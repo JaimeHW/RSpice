@@ -62,8 +62,9 @@ pub(crate) struct SharedPropertiesDialogState {
 /// selected object an instance, and every one of a kind with a property
 /// schema.
 fn selected_instances(state: &AppState) -> Option<Vec<u64>> {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let ids: Vec<u64> = state
+        .model
         .schematic
         .document()
         .components
@@ -95,14 +96,14 @@ pub(crate) fn open_shared_properties(state: &mut AppState) -> bool {
         open: true,
         ids,
         fields,
-        content_version: state.schematic.content_version(),
+        content_version: state.model.schematic.content_version(),
         error: None,
     };
     true
 }
 
 fn instances<'a>(state: &'a AppState, ids: &[u64]) -> Vec<&'a Component> {
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     ids.iter()
         .filter_map(|id| {
             document
@@ -191,7 +192,7 @@ fn retyped(current: &PropertyValue, text: &str) -> PropertyValue {
 /// how many instances changed, or which one refused and why.
 pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, String> {
     let form = state.dialogs.shared_properties.clone();
-    if form.content_version != state.schematic.content_version() {
+    if form.content_version != state.model.schematic.content_version() {
         return Err(
             "The drawing changed while the form was open. Close it and press Q again.".to_owned(),
         );
@@ -230,7 +231,7 @@ pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, Str
         return Err("A selected instance no longer exists.".to_owned());
     }
     let changed = crate::state::bulk_edit::replace_components(
-        &mut state.schematic,
+        &mut state.model.schematic,
         edits,
         "edit selected instances",
     )?;
@@ -310,11 +311,11 @@ mod tests {
 
     fn two_resistors() -> AppState {
         let mut state = AppState::default();
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components = vec![resistor(1, "R1", "1k"), resistor(2, "R2", "2k")];
         document.wires.clear();
-        state.schematic.init_undo_history();
-        let selection = &mut state.schematic.session.editor.selection;
+        state.model.schematic.init_undo_history();
+        let selection = &mut state.model.schematic.session.editor.selection;
         selection.select_component(1);
         selection.select_component(2);
         state
@@ -332,6 +333,7 @@ mod tests {
 
     fn property(state: &AppState, id: u64, key: &str) -> Option<String> {
         let component = state
+            .model
             .schematic
             .document()
             .components
@@ -365,14 +367,14 @@ mod tests {
         field(&mut state, "m").text = "2".to_owned();
 
         assert_eq!(apply_shared_properties(&mut state), Ok(2));
-        assert_eq!(state.schematic.document().components[0].value, "1k");
-        assert_eq!(state.schematic.document().components[1].value, "2k");
+        assert_eq!(state.model.schematic.document().components[0].value, "1k");
+        assert_eq!(state.model.schematic.document().components[1].value, "2k");
         assert_eq!(property(&state, 1, "m").as_deref(), Some("2"));
         assert_eq!(property(&state, 2, "m").as_deref(), Some("2"));
-        assert!(state.schematic.undo(), "Apply is one undo step");
+        assert!(state.model.schematic.undo(), "Apply is one undo step");
         assert_eq!(property(&state, 1, "m"), None);
         assert_eq!(property(&state, 2, "m"), None);
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// Typing into the mixed field sets every instance to that value.
@@ -382,8 +384,8 @@ mod tests {
         assert!(open_shared_properties(&mut state));
         field(&mut state, "r").text = "4.7k".to_owned();
         assert_eq!(apply_shared_properties(&mut state), Ok(2));
-        assert_eq!(state.schematic.document().components[0].value, "4.7k");
-        assert_eq!(state.schematic.document().components[1].value, "4.7k");
+        assert_eq!(state.model.schematic.document().components[0].value, "4.7k");
+        assert_eq!(state.model.schematic.document().components[1].value, "4.7k");
     }
 
     /// A resistor and a capacitor share only what both kinds own: neither
@@ -391,7 +393,7 @@ mod tests {
     #[test]
     fn only_what_every_kind_owns_is_offered() {
         let mut state = two_resistors();
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components[1].kind = ComponentType::Capacitor;
         assert!(open_shared_properties(&mut state));
         let keys: Vec<&str> = state
@@ -409,8 +411,14 @@ mod tests {
     #[test]
     fn one_instance_is_not_offered() {
         let mut state = two_resistors();
-        state.schematic.session.editor.selection.clear();
-        state.schematic.session.editor.selection.select_component(1);
+        state.model.schematic.session.editor.selection.clear();
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
         assert!(!shared_properties_available(&state));
     }
 
@@ -429,7 +437,7 @@ mod tests {
         ] {
             for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
                 let mut app = RSpiceApp::test_instance();
-                let document = app.state.schematic.document_mut_for_test();
+                let document = app.state.model.schematic.document_mut_for_test();
                 document.components = vec![
                     resistor(1, "R1", "1k"),
                     resistor(2, "R2", "2k"),
@@ -438,7 +446,7 @@ mod tests {
                 for component in &mut document.components {
                     component.params = "m=2".to_owned();
                 }
-                let selection = &mut app.state.schematic.session.editor.selection;
+                let selection = &mut app.state.model.schematic.session.editor.selection;
                 for id in 1..=3 {
                     selection.select_component(id);
                 }

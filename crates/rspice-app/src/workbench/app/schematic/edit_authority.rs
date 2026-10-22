@@ -25,11 +25,11 @@ impl SchematicEditAuthority {
     pub(crate) fn capture(state: &AppState) -> Self {
         Self {
             source: schematic_editor_request_source(state),
-            view_path: state.workspace.content.active_view.display_path(),
-            grid_size: state.schematic.document().grid_size,
-            document_policy: state.schematic.document().document_policy,
-            snapshot: SchematicSnapshot::capture(state.schematic.document()),
-            selection: state.schematic.session.editor.selection.clone(),
+            view_path: state.model.workspace.content.active_view.display_path(),
+            grid_size: state.model.schematic.document().grid_size,
+            document_policy: state.model.schematic.document().document_policy,
+            snapshot: SchematicSnapshot::capture(state.model.schematic.document()),
+            selection: state.model.schematic.session.editor.selection.clone(),
         }
     }
 
@@ -73,21 +73,24 @@ impl SchematicEditAuthority {
         if self.source.topology_version != current.topology_version {
             return Err(reopen("The schematic topology changed"));
         }
-        if self.view_path != state.workspace.content.active_view.display_path() {
+        if self.view_path != state.model.workspace.content.active_view.display_path() {
             return Err(reopen("The active cell/view changed"));
         }
         if !self.matches_source(&current) {
             return Err(reopen("The schematic source or editing scope changed"));
         }
-        if self.grid_size != state.schematic.document().grid_size
-            || self.document_policy != state.schematic.document().document_policy
+        if self.grid_size != state.model.schematic.document().grid_size
+            || self.document_policy != state.model.schematic.document().document_policy
         {
             return Err(reopen("The schematic grid or editing policy changed"));
         }
-        if self.selection != state.schematic.session.editor.selection {
+        if self.selection != state.model.schematic.session.editor.selection {
             return Err(reopen("The selected-object set changed"));
         }
-        if !self.snapshot.is_equal_document(state.schematic.document()) {
+        if !self
+            .snapshot
+            .is_equal_document(state.model.schematic.document())
+        {
             return Err(reopen("The schematic geometry changed"));
         }
         Ok(())
@@ -96,22 +99,23 @@ impl SchematicEditAuthority {
 
 /// Source identity shared by editor requests and retained edit workflows.
 pub(crate) fn schematic_editor_request_source(state: &AppState) -> EditorRequestSource {
-    let document = state.workspace.content.active_schematic_reference();
+    let document = state.model.workspace.content.active_schematic_reference();
     let document_key = document.key();
     let sheet = state
+        .model
         .workspace
         .content
         .design_management
         .sheet_catalog(&document_key)
         .map(|catalog| (catalog.active_sheet_id(), catalog.revision()));
     EditorRequestSource {
-        project: state.workspace.content.project.id(),
+        project: state.model.workspace.content.project.id(),
         document,
-        occurrence: state.workspace.content.active_occurrence().cloned(),
-        design_epoch: state.design_execution_epoch,
-        document_epoch: state.active_schematic_epoch,
-        content_version: state.schematic.content_version(),
-        topology_version: state.schematic.topology_version(),
+        occurrence: state.model.workspace.content.active_occurrence().cloned(),
+        design_epoch: state.model.design_execution_epoch,
+        document_epoch: state.model.active_schematic_epoch,
+        content_version: state.model.schematic.content_version(),
+        topology_version: state.model.schematic.topology_version(),
         symbol_revision: symbol_context_revision(state),
         sheet,
     }
@@ -119,8 +123,9 @@ pub(crate) fn schematic_editor_request_source(state: &AppState) -> EditorRequest
 
 pub(crate) fn symbol_context_revision(state: &AppState) -> u64 {
     let mut hasher = DefaultHasher::new();
-    state.library_manager.revision().hash(&mut hasher);
+    state.model.library_manager.revision().hash(&mut hasher);
     state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -128,7 +133,7 @@ pub(crate) fn symbol_context_revision(state: &AppState) -> u64 {
         .hash(&mut hasher);
     let mut folded_xor = 0_u64;
     let mut folded_sum = 0_u64;
-    for (key, buffer) in &state.workspace.content.schematic_buffers {
+    for (key, buffer) in &state.model.workspace.content.schematic_buffers {
         let mut entry = DefaultHasher::new();
         key.hash(&mut entry);
         buffer.topology_version().hash(&mut entry);
@@ -154,21 +159,26 @@ mod tests {
         };
         for occurrence_change in [true, false] {
             let mut state = AppState::default();
-            let parent = state.workspace.content.active_view.clone();
+            let parent = state.model.workspace.content.active_view.clone();
             let master = CellViewRef::new(&parent.library, "authority_child", "schematic");
             state
+                .model
                 .workspace
-                .insert_schematic_editor(master.key(), state.schematic.clone());
-            state
-                .workspace
-                .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+                .insert_schematic_editor(master.key(), state.model.schematic.clone());
+            state.model.workspace.descend_into(
+                "X1".to_owned(),
+                master.clone(),
+                ViewType::Schematic,
+            );
             let first = state
+                .model
                 .workspace
                 .content
                 .design_management
                 .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
                 .unwrap();
             let catalog = state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -190,12 +200,14 @@ mod tests {
             assert!(authority.validate(&state, "Create array").is_ok());
 
             if occurrence_change {
-                state.workspace.ascend_one().unwrap();
+                state.model.workspace.ascend_one().unwrap();
                 state
+                    .model
                     .workspace
                     .descend_into("X2".to_owned(), master, ViewType::Schematic);
             } else {
                 state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -212,7 +224,7 @@ mod tests {
             assert!(
                 authority
                     .snapshot
-                    .is_equal_document(state.schematic.document())
+                    .is_equal_document(state.model.schematic.document())
             );
             assert!(authority.validate(&state, "Create array").is_err());
             assert!(
@@ -227,9 +239,11 @@ mod tests {
     fn authority_rejects_geometry_selection_and_view_drift() {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor
@@ -238,10 +252,10 @@ mod tests {
         let authority = SchematicEditAuthority::capture(&state);
         assert!(authority.validate(&state, "Move selection").is_ok());
 
-        state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
+        state.model.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         assert!(authority.validate(&state, "Move selection").is_err());
-        state.schematic.document_mut_for_test().components[0].value = "1k".to_owned();
-        state.schematic.session.editor.selection.clear();
+        state.model.schematic.document_mut_for_test().components[0].value = "1k".to_owned();
+        state.model.schematic.session.editor.selection.clear();
         assert!(authority.validate(&state, "Move selection").is_err());
     }
 

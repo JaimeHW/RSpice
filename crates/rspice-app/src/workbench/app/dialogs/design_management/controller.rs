@@ -91,9 +91,9 @@ impl RSpiceApp {
                 body_action = design_management_manager_body(
                     ui,
                     &mut self.state.dialogs.design_management,
-                    &self.state.workspace,
-                    &self.state.library_manager,
-                    &self.state.schematic,
+                    &self.state.model.workspace,
+                    &self.state.model.library_manager,
+                    &self.state.model.schematic,
                     write_allowed,
                 );
                 None
@@ -101,9 +101,9 @@ impl RSpiceApp {
                 Some(design_management_subflow_body(
                     ui,
                     &mut self.state.dialogs.design_management,
-                    &self.state.workspace,
-                    &self.state.library_manager,
-                    &self.state.schematic,
+                    &self.state.model.workspace,
+                    &self.state.model.library_manager,
+                    &self.state.model.schematic,
                     &drawing_sheet_personal,
                     write_allowed,
                 ))
@@ -157,7 +157,13 @@ impl RSpiceApp {
                             catalog.sheet_catalog(&self.state.dialogs.design_management.owner_key)
                         })
                         .and_then(|catalog| catalog.active_sheet_id());
-                    let configurations = self.state.workspace.content.configuration_sets.clone();
+                    let configurations = self
+                        .state
+                        .model
+                        .workspace
+                        .content
+                        .configuration_sets
+                        .clone();
                     self.state.dialogs.design_management.reset_inputs_for_page(
                         DesignManagementPage::Manager,
                         Some(&configurations),
@@ -183,7 +189,13 @@ impl RSpiceApp {
                         catalog.sheet_catalog(&self.state.dialogs.design_management.owner_key)
                     })
                     .and_then(|catalog| catalog.active_sheet_id());
-                let configurations = self.state.workspace.content.configuration_sets.clone();
+                let configurations = self
+                    .state
+                    .model
+                    .workspace
+                    .content
+                    .configuration_sets
+                    .clone();
                 self.state.dialogs.design_management.reset_inputs_for_page(
                     page,
                     Some(&configurations),
@@ -218,7 +230,7 @@ impl RSpiceApp {
     }
 
     fn publish_design_management_draft(&mut self) -> Result<(), String> {
-        let before = (*self.state.workspace.content.design_management).clone();
+        let before = (*self.state.model.workspace.content.design_management).clone();
         let draft = self
             .state
             .dialogs
@@ -230,16 +242,22 @@ impl RSpiceApp {
         let schematic_tx = self
             .state
             .prepare_design_management_schematic_transaction(&draft)?;
-        let owner = self.state.workspace.content.active_schematic_reference();
+        let owner = self
+            .state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference();
         let committed_revision = self
             .state
+            .model
             .workspace
             .content
             .replace_design_management(draft)
             .map_err(|error| error.to_string())?;
         self.state
             .apply_design_management_schematic_transaction(&schematic_tx);
-        let candidate = (*self.state.workspace.content.design_management).clone();
+        let candidate = (*self.state.model.workspace.content.design_management).clone();
         self.state
             .record_design_management_transaction(DesignManagementHistoryEntry {
                 description: "apply reviewed design-management changes".to_owned(),
@@ -251,9 +269,13 @@ impl RSpiceApp {
                 references: schematic_tx.references,
                 committed_revision,
             });
-        self.state.design_execution_epoch = self.state.design_execution_epoch.wrapping_add(1);
+        self.state.model.design_execution_epoch =
+            self.state.model.design_execution_epoch.wrapping_add(1);
         self.invalidate_simulation_preflight();
-        self.state.netlist_artifacts.current_generation_input_digest = None;
+        self.state
+            .model
+            .netlist_artifacts
+            .current_generation_input_digest = None;
         self.state.record(
             LogSeverity::Info,
             LogSource::Studio,
@@ -338,6 +360,7 @@ pub(super) fn validate_design_management_page(
                 return Err("Boundary-net policy blocks this move.".to_owned());
             }
             let selected_components = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -346,8 +369,15 @@ pub(super) fn validate_design_management_page(
                 .count();
             if selected_components != dialog.selection_object_ids.len()
                 || selected_components == 0
-                || state.schematic.session.editor.selection.count()
-                    != state.schematic.session.editor.selection.components.len()
+                || state.model.schematic.session.editor.selection.count()
+                    != state
+                        .model
+                        .schematic
+                        .session
+                        .editor
+                        .selection
+                        .components
+                        .len()
             {
                 return Err(
                     "Connectivity-preserving sheet and hierarchy moves require the same complete instance-only selection captured when Design Management opened."
@@ -379,7 +409,7 @@ pub(super) fn validate_design_management_page(
             }
         }
         DesignManagementPage::RenumberPreview => {
-            if state.schematic.document().components.is_empty() {
+            if state.model.schematic.document().components.is_empty() {
                 return Err("The active schematic has no instances to annotate.".to_owned());
             }
         }

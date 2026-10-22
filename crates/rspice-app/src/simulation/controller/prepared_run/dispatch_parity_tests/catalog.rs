@@ -37,11 +37,11 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
                     .map_err(|error| error.to_string())?;
             }
             let saved = serde_json::to_vec(plan_mut(&mut state)).unwrap();
-            state.sim_setup.analysis_plan = Some(serde_json::from_slice(&saved).unwrap());
+            state.model.sim_setup.analysis_plan = Some(serde_json::from_slice(&saved).unwrap());
             plan_mut(&mut state).prepare_after_restore();
 
             let mut controller = SimulationController::new();
-            let frozen = SimulationController::build_analysis_plan(&state.sim_setup)
+            let frozen = SimulationController::build_analysis_plan(&state.model.sim_setup)
                 .map_err(|e| e.join("; "))?;
             let queue = compiled_queue(&state).map_err(|e| e.join("; "))?;
             let own_task = queue
@@ -62,6 +62,7 @@ fn every_configured_analysis_survives_save_prepare_and_dispatch() {
                     .ok_or("an enabled analysis disappeared from the queue")?;
                 let mut projected = state.clone();
                 projected
+                    .model
                     .sim_setup
                     .apply_analysis_draft_projection(instance.draft());
                 let displayed =

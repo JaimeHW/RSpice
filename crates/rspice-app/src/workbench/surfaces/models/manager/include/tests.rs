@@ -97,7 +97,7 @@ fn a_definition_outside_any_section_says_so_rather_than_guessing() {
 #[test]
 fn the_index_carries_the_section_each_provider_declares_a_name_inside() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("foundry");
     let mut sectioned = DeviceModel::new("nch", crate::state::model_library::ModelType::Nmos);
     sectioned.section = Some("tt".to_owned());
@@ -106,7 +106,7 @@ fn the_index_carries_the_section_each_provider_declares_a_name_inside() {
         "pch",
         crate::state::model_library::ModelType::Pmos,
     ));
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
 
     let index = definition_index(&state);
     let nch = index
@@ -130,15 +130,16 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
     // It is answered out of the index the page already built, so this is also
     // the test that the two cannot drift: the same names decide both.
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("foundry");
     library.add_model(DeviceModel::new(
         "nch",
         crate::state::model_library::ModelType::Nmos,
     ));
-    state.model_library_manager.add_library(library);
-    state.workspace.ensure_active_buffer();
+    state.model.model_library_manager.add_library(library);
+    state.model.workspace.ensure_active_buffer();
     let mut schematic = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -153,7 +154,7 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
         component.value = model.to_owned();
         schematic.document_mut_for_test().components.push(component);
     }
-    state.workspace.save_active_schematic(&schematic);
+    state.model.workspace.save_active_schematic(&schematic);
 
     let definitions = definition_index(&state);
     let unbound = unbound_instances(&state, &definitions);
@@ -170,7 +171,7 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
 fn a_binned_family_is_indexed_under_the_name_it_binds() {
     use crate::state::model_library::ModelType;
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     for name in ["kit", "vendor"] {
         let mut library = ModelLibrary::new(name);
         for bin in ["nch.1", "nch.2"] {
@@ -178,7 +179,7 @@ fn a_binned_family_is_indexed_under_the_name_it_binds() {
             card.section = Some("tt".to_owned());
             library.add_model(card);
         }
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
     }
     let index = definition_index(&state);
     let family = index
@@ -189,8 +190,9 @@ fn a_binned_family_is_indexed_under_the_name_it_binds() {
     assert_eq!(family.sections, ["tt"]);
     assert!(family.contested());
 
-    state.workspace.ensure_active_buffer();
+    state.model.workspace.ensure_active_buffer();
     let mut schematic = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -203,7 +205,7 @@ fn a_binned_family_is_indexed_under_the_name_it_binds() {
     component.name = "M1".to_owned();
     component.value = "nch".to_owned();
     schematic.document_mut_for_test().components.push(component);
-    state.workspace.save_active_schematic(&schematic);
+    state.model.workspace.save_active_schematic(&schematic);
     assert!(unbound_instances(&state, &definition_index(&state)).is_empty());
 }
 
@@ -234,7 +236,7 @@ fn render_a_populated_include_page() {
     use crate::state::model_library::ModelType;
 
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     for (name, models) in [
         (
             "demo180_corners",
@@ -273,10 +275,11 @@ fn render_a_populated_include_page() {
             card.section = Some((*section).to_owned());
             library.add_model(card);
         }
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
     }
-    state.workspace.ensure_active_buffer();
+    state.model.workspace.ensure_active_buffer();
     let mut schematic = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -295,9 +298,9 @@ fn render_a_populated_include_page() {
         component.value = model.to_owned();
         schematic.document_mut_for_test().components.push(component);
     }
-    state.workspace.save_active_schematic(&schematic);
+    state.model.workspace.save_active_schematic(&schematic);
 
-    let facts = closure_facts(state.model_library_manager.libraries_sorted());
+    let facts = closure_facts(state.model.model_library_manager.libraries_sorted());
     let mut pending = Vec::new();
     let canvas = crate::ui::raster::render(egui::vec2(1180.0, 980.0), |ui, background| {
         egui::CentralPanel::default()

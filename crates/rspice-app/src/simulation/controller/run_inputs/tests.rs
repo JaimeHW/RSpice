@@ -14,6 +14,7 @@ const RESUMED: &str = "the retained runs a checkpoint resumes from";
 /// Set the checkpoint fixture's Monte Carlo to resume from `image`.
 fn resume_from(state: &mut AppState, image: crate::product::ContentDigest) {
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -73,6 +74,7 @@ fn a_monte_carlo_resuming_from_a_checkpoint_is_held_to_what_it_resumes_from() {
     let image = MonteCarloCheckpointEvidence::from_bytes(bytes).expect("a completed journal");
     let mut state = checkpoint_state();
     state
+        .model
         .simulation
         .retained
         .runs
@@ -82,6 +84,7 @@ fn a_monte_carlo_resuming_from_a_checkpoint_is_held_to_what_it_resumes_from() {
     assert_eq!(identity.run_set_moved_in(&state), None);
 
     state
+        .model
         .simulation
         .retained
         .runs
@@ -93,6 +96,7 @@ fn a_monte_carlo_resuming_from_a_checkpoint_is_held_to_what_it_resumes_from() {
     );
 
     state
+        .model
         .simulation
         .retained
         .runs
@@ -103,14 +107,14 @@ fn a_monte_carlo_resuming_from_a_checkpoint_is_held_to_what_it_resumes_from() {
         "a newer run holding the checkpoint as admissibly"
     );
 
-    state.simulation.retained.runs[0].analyses[0].success = true;
+    state.model.simulation.retained.runs[0].analyses[0].success = true;
     assert_eq!(
         identity.run_set_moved_in(&state),
         Some(RESUMED),
         "a newer holder that completed without its trial roster"
     );
 
-    state.simulation.retained.runs.remove(0);
+    state.model.simulation.retained.runs.remove(0);
     assert_eq!(
         identity.run_set_moved_in(&state),
         None,
@@ -118,6 +122,7 @@ fn a_monte_carlo_resuming_from_a_checkpoint_is_held_to_what_it_resumes_from() {
     );
 
     state
+        .model
         .simulation
         .retained
         .runs

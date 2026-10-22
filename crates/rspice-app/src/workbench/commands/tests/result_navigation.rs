@@ -20,6 +20,7 @@ use crate::workbench::commands::result_navigation;
 fn plan_binding(app: &RSpiceApp) -> (SimulationPlanId, AnalysisInstanceId) {
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance owns a stable analysis plan");
@@ -49,7 +50,7 @@ pub(super) fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     let (active_plan, analysis_id) = plan_binding(&app);
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     let (domain, plan_id, source_check) = match origin {
         RunOrigin::ActivePlan => (
             AnalysisResultSourceDomain::SimulationPlan,
@@ -90,6 +91,7 @@ pub(super) fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
     })
     .expect("valid prepared run receipt");
     app.state
+        .model
         .simulation
         .start_prepared_run(receipt)
         .unwrap()
@@ -105,8 +107,8 @@ pub(super) fn app_with_prepared_run(origin: RunOrigin) -> RSpiceApp {
                 .expect("valid prepared analysis provenance"),
             ),
         );
-    app.state.simulation.view.active_run_idx = Some(0);
-    app.state.simulation.view.active_analysis_idx = Some(0);
+    app.state.model.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.view.active_analysis_idx = Some(0);
     app
 }
 
@@ -132,7 +134,7 @@ fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {
     Command::OpenRunInResults.execute(&mut app);
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
-        app.state.simulation.active_run().map(|run| run.id),
+        app.state.model.simulation.active_run().map(|run| run.id),
         Some(1),
         "the selection the affordance made is the one the command lands on"
     );
@@ -149,10 +151,13 @@ fn a_notice_offer_selects_its_run_and_refuses_when_the_run_is_gone() {
         NotificationAction::OpenRunInResults { run_sequence: 1 },
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert_eq!(app.state.simulation.active_run().map(|run| run.id), Some(1));
+    assert_eq!(
+        app.state.model.simulation.active_run().map(|run| run.id),
+        Some(1)
+    );
 
     app.state.workbench.activate(Workspace::Simulate);
-    let before = app.state.log_buffer.revision();
+    let before = app.state.model.log_buffer.revision();
     result_navigation::perform_notification_action(
         &mut app,
         NotificationAction::OpenRunInResults { run_sequence: 47 },
@@ -166,7 +171,11 @@ fn a_notice_offer_selects_its_run_and_refuses_when_the_run_is_gone() {
         app.state.prompt_text().is_some(),
         "and the refusal is stated rather than silently dropped"
     );
-    assert_eq!(app.state.log_buffer.revision(), before, "on the status bar");
+    assert_eq!(
+        app.state.model.log_buffer.revision(),
+        before,
+        "on the status bar"
+    );
 }
 
 /// The status bar's engine chip and the split toggle both mean "the newest
@@ -183,10 +192,13 @@ fn the_newest_retained_run_is_what_an_unnamed_results_hop_opens() {
 
     let mut app = app_with_prepared_run(RunOrigin::ManualDeck);
     app.state.workbench.activate(Workspace::Simulate);
-    app.state.simulation.view.active_run_idx = None;
+    app.state.model.simulation.view.active_run_idx = None;
     assert!(result_navigation::open_newest_retained_run(&mut app));
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
-    assert_eq!(app.state.simulation.active_run().map(|run| run.id), Some(1));
+    assert_eq!(
+        app.state.model.simulation.active_run().map(|run| run.id),
+        Some(1)
+    );
 }
 
 #[test]
@@ -225,13 +237,14 @@ fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
     let (_, analysis_id) = plan_binding(&app);
     app.state.workbench.active_analysis_instance = Some(analysis_id);
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the fixture owns a stable plan")
         .remove(analysis_id, Vec::new())
         .expect("the producing instance is removed from the plan");
     app.state.workbench.activate(Workspace::Results);
-    let before = app.state.log_buffer.revision();
+    let before = app.state.model.log_buffer.revision();
 
     Command::OpenProducingPlan.execute(&mut app);
 
@@ -240,7 +253,7 @@ fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
         app.state.workbench.active_analysis_instance.is_none(),
         "the hop selected nothing, so nothing may stay selected"
     );
-    assert_eq!(app.state.log_buffer.revision(), before);
+    assert_eq!(app.state.model.log_buffer.revision(), before);
     assert!(
         app.state
             .prompt_text()
@@ -265,10 +278,11 @@ fn each_reason_a_dataset_cannot_name_its_plan_is_stated_exactly() {
     legacy.state.open_project_session();
     legacy
         .state
+        .model
         .simulation
         .start_run()
         .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "legacy"));
-    legacy.state.simulation.view.active_run_idx = Some(0);
+    legacy.state.model.simulation.view.active_run_idx = Some(0);
     assert_eq!(
         Command::OpenProducingPlan.availability(&legacy),
         CommandAvailability::Disabled(
@@ -369,11 +383,13 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
 
     let sequence = app
         .state
+        .model
         .simulation
         .active_run()
         .expect("the fixture selected a run")
         .id;
     app.state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -436,6 +452,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     let mut values = std::collections::BTreeMap::new();
     values.insert("settling_time".to_owned(), 1.0 / 3.0);
     app.state
+        .model
         .simulation
         .active_run_mut()
         .expect("the fixture selected a run")
@@ -443,6 +460,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
         .result_payload = Some(AnalysisResultPayload::ScalarMeasurements { values });
     let run = app
         .state
+        .model
         .simulation
         .active_run()
         .expect("the fixture selected a run");
@@ -493,6 +511,7 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
 
     let producer = app
         .state
+        .model
         .simulation
         .active_run()
         .expect("the fixture selected a run")

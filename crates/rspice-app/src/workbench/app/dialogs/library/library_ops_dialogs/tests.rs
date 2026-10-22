@@ -9,7 +9,7 @@ fn state_with_writable_work_library() -> AppState {
     let mut cell = Cell::new("amplifier");
     cell.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state
 }
 
@@ -36,7 +36,7 @@ fn library_dialog_entry_points_capture_the_exact_catalog_revision() {
         state.dialogs.rename_library_library_revision,
         state.dialogs.delete_library_library_revision,
     ] {
-        assert_eq!(revision, state.library_manager.revision());
+        assert_eq!(revision, state.model.library_manager.revision());
     }
 }
 
@@ -50,6 +50,7 @@ fn library_dialog_entry_points_reject_missing_and_read_only_targets() {
     assert!(state.open_delete_library_review("missing").is_err());
 
     state
+        .model
         .library_manager
         .get_library_mut("work")
         .expect("work library exists")
@@ -78,6 +79,7 @@ fn library_dialog_commits_reject_an_intervening_catalog_change() {
         .open_delete_library_review("work")
         .expect("deletion review opens");
     state
+        .model
         .library_manager
         .add_library(Library::new("intervening"));
 
@@ -94,16 +96,16 @@ fn library_dialog_commits_reject_an_intervening_catalog_change() {
     ] {
         assert_eq!(error, LIBRARY_CATALOG_STALE_MESSAGE);
     }
-    assert!(state.library_manager.get_library("vendor").is_none());
-    assert!(state.library_manager.get_library("work").is_some());
-    assert!(state.library_manager.get_library("work_v2").is_none());
+    assert!(state.model.library_manager.get_library("vendor").is_none());
+    assert!(state.model.library_manager.get_library("work").is_some());
+    assert!(state.model.library_manager.get_library("work_v2").is_none());
 }
 
 #[test]
 fn the_deletion_review_reports_the_same_blocker_the_transaction_enforces() {
     let mut state = state_with_writable_work_library();
-    state.workspace.content.project.root_library = "work".to_owned();
-    state.workspace.content.project.top_cell = "amplifier".to_owned();
+    state.model.workspace.content.project.root_library = "work".to_owned();
+    state.model.workspace.content.project.top_cell = "amplifier".to_owned();
     state
         .open_delete_library_review("work")
         .expect("deletion review opens");
@@ -116,17 +118,17 @@ fn the_deletion_review_reports_the_same_blocker_the_transaction_enforces() {
         .expect_err("the transaction refuses exactly what the review states");
 
     assert_eq!(blocker, committed);
-    assert!(state.library_manager.get_library("work").is_some());
+    assert!(state.model.library_manager.get_library("work").is_some());
 }
 
 #[test]
 fn the_deletion_review_counts_what_the_library_owns() {
     let mut state = state_with_writable_work_library();
-    state.workspace.content.open_views = vec![crate::state::OpenCellView::new(
+    state.model.workspace.content.open_views = vec![crate::state::OpenCellView::new(
         crate::state::CellViewRef::new("work", "amplifier", "schematic"),
         ViewType::Schematic,
     )];
-    state.schematic.add_library_cell_component(
+    state.model.schematic.add_library_cell_component(
         crate::state::Point::origin(),
         crate::state::LibraryCellInstance::new("work", "amplifier", "schematic"),
     );

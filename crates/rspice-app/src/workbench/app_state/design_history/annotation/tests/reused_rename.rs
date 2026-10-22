@@ -9,24 +9,31 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         .state
         .activate_history_document(&child, "Edit reused master");
     assert_eq!(
-        fixture.state.workspace.content.active_schematic_reference(),
+        fixture
+            .state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         child
     );
     fixture
         .state
+        .model
         .schematic
         .session
         .editor
         .selection
         .components
         .insert(fixture.sources[0]);
-    let root_selection = fixture.state.workspace.content.schematic_buffers[&root.key()]
+    let root_selection = fixture.state.model.workspace.content.schematic_buffers[&root.key()]
         .document()
         .components[0]
         .id;
     for reference in [&root, &other] {
         let mut stored_source = fixture
             .state
+            .model
             .workspace
             .schematic_editor_mut(&reference.key())
             .unwrap();
@@ -45,6 +52,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
     }
     let expected = fixture
         .state
+        .model
         .schematic
         .document()
         .components
@@ -58,6 +66,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         .unwrap();
     let documents = fixture
         .state
+        .model
         .project_design_history
         .undo
         .last()
@@ -75,6 +84,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         let state = &fixture.state;
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .plan_data(fixture.plan)
@@ -98,6 +108,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
             }
             assert!(
                 state
+                    .model
                     .workspace
                     .content
                     .open_views
@@ -109,6 +120,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
         }
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -117,7 +129,7 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
                 .contains(&fixture.sources[0])
         );
         assert!(
-            state.workspace.session.schematic_sessions[&root.key()]
+            state.model.workspace.session.schematic_sessions[&root.key()]
                 .editor
                 .selection
                 .components
@@ -129,7 +141,12 @@ fn editing_a_reused_master_renames_saved_outputs_and_inactive_probes() {
                 .activate_history_document(&root, "Inspect affected root");
             assert!(fixture.state.undo_project_design().unwrap().is_some());
             assert_eq!(
-                fixture.state.workspace.content.active_schematic_reference(),
+                fixture
+                    .state
+                    .model
+                    .workspace
+                    .content
+                    .active_schematic_reference(),
                 child
             );
         }
@@ -149,6 +166,7 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 .activate_history_document(&child, "Edit reused master");
             let expected = fixture
                 .state
+                .model
                 .schematic
                 .document()
                 .components
@@ -165,6 +183,7 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
             if failure == "read only" {
                 fixture
                     .state
+                    .model
                     .workspace
                     .content
                     .open_views
@@ -175,28 +194,36 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
             } else {
                 fixture
                     .state
+                    .model
                     .workspace
                     .schematic_editor_mut(&other.key())
                     .unwrap()
                     .editor
                     .begin_operation("Pending inactive gesture");
             }
-            let before = SchematicSnapshot::capture(fixture.state.schematic.document());
+            let before = SchematicSnapshot::capture(fixture.state.model.schematic.document());
             let root_before = SchematicSnapshot::capture(
-                fixture.state.workspace.content.schematic_buffers[&root.key()].document(),
+                fixture.state.model.workspace.content.schematic_buffers[&root.key()].document(),
             );
             let other_before = SchematicSnapshot::capture(
-                fixture.state.workspace.content.schematic_buffers[&other.key()].document(),
+                fixture.state.model.workspace.content.schematic_buffers[&other.key()].document(),
             );
             let outputs = fixture
                 .state
+                .model
                 .workspace
                 .content
                 .plan_data(fixture.plan)
                 .unwrap()
                 .saved_outputs
                 .clone();
-            let configurations = fixture.state.workspace.content.configuration_sets.clone();
+            let configurations = fixture
+                .state
+                .model
+                .workspace
+                .content
+                .configuration_sets
+                .clone();
             let sequence = fixture.state.project_undo_sequence();
             if history {
                 assert!(fixture.state.undo_project_design().is_err(), "{failure}");
@@ -209,16 +236,17 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                     "{failure}"
                 );
             }
-            assert!(before.is_equal_document(fixture.state.schematic.document()));
+            assert!(before.is_equal_document(fixture.state.model.schematic.document()));
             assert!(root_before.is_equal_document(
-                fixture.state.workspace.content.schematic_buffers[&root.key()].document()
+                fixture.state.model.workspace.content.schematic_buffers[&root.key()].document()
             ));
             assert!(other_before.is_equal_document(
-                fixture.state.workspace.content.schematic_buffers[&other.key()].document()
+                fixture.state.model.workspace.content.schematic_buffers[&other.key()].document()
             ));
             assert_eq!(
                 fixture
                     .state
+                    .model
                     .workspace
                     .content
                     .plan_data(fixture.plan)
@@ -227,16 +255,22 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 outputs
             );
             assert_eq!(
-                fixture.state.workspace.content.configuration_sets,
+                fixture.state.model.workspace.content.configuration_sets,
                 configurations
             );
             assert_eq!(fixture.state.project_undo_sequence(), sequence);
             assert_eq!(
-                fixture.state.workspace.content.active_schematic_reference(),
+                fixture
+                    .state
+                    .model
+                    .workspace
+                    .content
+                    .active_schematic_reference(),
                 child
             );
             fixture
                 .state
+                .model
                 .workspace
                 .content
                 .open_views
@@ -246,6 +280,7 @@ fn inactive_document_authority_refuses_the_entire_reference_edit_and_history() {
                 .read_only_reference = false;
             fixture
                 .state
+                .model
                 .workspace
                 .schematic_editor_mut(&other.key())
                 .unwrap()
@@ -273,6 +308,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
         // belongs to a different root, so its read-only state must not block.
         fixture
             .state
+            .model
             .workspace
             .content
             .open_views
@@ -282,6 +318,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
             .read_only_reference = true;
         let expected = fixture
             .state
+            .model
             .schematic
             .document()
             .components
@@ -304,6 +341,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
             }
             assert_eq!(
                 state
+                    .model
                     .workspace
                     .content
                     .configuration_sets
@@ -314,6 +352,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
             );
             assert_eq!(
                 state
+                    .model
                     .workspace
                     .content
                     .open_views
@@ -326,7 +365,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
                 name
             );
             assert_eq!(
-                state.workspace.content.schematic_buffers[&other.key()]
+                state.model.workspace.content.schematic_buffers[&other.key()]
                     .document()
                     .probes[0]
                     .source_expression
@@ -335,6 +374,7 @@ fn renaming_a_parent_updates_descended_probes_and_their_occurrence() {
             );
             assert_eq!(
                 state
+                    .model
                     .workspace
                     .content
                     .plan_data(fixture.plan)
@@ -361,6 +401,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     let (mut fixture, root, child, other) = reused_master_fixture(["X1", "X2"]);
     let configuration = fixture
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -371,6 +412,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     let revision = configuration.revision();
     fixture
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -378,15 +420,22 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         .unwrap();
     let first_output = fixture
         .state
+        .model
         .workspace
         .content
         .plan_data(fixture.plan)
         .unwrap()
         .saved_outputs[0]
         .id;
-    let second_plan = fixture.state.sim_setup.create_plan("Second plan").unwrap();
+    let second_plan = fixture
+        .state
+        .model
+        .sim_setup
+        .create_plan("Second plan")
+        .unwrap();
     let mut output = fixture
         .state
+        .model
         .workspace
         .content
         .plan_data(fixture.plan)
@@ -399,17 +448,24 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     let second_output = output.id;
     fixture
         .state
+        .model
         .workspace
         .content
         .add_saved_output(second_plan, output)
         .unwrap();
-    fixture.state.sim_setup.activate_plan(fixture.plan).unwrap();
-    fixture.state.schematic.document_mut_for_test().probes[0]
+    fixture
+        .state
+        .model
+        .sim_setup
+        .activate_plan(fixture.plan)
+        .unwrap();
+    fixture.state.model.schematic.document_mut_for_test().probes[0]
         .bind_saved_output(second_plan, second_output);
-    fixture.state.schematic.document_mut_for_test().probes[1]
+    fixture.state.model.schematic.document_mut_for_test().probes[1]
         .bind_saved_output(fixture.plan, first_output);
     fixture
         .state
+        .model
         .workspace
         .schematic_editor_mut(&child.key())
         .unwrap()
@@ -420,6 +476,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
     // A buffered document can carry references even without an open tab.
     fixture
         .state
+        .model
         .workspace
         .content
         .open_views
@@ -429,6 +486,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
         .activate_history_document(&child, "Edit reused master");
     let expected = fixture
         .state
+        .model
         .schematic
         .document()
         .components
@@ -463,6 +521,7 @@ fn reused_master_property_edits_and_bound_outputs_survive_native_reopen() {
             late_outputs.push(output.id);
             fixture
                 .state
+                .model
                 .workspace
                 .content
                 .add_saved_output(second_plan, output)

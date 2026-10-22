@@ -52,6 +52,7 @@ pub(super) fn add_corner(
     };
     let Some(source) = app
         .state
+        .model
         .model_library_manager
         .get_library(library_name)
         .cloned()
@@ -84,7 +85,7 @@ pub(super) fn add_corner(
         );
         return;
     }
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let library = candidate
         .get_library_mut(library_name)
         .expect("the source library was resolved above");
@@ -183,7 +184,7 @@ pub(super) fn edit_corner(
         return;
     }
 
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let Some(library) = candidate.get_library_mut(library_name) else {
         receipt(
             app,
@@ -348,7 +349,7 @@ pub(super) fn set_default_corner(
     library_name: &str,
     corner_name: &str,
 ) {
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let result = candidate
         .get_library_mut(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))
@@ -393,7 +394,7 @@ pub(super) fn delete_corner(
     library_name: &str,
     corner_name: &str,
 ) {
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let Some(library) = candidate.get_library_mut(library_name) else {
         receipt(
             app,
@@ -467,7 +468,7 @@ pub(super) fn unbind_corner_section(
     corner_name: &str,
     domain: CornerSectionDomain,
 ) {
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let Some(library) = candidate.get_library_mut(library_name) else {
         receipt(
             app,
@@ -539,7 +540,7 @@ pub(super) fn bind_corner_section(
     section: &str,
 ) {
     let section = section.trim();
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let Some(library) = candidate.get_library_mut(library_name) else {
         receipt(
             app,

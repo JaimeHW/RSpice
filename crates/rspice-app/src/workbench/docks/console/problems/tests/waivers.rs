@@ -10,11 +10,13 @@ const REASON: &str = "the stub is a probe point";
 /// The current finding's record, as the store holds it.
 fn current_record(state: &AppState) -> DiagnosticRecord {
     let current = state
+        .model
         .diagnostics
         .current_finding()
         .expect("a finding is current");
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     state
+        .model
         .diagnostics
         .batch(&DiagnosticInputs::DesignCheck { subject })
         .expect("the checks published")
@@ -30,7 +32,7 @@ fn current_record(state: &AppState) -> DiagnosticRecord {
 fn wire_current() -> AppState {
     let mut state = state_with_design_findings();
     let wire = reported(&state)[1];
-    state.diagnostics.set_current_finding(Some(wire));
+    state.model.diagnostics.set_current_finding(Some(wire));
     state
 }
 
@@ -51,11 +53,11 @@ fn waive_is_offered_only_where_the_rule_may_be_waived() {
         panic!("two findings");
     };
 
-    state.diagnostics.set_current_finding(Some(wire));
+    state.model.diagnostics.set_current_finding(Some(wire));
     let offered = render(&mut state, sized(egui::RawInput::default()));
     assert!(offered.has("Waive\u{2026}"), "{:?}", offered.texts);
 
-    state.diagnostics.set_current_finding(Some(missing));
+    state.model.diagnostics.set_current_finding(Some(missing));
     let withheld = render(&mut state, sized(egui::RawInput::default()));
     assert!(withheld.has("R1 has no resistance"), "precondition: drawn");
     assert!(
@@ -97,7 +99,7 @@ fn a_waiver_is_recorded_with_its_reason_and_removed_from_the_detail_region() {
         .as_ref()
         .expect("Enter records the waiver");
     assert_eq!(waiver.reason, REASON);
-    assert_eq!(state.schematic.document().waivers.entries().len(), 1);
+    assert_eq!(state.model.schematic.document().waivers.entries().len(), 1);
     assert!(state.problems_view.waiving.is_none(), "the draft is closed");
 
     let stated = harness.frame(&mut state, sized(egui::RawInput::default()));
@@ -107,7 +109,7 @@ fn a_waiver_is_recorded_with_its_reason_and_removed_from_the_detail_region() {
 
     let _ = harness.frame(&mut state, click_on(&stated, "Remove waiver"));
     harness.settle(&mut state);
-    assert!(state.schematic.document().waivers.is_empty());
+    assert!(state.model.schematic.document().waivers.is_empty());
     assert!(!current_record(&state).waived());
 }
 
@@ -126,19 +128,19 @@ fn a_reason_is_abandoned_by_escape_and_by_standing_elsewhere() {
     let _ = harness.frame(&mut state, keyed(egui::Key::Escape));
     harness.settle(&mut state);
     assert!(state.problems_view.waiving.is_none(), "Escape abandons it");
-    assert!(state.schematic.document().waivers.is_empty());
+    assert!(state.model.schematic.document().waivers.is_empty());
 
     let render = harness.frame(&mut state, sized(egui::RawInput::default()));
     let _ = harness.frame(&mut state, click_on(&render, "Waive\u{2026}"));
     assert!(state.problems_view.waiving.is_some(), "precondition: asked");
     let missing = reported(&state)[0];
-    state.diagnostics.set_current_finding(Some(missing));
+    state.model.diagnostics.set_current_finding(Some(missing));
     harness.settle(&mut state);
     assert!(
         state.problems_view.waiving.is_none(),
         "the reason goes with the finding it was written for",
     );
-    assert!(state.schematic.document().waivers.is_empty());
+    assert!(state.model.schematic.document().waivers.is_empty());
 }
 
 /// The row's own menu offers the same verb, and opens the same reason in the
@@ -173,7 +175,7 @@ fn the_row_menu_waives_the_row_it_was_opened_on() {
     let menu = harness.frame(&mut state, sized(egui::RawInput::default()));
     let _ = harness.frame(&mut state, click_on(&menu, "Waive\u{2026}"));
     harness.settle(&mut state);
-    assert_eq!(state.diagnostics.current_finding(), Some(wire));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(wire));
     assert_eq!(
         state
             .problems_view
@@ -210,7 +212,7 @@ fn a_waiver_that_cannot_be_recorded_here_is_not_offered() {
     })));
     publish(&mut state, vec![finding]);
     let id = listing(&state).row(0).expect("the finding is listed").id;
-    state.diagnostics.set_current_finding(Some(id));
+    state.model.diagnostics.set_current_finding(Some(id));
 
     let harness = Harness::new();
     harness.settle(&mut state);
@@ -263,19 +265,21 @@ fn a_copied_row_carries_its_waiver() {
 /// accept. The Console is open on the Problems page.
 fn runnable_colliding_app() -> crate::workbench::RSpiceApp {
     let mut app = crate::workbench::RSpiceApp::test_instance();
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+    for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
         if dimension.kind
             == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
         {
             dimension.enabled = false;
         }
     }
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.provision_test_project_technology_contract();
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 600), "sense".to_owned());
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 700), "SENSE".to_owned());
     app.state.sync_active_schematic_to_workspace();
@@ -289,8 +293,9 @@ fn runnable_colliding_app() -> crate::workbench::RSpiceApp {
 
 /// Make the case collision current.
 fn collision_current(state: &mut AppState) {
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     let collision = state
+        .model
         .diagnostics
         .batch(&DiagnosticInputs::DesignCheck { subject })
         .expect("the checks published")
@@ -299,7 +304,7 @@ fn collision_current(state: &mut AppState) {
         .find(|record| &*record.key.code == "DRC-CASE-COLLIDING-NET-NAMES")
         .map(|record| record.canonical.diagnostic_id)
         .expect("the collision is found");
-    state.diagnostics.set_current_finding(Some(collision));
+    state.model.diagnostics.set_current_finding(Some(collision));
 }
 
 /// One frame of the Console dock, as the workbench draws it.
@@ -344,7 +349,7 @@ fn a_waiver_removed_on_the_page_drops_preflight_and_the_prepared_run() {
     let render = console_frame(&harness, &mut app, sized(egui::RawInput::default()));
     let _ = console_frame(&harness, &mut app, click_on(&render, "Remove waiver"));
 
-    assert!(app.state.schematic.document().waivers.is_empty());
+    assert!(app.state.model.schematic.document().waivers.is_empty());
     assert!(
         app.state.workbench.preflight.report.is_none(),
         "the report that let the run through no longer stands",
@@ -395,7 +400,10 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
         .expect("the verb that records the reason is drawn");
     let _ = console_frame(&harness, &mut app, clicked(record + egui::vec2(4.0, 4.0)));
 
-    assert_eq!(app.state.schematic.document().waivers.entries().len(), 1);
+    assert_eq!(
+        app.state.model.schematic.document().waivers.entries().len(),
+        1
+    );
     assert!(
         app.state.workbench.preflight.report.is_none(),
         "the report that refused the run no longer stands",
@@ -414,7 +422,7 @@ fn retain_report(state: &mut AppState, blockers: Vec<crate::state::PreflightIssu
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let plan = state.active_plan_revision();
     state.workbench.preflight.report = Some(crate::state::PreflightReport {
-        project_revision: state.workspace.content.project.revision().get(),
+        project_revision: state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
         topology_closure,
@@ -435,6 +443,7 @@ fn undo_and_redo_of_a_waiver_re_state_the_finding_and_drop_preflight() {
     // waiver and nothing else.
     let mut app = design_app();
     app.state
+        .model
         .schematic
         .with_undo("Label the collision", |schematic| {
             schematic.add_net_label(Point::new(600, 600), "sense".to_owned());
@@ -457,7 +466,7 @@ fn undo_and_redo_of_a_waiver_re_state_the_finding_and_drop_preflight() {
 
     retain_report(&mut app.state, Vec::new());
     app.action_edit_undo();
-    assert!(app.state.schematic.document().waivers.is_empty());
+    assert!(app.state.model.schematic.document().waivers.is_empty());
     collision_current(&mut app.state);
     assert!(
         !current_record(&app.state).waived(),
@@ -470,7 +479,10 @@ fn undo_and_redo_of_a_waiver_re_state_the_finding_and_drop_preflight() {
 
     retain_report(&mut app.state, Vec::new());
     app.action_edit_redo();
-    assert_eq!(app.state.schematic.document().waivers.entries().len(), 1);
+    assert_eq!(
+        app.state.model.schematic.document().waivers.entries().len(),
+        1
+    );
     collision_current(&mut app.state);
     assert!(current_record(&app.state).waived(), "redo puts it back");
     assert!(app.state.workbench.preflight.report.is_none());

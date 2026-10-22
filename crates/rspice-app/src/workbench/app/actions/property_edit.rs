@@ -30,6 +30,7 @@ fn authoritative_cell_instance_sheet(
         return generated_veriloga_property_sheet(binding).map(Some);
     }
     let Some(cell) = state
+        .model
         .library_manager
         .get_library(&binding.library)
         .and_then(|library| library.get_cell(&binding.cell))
@@ -432,8 +433,16 @@ pub(in crate::workbench::app) fn cell_instance_identity_sheet() -> PropertySheet
 /// Single authority for the schematic Object properties command. Availability
 /// requires a live target that the matching editor can actually open.
 pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
-    if let Some(id) = state.schematic.session.editor.selection.single_probe() {
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_probe()
+    {
         return state
+            .model
             .schematic
             .document()
             .probes
@@ -443,8 +452,16 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
     if state.schematic_edit_read_only() {
         return false;
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_component() {
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
+    {
         return state
+            .model
             .schematic
             .document()
             .components
@@ -458,8 +475,16 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
                 }
             });
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_net_label() {
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_net_label()
+    {
         return state
+            .model
             .schematic
             .document()
             .net_labels
@@ -467,6 +492,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .any(|label| label.id == id);
     }
     if let Some(id) = state
+        .model
         .schematic
         .session
         .editor
@@ -474,6 +500,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
         .single_design_note()
     {
         return state
+            .model
             .schematic
             .document()
             .design_notes
@@ -481,6 +508,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .any(|note| note.id == id);
     }
     if let Some(id) = state
+        .model
         .schematic
         .session
         .editor
@@ -488,22 +516,32 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
         .single_documentation_shape()
     {
         return state
+            .model
             .schematic
             .document()
             .documentation_shapes
             .iter()
             .any(|shape| shape.id == id);
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_bus_tap() {
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_bus_tap()
+    {
         return state
+            .model
             .schematic
             .document()
             .bus_taps
             .iter()
             .any(|tap| tap.id == id);
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_bus() {
+    if let Some(id) = state.model.schematic.session.editor.selection.single_bus() {
         return state
+            .model
             .schematic
             .document()
             .buses
@@ -511,6 +549,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .any(|bus| bus.id == id);
     }
     if state
+        .model
         .schematic
         .session
         .editor
@@ -539,6 +578,7 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
         return;
     }
     let Some(component) = state
+        .model
         .schematic
         .document()
         .components
@@ -592,10 +632,11 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
             crate::properties::ComponentPropertySession::new(
                 component,
                 crate::workbench::app::schematic_editor_request_source(state),
-                state.workspace.content.active_view.display_path(),
+                state.model.workspace.content.active_view.display_path(),
             )
             .with_data_root(
                 state
+                    .model
                     .workspace
                     .content
                     .project
@@ -617,15 +658,20 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
 /// if the user added one and changed nothing, and the card says the numbers came
 /// from there rather than from an analysis.
 pub(in crate::workbench) fn stimulus_preview_timing(state: &AppState) -> PreviewTiming {
-    let authored = state.sim_setup.analysis_plan.as_ref().and_then(|plan| {
-        plan.instances()
-            .iter()
-            .filter(|instance| instance.enabled())
-            .find_map(|instance| match instance.draft() {
-                AnalysisDraft::Transient(setup) => Some(setup.clone()),
-                _ => None,
-            })
-    });
+    let authored = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .and_then(|plan| {
+            plan.instances()
+                .iter()
+                .filter(|instance| instance.enabled())
+                .find_map(|instance| match instance.draft() {
+                    AnalysisDraft::Transient(setup) => Some(setup.clone()),
+                    _ => None,
+                })
+        });
     let from_analysis = authored.is_some();
     let setup = authored.unwrap_or_default();
     let seconds = |text: &str| crate::quantity::parse_engineering_value(text).ok();
@@ -652,8 +698,16 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     {
         return false;
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_probe() {
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_probe()
+    {
         if state
+            .model
             .schematic
             .document()
             .probes
@@ -669,13 +723,27 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if state.deny_read_only_edit() || !selected_object_properties_available(state) {
         return false;
     }
-    if let Some(component_id) = state.schematic.session.editor.selection.single_component() {
+    if let Some(component_id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
+    {
         open_property_editor(state, component_id);
         return state.tabbed_property_dialog.open;
     }
     let source = crate::workbench::app::schematic_editor_request_source(state);
-    if let Some(label_id) = state.schematic.session.editor.selection.single_net_label()
+    if let Some(label_id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_net_label()
         && let Some(label) = state
+            .model
             .schematic
             .document()
             .net_labels
@@ -685,11 +753,12 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         state.dialogs.object_properties.open_net_label(
             label,
             source,
-            state.workspace.content.active_view.display_path(),
+            state.model.workspace.content.active_view.display_path(),
         );
         return true;
     }
     if state
+        .model
         .schematic
         .session
         .editor
@@ -700,17 +769,19 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         state.dialogs.object_properties.open_named_net(
             target,
             source,
-            state.workspace.content.active_view.display_path(),
+            state.model.workspace.content.active_view.display_path(),
         );
         return true;
     }
     if let Some(note_id) = state
+        .model
         .schematic
         .session
         .editor
         .selection
         .single_design_note()
         && let Some(note) = state
+            .model
             .schematic
             .document()
             .design_notes
@@ -720,17 +791,19 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         state.dialogs.object_properties.open_design_note(
             note,
             source,
-            state.workspace.content.active_view.display_path(),
+            state.model.workspace.content.active_view.display_path(),
         );
         return true;
     }
     if let Some(shape_id) = state
+        .model
         .schematic
         .session
         .editor
         .selection
         .single_documentation_shape()
         && let Some(shape) = state
+            .model
             .schematic
             .document()
             .documentation_shapes
@@ -740,12 +813,19 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         state.dialogs.object_properties.open_documentation_shape(
             shape,
             source,
-            state.workspace.content.active_view.display_path(),
+            state.model.workspace.content.active_view.display_path(),
         );
         return true;
     }
-    if let Some(tap_id) = state.schematic.session.editor.selection.single_bus_tap()
+    if let Some(tap_id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_bus_tap()
         && let Some(tap) = state
+            .model
             .schematic
             .document()
             .bus_taps
@@ -755,12 +835,13 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         state.dialogs.object_properties.open_bus_tap(
             tap,
             source,
-            state.workspace.content.active_view.display_path(),
+            state.model.workspace.content.active_view.display_path(),
         );
         return true;
     }
-    if let Some(bus_id) = state.schematic.session.editor.selection.single_bus()
+    if let Some(bus_id) = state.model.schematic.session.editor.selection.single_bus()
         && let Some(bus) = state
+            .model
             .schematic
             .document()
             .buses
@@ -770,7 +851,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         state.dialogs.object_properties.open_bus(
             bus,
             source,
-            state.workspace.content.active_view.display_path(),
+            state.model.workspace.content.active_view.display_path(),
         );
         return true;
     }
@@ -818,7 +899,7 @@ mod tests {
             "a new project's plan opens with a transient in it"
         );
 
-        state.sim_setup.analysis_plan = None;
+        state.model.sim_setup.analysis_plan = None;
         let fallback = stimulus_preview_timing(&state);
         assert_eq!(fallback, PreviewTiming::default());
         assert!(!fallback.from_analysis);
@@ -927,7 +1008,7 @@ mod tests {
             .expect("construction plan")
             .commit(&mut library)
             .expect("definition publication");
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
 
         let implementation_view = match &definition.source {
             SymbolSourceContract::Model { model, .. } => model.implementation_view.view_name(),
@@ -973,7 +1054,7 @@ mod tests {
         width.constraints.minimum = Some("1m".to_owned());
         width.constraints.maximum = Some("1".to_owned());
         let second_binding = install_definition(&mut state, &second);
-        state.schematic.document_mut_for_test().components = vec![
+        state.model.schematic.document_mut_for_test().components = vec![
             Component::new(1, ComponentType::CellInstance, Point::new(0, 0))
                 .with_library_cell(first_binding)
                 .with_name_value("M1", "nmos_core"),
@@ -981,10 +1062,11 @@ mod tests {
                 .with_library_cell(second_binding)
                 .with_name_value("M2", "nmos_core"),
         ];
-        state.schematic.document_mut_for_test().components[0].params = "w=2u l=180n".to_owned();
+        state.model.schematic.document_mut_for_test().components[0].params =
+            "w=2u l=180n".to_owned();
 
         for (width, invalid) in [("2m", false), ("2u", true)] {
-            state.schematic.document_mut_for_test().components[1].params =
+            state.model.schematic.document_mut_for_test().components[1].params =
                 format!("w={width} l=180n");
             for owner in [None, Some(1), Some(2)] {
                 state.tabbed_property_dialog.close();
@@ -993,7 +1075,7 @@ mod tests {
                     open_property_editor(&mut state, owner);
                     assert!(state.tabbed_property_dialog.open);
                 }
-                let original = state.schematic.document().components.clone();
+                let original = state.model.schematic.document().components.clone();
                 let draft = state.tabbed_property_dialog.draft.values.clone();
                 let report = CheckAndSaveValidationReport::validate(&state).unwrap();
                 let errors = report
@@ -1008,15 +1090,17 @@ mod tests {
                 } else {
                     assert!(errors.is_empty(), "owner {owner:?}: {errors:?}");
                 }
-                assert_eq!(state.schematic.document().components, original);
+                assert_eq!(state.model.schematic.document().components, original);
                 assert_eq!(state.tabbed_property_dialog.draft.values, draft);
             }
         }
 
         // Invalid published metadata must not fall back to the other master's
         // retained form or to an identity-only schema.
-        state.schematic.document_mut_for_test().components[1].params = "w=2m l=180n".to_owned();
+        state.model.schematic.document_mut_for_test().components[1].params =
+            "w=2m l=180n".to_owned();
         state
+            .model
             .library_manager
             .get_library_mut(&first.identity.library)
             .unwrap()
@@ -1054,10 +1138,26 @@ mod tests {
             BusTapOrientation::Down,
         )
         .unwrap();
-        state.schematic.document_mut_for_test().buses.push(bus);
-        state.schematic.document_mut_for_test().bus_taps.push(tap);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .bus_taps
+            .push(tap);
 
-        state.schematic.session.editor.selection.select_only_bus(41);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus(41);
         assert!(open_selected_object_properties(&mut state));
         assert_eq!(
             state.dialogs.object_properties.source,
@@ -1072,6 +1172,7 @@ mod tests {
         state.dialogs.object_properties.close();
 
         state
+            .model
             .schematic
             .session
             .editor
@@ -1095,11 +1196,13 @@ mod tests {
         let mut state = AppState::default();
         let label = NetLabel::new(43, Point::new(-12, 34), "afe.out");
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(label.clone());
         state
+            .model
             .schematic
             .session
             .editor
@@ -1127,16 +1230,19 @@ mod tests {
     fn selected_named_wire_opens_net_scoped_properties_and_unnamed_wire_fails_closed() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::new(71, vec![Point::new(0, 0), Point::new(40, 0)]));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(72, Point::new(20, 0), "sense"));
         state
+            .model
             .schematic
             .session
             .editor
@@ -1160,7 +1266,12 @@ mod tests {
         ));
 
         state.dialogs.object_properties.close();
-        state.schematic.document_mut_for_test().net_labels.clear();
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .net_labels
+            .clear();
         assert!(!selected_object_properties_available(&state));
         assert!(!open_selected_object_properties(&mut state));
     }
@@ -1168,10 +1279,17 @@ mod tests {
     #[test]
     fn interface_port_object_properties_preserve_the_full_typed_editor() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(73, ComponentType::Port, Point::origin()).with_name_value("P73", "VIN"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(73, ComponentType::Port, Point::origin())
+                    .with_name_value("P73", "VIN"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -1199,11 +1317,13 @@ mod tests {
         )
         .unwrap();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .design_notes
             .push(note.clone());
         state
+            .model
             .schematic
             .session
             .editor
@@ -1230,12 +1350,19 @@ mod tests {
     fn generic_properties_refuses_read_only_schematics() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .buses
             .push(Bus::segment(1, Point::new(0, 0), Point::new(10, 0), None).unwrap());
-        state.schematic.session.editor.selection.select_only_bus(1);
-        state.schematic.session.read_only = true;
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus(1);
+        state.model.schematic.session.read_only = true;
 
         assert!(!open_selected_object_properties(&mut state));
         assert!(!state.dialogs.object_properties.open);
@@ -1244,17 +1371,18 @@ mod tests {
     #[test]
     fn selected_probe_routes_to_the_inspector_even_in_read_only_mode() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().probes.push(
+        state.model.schematic.document_mut_for_test().probes.push(
             SchematicProbe::new(74, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap(),
         );
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_probe(74);
-        state.schematic.session.read_only = true;
+        state.model.schematic.session.read_only = true;
 
         assert!(selected_object_properties_available(&state));
         assert!(open_selected_object_properties(&mut state));
@@ -1271,6 +1399,7 @@ mod tests {
     fn stale_selected_object_ids_fail_closed_without_opening_a_dialog() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .session
             .editor
@@ -1280,6 +1409,7 @@ mod tests {
         assert!(!state.dialogs.object_properties.open);
 
         state
+            .model
             .schematic
             .session
             .editor
@@ -1289,6 +1419,7 @@ mod tests {
         assert!(!state.dialogs.object_properties.open);
 
         state
+            .model
             .schematic
             .session
             .editor
@@ -1298,6 +1429,7 @@ mod tests {
         assert!(!state.dialogs.object_properties.open);
 
         state
+            .model
             .schematic
             .session
             .editor
@@ -1317,11 +1449,23 @@ mod tests {
             Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
         )
         .unwrap();
-        state.schematic.document_mut_for_test().buses.push(bus);
-        state.schematic.session.editor.selection.select_only_bus(1);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(bus);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus(1);
         assert!(open_selected_object_properties(&mut state));
 
         state
+            .model
             .schematic
             .session
             .editor
@@ -1344,11 +1488,13 @@ mod tests {
             .with_name_value("M44", "nmos_core");
         instance.params = "w=2u l=220n".to_owned();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(instance);
         state
+            .model
             .schematic
             .session
             .editor
@@ -1403,13 +1549,19 @@ mod tests {
         ));
         let mut library = Library::new("work");
         library.add_cell(cell);
-        state.library_manager.add_library(library);
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(9, ComponentType::CellInstance, Point::origin())
-                .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
-                .with_name_value("X9", "amp"),
-        );
+        state.model.library_manager.add_library(library);
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(9, ComponentType::CellInstance, Point::origin())
+                    .with_library_cell(LibraryCellInstance::new("work", "amp", "schematic"))
+                    .with_name_value("X9", "amp"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -1445,7 +1597,12 @@ mod tests {
             .enumerate()
         {
             let mut state = AppState::default();
-            state.schematic.document_mut_for_test().components.clear();
+            state
+                .model
+                .schematic
+                .document_mut_for_test()
+                .components
+                .clear();
             let name = if kind.spice_prefix().is_empty() {
                 if kind == ComponentType::Ground {
                     "GND".to_owned()
@@ -1458,6 +1615,7 @@ mod tests {
             let component =
                 Component::new(index as u64 + 1, kind, Point::origin()).with_name_value(name, "");
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .components
@@ -1482,12 +1640,18 @@ mod tests {
         let mut state = AppState::default();
         let definition = model_bound_definition();
         let binding = install_definition(&mut state, &definition);
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(1, ComponentType::CellInstance, Point::origin())
-                .with_library_cell(binding)
-                .with_name_value("M1", "nmos_core"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(1, ComponentType::CellInstance, Point::origin())
+                    .with_library_cell(binding)
+                    .with_name_value("M1", "nmos_core"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -1505,13 +1669,19 @@ mod tests {
 
         let mut legacy_library = Library::new("legacy");
         legacy_library.add_cell(crate::state::Cell::new("opaque"));
-        state.library_manager.add_library(legacy_library);
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(2, ComponentType::CellInstance, Point::new(20, 0))
-                .with_library_cell(LibraryCellInstance::new("legacy", "opaque", "schematic"))
-                .with_name_value("X2", "opaque"),
-        );
+        state.model.library_manager.add_library(legacy_library);
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(2, ComponentType::CellInstance, Point::new(20, 0))
+                    .with_library_cell(LibraryCellInstance::new("legacy", "opaque", "schematic"))
+                    .with_name_value("X2", "opaque"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -1534,12 +1704,18 @@ mod tests {
         review.source = SymbolSourceContract::BlankExplicitContract;
         review.netlist = SymbolNetlistBinding::unbound();
         let review_binding = install_definition(&mut state, &review);
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(3, ComponentType::CellInstance, Point::new(40, 0))
-                .with_library_cell(review_binding)
-                .with_name_value("X3", "review_only"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(3, ComponentType::CellInstance, Point::new(40, 0))
+                    .with_library_cell(review_binding)
+                    .with_name_value("X3", "review_only"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor

@@ -74,6 +74,7 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
         .unwrap_or(netlist.active_document);
     let document_id = match root {
         super::ActiveNetlistDocument::Generated => state
+            .model
             .netlist_artifacts
             .generated_document
             .as_ref()
@@ -81,7 +82,7 @@ pub(crate) fn editor_id(state: &AppState) -> egui::Id {
         super::ActiveNetlistDocument::OwnedSource => netlist
             .owned_document
             .as_ref()
-            .or(state.workspace.content.netlist_document.as_ref())
+            .or(state.model.workspace.content.netlist_document.as_ref())
             .map(|document| document.id()),
         super::ActiveNetlistDocument::GeneratedDiff | super::ActiveNetlistDocument::RunSnapshot => {
             None
@@ -136,7 +137,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
 
     // Take the buffer out so the layouter and the post-edit bookkeeping
     // don't fight over `state`.
-    let mut buffer = std::mem::take(&mut state.simulation.source.netlist_content);
+    let mut buffer = std::mem::take(&mut state.model.simulation.source.netlist_content);
     let requested_line = state
         .ui
         .netlist
@@ -296,7 +297,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
     if !source_changed {
         // The buffer was taken at the beginning of the frame; restore it on
         // unchanged and generated-document frames.
-        state.simulation.source.netlist_content = buffer;
+        state.model.simulation.source.netlist_content = buffer;
     }
     if source_changed && state.ui.netlist.active_dependency_identity.is_none() {
         super::refresh_diff_pips_from_baseline(state);
@@ -556,13 +557,14 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
         return;
     }
 
-    let buffer = state.simulation.source.netlist_content.clone();
+    let buffer = state.model.simulation.source.netlist_content.clone();
     let materialized = if state.ui.netlist.active_dependency_identity.is_some() {
         Ok(buffer.clone())
     } else if state.ui.netlist.active_document == super::ActiveNetlistDocument::OwnedSource {
         rspice_simulation::netlist_preparation::owned_source::compose_owned_netlist_execution_source(
-            state.workspace.content.netlist_descriptor.as_ref(),
+            state.model.workspace.content.netlist_descriptor.as_ref(),
             state
+                .model
                 .workspace
                 .content
                 .netlist_document
@@ -578,10 +580,10 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
     } else {
         match state.ui.netlist.active_document {
             super::ActiveNetlistDocument::OwnedSource => {
-                state.workspace.content.netlist_source_path.as_deref()
+                state.model.workspace.content.netlist_source_path.as_deref()
             }
             super::ActiveNetlistDocument::Generated => {
-                state.schematic.session.current_file.as_deref()
+                state.model.schematic.session.current_file.as_deref()
             }
             super::ActiveNetlistDocument::GeneratedDiff
             | super::ActiveNetlistDocument::RunSnapshot => None,
@@ -607,7 +609,7 @@ fn validate_visible_source(state: &mut AppState, revision: u64) {
     let sealed_sources = if platform_include_access() == IncludeAccess::AuthenticatedBundleOnly
         && materialized_external_line.is_some()
     {
-        match state.model_library_manager.seal_execution_sources() {
+        match state.model.model_library_manager.seal_execution_sources() {
             Ok(sources) => Some(sources),
             Err(error) => {
                 let netlist = &mut state.ui.netlist;

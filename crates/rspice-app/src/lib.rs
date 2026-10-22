@@ -205,25 +205,26 @@ impl RSpiceApp {
         snapshot: ProjectLibraryLockSnapshot,
     ) -> Result<(), String> {
         snapshot.validate()?;
-        if snapshot.project_id() != self.state.workspace.content.project.id() {
+        if snapshot.project_id() != self.state.model.workspace.content.project.id() {
             return Err(format!(
                 "project library lock snapshot belongs to project {}, not current project {}",
                 snapshot.project_id(),
-                self.state.workspace.content.project.id()
+                self.state.model.workspace.content.project.id()
             ));
         }
-        if snapshot.project_revision() != self.state.workspace.content.project.revision()
-            || snapshot.library_revision() != self.state.library_manager.revision()
+        if snapshot.project_revision() != self.state.model.workspace.content.project.revision()
+            || snapshot.library_revision() != self.state.model.library_manager.revision()
         {
             return Err(format!(
                 "project library lock snapshot is stale (project {} vs {}, library {} vs {})",
                 snapshot.project_revision().get(),
-                self.state.workspace.content.project.revision().get(),
+                self.state.model.workspace.content.project.revision().get(),
                 snapshot.library_revision(),
-                self.state.library_manager.revision()
+                self.state.model.library_manager.revision()
             ));
         }
         self.state
+            .model
             .library_edit_locks
             .install_authoritative(snapshot)
     }
@@ -246,7 +247,7 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if self.state.simulation.execution.has_active_execution() {
+        if self.state.model.simulation.execution.has_active_execution() {
             return Err(
                 "project library publication is unavailable while a simulation is running"
                     .to_owned(),
@@ -272,20 +273,20 @@ impl RSpiceApp {
                 .try_into()
                 .unwrap_or(u64::MAX)
                 .max(1),
-            library_revision: self.state.library_manager.revision(),
+            library_revision: self.state.model.library_manager.revision(),
             snapshot_digest: crate::product::ContentDigest::from_bytes(
                 sha2::Sha256::digest(&bytes).into(),
             ),
             snapshot_byte_len,
         };
-        let mut descriptor_preflight = self.state.workspace.content.project.clone();
+        let mut descriptor_preflight = self.state.model.workspace.content.project.clone();
         descriptor_preflight
             .publish_library_snapshot(draft.clone())
             .map_err(|error| format!("project library publication preflight failed: {error}"))?;
         Ok(ProjectLibraryPublicationCandidate {
             draft,
             artifact_bytes: bytes,
-            source_project_revision: self.state.workspace.content.project.revision(),
+            source_project_revision: self.state.model.workspace.content.project.revision(),
         })
     }
 
@@ -304,14 +305,15 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if self.state.simulation.execution.has_active_execution() {
+        if self.state.model.simulation.execution.has_active_execution() {
             return Err(
                 "project library publication is unavailable while a simulation is running"
                     .to_owned(),
             );
         }
-        if self.state.workspace.content.project.revision() != candidate.source_project_revision
-            || self.state.library_manager.revision() != candidate.draft.library_revision
+        if self.state.model.workspace.content.project.revision()
+            != candidate.source_project_revision
+            || self.state.model.library_manager.revision() != candidate.draft.library_revision
         {
             return Err(
                 "project library publication candidate is stale; prepare and publish a new artifact"
@@ -337,14 +339,19 @@ impl RSpiceApp {
         }
         let receipt = self
             .state
+            .model
             .workspace
             .content
             .project
             .publish_library_snapshot(candidate.draft)
             .map_err(|error| format!("project library publication failed: {error}"))?;
-        self.state.workspace.content.project_metadata_dirty = true;
-        self.state.design_execution_epoch = self.state.design_execution_epoch.wrapping_add(1);
-        self.state.netlist_artifacts.current_generation_input_digest = None;
+        self.state.model.workspace.content.project_metadata_dirty = true;
+        self.state.model.design_execution_epoch =
+            self.state.model.design_execution_epoch.wrapping_add(1);
+        self.state
+            .model
+            .netlist_artifacts
+            .current_generation_input_digest = None;
         self.state.clear_project_design_history();
         Ok(receipt)
     }
@@ -370,13 +377,14 @@ impl RSpiceApp {
                     .to_owned(),
             );
         }
-        if self.state.simulation.execution.has_active_execution() {
+        if self.state.model.simulation.execution.has_active_execution() {
             return Err(
                 "project library rollback is unavailable while a simulation is running".to_owned(),
             );
         }
         let receipt = self
             .state
+            .model
             .workspace
             .content
             .project
@@ -429,7 +437,13 @@ impl RSpiceApp {
             );
         }
         if artifact.file.workspace.project.technology_binding()
-            != self.state.workspace.content.project.technology_binding()
+            != self
+                .state
+                .model
+                .workspace
+                .content
+                .project
+                .technology_binding()
         {
             return Err(
                 "project library rollback cannot undo a change to the project's technology binding"
@@ -466,30 +480,32 @@ impl RSpiceApp {
             };
 
         let mut candidate = self.state.clone();
-        let mut current_project = candidate.workspace.content.project.clone();
+        let mut current_project = candidate.model.workspace.content.project.clone();
         current_project.root_library = artifact.file.workspace.project.root_library.clone();
         current_project.top_cell = artifact.file.workspace.project.top_cell.clone();
         artifact.file.workspace.project = current_project;
         candidate.clear_design_execution_context();
         candidate
+            .model
             .library_manager
             .replace_catalog_from_snapshot(&artifact.file.libraries)?;
-        candidate.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-        candidate.workspace = crate::state::ProjectWorkspace::from_parts(
+        candidate.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
+        candidate.model.workspace = crate::state::ProjectWorkspace::from_parts(
             artifact.file.workspace,
             artifact.workspace_session,
         );
-        candidate.sim_setup = simulation_plan;
-        candidate.model_library_manager = model_library_manager;
+        candidate.model.sim_setup = simulation_plan;
+        candidate.model.model_library_manager = model_library_manager;
         candidate.restore_active_schematic_from_workspace();
-        candidate.simulation = crate::state::SimulationState::default();
+        candidate.model.simulation = crate::state::SimulationState::default();
         crate::io::restore_simulation_results(
             artifact.file.simulation_results,
-            &mut candidate.simulation,
+            &mut candidate.model.simulation,
         )
         .map_err(|error| format!("project library rollback result history is invalid: {error}"))?;
         candidate.publish_project_library_mutation(prepared);
         candidate
+            .model
             .workspace
             .content
             .project

@@ -72,7 +72,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         &effective_outputs,
         &reports,
         &membership,
-        app.state.sim_setup.save_policy.output_selection_mode,
+        app.state.model.sim_setup.save_policy.output_selection_mode,
         &workload,
     );
     // A forecast whose basis changed has to say so. Over-pricing is the safe
@@ -116,7 +116,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// point — and returns the reason so the page can say the forecast is a
 /// ceiling rather than an estimate.
 pub(super) fn capture_workload(app: &RSpiceApp) -> (CaptureWorkload, Option<String>) {
-    let matrix = u64::try_from(app.state.sim_setup.run_set.point_count()).unwrap_or(u64::MAX);
+    let matrix = u64::try_from(app.state.model.sim_setup.run_set.point_count()).unwrap_or(u64::MAX);
     match super::workload::PlanWorkload::resolve(app) {
         Ok(workload) => {
             let engine_task_points = workload.rows.iter().fold(0u64, |total, row| {
@@ -139,7 +139,7 @@ pub(super) fn capture_workload(app: &RSpiceApp) -> (CaptureWorkload, Option<Stri
         Err(error) => (
             CaptureWorkload::uniform(
                 matrix,
-                app.state.sim_setup.enabled_analysis_instance_count(),
+                app.state.model.sim_setup.enabled_analysis_instance_count(),
             ),
             Some(format!(
                 "The plan's task workload could not be resolved, so this forecast prices every \
@@ -233,8 +233,9 @@ impl ExecutedDeckStorage {
 /// already refused to do that for its own half of the page; this is the same
 /// refusal, taken before the controller is asked to price anything.
 fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
-    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
     app.state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -301,7 +302,7 @@ fn streaming_contract(ui: &mut Ui, state: &mut AppState, payload: &SimulationPla
         Some((format!("{streamed} streamed").as_str(), Tone::Neutral)),
         |ui| {
             card_body(ui, |ui| {
-                let mut policy = state.sim_setup.save_policy;
+                let mut policy = state.model.sim_setup.save_policy;
                 let mut changed = false;
                 changed |= super::page_kit::switch_row(
                     ui,
@@ -450,8 +451,9 @@ fn retention_ledger(
 }
 
 fn retention_contract(ui: &mut Ui, state: &mut AppState) {
-    let simulation = &state.simulation;
+    let simulation = &state.model.simulation;
     let Some(plan_id) = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -471,7 +473,7 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let retained = simulation.retained.retained_plan_dataset_count(plan_id);
-    let limit = state.sim_setup.save_policy.retained_dataset_limit;
+    let limit = state.model.sim_setup.save_policy.retained_dataset_limit;
     let pinned = simulation.retained.pinned_plan_run_count(plan_id);
     // Pinning can put the limit out of reach entirely. The card states that
     // rather than a count that reads as a policy still being enforced.
@@ -479,6 +481,7 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
     let at_limit = retained >= limit;
     let active_run_id = simulation.active_run().map(|run| run.run_id);
     let regression_baseline = state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -633,15 +636,15 @@ fn retention_contract(ui: &mut Ui, state: &mut AppState) {
         },
     );
     if let Some((run_id, retention)) = reclassified {
-        state.simulation.set_run_retention(run_id, retention);
+        state.model.simulation.set_run_retention(run_id, retention);
     }
     if let Some(index) = picked
         && let Some(depth) = RETENTION_CHOICES.get(index)
     {
-        let mut policy = state.sim_setup.save_policy;
+        let mut policy = state.model.sim_setup.save_policy;
         policy.retained_dataset_limit = *depth;
         if commit_save_policy(state, policy, "Save policy · dataset retention") {
-            state.simulation.prune_plan_runs(plan_id, *depth);
+            state.model.simulation.prune_plan_runs(plan_id, *depth);
         }
     }
 }
@@ -651,16 +654,17 @@ fn commit_save_policy(
     policy: crate::workbench::app_state::SimulationSavePolicy,
     detail: &str,
 ) -> bool {
-    if policy == state.sim_setup.save_policy {
+    if policy == state.model.sim_setup.save_policy {
         return false;
     }
     if let Err(error) = policy.validate() {
         state.record_plan_refusal(error);
         return false;
     }
-    let previous = state.sim_setup.save_policy;
-    state.sim_setup.save_policy = policy;
+    let previous = state.model.sim_setup.save_policy;
+    state.model.sim_setup.save_policy = policy;
     match state
+        .model
         .sim_setup
         .commit_active_plan_configuration_change(detail)
     {
@@ -670,7 +674,7 @@ fn commit_save_policy(
             true
         }
         Err(error) => {
-            state.sim_setup.save_policy = previous;
+            state.model.sim_setup.save_policy = previous;
             state.record_plan_refusal(error.to_string());
             false
         }
@@ -756,6 +760,7 @@ mod tests {
 
     fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
         app.state
+            .model
             .sim_setup
             .analysis_plan
             .as_ref()
@@ -879,9 +884,9 @@ mod tests {
         let before_revision = active_plan_revision(&app);
         app.state.workbench.preflight.report =
             Some(crate::state::PreflightReport::retained_for_test(
-                app.state.workspace.content.project.revision().get(),
+                app.state.model.workspace.content.project.revision().get(),
             ));
-        let mut policy = app.state.sim_setup.save_policy;
+        let mut policy = app.state.model.sim_setup.save_policy;
         policy.maximum_storage_bytes /= 2;
 
         assert!(commit_save_policy(
@@ -890,7 +895,7 @@ mod tests {
             "Save policy test commit"
         ));
 
-        assert_eq!(app.state.sim_setup.save_policy, policy);
+        assert_eq!(app.state.model.sim_setup.save_policy, policy);
         assert_ne!(active_plan_revision(&app), before_revision);
         assert!(app.state.workbench.preflight.report.is_none());
         assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
@@ -899,11 +904,11 @@ mod tests {
     #[test]
     fn invalid_save_policy_is_refused_without_mutating_plan_or_preflight() {
         let mut app = RSpiceApp::test_instance();
-        let before_policy = app.state.sim_setup.save_policy;
+        let before_policy = app.state.model.sim_setup.save_policy;
         let before_revision = active_plan_revision(&app);
         app.state.workbench.preflight.report =
             Some(crate::state::PreflightReport::retained_for_test(
-                app.state.workspace.content.project.revision().get(),
+                app.state.model.workspace.content.project.revision().get(),
             ));
         let mut invalid = before_policy;
         invalid.maximum_storage_bytes = 0;
@@ -914,7 +919,7 @@ mod tests {
             "Invalid save policy test"
         ));
 
-        assert_eq!(app.state.sim_setup.save_policy, before_policy);
+        assert_eq!(app.state.model.sim_setup.save_policy, before_policy);
         assert_eq!(active_plan_revision(&app), before_revision);
         assert!(app.state.workbench.preflight.report.is_some());
         assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
@@ -923,10 +928,10 @@ mod tests {
     #[test]
     fn failed_plan_commit_rolls_back_the_candidate_save_policy() {
         let mut app = RSpiceApp::test_instance();
-        let before_policy = app.state.sim_setup.save_policy;
+        let before_policy = app.state.model.sim_setup.save_policy;
         let mut candidate = before_policy;
         candidate.retained_dataset_limit += 1;
-        app.state.sim_setup.analysis_plan = None;
+        app.state.model.sim_setup.analysis_plan = None;
 
         assert!(!commit_save_policy(
             &mut app.state,
@@ -934,7 +939,7 @@ mod tests {
             "Save policy rollback test"
         ));
 
-        assert_eq!(app.state.sim_setup.save_policy, before_policy);
+        assert_eq!(app.state.model.sim_setup.save_policy, before_policy);
         assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 }

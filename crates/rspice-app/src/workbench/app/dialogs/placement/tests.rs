@@ -29,9 +29,9 @@ fn raster_directory() -> std::path::PathBuf {
 
 /// Draw one declared bus, so the bus-tap form has something to prefill from.
 fn declare_bus(state: &mut AppState, declaration: &str) {
-    let id = state.schematic.next_id();
+    let id = state.model.schematic.next_id();
     let declaration = BusDeclaration::parse(declaration).expect("declaration");
-    state.schematic.document_mut_for_test().buses.push(
+    state.model.schematic.document_mut_for_test().buses.push(
         Bus::segment(id, Point::new(0, 0), Point::new(40, 0), Some(declaration))
             .expect("bus segment"),
     );
@@ -94,7 +94,13 @@ fn render_placement_forms() {
             "documentation-shape",
             |app| {
                 let source = schematic_editor_request_source(&app.state);
-                let shapes = app.state.schematic.document().documentation_shapes.clone();
+                let shapes = app
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .documentation_shapes
+                    .clone();
                 app.state.dialogs.documentation_shape.open(source, shapes);
             },
             |app, ctx| app.render_documentation_shape_dialog(ctx),
@@ -161,16 +167,16 @@ fn render_net_label_entry() {
 
     let cases: [EntryCase; 3] = [
         ("net-label-empty", |app| {
-            app.state.schematic.session.editor.tool = Tool::Label;
+            app.state.model.schematic.session.editor.tool = Tool::Label;
             crate::workbench::app::open_net_label_placement(&mut app.state, Point::new(30, 50));
         }),
         ("net-label-refused", |app| {
-            app.state.schematic.session.editor.tool = Tool::Label;
+            app.state.model.schematic.session.editor.tool = Tool::Label;
             crate::workbench::app::open_net_label_placement(&mut app.state, Point::new(30, 50));
             app.state.dialogs.net_label_placement.name = "two nodes".to_owned();
         }),
         ("off-sheet-connector", |app| {
-            app.state.schematic.session.editor.tool = Tool::OffSheetConnector;
+            app.state.model.schematic.session.editor.tool = Tool::OffSheetConnector;
             crate::workbench::app::open_net_label_placement(&mut app.state, Point::new(30, 50));
             app.state.dialogs.net_label_placement.name = "BIAS".to_owned();
         }),

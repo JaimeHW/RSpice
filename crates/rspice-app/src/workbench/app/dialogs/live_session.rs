@@ -94,6 +94,7 @@ impl RSpiceApp {
         let mirroring = self.state.workbench.live_write_locks.mirror;
         let circuit_id = self
             .state
+            .model
             .workspace
             .content
             .project

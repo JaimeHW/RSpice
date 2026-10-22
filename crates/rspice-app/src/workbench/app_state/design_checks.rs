@@ -273,19 +273,19 @@ impl AppState {
     /// through it — so it answers in the time the one drawing takes.
     pub(crate) fn check_active_cellview(&mut self) -> Result<DrcResult, String> {
         if !matches!(
-            self.workspace.content.active_view_type(),
+            self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             return Err("only a schematic or a testbench has design rules to check".to_owned());
         }
-        let subject = self.workspace.content.active_schematic_reference();
+        let subject = self.model.workspace.content.active_schematic_reference();
         self.run_design_check(subject, CheckScope::Cellview)
     }
 
     /// Check Design: the configured design, walked from the simulation root,
     /// with every schematic of the project's own libraries it never reaches.
     pub(crate) fn check_design(&mut self) -> Result<DrcResult, String> {
-        let root = self.workspace.content.simulation_root_reference();
+        let root = self.model.workspace.content.simulation_root_reference();
         self.run_design_check(root, CheckScope::Design)
     }
 
@@ -325,7 +325,7 @@ impl AppState {
 
     /// The open cellview and every cellview its walk reaches.
     pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
-        let subject = self.workspace.content.active_schematic_reference();
+        let subject = self.model.workspace.content.active_schematic_reference();
         self.run_design_check(subject, CheckScope::Hierarchy)
     }
 
@@ -334,7 +334,12 @@ impl AppState {
         subject: CellViewRef,
         scope: CheckScope,
     ) -> Result<DrcResult, String> {
-        if self.workspace.annotation_restoration_error().is_some() {
+        if self
+            .model
+            .workspace
+            .annotation_restoration_error()
+            .is_some()
+        {
             self.sync_active_schematic_to_workspace();
         }
         let config = self.design_check_config(&subject);
@@ -343,16 +348,17 @@ impl AppState {
         // coordinates two nets: the projection namespaces the pages apart
         // before anything electrical is read off them.
         let projection = self
+            .model
             .workspace
             .design_projection(
-                &self.library_manager,
-                &self.workspace.content.active_view,
-                &self.schematic,
+                &self.model.library_manager,
+                &self.model.workspace.content.active_view,
+                &self.model.schematic,
             )
             .map_err(|error| error.to_string())?;
         let checked = projected_buffer(&projection, &subject)?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-            self.library_manager.catalog(),
+            self.model.library_manager.catalog(),
             &projection,
         );
         let mut result = rspice_design::drc::run_check_of_cellview(
@@ -381,7 +387,7 @@ impl AppState {
         result: DrcResult,
     ) -> Result<(), String> {
         if !matches!(
-            self.workspace.content.active_view_type(),
+            self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             return Err(
@@ -389,7 +395,7 @@ impl AppState {
                     .to_owned(),
             );
         }
-        let subject = self.workspace.content.active_schematic_reference();
+        let subject = self.model.workspace.content.active_schematic_reference();
         let config = self.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result, CheckScope::Hierarchy)
     }
@@ -399,7 +405,7 @@ impl AppState {
     /// that cell view, so a pass run by either is the same evidence, and the
     /// one the run gate judges the root under.
     pub(crate) fn configured_root_design_check_config(&self) -> DrcConfig {
-        self.design_check_config(&self.workspace.content.simulation_root_reference())
+        self.design_check_config(&self.model.workspace.content.simulation_root_reference())
     }
 
     /// Publish `result` as Check Design's findings about the configured
@@ -409,7 +415,7 @@ impl AppState {
         &mut self,
         result: DrcResult,
     ) -> Result<(), String> {
-        let subject = self.workspace.content.simulation_root_reference();
+        let subject = self.model.workspace.content.simulation_root_reference();
         let config = self.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result, CheckScope::Design)
     }
@@ -432,8 +438,8 @@ impl AppState {
         // ones. Applying them again to a pass that already states them
         // changes nothing.
         config.waivers.apply(&mut result);
-        let is_active_subject =
-            owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
+        let is_active_subject = owner_key(&subject)
+            == owner_key(&self.model.workspace.content.active_schematic_reference());
         let input_digest = self.diagnostic_live_digest(&DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
         })?;
@@ -453,8 +459,8 @@ impl AppState {
             records,
             &coverage,
         )?;
-        self.design_checks.insert(CellViewCheckReceipt {
-            project_id: self.workspace.content.project.id(),
+        self.model.design_checks.insert(CellViewCheckReceipt {
+            project_id: self.model.workspace.content.project.id(),
             subject,
             input_digest,
             result,
@@ -485,7 +491,7 @@ impl AppState {
     /// since they may be two passes' findings; this names one pass's.
     #[cfg(test)]
     pub(crate) fn design_rule_finding_identities(&self, subject: &CellViewRef) -> Vec<uuid::Uuid> {
-        let Some(receipt) = self.design_checks.receipt(subject) else {
+        let Some(receipt) = self.model.design_checks.receipt(subject) else {
             return Vec::new();
         };
         finding_identities(&receipt.subject, &receipt.result)
@@ -498,7 +504,10 @@ impl AppState {
         let Some(result) = &self.dialogs.drc_results else {
             return Vec::new();
         };
-        finding_identities(&self.workspace.content.active_schematic_reference(), result)
+        finding_identities(
+            &self.model.workspace.content.active_schematic_reference(),
+            result,
+        )
     }
 
     /// The other objects the current finding involves that `cell_view` draws,
@@ -516,7 +525,7 @@ impl AppState {
         use super::diagnostic_store::DiagnosticLevel;
         use rspice_design::drc::DrcSeverity;
 
-        let current = self.diagnostics.current_places()?;
+        let current = self.model.diagnostics.current_places()?;
         let key = cell_view.key();
         let drawn: Vec<DrcLocation> = current
             .places
@@ -527,7 +536,7 @@ impl AppState {
         if drawn.is_empty() {
             return None;
         }
-        let batch = self.diagnostics.batch_of(&current)?;
+        let batch = self.model.diagnostics.batch_of(&current)?;
         if !self.diagnostic_batch_standing(batch).is_current() {
             return None;
         }
@@ -549,7 +558,8 @@ impl AppState {
         let published = DiagnosticInputs::DesignCheck {
             subject: subject.clone(),
         };
-        self.diagnostics
+        self.model
+            .diagnostics
             .batch(&published)?
             .records
             .iter()
@@ -564,11 +574,11 @@ impl AppState {
     }
 
     pub(crate) fn design_check_status(&self, subject: &CellViewRef) -> DesignCheckStatus<'_> {
-        let last = self.design_checks.receipt(subject);
+        let last = self.model.design_checks.receipt(subject);
         let Some(receipt) = last else {
             return DesignCheckStatus::NotRun;
         };
-        if receipt.project_id != self.workspace.content.project.id() {
+        if receipt.project_id != self.model.workspace.content.project.id() {
             return DesignCheckStatus::Stale(receipt);
         }
         // Through the store's memo, so the canvas and the status bar asking
@@ -588,30 +598,30 @@ impl AppState {
 
     pub(crate) fn active_design_check_status(&self) -> DesignCheckStatus<'_> {
         if !matches!(
-            self.workspace.content.active_view_type(),
+            self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             return DesignCheckStatus::NotRun;
         }
-        self.design_check_status(&self.workspace.content.active_schematic_reference())
+        self.design_check_status(&self.model.workspace.content.active_schematic_reference())
     }
 
     /// Where Check Design's evidence about the configured design stands: the
     /// receipt is filed under the simulation root it walked from.
     pub(crate) fn simulation_root_design_check_status(&self) -> DesignCheckStatus<'_> {
-        self.design_check_status(&self.workspace.content.simulation_root_reference())
+        self.design_check_status(&self.model.workspace.content.simulation_root_reference())
     }
 
     pub(crate) fn clear_active_design_check(&mut self) {
         if !matches!(
-            self.workspace.content.active_view_type(),
+            self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             self.refresh_active_design_check_projection();
             return;
         }
-        let subject = self.workspace.content.active_schematic_reference();
-        self.design_checks.clear_subject(&subject);
+        let subject = self.model.workspace.content.active_schematic_reference();
+        self.model.design_checks.clear_subject(&subject);
         self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck {
             subject: subject.clone(),
         });
@@ -642,12 +652,14 @@ impl AppState {
         // In the order they were published, so each still takes over from the
         // checks before it what it took over then.
         let mut subjects = self
+            .model
             .design_checks
             .receipts
             .values()
             .map(|receipt| (receipt.sequence, false, receipt.subject.clone()))
             .chain(
-                self.design_checks
+                self.model
+                    .design_checks
                     .live
                     .values()
                     .map(|receipt| (receipt.sequence, true, receipt.subject.clone())),
@@ -676,20 +688,21 @@ impl AppState {
     }
 
     pub(crate) fn clear_all_design_checks(&mut self) {
-        let published: Vec<DiagnosticInputs> =
-            self.design_checks
-                .receipts
-                .values()
-                .map(|receipt| DiagnosticInputs::DesignCheck {
+        let published: Vec<DiagnosticInputs> = self
+            .model
+            .design_checks
+            .receipts
+            .values()
+            .map(|receipt| DiagnosticInputs::DesignCheck {
+                subject: receipt.subject.clone(),
+            })
+            .chain(self.model.design_checks.live.values().map(|receipt| {
+                DiagnosticInputs::LiveCheck {
                     subject: receipt.subject.clone(),
-                })
-                .chain(self.design_checks.live.values().map(|receipt| {
-                    DiagnosticInputs::LiveCheck {
-                        subject: receipt.subject.clone(),
-                    }
-                }))
-                .collect();
-        self.design_checks.clear();
+                }
+            }))
+            .collect();
+        self.model.design_checks.clear();
         for inputs in &published {
             self.withdraw_diagnostics(inputs);
         }
@@ -700,18 +713,18 @@ impl AppState {
     /// a different cell/view's findings while they are migrated to receipts.
     pub(crate) fn refresh_active_design_check_projection(&mut self) {
         if !matches!(
-            self.workspace.content.active_view_type(),
+            self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             self.dialogs.drc_checked_version = 0;
             self.dialogs.drc_results = None;
             return;
         }
-        let current =
-            self.current_drawing_findings(&self.workspace.content.active_schematic_reference());
+        let current = self
+            .current_drawing_findings(&self.model.workspace.content.active_schematic_reference());
         self.dialogs.drc_checked_version = current
             .as_ref()
-            .map_or(0, |_| self.schematic.topology_version());
+            .map_or(0, |_| self.model.schematic.topology_version());
         self.dialogs.drc_results = current;
     }
 
@@ -780,8 +793,8 @@ fn design_rule_records(
     result: &DrcResult,
     stored_waivers: StoredWaivers,
 ) -> Vec<DiagnosticRecord> {
-    let project = state.workspace.content.project.id();
-    let revision = state.workspace.content.project.revision().get();
+    let project = state.model.workspace.content.project.id();
+    let revision = state.model.workspace.content.project.revision().get();
     let document_id = subject.key();
     let keys = finding_keys(subject, result);
     let canonicals = mint_canonical(&keys, revision, &format!("design-check:{document_id}"));
@@ -932,6 +945,7 @@ fn projected_buffer<'p>(
 /// testbench is a root of its own, not a cell waiting to be placed.
 fn project_schematics(state: &AppState) -> Vec<CellViewRef> {
     state
+        .model
         .library_manager
         .catalog()
         .libraries_by_key()
@@ -992,16 +1006,17 @@ fn check_coverage(
 /// read off the same projected design and walk the check takes.
 fn reached_cellviews(state: &AppState, subject: &CellViewRef) -> Result<Vec<CellViewRef>, String> {
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let checked = projected_buffer(&projection, subject)?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     Ok(rspice_design::drc::check_reads(checked, subject, &hierarchy).reached)
@@ -1035,8 +1050,13 @@ impl AppState {
     pub(crate) fn design_check_config(&self, subject: &CellViewRef) -> DrcConfig {
         DrcConfig {
             check_missing_ground: asks_for_ground(self, subject),
-            severity_overrides: self.workspace.content.design_rules.severity_overrides(),
-            connectivity: self.workspace.content.connectivity.policy.clone(),
+            severity_overrides: self
+                .model
+                .workspace
+                .content
+                .design_rules
+                .severity_overrides(),
+            connectivity: self.model.workspace.content.connectivity.policy.clone(),
             waivers: self.check_waivers(subject),
             ..DrcConfig::default()
         }
@@ -1055,10 +1075,11 @@ impl AppState {
 /// without resolving the configured hierarchy.
 fn asks_for_ground(state: &AppState, subject: &CellViewRef) -> bool {
     let subject_key = owner_key(subject);
-    if subject_key == owner_key(&state.workspace.content.simulation_root_reference()) {
+    if subject_key == owner_key(&state.model.workspace.content.simulation_root_reference()) {
         return true;
     }
     let testbench = state
+        .model
         .library_manager
         .catalog()
         .get_library(&subject.library)
@@ -1072,11 +1093,12 @@ fn asks_for_ground(state: &AppState, subject: &CellViewRef) -> bool {
     // the subject is asked: the stricter answer, where the looser one would
     // pass a design nobody could tell was grounded.
     let placed = state
+        .model
         .workspace
         .inspect_design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .is_ok_and(|projection| {
             projection
@@ -1095,15 +1117,17 @@ fn asks_for_ground(state: &AppState, subject: &CellViewRef) -> bool {
 fn subject_has_interface(state: &AppState, subject: &CellViewRef) -> bool {
     let key = subject.key();
     if state
+        .model
         .workspace
         .content
         .active_view
         .key()
         .eq_ignore_ascii_case(&key)
     {
-        return state.schematic.document().has_interface();
+        return state.model.schematic.document().has_interface();
     }
     state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -1144,15 +1168,16 @@ fn design_check_input_digest(
     subject: &CellViewRef,
     config: &DrcConfig,
 ) -> Result<ContentDigest, String> {
-    if let Some(error) = state.workspace.annotation_restoration_error() {
+    if let Some(error) = state.model.workspace.annotation_restoration_error() {
         return Err(format!("reference annotation restoration failed: {error}"));
     }
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let buffer = |key: &str| {
@@ -1169,7 +1194,7 @@ fn design_check_input_digest(
         )
     })?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     let reads = rspice_design::drc::check_reads(checked, subject, &hierarchy);
@@ -1210,12 +1235,12 @@ fn design_check_input_digest(
     // single schematic, and only the cellviews read carry theirs in. The
     // configuration enters through the bindings it decided.
     let material = serde_json::to_vec(&(
-        state.workspace.content.project.id(),
+        state.model.workspace.content.project.id(),
         owner_key(subject).to_string(),
         cellviews,
         &reads.bindings,
         &reads.globals,
-        state.library_manager.revision(),
+        state.model.library_manager.revision(),
         projection.connectivity(),
         profile,
     ))
@@ -1266,9 +1291,10 @@ mod tests {
 
     /// The identity the published batch gives the finding about `object`.
     fn identity_of(state: &AppState, object: &str) -> uuid::Uuid {
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         let published = DiagnosticInputs::DesignCheck { subject };
         state
+            .model
             .diagnostics
             .batches()
             .find(|batch| batch.inputs == published)
@@ -1296,9 +1322,10 @@ mod tests {
             ],
         );
         let standing = identity_of(&state, "Pin R2.B");
-        state.diagnostics.set_current_finding(Some(standing));
+        state.model.diagnostics.set_current_finding(Some(standing));
 
         state
+            .model
             .workspace
             .content
             .project
@@ -1315,7 +1342,7 @@ mod tests {
 
         assert_eq!(identity_of(&state, "Pin R2.B"), standing);
         assert_eq!(
-            state.diagnostics.current_finding(),
+            state.model.diagnostics.current_finding(),
             Some(standing),
             "the shared current finding survives the re-check",
         );
@@ -1338,11 +1365,12 @@ mod tests {
             ],
         );
         let identity = identity_of(&state, "Pin R2.B");
-        state.diagnostics.set_current_finding(Some(identity));
+        state.model.diagnostics.set_current_finding(Some(identity));
         // A waiver is recorded against a finding by what the finding is.
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         let waived = |state: &AppState| {
             state
+                .model
                 .diagnostics
                 .batch(&DiagnosticInputs::DesignCheck {
                     subject: subject.clone(),
@@ -1370,7 +1398,7 @@ mod tests {
 
         assert_eq!(identity_of(&state, "Pin R2.B"), identity);
         assert_eq!(
-            state.diagnostics.current_finding(),
+            state.model.diagnostics.current_finding(),
             Some(identity),
             "the current selection stays on the reworded finding",
         );
@@ -1397,21 +1425,21 @@ mod tests {
         );
         let fixed = identity_of(&state, "Pin R1.A");
         let remaining = identity_of(&state, "Pin R2.B");
-        state.diagnostics.set_current_finding(Some(fixed));
+        state.model.diagnostics.set_current_finding(Some(fixed));
 
         publish_pass(
             &mut state,
             &[(open_pin(7, "R2", "B"), "Pin R2.B is not connected")],
         );
 
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         assert_eq!(
             state.design_rule_finding_identities(&subject),
             vec![remaining],
             "the remaining finding keeps its identity and the fixed one's is gone",
         );
         assert_ne!(
-            state.diagnostics.current_finding(),
+            state.model.diagnostics.current_finding(),
             Some(remaining),
             "a selection on the fixed finding does not move to another finding",
         );
@@ -1430,17 +1458,23 @@ mod tests {
                 (open_pin(4, "R1", "A"), "second report"),
             ],
         );
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         let identities = state.design_rule_finding_identities(&subject);
         assert_eq!(identities.len(), 2);
         assert_ne!(identities[0], identities[1]);
-        state.diagnostics.set_current_finding(Some(identities[1]));
+        state
+            .model
+            .diagnostics
+            .set_current_finding(Some(identities[1]));
 
         publish_pass(&mut state, &[(open_pin(4, "R1", "A"), "second report")]);
 
         let remaining = state.design_rule_finding_identities(&subject);
         assert_eq!(remaining, vec![identities[0]]);
-        assert_eq!(state.diagnostics.current_finding(), Some(remaining[0]));
+        assert_eq!(
+            state.model.diagnostics.current_finding(),
+            Some(remaining[0])
+        );
     }
 
     /// The store can refuse a batch, so a receipt is stored only once the
@@ -1449,7 +1483,7 @@ mod tests {
     #[test]
     fn a_refused_publication_stores_no_receipt() {
         let mut state = AppState::default();
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         let location = open_pin(4, "R1", "A");
         // A record that already holds the identity this pass will mint.
         let key = FindingKey::new(
@@ -1461,7 +1495,7 @@ mod tests {
         let squatter = DiagnosticRecord::new(
             mint_canonical(&[key], 0, "elsewhere").remove(0),
             crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Error,
-            DiagnosticSubject::new(state.workspace.content.project.id(), "elsewhere"),
+            DiagnosticSubject::new(state.model.workspace.content.project.id(), "elsewhere"),
             "elsewhere",
         );
         state
@@ -1494,9 +1528,10 @@ mod tests {
     #[test]
     fn receipts_never_alias_another_active_cell_view() {
         let mut state = AppState::default();
-        let root = state.workspace.content.active_schematic_reference();
+        let root = state.model.workspace.content.active_schematic_reference();
         let other = CellViewRef::new(&root.library, "aux", &root.view);
         state
+            .model
             .workspace
             .insert_schematic_editor(other.key(), crate::state::SchematicState::default());
         state
@@ -1504,10 +1539,11 @@ mod tests {
             .expect("publish root receipt");
 
         state
+            .model
             .workspace
-            .insert_schematic_editor(root.key(), state.schematic.clone());
-        state.workspace.content.active_view = other;
-        state.schematic = crate::state::SchematicState::default();
+            .insert_schematic_editor(root.key(), state.model.schematic.clone());
+        state.model.workspace.content.active_view = other;
+        state.model.schematic = crate::state::SchematicState::default();
         state.refresh_active_design_check_projection();
 
         assert!(matches!(
@@ -1540,7 +1576,7 @@ mod tests {
         );
         assert_eq!(
             state.dialogs.drc_checked_version,
-            state.schematic.topology_version()
+            state.model.schematic.topology_version()
         );
     }
 
@@ -1555,8 +1591,13 @@ mod tests {
             DesignCheckStatus::Current(_)
         ));
 
-        state.workspace.content.connectivity.policy.width_mismatch =
-            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        state
+            .model
+            .workspace
+            .content
+            .connectivity
+            .policy
+            .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
         assert!(matches!(
             state.active_design_check_status(),
@@ -1583,15 +1624,17 @@ mod tests {
     #[test]
     fn focusing_a_non_schematic_view_does_not_stale_root_evidence() {
         let mut state = AppState::default();
-        let root = state.workspace.content.active_view.clone();
+        let root = state.model.workspace.content.active_view.clone();
         state
             .publish_active_design_check_result(completed_result())
             .expect("publish root receipt");
         state
+            .model
             .workspace
-            .insert_schematic_editor(root.key(), state.schematic.clone());
+            .insert_schematic_editor(root.key(), state.model.schematic.clone());
         let layout = CellViewRef::new(&root.library, &root.cell, "layout");
         state
+            .model
             .workspace
             .content
             .open_views
@@ -1599,8 +1642,8 @@ mod tests {
                 layout.clone(),
                 ViewType::Layout,
             ));
-        state.workspace.content.active_view = layout;
-        state.schematic = crate::state::SchematicState::default();
+        state.model.workspace.content.active_view = layout;
+        state.model.schematic = crate::state::SchematicState::default();
 
         assert!(matches!(
             state.design_check_status(&root),
@@ -1611,12 +1654,13 @@ mod tests {
     #[test]
     fn symbol_focus_never_aliases_or_clears_its_sibling_schematic_receipt() {
         let mut state = AppState::default();
-        let root = state.workspace.content.active_view.clone();
+        let root = state.model.workspace.content.active_view.clone();
         state
             .publish_active_design_check_result(completed_result())
             .expect("publish root receipt");
         let symbol = CellViewRef::new(&root.library, &root.cell, "symbol");
         state
+            .model
             .workspace
             .content
             .open_views
@@ -1624,7 +1668,7 @@ mod tests {
                 symbol.clone(),
                 ViewType::Symbol,
             ));
-        state.workspace.content.active_view = symbol;
+        state.model.workspace.content.active_view = symbol;
 
         state.refresh_active_design_check_projection();
 
@@ -1658,6 +1702,7 @@ mod tests {
 
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -1667,6 +1712,7 @@ mod tests {
                 crate::state::Point::new(40, 0),
             ));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -1677,14 +1723,21 @@ mod tests {
             ));
         state.sync_active_schematic_to_workspace();
 
-        let key = state.workspace.content.active_schematic_reference().key();
+        let key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         let first = state
+            .model
             .workspace
             .content
             .design_management
             .bootstrap_for_cell_view(&key, "Page 1", [FIRST_WIRE])
             .expect("a fresh cell view accepts its first governed sheet");
         let catalog = state
+            .model
             .workspace
             .content
             .design_management
@@ -1711,24 +1764,25 @@ mod tests {
     fn design_checks_read_the_projection_so_coincident_pages_stay_two_nets() {
         let mut state = state_with_two_coincident_sheets();
         assert_eq!(
-            rspice_design::connectivity::summary::design_nets(&state.schematic).len(),
+            rspice_design::connectivity::summary::design_nets(&state.model.schematic).len(),
             1,
             "the editor buffer holds one coordinate space, so its pages overlap"
         );
 
         let projection = state
+            .model
             .workspace
             .design_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .expect("the fixture configuration resolves");
         assert_eq!(
             rspice_design::connectivity::summary::projection_nets(
-                state.library_manager.catalog(),
+                state.model.library_manager.catalog(),
                 &projection,
-                &state.workspace.content.active_view.key(),
+                &state.model.workspace.content.active_view.key(),
             )
             .len(),
             2,
@@ -1744,8 +1798,9 @@ mod tests {
     #[test]
     fn design_checks_state_an_unresolved_configuration_rather_than_checking_the_buffer() {
         let mut state = AppState::default();
-        let root = state.workspace.content.active_view.clone();
+        let root = state.model.workspace.content.active_view.clone();
         state
+            .model
             .workspace
             .content
             .configuration_sets

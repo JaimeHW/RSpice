@@ -33,10 +33,15 @@ const NEW_DEFINITION_FAMILY: crate::state::ComponentType =
 
 /// Create a definition, select it, and leave the reader in its name field.
 pub(crate) fn new_definition(state: &mut AppState) {
-    match state.workspace.content.stimulus_library.new_definition(
-        NEW_DEFINITION_FAMILY,
-        crate::state::stimulus_library::now_unix_ms,
-    ) {
+    match state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .new_definition(
+            NEW_DEFINITION_FAMILY,
+            crate::state::stimulus_library::now_unix_ms,
+        ) {
         Ok(definition) => {
             let name = definition.name().to_owned();
             state.workbench.selected_stimulus_definition = Some(name.clone());
@@ -53,6 +58,7 @@ pub(crate) fn duplicate_definition(state: &mut AppState) {
         return;
     };
     match state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -76,6 +82,7 @@ pub(crate) fn delete_definition(state: &mut AppState) {
     };
     let adopters = design_adopters(state, &name).len();
     if state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -86,6 +93,7 @@ pub(crate) fn delete_definition(state: &mut AppState) {
     }
     state.workbench.stimulus_editor.close(&name);
     state.workbench.selected_stimulus_definition = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -157,7 +165,14 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     let Some(name) = selected(state) else {
         return;
     };
-    let Some(saved) = state.workspace.content.stimulus_library.get(&name).cloned() else {
+    let Some(saved) = state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .get(&name)
+        .cloned()
+    else {
         return;
     };
     let draft = state.workbench.stimulus_editor.draft_for(&saved);
@@ -168,6 +183,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     let mut published = draft.clone();
     if !renamed.eq_ignore_ascii_case(&name)
         && let Err(error) = state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -177,6 +193,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
         return;
     }
     let revision = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -189,6 +206,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     // session open on the revision they just published rather than silently
     // reopening it on the next frame.
     if let Some(record) = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -269,6 +287,7 @@ pub(crate) fn edit_field(state: &mut AppState, field: &str, value: &str) {
 /// lets a project that has been zipped and mailed still describe the same run.
 pub(crate) fn import_data_file(state: &mut AppState) {
     let data_root = state
+        .model
         .workspace
         .content
         .project
@@ -403,6 +422,7 @@ pub(crate) fn place_selected_definition(state: &mut AppState) {
         return;
     };
     let saved = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -423,6 +443,7 @@ pub(crate) fn place_selected_definition(state: &mut AppState) {
 /// Audit every definition in the library and report the totals.
 pub(crate) fn validate_library(state: &mut AppState) {
     let definitions = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -495,15 +516,15 @@ pub(crate) fn contract_findings(
 /// comparison would report every one of them as an adopter of nothing.
 #[must_use]
 pub(crate) fn design_adopters(state: &AppState, name: &str) -> Vec<StimulusAdopter> {
-    let library = &state.workspace.content.stimulus_library;
+    let library = &state.model.workspace.content.stimulus_library;
     let Some(held) = library.get(name).map(StimulusDefinition::name) else {
         return Vec::new();
     };
     let (sources, _) = crate::simulation::placed_sources::whole_design_excitations(
-        &state.library_manager,
-        &state.workspace,
-        &state.schematic,
-        state.sim_setup.analysis_plan.as_ref(),
+        &state.model.library_manager,
+        &state.model.workspace,
+        &state.model.schematic,
+        state.model.sim_setup.analysis_plan.as_ref(),
     );
     sources
         .into_iter()
@@ -567,12 +588,12 @@ pub(crate) struct StimulusAdopter {
 /// fourteen times for two numbers per row.
 #[must_use]
 pub(crate) fn design_adopter_tally(state: &AppState) -> HashMap<String, AdopterTally> {
-    let library = &state.workspace.content.stimulus_library;
+    let library = &state.model.workspace.content.stimulus_library;
     let (sources, _) = crate::simulation::placed_sources::whole_design_excitations(
-        &state.library_manager,
-        &state.workspace,
-        &state.schematic,
-        state.sim_setup.analysis_plan.as_ref(),
+        &state.model.library_manager,
+        &state.model.workspace,
+        &state.model.schematic,
+        state.model.sim_setup.analysis_plan.as_ref(),
     );
     let mut tally: HashMap<String, AdopterTally> = HashMap::new();
     for source in &sources {
@@ -649,7 +670,14 @@ fn with_draft(state: &mut AppState, edit: impl FnOnce(&mut DefinitionDraft)) {
     let Some(name) = selected(state) else {
         return;
     };
-    let Some(saved) = state.workspace.content.stimulus_library.get(&name).cloned() else {
+    let Some(saved) = state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .get(&name)
+        .cloned()
+    else {
         return;
     };
     edit(state.workbench.stimulus_editor.draft_for(&saved));
@@ -659,6 +687,7 @@ fn with_draft(state: &mut AppState, edit: impl FnOnce(&mut DefinitionDraft)) {
 fn selected(state: &AppState) -> Option<String> {
     let name = state.workbench.selected_stimulus_definition.as_deref()?;
     state
+        .model
         .workspace
         .content
         .stimulus_library

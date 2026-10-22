@@ -15,11 +15,11 @@ pub(super) fn open_ownership_dialog(
     state: &mut AppState,
     strategy: crate::state::OwnedNetlistEditStrategy,
 ) {
-    if state.workspace.content.netlist_source.is_some() {
+    if state.model.workspace.content.netlist_source.is_some() {
         let _ = open_owned_source(state);
         return;
     }
-    if state.netlist_artifacts.generated_document.is_none() {
+    if state.model.netlist_artifacts.generated_document.is_none() {
         state.prompt("Generate the netlist before making an editable copy.");
         return;
     }
@@ -83,7 +83,13 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
     if !app.state.ui.netlist.ownership_dialog.open {
         return;
     }
-    let Some(generated) = app.state.netlist_artifacts.generated_document.as_ref() else {
+    let Some(generated) = app
+        .state
+        .model
+        .netlist_artifacts
+        .generated_document
+        .as_ref()
+    else {
         app.state.ui.netlist.ownership_dialog.open = false;
         return;
     };
@@ -174,10 +180,11 @@ pub(super) fn create_owned_source(
     {
         return Err("Artifact name must be one trimmed file name.".to_owned());
     }
-    if state.workspace.content.netlist_source.is_some() {
+    if state.model.workspace.content.netlist_source.is_some() {
         return Err("An owned SPICE source artifact already exists.".to_owned());
     }
     let generated = state
+        .model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -190,10 +197,10 @@ pub(super) fn create_owned_source(
         .replace_editable_source(owned.content_digest(), source.as_bytes().to_vec())
         .map_err(|error| error.to_string())?;
 
-    state.workspace.content.netlist_source = Some(source.clone());
-    state.workspace.content.netlist_source_path = None;
-    state.workspace.content.netlist_source_dirty = true;
-    state.workspace.content.netlist_document = Some(owned.clone());
+    state.model.workspace.content.netlist_source = Some(source.clone());
+    state.model.workspace.content.netlist_source_path = None;
+    state.model.workspace.content.netlist_source_dirty = true;
+    state.model.workspace.content.netlist_document = Some(owned.clone());
     let mut descriptor = crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
         artifact_name: name.to_owned(),
@@ -209,12 +216,12 @@ pub(super) fn create_owned_source(
         owned_includes: Vec::new(),
     };
     descriptor.retain_revision(&owned, "Created editable source baseline")?;
-    state.workspace.content.netlist_descriptor = Some(descriptor);
+    state.model.workspace.content.netlist_descriptor = Some(descriptor);
     state.ui.netlist.owned_document = Some(owned);
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.ui.netlist.externally_saved_content_digest = None;
-    state.simulation.source.netlist_content = source;
+    state.model.simulation.source.netlist_content = source;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
     Ok(())
@@ -304,14 +311,15 @@ fn is_analysis_card(head: &str) -> bool {
 /// Open (or explicitly create) the project-owned source derived from the
 /// immutable generated primary. Existing owned bytes are never overwritten.
 pub(super) fn open_owned_source(state: &mut AppState) -> bool {
-    if state.workspace.content.netlist_source.is_none() {
+    if state.model.workspace.content.netlist_source.is_none() {
         return false;
     }
     if state.ui.netlist.owned_document.is_none() {
-        let Some(generated) = state.netlist_artifacts.generated_document.as_ref() else {
+        let Some(generated) = state.model.netlist_artifacts.generated_document.as_ref() else {
             return false;
         };
         let source = state
+            .model
             .workspace
             .content
             .netlist_source
@@ -330,7 +338,9 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
                 return false;
             }
         };
-        let transition = if let Some(path) = state.workspace.content.netlist_source_path.as_ref() {
+        let transition = if let Some(path) =
+            state.model.workspace.content.netlist_source_path.as_ref()
+        {
             let display_name = path
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -363,10 +373,11 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
     else {
         return false;
     };
-    state.workspace.content.netlist_source = Some(source.clone());
-    state.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
-    if state.workspace.content.netlist_descriptor.is_none() {
+    state.model.workspace.content.netlist_source = Some(source.clone());
+    state.model.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
+    if state.model.workspace.content.netlist_descriptor.is_none() {
         let artifact_name = state
+            .model
             .workspace
             .content
             .netlist_source_path
@@ -374,26 +385,27 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
             .and_then(std::path::Path::file_name)
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "top_override.sp".to_owned());
-        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
-            deck_id: uuid::Uuid::new_v4(),
-            artifact_name,
-            strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
-            source_encoding: crate::state::NetlistTextEncoding::Utf8,
-            source_line_ending: crate::state::NetlistLineEnding::detect(&source),
-            imported_dialect: None,
-            compatibility_reviewed: false,
-            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-            external_file_sha256: None,
-            save_history: Vec::new(),
-            revision_history: Vec::new(),
-            owned_includes: Vec::new(),
-        });
+        state.model.workspace.content.netlist_descriptor =
+            Some(crate::state::OwnedNetlistDescriptor {
+                deck_id: uuid::Uuid::new_v4(),
+                artifact_name,
+                strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
+                source_encoding: crate::state::NetlistTextEncoding::Utf8,
+                source_line_ending: crate::state::NetlistLineEnding::detect(&source),
+                imported_dialect: None,
+                compatibility_reviewed: false,
+                execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+                external_file_sha256: None,
+                save_history: Vec::new(),
+                revision_history: Vec::new(),
+                owned_includes: Vec::new(),
+            });
     }
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_dependency_identity = None;
     state.ui.netlist.active_dependency_root = None;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.source.netlist_content = source;
+    state.model.simulation.source.netlist_content = source;
     state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
     state.ui.netlist.completion_open = false;
     state.ui.netlist.completion_dismissed_at = None;

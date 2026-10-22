@@ -77,6 +77,7 @@ fn run_set_workload_counts_generated_pss_spectrum_task() {
     insert_analysis_instance(&mut app, AnalysisKind::Pss).expect("a PSS instance inserts");
     name_every_pss_tone(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("stable plan"),
@@ -134,8 +135,8 @@ fn envelope_source_catalog_rejects_unknown_and_dc_only_selections() {
 fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
-    app.state.simulation.source.netlist_content =
+    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.model.schematic);
+    app.state.model.simulation.source.netlist_content =
         "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
 
     let catalog = build_envelope_source_catalog(&app.state);
@@ -149,15 +150,15 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
 fn dependency_source_cache_ignores_document_switches_and_tracks_design_commits() {
     let mut app = RSpiceApp::test_instance();
     let original = envelope_source_catalog_input_digest(&app.state);
-    app.state.simulation.source.netlist_content = "unrelated editor document".to_owned();
+    app.state.model.simulation.source.netlist_content = "unrelated editor document".to_owned();
     assert_eq!(envelope_source_catalog_input_digest(&app.state), original);
 
-    app.state.design_execution_epoch = app.state.design_execution_epoch.wrapping_add(1);
+    app.state.model.design_execution_epoch = app.state.model.design_execution_epoch.wrapping_add(1);
     assert_ne!(envelope_source_catalog_input_digest(&app.state), original);
 
     let mut app = RSpiceApp::test_instance();
     let original = envelope_source_catalog_input_digest(&app.state);
-    app.state.sim_setup.options.reltol *= 0.5;
+    app.state.model.sim_setup.options.reltol *= 0.5;
     assert_ne!(
         envelope_source_catalog_input_digest(&app.state),
         original,
@@ -669,7 +670,7 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
     .expect("invalid editable PSS draft is retained");
 
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.analysis_plan = Some(plan);
+    app.state.model.sim_setup.analysis_plan = Some(plan);
     validate_analysis_instance(&mut app.state, pac);
 
     assert!(
@@ -706,7 +707,7 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
         .expect("exact first OP binding succeeds");
 
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.analysis_plan = Some(plan);
+    app.state.model.sim_setup.analysis_plan = Some(plan);
     app.state.workbench.active_analysis_instance = Some(ac);
     let dependency_sources = EnvelopeSourceCatalog {
         source_digest: ContentDigest::from_bytes([7; 32]),
@@ -730,6 +731,7 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
     // A bound prerequisite is named by what it is called, never its id.
     let first_name = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the plan is stable")
@@ -755,7 +757,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
         .expect("PAC binds PSS");
 
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.analysis_plan = Some(plan);
+    app.state.model.sim_setup.analysis_plan = Some(plan);
     app.state.workbench.active_analysis_instance = Some(pac);
 
     let exact_sources = EnvelopeSourceCatalog {
@@ -803,7 +805,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     let (ac, _) = plan.insert(AnalysisKind::Ac).expect("AC inserts");
     plan.set_enabled(ac, false).expect("AC disables");
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.analysis_plan = Some(plan);
+    app.state.model.sim_setup.analysis_plan = Some(plan);
     app.state.workbench.active_analysis_instance = Some(ac);
     let sources = build_envelope_source_catalog(&app.state);
 
@@ -817,7 +819,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     );
 
     apply_analysis_action(&mut app, ac, AnalysisAction::RepairDependencies);
-    let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     let dependency = plan.instance(ac).unwrap().dependencies()[0];
     let op = plan.instance(dependency.target()).unwrap();
     assert_eq!(op.kind(), AnalysisKind::OperatingPoint);
@@ -843,7 +845,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     })
     .expect("phase-noise selection commits");
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.analysis_plan = Some(plan);
+    app.state.model.sim_setup.analysis_plan = Some(plan);
     app.state.workbench.active_analysis_instance = Some(pnoise);
     let sources = build_envelope_source_catalog(&app.state);
 
@@ -862,7 +864,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
         .workbench
         .active_analysis_instance
         .expect("prepared PSS becomes selected");
-    let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     let prerequisite = plan.instance(prepared).expect("prepared PSS is retained");
     assert_eq!(prerequisite.kind(), AnalysisKind::Pss);
     assert!(!prerequisite.enabled());
@@ -890,13 +892,14 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     );
     let before_count = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .unwrap()
         .instances()
         .len();
     apply_analysis_action(&mut app, pnoise, AnalysisAction::PrepareAutonomousPss);
-    let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     assert_eq!(plan.instances().len(), before_count);
     assert_eq!(app.state.workbench.active_analysis_instance, Some(prepared));
     assert!(
@@ -1056,18 +1059,21 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
     let revision_before = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
     let count_before = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1078,6 +1084,7 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
 
     let payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1092,6 +1099,7 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
     );
     assert!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -1106,18 +1114,21 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
     let revision_before = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
     let count_before = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1128,6 +1139,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
     assert!(commit_design_variable(&mut app, &draft).is_err());
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1136,6 +1148,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
     );
     assert_eq!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -1150,12 +1163,14 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
     app.state.provision_test_project_technology_contract();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
     let count_before = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1165,6 +1180,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
 
     let output = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1175,6 +1191,7 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
     assert_eq!(
         count_before + 1,
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1194,12 +1211,14 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     commit_saved_output(&mut app, &named_saved_output_draft()).expect("source output");
     let source_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable source plan")
         .id();
     let source_payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(source_id)
@@ -1207,6 +1226,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
         .clone();
     let retained_runs_before = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -1214,8 +1234,13 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
         .map(|run| (run.run_id, run.dataset_id, run.id))
         .collect::<Vec<_>>();
     let mut draft = ClonePlanDraft::for_source(
-        app.state.sim_setup.stable_analysis_plan().unwrap().id(),
-        app.state.sim_setup.active_plan_name().as_str(),
+        app.state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .id(),
+        app.state.model.sim_setup.active_plan_name().as_str(),
     );
     draft.name = "Independent characterization".to_owned();
 
@@ -1223,14 +1248,19 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
 
     let clone_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("active clone")
         .id();
     assert_ne!(clone_id, source_id);
-    assert_eq!(app.state.sim_setup.active_plan_name().as_str(), draft.name);
+    assert_eq!(
+        app.state.model.sim_setup.active_plan_name().as_str(),
+        draft.name
+    );
     let clone_payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(clone_id)
@@ -1247,6 +1277,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     );
     assert_eq!(
         app.state
+            .model
             .simulation
             .retained
             .runs
@@ -1265,6 +1296,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
     commit_saved_output(&mut app, &named_saved_output_draft()).expect("source output");
     let source_plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable source plan");
@@ -1276,6 +1308,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
         .collect::<Vec<_>>();
     let source_payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(source_id)
@@ -1293,10 +1326,10 @@ fn plan_manager_export_import_remaps_all_local_identities() {
 
     assert_ne!(imported_id, source_id);
     assert_eq!(
-        app.state.sim_setup.active_plan_name().as_str(),
+        app.state.model.sim_setup.active_plan_name().as_str(),
         "Imported independent characterization"
     );
-    let imported_plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+    let imported_plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     assert!(
         imported_plan
             .instances()
@@ -1305,6 +1338,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
     );
     let imported_payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(imported_id)
@@ -1327,14 +1361,20 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
     let mut app = RSpiceApp::test_instance();
     let source_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable source plan")
         .id();
-    let inactive_before = app.state.sim_setup.inactive_plans().len();
+    let inactive_before = app.state.model.sim_setup.inactive_plans().len();
     let mut draft = ClonePlanDraft::for_source(
-        app.state.sim_setup.stable_analysis_plan().unwrap().id(),
-        app.state.sim_setup.active_plan_name().as_str(),
+        app.state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .id(),
+        app.state.model.sim_setup.active_plan_name().as_str(),
     );
     draft.name = "Cancelled clone".to_owned();
     app.state.workbench.simulation_workflow =
@@ -1345,13 +1385,17 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
     assert!(app.state.workbench.simulation_workflow.is_none());
     assert_eq!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable source plan")
             .id(),
         source_id
     );
-    assert_eq!(app.state.sim_setup.inactive_plans().len(), inactive_before);
+    assert_eq!(
+        app.state.model.sim_setup.inactive_plans().len(),
+        inactive_before
+    );
 }
 
 /// A committed plan edit is answered on the status bar: the reader made the
@@ -1360,8 +1404,13 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
 fn a_committed_simulation_workflow_answers_on_the_status_bar() {
     let mut app = RSpiceApp::test_instance();
     let mut draft = ClonePlanDraft::for_source(
-        app.state.sim_setup.stable_analysis_plan().unwrap().id(),
-        app.state.sim_setup.active_plan_name().as_str(),
+        app.state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .unwrap()
+            .id(),
+        app.state.model.sim_setup.active_plan_name().as_str(),
     );
     draft.name = "Committed clone".to_owned();
 
@@ -1929,7 +1978,7 @@ fn a_render_path_refusal_restated_every_frame_is_one_event() {
     use crate::workbench::state::SimulationPage;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.analysis_plan = None;
+    app.state.model.sim_setup.analysis_plan = None;
     for _ in 0..4 {
         simulate_frame(&mut app, Some(SimulationPage::Analyses));
     }
@@ -1943,6 +1992,7 @@ fn a_render_path_refusal_restated_every_frame_is_one_event() {
     );
     assert_eq!(
         app.state
+            .model
             .log_buffer
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
@@ -1974,8 +2024,9 @@ fn corner_evidence_run() -> SimulationRun {
         &["125", "27"],
     );
     state.provision_test_project_technology_contract();
-    state.sim_setup.run_set.composition.mode = RunSetCompositionMode::Zipped;
+    state.model.sim_setup.run_set.composition.mode = RunSetCompositionMode::Zipped;
     state
+        .model
         .sim_setup
         .run_set
         .dimensions
@@ -1985,18 +2036,19 @@ fn corner_evidence_run() -> SimulationRun {
             &["SS", "TT"],
             1,
         ));
-    let library = state.model_library_manager.load_library_bytes(
+    let library = state.model.model_library_manager.load_library_bytes(
         "corners.lib",
         b".lib TT\n.model DPROCESS D (IS=1e-12)\n.endl TT\n.lib SS\n.model DPROCESS D (IS=1e-13)\n.endl SS\n".to_vec(),
         Some("TT"),
     ).unwrap();
-    state.sim_setup.model_bindings = vec![
+    state.model.sim_setup.model_bindings = vec![
         state
+            .model
             .model_library_manager
             .simulation_plan_binding(&library)
             .unwrap(),
     ];
-    let plan_id = state.sim_setup.analysis_plan.as_ref().unwrap().id();
+    let plan_id = state.model.sim_setup.analysis_plan.as_ref().unwrap().id();
     let mut measurement =
         crate::state::SpecificationDefinition::new_from_projection(&crate::state::SpecEntry {
             measurement: "vout".into(),
@@ -2008,6 +2060,7 @@ fn corner_evidence_run() -> SimulationRun {
         });
     measurement.define_measurement = true;
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, vec![measurement]);
@@ -2115,6 +2168,7 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
         &["27"],
     );
     let library = state
+        .model
         .model_library_manager
         .load_library_bytes(
             "tt.lib",
@@ -2122,8 +2176,9 @@ fn a_corner_point_that_cannot_be_solved_is_retained_as_a_failure() {
             Some("TT"),
         )
         .unwrap();
-    state.sim_setup.model_bindings = vec![
+    state.model.sim_setup.model_bindings = vec![
         state
+            .model
             .model_library_manager
             .simulation_plan_binding(&library)
             .unwrap(),

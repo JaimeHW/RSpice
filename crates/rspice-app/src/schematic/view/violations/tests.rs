@@ -24,7 +24,7 @@ pub(crate) fn draw_source_loop(
         cell.add_view(View::new("schematic", ViewType::Schematic));
         library.add_cell(cell);
     }
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     let top = CellViewRef::new("work", "top", "schematic");
     let aux = CellViewRef::new("work", "aux", "schematic");
     state.open_workspace_view(top.clone());
@@ -32,11 +32,12 @@ pub(crate) fn draw_source_loop(
     let mut label = 9000;
     let mut sources = Vec::new();
     for (index, (plus, minus)) in [("a", "b"), ("b", "0"), ("0", "a")].into_iter().enumerate() {
-        let id = state.schematic.add_component(
+        let id = state.model.schematic.add_component(
             ComponentType::VoltageSource,
             Point::new(300 * index as i32, 0),
         );
         let component = state
+            .model
             .schematic
             .document()
             .components
@@ -52,6 +53,7 @@ pub(crate) fn draw_source_loop(
                 .expect("a voltage source has both terminals");
             label += 1;
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .net_labels
@@ -108,6 +110,7 @@ fn every_source_in_the_current_loop_is_marked() {
     assert_eq!(related_marks(&state), None, "no finding is current");
 
     state
+        .model
         .diagnostics
         .set_current_finding(Some(loop_finding(&state, &top)));
     let (severity, mut marked) = related_marks(&state).expect("the loop's sources are marked");

@@ -20,7 +20,7 @@ use crate::workbench::state::SimulationPage;
 #[test]
 fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
-        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
             dimension.enabled = matches!(
                 dimension.kind,
                 RunSetDimensionKind::ProcessSection
@@ -75,10 +75,10 @@ fn the_run_space_page_states_every_axis_and_what_they_resolve_to() {
 #[test]
 fn an_unresolvable_run_space_shows_its_refusal_and_keeps_the_invalid_value() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
-        app.state.sim_setup.run_set.dimensions[2].enabled = true;
-        let id = app.state.sim_setup.run_set.dimensions[2].id.clone();
+        app.state.model.sim_setup.run_set.dimensions[2].enabled = true;
+        let id = app.state.model.sim_setup.run_set.dimensions[2].id.clone();
         dispatch(
-            &mut app.state.sim_setup.run_set,
+            &mut app.state.model.sim_setup.run_set,
             RunSetAction::SetValues {
                 id,
                 text: "-40\nwarm\n125".to_owned(),
@@ -181,10 +181,11 @@ fn the_composition_card_restates_no_rule_its_own_controls_already_name() {
 #[test]
 fn the_composition_card_reports_exclusions_when_the_run_space_has_them() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
-        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
             dimension.enabled = matches!(dimension.kind, RunSetDimensionKind::ProcessSection);
         }
         app.state
+            .model
             .sim_setup
             .run_set
             .composition
@@ -231,7 +232,7 @@ fn the_dimension_editor_does_not_define_the_kind_the_axis_card_names() {
 #[test]
 fn disabling_an_axis_moves_the_forecast_and_the_point_table_together() {
     let rendered = render_with(SimulationPage::RunSet, 1200.0, |app| {
-        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
             dimension.enabled = matches!(
                 dimension.kind,
                 RunSetDimensionKind::ProcessSection
@@ -239,9 +240,9 @@ fn disabling_an_axis_moves_the_forecast_and_the_point_table_together() {
                     | RunSetDimensionKind::Temperature
             );
         }
-        let id = app.state.sim_setup.run_set.dimensions[1].id.clone();
+        let id = app.state.model.sim_setup.run_set.dimensions[1].id.clone();
         dispatch(
-            &mut app.state.sim_setup.run_set,
+            &mut app.state.model.sim_setup.run_set,
             RunSetAction::SetEnabled { id, enabled: false },
             1,
         );

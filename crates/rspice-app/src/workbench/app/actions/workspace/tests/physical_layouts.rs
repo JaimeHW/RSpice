@@ -14,6 +14,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     let wrapper_layout = CellViewRef::new("work", "wrapper", "layout");
     {
         let library = state
+            .model
             .library_manager
             .get_library_mut("work")
             .expect("work library");
@@ -35,6 +36,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
         .expect("wrapper layout initializes from exact project PDK pin");
 
     let mut wrapper = state
+        .model
         .workspace
         .content
         .physical_layout_document(&wrapper_layout)
@@ -60,6 +62,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
         )
         .expect("hierarchical instance transaction");
     state
+        .model
         .workspace
         .content
         .commit_physical_layout_document(wrapper)
@@ -70,6 +73,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
         .expect("layout-bearing cell copy succeeds");
     let copied_layout = CellViewRef::new("work", "amp_copy", "layout");
     let copied = state
+        .model
         .workspace
         .content
         .physical_layout_document(&copied_layout)
@@ -78,6 +82,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     assert_eq!(
         copied.technology(),
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&amp_layout)
@@ -86,6 +91,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&wrapper_layout)
@@ -105,6 +111,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     let renamed_layout = CellViewRef::new("work", "amp_renamed", "layout");
     assert!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&CellViewRef::new("work", "amp", "layout"))
@@ -112,6 +119,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&renamed_layout)
@@ -121,6 +129,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&wrapper_layout)
@@ -135,6 +144,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&copied_layout)
@@ -149,7 +159,7 @@ fn copy_and_rename_cell_preserve_layout_documents_and_remap_hierarchical_masters
 fn rename_library_carries_the_physical_layouts_that_name_it() {
     let mut state = state_with_populated_user_library();
     state.provision_test_project_technology_contract();
-    if let Some(library) = state.library_manager.get_library_mut("user") {
+    if let Some(library) = state.model.library_manager.get_library_mut("user") {
         library
             .get_cell_mut("amp")
             .expect("fixture amp cell")
@@ -163,9 +173,10 @@ fn rename_library_carries_the_physical_layouts_that_name_it() {
         .rename_library("user", "project_lib")
         .expect("a layout follows its library the way it follows its cell");
 
-    assert!(state.library_manager.get_library("user").is_none());
+    assert!(state.model.library_manager.get_library("user").is_none());
     assert!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&CellViewRef::new("user", "amp", "layout"))
@@ -174,6 +185,7 @@ fn rename_library_carries_the_physical_layouts_that_name_it() {
     let moved = CellViewRef::new("project_lib", "amp", "layout");
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&moved)
@@ -187,7 +199,7 @@ fn rename_library_carries_the_physical_layouts_that_name_it() {
 fn rename_view_carries_the_physical_layouts_that_name_it() {
     let mut state = state_with_populated_user_library();
     state.provision_test_project_technology_contract();
-    if let Some(library) = state.library_manager.get_library_mut("user") {
+    if let Some(library) = state.model.library_manager.get_library_mut("user") {
         library
             .get_cell_mut("amp")
             .expect("fixture amp cell")
@@ -203,6 +215,7 @@ fn rename_view_carries_the_physical_layouts_that_name_it() {
 
     assert!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&CellViewRef::new("user", "amp", "layout"))
@@ -211,6 +224,7 @@ fn rename_view_carries_the_physical_layouts_that_name_it() {
     let moved = CellViewRef::new("user", "amp", "layout_v2");
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .physical_layout_document(&moved)

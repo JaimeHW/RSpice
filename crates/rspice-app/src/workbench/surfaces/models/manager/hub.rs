@@ -600,7 +600,7 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
 /// row, and a project at the top of its range binds dozens of libraries.
 fn project_pins(state: &AppState) -> BTreeMap<String, Vec<PackPartPin>> {
     let mut pins: BTreeMap<String, Vec<PackPartPin>> = BTreeMap::new();
-    for library in state.model_library_manager.libraries_sorted() {
+    for library in state.model.model_library_manager.libraries_sorted() {
         if let Some(pin) = library.pack_pin.as_ref() {
             pins.entry(pin.pack_id.clone())
                 .or_default()
@@ -809,6 +809,7 @@ pub(super) fn packs_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &
     exception_banner(ui, app);
     let packs = app
         .state
+        .model
         .model_library_manager
         .spice_packs()
         .map(|index| index.packs().to_vec())

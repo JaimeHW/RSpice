@@ -17,11 +17,13 @@ use crate::workbench::app_state::{
 
 pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     let library = state
+        .model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
             state
+                .model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
@@ -29,6 +31,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         })
         .or_else(|| {
             state
+                .model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -46,6 +49,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         .as_deref()
         .and_then(|selected| {
             state
+                .model
                 .model_library_manager
                 .search_models("")
                 .into_iter()
@@ -53,6 +57,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         })
         .or_else(|| {
             state
+                .model
                 .model_library_manager
                 .search_models("")
                 .into_iter()
@@ -87,8 +92,8 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         }
     });
 
-    let schematic_reference = state.workspace.content.active_schematic_reference();
-    let schematic_ports = state.schematic.interface_ports();
+    let schematic_reference = state.model.workspace.content.active_schematic_reference();
+    let schematic_ports = state.model.schematic.interface_ports();
     let schematic_source = (!schematic_ports.is_empty()).then(|| CreateSymbolSchematicSource {
         reference: schematic_reference,
         pins: schematic_ports
@@ -134,7 +139,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
         pins,
         template,
         pin_contract_reviewed: !matches!(source_mode, CreateSymbolSourceMode::Model),
-        expected_library_revision: state.library_manager.revision(),
+        expected_library_revision: state.model.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
     };
 }
@@ -149,11 +154,13 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     parameter_defaults: std::collections::BTreeMap<String, String>,
 ) -> Result<(), String> {
     let target_library = state
+        .model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
             state
+                .model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
@@ -161,6 +168,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
         })
         .or_else(|| {
             state
+                .model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -208,7 +216,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
         pins,
         template: CreateSymbolTemplate::RectangularIc,
         pin_contract_reviewed: false,
-        expected_library_revision: state.library_manager.revision(),
+        expected_library_revision: state.model.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
     };
     Ok(())
@@ -216,7 +224,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
 
 pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
     let draft = &state.dialogs.create_model_bound_symbol;
-    if state.library_manager.revision() != draft.expected_library_revision {
+    if state.model.library_manager.revision() != draft.expected_library_revision {
         return Err(
             "The design library changed after this transaction opened. Close and reopen Create symbol."
                 .to_owned(),
@@ -224,6 +232,7 @@ pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), Strin
     }
     let (library_name, cell_name) = parse_target(&draft.target)?;
     let library = state
+        .model
         .library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
@@ -446,6 +455,7 @@ pub(super) fn build_create_symbol_definition(
     let draft = &state.dialogs.create_model_bound_symbol;
     let (library_name, cell_name) = parse_target(&draft.target)?;
     let library = state
+        .model
         .library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
@@ -471,7 +481,7 @@ pub(super) fn build_create_symbol_definition(
         || {
             let material = format!(
                 "rspice:model-bound-symbol:{}:{library_name}/{cell_name}",
-                state.workspace.content.project.id()
+                state.model.workspace.content.project.id()
             );
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, material.as_bytes()).to_string()
         },
@@ -966,7 +976,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
     definition
         .validation_digest()
         .map_err(|error| error.to_string())?;
-    let mut candidate = state.library_manager.clone();
+    let mut candidate = state.model.library_manager.clone();
     candidate
         .edit_library(&library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?
@@ -975,10 +985,13 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
 
     let fixture = if definition.generated_views.simulation_test_fixture {
         let reference = CellViewRef::new(&library_name, &cell_name, "testbench");
-        let before = if state.workspace.content.active_view == reference {
-            Some(state.schematic.clone())
+        let before = if state.model.workspace.content.active_view == reference {
+            Some(state.model.schematic.clone())
         } else {
-            state.workspace.clone_schematic_editor(&reference.key())
+            state
+                .model
+                .workspace
+                .clone_schematic_editor(&reference.key())
         };
         let after = crate::state::build_symbol_test_fixture(&definition)
             .map_err(|error| error.to_string())?;

@@ -256,10 +256,18 @@ pub(crate) fn replace_instance_available(state: &AppState) -> bool {
     if state.schematic_edit_read_only() {
         return false;
     }
-    let Some(component_id) = state.schematic.session.editor.selection.single_component() else {
+    let Some(component_id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
+    else {
         return false;
     };
     let Some(source) = state
+        .model
         .schematic
         .document()
         .components
@@ -315,6 +323,7 @@ impl RSpiceApp {
             .unwrap_or_else(|| "Unavailable".to_owned());
         let project = self
             .state
+            .model
             .workspace
             .content
             .project
@@ -322,6 +331,7 @@ impl RSpiceApp {
             .to_owned();
         let revision = self
             .state
+            .model
             .workspace
             .content
             .project
@@ -414,6 +424,7 @@ impl RSpiceApp {
         };
         match self
             .state
+            .model
             .schematic
             .replace_selected_instance(&authority, &resolved.target)
         {
@@ -421,6 +432,7 @@ impl RSpiceApp {
                 self.state.sync_active_schematic_to_workspace();
                 let replaced = self
                     .state
+                    .model
                     .schematic
                     .document()
                     .components
@@ -749,16 +761,22 @@ fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidat
     let draft = &state.dialogs.replace_instance;
     let key = ValidationCacheKey {
         source_component_id: draft.source_component_id,
-        selected_component_id: state.schematic.session.editor.selection.single_component(),
+        selected_component_id: state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_component(),
         query: draft.replacement.trim().to_ascii_lowercase(),
         dirty: draft.dirty,
         preview_error: draft.preview_error.clone(),
         schematic_edit_read_only: state.schematic_edit_read_only(),
-        library_revision: state.library_manager.revision(),
-        project_revision: state.workspace.content.project.revision().get(),
-        design_execution_epoch: state.design_execution_epoch,
-        active_schematic_epoch: state.active_schematic_epoch,
-        topology_version: state.schematic.topology_version(),
+        library_revision: state.model.library_manager.revision(),
+        project_revision: state.model.workspace.content.project.revision().get(),
+        design_execution_epoch: state.model.design_execution_epoch,
+        active_schematic_epoch: state.model.active_schematic_epoch,
+        topology_version: state.model.schematic.topology_version(),
     };
     let cache_id = egui::Id::new("replace-instance-validation-cache");
     if let Some(cached) = ctx.data(|data| data.get_temp::<CachedReplacementValidation>(cache_id))
@@ -800,6 +818,7 @@ fn resolve_replacement(
         Err(error) => return ReplacementValidation::Invalid(error),
     };
     let preview = match state
+        .model
         .schematic
         .preview_instance_replacement(authority, &target)
     {
@@ -819,6 +838,7 @@ fn resolve_replacement(
 
 fn replacement_authority(state: &AppState) -> Result<SchematicReplacementAuthority, String> {
     let component_id = state
+        .model
         .schematic
         .session
         .editor
@@ -826,6 +846,7 @@ fn replacement_authority(state: &AppState) -> Result<SchematicReplacementAuthori
         .single_component()
         .ok_or_else(|| "Select exactly one complete component instance to replace.".to_owned())?;
     let component = state
+        .model
         .schematic
         .document()
         .components
@@ -837,6 +858,7 @@ fn replacement_authority(state: &AppState) -> Result<SchematicReplacementAuthori
     }
     let source_spec = authored_source_spec(state, component)?;
     state
+        .model
         .schematic
         .replacement_authority_with_spec(source_spec)
         .map_err(|error| error.to_string())
@@ -853,8 +875,8 @@ fn authored_source_spec(
     template.mirror_v = false;
     let resolved = template.library_cell.as_ref().and_then(|binding| {
         SymbolResolver::new(
-            &state.library_manager,
-            &state.workspace.content.schematic_buffers,
+            &state.model.library_manager,
+            &state.model.workspace.content.schematic_buffers,
         )
         .resolve_binding(binding)
     });
@@ -912,6 +934,7 @@ fn best_replacement(
         .filter_map(|entry| {
             let target = entry.target_spec(state).ok()?;
             let preview = state
+                .model
                 .schematic
                 .preview_instance_replacement(authority, &target)
                 .ok()?;
@@ -959,19 +982,19 @@ fn validate_downstream(
     authority: &SchematicReplacementAuthority,
     target: &SchematicReplacementTargetSpec,
 ) -> Result<(), String> {
-    let mut candidate = state.schematic.clone();
+    let mut candidate = state.model.schematic.clone();
     candidate
         .replace_selected_instance(authority, target)
         .map_err(|error| error.to_string())?;
 
-    let baseline_hierarchy = state.workspace.resolve_hierarchy_with_active(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    let baseline_hierarchy = state.model.workspace.resolve_hierarchy_with_active(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     );
-    let candidate_hierarchy = state.workspace.resolve_hierarchy_with_active(
-        &state.library_manager,
-        &state.workspace.content.active_view,
+    let candidate_hierarchy = state.model.workspace.resolve_hierarchy_with_active(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
         &candidate,
     );
     let baseline_failures = hierarchy_failures(&baseline_hierarchy);
@@ -986,7 +1009,7 @@ fn validate_downstream(
         ));
     }
 
-    let baseline_generation = generate_candidate_netlist(state, &state.schematic)?;
+    let baseline_generation = generate_candidate_netlist(state, &state.model.schematic)?;
     let candidate_generation = generate_candidate_netlist(state, &candidate)?;
     let baseline_errors = baseline_generation
         .errors
@@ -1039,15 +1062,16 @@ fn generate_candidate_netlist(
     schematic: &crate::state::SchematicState,
 ) -> Result<rspice_simulation::netlist_gen::NetlistResult, String> {
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
     Ok(generate_netlist_hierarchical(
         schematic,
         &[],
@@ -1106,9 +1130,11 @@ mod tests {
     fn voltage_source_variants_offer_a_real_compatible_replacement() {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor
@@ -1128,9 +1154,11 @@ mod tests {
     fn ambiguous_authored_master_fails_closed() {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor
@@ -1154,9 +1182,11 @@ mod tests {
     fn unrelated_library_revision_does_not_invalidate_the_reviewed_master() {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor
@@ -1165,7 +1195,7 @@ mod tests {
         open_replace_instance_dialog(&mut state);
         assert!(validate_draft(&state).can_commit());
 
-        state.library_manager.clear();
+        state.model.library_manager.clear();
 
         assert!(validate_draft(&state).can_commit());
     }
@@ -1184,9 +1214,11 @@ mod tests {
     fn the_evidence_names_a_parameter_the_new_master_cannot_carry() {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -1195,6 +1227,7 @@ mod tests {
             .expect("the placed source is retained")
             .params = "legacy_tail=3n".to_owned();
         state
+            .model
             .schematic
             .session
             .editor
@@ -1237,9 +1270,11 @@ mod tests {
     fn validation_cache_does_not_hide_a_commit_failure() {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::VoltageSource, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor

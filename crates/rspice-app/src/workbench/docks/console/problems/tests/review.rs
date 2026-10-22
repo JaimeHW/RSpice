@@ -23,6 +23,7 @@ const SIZES: [(f32, f32); 5] = [
 /// ground.
 fn three_findings(state: &mut AppState) {
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 40));
     state.sync_active_schematic_to_workspace();
@@ -70,12 +71,12 @@ fn unreadable_symbol_finding(state: &mut AppState) {
     use crate::state::{
         Cell, CellViewRef, Library, PortDirection, SymbolDocument, SymbolPin, View, ViewType,
     };
-    let schematic = state.workspace.content.active_view.clone();
+    let schematic = state.model.workspace.content.active_view.clone();
     let mut library = Library::new("work");
     let mut amp = Cell::new("amp");
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     let symbol = CellViewRef::new("work", "amp", "symbol");
     state.open_workspace_view(symbol.clone());
     state
@@ -96,7 +97,7 @@ fn unreadable_symbol_finding(state: &mut AppState) {
             message,
         ),
         DiagnosticLevel::Warning,
-        DiagnosticSubject::new(state.workspace.content.project.id(), "Pin 'IN'"),
+        DiagnosticSubject::new(state.model.workspace.content.project.id(), "Pin 'IN'"),
         message,
     );
     state
@@ -106,7 +107,7 @@ fn unreadable_symbol_finding(state: &mut AppState) {
         )
         .expect("the symbol is readable when its pins are checked");
     state.open_workspace_view(schematic);
-    let _ = state.library_manager.remove_library("work");
+    let _ = state.model.library_manager.remove_library("work");
 }
 
 fn dock_app() -> RSpiceApp {
@@ -128,14 +129,22 @@ fn states() -> Vec<(&'static str, RSpiceApp)> {
     let mut selected = dock_app();
     three_findings(&mut selected.state);
     let info = finding(&selected.state, "DRC-OFF-SHEET-CONNECTOR-WITHOUT-PARTNER");
-    selected.state.diagnostics.set_current_finding(Some(info));
+    selected
+        .state
+        .model
+        .diagnostics
+        .set_current_finding(Some(info));
     states.push(("selected", selected));
 
     // The missing ground: a message and a remedy line under it.
     let mut ground = dock_app();
     three_findings(&mut ground.state);
     let missing = finding(&ground.state, "DRC-MISSING-GROUND");
-    ground.state.diagnostics.set_current_finding(Some(missing));
+    ground
+        .state
+        .model
+        .diagnostics
+        .set_current_finding(Some(missing));
     states.push(("ground", ground));
 
     let mut grouped = dock_app();
@@ -183,9 +192,10 @@ fn measured_run(state: &mut AppState) {
     ]);
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    state.simulation.retained.runs.push(run);
-    state.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.retained.runs.push(run);
+    state.model.simulation.view.active_run_idx = Some(0);
     state
+        .model
         .log_buffer
         .warning(crate::diagnostics::LogSource::Run, "a session warning");
 }
@@ -245,7 +255,10 @@ fn nothing_in_the_dock_is_cut_at_any_height() {
     measured_run(&mut app.state);
     three_findings(&mut app.state);
     let missing = finding(&app.state, "DRC-MISSING-GROUND");
-    app.state.diagnostics.set_current_finding(Some(missing));
+    app.state
+        .model
+        .diagnostics
+        .set_current_finding(Some(missing));
     let width = 1280.0;
     let default = crate::workbench::state::WorkbenchState::default().console_height;
     let pages = [

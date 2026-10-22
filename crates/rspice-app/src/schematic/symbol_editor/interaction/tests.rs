@@ -15,7 +15,7 @@ fn open_symbol() -> AppState {
     cell.add_view(View::new("schematic", ViewType::Schematic));
     cell.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     let document = SymbolDocument {
         pins: vec![SymbolPin::new(
@@ -87,7 +87,7 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
             .ui
             .symbol
             .history
-            .undo_depth(&state.workspace.content.active_key()),
+            .undo_depth(&state.model.workspace.content.active_key()),
         1
     );
     assert!(state.ui.symbol.editor.drag_undo_recorded);
@@ -176,7 +176,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
             .ui
             .symbol
             .history
-            .undo_depth(&state.workspace.content.active_key()),
+            .undo_depth(&state.model.workspace.content.active_key()),
         1
     );
     assert!(!state.ui.symbol.editor.drag_undo_recorded);
@@ -228,14 +228,18 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
     state.ui.symbol.editor.shape_start = Some(Point::origin());
     state.ui.symbol.editor.marquee_start = Some(Point::origin());
     state.ui.symbol.editor.dragging_origin = true;
-    state.active_schematic_epoch += 1;
+    state.model.active_schematic_epoch += 1;
     bind_active_canvas(&mut state);
     assert!(state.ui.symbol.editor.pending_polyline.is_empty());
     assert!(state.ui.symbol.editor.shape_start.is_none());
     assert!(state.ui.symbol.editor.marquee_start.is_none());
     assert!(!state.ui.symbol.editor.dragging_origin);
 
-    state.workspace.content.set_active_read_only_reference(true);
+    state
+        .model
+        .workspace
+        .content
+        .set_active_read_only_reference(true);
     state.ui.symbol.editor.tool = SymbolTool::Text;
     let before = state.load_active_symbol_document().unwrap();
     let request = request(
@@ -250,10 +254,11 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
     assert!(!state.can_undo_active_symbol_document());
 
     state
+        .model
         .workspace
         .content
         .set_active_read_only_reference(false);
-    state.schematic.session.read_only = true;
+    state.model.schematic.session.read_only = true;
     let pending = self::request(
         &state,
         SymbolCanvasInput {
@@ -278,6 +283,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
         }],
     };
     state
+        .model
         .workspace
         .content
         .set_active_occurrence(occurrence("X1"));
@@ -293,6 +299,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
     );
     let before = state.load_active_symbol_document().unwrap();
     state
+        .model
         .workspace
         .content
         .set_active_occurrence(occurrence("X2"));
@@ -366,7 +373,7 @@ fn ota_placed_in_open_parent(hidden_vertex: bool) -> AppState {
         drawing
             .wires
             .push(Wire::segment(12, Point::new(70, 90), Point::new(70, 40)));
-        let catalogs = &mut state.workspace.content.design_management;
+        let catalogs = &mut state.model.workspace.content.design_management;
         let first = catalogs
             .bootstrap_for_cell_view(TOP, "Sheet 1", vec![1, 10, 11, 12])
             .unwrap();
@@ -388,6 +395,7 @@ fn ota_placed_in_open_parent(hidden_vertex: bool) -> AppState {
         catalog.set_active(first).unwrap();
     }
     state
+        .model
         .workspace
         .insert_schematic_editor(TOP.to_owned(), parent);
     bind_active_canvas(&mut state);
@@ -395,7 +403,7 @@ fn ota_placed_in_open_parent(hidden_vertex: bool) -> AppState {
 }
 
 fn parent_document(state: &AppState) -> rspice_design::schematic::document::SchematicDocument {
-    state.workspace.content.schematic_buffers[TOP]
+    state.model.workspace.content.schematic_buffers[TOP]
         .document()
         .clone()
 }
@@ -505,20 +513,21 @@ fn symbol_undo_puts_the_parent_back_exactly() {
 fn the_parent_undoes_a_whole_pin_drag_as_one_step() {
     let mut state = ota_placed_in_open_parent(false);
     let before = parent_bits(&state);
-    let depth = state.workspace.content.schematic_buffers[TOP]
+    let depth = state.model.workspace.content.schematic_buffers[TOP]
         .history()
         .undo_count();
 
     drag_inp(&mut state, &PAST_INN);
 
     assert_eq!(
-        state.workspace.content.schematic_buffers[TOP]
+        state.model.workspace.content.schematic_buffers[TOP]
             .history()
             .undo_count(),
         depth + 1
     );
     let mut undone = false;
     state
+        .model
         .workspace
         .for_each_schematic_editor_mut(|key, parent| {
             if key == TOP {
@@ -564,7 +573,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
     for change in ["navigation", "revision", "replacement", "close", "window"] {
         let mut state = open_symbol();
         state.open_project_session();
-        let symbol = state.workspace.content.active_view.clone();
+        let symbol = state.model.workspace.content.active_view.clone();
         let before = state.load_active_symbol_document().unwrap();
         let points = vec![Point::origin(), Point::new(20, 10)];
         state.ui.symbol.editor.tool = SymbolTool::Line;
@@ -590,6 +599,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
                 .unwrap();
             assert!(
                 !state
+                    .model
                     .workspace
                     .session
                     .symbol_sessions
@@ -599,7 +609,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
             state.open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
         }
         if change == "replacement" {
-            state.design_execution_epoch += 1;
+            state.model.design_execution_epoch += 1;
         }
         if change == "window" {
             let layout = state.workbench.current_workspace_layout();

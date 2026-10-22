@@ -255,6 +255,7 @@ fn document_values_typed_in_the_panel_land_on_the_project() {
     let settings = panel
         .app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -458,7 +459,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
         &mut app.state,
         SchematicEdit::NetNameCharacters(NetNamingPolicy::SpiceCompatibleRelaxed),
     );
-    let schematic = &app.state.schematic;
+    let schematic = &app.state.model.schematic;
     let policy = &schematic.document().document_policy;
     assert_eq!(policy.grid_pitch, SchematicGridPitch::Mil25);
     assert_eq!(policy.net_naming, NetNamingPolicy::SpiceCompatibleRelaxed);
@@ -471,8 +472,8 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
         "{painted}"
     );
 
-    assert!(app.state.schematic.undo());
-    let policy = &app.state.schematic.document().document_policy;
+    assert!(app.state.model.schematic.undo());
+    let policy = &app.state.model.schematic.document().document_policy;
     assert_eq!(policy.net_naming, NetNamingPolicy::StrictCaseSensitive);
     assert_eq!(policy.grid_pitch, SchematicGridPitch::Mil25);
 }
@@ -525,8 +526,8 @@ fn a_value_still_being_typed_lands_when_the_panel_moves_on() {
 #[test]
 fn a_value_typed_on_one_sheet_never_lands_on_another() {
     let mut panel = SheetPanel::new();
-    let key = panel.app.state.workspace.content.active_key();
-    let designs = &mut panel.app.state.workspace.content.design_management;
+    let key = panel.app.state.model.workspace.content.active_key();
+    let designs = &mut panel.app.state.model.workspace.content.design_management;
     let first = designs
         .bootstrap_for_cell_view(&key, "Sheet 1", [])
         .unwrap();
@@ -548,6 +549,7 @@ fn a_value_typed_on_one_sheet_never_lands_on_another() {
     panel
         .app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -610,12 +612,17 @@ fn a_read_only_sheet_states_its_properties_without_controls() {
 #[test]
 fn checks_appear_only_for_findings_on_this_sheet() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.model.schematic);
     Command::CheckCellview.execute(&mut app);
     let clean = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(!clean.contains("Checks"), "{clean}");
 
-    app.state.schematic.document_mut_for_test().wires.pop();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .wires
+        .pop();
     Command::CheckCellview.execute(&mut app);
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.contains("Checks\n"), "{painted}");
@@ -673,6 +680,7 @@ fn a_custom_size_is_typed_in_the_panel_and_saved_to_custom_sizes() {
     let settings = panel
         .app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -877,6 +885,7 @@ fn the_change_reference_is_typed_with_the_documents_values() {
         panel
             .app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -896,6 +905,7 @@ fn content_outside_the_drawing_area_is_counted_under_the_size() {
     // 12 mm from the left edge: on the paper, outside ISO 5457's 20 mm
     // filing border.
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires

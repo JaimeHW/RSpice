@@ -10,6 +10,7 @@ use super::*;
 fn explain_is_offered_only_where_the_rule_has_words() {
     let mut state = state_with_design_findings();
     state
+        .model
         .diagnostics
         .set_current_finding(reported(&state).first().copied());
 
@@ -35,7 +36,8 @@ fn explain_is_offered_only_where_the_rule_has_words() {
     // and no control that says there is.
     let mut run = open_state();
     run.publish_run_failure("Transient", "Analysis failed: no convergence", None, 1);
-    run.diagnostics
+    run.model
+        .diagnostics
         .set_current_finding(reported(&run).first().copied());
     let rendered = render(&mut run, sized(egui::RawInput::default()));
     assert!(
@@ -55,6 +57,7 @@ fn a_fix_is_offered_only_where_the_producer_offered_edits() {
     let mut state = open_state();
     netlist_finding_with_a_fix(&mut state);
     state
+        .model
         .diagnostics
         .set_current_finding(reported(&state).first().copied());
     let offered = render(&mut state, sized(egui::RawInput::default()));
@@ -66,6 +69,7 @@ fn a_fix_is_offered_only_where_the_producer_offered_edits() {
 
     let mut rules = state_with_design_findings();
     rules
+        .model
         .diagnostics
         .set_current_finding(reported(&rules).first().copied());
     let unoffered = render(&mut rules, sized(egui::RawInput::default()));
@@ -81,6 +85,7 @@ fn a_fix_is_offered_only_where_the_producer_offered_edits() {
 fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current() {
     let mut state = state_with_design_findings();
     state
+        .model
         .diagnostics
         .set_current_finding(reported(&state).first().copied());
 
@@ -99,8 +104,13 @@ fn the_detail_region_states_where_the_batch_stands_only_when_it_is_not_current()
 
     // Move the inputs under the batch. The finding keeps its row and now says
     // what moved rather than only that it is stale.
-    state.workspace.content.connectivity.policy.width_mismatch =
-        crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+    state
+        .model
+        .workspace
+        .content
+        .connectivity
+        .policy
+        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     let reason = {
         use crate::workbench::app_state::diagnostic_store::listing::RowStanding;
         let listed = listing(&state);
@@ -150,11 +160,12 @@ fn a_related_place_is_stated_even_where_it_cannot_be_followed() {
     let record = DiagnosticRecord::new(
         canonical,
         DiagnosticLevel::Error,
-        DiagnosticSubject::new(state.workspace.content.project.id(), "Net 'out'"),
+        DiagnosticSubject::new(state.model.workspace.content.project.id(), "Net 'out'"),
         "two outputs drive this net",
     );
     publish(&mut state, vec![record]);
     state
+        .model
         .diagnostics
         .set_current_finding(reported(&state).first().copied());
 
@@ -198,7 +209,7 @@ fn a_finding_a_runs_log_states_offers_that_line_and_one_no_line_states_offers_no
     publish(&mut state, vec![stated, silent]);
     let order = reported(&state);
 
-    state.diagnostics.set_current_finding(Some(order[1]));
+    state.model.diagnostics.set_current_finding(Some(order[1]));
     let unstated = render(&mut state, sized(egui::RawInput::default()));
     assert!(
         unstated.has("raised silently") && !unstated.has(" log \u{00b7} line "),
@@ -207,7 +218,7 @@ fn a_finding_a_runs_log_states_offers_that_line_and_one_no_line_states_offers_no
     );
     assert!(unstated.exact("Go").is_none(), "and offers no jump");
 
-    state.diagnostics.set_current_finding(Some(order[0]));
+    state.model.diagnostics.set_current_finding(Some(order[0]));
     let harness = Harness::new();
     harness.settle(&mut state);
     let offered = harness.frame(&mut state, sized(egui::RawInput::default()));
@@ -219,7 +230,7 @@ fn a_finding_a_runs_log_states_offers_that_line_and_one_no_line_states_offers_no
     let go = offered.exact("Go").expect("the line is offered as a jump");
     let _ = harness.frame(&mut state, clicked(go + egui::vec2(3.0, 3.0)));
     assert_eq!(
-        state.diagnostics.take_pending_route(),
+        state.model.diagnostics.take_pending_route(),
         Some(DiagnosticRoute::RunLogLine {
             run_sequence: 1,
             line: 3,

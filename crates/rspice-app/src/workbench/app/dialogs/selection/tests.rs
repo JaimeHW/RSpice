@@ -154,9 +154,11 @@ fn render_selection_forms() {
 
     fn with_a_selected_resistor(state: &mut AppState) {
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor
@@ -165,7 +167,7 @@ fn render_selection_forms() {
     }
 
     fn with_a_selected_bus(state: &mut AppState) {
-        state.schematic.document_mut_for_test().buses.push(
+        state.model.schematic.document_mut_for_test().buses.push(
             Bus::segment(
                 1,
                 Point::new(0, 0),
@@ -174,7 +176,13 @@ fn render_selection_forms() {
             )
             .unwrap(),
         );
-        state.schematic.session.editor.selection.select_only_bus(1);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_bus(1);
     }
 
     let directory = std::env::var("RSPICE_RASTER_DIR")

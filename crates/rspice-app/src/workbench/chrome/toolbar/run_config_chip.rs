@@ -37,8 +37,14 @@ struct RunConfigChipCopy {
 }
 
 fn run_config_chip_copy(app: &RSpiceApp) -> RunConfigChipCopy {
-    let title = app.state.sim_setup.active_plan_name().as_str().to_owned();
-    let analysis_count = app.state.sim_setup.enabled_analysis_instance_count();
+    let title = app
+        .state
+        .model
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
+    let analysis_count = app.state.model.sim_setup.enabled_analysis_instance_count();
     let pvt_count = configured_pvt_count(app);
     RunConfigChipCopy {
         accessibility: format!("Simulation plan {title}; manage and switch simulation plans"),
@@ -169,7 +175,7 @@ fn configured_pvt_count(app: &RSpiceApp) -> usize {
     // The plan-wide Run Set expands every enabled analysis. Legacy Corner and
     // Temperature analysis drafts no longer own the workspace's PVT count and
     // must not be added a second time in the chrome summary.
-    app.state.sim_setup.run_set.point_count().max(1)
+    app.state.model.sim_setup.run_set.point_count().max(1)
 }
 
 #[cfg(test)]
@@ -187,12 +193,14 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let plan_id = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("default plan")
             .id();
 
         app.state
+            .model
             .sim_setup
             .rename_plan(plan_id, "Automotive temperature sweep")
             .expect("rename the active plan");
@@ -281,7 +289,7 @@ mod tests {
         use rspice_simulation_contract::corner_config::{CornerBaseAnalysis, CornerConfig};
 
         let mut app = RSpiceApp::test_instance();
-        app.state.sim_setup.run_set =
+        app.state.model.sim_setup.run_set =
             crate::simulation::run_set_tests::from_corner_config(&CornerConfig {
                 process_corners: vec![ProcessCorner::TT, ProcessCorner::SS],
                 voltages: vec![1.0],

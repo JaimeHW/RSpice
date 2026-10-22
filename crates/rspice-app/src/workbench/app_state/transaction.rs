@@ -24,7 +24,10 @@ impl AppState {
     /// transaction reported itself. Everything else is the candidate's.
     pub(crate) fn commit_candidate(&mut self, mut candidate: AppState) {
         std::mem::swap(&mut candidate.dialogs.hardcopy, &mut self.dialogs.hardcopy);
-        candidate.notices.prepend(std::mem::take(&mut self.notices));
+        candidate
+            .model
+            .notices
+            .prepend(std::mem::take(&mut self.model.notices));
         if let (Some(committed), Some(live)) = (
             candidate.ui.results.session.spec_drafts.as_mut(),
             self.ui.results.session.spec_drafts.as_mut(),
@@ -49,12 +52,16 @@ mod tests {
         let mut live = AppState::default();
         live.report_failure("Autosave failed", "The disk is full.");
         let mut candidate = live.clone();
-        assert!(candidate.notices.is_empty(), "a clone duplicates nothing");
+        assert!(
+            candidate.model.notices.is_empty(),
+            "a clone duplicates nothing"
+        );
         candidate.report_warning("Netlist updated", "One device was renamed.");
 
         live.commit_candidate(candidate);
 
         let titles: Vec<_> = live
+            .model
             .notices
             .take()
             .into_iter()

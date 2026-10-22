@@ -76,15 +76,19 @@ pub(super) fn structure_is_renderable(analysis: &AnalysisResult) -> bool {
 /// The structural verdict comes from the workspace memo rather than a fresh
 /// walk of every retained coefficient.
 pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
-    if state.simulation.active_run().is_some_and(|run| {
-        state.simulation.active_analysis().is_some_and(|analysis| {
-            super::analysis_answers_structural_gate(
-                state,
-                run.dataset_id,
-                analysis,
-                super::StructuralGate::NetworkMatrix,
-            ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
-        })
+    if state.model.simulation.active_run().is_some_and(|run| {
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .is_some_and(|analysis| {
+                super::analysis_answers_structural_gate(
+                    state,
+                    run.dataset_id,
+                    analysis,
+                    super::StructuralGate::NetworkMatrix,
+                ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+            })
     }) {
         super::ViewerAvailability::available(
             "Complete retained network matrices and port references are available",
@@ -371,9 +375,10 @@ pub(crate) mod tests {
             let mut app = crate::workbench::AppState::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
-            app.simulation.retained.runs.push(run);
-            assert!(app.simulation.select_run(0));
+            app.model.simulation.retained.runs.push(run);
+            assert!(app.model.simulation.select_run(0));
             let before = app
+                .model
                 .simulation
                 .active_analysis()
                 .unwrap()
@@ -423,35 +428,45 @@ pub(crate) mod tests {
             );
             assert_eq!(
                 before,
-                app.simulation
+                app.model
+                    .simulation
                     .active_analysis()
                     .unwrap()
                     .result_data_digest()
             );
 
             let cached = Arc::downgrade(app.ui.results.network_matrix.layout.as_ref().unwrap());
-            let discarded = app.simulation.retained.runs[0].dataset_id;
-            let version = app.simulation.view.data_version;
+            let discarded = app.model.simulation.retained.runs[0].dataset_id;
+            let version = app.model.simulation.view.data_version;
             let controls = &mut app.ui.results.network_matrix.controls;
             controls.representation = 2;
             controls.transpose = true;
             controls.heatmap = false;
             controls.floor_db = -120.0;
             controls.diagnostic = Some((0, 0, "retained diagnostic".to_owned()));
-            app.simulation.retained.runs.push(SimulationRun::new(2));
-            app.ui.results.reconcile_retained_datasets(&app.simulation);
+            app.model
+                .simulation
+                .retained
+                .runs
+                .push(SimulationRun::new(2));
+            app.ui
+                .results
+                .reconcile_retained_datasets(&app.model.simulation);
             assert!(cached.upgrade().is_some());
             assert!(app.ui.results.network_matrix.open_trace);
 
             // Prune while another viewer is active, without revisiting the matrix.
             app.ui.results.session.viewer =
                 rspice_results::result_presentation::ResultViewer::Table;
-            app.simulation
+            app.model
+                .simulation
                 .retained
                 .runs
                 .retain(|run| run.dataset_id != discarded);
-            app.ui.results.reconcile_retained_datasets(&app.simulation);
-            assert_eq!(app.simulation.view.data_version, version);
+            app.ui
+                .results
+                .reconcile_retained_datasets(&app.model.simulation);
+            assert_eq!(app.model.simulation.view.data_version, version);
             assert!(
                 cached.upgrade().is_none(),
                 "discarding the dataset must release its matrix layout without another matrix frame"
@@ -473,9 +488,10 @@ pub(crate) mod tests {
             let mut app = crate::workbench::AppState::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
-            app.simulation.retained.runs.push(run);
-            assert!(app.simulation.select_run(0));
+            app.model.simulation.retained.runs.push(run);
+            assert!(app.model.simulation.select_run(0));
             let before = app
+                .model
                 .simulation
                 .active_analysis()
                 .unwrap()
@@ -496,7 +512,8 @@ pub(crate) mod tests {
             assert!(!output.shapes.is_empty());
             assert_eq!(
                 before,
-                app.simulation
+                app.model
+                    .simulation
                     .active_analysis()
                     .unwrap()
                     .result_data_digest()
@@ -516,13 +533,16 @@ pub(crate) mod tests {
             let mut app = crate::workbench::AppState::default();
             let mut run = SimulationRun::new(1);
             run.add_analysis(fixture(true));
-            app.simulation.retained.runs.push(run);
-            assert!(app.simulation.select_run(0));
+            app.model.simulation.retained.runs.push(run);
+            assert!(app.model.simulation.select_run(0));
             if open_plot {
-                let run = app.simulation.active_run().unwrap();
-                let analysis = app.simulation.active_analysis().unwrap();
+                let run = app.model.simulation.active_run().unwrap();
+                let analysis = app.model.simulation.active_analysis().unwrap();
                 let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-                app.ui.results.network_matrix.bind(key, &app.simulation);
+                app.ui
+                    .results
+                    .network_matrix
+                    .bind(key, &app.model.simulation);
                 app.ui.results.network_matrix.open_trace = true;
                 app.ui.results.session.polar.quantity = Some("|Sdd11|".to_owned());
             }

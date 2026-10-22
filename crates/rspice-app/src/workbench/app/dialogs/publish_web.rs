@@ -103,6 +103,7 @@ impl RSpiceApp {
             .unwrap_or_default();
         let project_name = self
             .state
+            .model
             .workspace
             .content
             .project
@@ -126,7 +127,14 @@ impl RSpiceApp {
         };
         dialog.scope = Some(build_scope(&self.state, &publication_draft(&dialog)));
         self.state.dialogs.publish_web = dialog;
-        if let Some(binding) = self.state.workspace.content.project.cloud_publication() {
+        if let Some(binding) = self
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .cloud_publication()
+        {
             self.cloud_account
                 .refresh_publications(binding.circuit_id().to_owned());
         }
@@ -149,6 +157,7 @@ impl RSpiceApp {
         let workspaces = self.cloud_account.snapshot().workspaces.clone();
         let binding = self
             .state
+            .model
             .workspace
             .content
             .project
@@ -361,7 +370,13 @@ impl RSpiceApp {
             receipt.circuit_id.clone(),
         ) {
             Ok(binding) => {
-                if let Err(error) = self.state.workspace.content.bind_cloud_publication(binding) {
+                if let Err(error) = self
+                    .state
+                    .model
+                    .workspace
+                    .content
+                    .bind_cloud_publication(binding)
+                {
                     self.state.record(
                         LogSeverity::Warning,
                         LogSource::Studio,
@@ -579,6 +594,7 @@ fn imported_model_source_count(state: &AppState, include_netlist: bool) -> usize
         return 0;
     }
     state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1028,7 +1044,7 @@ mod tests {
                 source_id: crate::product::ModelSourceId::new(),
                 digest: crate::product::ContentDigest::from_bytes([7; 32]),
             };
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
 
         assert_eq!(imported_model_source_count(&state, true), 1);
         assert_eq!(imported_model_source_count(&state, false), 0);

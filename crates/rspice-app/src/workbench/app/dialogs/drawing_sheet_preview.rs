@@ -676,25 +676,33 @@ mod tests {
     fn preview_covers_every_hardcopy_printable_class_but_not_probe_flags() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .junctions
             .push(Junction::new(51, Point::new(1_100, 100)));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(52, Point::new(1_100, 140), "OUTSIDE"));
-        state.schematic.document_mut_for_test().design_notes.push(
-            DesignNote::new(
-                53,
-                Point::new(1_100, 180),
-                DesignNoteKind::PlainText,
-                "outside note",
-            )
-            .expect("valid note"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(
+                DesignNote::new(
+                    53,
+                    Point::new(1_100, 180),
+                    DesignNoteKind::PlainText,
+                    "outside note",
+                )
+                .expect("valid note"),
+            );
+        state
+            .model
             .schematic
             .document_mut_for_test()
             .documentation_shapes
@@ -708,7 +716,7 @@ mod tests {
                 )
                 .expect("valid documentation line"),
             );
-        state.schematic.document_mut_for_test().probes.push(
+        state.model.schematic.document_mut_for_test().probes.push(
             SchematicProbe::new(
                 55,
                 Point::new(1_100, 260),

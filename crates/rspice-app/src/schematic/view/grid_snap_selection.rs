@@ -49,10 +49,13 @@ pub(crate) fn snap_selection_to_grid(
     if snaps.is_empty() {
         return Ok(0);
     }
-    let selection = state.schematic.session.editor.selection.clone();
+    let selection = state.model.schematic.session.editor.selection.clone();
     // The undo step opens with every sheet present; the other sheets step
     // out of reach only while the wiring is carried and tidied.
-    state.schematic.begin_operation("snap selection to grid");
+    state
+        .model
+        .schematic
+        .begin_operation("snap selection to grid");
     let moved = with_active_wire_topology(state, |schematic, scope| {
         let terminal_points =
             |component: &crate::state::Component| symbols.terminal_points(component);
@@ -91,17 +94,17 @@ pub(crate) fn snap_selection_to_grid(
         schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
         Ok::<usize, rspice_design::schematic::movement::MoveSelectionError>(snaps.len())
     });
-    state.schematic.session.editor.selection = selection;
+    state.model.schematic.session.editor.selection = selection;
     match moved {
         Ok(moved) => {
-            state.schematic.session.is_dirty = true;
-            if state.schematic.end_operation() {
+            state.model.schematic.session.is_dirty = true;
+            if state.model.schematic.end_operation() {
                 state.sync_active_schematic_to_workspace();
             }
             Ok(moved)
         }
         Err(error) => {
-            state.schematic.cancel_operation();
+            state.model.schematic.cancel_operation();
             Err(format!("Snap to grid was not applied: {error}."))
         }
     }
@@ -110,9 +113,9 @@ pub(crate) fn snap_selection_to_grid(
 /// The step each selected object's anchor needs, parts first so the wires
 /// they carry are settled before a free wire is looked at.
 fn snaps(state: &AppState, symbols: &SchematicSymbolContext) -> Vec<Snap> {
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     let grid = document.grid_size;
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let step = |anchor: Point| {
         let delta = on_grid(anchor, grid) - anchor;
         (delta != Point::origin()).then_some(delta)
@@ -178,21 +181,27 @@ mod tests {
     #[test]
     fn an_off_grid_part_lands_on_the_grid_and_its_wire_follows_square() {
         let mut state = AppState::default();
-        let grid = state.schematic.document().grid_size;
+        let grid = state.model.schematic.document().grid_size;
         let part = Component::new(1, ComponentType::Resistor, Point::new(103, 47));
         let symbols = super::super::schematic_symbol_context(&state);
         let pin = symbols.terminal_points(&part)[0];
         let wire = Wire::segment(2, Point::new(pin.x - 200, pin.y), pin);
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components = vec![part];
         document.wires = vec![wire];
         document.junctions.clear();
-        state.schematic.init_undo_history();
-        state.schematic.session.editor.selection.select_component(1);
+        state.model.schematic.init_undo_history();
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
 
         assert_eq!(snap_selection_to_grid(&mut state, &symbols), Ok(1));
 
-        let document = state.schematic.document();
+        let document = state.model.schematic.document();
         let pos = document.components[0].pos;
         assert_eq!(pos, on_grid(Point::new(103, 47), grid));
         assert!(pos.x % grid == 0 && pos.y % grid == 0);
@@ -210,13 +219,19 @@ mod tests {
             "a wire went slanted: {:?}",
             document.wires
         );
-        assert!(state.schematic.undo(), "snap is one undo step");
+        assert!(state.model.schematic.undo(), "snap is one undo step");
         assert_eq!(
-            state.schematic.document().components[0].pos,
+            state.model.schematic.document().components[0].pos,
             Point::new(103, 47)
         );
-        assert!(!state.schematic.can_undo());
-        state.schematic.session.editor.selection.select_component(1);
+        assert!(!state.model.schematic.can_undo());
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
         assert_eq!(snap_selection_to_grid(&mut state, &symbols), Ok(1));
         assert_eq!(
             snap_selection_to_grid(&mut state, &symbols),
@@ -234,14 +249,20 @@ mod tests {
         let symbols = super::super::schematic_symbol_context(&state);
         let pin = symbols.terminal_points(&part)[0];
         let there = Wire::segment(2, Point::new(pin.x - 200, pin.y), pin);
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components = vec![part];
         document.wires = vec![there.clone()];
         document.junctions.clear();
-        state.schematic.init_undo_history();
-        state.schematic.session.editor.selection.select_component(1);
+        state.model.schematic.init_undo_history();
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
 
         assert_eq!(snap_selection_to_grid(&mut state, &symbols), Ok(1));
-        assert_eq!(state.schematic.document().wires, vec![there]);
+        assert_eq!(state.model.schematic.document().wires, vec![there]);
     }
 }

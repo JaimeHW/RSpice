@@ -20,11 +20,12 @@ use crate::workbench::{AppState, RSpiceApp};
 /// partial bytes.
 pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
     if app.state.ui.netlist.owned_document.is_none() {
-        app.state.ui.netlist.owned_document = app.state.workspace.content.netlist_document.clone();
+        app.state.ui.netlist.owned_document =
+            app.state.model.workspace.content.netlist_document.clone();
     }
     if !app.state.ui.netlist.active_document_initialized {
         app.state.ui.netlist.active_document =
-            if app.state.workspace.content.netlist_source.is_some() {
+            if app.state.model.workspace.content.netlist_source.is_some() {
                 ActiveNetlistDocument::OwnedSource
             } else {
                 ActiveNetlistDocument::Generated
@@ -51,10 +52,10 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
         .map(str::to_owned)
         .or_else(|| match app.state.ui.netlist.active_document {
             ActiveNetlistDocument::Generated => {
-                Some(app.state.netlist_artifacts.generated_source.clone())
+                Some(app.state.model.netlist_artifacts.generated_source.clone())
             }
             ActiveNetlistDocument::OwnedSource => {
-                app.state.workspace.content.netlist_source.clone()
+                app.state.model.workspace.content.netlist_source.clone()
             }
             ActiveNetlistDocument::GeneratedDiff => {
                 Some(app.state.ui.netlist.generated_diff_source.clone())
@@ -62,9 +63,9 @@ pub(super) fn reconcile_documents(app: &mut RSpiceApp) {
             ActiveNetlistDocument::RunSnapshot => app.state.manual_run.last_run_buffer.clone(),
         });
     if let Some(projected) = projected
-        && app.state.simulation.source.netlist_content != projected
+        && app.state.model.simulation.source.netlist_content != projected
     {
-        app.state.simulation.source.netlist_content = projected;
+        app.state.model.simulation.source.netlist_content = projected;
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
         crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state);
     }
@@ -77,35 +78,53 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         ) {
             Ok(digest) => digest,
             Err(error) => {
-                app.state.netlist_artifacts.current_generation_input_digest = None;
-                app.state.netlist_artifacts.generation_error = Some(error.to_string());
+                app.state
+                    .model
+                    .netlist_artifacts
+                    .current_generation_input_digest = None;
+                app.state.model.netlist_artifacts.generation_error = Some(error.to_string());
                 return;
             }
         };
     let authoritative_input_changed = app
         .state
+        .model
         .netlist_artifacts
         .current_generation_input_digest
         .is_some_and(|previous| previous != input_digest);
-    app.state.netlist_artifacts.current_generation_input_digest = Some(input_digest);
+    app.state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = Some(input_digest);
     if authoritative_input_changed {
         app.invalidate_simulation_preflight();
         crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut app.state);
-        if let Some(document) = app.state.netlist_artifacts.generated_document.as_mut() {
+        if let Some(document) = app
+            .state
+            .model
+            .netlist_artifacts
+            .generated_document
+            .as_mut()
+        {
             let _ = document.invalidate_validation(document.content_digest());
         }
         if let Some(document) = app.state.ui.netlist.owned_document.as_mut() {
             let _ = document.invalidate_validation(document.content_digest());
-            app.state.workspace.content.netlist_document = Some(document.clone());
+            app.state.model.workspace.content.netlist_document = Some(document.clone());
         }
     }
-    if app.state.netlist_artifacts.generated_input_digest == Some(input_digest)
-        && !app.state.netlist_artifacts.generated_source.is_empty()
+    if app.state.model.netlist_artifacts.generated_input_digest == Some(input_digest)
+        && !app
+            .state
+            .model
+            .netlist_artifacts
+            .generated_source
+            .is_empty()
     {
         return;
     }
-    if app.state.schematic.document().components.is_empty() {
-        app.state.netlist_artifacts.generation_error =
+    if app.state.model.schematic.document().components.is_empty() {
+        app.state.model.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
         return;
     }
@@ -119,7 +138,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
         crate::workbench::menu_bar::build_menu_netlist(&app.state, crate::io::NetlistFormat::Spice);
     let failed = |state: &mut AppState, error: String| {
         state.ui.netlist.failed_generation_input_digest = Some(input_digest);
-        state.netlist_artifacts.generation_error = Some(error);
+        state.model.netlist_artifacts.generation_error = Some(error);
     };
     match generated {
         Ok(generated) => {
@@ -127,6 +146,7 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                 Ok((generated_document, owned_document)) => {
                     if let (Some(previous), Some(current)) = (
                         app.state
+                            .model
                             .netlist_artifacts
                             .generated_document
                             .as_ref()
@@ -167,13 +187,13 @@ fn refresh_generated_artifact(app: &mut RSpiceApp) {
                         );
                         return;
                     };
-                    app.state.netlist_artifacts.generated_source =
+                    app.state.model.netlist_artifacts.generated_source =
                         generated_artifact.source().to_owned();
-                    app.state.netlist_artifacts.generated_document = Some(generated_document);
-                    app.state.workspace.content.netlist_document = owned_document.clone();
+                    app.state.model.netlist_artifacts.generated_document = Some(generated_document);
+                    app.state.model.workspace.content.netlist_document = owned_document.clone();
                     app.state.ui.netlist.owned_document = owned_document;
-                    app.state.netlist_artifacts.generated_input_digest = Some(input_digest);
-                    app.state.netlist_artifacts.generation_error = None;
+                    app.state.model.netlist_artifacts.generated_input_digest = Some(input_digest);
+                    app.state.model.netlist_artifacts.generation_error = None;
                     app.state.ui.netlist.failed_generation_input_digest = None;
                     crate::workbench::menu_bar::record_netlist_warnings(
                         &mut app.state,
@@ -201,7 +221,10 @@ pub(super) fn publish_generated_document(
 ) -> Result<(NetlistDocument, Option<NetlistDocument>), String> {
     let provenance = GeneratedProvenance::try_new(
         "rspice-netlist-generator/v1",
-        GenerationInput::new(state.workspace.content.project.revision(), input_digest),
+        GenerationInput::new(
+            state.model.workspace.content.project.revision(),
+            input_digest,
+        ),
     )
     .map_err(|error| error.to_string())?;
     let source_map = generated_source_map(state, &source)?;
@@ -210,7 +233,9 @@ pub(super) fn publish_generated_document(
         GeneratedArtifact::try_from_utf8(provenance, source.into_bytes(), dependencies, source_map)
             .map_err(|error| error.to_string())?;
 
-    let generated_document = if let Some(existing) = &state.netlist_artifacts.generated_document {
+    let generated_document = if let Some(existing) =
+        &state.model.netlist_artifacts.generated_document
+    {
         let mut next = existing.clone();
         let expected_digest = existing
             .generated_artifact()
@@ -240,11 +265,12 @@ pub(super) fn generated_project_source_dependencies(
     let mut dependencies = Vec::new();
 
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let mut retained_keys = std::collections::HashSet::new();
@@ -256,6 +282,7 @@ pub(super) fn generated_project_source_dependencies(
             continue;
         }
         let bundle = state
+            .model
             .workspace
             .content
             .project_sources
@@ -415,7 +442,7 @@ fn generated_source_map(
     state: &AppState,
     source: &str,
 ) -> Result<Vec<GeneratedSourceMapEntry>, String> {
-    let top = state.workspace.content.active_view.clone();
+    let top = state.model.workspace.content.active_view.clone();
     let mut current = top.clone();
     let mut entries = Vec::with_capacity(source.lines().count());
 
@@ -428,6 +455,7 @@ fn generated_source_map(
             && let Some(cell) = tokens.get(1)
         {
             current = state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -482,6 +510,7 @@ fn source_line_component(
     }
     let named = tokens.next();
     let schematic = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -519,7 +548,7 @@ mod tests {
     #[test]
     fn a_keyword_headed_card_names_the_component_after_its_keyword() {
         let mut state = AppState::default();
-        let view = state.workspace.content.active_view.key();
+        let view = state.model.workspace.content.active_view.key();
         let mut schematic = SchematicState::default();
         schematic.document_mut_for_test().components.extend([
             Component::new(4, ComponentType::Memristor, Point::origin()).with_name_value("MR1", ""),
@@ -528,6 +557,7 @@ mod tests {
         ]);
         let (design, _) = schematic.into_parts();
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -570,13 +600,15 @@ mod tests {
         let mut absent = LibraryCellInstance::new("work", "absent", "schematic");
         absent.terminal_order = vec!["a".to_owned(), "b".to_owned()];
         app.state
+            .model
             .schematic
             .add_library_cell_component(Point::new(100, 0), absent);
         app.state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));
         for index in 0..10_000 {
-            app.state.log_buffer.log(
+            app.state.model.log_buffer.log(
                 LogSeverity::Info,
                 LogSource::Studio,
                 format!("line {index}"),
@@ -586,12 +618,14 @@ mod tests {
         refresh_generated_artifact(&mut app);
         let error = app
             .state
+            .model
             .netlist_artifacts
             .generation_error
             .clone()
             .expect("the failure is stated on the page");
         let newest = app
             .state
+            .model
             .log_buffer
             .entries()
             .last()
@@ -603,18 +637,22 @@ mod tests {
             format!("Netlist generation failed: {error}"),
             "the page states the generator's own reason, which the Console records"
         );
-        let recorded = app.state.log_buffer.revision();
+        let recorded = app.state.model.log_buffer.revision();
 
         for _ in 0..3 {
             refresh_generated_artifact(&mut app);
         }
         assert_eq!(
-            app.state.log_buffer.revision(),
+            app.state.model.log_buffer.revision(),
             recorded,
             "the same inputs are neither rebuilt nor reported again"
         );
         assert_eq!(
-            app.state.netlist_artifacts.generation_error.as_deref(),
+            app.state
+                .model
+                .netlist_artifacts
+                .generation_error
+                .as_deref(),
             Some(error.as_str())
         );
     }

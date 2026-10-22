@@ -140,6 +140,7 @@ fn stimulus_link_target(state: &AppState, component_id: u64) -> Option<&Componen
         return None;
     }
     state
+        .model
         .schematic
         .document()
         .components
@@ -164,7 +165,8 @@ pub(crate) fn open_stimulus_link(
                 .to_owned(),
         );
     };
-    if mode == StimulusLinkMode::Adopt && state.workspace.content.stimulus_library.is_empty() {
+    if mode == StimulusLinkMode::Adopt && state.model.workspace.content.stimulus_library.is_empty()
+    {
         return Err(
             "This project holds no stimulus definitions yet. Save this source as one first, or \
              author one in the Stimulus Library workspace."
@@ -189,9 +191,18 @@ pub(crate) fn open_stimulus_link(
         .stimulus_provenance
         .as_ref()
         .map(|provenance| provenance.definition.clone())
-        .filter(|name| state.workspace.content.stimulus_library.get(name).is_some())
+        .filter(|name| {
+            state
+                .model
+                .workspace
+                .content
+                .stimulus_library
+                .get(name)
+                .is_some()
+        })
         .or_else(|| first_equal_definition(state, &component));
     let provenance = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -208,12 +219,14 @@ pub(crate) fn open_stimulus_link(
         nets,
         timing: crate::workbench::app::actions::property_edit::stimulus_preview_timing(state),
         data_root: state
+            .model
             .workspace
             .content
             .project
             .data_root()
             .map(std::path::Path::to_path_buf),
         retained_table: state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -231,6 +244,7 @@ pub(crate) fn open_stimulus_link(
 /// one. It is the pick a reader almost always wants when nothing was adopted.
 fn first_equal_definition(state: &AppState, component: &Component) -> Option<String> {
     state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -279,8 +293,8 @@ fn instance_nets(state: &AppState, component_id: u64) -> [String; 2] {
         ]
     };
     let sources = crate::simulation::placed_sources::placed_sources(
-        &state.schematic,
-        &state.workspace.content.stimulus_library,
+        &state.model.schematic,
+        &state.model.workspace.content.stimulus_library,
         None,
     );
     let Some(source) = sources
@@ -341,6 +355,7 @@ fn extract_refusal(state: &AppState, component: &Component, name: &str) -> Optio
         return Some(error.to_string());
     }
     state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -372,6 +387,7 @@ pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
     let mut minis = std::mem::take(&mut state.dialogs.stimulus_link.minis);
     let session = state.dialogs.stimulus_link.clone();
     let Some(component) = state
+        .model
         .schematic
         .document()
         .components
@@ -401,6 +417,7 @@ pub(crate) fn commit_adoption(
     definition: &StimulusDefinition,
 ) -> Result<String, String> {
     let expected = state
+        .model
         .schematic
         .document()
         .components
@@ -430,7 +447,7 @@ pub(crate) fn commit_adoption(
             ));
         }
         let description = format!("adopt {} onto {reference}", definition.name());
-        let replaced = candidate.replace_family(&mut state.schematic, description);
+        let replaced = candidate.replace_family(&mut state.model.schematic, description);
         if !replaced {
             return Err(format!(
                 "{reference} was not re-placed: the active schematic view is read-only."
@@ -474,6 +491,7 @@ pub(crate) fn commit_readoption(
     definition: &str,
 ) -> Result<String, String> {
     let held = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -481,6 +499,7 @@ pub(crate) fn commit_readoption(
         .cloned()
         .ok_or_else(|| format!("This project defines no '{definition}' to re-adopt."))?;
     let expected = state
+        .model
         .schematic
         .document()
         .components
@@ -503,6 +522,7 @@ pub(crate) fn commit_readoption(
 fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, String> {
     let session = state.dialogs.stimulus_link.clone();
     let expected = state
+        .model
         .schematic
         .document()
         .components
@@ -527,6 +547,7 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
     // the project does not hold — which every surface reads as `definition
     // removed`, over an extraction the reader was told had failed.
     state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -535,7 +556,7 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
     if let Err(refusal) =
         state.edit_component_transaction(&expected, candidate, "save stimulus definition")
     {
-        let _ = state.workspace.content.stimulus_library.delete(&name);
+        let _ = state.model.workspace.content.stimulus_library.delete(&name);
         return Err(refusal);
     }
     state.workbench.selected_stimulus_definition = Some(name.clone());

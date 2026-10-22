@@ -14,7 +14,7 @@ fn app_with_draft(name: &str, ports: &str) -> RSpiceApp {
     app.state.open_project_session();
     let mut library = Library::new(LIBRARY);
     library.add_cell(Cell::new("taken"));
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     open_new_veriloga_device_form(&mut app.state);
     let form = &mut app.state.dialogs.new_veriloga_device;
     form.library = LIBRARY.to_owned();
@@ -32,6 +32,7 @@ fn refusal(app: &RSpiceApp) -> String {
 
 fn view<'a>(app: &'a RSpiceApp, cell: &str, view: &str) -> Option<&'a View> {
     app.state
+        .model
         .library_manager
         .get_library(LIBRARY)?
         .get_cell(cell)?
@@ -40,6 +41,7 @@ fn view<'a>(app: &'a RSpiceApp, cell: &str, view: &str) -> Option<&'a View> {
 
 fn root_source(app: &RSpiceApp, reference: &CellViewRef) -> String {
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -76,10 +78,13 @@ fn a_cell_name_the_library_already_holds_is_refused_under_its_field() {
     // The same cell under another case is the same canonical identity.
     app.state.dialogs.new_veriloga_device.name = "TAKEN".to_owned();
     assert_eq!(refusal(&app), "behavioral already has a cell named TAKEN.");
-    let revision = app.state.workspace.content.project.revision();
+    let revision = app.state.model.workspace.content.project.revision();
 
     assert!(app.commit_new_veriloga_device().is_err());
-    assert_eq!(app.state.workspace.content.project.revision(), revision);
+    assert_eq!(
+        app.state.model.workspace.content.project.revision(),
+        revision
+    );
 
     // A cell name is letters, digits and underscores; one the module cannot
     // carry as it is names a module made from it.
@@ -152,7 +157,7 @@ fn a_port_entry_the_codec_cannot_read_is_refused_under_its_field() {
 #[test]
 fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once() {
     let mut app = app_with_draft("opamp", "inp:in inn:in out:out vdd vss");
-    let revision = app.state.workspace.content.project.revision().get();
+    let revision = app.state.model.workspace.content.project.revision().get();
 
     let reference = app
         .commit_new_veriloga_device()
@@ -160,13 +165,13 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
 
     assert_eq!(reference, CellViewRef::new(LIBRARY, "opamp", "veriloga"));
     assert_eq!(
-        app.state.workspace.content.project.revision().get(),
+        app.state.model.workspace.content.project.revision().get(),
         revision + 1,
         "one library transaction"
     );
     assert!(matches!(
         app.state
-            .workspace
+            .model.workspace
             .content
             .project
             .library_mutation_audit()
@@ -184,6 +189,7 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
     );
     let root = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -229,7 +235,7 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
             .collect::<Vec<_>>(),
         ["inp", "inn", "out", "vdd", "vss"]
     );
-    assert_eq!(app.state.workspace.content.active_view, reference);
+    assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Design
@@ -245,6 +251,7 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
     let mut app = app_with_draft("opamp", "inp:in out:out");
     let reference = CellViewRef::new(LIBRARY, "opamp", "veriloga");
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -262,13 +269,14 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
         .expect("an orphaned owner the source registry still holds");
     let bundles = app
         .state
+        .model
         .workspace
         .content
         .project_sources
         .iter_bundles()
         .count();
-    let revision = app.state.workspace.content.project.revision();
-    let catalog = app.state.library_manager.revision();
+    let revision = app.state.model.workspace.content.project.revision();
+    let catalog = app.state.model.library_manager.revision();
 
     let error = app
         .commit_new_veriloga_device()
@@ -278,6 +286,7 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
     assert!(view(&app, "opamp", "veriloga").is_none());
     assert!(
         app.state
+            .model
             .library_manager
             .get_library(LIBRARY)
             .is_some_and(|library| library.get_cell("opamp").is_none()),
@@ -285,6 +294,7 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
     );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .project_sources
@@ -292,8 +302,11 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
             .count(),
         bundles
     );
-    assert_eq!(app.state.workspace.content.project.revision(), revision);
-    assert_eq!(app.state.library_manager.revision(), catalog);
+    assert_eq!(
+        app.state.model.workspace.content.project.revision(),
+        revision
+    );
+    assert_eq!(app.state.model.library_manager.revision(), catalog);
 }
 
 /// Ports are a starting point: with none typed, the module declares none and
@@ -402,11 +415,19 @@ fn nothing_moves_while_the_draft_is_typed() {
 #[test]
 fn the_form_opens_on_the_active_designs_library() {
     let mut app = app_with_draft("", "");
-    let active = app.state.workspace.content.active_view.library.clone();
+    let active = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_view
+        .library
+        .clone();
     open_new_veriloga_device_form(&mut app.state);
     assert_eq!(app.state.dialogs.new_veriloga_device.library, active);
 
     app.state
+        .model
         .library_manager
         .get_library_mut(&active)
         .expect("the active design's library")

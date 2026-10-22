@@ -31,7 +31,7 @@ pub(crate) fn arm_placement_from_definition(
              the view in an editable context first."
         ));
     }
-    let Some(definition) = state.workspace.content.stimulus_library.get(name) else {
+    let Some(definition) = state.model.workspace.content.stimulus_library.get(name) else {
         return Err(format!(
             "This project defines no '{name}', so there is no stimulus to place."
         ));
@@ -41,9 +41,10 @@ pub(crate) fn arm_placement_from_definition(
     let armed = format!("{} r{}", placement.definition(), placement.revision());
 
     state
+        .model
         .schematic
         .arm_tool(Tool::Place(placement.component_type));
-    state.schematic.session.editor.pending_stimulus = Some(placement);
+    state.model.schematic.session.editor.pending_stimulus = Some(placement);
     state.workbench.activate(Workspace::Design);
     state.prompt(format!(
         "{reference}\u{2026} from {armed} follows the pointer; click to place, Esc cancels."
@@ -70,6 +71,7 @@ mod tests {
         definition.value = "0".to_owned();
         definition.params = "va=3m freq=1k".to_owned();
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -84,11 +86,12 @@ mod tests {
         arm_placement_from_definition(&mut app.state, "sensor_drive").expect("armed");
 
         assert_eq!(
-            app.state.schematic.session.editor.tool,
+            app.state.model.schematic.session.editor.tool,
             Tool::Place(ComponentType::VoltageSourceSin)
         );
         let armed = app
             .state
+            .model
             .schematic
             .session
             .editor
@@ -100,10 +103,12 @@ mod tests {
 
         let id = app
             .state
+            .model
             .schematic
             .add_stimulus_component(&armed, Point::new(6, 6));
         let component = app
             .state
+            .model
             .schematic
             .document()
             .components
@@ -112,6 +117,7 @@ mod tests {
             .expect("placed");
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .stimulus_library
@@ -128,24 +134,26 @@ mod tests {
         assert!(refusal.contains("defines no 'absent'"), "{refusal}");
         assert!(
             app.state
+                .model
                 .schematic
                 .session
                 .editor
                 .pending_stimulus
                 .is_none()
         );
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
     }
 
     #[test]
     fn arming_refuses_a_read_only_view() {
         let mut app = app_with_definition();
-        app.state.schematic.session.read_only = true;
+        app.state.model.schematic.session.read_only = true;
         let refusal = arm_placement_from_definition(&mut app.state, "sensor_drive")
             .expect_err("a read-only sheet takes no placement");
         assert!(refusal.contains("read-only"), "{refusal}");
         assert!(
             app.state
+                .model
                 .schematic
                 .session
                 .editor

@@ -79,7 +79,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
             // selection, and opening Results anyway landed the reader on
             // whichever dataset happened to be active as if it were the one
             // they asked for.
-            if app.state.simulation.select_run_by_sequence(run_id) {
+            if app.state.model.simulation.select_run_by_sequence(run_id) {
                 crate::workbench::commands::vocabulary::Command::OpenWorkspace(
                     crate::workbench::state::Workspace::Results,
                 )
@@ -106,8 +106,8 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.set_min_size(ui.available_size());
         if generated_primary_unavailable(&app.state) {
             let messages = app.state.ui.messages();
-            if app.state.workspace.content.netlist_source.is_none()
-                && app.state.netlist_artifacts.generated_document.is_none()
+            if app.state.model.workspace.content.netlist_source.is_none()
+                && app.state.model.netlist_artifacts.generated_document.is_none()
             {
                 let mut action = None;
                 empty_state_with_actions(
@@ -159,7 +159,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                     WorkbenchIcon::Netlist,
                     &title,
                     app.state
-                        .netlist_artifacts
+                        .model.netlist_artifacts
                         .generation_error
                         .as_deref()
                         .unwrap_or(&default_description),
@@ -302,6 +302,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     // statement about the run itself, which every run can make.
     let point = state.ui.netlist.executed_deck_view.and_then(|selection| {
         state
+            .model
             .simulation
             .retained
             .executed_decks
@@ -310,6 +311,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
             .map(|point| point.label.clone())
     });
     let receipt = state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_id)?
@@ -322,6 +324,7 @@ pub(super) fn run_strip_projection(state: &AppState) -> Option<RunStripProjectio
     // baseline phases they are the same run, and this is what decides whether
     // the hop to its task decks can be offered at all.
     let tasks = state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -717,6 +720,7 @@ fn advisory_band(ui: &mut Ui, problem: Option<Problem>, contents: impl FnOnce(&m
 fn execution_profile_review_banner(ui: &mut Ui, app: &mut RSpiceApp) {
     if !app
         .state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -849,7 +853,7 @@ fn format_owned_netlist(app: &mut RSpiceApp) {
     {
         return;
     }
-    let source = app.state.simulation.source.netlist_content.clone();
+    let source = app.state.model.simulation.source.netlist_content.clone();
     let dependency_document = app.state.ui.netlist.active_dependency_identity.is_some();
     if dependency_document {
         let has_errors = app.state.ui.netlist.diagnostics.iter().any(|diagnostic| {
@@ -875,29 +879,31 @@ fn format_owned_netlist(app: &mut RSpiceApp) {
         return;
     }
     let digest = crate::state::content_digest(&source);
-    let validation_current =
-        app.state
-            .netlist_artifacts
-            .validation
-            .as_ref()
-            .is_some_and(|receipt| {
-                receipt.visible_content_digest == digest
-                    && receipt.project_revision
-                        == app.state.workspace.content.project.revision().get()
-            });
+    let validation_current = app
+        .state
+        .model
+        .netlist_artifacts
+        .validation
+        .as_ref()
+        .is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision
+                    == app.state.model.workspace.content.project.revision().get()
+        });
     if !validation_current {
         crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
     }
-    let validation_current =
-        app.state
-            .netlist_artifacts
-            .validation
-            .as_ref()
-            .is_some_and(|receipt| {
-                receipt.visible_content_digest == digest
-                    && receipt.project_revision
-                        == app.state.workspace.content.project.revision().get()
-            });
+    let validation_current = app
+        .state
+        .model
+        .netlist_artifacts
+        .validation
+        .as_ref()
+        .is_some_and(|receipt| {
+            receipt.visible_content_digest == digest
+                && receipt.project_revision
+                    == app.state.model.workspace.content.project.revision().get()
+        });
     if !validation_current {
         let message = app
             .state
@@ -971,8 +977,8 @@ fn generated_primary_unavailable(state: &AppState) -> bool {
 }
 
 fn generated_primary_ready(state: &AppState) -> bool {
-    state.netlist_artifacts.generated_document.is_some()
-        && !state.netlist_artifacts.generated_source.is_empty()
+    state.model.netlist_artifacts.generated_document.is_some()
+        && !state.model.netlist_artifacts.generated_source.is_empty()
 }
 
 fn active_document_available(state: &AppState) -> bool {
@@ -981,7 +987,9 @@ fn active_document_available(state: &AppState) -> bool {
     }
     match state.ui.netlist.active_document {
         ActiveNetlistDocument::Generated => generated_primary_ready(state),
-        ActiveNetlistDocument::OwnedSource => state.workspace.content.netlist_source.is_some(),
+        ActiveNetlistDocument::OwnedSource => {
+            state.model.workspace.content.netlist_source.is_some()
+        }
         ActiveNetlistDocument::GeneratedDiff => !state.ui.netlist.generated_diff_source.is_empty(),
         ActiveNetlistDocument::RunSnapshot => {
             crate::workbench::documents::netlist_document::run_deck_snapshot_run_id(state).is_some()
@@ -991,6 +999,7 @@ fn active_document_available(state: &AppState) -> bool {
 
 fn generation_block_reason(state: &AppState) -> String {
     state
+        .model
         .netlist_artifacts
         .generation_error
         .clone()
@@ -1016,10 +1025,13 @@ fn document_syntax_status(state: &AppState) -> Option<(String, Problem)> {
         return None;
     }
     if state.ui.netlist.active_document == ActiveNetlistDocument::Generated
-        && (state.netlist_artifacts.generation_error.is_some()
+        && (state.model.netlist_artifacts.generation_error.is_some()
             || !generated_primary_ready(state)
-            || state.netlist_artifacts.generated_input_digest
-                != state.netlist_artifacts.current_generation_input_digest)
+            || state.model.netlist_artifacts.generated_input_digest
+                != state
+                    .model
+                    .netlist_artifacts
+                    .current_generation_input_digest)
     {
         let retained_artifact = generated_primary_ready(state);
         return Some((
@@ -1088,7 +1100,7 @@ mod tests {
         cell.add_view(view);
         let mut library = crate::state::Library::new("behavioral");
         library.add_cell(cell);
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
 
         let bundle = crate::state::ProjectSourceBundle::try_new(
             crate::state::ProjectSourceOwner::cell_view(reference),
@@ -1122,6 +1134,7 @@ mod tests {
         )
         .expect("valid source closure");
         state
+            .model
             .workspace
             .content
             .project_sources
@@ -1131,9 +1144,11 @@ mod tests {
         let mut placed = crate::state::LibraryCellInstance::new("behavioral", "gain", "schematic");
         placed.terminal_order = vec!["p".to_owned(), "n".to_owned()];
         state
+            .model
             .schematic
             .add_library_cell_component(crate::state::Point::new(20, 20), placed);
         state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -1152,11 +1167,12 @@ mod tests {
             })
             .expect("create mixed-signal configuration");
         let projection = state
+            .model
             .workspace
             .configuration_execution_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .expect("resolve configured behavioral view");
         let source_key = projection
@@ -1175,19 +1191,23 @@ mod tests {
         let (document, owned) =
             generation::publish_generated_document(state, input_digest, source.clone())
                 .expect("canonical generated fixture");
-        state.netlist_artifacts.generated_source = source;
-        state.netlist_artifacts.generated_document = Some(document);
+        state.model.netlist_artifacts.generated_source = source;
+        state.model.netlist_artifacts.generated_document = Some(document);
         state.ui.netlist.owned_document = owned;
-        state.netlist_artifacts.generated_input_digest = Some(input_digest);
-        state.netlist_artifacts.current_generation_input_digest = Some(input_digest);
+        state.model.netlist_artifacts.generated_input_digest = Some(input_digest);
+        state
+            .model
+            .netlist_artifacts
+            .current_generation_input_digest = Some(input_digest);
     }
 
     #[test]
     fn editable_source_and_generated_primary_coexist_without_overwrite() {
         let mut state = AppState::default();
         retain_generated(&mut state, "generated\n.end\n");
-        let retained_generated = state.netlist_artifacts.generated_source.clone();
-        state.simulation.source.netlist_content = state.netlist_artifacts.generated_source.clone();
+        let retained_generated = state.model.netlist_artifacts.generated_source.clone();
+        state.model.simulation.source.netlist_content =
+            state.model.netlist_artifacts.generated_source.clone();
 
         ownership::create_owned_source(
             &mut state,
@@ -1196,7 +1216,7 @@ mod tests {
         )
         .expect("create owned source");
         assert_eq!(
-            state.workspace.content.netlist_source.as_deref(),
+            state.model.workspace.content.netlist_source.as_deref(),
             Some(retained_generated.as_str())
         );
         assert!(
@@ -1207,9 +1227,12 @@ mod tests {
         );
 
         assert!(crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
-        assert_eq!(state.simulation.source.netlist_content, retained_generated);
         assert_eq!(
-            state.workspace.content.netlist_source.as_deref(),
+            state.model.simulation.source.netlist_content,
+            retained_generated
+        );
+        assert_eq!(
+            state.model.workspace.content.netlist_source.as_deref(),
             Some("owned edit\n.end\n")
         );
         assert!(!crate::workbench::documents::netlist_document::open_generated_primary(&mut state));
@@ -1219,15 +1242,15 @@ mod tests {
     fn opening_existing_owned_source_never_overwrites_its_bytes() {
         let mut state = AppState::default();
         retain_generated(&mut state, "new generated\n.end\n");
-        state.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
+        state.model.workspace.content.netlist_source = Some("retained owned\n.end\n".to_owned());
 
         assert!(ownership::open_owned_source(&mut state));
         assert_eq!(
-            state.simulation.source.netlist_content,
+            state.model.simulation.source.netlist_content,
             "retained owned\n.end\n"
         );
         assert_eq!(
-            state.workspace.content.netlist_source.as_deref(),
+            state.model.workspace.content.netlist_source.as_deref(),
             Some("retained owned\n.end\n")
         );
     }
@@ -1279,7 +1302,7 @@ mod tests {
     fn empty_generated_primary_reports_blocked_without_claiming_staleness() {
         let mut state = AppState::default();
         state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.netlist_artifacts.generation_error =
+        state.model.netlist_artifacts.generation_error =
             Some("Add a circuit before generating the primary netlist.".to_owned());
 
         assert!(generated_primary_unavailable(&state));
@@ -1295,7 +1318,7 @@ mod tests {
         let mut state = AppState::default();
         retain_generated(&mut state, "retained\n.end\n");
         state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.netlist_artifacts.generation_error = Some("Regeneration failed.".to_owned());
+        state.model.netlist_artifacts.generation_error = Some("Regeneration failed.".to_owned());
 
         assert!(!generated_primary_unavailable(&state));
         assert!(generated_primary_ready(&state));
@@ -1310,10 +1333,10 @@ mod tests {
         let mut state = AppState::default();
         retain_generated(&mut state, "retained\n.end\n");
         state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        state.netlist_artifacts.generated_source.clear();
-        state.netlist_artifacts.generation_error = None;
+        state.model.netlist_artifacts.generated_source.clear();
+        state.model.netlist_artifacts.generation_error = None;
 
-        assert!(state.netlist_artifacts.generated_document.is_some());
+        assert!(state.model.netlist_artifacts.generated_document.is_some());
         assert!(generated_primary_unavailable(&state));
         assert!(!generated_primary_ready(&state));
         assert!(!active_document_available(&state));
@@ -1358,13 +1381,13 @@ mod tests {
             receipt,
         )))
         .expect("fresh run accepts its receipt");
-        state.simulation.retained.runs.push(run);
+        state.model.simulation.retained.runs.push(run);
     }
 
     fn ran_owned_deck(deck: &str) -> AppState {
         let mut state = AppState::default();
-        state.workspace.content.netlist_source = Some(deck.to_owned());
-        state.simulation.source.netlist_content = deck.to_owned();
+        state.model.workspace.content.netlist_source = Some(deck.to_owned());
+        state.model.simulation.source.netlist_content = deck.to_owned();
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.ui.netlist.active_document_initialized = true;
         state.manual_run.last_run_buffer = Some(deck.to_owned());
@@ -1394,8 +1417,9 @@ mod tests {
     #[test]
     fn run_strip_warns_once_the_working_deck_moves_past_the_run() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.workspace.content.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
-        state.simulation.source.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
+        state.model.workspace.content.netlist_source =
+            Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
+        state.model.simulation.source.netlist_content = "deck\nR1 out 0 2k\n.op\n.end\n".to_owned();
 
         assert_eq!(
             run_strip_projection(&state).map(|projection| projection.phase),
@@ -1406,7 +1430,8 @@ mod tests {
     #[test]
     fn run_strip_states_the_run_in_flight_and_never_the_stale_baseline() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.workspace.content.netlist_source = Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
+        state.model.workspace.content.netlist_source =
+            Some("deck\nR1 out 0 2k\n.op\n.end\n".to_owned());
         seal_manual_run(&mut state, 8, 0xCD, 5);
         state.manual_run.pending_manual_run_id = Some(8);
 
@@ -1419,7 +1444,7 @@ mod tests {
     #[test]
     fn run_strip_is_silent_without_a_retained_manual_run() {
         let mut state = ran_owned_deck("deck\nR1 out 0 1k\n.op\n.end\n");
-        state.simulation.retained.runs.clear();
+        state.model.simulation.retained.runs.clear();
 
         assert!(run_strip_projection(&state).is_none());
     }
@@ -1483,6 +1508,7 @@ mod tests {
             }
         };
         state
+            .model
             .simulation
             .retained
             .executed_decks
@@ -1543,8 +1569,8 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        app.state.workspace.content.netlist_source = Some(DECK.to_owned());
-        app.state.simulation.source.netlist_content = DECK.to_owned();
+        app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
+        app.state.model.simulation.source.netlist_content = DECK.to_owned();
         app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         app.state.ui.netlist.active_document_initialized = true;
         app.state.manual_run.last_run_buffer = Some(DECK.to_owned());
@@ -1560,8 +1586,8 @@ mod tests {
                 );
             }
             RunStripPhase::Edited => {
-                app.state.workspace.content.netlist_source = Some(EDITED.to_owned());
-                app.state.simulation.source.netlist_content = EDITED.to_owned();
+                app.state.model.workspace.content.netlist_source = Some(EDITED.to_owned());
+                app.state.model.simulation.source.netlist_content = EDITED.to_owned();
             }
             RunStripPhase::Running => {
                 seal_manual_run(&mut app.state, 8, 0xCD, 5);
@@ -1613,6 +1639,7 @@ mod tests {
         seal_manual_run(&mut app.state, 7, 0xAB, 4);
         let deck: std::sync::Arc<str> = std::sync::Arc::from(EXECUTED);
         app.state
+            .model
             .simulation
             .retained
             .executed_decks

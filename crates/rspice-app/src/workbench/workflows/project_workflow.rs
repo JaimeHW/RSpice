@@ -165,7 +165,7 @@ fn replace_with_new_project(
     params: &NewProjectParams,
     announcement: String,
 ) -> Result<Vec<String>, String> {
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         lifecycle_error(
             state,
             ProjectLifecycleError::ActiveRun,
@@ -177,8 +177,9 @@ fn replace_with_new_project(
         state.prompt(format!("New project not created: {error}"));
         return Err(error);
     }
-    let restored_model_catalog =
-        crate::workbench::app_state::restore_session_model_library_manager(&mut state.pdk_config);
+    let restored_model_catalog = crate::workbench::app_state::restore_session_model_library_manager(
+        &mut state.model.pdk_config,
+    );
     let (model_library_manager, model_restore_errors) = match restored_model_catalog {
         Ok((manager, _loaded)) => (manager, Vec::new()),
         Err(errors) => (
@@ -197,24 +198,28 @@ fn replace_with_new_project(
     let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
 
-    state.library_manager = library_manager;
-    state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    state.workspace = workspace;
-    state.schematic = schematic;
-    state.ui.schematic_snap = state.schematic.session.editor.snap_engine.clone();
+    state.model.library_manager = library_manager;
+    state.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
+    state.model.workspace = workspace;
+    state.model.schematic = schematic;
+    state.ui.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
     state.replace_project_execution_context(announcement);
-    state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
+    state.model.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
     );
     // The new plan owns its variables, outputs and specifications, as the
     // session's first plan does. Without the payload every Run plan in a new
     // project was refused before it netlisted anything.
-    if let Ok(plan) = state.sim_setup.stable_analysis_plan() {
+    if let Ok(plan) = state.model.sim_setup.stable_analysis_plan() {
         let plan_id = plan.id();
-        state.workspace.content.migrate_active_plan_data(plan_id);
+        state
+            .model
+            .workspace
+            .content
+            .migrate_active_plan_data(plan_id);
     }
-    state.model_library_manager = model_library_manager;
+    state.model.model_library_manager = model_library_manager;
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::reset_for_new_project(state);
     Ok(model_restore_errors)
@@ -290,6 +295,7 @@ fn file_name_string(path: &Path) -> Option<String> {
 
 fn project_save_dialog_default_name(state: &AppState) -> String {
     state
+        .model
         .workspace
         .content
         .project
@@ -1011,7 +1017,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
 /// model candidate, and no local run that would have to stop. A project never
 /// saved to a file always has something to lose.
 fn closing_loses_nothing(state: &AppState) -> bool {
-    !state.simulation.execution.has_active_execution()
+    !state.model.simulation.execution.has_active_execution()
         && !state.workbench.model_editor_has_unsaved_changes()
         && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty()
 }
@@ -1047,7 +1053,7 @@ fn apply_startup_project_choice(state: &mut AppState) {
 }
 
 pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         lifecycle_error(
             state,
             ProjectLifecycleError::ActiveRun,
@@ -1057,24 +1063,25 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     }
     let closed = format!(
         "Closed project {}.",
-        state.workspace.content.project.display_name()
+        state.model.workspace.content.project.display_name()
     );
     let mut libraries = crate::state::LibraryManager::with_primitives();
     let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
     let schematic = state.new_schematic_document();
     workspace.save_active_schematic(&schematic);
     state.replace_project_execution_context(closed);
-    state.library_manager = libraries;
-    state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    state.workspace = workspace;
-    state.schematic = schematic;
-    state.ui.schematic_snap = state.schematic.session.editor.snap_engine.clone();
+    state.model.library_manager = libraries;
+    state.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
+    state.model.workspace = workspace;
+    state.model.schematic = schematic;
+    state.ui.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
-    state.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
+    state.model.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
         &state.ui.preferences,
     );
-    let restored_model_catalog =
-        crate::workbench::app_state::restore_session_model_library_manager(&mut state.pdk_config);
+    let restored_model_catalog = crate::workbench::app_state::restore_session_model_library_manager(
+        &mut state.model.pdk_config,
+    );
     let (model_library_manager, model_restore_errors) = match restored_model_catalog {
         Ok((manager, _loaded)) => (manager, Vec::new()),
         Err(errors) => (
@@ -1082,7 +1089,7 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
             errors,
         ),
     };
-    state.model_library_manager = model_library_manager;
+    state.model.model_library_manager = model_library_manager;
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
     emit_session_model_restore_errors(state, "project close", model_restore_errors);
@@ -1188,7 +1195,7 @@ fn apply_loaded_project_authorized(
         None => {
             let (manager, mut warnings) =
                 match crate::workbench::app_state::restore_session_model_library_manager(
-                    &mut state.pdk_config,
+                    &mut state.model.pdk_config,
                 ) {
                     Ok((manager, loaded)) => (
                         manager,
@@ -1259,23 +1266,23 @@ fn apply_loaded_project_authorized(
         origin.display_label()
     );
     state.replace_project_execution_context(opened);
-    state.library_manager = project.file.libraries;
-    state.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    state.workspace = crate::state::ProjectWorkspace::from_parts(
+    state.model.library_manager = project.file.libraries;
+    state.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
+    state.model.workspace = crate::state::ProjectWorkspace::from_parts(
         project.file.workspace,
         project.workspace_session,
     );
-    state.sim_setup = simulation_plan;
-    state.model_library_manager = model_library_manager;
+    state.model.sim_setup = simulation_plan;
+    state.model.model_library_manager = model_library_manager;
     state.restore_active_schematic_from_workspace();
-    state.simulation = crate::state::SimulationState::default();
+    state.model.simulation = crate::state::SimulationState::default();
     // Asked of the one gate a run asks: a project with no technology runs
     // whatever its plan does not need one for. Asking whether it had a
     // binding at all told every such project its runs were blocked, and they
     // were not.
     let technology_block = state.technology_gate_block_reason().err();
     if let Err(error) =
-        crate::io::restore_simulation_results(simulation_results, &mut state.simulation)
+        crate::io::restore_simulation_results(simulation_results, &mut state.model.simulation)
         && simulation_results_warning.is_none()
     {
         simulation_results_warning = Some(format!(
@@ -1331,7 +1338,7 @@ fn apply_loaded_project_authorized(
 /// Drained rather than read, so a second load of the same session cannot repeat
 /// a loss that was already announced.
 fn report_legacy_run_set_notes(state: &mut AppState) {
-    for note in std::mem::take(&mut state.sim_setup.legacy_run_set_notes) {
+    for note in std::mem::take(&mut state.model.sim_setup.legacy_run_set_notes) {
         state.record(LogSeverity::Warning, LogSource::Studio, note);
     }
 }

@@ -119,10 +119,12 @@ pub(crate) struct ResultsQuickViewHardcopySource<'a> {
 /// palette rather than from the workspace.
 fn captured_results_run(state: &AppState) -> Option<&SimulationRun> {
     match state.workbench.documents.active(Workspace::Results) {
-        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => {
-            state.simulation.retained.run_by_dataset_id(*dataset_id)
-        }
-        _ => state.simulation.active_run(),
+        Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => state
+            .model
+            .simulation
+            .retained
+            .run_by_dataset_id(*dataset_id),
+        _ => state.model.simulation.active_run(),
     }
 }
 
@@ -185,15 +187,15 @@ impl RetainedHardcopySourceAvailability {
 pub(crate) fn enumerate_retained_hardcopy_sources(
     state: &AppState,
 ) -> Vec<RetainedHardcopySourceDescriptor> {
-    let project_id = state.workspace.content.project.id();
+    let project_id = state.model.workspace.content.project.id();
     let mut descriptors = Vec::new();
 
     if matches!(
         state.workbench.documents.active(Workspace::Design),
-        Some(WorkspaceDocumentId::CellView(reference)) if reference == &state.workspace.content.active_view
+        Some(WorkspaceDocumentId::CellView(reference)) if reference == &state.model.workspace.content.active_view
     ) {
-        let view_type = state.workspace.content.active_view_type();
-        let active_key = state.workspace.content.active_key();
+        let view_type = state.model.workspace.content.active_view_type();
+        let active_key = state.model.workspace.content.active_key();
         let design_source_key = format!("project:{}:cell-view:{active_key}", project_id.as_uuid());
         let supported = matches!(
             view_type,
@@ -207,6 +209,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
         // second name.
         let has_sheets = schematic
             && state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -227,7 +230,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
         };
         descriptors.push(RetainedHardcopySourceDescriptor {
             source_key: design_source_key.clone(),
-            display_name: state.workspace.content.active_display_path(),
+            display_name: state.model.workspace.content.active_display_path(),
             document_kind: HardcopyDocumentKind::SchematicOrSymbol,
             allowed_scopes,
             availability: if supported {
@@ -243,6 +246,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
         });
         if matches!(view_type, ViewType::Schematic | ViewType::Testbench)
             && let Some(catalog) = state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -254,7 +258,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
                     display_name: compact_display(
                         &format!(
                             "{} · {}",
-                            state.workspace.content.active_display_path(),
+                            state.model.workspace.content.active_display_path(),
                             sheet.name()
                         ),
                         "Schematic sheet",
@@ -269,7 +273,11 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
 
     if let Some(WorkspaceDocumentId::ResultDataset(dataset_id)) =
         state.workbench.documents.active(Workspace::Results)
-        && let Some(run) = state.simulation.retained.run_by_dataset_id(*dataset_id)
+        && let Some(run) = state
+            .model
+            .simulation
+            .retained
+            .run_by_dataset_id(*dataset_id)
     {
         let availability = quick_result_availability(state, run);
         descriptors.push(RetainedHardcopySourceDescriptor {
@@ -315,6 +323,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
 
     if let Some(document_id) = state.workbench.report_authoring.selected_document
         && let Some(document) = state
+            .model
             .workspace
             .content
             .report_documents
@@ -331,6 +340,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
     }
 
     let source_set_descriptors = state
+        .model
         .workspace
         .content
         .hardcopy_source_sets()
@@ -422,7 +432,12 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         return Err(HardcopySourceError::UnsupportedScope(scope));
     }
 
-    if let Some(source_set) = state.workspace.content.hardcopy_source_set(source_key) {
+    if let Some(source_set) = state
+        .model
+        .workspace
+        .content
+        .hardcopy_source_set(source_key)
+    {
         let members = source_set
             .members()
             .iter()
@@ -442,18 +457,19 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         );
     }
 
-    let project_id = state.workspace.content.project.id();
+    let project_id = state.model.workspace.content.project.id();
     let design_key = format!(
         "project:{}:cell-view:{}",
         project_id.as_uuid(),
-        state.workspace.content.active_key()
+        state.model.workspace.content.active_key()
     );
     if matches!(
-        state.workspace.content.active_view_type(),
+        state.model.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
-        let active_key = state.workspace.content.active_key();
+        let active_key = state.model.workspace.content.active_key();
         let catalog = state
+            .model
             .workspace
             .content
             .design_management
@@ -476,10 +492,11 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
     }
     if source_key == design_key {
         let identity = active_cell_view_identity(state)?;
-        return match state.workspace.content.active_view_type() {
+        return match state.model.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench => {
-                let active_key = state.workspace.content.active_key();
+                let active_key = state.model.workspace.content.active_key();
                 let catalog = state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -640,6 +657,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         let report_key = format!("project:{}:report:{}", project_id.as_uuid(), document_id);
         if source_key == report_key {
             let document = state
+                .model
                 .workspace
                 .content
                 .report_documents
@@ -673,15 +691,16 @@ fn prepare_schematic_resolution(
     scope: HardcopyScope,
 ) -> Result<PreparedRetainedHardcopyResolution, HardcopySourceError> {
     PreparedRetainedHardcopyResolution::try_capture(RetainedHardcopySourceInput::Schematic {
-        project_id: state.workspace.content.project.id(),
+        project_id: state.model.workspace.content.project.id(),
         identity,
-        schematic: state.schematic.editor_ref().design.clone(),
-        selection: state.schematic.session.editor.selection.clone(),
-        library_manager: state.library_manager.clone(),
-        schematic_buffers: state.workspace.content.schematic_buffers.clone(),
+        schematic: state.model.schematic.editor_ref().design.clone(),
+        selection: state.model.schematic.session.editor.selection.clone(),
+        library_manager: state.model.library_manager.clone(),
+        schematic_buffers: state.model.workspace.content.schematic_buffers.clone(),
         sheet_catalog,
         sheet_id,
         project_default_drawing_sheet: state
+            .model
             .workspace
             .content
             .design_management
@@ -689,6 +708,7 @@ fn prepare_schematic_resolution(
             .default_format
             .clone(),
         project_title_block_field_values: state
+            .model
             .workspace
             .content
             .design_management
@@ -720,14 +740,15 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
             matches!(
                 state.workbench.documents.active(Workspace::Design),
                 Some(WorkspaceDocumentId::CellView(reference))
-                    if reference == &state.workspace.content.active_view
+                    if reference == &state.model.workspace.content.active_view
             ) && matches!(
-                state.workspace.content.active_view_type(),
+                state.model.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench | ViewType::Symbol
             )
         }
         SurfaceId::Results => match state.workbench.documents.active(Workspace::Results) {
             Some(WorkspaceDocumentId::ResultDataset(dataset)) => state
+                .model
                 .simulation
                 .retained
                 .run_by_dataset_id(*dataset)
@@ -747,6 +768,7 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
             .selected_document
             .and_then(|document_id| {
                 state
+                    .model
                     .workspace
                     .content
                     .report_documents
@@ -769,7 +791,7 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
 /// live contract.
 fn resolved_run_specifications_are_empty(state: &AppState, run: &SimulationRun) -> bool {
     run.prepared_receipt().map_or_else(
-        || state.workspace.content.specs.is_empty(),
+        || state.model.workspace.content.specs.is_empty(),
         |receipt| receipt.specifications().is_empty(),
     )
 }
@@ -992,14 +1014,15 @@ fn quick_result_analysis_index(
     run: &SimulationRun,
     viewer: ResultViewer,
 ) -> Option<usize> {
-    let globally_selected = (state.simulation.view.active_run_idx
+    let globally_selected = (state.model.simulation.view.active_run_idx
         == state
+            .model
             .simulation
             .retained
             .runs
             .iter()
             .position(|candidate| candidate.dataset_id == run.dataset_id))
-    .then_some(state.simulation.view.active_analysis_idx)
+    .then_some(state.model.simulation.view.active_analysis_idx)
     .flatten();
     match viewer {
         ResultViewer::Waves => globally_selected
@@ -1094,6 +1117,7 @@ fn active_visualization_document_pane(
     document_id: crate::product::ResultDocumentId,
 ) -> Option<(&VisualizationDocument, &Page, &Pane)> {
     let document = state
+        .model
         .workspace
         .content
         .visualization_document(document_id)?;
@@ -1175,7 +1199,7 @@ fn visualization_document_pane_availability(
 pub(crate) fn resolve_active_app_hardcopy_source(
     state: &AppState,
 ) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    let project_id = state.workspace.content.project.id();
+    let project_id = state.model.workspace.content.project.id();
     match state.workbench.current_route().surface_id() {
         SurfaceId::Design => {
             let active = state
@@ -1185,31 +1209,32 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                 .ok_or(HardcopySourceError::NoActiveDocumentAuthority("design"))?;
             match active {
                 WorkspaceDocumentId::CellView(reference)
-                    if reference == &state.workspace.content.active_view => {}
+                    if reference == &state.model.workspace.content.active_view => {}
                 _ => {
                     return Err(HardcopySourceError::StaleActiveDocumentAuthority(format!(
                         "the Design workspace's active document is not the active view {}",
-                        state.workspace.content.active_display_path()
+                        state.model.workspace.content.active_display_path()
                     )));
                 }
             }
             let identity = active_cell_view_identity(state)?;
-            match state.workspace.content.active_view_type() {
+            match state.model.workspace.content.active_view_type() {
                 ViewType::Schematic | ViewType::Testbench => {
                     let resolver = SymbolResolver::new(
-                        state.library_manager.catalog(),
-                        &state.workspace.content.schematic_buffers,
+                        state.model.library_manager.catalog(),
+                        &state.model.workspace.content.schematic_buffers,
                     );
                     resolve_schematic_source(SchematicHardcopySource {
                         identity,
-                        schematic: state.schematic.editor_ref().design,
+                        schematic: state.model.schematic.editor_ref().design,
                         selection: None,
-                        expected_topology_version: state.schematic.topology_version(),
+                        expected_topology_version: state.model.schematic.topology_version(),
                         symbol_resolver: Some(&resolver),
                         sheet_catalog: None,
                         sheet_id: None,
                         project_default_drawing_sheet: Some(
                             &state
+                                .model
                                 .workspace
                                 .content
                                 .design_management
@@ -1218,6 +1243,7 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                         ),
                         project_title_block_field_values: Some(
                             &state
+                                .model
                                 .workspace
                                 .content
                                 .design_management
@@ -1283,6 +1309,7 @@ pub(crate) fn resolve_active_app_hardcopy_source(
                 HardcopySourceError::NoActiveDocumentAuthority("report document"),
             )?;
             let matching = state
+                .model
                 .workspace
                 .content
                 .report_documents
@@ -1312,11 +1339,12 @@ pub(crate) fn resolve_active_app_hardcopy_source(
 fn active_cell_view_identity(
     state: &AppState,
 ) -> Result<HardcopySourceIdentity, HardcopySourceError> {
-    let project_id = state.workspace.content.project.id();
-    let view_key = state.workspace.content.active_key();
+    let project_id = state.model.workspace.content.project.id();
+    let view_key = state.model.workspace.content.active_key();
     let mut identity_material = b"rspice-cell-view-hardcopy-v1:".to_vec();
     identity_material.extend_from_slice(view_key.as_bytes());
     let document_control = &state
+        .model
         .workspace
         .content
         .design_management
@@ -1328,12 +1356,12 @@ fn active_cell_view_identity(
         format!("project:{}:cell-view:{view_key}", project_id.as_uuid()),
         HardcopyDocumentId::try_from_uuid(Uuid::new_v5(&project_id.as_uuid(), &identity_material))
             .map_err(|error| HardcopySourceError::HardcopyContract(error.to_string()))?,
-        state.workspace.content.project.revision(),
-        state.workspace.content.active_display_path(),
+        state.model.workspace.content.project.revision(),
+        state.model.workspace.content.active_display_path(),
     )?
     .with_publication(HardcopyPublicationIdentity::try_new(
-        state.workspace.content.project.name(),
-        state.workspace.content.active_view.display_path(),
+        state.model.workspace.content.project.name(),
+        state.model.workspace.content.active_view.display_path(),
         (!revision.is_empty()).then(|| revision.to_owned()),
         (!date.is_empty()).then(|| date.clone()),
         Some(document_control.status.label().to_owned()),

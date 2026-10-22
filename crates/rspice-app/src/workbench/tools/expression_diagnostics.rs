@@ -187,7 +187,7 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
 /// workspace already holds for it.
 fn collect_rows(app: &RSpiceApp) -> Vec<ExpressionRow> {
     let state = &app.state;
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return Vec::new();
     };
     let mut rows = Vec::new();

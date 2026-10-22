@@ -23,6 +23,7 @@ fn checked_reference() -> (HierarchyReference, CellViewRef) {
     assert!(
         reference
             .state
+            .model
             .workspace
             .content
             .active_view
@@ -31,10 +32,16 @@ fn checked_reference() -> (HierarchyReference, CellViewRef) {
         "precondition: the root is the view in front of the reader"
     );
     let spare = CellViewRef::new(&reference.top.library, "spare", "schematic");
-    reference.state.workspace.content.schematic_buffers.insert(
-        spare.key(),
-        rspice_design::schematic::owned::Schematic::default(),
-    );
+    reference
+        .state
+        .model
+        .workspace
+        .content
+        .schematic_buffers
+        .insert(
+            spare.key(),
+            rspice_design::schematic::owned::Schematic::default(),
+        );
     reference
         .state
         .run_active_design_checks()
@@ -57,6 +64,7 @@ fn is_current(state: &AppState, subject: &CellViewRef) -> bool {
 /// Edit a stored cellview's content, as any edit of its drawing does.
 fn edit_stored(state: &mut AppState, cell_view: &CellViewRef) {
     state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -93,7 +101,7 @@ fn an_edit_to_a_cellview_the_check_instantiates_stales_its_findings() {
 /// `views`.
 fn rebind_second_amplifier(reference: &mut HierarchyReference, views: &[&str]) {
     let state = &mut reference.state;
-    let mut catalog = (*state.workspace.content.configuration_sets).clone();
+    let mut catalog = (*state.model.workspace.content.configuration_sets).clone();
     let configuration = catalog
         .find(reference.configuration)
         .expect("the reference configuration")
@@ -109,6 +117,7 @@ fn rebind_second_amplifier(reference: &mut HierarchyReference, views: &[&str]) {
         )
         .expect("the override is well formed");
     state
+        .model
         .workspace
         .content
         .replace_configuration_sets(catalog)
@@ -124,6 +133,7 @@ fn rebinding_a_configuration_entry_the_check_followed_stales_its_findings() {
     let alternate = CellViewRef::new(&amp.library, &amp.cell, "alternate");
     reference
         .state
+        .model
         .library_manager
         .edit_library(&amp.library)
         .expect("the amplifier's library")
@@ -132,9 +142,10 @@ fn rebinding_a_configuration_entry_the_check_followed_stales_its_findings() {
             crate::state::View::new("alternate", ViewType::Schematic),
         )
         .expect("the amplifier cell");
-    let copy = reference.state.workspace.content.schematic_buffers[&amp.key()].clone();
+    let copy = reference.state.model.workspace.content.schematic_buffers[&amp.key()].clone();
     reference
         .state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -203,19 +214,19 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
         (
             "an edit to the drawing in front of the reader",
             |reference| {
-                reference.state.schematic.add_component(
+                reference.state.model.schematic.add_component(
                     crate::state::ComponentType::Resistor,
                     Point::new(4000, 4000),
                 );
             },
         ),
         ("an undo", |reference| {
-            reference.state.schematic.add_component(
+            reference.state.model.schematic.add_component(
                 crate::state::ComponentType::Resistor,
                 Point::new(4000, 4000),
             );
             let _ = listing::listing_in_pass(&reference.state, 90);
-            assert!(reference.state.schematic.undo(), "the edit is undone");
+            assert!(reference.state.model.schematic.undo(), "the edit is undone");
         }),
         ("an edit to a stored cellview", |reference| {
             let amp = reference.amp_schematic.clone();
@@ -224,12 +235,14 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
         ("a library added", |reference| {
             reference
                 .state
+                .model
                 .library_manager
                 .add_library(Library::new("scratch"));
         }),
         ("the connectivity contract", |reference| {
             reference
                 .state
+                .model
                 .workspace
                 .content
                 .connectivity
@@ -237,7 +250,7 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
                 .alias_comparison = GlobalAliasComparisonPolicy::DialectCompatibility;
         }),
         ("design management, edited in place", |reference| {
-            let management = &mut reference.state.workspace.content.design_management;
+            let management = &mut reference.state.model.workspace.content.design_management;
             let mut settings = management.drawing_sheet_settings().clone();
             settings.title_block_field_values.insert(
                 crate::state::DrawingSheetTitleFieldId::Organization,
@@ -249,7 +262,8 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
                 .expect("the settings are valid");
         }),
         ("design management, replaced", |reference| {
-            let mut candidate = (*reference.state.workspace.content.design_management).clone();
+            let mut candidate =
+                (*reference.state.model.workspace.content.design_management).clone();
             let mut settings = candidate.drawing_sheet_settings().clone();
             settings.title_block_field_values.insert(
                 crate::state::DrawingSheetTitleFieldId::Organization,
@@ -261,6 +275,7 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
                 .expect("the settings are valid");
             reference
                 .state
+                .model
                 .workspace
                 .content
                 .replace_design_management(candidate)
@@ -270,7 +285,7 @@ fn every_input_the_memo_is_keyed_by_moves_on_every_way_it_is_changed() {
             rebind_second_amplifier(reference, &["schematic", "symbol"]);
         }),
         ("the rule deck, even unchanged", |reference| {
-            let _ = &mut *reference.state.workspace.content.design_rules;
+            let _ = &mut *reference.state.model.workspace.content.design_rules;
         }),
     ];
     for (name, mutate) in mutations {

@@ -175,7 +175,7 @@ pub(crate) fn build_publication_snapshot(
         .flatten();
     let results = if draft.include_results {
         let specifications = active_specs(state);
-        results_section(state.simulation.active_run(), &specifications)?
+        results_section(state.model.simulation.active_run(), &specifications)?
     } else {
         None
     };
@@ -325,7 +325,7 @@ fn engineering_publication(
     include_schematic: bool,
     results: Option<&ResultsSection>,
 ) -> Result<EngineeringPublication, PublicationBuildError> {
-    let simulation = results.map(|_| simulation_provenance(state.simulation.active_run()));
+    let simulation = results.map(|_| simulation_provenance(state.model.simulation.active_run()));
     if !include_schematic {
         return Ok(EngineeringPublication {
             components: Vec::new(),
@@ -336,30 +336,32 @@ fn engineering_publication(
     }
 
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| PublicationBuildError::SourceResolution {
-            source: state.workspace.content.active_view.display_path(),
+            source: state.model.workspace.content.active_view.display_path(),
             reason: error.to_string(),
         })?;
     let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
     let subject = projection
         .schematic_buffers()
         .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(&state.workspace.content.active_view.key()))
+        .find(|(key, _)| key.eq_ignore_ascii_case(&state.model.workspace.content.active_view.key()))
         .map(|(_, schematic)| schematic)
         .ok_or_else(|| PublicationBuildError::SourceResolution {
-            source: state.workspace.content.active_view.display_path(),
+            source: state.model.workspace.content.active_view.display_path(),
             reason: "the open view is not part of the configured design".to_owned(),
         })?;
     let design_nets = design_nets_with_hierarchy(subject, &hierarchy);
     let resolved_pin_names = component_pin_names_with_hierarchy(subject, &hierarchy);
     let published_components = state
+        .model
         .schematic
         .document()
         .components
@@ -1032,6 +1034,7 @@ fn convert_scene(
 
 fn active_specs(state: &AppState) -> Vec<SpecEntry> {
     if let Some(receipt) = state
+        .model
         .simulation
         .active_run()
         .and_then(crate::state::SimulationRun::prepared_receipt)
@@ -1043,10 +1046,11 @@ fn active_specs(state: &AppState) -> Vec<SpecEntry> {
             .collect();
     }
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .map(|plan| state.workspace.content.active_specs(plan.id()))
+        .map(|plan| state.model.workspace.content.active_specs(plan.id()))
         .unwrap_or(&[])
         .to_vec()
 }
@@ -1382,10 +1386,10 @@ fn effective_deck(state: &AppState) -> Option<NetlistSection> {
         .manual_run
         .last_run_buffer
         .as_deref()
-        .or(state.workspace.content.netlist_source.as_deref())
+        .or(state.model.workspace.content.netlist_source.as_deref())
         .filter(|deck| !deck.trim().is_empty())
         .or_else(|| {
-            let live = state.simulation.source.netlist_content.as_str();
+            let live = state.model.simulation.source.netlist_content.as_str();
             (!live.trim().is_empty()).then_some(live)
         })?;
     let deck = raw.replace("\r\n", "\n").replace('\r', "\n");
@@ -1774,7 +1778,7 @@ mod tests {
     #[test]
     fn deck_line_endings_normalize_to_canonical_form() {
         let mut state = AppState::default();
-        state.simulation.source.netlist_content =
+        state.model.simulation.source.netlist_content =
             "* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string();
         let deck = effective_deck(&state).expect("deck").deck;
         assert!(!deck.contains('\r'));
@@ -1784,7 +1788,7 @@ mod tests {
     #[test]
     fn authored_presentation_and_disclosure_choices_are_sealed() {
         let mut state = AppState::default();
-        state.simulation.source.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
+        state.model.simulation.source.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
         let snapshot = build_publication_snapshot(
             &state,
             &PublicationDraft {
@@ -1863,6 +1867,7 @@ mod tests {
         // that ignored the sheet partition would show them overlaid.
         for wire_id in [11, 22] {
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .wires
@@ -1872,13 +1877,13 @@ mod tests {
                     crate::state::Point::new(20, 0),
                 ));
         }
-        let reference = state.workspace.content.active_view.clone();
+        let reference = state.model.workspace.content.active_view.clone();
         state
             .workbench
             .documents
             .activate(WorkspaceDocumentId::CellView(reference));
-        let active_key = state.workspace.content.active_key();
-        let design_management = &mut state.workspace.content.design_management;
+        let active_key = state.model.workspace.content.active_key();
+        let design_management = &mut state.model.workspace.content.design_management;
         let first = design_management
             .bootstrap_for_cell_view(&active_key, "First", [11])
             .unwrap();
@@ -1899,7 +1904,7 @@ mod tests {
             .unwrap();
 
         let (sheets, plots) = collect_scenes(&state).unwrap();
-        let path = state.workspace.content.active_display_path();
+        let path = state.model.workspace.content.active_display_path();
         assert_eq!(
             sheets
                 .iter()
@@ -1913,7 +1918,7 @@ mod tests {
     #[test]
     fn native_engineering_projection_preserves_components_nets_and_signal_identity() {
         let mut state = AppState::default();
-        state.schematic.add_component(
+        state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(0, 0),
         );
@@ -2147,7 +2152,7 @@ mod tests {
     #[test]
     fn run_results_and_deck_build_a_valid_snapshot() {
         let mut state = AppState::default();
-        state.simulation.source.netlist_content =
+        state.model.simulation.source.netlist_content =
             "* RSpice Netlist\nR1 in out 1k\n.end".to_string();
         let mut run = crate::state::SimulationRun::new(1);
         run.analyses.push({
@@ -2171,8 +2176,8 @@ mod tests {
             result
         });
         run.success = true;
-        state.simulation.retained.runs.push(run);
-        state.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.retained.runs.push(run);
+        state.model.simulation.view.active_run_idx = Some(0);
 
         let snapshot = build_publication_snapshot(
             &state,

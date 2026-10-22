@@ -15,6 +15,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
         && app.state.ui.netlist.active_dependency_identity.is_none();
     let history_len = if owned {
         app.state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -26,7 +27,11 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
     let current_available = if owned {
         app.state.ui.netlist.owned_document.is_some()
     } else {
-        app.state.netlist_artifacts.generated_document.is_some()
+        app.state
+            .model
+            .netlist_artifacts
+            .generated_document
+            .is_some()
     };
     if history_len == 0 || !current_available {
         app.state.ui.netlist.comparison_dialog.open = false;
@@ -38,6 +43,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
     let selected_label = if owned {
         let Some(selected) = app
             .state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -83,6 +89,7 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
     let restore_enabled = owned
         && app
             .state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -131,8 +138,13 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
             .width(ui.available_width().max(1.0))
             .show_ui(ui, |ui| {
                 if owned {
-                    if let Some(descriptor) =
-                        app.state.workspace.content.netlist_descriptor.as_ref()
+                    if let Some(descriptor) = app
+                        .state
+                        .model
+                        .workspace
+                        .content
+                        .netlist_descriptor
+                        .as_ref()
                     {
                         for (index, snapshot) in
                             descriptor.revision_history.iter().enumerate().rev()
@@ -218,11 +230,11 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
 pub(super) fn owned_source_save_ready(app: &RSpiceApp) -> bool {
     if app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
         || app.state.ui.netlist.active_dependency_identity.is_some()
-        || app.state.workspace.content.netlist_source.is_none()
+        || app.state.model.workspace.content.netlist_source.is_none()
     {
         return false;
     }
-    let digest = crate::state::content_digest(&app.state.simulation.source.netlist_content);
+    let digest = crate::state::content_digest(&app.state.model.simulation.source.netlist_content);
     app.state.ui.netlist.externally_saved_content_digest != Some(digest)
 }
 
@@ -239,7 +251,8 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
 
     let mut dialog = app.state.ui.netlist.save_dialog.clone();
     let messages = app.state.ui.messages();
-    let current_digest = crate::state::content_digest(&app.state.simulation.source.netlist_content);
+    let current_digest =
+        crate::state::content_digest(&app.state.model.simulation.source.netlist_content);
     let browser_copy = cfg!(target_arch = "wasm32");
     let message_valid = browser_copy || {
         let message = dialog.message.trim();
@@ -281,7 +294,13 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
     .hint(footer_hint)
     .show_with_initial_body_focus(ctx, |ui| {
         let t = Tokens::get(ctx);
-        let descriptor = app.state.workspace.content.netlist_descriptor.as_ref();
+        let descriptor = app
+            .state
+            .model
+            .workspace
+            .content
+            .netlist_descriptor
+            .as_ref();
         let artifact_name = descriptor.map_or_else(
             || messages.text(MessageId::NetlistOwnedSpiceSource),
             |value| value.artifact_name.clone(),

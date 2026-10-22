@@ -231,13 +231,17 @@ pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
     // Create array is greyed on a read-only schematic and on a selection it
     // cannot repeat, so those two return without a word.
     if state.schematic_edit_read_only()
-        || state.schematic.validate_array_source_selection().is_err()
+        || state
+            .model
+            .schematic
+            .validate_array_source_selection()
+            .is_err()
     {
         return;
     }
     let count = SchematicArrayCount::parse(DEFAULT_COUNT)
         .expect("the mockup-owned default array count is valid");
-    let naming = match state.schematic.default_array_naming(count) {
+    let naming = match state.model.schematic.default_array_naming(count) {
         Ok(naming) => naming.to_string(),
         Err(error) => {
             state.prompt(format!("Create array could not find unused names: {error}"));
@@ -290,7 +294,7 @@ impl RSpiceApp {
                     };
                     self.state.dialogs.array_selection.arm();
                     self.state.dialogs.array_selection.canvas.anchor = radial_center;
-                    self.state.schematic.arm_tool(Tool::ArraySelection);
+                    self.state.model.schematic.arm_tool(Tool::ArraySelection);
                     rspice_schematic_editor::view::canvas::request_focus(ctx);
                 }
             }
@@ -316,7 +320,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         errors.messages.push(message);
     }
     if draft.kind == SchematicArrayKind::RadialDocumentation {
-        let selection = &state.schematic.session.editor.selection;
+        let selection = &state.model.schematic.session.editor.selection;
         let documentation_count = selection
             .documentation_shapes
             .len()
@@ -362,12 +366,12 @@ fn validate_draft(state: &AppState) -> DraftValidation {
                 SchematicArrayPlacement::Center(Point::origin())
             }
             SchematicArrayKind::Linear => SchematicArrayPlacement::Pitch(Point::new(
-                state.schematic.document().grid_size.max(1),
-                state.schematic.document().grid_size.max(1),
+                state.model.schematic.document().grid_size.max(1),
+                state.model.schematic.document().grid_size.max(1),
             )),
             SchematicArrayKind::Rectangular => SchematicArrayPlacement::Pitch(Point::new(
-                state.schematic.document().grid_size.max(1),
-                state.schematic.document().grid_size.max(1),
+                state.model.schematic.document().grid_size.max(1),
+                state.model.schematic.document().grid_size.max(1),
             )),
         };
         if let Err(error) = SchematicArrayPlan::new(draft.kind, count, naming.clone(), placement) {
@@ -383,7 +387,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
 
 pub(crate) fn armed_array_selection_authority(state: &AppState) -> Result<(), String> {
     if !state.dialogs.array_selection.armed
-        || state.schematic.session.editor.tool != Tool::ArraySelection
+        || state.model.schematic.session.editor.tool != Tool::ArraySelection
     {
         return Err("Create array is not armed.".to_owned());
     }
@@ -405,8 +409,8 @@ pub(crate) fn armed_array_selection_plan(
 
 pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
     state.dialogs.array_selection.close();
-    if state.schematic.session.editor.tool == Tool::ArraySelection {
-        state.schematic.cancel_tool();
+    if state.model.schematic.session.editor.tool == Tool::ArraySelection {
+        state.model.schematic.cancel_tool();
     }
 }
 
@@ -467,7 +471,7 @@ fn error_or_blank(error: Option<&str>) -> FieldLine<'_> {
 }
 
 fn radial_documentation_center(state: &AppState) -> Option<Point> {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let mut min_x = i32::MAX;
     let mut min_y = i32::MAX;
     let mut max_x = i32::MIN;
@@ -478,12 +482,12 @@ fn radial_documentation_center(state: &AppState) -> Option<Point> {
         max_x = max_x.max(point.x);
         max_y = max_y.max(point.y);
     };
-    for note in &state.schematic.document().design_notes {
+    for note in &state.model.schematic.document().design_notes {
         if selection.has_design_note(note.id) {
             include(note.pos);
         }
     }
-    for shape in &state.schematic.document().documentation_shapes {
+    for shape in &state.model.schematic.document().documentation_shapes {
         if selection.has_documentation_shape(shape.id) {
             for point in shape.geometry.points() {
                 include(point);
@@ -530,10 +534,17 @@ mod tests {
     #[test]
     fn open_uses_exact_default_count_and_collision_free_naming() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(4, ComponentType::Resistor, Point::origin())
+                    .with_name_value("R1", "1k"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -571,16 +582,22 @@ mod tests {
     #[test]
     fn radial_documentation_accepts_notes_and_starts_at_the_selection_center() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().design_notes.push(
-            DesignNote::new(
-                11,
-                Point::new(120, -40),
-                DesignNoteKind::PlainText,
-                "review boundary",
-            )
-            .unwrap(),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(
+                DesignNote::new(
+                    11,
+                    Point::new(120, -40),
+                    DesignNoteKind::PlainText,
+                    "review boundary",
+                )
+                .unwrap(),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -600,10 +617,17 @@ mod tests {
     #[test]
     fn rectangular_array_highlights_only_the_incompatible_count_field() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(4, ComponentType::Resistor, Point::origin())
+                    .with_name_value("R1", "1k"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -622,10 +646,17 @@ mod tests {
     #[test]
     fn malformed_naming_highlights_only_the_naming_field() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(4, ComponentType::Resistor, Point::origin())
+                    .with_name_value("R1", "1k"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -648,10 +679,17 @@ mod tests {
     #[test]
     fn stale_operation_is_not_misrepresented_as_a_field_error() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.push(
-            Component::new(4, ComponentType::Resistor, Point::origin()).with_name_value("R1", "1k"),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                Component::new(4, ComponentType::Resistor, Point::origin())
+                    .with_name_value("R1", "1k"),
+            );
+        state
+            .model
             .schematic
             .session
             .editor

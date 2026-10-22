@@ -280,16 +280,16 @@ impl DrawnDesign {
     /// when the configuration no longer projects, in which case every name is
     /// located in the deck.
     fn configured(state: &AppState) -> Self {
-        let Ok(projection) = state.workspace.configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+        let Ok(projection) = state.model.workspace.configuration_execution_projection(
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         ) else {
             return Self {
                 occurrences: Vec::new(),
             };
         };
-        let catalog = state.library_manager.catalog();
+        let catalog = state.model.library_manager.catalog();
         let schematic_of = |cell_view: &CellViewRef| {
             projection
                 .schematic_buffers()

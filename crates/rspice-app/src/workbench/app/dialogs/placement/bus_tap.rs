@@ -61,7 +61,13 @@ impl RSpiceApp {
         };
         // The sheet this tap goes on: the one thing about the form that is not
         // in the form.
-        let view_path = self.state.workspace.content.active_view.display_path();
+        let view_path = self
+            .state
+            .model
+            .workspace
+            .content
+            .active_view
+            .display_path();
 
         let fields = &mut self.state.dialogs.bus_tap.fields;
         let choice = CommandForm::new(TITLE, PRIMARY)
@@ -85,8 +91,8 @@ impl RSpiceApp {
                         self.state.dialogs.bus_tap.fields.validate()
                 {
                     let placement = PendingBusTapPlacement::new(pending, source.clone());
-                    self.state.schematic.session.editor.pending_bus_tap = Some(placement);
-                    self.state.schematic.arm_tool(Tool::BusTap);
+                    self.state.model.schematic.session.editor.pending_bus_tap = Some(placement);
+                    self.state.model.schematic.arm_tool(Tool::BusTap);
                     self.state.dialogs.bus_tap.close();
                 }
             }
@@ -114,6 +120,7 @@ pub(crate) fn open_bus_tap(state: &mut AppState) {
 /// field's hint.
 fn sole_declared_bus(state: &AppState) -> String {
     let mut declarations = state
+        .model
         .schematic
         .document()
         .buses
@@ -189,9 +196,9 @@ mod tests {
 
     /// Draw one declared bus on the active sheet.
     fn declare_bus(state: &mut AppState, declaration: &str) {
-        let id = state.schematic.next_id();
+        let id = state.model.schematic.next_id();
         let declaration = BusDeclaration::parse(declaration).expect("declaration");
-        state.schematic.document_mut_for_test().buses.push(
+        state.model.schematic.document_mut_for_test().buses.push(
             Bus::segment(id, Point::new(0, 0), Point::new(40, 0), Some(declaration))
                 .expect("bus segment"),
         );
@@ -220,7 +227,15 @@ mod tests {
         });
 
         assert_eq!(app.state.dialogs.bus_tap.fields.bus, "DATA[31:0]");
-        assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
+        assert!(
+            app.state
+                .model
+                .schematic
+                .session
+                .editor
+                .pending_bus_tap
+                .is_none()
+        );
     }
 
     /// The content bug this form shipped: it opened holding `DATA[15:0]` and
@@ -286,8 +301,16 @@ mod tests {
         });
 
         assert!(!app.state.dialogs.bus_tap.open);
-        assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+        assert!(
+            app.state
+                .model
+                .schematic
+                .session
+                .editor
+                .pending_bus_tap
+                .is_none()
+        );
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
     }
 
     #[test]
@@ -306,9 +329,10 @@ mod tests {
         });
 
         assert!(!app.state.dialogs.bus_tap.open);
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::BusTap);
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::BusTap);
         let pending = app
             .state
+            .model
             .schematic
             .session
             .editor
@@ -341,13 +365,14 @@ mod tests {
             crate::ui::Theme::default().apply(&ctx);
             let mut app = RSpiceApp::test_instance();
             let master = crate::state::CellViewRef::new("work", "tap_parent", "schematic");
-            app.state.workspace.descend_into(
+            app.state.model.workspace.descend_into(
                 "X1".to_owned(),
                 master.clone(),
                 crate::state::ViewType::Schematic,
             );
             let first = app
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -359,11 +384,11 @@ mod tests {
                 app.render_bus_tap_dialog(ctx)
             });
             match change {
-                "design" => app.state.design_execution_epoch += 1,
-                "buffer" => app.state.active_schematic_epoch += 1,
+                "design" => app.state.model.design_execution_epoch += 1,
+                "buffer" => app.state.model.active_schematic_epoch += 1,
                 "occurrence" => {
-                    app.state.workspace.ascend_one().unwrap();
-                    app.state.workspace.descend_into(
+                    app.state.model.workspace.ascend_one().unwrap();
+                    app.state.model.workspace.descend_into(
                         "X2".to_owned(),
                         master.clone(),
                         crate::state::ViewType::Schematic,
@@ -372,6 +397,7 @@ mod tests {
                 "sheet" => {
                     let catalog = app
                         .state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -391,12 +417,12 @@ mod tests {
                     catalog.set_active(second).unwrap();
                 }
                 "content" => {
-                    app.state.schematic.add_component(
+                    app.state.model.schematic.add_component(
                         crate::state::ComponentType::Resistor,
                         crate::state::Point::new(40, 20),
                     );
                 }
-                "read-only" => app.state.schematic.session.read_only = true,
+                "read-only" => app.state.model.schematic.session.read_only = true,
                 "safe-mode" => app.state.workbench.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
@@ -408,23 +434,37 @@ mod tests {
                 _ => unreachable!(),
             }
             assert!(placement_source(&app.state).is_err(), "{change}");
-            let content = app.state.schematic.content_version();
-            let topology = app.state.schematic.topology_version();
+            let content = app.state.model.schematic.content_version();
+            let topology = app.state.model.schematic.topology_version();
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 app.render_bus_tap_dialog(ctx)
             });
             assert!(app.state.dialogs.bus_tap.open, "{change}");
             assert_eq!(
-                app.state.schematic.session.editor.tool,
+                app.state.model.schematic.session.editor.tool,
                 Tool::Select,
                 "{change}"
             );
             assert!(
-                app.state.schematic.session.editor.pending_bus_tap.is_none(),
+                app.state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .pending_bus_tap
+                    .is_none(),
                 "{change}"
             );
-            assert_eq!(app.state.schematic.content_version(), content, "{change}");
-            assert_eq!(app.state.schematic.topology_version(), topology, "{change}");
+            assert_eq!(
+                app.state.model.schematic.content_version(),
+                content,
+                "{change}"
+            );
+            assert_eq!(
+                app.state.model.schematic.topology_version(),
+                topology,
+                "{change}"
+            );
         }
     }
 }

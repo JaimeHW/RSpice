@@ -70,11 +70,13 @@ fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
     app.state.open_project_session();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan")
         .id();
     app.state
+        .model
         .sim_setup
         .rename_plan(plan_id, "Regression envelope")
         .expect("rename the active plan");
@@ -105,7 +107,7 @@ fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
 fn managing_simulation_plans_is_disabled_without_a_stable_analysis_plan() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.sim_setup.analysis_plan = None;
+    app.state.model.sim_setup.analysis_plan = None;
 
     assert!(!Command::ManageSimulationPlans.is_enabled(&app));
     assert_eq!(

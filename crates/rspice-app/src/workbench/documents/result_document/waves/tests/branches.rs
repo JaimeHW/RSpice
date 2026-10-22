@@ -16,7 +16,7 @@ use super::*;
 /// those two lines.
 pub(super) fn hysteresis_run() -> AppState {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
             RetainedTrace::new(
                 "V(out)",
@@ -35,7 +35,7 @@ fn rows_of(state: &mut AppState, a: Option<f64>, b: Option<f64>) -> Vec<ReadoutR
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -74,7 +74,7 @@ fn a_hysteresis_sweep_reports_one_row_per_branch() {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -129,7 +129,7 @@ fn a_branch_that_does_not_reach_the_cursor_reports_nothing() {
 #[test]
 fn a_descending_sweep_keeps_one_untagged_row() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![2.0, 1.0, 0.0], vec![20.0, 10.0, 0.0], "#fff"),
         ]),
@@ -149,7 +149,7 @@ fn a_descending_sweep_keeps_one_untagged_row() {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -180,7 +180,7 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
         }
     }
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
             .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
     );
@@ -204,7 +204,7 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
 
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -227,7 +227,7 @@ fn the_readout_band_is_sized_by_the_rows_it_will_draw() {
     state.ui.results.session.cursors.place(0.25);
     state.ui.results.session.readout_collapsed = false;
 
-    let retained_waveforms = state.simulation.active_run().unwrap().analyses[0]
+    let retained_waveforms = state.model.simulation.active_run().unwrap().analyses[0]
         .waveforms
         .len();
     assert_eq!(retained_waveforms, 1, "one retained waveform, two branches");
@@ -309,7 +309,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
         .collect();
     let y: Vec<f64> = x.iter().map(|value| value * 2.0).collect();
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
             .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
     );
@@ -317,7 +317,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
     let analysis = {
         let presentation = state.ui.preferences.result_presentation_policy();
         let models = cached_models(
-            &state.simulation,
+            &state.model.simulation,
             &mut state.ui.results,
             presentation.complex_number_display(),
             &Tokens::default(),
@@ -357,7 +357,7 @@ fn loop_readings(
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),

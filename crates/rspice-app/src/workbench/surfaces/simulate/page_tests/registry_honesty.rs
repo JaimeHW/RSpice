@@ -50,7 +50,7 @@ fn registries() -> [(SimulationPage, &'static str, [&'static str; 2]); 3] {
 fn a_registry_over_an_unresolvable_plan_refuses_rather_than_reading_as_empty() {
     for (page, refusal, headings) in registries() {
         let rendered = render_with(page, 1200.0, |app| {
-            app.state.sim_setup.analysis_plan = None;
+            app.state.model.sim_setup.analysis_plan = None;
         });
         assert!(
             rendered.contains("plan unavailable"),
@@ -107,7 +107,7 @@ fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
     let mut last_receipt = None;
     let rendered = render_with(SimulationPage::Specifications, 1200.0, |app| {
         let id = plan_id(app);
-        app.state.workspace.content.replace_active_specs(
+        app.state.model.workspace.content.replace_active_specs(
             id,
             vec![SpecEntry {
                 measurement: "gain".to_owned(),
@@ -121,6 +121,7 @@ fn a_specification_commit_lands_in_the_plan_log_without_a_receipts_card() {
         super::super::page_specs::commit_scope(app, "gain", SpecPointScope::Nominal);
         last_receipt = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
@@ -304,6 +305,7 @@ fn app_with_bounded_variable() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let id = plan_id(&app);
     app.state
+        .model
         .workspace
         .content
         .add_design_variable(id, bounded_variable())
@@ -330,6 +332,7 @@ fn a_refused_variable_expression_stays_on_the_field_that_was_typed_into() {
         registry
             .app
             .state
+            .model
             .workspace
             .content
             .plan_data(id)
@@ -394,6 +397,7 @@ fn an_accepted_variable_expression_clears_the_draft_it_committed() {
         registry
             .app
             .state
+            .model
             .workspace
             .content
             .plan_data(id)
@@ -445,6 +449,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
         )
         .expect("a valid saved output");
         app.state
+            .model
             .workspace
             .content
             .add_saved_output(id, output)
@@ -462,6 +467,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
     let stored: Vec<String> = registry
         .app
         .state
+        .model
         .workspace
         .content
         .plan_data(id)

@@ -106,7 +106,7 @@ const APPLICATION_GATE: &[GateRow] = &[
         state.ui.netlist.find.open = true;
     }),
     ("sim_setup.session.palette_open", |state| {
-        state.sim_setup.session.palette_open = true;
+        state.model.sim_setup.session.palette_open = true;
     }),
     ("tabbed_property_dialog", |state| {
         state.tabbed_property_dialog.open = true;
@@ -150,7 +150,7 @@ const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
     ("ui.code_workspace.veriloga.import_form", |state| {
         state.ui.code_workspace.veriloga.import_form = Some(
             crate::workbench::documents::code_workspace::VerilogAImportFormState {
-                project_id: state.workspace.content.project.id(),
+                project_id: state.model.workspace.content.project.id(),
                 file_name: "gain.va".to_owned(),
                 contents: String::new(),
                 library: "behavioral".to_owned(),

@@ -36,7 +36,7 @@ enum OverflowReviewAction {
 pub(crate) fn open_drawing_sheet_overflow_review(state: &mut AppState) -> bool {
     if state.dialogs.drawing_sheet_overflow_open
         || !matches!(
-            state.workspace.content.active_view_type(),
+            state.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
     {
@@ -87,8 +87,13 @@ impl RSpiceApp {
             }
             OverflowReviewAction::FitContent => {
                 self.state.dialogs.drawing_sheet_overflow_open = false;
-                self.state.schematic.session.editor.needs_fit = true;
-                self.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+                self.state.model.schematic.session.editor.needs_fit = true;
+                self.state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .needs_drawing_sheet_fit = false;
             }
             OverflowReviewAction::SheetProperties => {
                 self.state.dialogs.drawing_sheet_overflow_open = false;

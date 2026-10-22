@@ -54,7 +54,7 @@ fn app_with_selected_authored_symbol() -> RSpiceApp {
     cell.add_view(symbol_view);
     let mut library = Library::new("command_test");
     library.add_cell(cell);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
 
     let interface = [
         PortSpec {
@@ -68,16 +68,23 @@ fn app_with_selected_authored_symbol() -> RSpiceApp {
     ];
     let mut binding = LibraryCellInstance::new("command_test", "amp", "schematic");
     binding.bind_interface(&interface);
-    app.state.schematic.document_mut_for_test().components.push(
-        Component::new(701, ComponentType::CellInstance, Point::new(100, 50))
-            .with_library_cell(binding),
-    );
     app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(
+            Component::new(701, ComponentType::CellInstance, Point::new(100, 50))
+                .with_library_cell(binding),
+        );
+    app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(702, Point::new(60, 40), Point::new(60, 0)));
     app.state
+        .model
         .schematic
         .session
         .editor

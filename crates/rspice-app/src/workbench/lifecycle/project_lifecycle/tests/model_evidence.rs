@@ -22,15 +22,17 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
         .unwrap();
         let solver_input = generated_netlist_input_digest(&state).unwrap();
         let plan = state
+            .model
             .model_library_manager
             .seal_execution_sources()
             .unwrap()
             .reference_model_execution_plan(crate::product::ProcessCorner::TT)
             .unwrap();
         let receipt = state
+            .model
             .model_library_manager
             .issue_model_validation_receipt(
-                state.workspace.content.project.revision(),
+                state.model.workspace.content.project.revision(),
                 plan.digest(),
                 None,
                 crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
@@ -66,6 +68,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
         );
         assert!(!active_document_is_dirty(&state));
         state
+            .model
             .model_library_manager
             .restore_model_validation_receipt(None)
             .unwrap();
@@ -73,12 +76,12 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
         let review = prepare_revert_active_document(&state).unwrap();
         confirm_revert_active_document(&mut state, &review).unwrap();
         assert_eq!(
-            state.model_library_manager.model_validation_receipt(),
+            state.model.model_library_manager.model_validation_receipt(),
             Some(&receipt)
         );
         assert!(!active_document_is_dirty(&state));
         assert!(
-            has_ac_analysis(&state.sim_setup),
+            has_ac_analysis(&state.model.sim_setup),
             "model revert must retain the plan draft"
         );
         for epoch in [
@@ -89,6 +92,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
             crate::time_compat::with_unix_epoch(epoch, || {
                 assert!(
                     state
+                        .model
                         .model_library_manager
                         .issue_model_validation_receipt(
                             receipt.project_revision,
@@ -101,7 +105,7 @@ fn model_validation_receipt_is_dirty_and_survives_save_reload_and_revert() {
                 );
             });
             assert_eq!(
-                state.model_library_manager.model_validation_receipt(),
+                state.model.model_library_manager.model_validation_receipt(),
                 Some(&receipt)
             );
             assert!(!active_document_is_dirty(&state));
@@ -118,6 +122,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
             .workbench
             .activate(crate::workbench::state::Workspace::Models);
         let first = state
+            .model
             .model_library_manager
             .load_library_bytes(
                 "first.lib",
@@ -126,6 +131,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
             )
             .unwrap();
         let second = state
+            .model
             .model_library_manager
             .load_library_bytes(
                 "second.lib",
@@ -134,6 +140,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
             )
             .unwrap();
         state
+            .model
             .model_library_manager
             .resolve_definition_provider(
                 ModelConsumerScope::PrimitiveModel,
@@ -152,6 +159,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
         .unwrap();
         let solver_input = generated_netlist_input_digest(&state).unwrap();
         let original = state
+            .model
             .model_library_manager
             .model_resolution_record(ModelConsumerScope::PrimitiveModel, "shared")
             .cloned()
@@ -164,6 +172,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
             crate::time_compat::with_unix_epoch(epoch, || {
                 assert!(
                     state
+                        .model
                         .model_library_manager
                         .resolve_definition_provider(
                             ModelConsumerScope::PrimitiveModel,
@@ -176,6 +185,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
             });
             assert_eq!(
                 state
+                    .model
                     .model_library_manager
                     .model_resolution_record(ModelConsumerScope::PrimitiveModel, "shared"),
                 Some(&original)
@@ -183,6 +193,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
             assert!(!has_unsaved_changes(&state));
         }
         let decision = state
+            .model
             .model_library_manager
             .resolve_definition_provider(
                 ModelConsumerScope::PrimitiveModel,
@@ -217,6 +228,7 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
         assert!(!active_document_is_dirty(&state));
         assert!(
             state
+                .model
                 .model_library_manager
                 .clear_definition_provider(ModelConsumerScope::PrimitiveModel, "shared")
         );
@@ -225,12 +237,13 @@ fn provider_decision_is_dirty_and_survives_save_reload_and_revert() {
         confirm_revert_active_document(&mut state, &review).unwrap();
         assert_eq!(
             state
+                .model
                 .model_library_manager
                 .model_resolution_record(ModelConsumerScope::PrimitiveModel, "shared"),
             Some(&decision)
         );
         assert!(!active_document_is_dirty(&state));
-        assert!(has_ac_analysis(&state.sim_setup));
+        assert!(has_ac_analysis(&state.model.sim_setup));
         remove_project_artifacts(&path);
     }
 }

@@ -100,9 +100,11 @@ pub fn create_editable_project_copy_and_open(
         ));
     }
 
-    let project_library_name =
-        available_project_copy_library_name(&app.state.model_library_manager, source_model_name);
-    let mut candidate = app.state.model_library_manager.clone();
+    let project_library_name = available_project_copy_library_name(
+        &app.state.model.model_library_manager,
+        source_model_name,
+    );
+    let mut candidate = app.state.model.model_library_manager.clone();
     let commit = candidate.create_editable_project_copy(
         source_library_name,
         source_model_name,
@@ -111,6 +113,7 @@ pub fn create_editable_project_copy_and_open(
     let project_model_name = commit.model_name.clone();
     let expected_project_revision = app
         .state
+        .model
         .workspace
         .content
         .project
@@ -210,10 +213,10 @@ pub fn open_project_model(
     }
     let mut editor = ModelEditorState::default();
     editor.open(
-        &app.state.model_library_manager,
+        &app.state.model.model_library_manager,
         library_name,
         model_name,
-        app.state.workspace.content.project.revision(),
+        app.state.model.workspace.content.project.revision(),
     )?;
     app.state
         .workbench
@@ -232,8 +235,8 @@ pub fn open_project_model(
 /// model-source and project revisions.
 pub fn validate_open_candidate(app: &mut RSpiceApp) -> bool {
     let valid = app.state.workbench.model_editor.validate_candidate(
-        &app.state.model_library_manager,
-        app.state.workspace.content.project.revision(),
+        &app.state.model.model_library_manager,
+        app.state.model.workspace.content.project.revision(),
     );
     let message = if valid {
         "Model candidate is valid against the current source revision.".to_owned()
@@ -595,6 +598,7 @@ pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
     };
     let Some(library) = app
         .state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -677,7 +681,7 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
             .join("; ")
     })?;
     let definition_changed = definition != draft.base_definition;
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let commit = if definition_changed {
         candidate.replace_project_model_revision_in_library(
             &draft.library_name,
@@ -720,7 +724,7 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     app.state.select_model_library(&draft.library_name);
     app.state.workbench.selected_model = Some(definition.base.name.clone());
     let reopen_result = app.state.workbench.model_editor.open(
-        &app.state.model_library_manager,
+        &app.state.model.model_library_manager,
         &draft.library_name,
         &definition.base.name,
         committed_revision,
@@ -729,7 +733,7 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
         app.state
             .workbench
             .model_editor
-            .validate_candidate(&app.state.model_library_manager, committed_revision);
+            .validate_candidate(&app.state.model.model_library_manager, committed_revision);
     } else if let Err(error) = reopen_result {
         // Publication has already committed at this point. Never report that
         // the save failed or leave a stale editable draft behind merely

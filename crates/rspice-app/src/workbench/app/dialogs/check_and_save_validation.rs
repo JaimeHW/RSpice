@@ -73,9 +73,9 @@ pub(crate) struct CheckAndSaveValidationReport {
 impl CheckAndSaveValidationReport {
     pub(crate) fn collect(state: &AppState) -> Result<Self, String> {
         let effective_scope = effective_save_scope(state, SaveScope::ActiveDocument);
-        let active_view = state.workspace.content.active_schematic_reference();
-        let project_id = state.workspace.content.project.id().to_string();
-        let project_revision = state.workspace.content.project.revision().get();
+        let active_view = state.model.workspace.content.active_schematic_reference();
+        let project_id = state.model.workspace.content.project.id().to_string();
+        let project_revision = state.model.workspace.content.project.revision().get();
         let accepted_generation = accepted_generation(state);
         let mut findings = BTreeMap::<String, CheckAndSaveFinding>::new();
         let mut dependencies = BTreeMap::<String, ContentDigest>::new();
@@ -98,7 +98,7 @@ impl CheckAndSaveValidationReport {
                 "Safe mode opened this project read-only.",
             );
         }
-        if state.schematic.session.read_only || state.active_view_read_only() {
+        if state.model.schematic.session.read_only || state.active_view_read_only() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -117,7 +117,7 @@ impl CheckAndSaveValidationReport {
             );
         }
 
-        if let Err(error) = state.workspace.content.project.validate() {
+        if let Err(error) = state.model.workspace.content.project.validate() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -131,6 +131,7 @@ impl CheckAndSaveValidationReport {
         // carry different remedies, so each owns a distinct finding identity.
         if let Err(error) = state.technology_gate_block_reason() {
             let discriminator = if state
+                .model
                 .workspace
                 .content
                 .project
@@ -139,6 +140,7 @@ impl CheckAndSaveValidationReport {
             {
                 "technology-required-by-plan"
             } else if state
+                .model
                 .workspace
                 .content
                 .project
@@ -158,8 +160,9 @@ impl CheckAndSaveValidationReport {
             );
         }
         match state
+            .model
             .model_library_manager
-            .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+            .reference_process_model_cards(state.model.sim_setup.reference_pvt.process)
         {
             Ok(cards) => {
                 dependencies.insert(
@@ -182,17 +185,18 @@ impl CheckAndSaveValidationReport {
         // editor buffer over its own. Digests, revision journals, and symbol
         // contracts are statements about these; nothing hierarchy-derived is.
         let mut buffers = state
+            .model
             .workspace
             .content
             .schematic_buffers
             .iter()
             .map(|(key, schematic)| (key.clone(), schematic))
             .collect::<std::collections::HashMap<_, _>>();
-        buffers.insert(active_view.key(), state.schematic.editor_ref().design);
-        let inspection = state.workspace.inspect_design_projection(
-            &state.library_manager,
+        buffers.insert(active_view.key(), state.model.schematic.editor_ref().design);
+        let inspection = state.model.workspace.inspect_design_projection(
+            &state.model.library_manager,
             &active_view,
-            &state.schematic,
+            &state.model.schematic,
         );
         let execution_projection = inspection
             .clone()
@@ -251,6 +255,7 @@ impl CheckAndSaveValidationReport {
         // offer a place to go — see [`CheckAndSaveFinding::location`].
         let active_key = active_view.key();
         let root_is_active = state
+            .model
             .workspace
             .content
             .simulation_root_reference()
@@ -262,7 +267,10 @@ impl CheckAndSaveValidationReport {
         // same checks from the live editor buffers would seal a receipt for a
         // design the project does not have.
         let configured_hierarchy = execution_projection.as_ref().ok().map(|projection| {
-            HierarchySource::from_execution_projection(state.library_manager.catalog(), projection)
+            HierarchySource::from_execution_projection(
+                state.model.library_manager.catalog(),
+                projection,
+            )
         });
 
         // A stale instance is the one netlist blocker with a one-click remedy,
@@ -279,8 +287,8 @@ impl CheckAndSaveValidationReport {
         // refuses to resolve while an instance disagrees with it, so those
         // instances are found whether or not the projection resolved.
         let no_masters = std::collections::HashMap::new();
-        let stale_interface_instances = state.schematic.stale_instance_interfaces(
-            &state.library_manager,
+        let stale_interface_instances = state.model.schematic.stale_instance_interfaces(
+            &state.model.library_manager,
             execution_projection
                 .as_ref()
                 .map_or(&no_masters, |projection| projection.schematic_buffers()),
@@ -296,6 +304,7 @@ impl CheckAndSaveValidationReport {
                      select it and run \"Update instance interface\"."
                 ),
                 state
+                    .model
                     .schematic
                     .document()
                     .components
@@ -313,7 +322,7 @@ impl CheckAndSaveValidationReport {
         if let Some((reference, message)) =
             crate::workbench::documents::code_workspace::interface_check_finding(
                 &state.ui.code_workspace.veriloga,
-                &state.workspace.content.project_sources,
+                &state.model.workspace.content.project_sources,
             )
         {
             insert_finding(
@@ -327,7 +336,7 @@ impl CheckAndSaveValidationReport {
 
         let mut documents = match effective_scope {
             SaveScope::ActiveDocument => {
-                vec![(active_view.key(), state.schematic.editor_ref().design)]
+                vec![(active_view.key(), state.model.schematic.editor_ref().design)]
             }
             SaveScope::AllDocuments => buffers
                 .iter()
@@ -335,7 +344,12 @@ impl CheckAndSaveValidationReport {
                 .collect::<Vec<_>>(),
         };
         documents.sort_by(|left, right| left.0.cmp(&right.0));
-        let root_schematic_key = state.workspace.content.simulation_root_reference().key();
+        let root_schematic_key = state
+            .model
+            .workspace
+            .content
+            .simulation_root_reference()
+            .key();
         let plan = DesignCheckPlan::of(state);
         // Every defect is stated once. A document in scope states its own
         // findings, below, where they can point at the canvas. A walk through
@@ -410,6 +424,7 @@ impl CheckAndSaveValidationReport {
                     );
                 }
                 let generated_source = state
+                    .model
                     .workspace
                     .content
                     .bind_generated_netlist_provenance(generated.netlist);
@@ -417,8 +432,8 @@ impl CheckAndSaveValidationReport {
                     &generated_source,
                     root.current_file(),
                     &state.include_search_chain(),
-                    state.model_library_manager.catalog(),
-                    state.model_library_manager.resolution_records(),
+                    state.model.model_library_manager.catalog(),
+                    state.model.model_library_manager.resolution_records(),
                 ) {
                     Ok((sealed_source, sealed_dependencies)) => {
                         dependencies.insert(
@@ -454,7 +469,7 @@ impl CheckAndSaveValidationReport {
             ),
         }
 
-        let symbol_resolver = SymbolResolver::new(&state.library_manager, &buffers);
+        let symbol_resolver = SymbolResolver::new(&state.model.library_manager, &buffers);
         for (key, schematic) in &documents {
             if let Err(error) = schematic.document().validated_revisions.validate() {
                 insert_finding(
@@ -619,11 +634,11 @@ impl CheckAndSaveValidationReport {
         }
         dependencies.insert(
             "project:descriptor".to_owned(),
-            digest_serializable(&state.workspace.content.project)?,
+            digest_serializable(&state.model.workspace.content.project)?,
         );
         dependencies.insert(
             "project:libraries".to_owned(),
-            digest_serializable(&state.library_manager)?,
+            digest_serializable(&state.model.library_manager)?,
         );
 
         let mut blockers = Vec::new();
@@ -671,10 +686,10 @@ impl CheckAndSaveValidationReport {
             project_id: &project_id,
             project_revision,
             accepted_generation,
-            design_execution_epoch: state.design_execution_epoch,
-            active_schematic_epoch: state.active_schematic_epoch,
-            active_topology_version: state.schematic.topology_version(),
-            library_revision: state.library_manager.revision(),
+            design_execution_epoch: state.model.design_execution_epoch,
+            active_schematic_epoch: state.model.active_schematic_epoch,
+            active_topology_version: state.model.schematic.topology_version(),
+            library_revision: state.model.library_manager.revision(),
             blockers: &blockers,
             advisories: &advisories,
             dependencies: &dependencies,
@@ -686,10 +701,10 @@ impl CheckAndSaveValidationReport {
             project_id,
             project_revision,
             accepted_generation,
-            design_execution_epoch: state.design_execution_epoch,
-            active_schematic_epoch: state.active_schematic_epoch,
-            active_topology_version: state.schematic.topology_version(),
-            library_revision: state.library_manager.revision(),
+            design_execution_epoch: state.model.design_execution_epoch,
+            active_schematic_epoch: state.model.active_schematic_epoch,
+            active_topology_version: state.model.schematic.topology_version(),
+            library_revision: state.model.library_manager.revision(),
             document_scope_label,
             stale_interface_instances,
             blockers,
@@ -713,14 +728,14 @@ impl CheckAndSaveValidationReport {
     }
 
     pub(crate) fn source_is_current(&self, state: &AppState) -> bool {
-        self.project_id == state.workspace.content.project.id().to_string()
-            && self.project_revision == state.workspace.content.project.revision().get()
+        self.project_id == state.model.workspace.content.project.id().to_string()
+            && self.project_revision == state.model.workspace.content.project.revision().get()
             && self.accepted_generation == accepted_generation(state)
-            && self.design_execution_epoch == state.design_execution_epoch
-            && self.active_schematic_epoch == state.active_schematic_epoch
-            && self.active_topology_version == state.schematic.topology_version()
-            && self.library_revision == state.library_manager.revision()
-            && self.active_view == state.workspace.content.active_schematic_reference()
+            && self.design_execution_epoch == state.model.design_execution_epoch
+            && self.active_schematic_epoch == state.model.active_schematic_epoch
+            && self.active_topology_version == state.model.schematic.topology_version()
+            && self.library_revision == state.model.library_manager.revision()
+            && self.active_view == state.model.workspace.content.active_schematic_reference()
     }
 
     pub(crate) fn blockers(&self) -> &[CheckAndSaveFinding] {
@@ -1054,11 +1069,11 @@ struct DesignCheckPlan {
 
 impl DesignCheckPlan {
     fn of(state: &AppState) -> Self {
-        let active_view = state.workspace.content.active_schematic_reference();
-        let inspection = state.workspace.inspect_design_projection(
-            &state.library_manager,
+        let active_view = state.model.workspace.content.active_schematic_reference();
+        let inspection = state.model.workspace.inspect_design_projection(
+            &state.model.library_manager,
             &active_view,
-            &state.schematic,
+            &state.model.schematic,
         );
         let execution = inspection
             .clone()
@@ -1069,7 +1084,7 @@ impl DesignCheckPlan {
                 documents: Vec::new(),
             };
         };
-        let root = state.workspace.content.simulation_root_reference();
+        let root = state.model.workspace.content.simulation_root_reference();
         let placed_by_root = inspection
             .hierarchy_resolution()
             .bindings
@@ -1080,6 +1095,7 @@ impl DesignCheckPlan {
         let mut keys = match effective_save_scope(state, SaveScope::ActiveDocument) {
             SaveScope::ActiveDocument => vec![active_view.key()],
             SaveScope::AllDocuments => state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -1264,7 +1280,7 @@ mod tests {
                 .all(|finding| finding.source != "hierarchy")
         );
         crate::workbench::examples::hierarchy_reference::omit_missing_instance(&mut state);
-        let authored = serde_json::to_value(&state.schematic).unwrap();
+        let authored = serde_json::to_value(&state.model.schematic).unwrap();
         let report = CheckAndSaveValidationReport::validate(&state).unwrap();
         assert!(
             report
@@ -1274,7 +1290,10 @@ mod tests {
             "{:?}",
             report.blockers()
         );
-        assert_eq!(serde_json::to_value(&state.schematic).unwrap(), authored);
+        assert_eq!(
+            serde_json::to_value(&state.model.schematic).unwrap(),
+            authored
+        );
     }
 
     #[test]
@@ -1288,6 +1307,7 @@ mod tests {
         assert_eq!(first.receipt_digest(), second.receipt_digest());
 
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
         let unchecked = CheckAndSaveValidationReport::collect(&state).expect("unchecked report");
@@ -1315,6 +1335,7 @@ mod tests {
         state.open_project_session();
         // An open pin is an error under this deck, and one a waiver may cover.
         state
+            .model
             .workspace
             .content
             .design_rules
@@ -1324,12 +1345,14 @@ mod tests {
             )
             .expect("an open pin may be promoted");
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
         run_design_checks(&mut state);
         let report = CheckAndSaveValidationReport::collect(&state).expect("report");
-        let root = state.workspace.content.simulation_root_reference();
+        let root = state.model.workspace.content.simulation_root_reference();
         let published = state
+            .model
             .diagnostics
             .batch(&DiagnosticInputs::DesignCheck { subject: root })
             .expect("the checks the report read are on the page")
@@ -1387,6 +1410,7 @@ mod tests {
     fn missing_ground_blocks_validated_save() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
         let report = CheckAndSaveValidationReport::validate(&state).expect("report");
@@ -1404,9 +1428,11 @@ mod tests {
     fn a_located_finding_names_the_object_it_is_about() {
         let mut state = AppState::default();
         let resistor = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(40, 40));
         let placed = state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -1454,7 +1480,7 @@ mod tests {
             ));
             work.add_cell(cell);
         }
-        state.library_manager.add_library(work);
+        state.model.library_manager.add_library(work);
         let placed = |cell: &str| {
             let mut binding = crate::state::LibraryCellInstance::new("work", cell, "schematic");
             binding.bind_interface(&[]);
@@ -1464,18 +1490,22 @@ mod tests {
         let mut leaf = crate::state::SchematicState::default();
         leaf.add_component(ComponentType::Resistor, Point::new(30, 0));
         state
+            .model
             .workspace
             .insert_schematic_editor("work/leaf/schematic".to_owned(), leaf);
         let mut mid = crate::state::SchematicState::default();
         mid.add_library_cell_component(Point::new(100, 0), placed("leaf"));
         mid.add_library_cell_component(Point::new(300, 0), placed("leaf"));
         state
+            .model
             .workspace
             .insert_schematic_editor("work/mid/schematic".to_owned(), mid);
         state
+            .model
             .schematic
             .add_library_cell_component(Point::new(100, 0), placed("mid"));
         state
+            .model
             .schematic
             .add_library_cell_component(Point::new(300, 0), placed("mid"));
         state.sync_active_schematic_to_workspace();
@@ -1556,7 +1586,7 @@ mod tests {
             }
             work.add_cell(cell);
         }
-        state.library_manager.add_library(work);
+        state.model.library_manager.add_library(work);
     }
 
     /// The configuration binds `mid`'s instance of `leaf` to a view whose pin
@@ -1578,6 +1608,7 @@ mod tests {
             let mut leaf = crate::state::SchematicState::default();
             add_port(&mut leaf, "a", direction);
             state
+                .model
                 .workspace
                 .insert_schematic_editor(format!("work/leaf/{view}"), leaf);
         }
@@ -1593,12 +1624,20 @@ mod tests {
             Point::new(100, 0),
         );
         state
+            .model
             .workspace
             .insert_schematic_editor("work/mid/schematic".to_owned(), mid);
-        place(&mut state.schematic, "mid", "XM", &[], Point::new(100, 0));
+        place(
+            &mut state.model.schematic,
+            "mid",
+            "XM",
+            &[],
+            Point::new(100, 0),
+        );
         state.sync_active_schematic_to_workspace();
-        let root = state.workspace.content.active_view.clone();
+        let root = state.model.workspace.content.active_view.clone();
         state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -1675,12 +1714,14 @@ mod tests {
                 .push(crate::state::NetLabel::new(id, point, node));
         }
         state
+            .model
             .workspace
             .insert_schematic_editor("work/supply/schematic".to_owned(), supply);
         let mut bench = crate::state::SchematicState::default();
         place(&mut bench, "supply", "X1", &[], Point::new(100, 0));
         place(&mut bench, "supply", "X2", &[], Point::new(300, 0));
         state
+            .model
             .workspace
             .insert_schematic_editor("work/bench/schematic".to_owned(), bench);
 
@@ -1692,9 +1733,11 @@ mod tests {
         let mut buffer = stray.clone();
         add_port(&mut buffer, "a", "inout");
         state
+            .model
             .workspace
             .insert_schematic_editor("work/stray/schematic".to_owned(), stray);
         state
+            .model
             .workspace
             .insert_schematic_editor("work/buffer/schematic".to_owned(), buffer);
         state.sync_active_schematic_to_workspace();
@@ -1756,7 +1799,7 @@ mod tests {
             crate::state::ViewType::Schematic,
         ));
         work.add_cell(div);
-        state.library_manager.add_library(work);
+        state.model.library_manager.add_library(work);
 
         let mut master = crate::state::SchematicState::default();
         let port = master.add_component(ComponentType::Port, Point::new(20, 0));
@@ -1768,6 +1811,7 @@ mod tests {
             .expect("the placed port is retained")
             .value = "a".to_owned();
         state
+            .model
             .workspace
             .insert_schematic_editor("work/div/schematic".to_owned(), master);
 
@@ -1777,9 +1821,11 @@ mod tests {
             direction: crate::state::PortDirection::InOut,
         }]);
         let instance = state
+            .model
             .schematic
             .add_library_cell_component(Point::new(100, 0), binding);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -1815,19 +1861,22 @@ mod tests {
             crate::state::ViewType::Schematic,
         ));
         work.add_cell(amp);
-        state.library_manager.add_library(work);
+        state.model.library_manager.add_library(work);
 
         let mut master = crate::state::SchematicState::default();
         master.add_component(ComponentType::Resistor, Point::new(30, 0));
         state
+            .model
             .workspace
             .insert_schematic_editor("work/amp/schematic".to_owned(), master);
 
         let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
         let instance = state
+            .model
             .schematic
             .add_library_cell_component(Point::new(100, 0), binding);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -1837,8 +1886,9 @@ mod tests {
             .name = "X1".to_owned();
         state.sync_active_schematic_to_workspace();
 
-        let root = state.workspace.content.active_view.clone();
+        let root = state.model.workspace.content.active_view.clone();
         state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -1878,11 +1928,13 @@ mod tests {
     fn an_unresolved_configuration_is_stated_rather_than_checked_from_editor_buffers() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
         state.sync_active_schematic_to_workspace();
-        let root = state.workspace.content.active_view.clone();
+        let root = state.model.workspace.content.active_view.clone();
         state
+            .model
             .workspace
             .content
             .configuration_sets

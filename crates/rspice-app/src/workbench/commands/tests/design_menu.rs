@@ -69,7 +69,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     );
 
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     for command in authoring_commands {
         assert_eq!(
             command.availability(&app),
@@ -151,10 +151,10 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
     assert!(app.state.dialogs.check_and_save.report.is_some());
 
     app.state.dialogs.check_and_save.close();
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::CheckAndSave.is_enabled(&app));
 
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     app.state.workbench.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
@@ -230,10 +230,10 @@ fn design_management_has_mockup_identity_authority_and_owned_workflow() {
     assert!(app.state.dialogs.application_modal_open());
 
     app.state.dialogs.design_management.open = false;
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::DesignManagement.is_enabled(&app));
 
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     app.state.close_project_session();
     assert!(!Command::DesignManagement.is_enabled(&app));
 }
@@ -270,7 +270,7 @@ fn connectivity_manager_has_mockup_identity_and_supports_read_only_inspection() 
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(Command::ConnectivityManager.is_enabled(&app));
     Command::ConnectivityManager.execute(&mut app);
     assert!(app.state.dialogs.connectivity_manager.open);
@@ -310,7 +310,7 @@ fn selection_bulk_edit_has_mockup_identity_order_and_read_only_inspection() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(Command::SelectionBulkEdit.is_enabled(&app));
     Command::SelectionBulkEdit.execute(&mut app);
     assert!(app.state.dialogs.selection_bulk_edit.open);

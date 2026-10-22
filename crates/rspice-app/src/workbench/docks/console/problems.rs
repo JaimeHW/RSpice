@@ -190,7 +190,7 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
     let mut view = state.problems_view.clone();
     let mut selection = Selection {
         listed: None,
-        finding: state.diagnostics.current_finding(),
+        finding: state.model.diagnostics.current_finding(),
     };
     let mut intent = PageIntent::default();
     {
@@ -389,12 +389,15 @@ pub(super) fn problems(ui: &mut Ui, state: &mut AppState) -> bool {
         view.waiving = None;
     }
     state.problems_view = view;
-    state.diagnostics.set_current_finding(selection.finding);
+    state
+        .model
+        .diagnostics
+        .set_current_finding(selection.finding);
     if let Some(route) = intent.route {
         if lands_on_canvas(&route) {
             request_engineering_canvas_focus(ui.ctx());
         }
-        state.diagnostics.request_route(route);
+        state.model.diagnostics.request_route(route);
     }
     if let Some(text) = intent.clipboard {
         ui.ctx().copy_text(text);

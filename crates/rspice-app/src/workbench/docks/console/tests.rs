@@ -31,6 +31,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 // route is the real one the canvas resolves.
                 let resistor = app
                     .state
+                    .model
                     .schematic
                     .add_component(crate::state::ComponentType::Resistor, Point::new(40, 40));
                 app.state.sync_active_schematic_to_workspace();
@@ -63,7 +64,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 amp.add_view(View::new("schematic", ViewType::Schematic));
                 amp.add_view(View::new("symbol", ViewType::Symbol));
                 library.add_cell(amp);
-                app.state.library_manager.add_library(library);
+                app.state.model.library_manager.add_library(library);
 
                 let mut schematic = SchematicState::default();
                 let port = schematic.add_component(ComponentType::Port, Point::new(0, 0));
@@ -74,7 +75,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                     .find(|component| component.id == port)
                     .expect("the fixture just placed this port")
                     .value = "IN".to_owned();
-                app.state.workspace.insert_schematic_editor(
+                app.state.model.workspace.insert_schematic_editor(
                     CellViewRef::new("work", "amp", "schematic").key(),
                     schematic,
                 );
@@ -95,7 +96,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
             DiagnosticOwner::Dispatch => {
                 // The real command, on an empty design: a schematic with no
                 // components cannot be dispatched, so the pass blocks.
-                app.state.schematic = crate::state::SchematicState::default();
+                app.state.model.schematic = crate::state::SchematicState::default();
                 Command::PreflightChecks.execute(&mut app);
             }
             DiagnosticOwner::Run => {
@@ -122,7 +123,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 // A deck written under a schema this build does not read: none
                 // of it is applied, which the team has to know before it signs
                 // off under it.
-                app.state.workspace.content.design_rules =
+                app.state.model.workspace.content.design_rules =
                     serde_json::from_str(r#"{"schema_version":2}"#)
                         .expect("a stored deck always reads");
                 app.state.publish_rule_deck_issues();
@@ -131,6 +132,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
 
         let batch = app
             .state
+            .model
             .diagnostics
             .batches()
             .find(|batch| batch.inputs.owner() == owner)
@@ -205,6 +207,7 @@ fn a_completed_runs_engine_warnings_reach_the_page_as_canonical_records() {
     state.open_project_session();
 
     let batch = state
+        .model
         .diagnostics
         .batches()
         .find(|batch| batch.inputs.owner() == DiagnosticOwner::Run)
@@ -275,11 +278,12 @@ fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
          .model nch nmos level=54 version=4.8 pbs=0.05 pbsws=0.05\n.op\n.end\n",
     );
     app.state.open_project_session();
-    let run_sequence = app.state.simulation.retained.runs[0].id;
+    let run_sequence = app.state.model.simulation.retained.runs[0].id;
 
     for parameter in ["pbs", "pbsws"] {
         let place = app
             .state
+            .model
             .diagnostics
             .batches()
             .flat_map(|batch| batch.records.iter())
@@ -296,6 +300,7 @@ fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
         assert_eq!(place.run_sequence, run_sequence);
         let line = &app
             .state
+            .model
             .simulation
             .retained
             .run_by_sequence(run_sequence)
@@ -308,7 +313,7 @@ fn a_clamp_opens_its_runs_log_on_the_line_the_engine_reported_it_on() {
             format!("BSIM4: given {parameter} is less than 0.1; set to 0.1")
         );
 
-        app.state.diagnostics.request_route(place.route());
+        app.state.model.diagnostics.request_route(place.route());
         crate::workbench::diagnostic_routes::apply_pending(&egui::Context::default(), &mut app);
         let view = &app.state.workbench.console_view;
         let key = place.line as u64;
@@ -496,14 +501,17 @@ fn console_rows_paint_no_coloured_text() {
     }
 
     let mut state = AppState::default();
-    state.log_buffer.clear();
+    state.model.log_buffer.clear();
     state
+        .model
         .log_buffer
         .log(LogSeverity::Error, LogSource::Run, "solve failed");
     state
+        .model
         .log_buffer
         .log(LogSeverity::Warning, LogSource::Run, "gmin stepping");
     state
+        .model
         .log_buffer
         .log(LogSeverity::Info, LogSource::Run, "run complete");
 
@@ -544,6 +552,7 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
     app.state.ui.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state
+        .model
         .log_buffer
         .warning(LogSource::Run, "unrelated retained log warning");
     app.state.ui.netlist.diagnostics = std::sync::Arc::new(
@@ -609,18 +618,19 @@ fn the_strip_holds_only_the_docks_own_actions_and_clear_is_the_consoles() {
 fn the_clear_control_clears_the_visible_page_through_its_command() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .log_buffer
         .warning(LogSource::Run, "visible console warning");
 
     app.state.workbench.console_page = ConsolePage::Problems;
     assert!(!Command::ClearConsole.is_enabled(&app));
     Command::ClearConsole.execute(&mut app);
-    assert!(!app.state.log_buffer.is_empty());
+    assert!(!app.state.model.log_buffer.is_empty());
 
     app.state.workbench.console_page = ConsolePage::Console;
     assert!(Command::ClearConsole.is_enabled(&app));
     Command::ClearConsole.execute(&mut app);
-    assert!(app.state.log_buffer.is_empty());
+    assert!(app.state.model.log_buffer.is_empty());
     assert!(!Command::ClearConsole.is_enabled(&app));
 }
 
@@ -630,9 +640,11 @@ fn the_clear_control_clears_the_visible_page_through_its_command() {
 fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .log_buffer
         .warning(LogSource::Run, "visible console warning");
     app.state
+        .model
         .simulation
         .retained
         .runs
@@ -650,13 +662,14 @@ fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
     ));
     assert!(!Command::ClearConsole.is_enabled(&app));
     Command::ClearConsole.execute(&mut app);
-    assert!(!app.state.log_buffer.is_empty());
+    assert!(!app.state.model.log_buffer.is_empty());
 }
 
 #[test]
 fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
     let mut state = AppState::default();
     state
+        .model
         .log_buffer
         .warning(LogSource::Run, "visible console warning");
     state.dialogs.drc_results = Some(DrcResult::new());
@@ -666,15 +679,15 @@ fn clearing_console_preserves_diagnostics_measurements_and_run_history() {
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_measurements(vec![measurement]);
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    state.simulation.retained.runs.push(run);
+    state.model.simulation.retained.runs.push(run);
 
     state.clear_primary_log();
 
-    assert!(state.log_buffer.is_empty());
+    assert!(state.model.log_buffer.is_empty());
     assert!(state.dialogs.drc_results.is_some());
-    assert_eq!(state.simulation.retained.runs.len(), 1);
+    assert_eq!(state.model.simulation.retained.runs.len(), 1);
     assert_eq!(
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .measurements
             .len(),
         1
@@ -1166,18 +1179,24 @@ fn each_channel_says_why_it_shows_no_rows() {
     use crate::workbench::state::ConsoleChannel;
 
     let mut state = AppState::default();
-    state.log_buffer.clear();
+    state.model.log_buffer.clear();
     let rendered = painted_console_body(|ui| transcript::console(ui, &mut state));
     assert!(rendered.contains("No studio activity yet."), "{rendered}");
     assert!(!rendered.contains("will appear"), "{rendered}");
 
-    state.simulation.retained.runs.push(SimulationRun::new(4));
+    state
+        .model
+        .simulation
+        .retained
+        .runs
+        .push(SimulationRun::new(4));
     state.workbench.console_view.open(ConsoleChannel::Run(4));
     let rendered = painted_console_body(|ui| transcript::console(ui, &mut state));
     assert!(rendered.contains("This run wrote no log."), "{rendered}");
 
     state.workbench.console_view.open(ConsoleChannel::Session);
     state
+        .model
         .log_buffer
         .log(LogSeverity::Info, LogSource::Studio, "Project opened");
     state.workbench.console_view.find = "netlist".to_owned();
@@ -1243,14 +1262,15 @@ fn busy_console() -> RSpiceApp {
     app.state.workbench.console_page = ConsolePage::Console;
     for sequence in 1..=12 {
         app.state
+            .model
             .simulation
             .retained
             .runs
             .insert(0, SimulationRun::new(sequence));
     }
-    app.state.log_buffer.clear();
+    app.state.model.log_buffer.clear();
     for index in 0..240 {
-        app.state.log_buffer.log(
+        app.state.model.log_buffer.log(
             LogSeverity::Info,
             LogSource::Studio,
             format!("event {index}"),
@@ -1258,11 +1278,13 @@ fn busy_console() -> RSpiceApp {
     }
     for _ in 0..12 {
         app.state
+            .model
             .log_buffer
             .log(LogSeverity::Warning, LogSource::Netlist, "gmin stepping");
     }
     for _ in 0..3 {
         app.state
+            .model
             .log_buffer
             .log(LogSeverity::Error, LogSource::Studio, "Export failed");
     }
@@ -1325,7 +1347,7 @@ fn console_page_review_renders() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
     let mut app = busy_console();
-    app.state.log_buffer.clear();
+    app.state.model.log_buffer.clear();
     let lines: [(LogSeverity, LogSource, String); 5] = [
         (
             LogSeverity::Info,
@@ -1360,10 +1382,17 @@ fn console_page_review_renders() {
         let anchor =
             (source == LogSource::Run).then_some(LogAnchor::ResultRun { run_sequence: 12 });
         app.state
+            .model
             .log_buffer
             .log_anchored(severity, source, message, anchor);
     }
-    let selected = app.state.log_buffer.entries().nth(1).map(|entry| entry.id);
+    let selected = app
+        .state
+        .model
+        .log_buffer
+        .entries()
+        .nth(1)
+        .map(|entry| entry.id);
     app.state.workbench.console_view.selection =
         selected.map(crate::workbench::state::ConsoleSelection::single);
     let layout = LayoutSpec::resolve(1_280.0, 760.0, &app.state.workbench);
@@ -1377,6 +1406,7 @@ fn console_page_review_renders() {
 
     let run = app
         .state
+        .model
         .simulation
         .retained
         .run_by_sequence_mut(12)
@@ -1420,9 +1450,9 @@ fn console_page_review_renders() {
 #[test]
 fn a_session_that_dropped_entries_says_so_first() {
     let mut state = AppState::default();
-    state.log_buffer = crate::diagnostics::LogBuffer::new(3);
+    state.model.log_buffer = crate::diagnostics::LogBuffer::new(3);
     for index in 0..5 {
-        state.log_buffer.log(
+        state.model.log_buffer.log(
             LogSeverity::Info,
             LogSource::Studio,
             format!("event {index}"),

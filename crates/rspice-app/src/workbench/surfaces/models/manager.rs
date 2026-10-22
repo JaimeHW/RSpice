@@ -251,7 +251,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let page = app.state.workbench.models_page;
     let include_diagnostics = (page == ModelsPage::Include)
-        .then(|| closure_facts(app.state.model_library_manager.libraries_sorted()));
+        .then(|| closure_facts(app.state.model.model_library_manager.libraries_sorted()));
     // Projected before the render borrow, and settled there too: both the
     // stale-catalog refresh and the release diff need the session hub, which
     // the render borrow does not carry.
@@ -397,6 +397,7 @@ fn open_subcircuit_symbol_workflow(
     subcircuit_name: &str,
 ) -> Result<(), String> {
     let provider = state
+        .model
         .model_library_manager
         .effective_definition_provider(ModelConsumerScope::Subcircuit, subcircuit_name)?
         .ok_or_else(|| {
@@ -409,6 +410,7 @@ fn open_subcircuit_symbol_workflow(
         ));
     }
     let library = state
+        .model
         .model_library_manager
         .get_library(&provider.library)
         .ok_or_else(|| {
@@ -591,7 +593,7 @@ fn catalog_bar(
     installed: &[crate::state::model_hub::InstalledPack],
 ) {
     let loaded = scan.map_or_else(
-        || catalog_model_count(&app.state.model_library_manager),
+        || catalog_model_count(&app.state.model.model_library_manager),
         |scan| scan.total,
     );
     let packs = hub.packs.len();
@@ -599,8 +601,12 @@ fn catalog_bar(
     // is both. Counting only the shipped index said "17" over a table of
     // nineteen rows, and said "0" on a browser build over a project full of
     // parts.
-    let parts = app.state.model_library_manager.pack_definition_count()
-        + held_parts::held_count(&app.state.model_library_manager, installed);
+    let parts = app
+        .state
+        .model
+        .model_library_manager
+        .pack_definition_count()
+        + held_parts::held_count(&app.state.model.model_library_manager, installed);
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_panel)
@@ -909,7 +915,11 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
     let rows = &scan.rows;
     let selected_visible = rows.iter().any(|row| {
         row.holds(
-            app.state.model_library_manager.selected_library.as_deref(),
+            app.state
+                .model
+                .model_library_manager
+                .selected_library
+                .as_deref(),
             app.state.workbench.selected_model.as_deref(),
         )
     });
@@ -1001,6 +1011,7 @@ fn select_catalog_row(app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow)
     let card = (row.bins > 0)
         .then(|| {
             app.state
+                .model
                 .model_library_manager
                 .get_library(&row.library)
                 .and_then(|library| library.bin_family(&row.model))
@@ -1023,7 +1034,11 @@ fn selection_family<'a>(library: &'a ModelLibrary, model: &str) -> Option<BinFam
 
 fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
     let selected = row.holds(
-        app.state.model_library_manager.selected_library.as_deref(),
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
         app.state.workbench.selected_model.as_deref(),
     );
     let t = Tokens::get(ui.ctx());
@@ -1221,11 +1236,13 @@ fn compare_models(
 ) {
     let left = app
         .state
+        .model
         .model_library_manager
         .get_library(left_library)
         .and_then(|library| library.get_model(left_model));
     let right = app
         .state
+        .model
         .model_library_manager
         .get_library(right_library)
         .and_then(|library| library.get_model(right_model));
@@ -1349,6 +1366,7 @@ fn comparison_state(left: Option<&String>, right: Option<&String>) -> &'static s
 fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, left_model: &str) {
     let right = app
         .state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1387,6 +1405,7 @@ fn default_comparison_counterpart(
     left_model: &str,
 ) -> Option<(String, String)> {
     app.state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1410,6 +1429,7 @@ fn comparison_counterpart_picker(
 ) {
     let candidates = app
         .state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1451,6 +1471,7 @@ fn comparison_counterpart_picker(
 /// The name of the model library the catalog has selected, if it resolves.
 fn current_library_name(app: &ManagerRenderContext<'_>) -> Option<String> {
     app.state
+        .model
         .model_library_manager
         .current_library()
         .map(|library| library.name.clone())
@@ -1464,6 +1485,7 @@ fn current_library_name(app: &ManagerRenderContext<'_>) -> Option<String> {
 fn refresh_library(app: &mut ManagerRenderContext<'_>, library_name: &str) {
     if !app
         .state
+        .model
         .model_library_manager
         .get_library(library_name)
         .is_some_and(ModelLibrary::has_external_root)
@@ -1528,6 +1550,7 @@ fn author_technology_symbol_variant(
         })?;
     let target = app
         .state
+        .model
         .library_manager
         .get_library(target_library)
         .ok_or_else(|| format!("Target library '{target_library}' no longer exists."))?;
@@ -1564,7 +1587,7 @@ fn author_technology_symbol_variant(
         format!("Signed technology symbol cannot seed a project variant: {error}")
     })?;
 
-    let mut candidate = app.state.library_manager.clone();
+    let mut candidate = app.state.model.library_manager.clone();
     let plan = crate::state::prepare_symbol_construction(
         &variant,
         candidate
@@ -1601,7 +1624,7 @@ fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
         );
         return;
     }
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     for library in &libraries {
         candidate.remove_library(library);
     }
@@ -1638,7 +1661,7 @@ fn publish_definition_provider(
     provider_library: &str,
     reason: &str,
 ) -> Result<String, String> {
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     candidate
         .resolve_definition_provider(scope, definition, provider_library, reason.trim())
         .and_then(|record| {
@@ -1670,7 +1693,7 @@ fn clear_definition_provider(
     scope: ModelConsumerScope,
     definition: &str,
 ) -> Result<String, String> {
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     if !candidate.clear_definition_provider(scope, definition) {
         return Err(format!(
             "No provider decision exists for {} '{}'.",
@@ -1696,6 +1719,7 @@ fn clear_definition_provider(
 fn attached_libraries_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> Vec<String> {
     let mut libraries = app
         .state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1708,6 +1732,7 @@ fn attached_libraries_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) ->
 
 fn is_builtin_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> bool {
     app.state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1748,6 +1773,7 @@ fn export_include_manifest(app: &mut ManagerRenderContext<'_>) {
 fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
     let libraries = app
         .state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1776,7 +1802,7 @@ fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
         .collect::<Vec<_>>();
     serde_json::to_string_pretty(&serde_json::json!({
         "schema": 1,
-        "project_revision": app.state.workspace.content.project.revision(),
+        "project_revision": app.state.model.workspace.content.project.revision(),
         "libraries": libraries,
     }))
     .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))
@@ -1800,7 +1826,14 @@ const fn pin_source_block_reason(external: bool, importing: bool) -> Option<&'st
 }
 
 fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64> {
-    let selection = &app.state.schematic.session.editor.selection.components;
+    let selection = &app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .components;
     (selection.len() == 1).then(|| *selection.iter().next().expect("one selected component"))
 }
 

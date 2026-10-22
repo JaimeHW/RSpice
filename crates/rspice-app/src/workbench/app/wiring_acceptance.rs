@@ -62,15 +62,15 @@ impl Bench {
             cell.add_view(View::new("schematic", ViewType::Schematic));
             library.add_cell(cell);
         }
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         app.state.open_workspace_view(cell_view("top"));
         app.state.workbench.activate(Workspace::Design);
         let state = &mut app.state;
         let mut ids = Vec::new();
         for (name, kind, at, rotation) in parts {
-            state.schematic.session.editor.preview_rotation = *rotation;
-            let id = state.schematic.add_component(*kind, *at);
-            let document = state.schematic.document_mut_for_test();
+            state.model.schematic.session.editor.preview_rotation = *rotation;
+            let id = state.model.schematic.add_component(*kind, *at);
+            let document = state.model.schematic.document_mut_for_test();
             let part = document
                 .components
                 .iter_mut()
@@ -79,16 +79,18 @@ impl Bench {
             part.name = (*name).to_owned();
             ids.push(id);
         }
-        state.schematic.session.editor.preview_rotation = Rotation::R0;
-        state.schematic.recalculate_runtime_state();
+        state.model.schematic.session.editor.preview_rotation = Rotation::R0;
+        state.model.schematic.recalculate_runtime_state();
         let key = cell_view("top").key();
         let first = state
+            .model
             .workspace
             .content
             .design_management
             .bootstrap_for_cell_view(&key, "Sheet 1", ids)
             .expect("first sheet");
         let catalog = state
+            .model
             .workspace
             .content
             .design_management
@@ -106,7 +108,7 @@ impl Bench {
             )
             .expect("second sheet");
         catalog.set_active(first).expect("active sheet");
-        state.schematic.clear_undo_history();
+        state.model.schematic.clear_undo_history();
         state.sync_active_schematic_to_workspace();
         Self {
             app,
@@ -135,13 +137,13 @@ impl Bench {
         let (first, rest) = points.split_first().expect("a route has a start");
         let ctx = self.ctx.clone();
         let state = &mut self.app.state;
-        state.schematic.arm_tool(crate::state::Tool::Wire);
+        state.model.schematic.arm_tool(crate::state::Tool::Wire);
         state.start_canvas_wire(&ctx, *first);
         for point in rest {
-            state.schematic.extend_wire(*point);
+            state.model.schematic.extend_wire(*point);
         }
         let _ = finish_wire_on_active_sheet(state);
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         self.end_frame();
     }
 
@@ -149,18 +151,20 @@ impl Bench {
     pub(super) fn place(&mut self, kind: ComponentType, at: Point, rotation: Rotation) -> u64 {
         let state = &mut self.app.state;
         let before = state
+            .model
             .schematic
             .document()
             .components
             .iter()
             .map(|part| part.id)
             .collect::<BTreeSet<_>>();
-        state.schematic.session.editor.preview_rotation = rotation;
+        state.model.schematic.session.editor.preview_rotation = rotation;
         gesture_commits::place_component(state, kind, at);
-        state.schematic.session.editor.preview_rotation = Rotation::R0;
+        state.model.schematic.session.editor.preview_rotation = Rotation::R0;
         self.end_frame();
         self.app
             .state
+            .model
             .schematic
             .document()
             .components
@@ -178,7 +182,7 @@ impl Bench {
 
     /// Replace the selection, as a click or a window does.
     pub(super) fn select(&mut self, choose: impl FnOnce(&mut Selection)) {
-        let selection = &mut self.app.state.schematic.session.editor.selection;
+        let selection = &mut self.app.state.model.schematic.session.editor.selection;
         selection.clear();
         choose(selection);
     }
@@ -222,6 +226,7 @@ impl Bench {
         let Some(from) = self
             .app
             .state
+            .model
             .schematic
             .document()
             .components
@@ -247,7 +252,7 @@ impl Bench {
     pub(super) fn draw_bus(&mut self, points: &[Point], declaration: &str) -> u64 {
         let (first, rest) = points.split_first().expect("a bus has a start");
         let declaration = BusDeclaration::parse(declaration).expect("a bus declaration");
-        let schematic = &mut self.app.state.schematic;
+        let schematic = &mut self.app.state.model.schematic;
         let mut id = 0;
         if schematic.start_bus(*first, Some(declaration)).is_ok() {
             for point in rest {
@@ -269,7 +274,7 @@ impl Bench {
         connection_point: Point,
         slice: &str,
     ) -> u64 {
-        let schematic = &mut self.app.state.schematic;
+        let schematic = &mut self.app.state.model.schematic;
         let id = BusSlice::parse(slice)
             .ok()
             .and_then(|slice| {
@@ -293,6 +298,7 @@ impl Bench {
         let mut id = 0;
         self.app
             .state
+            .model
             .schematic
             .with_undo("place net label", |schematic| {
                 id = schematic.add_net_label(at, name.to_owned());
@@ -306,6 +312,7 @@ impl Bench {
         let id = self
             .app
             .state
+            .model
             .schematic
             .place_schematic_probe(at, None, None, None)
             .unwrap_or(0);
@@ -322,7 +329,7 @@ impl Bench {
     /// Forget every step of both histories, as a freshly opened project has
     /// none.
     pub(super) fn forget_history(&mut self) {
-        self.app.state.schematic.clear_undo_history();
+        self.app.state.model.schematic.clear_undo_history();
         self.app.state.clear_project_design_history();
     }
 
@@ -380,6 +387,7 @@ impl Bench {
         let key = self
             .app
             .state
+            .model
             .workspace
             .content
             .active_schematic_reference()
@@ -387,6 +395,7 @@ impl Bench {
         let catalog = self
             .app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -405,10 +414,16 @@ impl Bench {
     /// The document a run reads: every sheet materialized apart.
     pub(super) fn projected(&self) -> SchematicDocument {
         let state = &self.app.state;
-        let key = state.workspace.content.active_schematic_reference().key();
+        let key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         state
+            .model
             .schematic
-            .materialize(&state.workspace.content.design_management, &key)
+            .materialize(&state.model.workspace.content.design_management, &key)
             .expect("the design projects")
             .document()
             .clone()
@@ -423,6 +438,7 @@ impl Bench {
     pub(super) fn dots(&self) -> Dots {
         self.app
             .state
+            .model
             .schematic
             .document()
             .junctions
@@ -433,7 +449,7 @@ impl Bench {
 
     /// A readable account of the drawing, for a failure message.
     pub(super) fn describe(&self) -> String {
-        let document = self.app.state.schematic.document();
+        let document = self.app.state.model.schematic.document();
         let mut out = String::new();
         for part in &document.components {
             out.push_str(&format!(

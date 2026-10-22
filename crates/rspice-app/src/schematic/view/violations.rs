@@ -35,14 +35,14 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     //
     // With no findings, or none current, the command is disabled, so a press
     // that reaches here anyway says nothing.
-    if state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+    if state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
         state.cycle_active_symbol_pin_finding(step);
         return;
     }
     let Some(result) = &state.dialogs.drc_results else {
         return;
     };
-    if state.dialogs.drc_checked_version != state.schematic.topology_version() {
+    if state.dialogs.drc_checked_version != state.model.schematic.topology_version() {
         return;
     }
 
@@ -77,11 +77,15 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     // selection made on the grid — or on a finding this tour cannot visit,
     // such as a netlist error — therefore does not strand the tour: it starts
     // from the worst finding, which is where it starts from a cold session.
-    let standing = state.diagnostics.current_finding().and_then(|current| {
-        anchored
-            .iter()
-            .position(|found| found.identity == Some(current))
-    });
+    let standing = state
+        .model
+        .diagnostics
+        .current_finding()
+        .and_then(|current| {
+            anchored
+                .iter()
+                .position(|found| found.identity == Some(current))
+        });
     let index = match standing {
         // First jump lands on the worst finding, not the second one.
         None if step >= 0 => 0,
@@ -92,7 +96,7 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     let found = anchored.swap_remove(index);
     // A finding with no published record leaves nothing current rather than
     // leaving the previous finding standing, which the tour has just left.
-    state.diagnostics.set_current_finding(found.identity);
+    state.model.diagnostics.set_current_finding(found.identity);
     state.jump_to_log_anchor(found.anchor);
     state.prompt(format!(
         "Finding {}/{} — {} · {}",
@@ -138,7 +142,7 @@ pub(crate) fn location_anchor(
 ) -> Option<crate::diagnostics::LogAnchor> {
     location_anchor_in(
         state,
-        &state.workspace.content.active_schematic_reference(),
+        &state.model.workspace.content.active_schematic_reference(),
         location,
     )
 }
@@ -169,28 +173,36 @@ pub(crate) fn location_anchor_in(
     }
 
     let key = cell_view.key();
-    let placed =
-        if key.eq_ignore_ascii_case(&state.workspace.content.active_schematic_reference().key()) {
-            markers::placement(&super::schematic_design_view(state), location)?
-        } else {
-            let (_, schematic) = state
+    let placed = if key.eq_ignore_ascii_case(
+        &state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key(),
+    ) {
+        markers::placement(&super::schematic_design_view(state), location)?
+    } else {
+        let (_, schematic) = state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .iter()
+            .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?;
+        let view = rspice_schematic_editor::view::design_view::DesignView {
+            document: schematic.document(),
+            canvas_cache: None,
+            sheet_catalog: state
+                .model
                 .workspace
                 .content
-                .schematic_buffers
-                .iter()
-                .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?;
-            let view = rspice_schematic_editor::view::design_view::DesignView {
-                document: schematic.document(),
-                canvas_cache: None,
-                sheet_catalog: state
-                    .workspace
-                    .content
-                    .design_management
-                    .sheet_catalog(&key),
-                review_markers: state.ui.schematic_visibility.review_markers,
-            };
-            markers::placement(&view, location)?
+                .design_management
+                .sheet_catalog(&key),
+            review_markers: state.ui.schematic_visibility.review_markers,
         };
+        markers::placement(&view, location)?
+    };
     let (component, wire) = match location {
         DrcLocation::Component { id, .. } => (Some(*id), None),
         DrcLocation::Wire { id } => (None, Some(*id)),
@@ -214,7 +226,7 @@ pub(crate) fn location_anchor_in(
 /// stated inside an instance of this one — so this asks the store for it
 /// rather than the active drawing's own results.
 pub(crate) fn related_marks(state: &AppState) -> Option<(DrcSeverity, Vec<crate::state::Point>)> {
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     let (severity, locations) = state.current_finding_related_marks(&subject)?;
     let view = super::schematic_design_view(state);
     let points = locations
@@ -234,7 +246,7 @@ pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, sta
         return;
     };
     // Stale results stay in the dialog/console but vanish from the canvas.
-    if state.dialogs.drc_checked_version != state.schematic.topology_version() {
+    if state.dialogs.drc_checked_version != state.model.schematic.topology_version() {
         return;
     }
 

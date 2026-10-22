@@ -515,7 +515,7 @@ impl LiveSessionEngine {
     /// Finish a policy-mandated mirror teardown that had to wait for the
     /// local run to stop.
     fn settle_mirror_discard(&mut self, state: &mut AppState) {
-        if !self.mirror_discard_pending || state.simulation.execution.has_active_execution() {
+        if !self.mirror_discard_pending || state.model.simulation.execution.has_active_execution() {
             return;
         }
         state
@@ -611,7 +611,7 @@ impl LiveSessionEngine {
         state.workbench.live_write_locks = LiveWriteLocks::default();
         // The read-only flag is this engine's to own; clearing it never
         // unlocks library or safe-mode gates, which are separate.
-        state.schematic.session.read_only = false;
+        state.model.schematic.session.read_only = false;
     }
 
     /// The session is over: keep the mirror open as an unsaved copy when
@@ -631,9 +631,9 @@ impl LiveSessionEngine {
             "The live session ended; its policy does not allow keeping a copy, so the mirrored \
              project is closing.",
         );
-        if state.simulation.execution.has_active_execution() {
-            if state.simulation.can_request_abort_active_run()
-                && let Err(error) = state.simulation.request_abort_active_run()
+        if state.model.simulation.execution.has_active_execution() {
+            if state.model.simulation.can_request_abort_active_run()
+                && let Err(error) = state.model.simulation.request_abort_active_run()
             {
                 state.record(
                     LogSeverity::Error,
@@ -1063,13 +1063,14 @@ impl LiveSessionEngine {
             return;
         };
         let mut current: Vec<String> = state
+            .model
             .workspace
             .content
             .schematic_buffers
             .keys()
             .map(|key| schematic_doc_key(key))
             .collect();
-        if state.workspace.content.netlist_document.is_some() {
+        if state.model.workspace.content.netlist_document.is_some() {
             current.push(NETLIST_DOC.to_owned());
         }
         current.push(PROJECT_DOC.to_owned());
@@ -1114,8 +1115,8 @@ impl LiveSessionEngine {
     /// Keep the workspace buffer map current with the active working copy,
     /// but only when its content actually moved.
     fn sync_active_buffer(&mut self, state: &mut AppState) {
-        let key = state.workspace.content.active_key();
-        let version = state.schematic.content_version();
+        let key = state.model.workspace.content.active_key();
+        let version = state.model.schematic.content_version();
         if self.active_synced_version != Some((key.clone(), version)) {
             state.sync_active_schematic_to_workspace();
             self.active_synced_version = Some((key, version));
@@ -1237,9 +1238,9 @@ impl LiveSessionEngine {
         let Role::Host(host) = &mut self.role else {
             return;
         };
-        let running = state.simulation.execution.has_active_execution();
-        let fraction = state.simulation.execution.progress.clamp(0.0, 1.0);
-        let status = state.simulation.execution.status.clone();
+        let running = state.model.simulation.execution.has_active_execution();
+        let fraction = state.model.simulation.execution.progress.clamp(0.0, 1.0);
+        let status = state.model.simulation.execution.status.clone();
         let mut outgoing: Option<RunStatusPayload> = None;
         if running && !host.run.active {
             host.run.active = true;
@@ -1506,7 +1507,7 @@ impl LiveSessionEngine {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
-        let focused = schematic_doc_key(&state.workspace.content.active_key());
+        let focused = schematic_doc_key(&state.model.workspace.content.active_key());
         self.send(&LiveMessage::Presence(PresencePayload {
             sender: identity,
             focused_doc: Some(focused),
@@ -1526,7 +1527,7 @@ impl LiveSessionEngine {
             state.ui.canvas_hover.and_then(|(x, y)| {
                 let (x, y) = (x as f32, y as f32);
                 (x.is_finite() && y.is_finite()).then(|| CursorLocus::Canvas {
-                    doc: schematic_doc_key(&state.workspace.content.active_key()),
+                    doc: schematic_doc_key(&state.model.workspace.content.active_key()),
                     x,
                     y,
                 })
@@ -1662,9 +1663,9 @@ impl LiveSessionEngine {
         }
         let active_locked = locks
             .schematic_views
-            .contains_key(&state.workspace.content.active_key());
+            .contains_key(&state.model.workspace.content.active_key());
         state.workbench.live_write_locks = locks;
-        state.schematic.session.read_only = active_locked;
+        state.model.schematic.session.read_only = active_locked;
     }
 }
 
@@ -1681,13 +1682,14 @@ fn install_schematic_buffer(
     prepared.session.editor.needs_fit = false;
     prepared.session.is_dirty = remote_is_unsaved;
     prepared.session.needs_history_reset = true;
-    if state.workspace.content.active_key() == cell_key {
-        prepared.session.editor.zoom = state.schematic.session.editor.zoom;
-        prepared.session.editor.pan = state.schematic.session.editor.pan;
-        prepared.session.read_only = state.schematic.session.read_only;
-        state.schematic = prepared.clone();
+    if state.model.workspace.content.active_key() == cell_key {
+        prepared.session.editor.zoom = state.model.schematic.session.editor.zoom;
+        prepared.session.editor.pan = state.model.schematic.session.editor.pan;
+        prepared.session.read_only = state.model.schematic.session.read_only;
+        state.model.schematic = prepared.clone();
     }
     state
+        .model
         .workspace
         .insert_schematic_editor(cell_key.to_owned(), prepared);
 }
@@ -1706,6 +1708,7 @@ fn content_type_for(doc: &str) -> &'static str {
 fn host_document_version(state: &AppState, doc: &str) -> Option<u64> {
     if doc == NETLIST_DOC {
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1714,6 +1717,7 @@ fn host_document_version(state: &AppState, doc: &str) -> Option<u64> {
     } else {
         let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -1752,6 +1756,7 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
     }
     if doc == NETLIST_DOC {
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1759,7 +1764,12 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
             .map(|document| document.source_bytes().to_vec())
     } else {
         let cell_key = doc.strip_prefix(SCHEMATIC_DOC_PREFIX)?;
-        let buffer = state.workspace.content.schematic_buffers.get(cell_key)?;
+        let buffer = state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(cell_key)?;
         serialize_schematic_for_wire(buffer).ok()
     }
 }
@@ -1857,7 +1867,7 @@ mod tests {
         engine.drain_inbound(&mut state);
 
         assert!(engine.pending_run_requests.is_empty());
-        assert!(!state.simulation.execution.trigger_simulation);
+        assert!(!state.model.simulation.execution.trigger_simulation);
     }
 
     #[test]
@@ -1887,13 +1897,13 @@ mod tests {
         engine.drain_inbound(&mut state);
 
         assert_eq!(engine.pending_run_requests.len(), 1);
-        assert!(!state.simulation.execution.trigger_simulation);
+        assert!(!state.model.simulation.execution.trigger_simulation);
 
         let approved = engine.approve_run_request(editor);
 
         assert!(approved);
         assert!(engine.pending_run_requests.is_empty());
-        assert!(!state.simulation.execution.trigger_simulation);
+        assert!(!state.model.simulation.execution.trigger_simulation);
     }
 
     #[test]

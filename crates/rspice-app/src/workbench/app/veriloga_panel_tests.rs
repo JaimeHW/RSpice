@@ -38,10 +38,14 @@ pub(super) fn placed_veriloga_cell(
         .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
     let mut library_cell = Cell::new(cell);
     library_cell.add_view(view);
-    if state.library_manager.get_library(LIBRARY).is_none() {
-        state.library_manager.add_library(Library::new(LIBRARY));
+    if state.model.library_manager.get_library(LIBRARY).is_none() {
+        state
+            .model
+            .library_manager
+            .add_library(Library::new(LIBRARY));
     }
     state
+        .model
         .library_manager
         .get_library_mut(LIBRARY)
         .expect("the behavioral library")
@@ -76,6 +80,7 @@ pub(super) fn placed_veriloga_cell(
         .expect("a valid cell-view bundle");
     let bundle_id = bundle.id();
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -84,6 +89,7 @@ pub(super) fn placed_veriloga_cell(
 
     let ports = rspice_design::library::metadata::metadata_ports(
         &state
+            .model
             .library_manager
             .get_library(LIBRARY)
             .and_then(|library| library.get_cell(cell))
@@ -96,6 +102,7 @@ pub(super) fn placed_veriloga_cell(
     let mut binding = LibraryCellInstance::new(LIBRARY, cell, "veriloga");
     binding.bind_interface(&ports);
     let instance = state
+        .model
         .schematic
         .add_library_cell_component(Point::new(20, 20), binding);
     (reference, bundle_id, instance)
@@ -271,6 +278,7 @@ fn used_in_lists_a_placed_instance_and_opens_it_selected() {
     let name = reader
         .app
         .state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -293,8 +301,8 @@ fn used_in_lists_a_placed_instance_and_opens_it_selected() {
 
     reader.click(&row);
 
-    assert_eq!(reader.app.state.workspace.content.active_view, top);
-    let selection = &reader.app.state.schematic.session.editor.selection;
+    assert_eq!(reader.app.state.model.workspace.content.active_view, top);
+    let selection = &reader.app.state.model.schematic.session.editor.selection;
     assert!(
         selection.components.contains(&instance) && selection.components.len() == 1,
         "the instance alone is selected: {:?}",

@@ -491,6 +491,7 @@ mod tests {
     fn worker_fixture_with_wire_endpoint(endpoint_x: i32) -> WorkerFixture {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -499,15 +500,15 @@ mod tests {
                 Point::new(-20, 5),
                 Point::new(endpoint_x, 5),
             ));
-        let active_view = state.workspace.content.active_view.clone();
+        let active_view = state.model.workspace.content.active_view.clone();
         state
             .workbench
             .documents
             .activate(WorkspaceDocumentId::CellView(active_view));
         let source_key = format!(
             "project:{}:cell-view:{}",
-            state.workspace.content.project.id().as_uuid(),
-            state.workspace.content.active_key()
+            state.model.workspace.content.project.id().as_uuid(),
+            state.model.workspace.content.active_key()
         );
         let scope = HardcopyScope::ActiveDocument;
         let source = resolve_retained_hardcopy_source(&state, &source_key, scope.clone())

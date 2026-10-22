@@ -25,6 +25,7 @@ fn baselines<'a>(
     analysis: &AnalysisResult,
 ) -> Vec<(&'a SimulationRun, Vec<String>)> {
     state
+        .model
         .simulation
         .retained
         .runs
@@ -170,6 +171,7 @@ pub(super) fn commit(
             .baseline
             .and_then(|id| {
                 state
+                    .model
                     .simulation
                     .retained
                     .runs

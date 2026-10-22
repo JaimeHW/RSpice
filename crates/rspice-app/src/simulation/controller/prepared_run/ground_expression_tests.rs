@@ -21,8 +21,9 @@ use rspice_results::specification_verdict::SpecificationVerdictStatus;
 /// and no ground symbol: V(out) = 1.5 V. One transient, nothing else enabled.
 fn divider_returned_through_gnd_labels() -> AppState {
     let mut state = AppState::default();
-    state.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::reference_only();
-    state.sim_setup.reference_pvt.temperature_celsius = 27.0;
+    state.model.sim_setup.run_set =
+        rspice_simulation_contract::run_set::RunSetState::reference_only();
+    state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
     for (index, (kind, name, value, nodes)) in [
         (ComponentType::VoltageSource, "V1", "2", ["in", "GND!"]),
         (ComponentType::Resistor, "R1", "1k", ["in", "out"]),
@@ -32,9 +33,11 @@ fn divider_returned_through_gnd_labels() -> AppState {
     .enumerate()
     {
         let id = state
+            .model
             .schematic
             .add_component(kind, Point::new(100 + index as i32 * 200, 100));
         let component = state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -49,12 +52,19 @@ fn divider_returned_through_gnd_labels() -> AppState {
                 terminal.x,
                 terminal.y + if terminal.y < 100 { -20 } else { 20 },
             );
-            state.schematic.add_wire(vec![terminal, end]).unwrap();
-            state.schematic.add_net_label(end, node.to_owned());
+            state.model.schematic.add_wire(vec![terminal, end]).unwrap();
+            state.model.schematic.add_net_label(end, node.to_owned());
         }
     }
-    state.schematic.session.editor.selection.components.clear();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .components
+        .clear();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     for id in plan
         .instances()
         .iter()
@@ -73,8 +83,8 @@ fn divider_returned_through_gnd_labels() -> AppState {
         config.max_step = "100n".into();
     })
     .unwrap();
-    state.sim_setup.save_policy.output_selection_mode = OutputSelectionMode::ExplicitOnly;
-    state.sim_setup.save_policy.maximum_storage_bytes = u64::MAX;
+    state.model.sim_setup.save_policy.output_selection_mode = OutputSelectionMode::ExplicitOnly;
+    state.model.sim_setup.save_policy.maximum_storage_bytes = u64::MAX;
     state
 }
 
@@ -141,12 +151,14 @@ fn run_with(
     outputs: Vec<SavedOutput>,
     definitions: Vec<SpecificationDefinition>,
 ) -> SimulationRun {
-    let plan_id = state.sim_setup.analysis_plan.as_ref().unwrap().id();
+    let plan_id = state.model.sim_setup.analysis_plan.as_ref().unwrap().id();
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, definitions);
     state
+        .model
         .workspace
         .content
         .plan_data_mut(plan_id)
@@ -275,8 +287,9 @@ fn outputs_measures_and_specifications_read_the_drawn_ground_as_node_zero() {
 #[test]
 fn a_measurement_over_a_node_the_deck_lacks_is_still_refused() {
     let mut state = divider_returned_through_gnd_labels();
-    let plan_id = state.sim_setup.analysis_plan.as_ref().unwrap().id();
+    let plan_id = state.model.sim_setup.analysis_plan.as_ref().unwrap().id();
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(

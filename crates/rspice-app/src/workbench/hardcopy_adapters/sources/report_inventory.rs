@@ -49,7 +49,7 @@ pub(super) fn resolve(
     resolve_report_source(ReportHardcopySource {
         source_key: format!(
             "project:{}:report:{}",
-            state.workspace.content.project.id().as_uuid(),
+            state.model.workspace.content.project.id().as_uuid(),
             document.id()
         ),
         document,
@@ -63,7 +63,7 @@ pub(super) fn reference_inventory(
     document: &ReportDocument,
 ) -> Result<ReportReferenceInventory, HardcopySourceError> {
     let mut available_datasets = Vec::new();
-    for run in &state.simulation.retained.runs {
+    for run in &state.model.simulation.retained.runs {
         let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
         retain_available_dataset(&mut available_datasets, binding)?;
     }
@@ -141,6 +141,7 @@ fn resolve_inventory_entry(
     let entry = match &captured.source {
         ReportSourceId::VisualizationDocument { document_id } => {
             let matches = state
+                .model
                 .workspace
                 .content
                 .visualization_documents
@@ -233,6 +234,7 @@ fn resolve_linked_figure_artifact(
         ))
     })?;
     let matches = state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -291,6 +293,7 @@ fn unique_run_for_dataset<'a>(
     label: &str,
 ) -> Result<&'a crate::state::SimulationRun, HardcopySourceError> {
     let mut matching = state
+        .model
         .simulation
         .retained
         .runs

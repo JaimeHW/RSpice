@@ -291,7 +291,7 @@ pub(crate) fn start_create(
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn list(state: &AppState) -> Result<ProjectCheckpointCatalog, String> {
-    let project_id = state.workspace.content.project.id().to_string();
+    let project_id = state.model.workspace.content.project.id().to_string();
     list_native(state, &project_id)
 }
 
@@ -427,13 +427,17 @@ fn sort_newest_first(checkpoints: &mut [ProjectCheckpointSummary]) {
 /// Where this project's checkpoints are kept, as the reader would look for them.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn storage_location(state: &AppState) -> Result<PathBuf, String> {
-    checkpoint_directory(state, &state.workspace.content.project.id().to_string())
+    checkpoint_directory(
+        state,
+        &state.model.workspace.content.project.id().to_string(),
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn checkpoint_directory(state: &AppState, project_id: &str) -> Result<PathBuf, String> {
     let _ = project_id;
     let base = state
+        .model
         .workspace
         .content
         .project
@@ -788,7 +792,7 @@ pub(crate) fn start_list(
     state: &AppState,
     complete: impl FnOnce(Result<ProjectCheckpointCatalog, String>) + 'static,
 ) {
-    let project_id = state.workspace.content.project.id().to_string();
+    let project_id = state.model.workspace.content.project.id().to_string();
     let prefix = browser_project_prefix(&project_id);
     let accumulator = std::rc::Rc::new(std::cell::RefCell::new(BrowserCheckpointAccumulator {
         project_id,
@@ -931,7 +935,7 @@ mod tests {
         assert!(validate_snapshot_bytes(&summary, &changed).is_err());
 
         let mut changed_state = state;
-        changed_state.workspace.content.netlist_source = Some("R1 1 0 1k\n.end\n".to_owned());
+        changed_state.model.workspace.content.netlist_source = Some("R1 1 0 1k\n.end\n".to_owned());
         assert!(
             !matches_current_state(&summary, &changed_state)
                 .expect("changed state digest compares")
@@ -1030,11 +1034,17 @@ mod tests {
         let automation_id = automation.id();
 
         let mut state = AppState::default();
-        assert!(state.workspace.content.make_netlist_editable_copy(netlist));
-        state.workspace.content.project_sources =
+        assert!(
+            state
+                .model
+                .workspace
+                .content
+                .make_netlist_editable_copy(netlist)
+        );
+        state.model.workspace.content.project_sources =
             ProjectSourceRegistry::try_from_bundles([veriloga, automation])
                 .expect("source registry is valid");
-        state.workspace.content.project_sources_dirty = true;
+        state.model.workspace.content.project_sources_dirty = true;
 
         let (manifest, serialized) = prepare_checkpoint(&state, ProjectCheckpointReason::Manual)
             .expect("complete Code workspace checkpoint prepares");
@@ -1094,6 +1104,7 @@ mod tests {
 
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .replace_editable_netlist_source("* changed after checkpoint\n.end\n".to_owned())
@@ -1117,12 +1128,13 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("create fixture directory");
         let mut state = AppState::default();
         state
+            .model
             .workspace
             .content
             .project
             .set_path(directory.join("source.rspiceproj"));
-        let source_id = state.workspace.content.project.id();
-        let source_revision = state.workspace.content.project.revision();
+        let source_id = state.model.workspace.content.project.id();
+        let source_revision = state.model.workspace.content.project.revision();
 
         let checkpoint = create(&mut state, ProjectCheckpointReason::TechnologyAttachment)
             .expect("checkpoint publishes");
@@ -1181,6 +1193,7 @@ mod tests {
         std::fs::create_dir_all(&directory).expect("create fixture directory");
         let mut state = AppState::default();
         state
+            .model
             .workspace
             .content
             .project

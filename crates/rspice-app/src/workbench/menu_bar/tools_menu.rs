@@ -78,6 +78,7 @@ mod tests {
         report(&mut state, "Design checks", Ok(finding(DrcSeverity::Error)));
         state.drain_notices(&ctx);
         let line = state
+            .model
             .log_buffer
             .entries()
             .last()
@@ -103,6 +104,7 @@ mod tests {
         );
         state.drain_notices(&ctx);
         let line = state
+            .model
             .log_buffer
             .entries()
             .last()

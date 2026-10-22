@@ -58,8 +58,8 @@ struct BrowserRowSpec<'a> {
 pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     let ctx = ui.ctx().clone();
     ensure_valid_selection(
-        &mut app.state.library_manager,
-        &app.state.workspace.content.active_view,
+        &mut app.state.model.library_manager,
+        &app.state.model.workspace.content.active_view,
     );
     library_context(ui, &mut app.state);
 
@@ -178,10 +178,12 @@ fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_vie
 fn library_context(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
     let selection = state
+        .model
         .library_manager
         .selected_lcv_path()
         .unwrap_or_else(|| "No library selection".to_owned());
     let access = state
+        .model
         .library_manager
         .current_library()
         .map_or("unavailable", |library| {
@@ -242,6 +244,7 @@ fn context_value(ui: &mut Ui, label: &str, value: &str, color: Color32) {
 fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
     let libraries = app
         .state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -253,7 +256,7 @@ fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Opti
             )
         })
         .collect::<Vec<_>>();
-    let selected = app.state.library_manager.selected_library.as_deref();
+    let selected = app.state.model.library_manager.selected_library.as_deref();
     browser_column(ui, "Library", libraries.len(), width, height, |ui| {
         let mut intent = None;
         for (name, cells, read_only) in &libraries {
@@ -279,7 +282,7 @@ fn library_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Opti
 }
 
 fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
-    let selected_library = app.state.library_manager.selected_library.clone();
+    let selected_library = app.state.model.library_manager.selected_library.clone();
     let query = app
         .state
         .workbench
@@ -288,7 +291,7 @@ fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
         .to_ascii_lowercase();
     let cells = selected_library
         .as_deref()
-        .and_then(|library| app.state.library_manager.get_library(library))
+        .and_then(|library| app.state.model.library_manager.get_library(library))
         .map(|library| {
             library
                 .cells_sorted()
@@ -312,7 +315,7 @@ fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let selected_cell = app.state.library_manager.selected_cell.as_deref();
+    let selected_cell = app.state.model.library_manager.selected_cell.as_deref();
     browser_column(ui, "Cell", cells.len(), width, height, |ui| {
         let mut intent = None;
         for (name, views, description) in &cells {
@@ -347,11 +350,11 @@ fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
 }
 
 fn view_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<LibraryIntent> {
-    let selected_library = app.state.library_manager.selected_library.clone();
-    let selected_cell = app.state.library_manager.selected_cell.clone();
+    let selected_library = app.state.model.library_manager.selected_library.clone();
+    let selected_cell = app.state.model.library_manager.selected_cell.clone();
     let views = selected_library
         .as_deref()
-        .and_then(|library| app.state.library_manager.get_library(library))
+        .and_then(|library| app.state.model.library_manager.get_library(library))
         .and_then(|library| {
             selected_cell
                 .as_deref()
@@ -371,7 +374,7 @@ fn view_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let selected_view = app.state.library_manager.selected_view.as_deref();
+    let selected_view = app.state.model.library_manager.selected_view.as_deref();
     browser_column(ui, "View", views.len(), width, height, |ui| {
         let mut intent = None;
         for (name, view_type, modified, path) in &views {
@@ -524,10 +527,12 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
     let selected = selected_view(state);
     let selected_cell = selected_cell(state);
     let selected_library = state
+        .model
         .library_manager
         .current_library()
         .map(|library| (library.name.clone(), library.read_only));
     let writable_library_available = state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -569,14 +574,14 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let governance_write_allowed = state.project_lifecycle.is_open()
                         && !state.workbench.safe_mode.project_read_only()
-                        && !state.simulation.execution.has_active_execution();
+                        && !state.model.simulation.execution.has_active_execution();
                     let rollback = Button::new("Rollback\u{2026}")
                         .enabled(
                             governance_write_allowed
-                                && !state.workspace.content.project.library_publications().is_empty(),
+                                && !state.model.workspace.content.project.library_publications().is_empty(),
                         )
                         .show(ui)
-                        .on_disabled_hover_text(if state.simulation.execution.has_active_execution() {
+                        .on_disabled_hover_text(if state.model.simulation.execution.has_active_execution() {
                             "Library rollback is unavailable while a simulation is running."
                         } else if state.workbench.safe_mode.project_read_only() {
                             "Library rollback is unavailable while the project is read-only."
@@ -589,7 +594,7 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
                     let publish = Button::new("Publish\u{2026}")
                         .enabled(governance_write_allowed)
                         .show(ui)
-                        .on_disabled_hover_text(if state.simulation.execution.has_active_execution() {
+                        .on_disabled_hover_text(if state.model.simulation.execution.has_active_execution() {
                             "Library publication is unavailable while a simulation is running."
                         } else {
                             "Library publication is unavailable while the project is read-only."
@@ -754,14 +759,14 @@ fn library_detail(ui: &mut Ui, state: &AppState) -> Option<LibraryIntent> {
 }
 
 fn selected_cell(state: &AppState) -> Option<(String, String, bool)> {
-    let manager = &state.library_manager;
+    let manager = &state.model.library_manager;
     let library = manager.current_library()?;
     let cell = manager.current_cell()?;
     Some((library.name.clone(), cell.name.clone(), library.read_only))
 }
 
 fn selected_view(state: &AppState) -> Option<(CellViewRef, ViewType, bool, bool)> {
-    let manager = &state.library_manager;
+    let manager = &state.model.library_manager;
     let library = manager.current_library()?;
     let cell = manager.current_cell()?;
     let view = manager.current_view()?;
@@ -776,13 +781,13 @@ fn selected_view(state: &AppState) -> Option<(CellViewRef, ViewType, bool, bool)
 fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryIntent) {
     match intent {
         LibraryIntent::SelectLibrary(library) => {
-            app.state.library_manager.select_library(&library);
+            app.state.model.library_manager.select_library(&library);
         }
         LibraryIntent::SelectCell { library, cell } => {
-            app.state.library_manager.select_cell(&library, &cell);
+            app.state.model.library_manager.select_cell(&library, &cell);
         }
         LibraryIntent::SelectView(reference) => {
-            app.state.library_manager.select_view(
+            app.state.model.library_manager.select_view(
                 &reference.library,
                 &reference.cell,
                 &reference.view,
@@ -945,8 +950,13 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
         return;
     }
 
-    let receipts = state.workspace.content.project.library_mutation_audit();
-    let publications = state.workspace.content.project.library_publications();
+    let receipts = state
+        .model
+        .workspace
+        .content
+        .project
+        .library_mutation_audit();
+    let publications = state.model.workspace.content.project.library_publications();
     let description = format!(
         "{} recorded library change{} and {} publication{}.",
         receipts.len(),
@@ -962,12 +972,19 @@ fn show_library_audit_history(ctx: &Context, state: &AppState) {
                 property_row(
                     ui,
                     "Project revision",
-                    &state.workspace.content.project.revision().get().to_string(),
+                    &state
+                        .model
+                        .workspace
+                        .content
+                        .project
+                        .revision()
+                        .get()
+                        .to_string(),
                 );
                 property_row(
                     ui,
                     "Library revision",
-                    &state.library_manager.revision().to_string(),
+                    &state.model.library_manager.revision().to_string(),
                 );
                 property_row(ui, "Retained receipts", &receipts.len().to_string());
                 property_row(ui, "Retained publications", &publications.len().to_string());
@@ -1088,7 +1105,7 @@ fn show_library_edit_locks(ctx: &Context, state: &AppState) {
         return;
     }
 
-    let snapshot = state.library_edit_locks.snapshot();
+    let snapshot = state.model.library_edit_locks.snapshot();
     let description = match snapshot {
         Some(snapshot) => format!(
             "{} authoritative edit lock{} at synchronization generation {}.",
@@ -1264,12 +1281,12 @@ mod tests {
     #[test]
     fn selection_repairs_to_real_library_cell_and_view() {
         let app = RSpiceApp::test_instance();
-        let mut manager = app.state.library_manager.clone();
+        let mut manager = app.state.model.library_manager.clone();
         manager.selected_library = Some("missing".to_owned());
         manager.selected_cell = Some("missing".to_owned());
         manager.selected_view = Some("missing".to_owned());
 
-        ensure_valid_selection(&mut manager, &app.state.workspace.content.active_view);
+        ensure_valid_selection(&mut manager, &app.state.model.workspace.content.active_view);
 
         assert!(manager.current_library().is_some());
         assert!(manager.current_cell().is_some());
@@ -1289,7 +1306,7 @@ mod tests {
         for view_type in [ViewType::Spice, ViewType::Verilog, ViewType::VerilogA] {
             let mut app = RSpiceApp::test_instance();
             app.state.workbench.activate(Workspace::Models);
-            let reference = app.state.workspace.content.active_view.clone();
+            let reference = app.state.model.workspace.content.active_view.clone();
             apply_library_intent(
                 &egui::Context::default(),
                 &mut app,
@@ -1306,7 +1323,7 @@ mod tests {
     #[test]
     fn configuration_views_route_to_the_project_configuration_page() {
         let mut app = RSpiceApp::test_instance();
-        let reference = app.state.workspace.content.active_view.clone();
+        let reference = app.state.model.workspace.content.active_view.clone();
         apply_library_intent(
             &egui::Context::default(),
             &mut app,
@@ -1323,7 +1340,7 @@ mod tests {
         let mut cell = Cell::new("filter");
         cell.add_view(View::new("symbol", ViewType::Symbol));
         library.add_cell(cell);
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         let ctx = egui::Context::default();
 
         apply_library_intent(
@@ -1468,19 +1485,21 @@ mod tests {
     #[test]
     fn where_used_report_reads_live_and_inactive_schematic_buffers() {
         let mut app = RSpiceApp::test_instance();
-        let reference = app.state.workspace.content.active_view.clone();
+        let reference = app.state.model.workspace.content.active_view.clone();
         let binding = crate::state::LibraryCellInstance::new(
             &reference.library,
             &reference.cell,
             &reference.view,
         );
         app.state
+            .model
             .schematic
             .add_library_cell_component(crate::state::Point::origin(), binding.clone());
 
         let mut inactive = crate::state::SchematicState::default();
         inactive.add_library_cell_component(crate::state::Point::origin(), binding);
         app.state
+            .model
             .workspace
             .insert_schematic_editor("work/consumer/schematic".to_owned(), inactive);
 
@@ -1551,10 +1570,11 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        let project_revision = app.state.workspace.content.project.revision();
-        let library_revision = app.state.library_manager.revision();
+        let project_revision = app.state.model.workspace.content.project.revision();
+        let library_revision = app.state.model.library_manager.revision();
         let library = app
             .state
+            .model
             .library_manager
             .libraries_sorted()
             .first()
@@ -1562,7 +1582,7 @@ mod tests {
             .name
             .clone();
         let snapshot = ProjectLibraryLockSnapshot::try_new(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             1,
             project_revision,
             library_revision,
@@ -1592,10 +1612,10 @@ mod tests {
 
         assert!(error.contains("locked by other-engineer@example.test"));
         assert_eq!(
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
             project_revision
         );
-        assert_eq!(app.state.library_manager.revision(), library_revision);
+        assert_eq!(app.state.model.library_manager.revision(), library_revision);
     }
 
     #[test]
@@ -1603,9 +1623,9 @@ mod tests {
         use sha2::Digest as _;
 
         let mut app = RSpiceApp::test_instance();
-        let project_id = app.state.workspace.content.project.id();
-        let project_revision = app.state.workspace.content.project.revision();
-        let library_revision = app.state.library_manager.revision();
+        let project_id = app.state.model.workspace.content.project.id();
+        let project_revision = app.state.model.workspace.content.project.revision();
+        let library_revision = app.state.model.library_manager.revision();
 
         let candidate = app
             .prepare_project_library_publication(
@@ -1646,12 +1666,18 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(
-            app.state.workspace.content.project.library_publications(),
+            app.state
+                .model
+                .workspace
+                .content
+                .project
+                .library_publications(),
             [receipt.clone()]
         );
-        assert!(app.state.workspace.content.project_metadata_dirty);
-        let mut tampered_descriptor = serde_json::to_value(&app.state.workspace.content.project)
-            .expect("descriptor serializes");
+        assert!(app.state.model.workspace.content.project_metadata_dirty);
+        let mut tampered_descriptor =
+            serde_json::to_value(&app.state.model.workspace.content.project)
+                .expect("descriptor serializes");
         tampered_descriptor["library_publications"][0]["reason"] =
             serde_json::json!("silently changed reason");
         let tampered_descriptor: crate::state::ProjectDescriptor =
@@ -1663,6 +1689,7 @@ mod tests {
 
         let writable_library = app
             .state
+            .model
             .library_manager
             .libraries_sorted()
             .into_iter()
@@ -1678,6 +1705,7 @@ mod tests {
             })
             .expect("post-publication mutation preflights");
         app.state
+            .model
             .library_manager
             .get_library_mut(&writable_library)
             .expect("writable library")
@@ -1685,6 +1713,7 @@ mod tests {
         app.state.publish_project_library_mutation(prepared);
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library(&writable_library)
                 .and_then(|library| library.get_cell("post_publication_change"))
@@ -1694,7 +1723,7 @@ mod tests {
         let mut tampered = bytes.clone();
         let last = tampered.last_mut().expect("nonempty publication artifact");
         *last ^= 0x01;
-        let revision_before_rejection = app.state.workspace.content.project.revision();
+        let revision_before_rejection = app.state.model.workspace.content.project.revision();
         let tampered_result = app.rollback_project_library_publication(
             receipt.publication_id(),
             &tampered,
@@ -1704,11 +1733,12 @@ mod tests {
         );
         assert!(tampered_result.is_err());
         assert_eq!(
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
             revision_before_rejection
         );
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library(&writable_library)
                 .and_then(|library| library.get_cell("post_publication_change"))
@@ -1726,19 +1756,25 @@ mod tests {
         .expect("exact publication rollback succeeds");
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library(&writable_library)
                 .and_then(|library| library.get_cell("post_publication_change"))
                 .is_none()
         );
         assert_eq!(
-            app.state.workspace.content.project.library_publications(),
+            app.state
+                .model
+                .workspace
+                .content
+                .project
+                .library_publications(),
             [receipt.clone()],
             "rollback retains immutable publication lineage"
         );
         assert!(matches!(
             app.state
-                .workspace
+                .model.workspace
                 .content.project
                 .library_mutation_audit()
                 .last()
@@ -1755,7 +1791,7 @@ mod tests {
                 && reason == "Restore the qualified handoff"
         ));
 
-        let revision_after_first = app.state.workspace.content.project.revision();
+        let revision_after_first = app.state.model.workspace.content.project.revision();
         let duplicate = app.prepare_project_library_publication(
             "ANALOG-CORE-1.0.0",
             "release-engineer@example.test",
@@ -1764,7 +1800,7 @@ mod tests {
         );
         assert!(duplicate.is_err());
         assert_eq!(
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
             revision_after_first,
             "rejected publication must not partially advance project state"
         );
@@ -1783,6 +1819,7 @@ mod tests {
             .expect("publication prepares");
         let writable_library = app
             .state
+            .model
             .library_manager
             .libraries_sorted()
             .into_iter()
@@ -1798,13 +1835,14 @@ mod tests {
             })
             .expect("intervening mutation preflights");
         app.state
+            .model
             .library_manager
             .get_library_mut(&writable_library)
             .expect("writable library")
             .add_cell(crate::state::Cell::new("intervening_change"));
         app.state
             .publish_project_library_mutation(prepared_mutation);
-        let revision_after_mutation = app.state.workspace.content.project.revision();
+        let revision_after_mutation = app.state.model.workspace.content.project.revision();
 
         let error = app
             .commit_project_library_publication(candidate)
@@ -1813,6 +1851,7 @@ mod tests {
         assert!(error.contains("stale"));
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .project
@@ -1820,7 +1859,7 @@ mod tests {
                 .is_empty()
         );
         assert_eq!(
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
             revision_after_mutation
         );
     }

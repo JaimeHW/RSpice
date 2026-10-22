@@ -28,6 +28,7 @@ impl Route {
         app.state.workbench.simulation_page = SimulationPage::Analyses;
         let selected = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
@@ -150,6 +151,7 @@ impl Route {
         let plan = self
             .app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the plan resolves");
@@ -189,6 +191,7 @@ fn transient_checkpoint_interval_edit_reaches_the_authored_plan() {
     route
         .app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -203,7 +206,13 @@ fn transient_checkpoint_interval_edit_reaches_the_authored_plan() {
     route.pass(Vec::new());
     route.pass(Vec::new());
     route.retype("Checkpoint interval", "7n");
-    let plan = route.app.state.sim_setup.stable_analysis_plan().unwrap();
+    let plan = route
+        .app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap();
     let instance = plan
         .instances()
         .iter()

@@ -286,6 +286,7 @@ pub(super) fn render_dialog(
         } => {
             let writable = app
                 .state
+                .model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -369,6 +370,7 @@ pub(super) fn render_dialog(
         } => {
             let has_record = app
                 .state
+                .model
                 .model_library_manager
                 .model_resolution_record(scope, &definition)
                 .is_some();
@@ -735,6 +737,7 @@ pub(super) fn render_dialog(
         } => {
             let sections = app
                 .state
+                .model
                 .model_library_manager
                 .get_library(&library)
                 .map(ModelLibrary::section_index)

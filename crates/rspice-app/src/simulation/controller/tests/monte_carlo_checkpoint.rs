@@ -37,7 +37,7 @@ fn controller_fixture(
     })
     .unwrap();
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .unwrap();
     run.mark_running().unwrap();
@@ -62,9 +62,9 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
     let (mut controller, mut state) = controller_fixture(request.clone());
     (_, controller.runner) = start_checkpoint_run(&source);
     wait_until_finished_unpolled(&controller.runner);
-    let before = state.simulation.view.data_version;
+    let before = state.model.simulation.view.data_version;
     controller.publish_monte_carlo_checkpoint(&mut state);
-    let live = state.simulation.active_analysis().unwrap();
+    let live = state.model.simulation.active_analysis().unwrap();
     assert!(live.is_live_partial());
     assert!(!live.success);
     assert!(live.family_metadata.is_none());
@@ -72,7 +72,7 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
         live.monte_carlo_checkpoint.as_ref().unwrap().bytes(),
         &*bytes
     );
-    assert_ne!(state.simulation.view.data_version, before);
+    assert_ne!(state.model.simulation.view.data_version, before);
     let mut without = live.clone();
     without.monte_carlo_checkpoint = None;
     assert_ne!(live.result_data_digest(), without.result_data_digest());
@@ -80,7 +80,7 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
 
     controller.runner.abort();
     controller.poll_completion(&mut state, &MockExportWorkflowIo::default());
-    let run = state.simulation.active_run().unwrap();
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Aborted);
     assert!(!run.success);
     assert_eq!(run.analyses.len(), 1);
@@ -101,7 +101,7 @@ fn monte_carlo_checkpoint_retention_seals_abort_and_final_completion_drain() {
     (_, controller.runner) = start_checkpoint_run(&source);
     wait_until_finished_unpolled(&controller.runner);
     controller.poll_completion(&mut state, &MockExportWorkflowIo::default());
-    let run = state.simulation.active_run().unwrap();
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Completed);
     assert!(run.success);
     assert_eq!(run.analyses.len(), 1);
@@ -142,7 +142,15 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         retain_failure_diagnostics: false,
     };
     controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
-    assert!(state.simulation.active_run().unwrap().analyses.is_empty());
+    assert!(
+        state
+            .model
+            .simulation
+            .active_run()
+            .unwrap()
+            .analyses
+            .is_empty()
+    );
     controller.current_save_policy =
         crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
     controller
@@ -151,7 +159,15 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         .unwrap()
         .mc_checkpoint = None;
     controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
-    assert!(state.simulation.active_run().unwrap().analyses.is_empty());
+    assert!(
+        state
+            .model
+            .simulation
+            .active_run()
+            .unwrap()
+            .analyses
+            .is_empty()
+    );
     controller
         .current_spec_options
         .as_mut()
@@ -177,9 +193,17 @@ fn monte_carlo_checkpoint_retention_obeys_budget_and_rejects_unrequested_capture
         )
         .unwrap_err();
     assert!(error.contains("without its requested retained checkpoint"));
-    assert!(state.simulation.active_run().unwrap().analyses.is_empty());
+    assert!(
+        state
+            .model
+            .simulation
+            .active_run()
+            .unwrap()
+            .analyses
+            .is_empty()
+    );
     controller.accept_monte_carlo_checkpoint(&mut state, bytes);
-    let retained = state.simulation.active_analysis().unwrap();
+    let retained = state.model.simulation.active_analysis().unwrap();
     assert!(retained.is_live_partial());
     assert_eq!(
         retained
@@ -202,6 +226,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     let (mut controller, mut state) = controller_fixture(request);
     controller.accept_monte_carlo_checkpoint(&mut state, bytes.clone());
     let digest = state
+        .model
         .simulation
         .active_analysis()
         .unwrap()
@@ -209,7 +234,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
         .as_ref()
         .unwrap()
         .digest();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (mc, _) = plan.insert(AnalysisKind::MonteCarlo).unwrap();
     plan.edit(mc, |draft| {
@@ -226,6 +251,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     .unwrap();
     let frozen = plan.freeze().unwrap();
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
@@ -245,7 +271,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     );
     let input = task.monte_carlo_resumes()[0].input();
     assert_eq!(input.digest(), digest);
-    state.simulation.retained.runs.clear();
+    state.model.simulation.retained.runs.clear();
     assert_eq!(
         input.decode().unwrap().completed_trials(),
         1,
@@ -259,6 +285,7 @@ fn monte_carlo_checkpoint_controls_resolve_evidence_before_preparation() {
     );
     let imported = crate::state::MonteCarloCheckpointEvidence::from_bytes(bytes).unwrap();
     state
+        .model
         .simulation
         .retained
         .imported_monte_carlo_checkpoints

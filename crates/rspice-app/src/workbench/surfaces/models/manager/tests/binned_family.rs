@@ -11,7 +11,7 @@ use super::*;
 /// instance per entry of `models`, `M1` onward, each naming that model.
 fn kit_project(models: &[&str]) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     let mut kit = ModelLibrary::new("kit");
     for (name, line, length) in [
         ("nch.1", 10, (0.1e-6, 1e-6)),
@@ -25,12 +25,13 @@ fn kit_project(models: &[&str]) -> RSpiceApp {
         card.source_line = Some(line);
         kit.add_model(card);
     }
-    app.state.model_library_manager.add_library(kit);
+    app.state.model.model_library_manager.add_library(kit);
     app.state.workbench.models_page = ModelsPage::Models;
 
-    app.state.workspace.ensure_active_buffer();
+    app.state.model.workspace.ensure_active_buffer();
     let mut schematic = app
         .state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -43,8 +44,8 @@ fn kit_project(models: &[&str]) -> RSpiceApp {
         component.params = format!("model={model}");
         schematic.document_mut_for_test().components.push(component);
     }
-    app.state.workspace.save_active_schematic(&schematic);
-    app.state.schematic = schematic;
+    app.state.model.workspace.save_active_schematic(&schematic);
+    app.state.model.schematic = schematic;
     app
 }
 
@@ -90,6 +91,7 @@ fn a_family_is_one_row_that_counts_every_instance_its_bins_run_for() {
     let consumers = ConsumerIndex::build(&render);
     let kit = render
         .state
+        .model
         .model_library_manager
         .get_library("kit")
         .expect("kit");
@@ -119,6 +121,7 @@ fn a_family_is_one_row_that_counts_every_instance_its_bins_run_for() {
 fn a_card_of_the_familys_own_name_keeps_its_bins_as_rows() {
     let mut app = kit_project(&["nch.1"]);
     app.state
+        .model
         .model_library_manager
         .get_library_mut("kit")
         .expect("kit")
@@ -143,6 +146,7 @@ fn a_card_of_the_familys_own_name_keeps_its_bins_as_rows() {
 fn binding_from_the_catalog_binds_the_family_with_its_library() {
     let mut app = kit_project(&["nch.1"]);
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -186,6 +190,7 @@ fn binding_from_the_catalog_binds_the_family_with_its_library() {
     let params = &studio
         .app
         .state
+        .model
         .schematic
         .document()
         .components

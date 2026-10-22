@@ -112,7 +112,11 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
 fn split_results_is_visible(app: &RSpiceApp) -> bool {
     app.state.workbench.results_split_visible(
         app.state.project_lifecycle.is_open(),
-        app.state.simulation.retained.has_retained_result_dataset(),
+        app.state
+            .model
+            .simulation
+            .retained
+            .has_retained_result_dataset(),
     )
 }
 
@@ -233,10 +237,10 @@ mod tests {
                 cell.add_view(view);
                 let mut library = crate::state::Library::new("behavioral");
                 library.add_cell(cell);
-                app.state.library_manager.add_library(library);
+                app.state.model.library_manager.add_library(library);
                 let owner = crate::state::ProjectSourceOwner::cell_view(reference.clone());
                 app.state
-                    .workspace
+                    .model.workspace
                     .content
                     .project_sources
                     .insert_bundle(
@@ -260,6 +264,7 @@ mod tests {
         };
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -268,7 +273,7 @@ mod tests {
         let editor_id =
             code_workspace::source_editor_id(language, bundle.id(), bundle.root().logical_path());
         let original = bundle.root().content().to_owned();
-        let sources = app.state.workspace.content.project_sources.clone();
+        let sources = app.state.model.workspace.content.project_sources.clone();
         let mut render = |events| {
             let _ = ctx.run_ui(
                 egui::RawInput {
@@ -311,6 +316,7 @@ mod tests {
         ]);
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -318,7 +324,7 @@ mod tests {
             .unwrap();
         if preceding.is_empty() {
             assert!(
-                app.state.workspace.content.project_sources == sources,
+                app.state.model.workspace.content.project_sources == sources,
                 "search text must not edit {language:?} source code"
             );
         } else {

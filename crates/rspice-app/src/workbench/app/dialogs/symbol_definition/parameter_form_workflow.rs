@@ -101,7 +101,7 @@ impl RSpiceApp {
                 ParameterFormPhase::Review => form_review_body(
                     ui,
                     &mut self.state.dialogs.symbol_parameter_form,
-                    &self.state.library_manager,
+                    &self.state.model.library_manager,
                 ),
                 ParameterFormPhase::Designer => form_designer_body(
                     ui,
@@ -162,6 +162,7 @@ impl RSpiceApp {
         let result = (|| {
             let current_view = self
                 .state
+                .model
                 .library_manager
                 .get_library(&target.library)
                 .and_then(|library| library.get_cell(&target.cell))
@@ -185,7 +186,7 @@ impl RSpiceApp {
             let replacement = original
                 .replace_parameter_form(draft)
                 .map_err(|error| error.to_string())?;
-            let mut candidate = self.state.library_manager.clone();
+            let mut candidate = self.state.model.library_manager.clone();
             candidate
                 .edit_library(&target.library)
                 .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?

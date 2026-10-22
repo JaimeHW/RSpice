@@ -87,7 +87,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         .ui
         .symbol
         .history
-        .is_dirty(&state.workspace.content.active_key());
+        .is_dirty(&state.model.workspace.content.active_key());
     // Edited in place, the canvas is the parent sheet: a strip arriving with
     // the first edit would shift the whole sheet under the pointer mid-drag.
     // Leaving with unsaved edits asks instead.
@@ -144,7 +144,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
                 &editor,
                 &ports,
                 &state.ui.symbol.editor,
-                &state.workspace.content.active_view,
+                &state.model.workspace.content.active_view,
             ),
         }
         // The canvas takes keyboard focus on every press for its shortcuts, so
@@ -173,7 +173,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         });
         crate::workbench::app_state::report_engineering_canvas_focus(
             &response,
-            state.workspace.content.active_view_type(),
+            state.model.workspace.content.active_view_type(),
         );
     });
     // No breadcrumb overlay: the document tab and the inspector's eyebrow

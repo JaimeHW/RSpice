@@ -151,6 +151,7 @@ impl User {
     fn component(&self, id: u64) -> Component {
         self.app
             .state
+            .model
             .schematic
             .document()
             .components
@@ -169,7 +170,7 @@ impl User {
             .map(|(_, offset)| *offset)
             .expect("the device has a terminal");
         let mut placed = None;
-        let schematic = &mut self.app.state.schematic;
+        let schematic = &mut self.app.state.model.schematic;
         assert!(
             schematic.with_undo(format!("place {}", kind.display_name()), |schematic| {
                 placed = Some(schematic.add_armed_component(kind, terminal - anchor));
@@ -180,7 +181,7 @@ impl User {
 
     /// Draw a wire through `points` with the canvas's wire tool.
     fn wire(&mut self, points: &[Point]) {
-        let schematic = &mut self.app.state.schematic;
+        let schematic = &mut self.app.state.model.schematic;
         schematic.start_wire(points[0]);
         for point in &points[1..] {
             schematic.extend_wire(*point);
@@ -237,10 +238,10 @@ fn wired_device() -> (User, Device) {
         !user.app.state.dialogs.new_project.open,
         "the project is created"
     );
-    let project = &user.app.state.workspace.content.project;
+    let project = &user.app.state.model.workspace.content.project;
     let (library, top_cell) = (project.root_library.clone(), project.top_cell.clone());
     let top = CellViewRef::new(&library, &top_cell, "schematic");
-    assert_eq!(user.app.state.workspace.content.active_view, top);
+    assert_eq!(user.app.state.model.workspace.content.active_view, top);
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
 
     // 2. A right-click on the empty canvas, then New Verilog-A device….
@@ -260,7 +261,7 @@ fn wired_device() -> (User, Device) {
     user.click("Create");
     let view = CellViewRef::new(&library, CELL, "veriloga");
     assert!(!user.app.state.dialogs.new_veriloga_device.open);
-    assert_eq!(user.app.state.workspace.content.active_view, view);
+    assert_eq!(user.app.state.model.workspace.content.active_view, view);
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
 
     // 3. The module.
@@ -294,6 +295,7 @@ fn wired_device() -> (User, Device) {
     let cell = user
         .app
         .state
+        .model
         .library_manager
         .get_library(&view.library)
         .and_then(|library| library.get_cell(CELL))
@@ -327,18 +329,19 @@ fn wired_device() -> (User, Device) {
 
     // 6. Place in …, then a placement click on the schematic.
     user.click(&place);
-    assert_eq!(user.app.state.workspace.content.active_view, top);
+    assert_eq!(user.app.state.model.workspace.content.active_view, top);
     assert_eq!(
-        user.app.state.schematic.session.editor.tool,
+        user.app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance)
     );
     let canvas = user.expect("Schematic canvas");
     user.press(canvas.center(), egui::PointerButton::Primary);
     user.settle();
-    user.app.state.schematic.cancel_tool();
+    user.app.state.model.schematic.cancel_tool();
     let instances = user
         .app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -407,6 +410,7 @@ fn wired_device() -> (User, Device) {
     // 7. gain=5, typed into the inspector's row for it.
     user.app
         .state
+        .model
         .schematic
         .session
         .editor
@@ -446,6 +450,7 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
     assert!(
         user.app
             .state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -453,7 +458,7 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
             .is_empty(),
         "no configuration is made by hand"
     );
-    let runs_before = user.app.state.simulation.retained.runs.len();
+    let runs_before = user.app.state.model.simulation.retained.runs.len();
     assert!(Command::RunSimulation.is_enabled(&user.app));
     Command::RunSimulation.execute(&mut user.app);
     user.frame(Vec::new());
@@ -474,8 +479,8 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
             retained.push((deck.to_owned(), digest));
         }
         let state = &user.app.state;
-        if state.simulation.retained.runs.len() > runs_before
-            && !state.simulation.execution.has_active_execution()
+        if state.model.simulation.retained.runs.len() > runs_before
+            && !state.model.simulation.execution.has_active_execution()
         {
             break;
         }
@@ -486,6 +491,7 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
     let run = user
         .app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -516,6 +522,7 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
     let problems = user
         .app
         .state
+        .model
         .log_buffer
         .entries()
         .filter(|entry| {
@@ -539,9 +546,9 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
     // The module's instance, with the value the inspector set.
     let state = &user.app.state;
     let alias = rspice_design::hierarchy::project_veriloga_binding_for_view(
-        state.workspace.content.project.id(),
-        &state.workspace.content.project_sources,
-        state.library_manager.catalog(),
+        state.model.workspace.content.project.id(),
+        &state.model.workspace.content.project_sources,
+        state.model.library_manager.catalog(),
         &device.view,
     )
     .expect("the view owns its bundle")
@@ -637,7 +644,13 @@ fn a_new_veriloga_device_runs_from_the_canvas_to_its_operating_point_and_back_fr
         DestinationAuthority::UserSelected,
     )
     .expect("the project saves");
-    let top = user.app.state.workspace.content.simulation_root_reference();
+    let top = user
+        .app
+        .state
+        .model
+        .workspace
+        .content
+        .simulation_root_reference();
     drop(user);
 
     let mut reopened = User::new(RSpiceApp::test_instance());
@@ -679,14 +692,22 @@ fn render_the_wired_veriloga_device_for_review() {
     };
 
     let (mut user, device) = wired_device();
-    user.app.state.schematic.session.editor.selection.clear();
-    user.app.state.schematic.session.editor.needs_fit = true;
+    user.app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .clear();
+    user.app.state.model.schematic.session.editor.needs_fit = true;
     user.settle();
     let canvas = crate::ui::raster::render(SIZE, |ui, _| user.app.render_frame_chrome(ui));
     write("veriloga-e2e-schematic-1440x900", &canvas);
 
     user.app
         .state
+        .model
         .schematic
         .session
         .editor

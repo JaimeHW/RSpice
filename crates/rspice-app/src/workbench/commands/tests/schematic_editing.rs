@@ -15,11 +15,13 @@ fn descend_requires_a_resolved_schematic_master() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -35,18 +37,25 @@ fn descend_requires_a_resolved_schematic_master() {
     cell.add_view(View::new("symbol", ViewType::Symbol));
     let mut library = Library::new("work");
     library.add_cell(cell);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
 
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .clear();
-    app.state.schematic.document_mut_for_test().components.push(
-        Component::new(2, ComponentType::CellInstance, Point::origin())
-            .with_library_cell(LibraryCellInstance::new("work", "child", "schematic")),
-    );
     app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(
+            Component::new(2, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(LibraryCellInstance::new("work", "child", "schematic")),
+        );
+    app.state
+        .model
         .schematic
         .session
         .editor
@@ -56,19 +65,19 @@ fn descend_requires_a_resolved_schematic_master() {
         Command::DescendHierarchy.availability(&app).is_available(),
         "a resolved schematic master is descendable"
     );
-    let parent = app.state.workspace.content.active_view.clone();
+    let parent = app.state.model.workspace.content.active_view.clone();
     Command::DescendHierarchy.execute(&mut app);
     assert!(
         app.state.dialogs.descend_hierarchy.open,
         "the menu/palette command owns the explicit edit-context transaction"
     );
     assert_eq!(
-        app.state.workspace.content.active_view, parent,
+        app.state.model.workspace.content.active_view, parent,
         "opening the transaction must not navigate before commit"
     );
     app.state.dialogs.descend_hierarchy.close();
 
-    app.state.schematic.document_mut_for_test().components[0]
+    app.state.model.schematic.document_mut_for_test().components[0]
         .library_cell
         .as_mut()
         .expect("binding")
@@ -102,7 +111,7 @@ fn transform_commands_keep_wires_attached_to_authored_symbol_pins() {
 
         command.execute(&mut app);
 
-        let document = app.state.schematic.document();
+        let document = app.state.model.schematic.document();
         let part = &document.components[0];
         assert_eq!(
             (part.rotation, part.mirror_h, part.mirror_v),
@@ -132,7 +141,7 @@ fn app_with_selected_resistor_pair() -> (RSpiceApp, u64) {
     let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
     let first_pins = symbols.terminal_points(&first);
     let second_pins = symbols.terminal_points(&second);
-    let document = app.state.schematic.document_mut_for_test();
+    let document = app.state.model.schematic.document_mut_for_test();
     document.components.extend([first, second]);
     let joint = Wire::segment(3, first_pins[1], second_pins[0]);
     let label_at = Point::new((first_pins[1].x + second_pins[0].x) / 2, first_pins[1].y);
@@ -143,7 +152,7 @@ fn app_with_selected_resistor_pair() -> (RSpiceApp, u64) {
         Point::new(second_pins[1].x + 100, second_pins[1].y),
     ));
     document.net_labels.push(NetLabel::new(5, label_at, "MID"));
-    let selection = &mut app.state.schematic.session.editor.selection;
+    let selection = &mut app.state.model.schematic.session.editor.selection;
     selection.select_component(1);
     selection.select_component(2);
     selection.select_wire(3);
@@ -161,11 +170,11 @@ fn rotated_cw(vector: crate::state::Point) -> crate::state::Point {
 #[test]
 fn rotate_turns_the_whole_selection_as_one_body() {
     let (mut app, _) = app_with_selected_resistor_pair();
-    let before = app.state.schematic.document().clone();
+    let before = app.state.model.schematic.document().clone();
 
     Command::RotateSelection.execute(&mut app);
 
-    let after = app.state.schematic.document();
+    let after = app.state.model.schematic.document();
     let pos = |document: &rspice_design::schematic::document::SchematicDocument, id: u64| {
         document
             .components
@@ -202,8 +211,9 @@ fn rotate_turns_the_whole_selection_as_one_body() {
 #[test]
 fn rotate_and_mirror_are_offered_for_any_selected_object() {
     let (mut app, _) = app_with_selected_resistor_pair();
-    app.state.schematic.session.editor.selection.clear();
+    app.state.model.schematic.session.editor.selection.clear();
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -224,7 +234,7 @@ fn rotate_and_mirror_are_offered_for_any_selected_object() {
 fn a_wire_attached_to_a_turned_part_keeps_square_corners() {
     let (mut app, stub) = app_with_selected_resistor_pair();
     Command::RotateSelection.execute(&mut app);
-    let after = app.state.schematic.document();
+    let after = app.state.model.schematic.document();
     let wire = after
         .wires
         .iter()
@@ -265,24 +275,25 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
     let probe = Component::new(0, ComponentType::Resistor, Point::origin());
     let left = probe.terminal_positions()[0].1;
     let shared = probe.terminal_positions()[1].1;
-    let document = app.state.schematic.document_mut_for_test();
+    let document = app.state.model.schematic.document_mut_for_test();
     document.wires.clear();
     document.components = vec![
         Component::new(1, ComponentType::Resistor, Point::origin()),
         Component::new(2, ComponentType::Resistor, shared - left),
     ];
     app.state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(2);
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.init_undo_history();
 
     Command::RotateSelection.execute(&mut app);
 
     let symbols = crate::schematic::view::schematic_symbol_context(&app.state);
-    let document = app.state.schematic.document();
+    let document = app.state.model.schematic.document();
     let turned = document
         .components
         .iter()
@@ -300,8 +311,8 @@ fn turning_a_part_off_a_pin_it_touched_wires_the_two_pins() {
         "no square wire joins the two pins: {:?}",
         document.wires
     );
-    assert!(app.state.schematic.undo());
-    assert!(app.state.schematic.document().wires.is_empty());
+    assert!(app.state.model.schematic.undo());
+    assert!(app.state.model.schematic.document().wires.is_empty());
 }
 
 /// Ctrl+R turns the selection clockwise and Ctrl+Shift+R counter-clockwise;
@@ -338,8 +349,8 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
     let (mut app, _) = app_with_selected_resistor_pair();
     crate::workbench::app::arm_move_selection(&mut app.state);
     assert!(app.state.dialogs.move_selection.armed);
-    let before = app.state.schematic.document().components[1].pos
-        - app.state.schematic.document().components[0].pos;
+    let before = app.state.model.schematic.document().components[1].pos
+        - app.state.model.schematic.document().components[0].pos;
 
     let ctx = egui::Context::default();
     let mut handled = false;
@@ -364,8 +375,8 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
     );
 
     assert!(handled, "R belonged to the floating selection");
-    let after = app.state.schematic.document().components[1].pos
-        - app.state.schematic.document().components[0].pos;
+    let after = app.state.model.schematic.document().components[1].pos
+        - app.state.model.schematic.document().components[0].pos;
     assert_eq!(after, rotated_cw(before));
     assert!(
         app.state.dialogs.move_selection.armed,
@@ -406,27 +417,37 @@ fn app_with_every_complete_schematic_object() -> RSpiceApp {
     )
     .unwrap();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::new(0, 0), Point::new(20, 0)));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .junctions
         .push(Junction::new(3, Point::new(10, 0)));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(4, Point::new(10, 0), "sense_out"));
-    app.state.schematic.document_mut_for_test().buses.push(bus);
     app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .buses
+        .push(bus);
+    app.state
+        .model
         .schematic
         .document_mut_for_test()
         .bus_taps
@@ -446,26 +467,43 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
         ("bus tap", 6),
     ];
     for (kind, id) in selectable {
-        app.state.schematic.session.editor.selection.clear();
+        app.state.model.schematic.session.editor.selection.clear();
         match kind {
             "component" => app
                 .state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_component(id),
-            "wire" => app.state.schematic.session.editor.selection.select_wire(id),
+            "wire" => app
+                .state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_wire(id),
             "net label" => app
                 .state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_net_label(id),
-            "bus" => app.state.schematic.session.editor.selection.select_bus(id),
+            "bus" => app
+                .state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_bus(id),
             "bus tap" => app
                 .state
+                .model
                 .schematic
                 .session
                 .editor
@@ -486,6 +524,7 @@ fn edit_command_enablement_covers_every_complete_schematic_object_class() {
     }
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -505,6 +544,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -518,6 +558,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
         ));
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -529,6 +570,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
     assert!(!Command::Duplicate.is_enabled(&app));
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -540,6 +582,7 @@ fn delete_promotes_live_wire_handles_without_enabling_partial_copy_or_cut() {
     assert!(!Command::Duplicate.is_enabled(&app));
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -562,34 +605,61 @@ fn select_all_command_selects_the_active_sheet_without_a_dialog() {
     for id in [1_u64, 2, 5, 6] {
         assert!(
             app.state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .has_component(id)
-                || app.state.schematic.session.editor.selection.has_wire(id)
-                || app.state.schematic.session.editor.selection.has_bus(id)
-                || app.state.schematic.session.editor.selection.has_bus_tap(id),
+                || app
+                    .state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .has_wire(id)
+                || app
+                    .state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .has_bus(id)
+                || app
+                    .state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .has_bus_tap(id),
             "object {id} is on the active sheet and passes the filter"
         );
     }
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
             .selection
             .has_net_label(4)
     );
-    assert_eq!(app.state.schematic.session.editor.selection.count(), 6);
+    assert_eq!(
+        app.state.model.schematic.session.editor.selection.count(),
+        6
+    );
 }
 
 #[test]
 fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     let mut app = app_with_every_complete_schematic_object();
     app.state.sync_active_schematic_to_workspace();
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.init_undo_history();
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -599,14 +669,15 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     Command::Duplicate.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
     assert!(app.state.place_floating_paste());
-    assert_eq!(app.state.schematic.document().components.len(), 2);
+    assert_eq!(app.state.model.schematic.document().components.len(), 2);
 
     Command::Cut.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
-    assert_eq!(app.state.schematic.document().components.len(), 1);
+    assert_eq!(app.state.model.schematic.document().components.len(), 1);
     assert_eq!(app.state.ui.schematic_clipboard.components.len(), 1);
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -614,7 +685,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
         .select_only_component(1);
     Command::Delete.execute(&mut app);
     assert!(!app.state.dialogs.application_modal_open());
-    assert!(app.state.schematic.document().components.is_empty());
+    assert!(app.state.model.schematic.document().components.is_empty());
 }
 
 #[test]
@@ -734,6 +805,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
     assert!(!Command::MoveSelection.is_enabled(&app));
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -745,6 +817,7 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
     );
 
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -759,14 +832,14 @@ fn move_selection_requires_one_live_object_in_an_editable_active_schematic() {
         CommandAvailability::Available
     );
 
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::MoveSelection.is_enabled(&app));
     assert_eq!(
         Command::MoveSelection.availability(&app),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
     assert!(!Command::MoveSelection.is_enabled(&app));
 }
@@ -778,6 +851,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -789,6 +863,7 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
     );
 
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -799,14 +874,14 @@ fn stretch_selection_requires_one_live_eligible_geometry_target() {
         CommandAvailability::Available
     );
 
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::StretchSelection.is_enabled(&app));
     assert_eq!(
         Command::StretchSelection.availability(&app),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
     assert!(!Command::StretchSelection.is_enabled(&app));
 }
@@ -818,6 +893,7 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -829,6 +905,7 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
     );
 
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -843,14 +920,14 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
         CommandAvailability::Available
     );
 
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::ArraySelection.is_enabled(&app));
     assert_eq!(
         Command::ArraySelection.availability(&app),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
     assert!(!Command::ArraySelection.is_enabled(&app));
 }
@@ -859,12 +936,12 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
 fn cancel_retires_an_armed_array_transaction_and_restores_select() {
     let mut app = RSpiceApp::test_instance();
     app.state.dialogs.array_selection.armed = true;
-    app.state.schematic.session.editor.tool = Tool::ArraySelection;
+    app.state.model.schematic.session.editor.tool = Tool::ArraySelection;
 
     Command::Cancel.execute(&mut app);
 
     assert!(!app.state.dialogs.array_selection.armed);
-    assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+    assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
 }
 
 #[test]
@@ -885,9 +962,11 @@ fn rename_command_has_mockup_identity_and_opens_the_stable_target_dialog() {
     app.state.workbench.workspace = Workspace::Design;
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -925,14 +1004,21 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
         BusTapOrientation::Down,
     )
     .unwrap();
-    app.state.schematic.document_mut_for_test().buses.push(bus);
     app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .buses
+        .push(bus);
+    app.state
+        .model
         .schematic
         .document_mut_for_test()
         .bus_taps
         .push(tap);
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -947,6 +1033,7 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
     app.state.dialogs.object_properties.close();
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -959,7 +1046,7 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
     ));
     app.state.dialogs.object_properties.close();
 
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::ObjectProperties.is_enabled(&app));
     Command::ObjectProperties.execute(&mut app);
     assert!(!app.state.dialogs.object_properties.open);
@@ -973,9 +1060,11 @@ fn object_properties_availability_includes_one_selected_net_label() {
     app.state.workbench.workspace = Workspace::Design;
     let id = app
         .state
+        .model
         .schematic
         .add_net_label(Point::new(0, 0), "gain_node".to_owned());
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -990,16 +1079,18 @@ fn object_properties_availability_includes_one_selected_net_label() {
             if draft.original.id == id
     ));
     app.state.dialogs.object_properties.close();
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::ObjectProperties.is_enabled(&app));
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .clear();
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1025,7 +1116,7 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
@@ -1045,7 +1136,7 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
         .find(|component| component.id == port)
         .expect("port exists")
         .value = "IN".to_owned();
-    app.state.workspace.insert_schematic_editor(
+    app.state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -1103,7 +1194,7 @@ fn saving_a_symbol_that_fails_its_checks_refuses_before_the_dialog_opens() {
     amp.add_view(symbol_view);
     let mut library = Library::new("work");
     library.add_cell(amp);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
@@ -1132,7 +1223,7 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
     let mut div = Cell::new("div");
     div.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(div);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
 
     let mut master = SchematicState::default();
     for (name, position) in [("a", Point::new(20, 0)), ("b", Point::new(60, 0))] {
@@ -1151,10 +1242,11 @@ fn app_with_a_placed_cell_instance() -> (RSpiceApp, String) {
     let mut binding = LibraryCellInstance::new("work", "div", "schematic");
     binding.bind_interface(&master.interface_ports());
     app.state
+        .model
         .workspace
         .insert_schematic_editor(master_key.clone(), master);
 
-    let schematic = &mut app.state.schematic;
+    let schematic = &mut app.state.model.schematic;
     let instance = schematic.add_library_cell_component(Point::new(100, 0), binding);
     schematic.add_component(ComponentType::VoltageSource, Point::new(40, 40));
     schematic.add_component(ComponentType::Ground, Point::new(130, 20));
@@ -1188,6 +1280,7 @@ fn rename_master_port(master: &mut crate::state::SchematicState, from: &str, to:
 
 fn placed_interface(app: &RSpiceApp) -> Vec<String> {
     app.state
+        .model
         .schematic
         .document()
         .components
@@ -1216,6 +1309,7 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
     rename_master_port(
         &mut app
             .state
+            .model
             .workspace
             .schematic_editor_mut(&master_key)
             .expect("the fixture registers the master")
@@ -1239,7 +1333,7 @@ fn updating_an_instance_interface_is_offered_only_for_a_stale_placement() {
         "the repaired placement is no longer stale"
     );
     assert_eq!(
-        app.state.schematic.undo_description(),
+        app.state.model.schematic.undo_description(),
         Some("update instance interface")
     );
 }
@@ -1255,6 +1349,7 @@ fn repairing_a_stale_instance_restores_its_x_line() {
     rename_master_port(
         &mut app
             .state
+            .model
             .workspace
             .schematic_editor_mut(&master_key)
             .expect("the fixture registers the master")
@@ -1265,9 +1360,9 @@ fn repairing_a_stale_instance_restores_its_x_line() {
 
     let stale = {
         let hierarchy =
-            HierarchySource::from_buffers(&app.state.workspace.content.schematic_buffers);
+            HierarchySource::from_buffers(&app.state.model.workspace.content.schematic_buffers);
         generate_netlist_hierarchical(
-            &app.state.schematic,
+            &app.state.model.schematic,
             &[],
             &hierarchy,
             &rspice_simulation::netlist_gen::NetlistSourceData::new(
@@ -1296,9 +1391,9 @@ fn repairing_a_stale_instance_restores_its_x_line() {
 
     let repaired = {
         let hierarchy =
-            HierarchySource::from_buffers(&app.state.workspace.content.schematic_buffers);
+            HierarchySource::from_buffers(&app.state.model.workspace.content.schematic_buffers);
         generate_netlist_hierarchical(
-            &app.state.schematic,
+            &app.state.model.schematic,
             &[],
             &hierarchy,
             &rspice_simulation::netlist_gen::NetlistSourceData::new(
@@ -1333,16 +1428,17 @@ fn app_with_copied_wire(
 ) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.document_mut_for_test().wires = wires;
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.document_mut_for_test().wires = wires;
+    app.state.model.schematic.init_undo_history();
     app.state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_wire(copied);
     Command::Copy.execute(&mut app);
-    app.state.schematic.session.editor.selection.clear();
+    app.state.model.schematic.session.editor.selection.clear();
     app.state.ui.canvas_hover = Some(hover);
     app
 }
@@ -1362,7 +1458,7 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
     Command::Paste.execute(&mut app);
     assert!(app.state.place_floating_paste());
 
-    let document = app.state.schematic.document();
+    let document = app.state.model.schematic.document();
     let tee = Point::new(100, 100);
     let ends_at_tee = document
         .wires
@@ -1383,8 +1479,11 @@ fn a_pasted_wire_ending_inside_another_splits_it_and_dots_the_t() {
         "the T has no dot"
     );
 
-    assert!(app.state.schematic.undo(), "the paste is one undo step");
-    let document = app.state.schematic.document();
+    assert!(
+        app.state.model.schematic.undo(),
+        "the paste is one undo step"
+    );
+    let document = app.state.model.schematic.document();
     assert_eq!(document.wires, vec![through, stub]);
     assert!(document.junctions.is_empty());
 }
@@ -1400,26 +1499,27 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
     let part = Component::new(1, ComponentType::Resistor, Point::new(500, 500));
     let left = part.terminal_positions()[0].1 - part.pos;
     let rail = Wire::segment(2, Point::new(100, 0), Point::new(100, 200));
-    let document = app.state.schematic.document_mut_for_test();
+    let document = app.state.model.schematic.document_mut_for_test();
     document.components.push(part);
     document.wires.push(rail);
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.init_undo_history();
     app.state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_component(1);
     Command::Copy.execute(&mut app);
-    app.state.schematic.session.editor.selection.clear();
-    let grid = f64::from(app.state.schematic.document().grid_size);
+    app.state.model.schematic.session.editor.selection.clear();
+    let grid = f64::from(app.state.model.schematic.document().grid_size);
     let target = Point::new(100 - left.x, 100 - left.y);
     app.state.ui.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
 
     Command::Paste.execute(&mut app);
     assert!(app.state.place_floating_paste());
 
-    let document = app.state.schematic.document();
+    let document = app.state.model.schematic.document();
     assert_eq!(document.components.len(), 2, "the part was pasted");
     let pin = Point::new(100, 100);
     let ends_at_pin = document
@@ -1447,7 +1547,7 @@ fn app_with_two_cells() -> RSpiceApp {
         cell.add_view(View::new("schematic", ViewType::Schematic));
         library.add_cell(cell);
     }
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     app.state
         .open_workspace_view(crate::state::CellViewRef::new("work", "a", "schematic"));
     app.state.workbench.activate(Workspace::Design);
@@ -1481,9 +1581,10 @@ fn coupled_pair(first: u64) -> Vec<crate::state::Component> {
 #[test]
 fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     let mut app = app_with_two_cells();
-    app.state.schematic.document_mut_for_test().components = coupled_pair(1);
+    app.state.model.schematic.document_mut_for_test().components = coupled_pair(1);
     for id in [1, 2, 3] {
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1495,8 +1596,8 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     app.state
         .open_workspace_view(crate::state::CellViewRef::new("work", "b", "schematic"));
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.document_mut_for_test().components = coupled_pair(11);
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.document_mut_for_test().components = coupled_pair(11);
+    app.state.model.schematic.init_undo_history();
     assert!(
         Command::Paste.is_enabled(&app),
         "a copy from cell A pastes here"
@@ -1505,7 +1606,7 @@ fn a_copy_in_one_cell_pastes_into_another_with_its_coupling() {
     Command::Paste.execute(&mut app);
     assert!(app.state.place_floating_paste());
 
-    let document = app.state.schematic.document();
+    let document = app.state.model.schematic.document();
     assert_eq!(document.components.len(), 6);
     let pasted: Vec<_> = document
         .components
@@ -1541,18 +1642,23 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .clear();
     let first = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
-    app.state.schematic.reset_undo_history();
-    app.state.schematic.with_undo("place R2", |schematic| {
-        schematic.add_component(ComponentType::Resistor, Point::new(200, 0));
-    });
+    app.state.model.schematic.reset_undo_history();
+    app.state
+        .model
+        .schematic
+        .with_undo("place R2", |schematic| {
+            schematic.add_component(ComponentType::Resistor, Point::new(200, 0));
+        });
     let carry = |schematic: &mut crate::state::SchematicState, to: Point| {
         schematic
             .document_mut_for_test()
@@ -1564,6 +1670,7 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     };
     let position = |app: &RSpiceApp| {
         app.state
+            .model
             .schematic
             .document()
             .components
@@ -1575,43 +1682,46 @@ fn undo_and_redo_wait_for_the_edit_in_progress() {
     let mid_drag = "finish or cancel the edit in progress first";
 
     // R1 is picked up and carried while the mouse is held.
-    app.state.schematic.begin_operation("drag selection");
-    carry(&mut app.state.schematic, Point::new(0, 100));
+    app.state.model.schematic.begin_operation("drag selection");
+    carry(&mut app.state.model.schematic, Point::new(0, 100));
     assert_eq!(
         Command::Undo.availability(&app),
         CommandAvailability::Disabled(mid_drag)
     );
     Command::Undo.execute(&mut app);
     app.execute_shortcut_command(Command::Undo);
-    assert_eq!(app.state.schematic.document().components.len(), 2);
-    assert!(app.state.schematic.has_pending_operation());
+    assert_eq!(app.state.model.schematic.document().components.len(), 2);
+    assert!(app.state.model.schematic.has_pending_operation());
 
     // The release commits the drag as its own step, and Undo takes back
     // exactly that, then the placement before it.
-    assert!(app.state.schematic.end_operation());
+    assert!(app.state.model.schematic.end_operation());
     assert_eq!(
         Command::Undo.availability(&app),
         CommandAvailability::Available
     );
     Command::Undo.execute(&mut app);
     assert_eq!(position(&app), Point::new(0, 0));
-    assert_eq!(app.state.schematic.document().components.len(), 2);
+    assert_eq!(app.state.model.schematic.document().components.len(), 2);
     Command::Undo.execute(&mut app);
-    assert_eq!(app.state.schematic.document().components.len(), 1);
+    assert_eq!(app.state.model.schematic.document().components.len(), 1);
 
     // Redo waits the same way, and the redo stack survives the wait.
-    app.state.schematic.begin_operation("drag selection");
-    carry(&mut app.state.schematic, Point::new(0, 50));
+    app.state.model.schematic.begin_operation("drag selection");
+    carry(&mut app.state.model.schematic, Point::new(0, 50));
     assert_eq!(
         Command::Redo.availability(&app),
         CommandAvailability::Disabled(mid_drag)
     );
     Command::Redo.execute(&mut app);
-    assert_eq!(app.state.schematic.document().components.len(), 1);
-    assert!(app.state.schematic.cancel_operation());
-    assert_eq!(app.state.schematic.redo_description(), Some("place R2"));
+    assert_eq!(app.state.model.schematic.document().components.len(), 1);
+    assert!(app.state.model.schematic.cancel_operation());
+    assert_eq!(
+        app.state.model.schematic.redo_description(),
+        Some("place R2")
+    );
     Command::Redo.execute(&mut app);
-    assert_eq!(app.state.schematic.document().components.len(), 2);
+    assert_eq!(app.state.model.schematic.document().components.len(), 2);
 }
 
 /// Two wires drawn end to end on one line stayed two wires, with a vertex
@@ -1625,24 +1735,27 @@ fn join_collinear_wires_lays_a_straight_run_as_one_wire_in_one_undo_step() {
     app.state.workbench.activate(Workspace::Design);
     let first = Wire::segment(1, Point::new(0, 0), Point::new(50, 0));
     let second = Wire::segment(2, Point::new(50, 0), Point::new(100, 0));
-    let document = app.state.schematic.document_mut_for_test();
+    let document = app.state.model.schematic.document_mut_for_test();
     document.components.clear();
     document.junctions.clear();
     document.wires = vec![first.clone(), second.clone()];
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.init_undo_history();
     assert!(Command::JoinCollinearWires.is_enabled(&app));
 
     Command::JoinCollinearWires.execute(&mut app);
 
-    let wires = &app.state.schematic.document().wires;
+    let wires = &app.state.model.schematic.document().wires;
     assert_eq!(wires.len(), 1, "{wires:?}");
     assert_eq!(
         (wires[0].points[0], *wires[0].points.last().expect("end")),
         (Point::new(0, 0), Point::new(100, 0))
     );
-    assert!(app.state.schematic.undo());
-    assert_eq!(app.state.schematic.document().wires, vec![first, second]);
-    assert!(!app.state.schematic.can_undo(), "one step, not two");
+    assert!(app.state.model.schematic.undo());
+    assert_eq!(
+        app.state.model.schematic.document().wires,
+        vec![first, second]
+    );
+    assert!(!app.state.model.schematic.can_undo(), "one step, not two");
 }
 
 /// Repeat last command, on `.` over the canvas as Virtuoso and ADS repeat,
@@ -1684,7 +1797,7 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
     let (mut app, _) = app_with_selected_resistor_pair();
     assert!(!repeat.is_enabled(&app), "nothing has run yet");
     let offset = |app: &RSpiceApp| {
-        let components = &app.state.schematic.document().components;
+        let components = &app.state.model.schematic.document().components;
         components[1].pos - components[0].pos
     };
     let before = offset(&app);

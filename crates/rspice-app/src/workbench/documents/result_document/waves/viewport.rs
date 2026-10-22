@@ -57,7 +57,7 @@ pub(super) fn scaled_range(
 pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         t,
@@ -112,7 +112,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
 pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         t,
@@ -172,7 +172,7 @@ pub(crate) fn fit_active_strip(state: &mut AppState) {
 pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool, steps: f64) {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         tokens,

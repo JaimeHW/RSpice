@@ -20,9 +20,9 @@ fn deck_in(directory: &Path) -> AppState {
     let origin = deck.join("deck.cir");
     fs::write(&origin, DECK).expect("write deck");
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(DECK.to_owned());
-    state.workspace.content.netlist_source_path = Some(origin);
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(DECK.to_owned());
+    state.model.workspace.content.netlist_source_path = Some(origin);
     state
 }
 
@@ -85,6 +85,7 @@ fn the_projects_own_search_path_wins_over_a_library_folder() {
     let shared = library(&directory, "shared", "R1 out 0 9k\n");
     let mut state = deck_in(&directory);
     state
+        .model
         .workspace
         .content
         .project

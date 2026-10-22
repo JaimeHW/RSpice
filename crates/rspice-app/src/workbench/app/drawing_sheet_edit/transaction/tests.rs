@@ -6,8 +6,8 @@ use crate::workbench::app::RSpiceApp;
 
 fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<SheetId>) {
     let mut app = RSpiceApp::test_instance();
-    let key = app.state.workspace.content.active_key();
-    let designs = &mut app.state.workspace.content.design_management;
+    let key = app.state.model.workspace.content.active_key();
+    let designs = &mut app.state.model.workspace.content.design_management;
     let first = designs
         .bootstrap_for_cell_view(&key, "Sheet 1", [])
         .unwrap();
@@ -37,6 +37,7 @@ fn governed_app_with_sheets(count: usize) -> (RSpiceApp, String, Vec<SheetId>) {
 
 fn saved_format(app: &RSpiceApp, key: &str, id: SheetId) -> SchematicSheetFormat {
     app.state
+        .model
         .workspace
         .content
         .design_management
@@ -52,6 +53,7 @@ fn saved_format(app: &RSpiceApp, key: &str, id: SheetId) -> SchematicSheetFormat
 fn put_format(app: &mut RSpiceApp, key: &str, id: SheetId, format: SchematicSheetFormat) {
     let catalog = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -112,9 +114,9 @@ fn a_sheet_is_edited_only_on_a_writable_schematic() {
 #[test]
 fn an_edit_is_one_exact_undoable_presentation_transaction() {
     let (mut app, key, ids) = governed_app_with_sheets(1);
-    let topology = app.state.schematic.topology_version();
+    let topology = app.state.model.schematic.topology_version();
     let drc_version = app.state.dialogs.drc_checked_version;
-    let retained_runs = app.state.simulation.retained.runs.len();
+    let retained_runs = app.state.model.simulation.retained.runs.len();
     let before = saved_format(&app, &key, ids[0]);
 
     apply_drawing_sheet_edit(&mut app.state, DrawingSheetEdit::Zones(false)).unwrap();
@@ -125,12 +127,16 @@ fn an_edit_is_one_exact_undoable_presentation_transaction() {
     assert_eq!(after.authored_size, before.authored_size);
     assert_eq!(after.border, before.border);
     assert!(app.state.can_undo_project_design());
-    assert!(app.state.workspace.content.project_metadata_dirty);
-    assert_eq!(app.state.schematic.topology_version(), topology);
+    assert!(app.state.model.workspace.content.project_metadata_dirty);
+    assert_eq!(app.state.model.schematic.topology_version(), topology);
     assert_eq!(app.state.dialogs.drc_checked_version, drc_version);
-    assert_eq!(app.state.simulation.retained.runs.len(), retained_runs);
+    assert_eq!(
+        app.state.model.simulation.retained.runs.len(),
+        retained_runs
+    );
     let receipt = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -199,6 +205,7 @@ fn an_inherited_sheets_title_edit_keeps_it_on_the_project_default() {
     let (mut app, key, ids) = governed_app_with_sheets(1);
     let inherited = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -240,9 +247,10 @@ fn an_inherited_sheets_title_edit_keeps_it_on_the_project_default() {
 #[test]
 fn the_first_edit_gives_the_schematic_its_governed_sheet() {
     let mut app = RSpiceApp::test_instance();
-    let key = app.state.workspace.content.active_key();
+    let key = app.state.model.workspace.content.active_key();
     let mut settings = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -252,8 +260,15 @@ fn the_first_edit_gives_the_schematic_its_governed_sheet() {
         DrawingSheetTitleFieldId::Organization,
         "Previous organization".to_owned(),
     );
-    let revision = app.state.workspace.content.design_management.revision();
+    let revision = app
+        .state
+        .model
+        .workspace
+        .content
+        .design_management
+        .revision();
     app.state
+        .model
         .workspace
         .content
         .design_management
@@ -269,7 +284,7 @@ fn the_first_edit_gives_the_schematic_its_governed_sheet() {
     )
     .unwrap();
 
-    let designs = &app.state.workspace.content.design_management;
+    let designs = &app.state.model.workspace.content.design_management;
     let sheet = designs.sheet_catalog(&key).unwrap().active().unwrap();
     assert_eq!(
         sheet.page_format().title_block.fields[&DrawingSheetTitleFieldId::Organization].value,
@@ -290,6 +305,7 @@ fn the_first_edit_gives_the_schematic_its_governed_sheet() {
     .unwrap();
     let sheet = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -359,6 +375,7 @@ fn a_value_the_organization_locks_is_refused_and_changes_nothing() {
     );
     let mut settings = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -368,14 +385,27 @@ fn a_value_the_organization_locks_is_refused_and_changes_nothing() {
         DrawingSheetTitleFieldId::Classification,
         "INTERNAL".to_owned(),
     );
-    let revision = app.state.workspace.content.design_management.revision();
+    let revision = app
+        .state
+        .model
+        .workspace
+        .content
+        .design_management
+        .revision();
     app.state
+        .model
         .workspace
         .content
         .design_management
         .update_drawing_sheet_settings(revision, settings)
         .unwrap();
-    let design_revision = app.state.workspace.content.design_management.revision();
+    let design_revision = app
+        .state
+        .model
+        .workspace
+        .content
+        .design_management
+        .revision();
 
     let error = apply_drawing_sheet_edit(
         &mut app.state,
@@ -388,11 +418,17 @@ fn a_value_the_organization_locks_is_refused_and_changes_nothing() {
 
     assert!(error.contains("classification"), "{error}");
     assert_eq!(
-        app.state.workspace.content.design_management.revision(),
+        app.state
+            .model
+            .workspace
+            .content
+            .design_management
+            .revision(),
         design_revision
     );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .design_management
@@ -418,7 +454,7 @@ fn a_one_off_size_is_saved_to_the_projects_custom_sizes() {
         apply_drawing_sheet_edit(&mut app.state, edit).unwrap();
     }
 
-    let management = &app.state.workspace.content.design_management;
+    let management = &app.state.model.workspace.content.design_management;
     let presets = &management.drawing_sheet_settings().presets;
     assert_eq!(presets.len(), 1);
     assert_eq!(presets[0].name, "Lab panel");
@@ -466,6 +502,7 @@ fn a_personal_size_taken_by_a_sheet_is_copied_into_the_project() {
 
     let project_preset = app
         .state
+        .model
         .workspace
         .content
         .design_management

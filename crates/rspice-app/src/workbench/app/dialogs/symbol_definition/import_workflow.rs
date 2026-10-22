@@ -29,6 +29,7 @@ impl RSpiceApp {
         let binding_options = bound_symbol_references(&self.state);
         let writable_libraries = self
             .state
+            .model
             .library_manager
             .libraries_sorted()
             .into_iter()
@@ -130,7 +131,7 @@ impl RSpiceApp {
             .target_name
             .trim()
             .to_owned();
-        let mut candidate = self.state.library_manager.clone();
+        let mut candidate = self.state.model.library_manager.clone();
         let result = (|| {
             candidate
                 .edit_library(&library_name)
@@ -149,6 +150,7 @@ impl RSpiceApp {
         match result {
             Ok(()) => {
                 self.state
+                    .model
                     .library_manager
                     .select_view(&library_name, &cell_name, "symbol");
                 let format = imported.report.format_label();
@@ -362,6 +364,7 @@ fn import_candidate(
         return Err("Target name is required.".to_owned());
     }
     if state
+        .model
         .library_manager
         .get_library(&draft.target_library)
         .and_then(|library| library.get_cell(target_name))
@@ -383,6 +386,7 @@ fn import_candidate(
                         .to_owned()
                 })?;
                 let view = state
+                    .model
                     .library_manager
                     .get_library(&reference.library)
                     .and_then(|library| library.get_cell(&reference.cell))
@@ -430,7 +434,7 @@ fn source_looks_like_json(name: &str, source: &str) -> bool {
 
 fn bound_symbol_references(state: &crate::workbench::app_state::AppState) -> Vec<CellViewRef> {
     let mut references = Vec::new();
-    for library in state.library_manager.libraries_sorted() {
+    for library in state.model.library_manager.libraries_sorted() {
         for cell in library.cells_sorted() {
             for view in cell.views_sorted() {
                 if view.view_type == crate::state::ViewType::Symbol
@@ -539,7 +543,7 @@ mod tests {
             r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="40" height="20"/></svg>"#
                 .to_owned();
         app.dialogs.symbol_import.target_library =
-            app.workspace.content.active_view.library.clone();
+            app.model.workspace.content.active_view.library.clone();
         app.dialogs.symbol_import.target_name = "review_graphic".to_owned();
         app.dialogs.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
 
@@ -569,14 +573,15 @@ mod tests {
     fn import_candidate_never_overwrites_an_existing_cell() {
         let mut app = crate::workbench::app_state::AppState::default();
         app.open_project_session();
-        let library_name = app.workspace.content.active_view.library.clone();
+        let library_name = app.model.workspace.content.active_view.library.clone();
         app.dialogs.symbol_import.source_name = "review.svg".to_owned();
         app.dialogs.symbol_import.source_text =
             r#"<svg><line x1="0" y1="0" x2="10" y2="10"/></svg>"#.to_owned();
         app.dialogs.symbol_import.target_library = library_name.clone();
         app.dialogs.symbol_import.target_name = "existing".to_owned();
         app.dialogs.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
-        app.library_manager
+        app.model
+            .library_manager
             .get_library_mut(&library_name)
             .expect("project library")
             .add_cell(crate::state::Cell::new("existing"));

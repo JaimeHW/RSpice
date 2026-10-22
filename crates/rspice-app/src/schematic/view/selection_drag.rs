@@ -17,7 +17,7 @@ use rspice_schematic_editor::view::selection_drag::{
 fn view<'a>(state: &'a AppState, ctx: &egui::Context) -> SelectionDragView<'a> {
     SelectionDragView {
         design: super::schematic_design_view(state),
-        editor: &state.schematic.session.editor,
+        editor: &state.model.schematic.session.editor,
         filter: state.ui.schematic_selection_filter,
         drag: state.schematic_drag_snapshot(ctx),
     }
@@ -31,7 +31,7 @@ pub(super) fn handle_select_dragging(
     symbols: &SchematicSymbolContext,
 ) {
     if !select_drag_is_authorized(
-        state.schematic.session.editor.tool,
+        state.model.schematic.session.editor.tool,
         state.dialogs.move_selection.armed,
     ) {
         return;
@@ -56,7 +56,7 @@ pub(super) fn handle_select_dragging(
         viewport,
         symbols,
         state.schematic_edit_read_only(),
-        || state.workspace.content.active_view.display_path(),
+        || state.model.workspace.content.active_view.display_path(),
     );
     if let Some(action) = action {
         dispatch(state, ui.ctx(), symbols, action);
@@ -72,8 +72,8 @@ pub(super) fn handle_select_dragging(
 fn capture(state: &AppState, action: SelectionDragAction) -> SelectionDragRequest {
     SelectionDragRequest {
         source: editor_request_source(state),
-        selection: state.schematic.session.editor.selection.clone(),
-        rectangle: state.schematic.session.editor.selection_rect,
+        selection: state.model.schematic.session.editor.selection.clone(),
+        rectangle: state.model.schematic.session.editor.selection_rect,
         action,
     }
 }
@@ -95,10 +95,10 @@ fn apply(
     request: SelectionDragRequest,
 ) {
     if request.source != editor_request_source(state)
-        || request.selection != state.schematic.session.editor.selection
-        || request.rectangle != state.schematic.session.editor.selection_rect
+        || request.selection != state.model.schematic.session.editor.selection
+        || request.rectangle != state.model.schematic.session.editor.selection_rect
         || !select_drag_is_authorized(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             state.dialogs.move_selection.armed,
         )
     {
@@ -109,7 +109,7 @@ fn apply(
             if state.schematic_edit_read_only() {
                 return;
             }
-            select_drag_target(&mut state.schematic.session.editor.selection, target);
+            select_drag_target(&mut state.model.schematic.session.editor.selection, target);
             state.begin_schematic_drag((position.x, position.y), DragType::MoveSelection, ctx);
         }
         SelectionDragAction::BeginWireVertex(position) => {
@@ -119,6 +119,7 @@ fn apply(
             state.begin_schematic_drag((position.x, position.y), DragType::WireVertex, ctx);
         }
         SelectionDragAction::BeginMarquee(position) => state
+            .model
             .schematic
             .session
             .editor
@@ -131,12 +132,13 @@ fn apply(
             if let Some(travel) = ctx
                 .input(|input| Some(input.pointer.interact_pos()? - input.pointer.press_origin()?))
             {
-                let pan = &mut state.schematic.session.editor.pan;
+                let pan = &mut state.model.schematic.session.editor.pan;
                 pan.0 += f64::from(travel.x);
                 pan.1 += f64::from(travel.y);
             }
         }
         SelectionDragAction::UpdateMarquee(position) => state
+            .model
             .schematic
             .session
             .editor
@@ -176,6 +178,7 @@ fn apply(
             // The rubber band follows the routing style: square unless the
             // user draws at 45° or free angles.
             let rubber_band = if state
+                .model
                 .schematic
                 .session
                 .editor
@@ -205,8 +208,15 @@ fn apply(
             if !owns_operation(state, ctx, operation_id, None) {
                 return;
             }
-            let automatic_junctions = state.schematic.session.editor.automatic_junctions;
-            let moved = state.schematic.session.editor.selection.components.clone();
+            let automatic_junctions = state.model.schematic.session.editor.automatic_junctions;
+            let moved = state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .components
+                .clone();
             with_active_wire_topology(state, |schematic, scope| {
                 // A pin dropped inside a wire is connected there; the vertex
                 // it gets is what lets the next move carry the wire. A pin
@@ -220,13 +230,13 @@ fn apply(
                 schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope)
             });
             // One undo entry for the whole gesture (no-ops deduplicate).
-            if state.schematic.end_operation() {
+            if state.model.schematic.end_operation() {
                 state.sync_active_schematic_to_workspace();
             }
             state.dialogs.interaction.drag.cancel();
         }
         SelectionDragAction::FinishMarquee { additive } => {
-            let rectangle = &mut state.schematic.session.editor.selection_rect;
+            let rectangle = &mut state.model.schematic.session.editor.selection_rect;
             let (start, current) = (rectangle.start, rectangle.current);
             if rectangle.finish().is_none() {
                 return;
@@ -236,7 +246,7 @@ fn apply(
             let window = SelectionWindow::from_band(
                 start,
                 current,
-                state.schematic.session.editor.selection_crossing,
+                state.model.schematic.session.editor.selection_crossing,
             );
             select_in_rect_on_active_sheet(state, symbols, window, additive);
         }
@@ -273,7 +283,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = AppState::default();
         let junction = Point::new(100, 100);
-        state.schematic.add_junction(junction);
+        state.model.schematic.add_junction(junction);
         // No component takes part, so one context serves the whole gesture.
         let symbols = super::super::schematic_symbol_context(&state);
 
@@ -284,6 +294,7 @@ mod tests {
             SelectionDragAction::BeginWireVertex(junction),
         );
         let operation_id = state
+            .model
             .schematic
             .pending_operation_id()
             .expect("the gesture owns a transaction");
@@ -302,7 +313,7 @@ mod tests {
                 },
             );
             assert_eq!(
-                state.schematic.document().junctions[0].pos,
+                state.model.schematic.document().junctions[0].pos,
                 position,
                 "step {step} left the junction behind the pointer"
             );
@@ -333,7 +344,11 @@ mod tests {
                 position: from,
             },
         );
-        let operation_id = state.schematic.pending_operation_id().expect("a gesture");
+        let operation_id = state
+            .model
+            .schematic
+            .pending_operation_id()
+            .expect("a gesture");
         let position = Point::new(from.x + delta.x, from.y + delta.y);
         dispatch(
             state,
@@ -373,7 +388,11 @@ mod tests {
                 position: from,
             },
         );
-        let operation_id = state.schematic.pending_operation_id().expect("a gesture");
+        let operation_id = state
+            .model
+            .schematic
+            .pending_operation_id()
+            .expect("a gesture");
         let mut last = from;
         for step in steps {
             let position = Point::new(from.x + step.x, from.y + step.y);
@@ -402,16 +421,18 @@ mod tests {
     /// right, ready to drag.
     fn resistor_wired_right(state: &mut AppState) -> (PointerTarget, Point, Point) {
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
+        let pin = state.model.schematic.document().components[0].terminal_positions()[1].1;
         let far = Point::new(pin.x + 100, pin.y);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(crate::state::Wire::segment(9, pin, far));
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         (PointerTarget::Component(id), pin, far)
     }
 
@@ -436,13 +457,13 @@ mod tests {
 
         let moved = Point::new(pin.x, pin.y + 20);
         assert_eq!(
-            state.schematic.document().wires.len(),
+            state.model.schematic.document().wires.len(),
             1,
             "{:?}",
-            state.schematic.document().wires
+            state.model.schematic.document().wires
         );
         assert_eq!(
-            state.schematic.document().wires[0].points,
+            state.model.schematic.document().wires[0].points,
             vec![moved, pin, far]
         );
     }
@@ -468,7 +489,7 @@ mod tests {
 
         let moved = Point::new(pin.x + 30, pin.y + 20);
         assert_eq!(
-            state.schematic.document().wires[0].points,
+            state.model.schematic.document().wires[0].points,
             vec![moved, Point::new(moved.x, pin.y), far]
         );
     }
@@ -481,15 +502,17 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
-        let left = state.schematic.document().components[0].terminal_positions()[0].1;
+        let pin = state.model.schematic.document().components[0].terminal_positions()[1].1;
+        let left = state.model.schematic.document().components[0].terminal_positions()[0].1;
         let pitch = Point::new(pin.x - left.x, pin.y - left.y);
         let right = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, pitch);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         let symbols = super::super::schematic_symbol_context(&state);
 
         drag_through(
@@ -502,7 +525,7 @@ mod tests {
         );
 
         let moved = Point::new(pin.x + 30, pin.y + 20);
-        let wires = &state.schematic.document().wires;
+        let wires = &state.model.schematic.document().wires;
         assert!(
             wires.iter().any(|wire| wire.is_orthogonal()
                 && wire.points.first() == Some(&pin)
@@ -519,7 +542,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = AppState::default();
         let (target, _, _) = resistor_wired_right(&mut state);
-        let drawn = state.schematic.document().wires.clone();
+        let drawn = state.model.schematic.document().wires.clone();
         let symbols = super::super::schematic_symbol_context(&state);
 
         drag_through(
@@ -536,7 +559,7 @@ mod tests {
             ],
         );
 
-        assert_eq!(state.schematic.document().wires, drawn);
+        assert_eq!(state.model.schematic.document().wires, drawn);
     }
 
     /// The part passes over the end of a wire it is not connected to. That
@@ -552,11 +575,12 @@ mod tests {
             Point::new(pin.x + 60, pin.y + 20),
         );
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(loose.clone());
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         let symbols = super::super::schematic_symbol_context(&state);
 
         drag_through(
@@ -569,9 +593,9 @@ mod tests {
         );
 
         assert!(
-            state.schematic.document().wires.contains(&loose),
+            state.model.schematic.document().wires.contains(&loose),
             "{:?}",
-            state.schematic.document().wires
+            state.model.schematic.document().wires
         );
     }
 
@@ -583,6 +607,7 @@ mod tests {
         let mut state = AppState::default();
         let (target, pin, far) = resistor_wired_right(&mut state);
         state
+            .model
             .schematic
             .session
             .editor
@@ -600,7 +625,7 @@ mod tests {
         );
 
         assert_eq!(
-            state.schematic.document().wires[0].points,
+            state.model.schematic.document().wires[0].points,
             vec![Point::new(pin.x, pin.y + 20), far]
         );
     }
@@ -613,6 +638,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = super::super::sheet_visibility::two_sheet_state(&[1, 9], &[20]);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -621,13 +647,13 @@ mod tests {
                 ComponentType::Resistor,
                 Point::origin(),
             ));
-        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
+        let pin = state.model.schematic.document().components[0].terminal_positions()[1].1;
         let hidden = crate::state::Wire::segment(20, pin, Point::new(pin.x, pin.y - 100));
-        state.schematic.document_mut_for_test().wires = vec![
+        state.model.schematic.document_mut_for_test().wires = vec![
             crate::state::Wire::segment(9, pin, Point::new(pin.x + 100, pin.y)),
             hidden.clone(),
         ];
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         let symbols = super::super::schematic_symbol_context(&state);
 
         drag_through(
@@ -639,7 +665,7 @@ mod tests {
             &[Point::new(0, 10), Point::new(0, 20)],
         );
 
-        let wires = &state.schematic.document().wires;
+        let wires = &state.model.schematic.document().wires;
         assert_eq!(wires.iter().find(|wire| wire.id == 20), Some(&hidden));
         assert!(
             wires
@@ -658,11 +684,13 @@ mod tests {
         let ctx = egui::Context::default();
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
-        let pin = state.schematic.document().components[0].terminal_positions()[1].1;
+        let pin = state.model.schematic.document().components[0].terminal_positions()[1].1;
         let landing = Point::new(pin.x + 20, pin.y);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -671,7 +699,7 @@ mod tests {
                 Point::new(landing.x, landing.y - 100),
                 Point::new(landing.x, landing.y + 100),
             ));
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         let symbols = super::super::schematic_symbol_context(&state);
         let target = PointerTarget::Component(id);
 
@@ -685,6 +713,7 @@ mod tests {
         );
         let at_pin = |state: &AppState, point: Point| {
             state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -715,10 +744,12 @@ mod tests {
         for change in 0..4 {
             let mut state = AppState::default();
             let id = state
+                .model
                 .schematic
                 .add_component(ComponentType::Resistor, Point::new(100, 100));
             let master = CellViewRef::new("user", "amp", "schematic");
             state
+                .model
                 .workspace
                 .descend_into("X1".into(), master.clone(), ViewType::Schematic);
             let symbols = super::super::schematic_symbol_context(&state);
@@ -729,36 +760,46 @@ mod tests {
             let request = capture(&state, action);
             match change {
                 0 => {
-                    state.workspace.ascend_one().unwrap();
+                    state.model.workspace.ascend_one().unwrap();
                     state
+                        .model
                         .workspace
                         .descend_into("X2".into(), master, ViewType::Schematic);
                 }
                 1 => {
                     state
+                        .model
                         .schematic
                         .add_component(ComponentType::Resistor, Point::origin());
                 }
                 2 => state
+                    .model
                     .schematic
                     .session
                     .editor
                     .selection_rect
                     .start_at(Point::origin()),
-                _ => state.schematic.session.read_only = true,
+                _ => state.model.schematic.session.read_only = true,
             }
-            let before = state.schematic.document().components.clone();
+            let before = state.model.schematic.document().components.clone();
             apply(&mut state, &ctx, &symbols, request);
-            assert!(!state.schematic.has_pending_operation(), "change {change}");
-            assert_eq!(state.schematic.document().components, before);
-            assert!(state.schematic.session.editor.selection.is_empty());
+            assert!(
+                !state.model.schematic.has_pending_operation(),
+                "change {change}"
+            );
+            assert_eq!(state.model.schematic.document().components, before);
+            assert!(state.model.schematic.session.editor.selection.is_empty());
 
-            state.schematic.session.read_only = false;
+            state.model.schematic.session.read_only = false;
             dispatch(&mut state, &ctx, &symbols, action);
-            let operation_id = state.schematic.pending_operation_id().expect("fresh begin");
+            let operation_id = state
+                .model
+                .schematic
+                .pending_operation_id()
+                .expect("fresh begin");
             state.cancel_schematic_drag();
             assert!(state.begin_schematic_drag((100, 100), DragType::MoveSelection, &ctx));
-            let replacement = state.schematic.pending_operation_id();
+            let replacement = state.model.schematic.pending_operation_id();
             assert_ne!(replacement, Some(operation_id));
             // Capture current source revisions to isolate the operation-token guard.
             dispatch(
@@ -778,8 +819,8 @@ mod tests {
                 &symbols,
                 SelectionDragAction::Finish { operation_id },
             );
-            assert_eq!(state.schematic.document().components, before);
-            assert_eq!(state.schematic.pending_operation_id(), replacement);
+            assert_eq!(state.model.schematic.document().components, before);
+            assert_eq!(state.model.schematic.pending_operation_id(), replacement);
             state.cancel_schematic_drag();
         }
     }

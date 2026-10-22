@@ -289,10 +289,10 @@ pub(super) fn install_projected_run_geometry(
         nets,
         HashMap::new(),
     );
-    state.simulation.source.cross_probe.install(
-        state.workspace.content.active_view.clone(),
+    state.model.simulation.source.cross_probe.install(
+        state.model.workspace.content.active_view.clone(),
         sheets,
-        state.schematic.topology_version(),
+        state.model.schematic.topology_version(),
     );
 }
 
@@ -303,10 +303,10 @@ pub(super) fn install_projected_run_geometry(
 pub(super) fn two_sheet_operating_point(second_sheet_active: bool) -> AppState {
     let mut state = super::sheet_visibility::two_sheet_state(&[1], &[2]);
     let (start, end) = (Point::new(100, 0), Point::new(200, 0));
-    let document = state.schematic.document_mut_for_test();
+    let document = state.model.schematic.document_mut_for_test();
     document.wires.push(Wire::segment(1, start, end));
     document.wires.push(Wire::segment(2, start, end));
-    state.schematic.bump_topology_version();
+    state.model.schematic.bump_topology_version();
     let projected = |point: Point| Point::new(point.x + 1_000_000, point.y);
     install_projected_run_geometry(
         &mut state,
@@ -330,13 +330,19 @@ pub(super) fn two_sheet_operating_point(second_sheet_active: bool) -> AppState {
             power_dissipation: Vec::new(),
         }),
     );
-    state.simulation.retained.runs.insert(0, run);
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs.insert(0, run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
     if second_sheet_active {
-        let key = state.workspace.content.active_schematic_reference().key();
+        let key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         let catalog = state
+            .model
             .workspace
             .content
             .design_management
@@ -432,7 +438,7 @@ pub(super) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
     let first = sheets[0].ids().collect::<Vec<_>>();
     let second = sheets[1].ids().collect::<Vec<_>>();
     let mut state = super::sheet_visibility::two_sheet_state(&first, &second);
-    state.library_manager.add_library(master_library());
+    state.model.library_manager.add_library(master_library());
 
     let nets = cross_probe_nets(&sheets);
     let instances = sheets
@@ -456,24 +462,25 @@ pub(super) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
         sheets[1].routed_wires.clone(),
     ];
 
-    let document = state.schematic.document_mut_for_test();
+    let document = state.model.schematic.document_mut_for_test();
     for content in sheets {
         document.components.extend(content.components);
         document.wires.extend(content.wires);
         document.junctions.extend(content.junctions);
     }
-    state.schematic.recalculate_runtime_state();
-    state.schematic.bump_topology_version();
+    state.model.schematic.recalculate_runtime_state();
+    state.model.schematic.bump_topology_version();
     state.sync_active_schematic_to_workspace();
 
     install_projected_run_geometry(&mut state, nets);
     state
+        .model
         .simulation
         .retained
         .runs
         .insert(0, operating_point_run(&instances));
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 
     ScaleFixture {
         state,
@@ -486,7 +493,7 @@ pub(super) fn scale_fixture_of(columns: usize, rows: usize) -> ScaleFixture {
 #[test]
 fn the_scale_fixture_holds_the_stated_population() {
     let fixture = scale_fixture();
-    let document = fixture.state.schematic.document();
+    let document = fixture.state.model.schematic.document();
     assert_eq!(document.components.len(), 2_000);
     assert_eq!(document.wires.len(), 5_000);
     assert_eq!(document.junctions.len(), 2_000);
@@ -520,7 +527,12 @@ fn the_scale_fixture_holds_the_stated_population() {
             .iter()
             .all(|id| !super::sheet_visibility::object_is_on_active_sheet(&fixture.state, *id))
     );
-    let analysis = fixture.state.simulation.active_analysis().expect("OP");
+    let analysis = fixture
+        .state
+        .model
+        .simulation
+        .active_analysis()
+        .expect("OP");
     assert_eq!(
         analysis.dc_op.as_ref().expect("dc op").node_voltages.len(),
         OPERATING_POINT_NODES
@@ -608,7 +620,7 @@ fn time_scenario_in(
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
-    let editor = &mut state.schematic.session.editor;
+    let editor = &mut state.model.schematic.session.editor;
     match view {
         None => editor.needs_fit = true,
         Some((zoom, centre)) => {
@@ -676,6 +688,7 @@ fn move_preview() -> FrameTimes {
     let state = &mut fixture.state;
     for id in fixture.components[0].iter().take(40) {
         state
+            .model
             .schematic
             .session
             .editor
@@ -693,9 +706,9 @@ fn move_preview() -> FrameTimes {
 
 fn junction_hover() -> FrameTimes {
     let mut state = fixture_without_overlay().state;
-    state.schematic.session.editor.tool = Tool::Junction;
+    state.model.schematic.session.editor.tool = Tool::Junction;
     time_scenario("junction tool hover", 8.0, state, |state| {
-        assert_eq!(state.schematic.session.editor.tool, Tool::Junction);
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Junction);
     })
 }
 
@@ -707,6 +720,7 @@ fn stretch_preview() -> FrameTimes {
         .copied()
         .find(|id| {
             state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -715,6 +729,7 @@ fn stretch_preview() -> FrameTimes {
         })
         .expect("a four-point routed wire");
     state
+        .model
         .schematic
         .session
         .editor
@@ -764,7 +779,7 @@ fn operating_point_overlay_legible() -> FrameTimes {
                 "the overlay annotates the active sheet"
             );
             assert!(
-                (state.schematic.session.editor.zoom - 1.0).abs() < f64::EPSILON,
+                (state.model.schematic.session.editor.zoom - 1.0).abs() < f64::EPSILON,
                 "the view stays at 100 %"
             );
         },
@@ -784,6 +799,7 @@ fn part_drag() -> [FrameTimes; 2] {
     // A resistor in the middle of the open sheet's lattice.
     let part = fixture.components[0][COLUMNS * (ROWS / 2) + COLUMNS / 2];
     let at = state
+        .model
         .schematic
         .document()
         .components
@@ -791,8 +807,8 @@ fn part_drag() -> [FrameTimes; 2] {
         .find(|component| component.id == part)
         .map(|component| component.pos)
         .expect("the part is on the sheet");
-    let grid = state.schematic.document().grid_size;
-    let editor = &mut state.schematic.session.editor;
+    let grid = state.model.schematic.document().grid_size;
+    let editor = &mut state.model.schematic.session.editor;
     editor.needs_fit = false;
     editor.zoom = 1.0;
     editor.pan = (
@@ -843,6 +859,7 @@ fn part_drag() -> [FrameTimes; 2] {
 
     let steps = i32::try_from(TIMED_FRAMES).expect("a few frames");
     let dropped = state
+        .model
         .schematic
         .document()
         .components
@@ -900,6 +917,7 @@ fn site_cost_table() -> String {
     for id in fixture.components[0].iter().take(40) {
         fixture
             .state
+            .model
             .schematic
             .session
             .editor
@@ -908,7 +926,7 @@ fn site_cost_table() -> String {
     }
     fixture.state.ui.schematic_visibility.annotations =
         SchematicAnnotationVisibility::OperatingPoint;
-    fixture.state.schematic.ensure_canvas_cache();
+    fixture.state.model.schematic.ensure_canvas_cache();
     let state = &fixture.state;
     let symbols = super::schematic_symbol_context(state);
     let design = super::schematic_design_view(state);
@@ -958,7 +976,7 @@ fn site_cost_table() -> String {
     crate::ui::Theme::default().apply(&pick_ctx);
     let pointer_view = rspice_schematic_editor::view::tool_input::ToolPointerView {
         design: super::schematic_design_view(state),
-        snap_engine: &state.schematic.session.editor.snap_engine,
+        snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: true,
     };
     let overflow = std::sync::Arc::new(super::drawing_sheet::drawing_sheet_overflow_summary(
@@ -974,6 +992,7 @@ fn site_cost_table() -> String {
     let chain_groups = vec![(
         rspice_schematic_editor::view::drawing::ConductorInk::Plain,
         state
+            .model
             .schematic
             .document()
             .wires
@@ -999,7 +1018,7 @@ fn site_cost_table() -> String {
             site_ms(|| {
                 let target = rspice_schematic_editor::view::snap_resolution::resolve_target_pointer(
                     &design,
-                    &state.schematic.session.editor.snap_engine,
+                    &state.model.schematic.session.editor.snap_engine,
                     &symbols,
                     &viewport,
                     pointer,
@@ -1011,7 +1030,7 @@ fn site_cost_table() -> String {
             "junction candidate near a point (C-8)",
             site_ms(|| {
                 design
-                    .nearest_junction_candidate(near, state.schematic.document().grid_size)
+                    .nearest_junction_candidate(near, state.model.schematic.document().grid_size)
                     .map_or(0, |point| point.x.unsigned_abs() as usize)
             }),
         ),
@@ -1047,7 +1066,7 @@ fn site_cost_table() -> String {
                         &symbols,
                         &pick_ctx,
                         &viewport,
-                        || state.workspace.content.active_view.display_path(),
+                        || state.model.workspace.content.active_view.display_path(),
                     )
                     .is_some(),
                 )
@@ -1083,8 +1102,8 @@ fn site_cost_table() -> String {
         (
             "conductor chains, active sheet (C-21)",
             site_ms(|| {
-                let wires =
-                    design.objects_on_active_sheet(&state.schematic.document().wires, |w| w.id);
+                let wires = design
+                    .objects_on_active_sheet(&state.model.schematic.document().wires, |w| w.id);
                 rspice_schematic_editor::view::drawing::chain_conductors(
                     wires.iter().map(|wire| wire.points.as_slice()),
                 )
@@ -1097,7 +1116,10 @@ fn site_cost_table() -> String {
                 design
                     .canvas_cache
                     .expect("the fixture's canvas cache is built")
-                    .conductor_chains(&state.schematic.document().wires, chain_groups.clone())
+                    .conductor_chains(
+                        &state.model.schematic.document().wires,
+                        chain_groups.clone(),
+                    )
                     .len()
             }),
         ),
@@ -1145,7 +1167,7 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
     crate::ui::Theme::default().apply(&ctx);
     let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
     let mut state = fixture_without_overlay().state;
-    state.schematic.session.editor.needs_fit = true;
+    state.model.schematic.session.editor.needs_fit = true;
     let mut shapes = Vec::new();
     for _ in 0..WARM_UP_FRAMES {
         let input = egui::RawInput {

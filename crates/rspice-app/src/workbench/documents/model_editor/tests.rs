@@ -289,13 +289,13 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.model_library_manager = manager;
-    let project_revision = app.state.workspace.content.project.revision();
+    app.state.model.model_library_manager = manager;
+    let project_revision = app.state.model.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "multi-owned",
             "nch_owned",
             project_revision,
@@ -353,6 +353,7 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
     let sibling_source_id = draft.source_id;
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library_mut("multi-owned")
         .expect("multi-model library");
@@ -363,7 +364,7 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
         .model_qualification
         .insert("nch_owned".to_owned(), sibling_qualification.clone());
 
-    let mut manager = app.state.model_library_manager.clone();
+    let mut manager = app.state.model.model_library_manager.clone();
     let second = resolve_project_model_for_editor(&manager, "multi-owned", "pch_owned")
         .expect("resolve editable sibling");
     let mut changed_second = second.definition.clone();
@@ -407,6 +408,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .model_library_manager
         .create_project_model("first-owned-model", &definition())
         .expect("create first model");
@@ -417,6 +419,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         ..definition()
     };
     app.state
+        .model
         .model_library_manager
         .create_project_model("second-owned-model", &second)
         .expect("create second model");
@@ -424,10 +427,10 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "first-owned-model",
             "nch_owned",
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
         )
         .expect("open first candidate");
     app.state
@@ -898,16 +901,17 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create project model fixture");
-    let starting_project_revision = app.state.workspace.content.project.revision();
-    let starting_execution_epoch = app.state.design_execution_epoch;
+    let starting_project_revision = app.state.model.workspace.content.project.revision();
+    let starting_execution_epoch = app.state.model.design_execution_epoch;
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "owned-models",
             "nch_owned",
             starting_project_revision,
@@ -930,13 +934,14 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         committed_project_revision,
         starting_project_revision.next().expect("project revision")
     );
-    assert!(app.state.workspace.content.project_metadata_dirty);
+    assert!(app.state.model.workspace.content.project_metadata_dirty);
     assert_eq!(
-        app.state.design_execution_epoch,
+        app.state.model.design_execution_epoch,
         starting_execution_epoch.wrapping_add(1)
     );
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library("owned-models")
         .expect("library");
@@ -966,11 +971,12 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
             .contains("no semantic changes")
     );
     assert_eq!(
-        app.state.workspace.content.project.revision(),
+        app.state.model.workspace.content.project.revision(),
         committed_project_revision
     );
     assert_eq!(
         app.state
+            .model
             .model_library_manager
             .get_library("owned-models")
             .unwrap()
@@ -978,7 +984,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         Some(ObjectRevision::new(2).expect("source revision"))
     );
     assert_eq!(
-        app.state.design_execution_epoch,
+        app.state.model.design_execution_epoch,
         starting_execution_epoch.wrapping_add(1)
     );
 }
@@ -1011,15 +1017,16 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .model_library_manager
         .create_project_model_revision("sectioned", &revision, &ModelQualificationState::default())
         .expect("create sectioned revision");
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "sectioned",
             "nch_owned",
             project_revision,
@@ -1049,6 +1056,7 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
     save_open_candidate(&mut app).expect("save metadata-only revision");
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library("sectioned")
         .expect("saved sectioned library");
@@ -1064,6 +1072,7 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
     );
     let cards = app
         .state
+        .model
         .model_library_manager
         .reference_process_model_cards(crate::product::ProcessCorner::TT)
         .expect("materialize saved section")
@@ -1226,15 +1235,16 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create model");
-    let revision = app.state.workspace.content.project.revision();
+    let revision = app.state.model.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,
@@ -1291,15 +1301,16 @@ fn selected_vector_rerun_executes_only_its_complete_suite() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .unwrap();
-    let revision = app.state.workspace.content.project.revision();
+    let revision = app.state.model.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,
@@ -1378,15 +1389,16 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create model");
-    let revision = app.state.workspace.content.project.revision();
+    let revision = app.state.model.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,

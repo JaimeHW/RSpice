@@ -28,6 +28,7 @@ fn colliding_state() -> AppState {
 /// after it steps back over the edit that follows and no further.
 fn add_collision(state: &mut AppState, name: &str, y: i32) {
     state
+        .model
         .schematic
         .with_undo("Label the collision", |schematic| {
             schematic.add_net_label(Point::new(600, y), name.to_owned());
@@ -48,8 +49,9 @@ fn checked(state: &mut AppState) -> Vec<DiagnosticRecord> {
 /// What the design checks have published for the view in front of the
 /// reader, as it stands now: re-stated, where something re-stated it.
 fn published(state: &AppState) -> Vec<DiagnosticRecord> {
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     state
+        .model
         .diagnostics
         .batch(&DiagnosticInputs::DesignCheck { subject })
         .expect("the checks published their findings")
@@ -89,7 +91,7 @@ fn to_delete(record: &DiagnosticRecord) -> WaiverTarget {
 }
 
 fn active_waivers(state: &AppState) -> &[DrcWaiver] {
-    state.schematic.document().waivers.entries()
+    state.model.schematic.document().waivers.entries()
 }
 
 /// Check the drawing and waive its one case collision, as the page does.
@@ -107,6 +109,7 @@ fn a_waiver_survives_a_recheck_after_an_unrelated_edit() {
     let mut state = colliding_state();
     waive_the_collision(&mut state);
     state
+        .model
         .schematic
         .with_undo("Unrelated drawing edit", |schematic| {
             schematic.add_component(ComponentType::Resistor, Point::new(1_200, 1_200));
@@ -127,20 +130,23 @@ fn a_waiver_survives_a_recheck_after_an_unrelated_edit() {
 /// drawn. Returns the resistor's name.
 fn stub_a_resistor(state: &mut AppState, x: i32) -> String {
     let mut name = String::new();
-    state.schematic.with_undo("Stub a resistor", |schematic| {
-        let id = schematic.add_component(ComponentType::Resistor, Point::new(x, 0));
-        let resistor = schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == id)
-            .expect("the resistor is placed");
-        name.clone_from(&resistor.name);
-        let leg = resistor.terminal_positions()[0].1;
-        schematic
-            .add_wire(vec![leg, Point::new(leg.x, leg.y - 100)])
-            .expect("a two-point wire commits");
-    });
+    state
+        .model
+        .schematic
+        .with_undo("Stub a resistor", |schematic| {
+            let id = schematic.add_component(ComponentType::Resistor, Point::new(x, 0));
+            let resistor = schematic
+                .document()
+                .components
+                .iter()
+                .find(|component| component.id == id)
+                .expect("the resistor is placed");
+            name.clone_from(&resistor.name);
+            let leg = resistor.terminal_positions()[0].1;
+            schematic
+                .add_wire(vec![leg, Point::new(leg.x, leg.y - 100)])
+                .expect("a two-point wire commits");
+        });
     state.sync_active_schematic_to_workspace();
     name
 }
@@ -279,14 +285,14 @@ fn a_history_step_that_takes_a_waiver_away_re_states_the_finding() {
         .waive_finding(&target, REASON)
         .expect("a case collision may be waived");
     assert!(
-        state.schematic.session.is_dirty,
+        state.model.schematic.session.is_dirty,
         "a waiver dirties its cellview"
     );
     assert!(one(&published(&state), COLLISION).waived());
     assert_eq!(listing(&state).counts().errors, errors - 1);
 
     let before = state.stored_waivers();
-    assert!(state.schematic.undo(), "the waiver is one undo step");
+    assert!(state.model.schematic.undo(), "the waiver is one undo step");
     state.sync_active_schematic_to_workspace();
     assert!(active_waivers(&state).is_empty(), "undo takes it away");
     assert!(
@@ -335,7 +341,7 @@ fn a_rule_that_may_not_be_waived_offers_no_waiver() {
     assert!(duplicate.waiver_action.is_none());
     let refused = state.waive_finding(
         &WaiverTarget {
-            cell_view: state.workspace.content.active_schematic_reference(),
+            cell_view: state.model.workspace.content.active_schematic_reference(),
             rule: Arc::from("DRC-DUPLICATE-NAME"),
             object: "component:7".to_owned(),
         },
@@ -375,17 +381,18 @@ fn publish_duplicate_name(state: &mut AppState) {
 #[test]
 fn a_stored_waiver_on_a_rule_that_may_not_be_waived_is_reported_and_ignored() {
     let mut state = colliding_state();
-    state.schematic.document_mut_for_test().waivers = serde_json::from_value(serde_json::json!({
-        "schema_version": 1,
-        "waivers": [{
-            "rule": "DRC-DUPLICATE-NAME",
-            "object": "component:7",
-            "reason": "written by hand",
-            "author": "ana",
-            "waived_at_ms": 1_760_000_000_000_u64,
-        }],
-    }))
-    .expect("a stored list always reads");
+    state.model.schematic.document_mut_for_test().waivers =
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "waivers": [{
+                "rule": "DRC-DUPLICATE-NAME",
+                "object": "component:7",
+                "reason": "written by hand",
+                "author": "ana",
+                "waived_at_ms": 1_760_000_000_000_u64,
+            }],
+        }))
+        .expect("a stored list always reads");
     state.sync_active_schematic_to_workspace();
     publish_duplicate_name(&mut state);
 
@@ -415,6 +422,7 @@ fn an_unmatched_waiver_is_reported_and_its_delete_removes_it() {
     let mut state = colliding_state();
     waive_the_collision(&mut state);
     let label = state
+        .model
         .schematic
         .document()
         .net_labels
@@ -424,6 +432,7 @@ fn an_unmatched_waiver_is_reported_and_its_delete_removes_it() {
         .expect("the second spelling is drawn");
     assert!(
         state
+            .model
             .schematic
             .rename_net_label(label, "sense".to_owned())
             .expect("the label renames"),

@@ -59,7 +59,7 @@ const COMMAND: &str = "Move";
 pub(crate) fn arm_move_selection(state: &mut AppState) {
     // Move is greyed on a read-only schematic and with nothing movable
     // selected, so neither is answered.
-    if state.schematic_edit_read_only() || !state.schematic.has_live_movable_selection() {
+    if state.schematic_edit_read_only() || !state.model.schematic.has_live_movable_selection() {
         return;
     }
     if state.dialogs.stretch_selection.armed {
@@ -72,7 +72,7 @@ pub(crate) fn arm_move_selection(state: &mut AppState) {
         .dialogs
         .move_selection
         .arm(SchematicEditAuthority::capture(state));
-    state.schematic.arm_tool(Tool::MoveSelection);
+    state.model.schematic.arm_tool(Tool::MoveSelection);
 }
 
 fn validate_draft(state: &AppState) -> Result<(), String> {
@@ -84,7 +84,7 @@ fn validate_draft(state: &AppState) -> Result<(), String> {
         return Err("Move is not armed.".to_owned());
     };
     authority.validate(state, COMMAND)?;
-    if !state.schematic.has_live_movable_selection() {
+    if !state.model.schematic.has_live_movable_selection() {
         return Err("No movable selected object remains.".to_owned());
     }
     Ok(())
@@ -93,7 +93,7 @@ fn validate_draft(state: &AppState) -> Result<(), String> {
 /// Fail-closed authority check used again at the canvas commit boundary.
 pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), String> {
     let draft = &state.dialogs.move_selection;
-    if !draft.armed || state.schematic.session.editor.tool != Tool::MoveSelection {
+    if !draft.armed || state.model.schematic.session.editor.tool != Tool::MoveSelection {
         return Err("Move is not armed.".to_owned());
     }
     validate_draft(state)
@@ -101,8 +101,8 @@ pub(crate) fn armed_move_selection_authority(state: &AppState) -> Result<(), Str
 
 pub(crate) fn cancel_armed_move_selection(state: &mut AppState) {
     state.dialogs.move_selection.close();
-    if state.schematic.session.editor.tool == Tool::MoveSelection {
-        state.schematic.cancel_tool();
+    if state.model.schematic.session.editor.tool == Tool::MoveSelection {
+        state.model.schematic.cancel_tool();
     }
 }
 
@@ -114,9 +114,11 @@ mod tests {
     fn selected_resistor() -> AppState {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor
@@ -130,14 +132,19 @@ mod tests {
     #[test]
     fn arming_opens_no_dialog_and_hands_the_canvas_the_tool() {
         let mut state = selected_resistor();
-        let baseline = SchematicSnapshot::capture(state.schematic.document());
+        let baseline = SchematicSnapshot::capture(state.model.schematic.document());
 
         arm_move_selection(&mut state);
 
         assert!(state.dialogs.move_selection.armed);
-        assert_eq!(state.schematic.session.editor.tool, Tool::MoveSelection);
+        assert_eq!(
+            state.model.schematic.session.editor.tool,
+            Tool::MoveSelection
+        );
         assert!(!state.dialogs.application_modal_open());
-        assert!(baseline.is_equal(&SchematicSnapshot::capture(state.schematic.document())));
+        assert!(baseline.is_equal(&SchematicSnapshot::capture(
+            state.model.schematic.document()
+        )));
         assert!(armed_move_selection_authority(&state).is_ok());
     }
 
@@ -153,20 +160,18 @@ mod tests {
             .expect("captured authority");
         assert_eq!(
             authority.selection,
-            state.schematic.session.editor.selection
+            state.model.schematic.session.editor.selection
         );
-        assert!(
-            authority
-                .snapshot
-                .is_equal(&SchematicSnapshot::capture(state.schematic.document()))
-        );
+        assert!(authority.snapshot.is_equal(&SchematicSnapshot::capture(
+            state.model.schematic.document()
+        )));
     }
 
     #[test]
     fn validation_fails_closed_when_non_electrical_geometry_changes() {
         let mut state = selected_resistor();
         arm_move_selection(&mut state);
-        state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
+        state.model.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
         assert!(validate_draft(&state).is_err());
     }
 
@@ -176,6 +181,9 @@ mod tests {
         let mut state = AppState::default();
         arm_move_selection(&mut state);
         assert!(!state.dialogs.move_selection.armed);
-        assert_ne!(state.schematic.session.editor.tool, Tool::MoveSelection);
+        assert_ne!(
+            state.model.schematic.session.editor.tool,
+            Tool::MoveSelection
+        );
     }
 }

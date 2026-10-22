@@ -122,11 +122,12 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
     let reference = build();
     let state = &reference.state;
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .expect("the active configuration resolves into an execution plan");
     let plan = projection.plan();
@@ -161,8 +162,10 @@ fn the_reference_project_netlists_through_the_configured_execution_projection() 
         "one cell name in two libraries is two masters"
     );
 
-    let hierarchy =
-        HierarchySource::from_execution_projection(state.library_manager.catalog(), &projection);
+    let hierarchy = HierarchySource::from_execution_projection(
+        state.model.library_manager.catalog(),
+        &projection,
+    );
     let result = generate_netlist_hierarchical(
         projection
             .root_schematic()
@@ -259,7 +262,7 @@ fn ports_of(instance: &str) -> String {
 #[test]
 fn the_reference_libraries_hold_the_cross_library_name_collision() {
     let reference = build();
-    let libraries = &reference.state.library_manager;
+    let libraries = &reference.state.model.library_manager;
 
     for view in [&reference.user_filter, &reference.vendor_filter] {
         assert_eq!(
@@ -315,6 +318,7 @@ fn the_reference_top_carries_the_typed_bus_and_its_scalar_tap() {
     let reference = build();
     let top = reference
         .state
+        .model
         .workspace
         .content
         .schematic_buffers

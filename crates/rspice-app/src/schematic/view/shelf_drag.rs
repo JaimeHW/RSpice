@@ -78,7 +78,7 @@ pub(super) enum ShelfDropOutcome {
 }
 
 pub(super) fn can_accept_shelf_drop(state: &AppState, payload: &SchematicShelfDragPayload) -> bool {
-    !state.schematic.session.read_only
+    !state.model.schematic.session.read_only
         && !state.active_view_read_only()
         && !matches!(
             payload,
@@ -107,36 +107,40 @@ pub(super) fn commit_shelf_drop(
     }
 
     let label = payload.placement_label();
-    let changed = match payload {
-        SchematicShelfDragPayload::Primitive(kind) => {
-            state
-                .schematic
-                .with_undo(format!("drop {}", kind.display_name()), |schematic| {
+    let changed =
+        match payload {
+            SchematicShelfDragPayload::Primitive(kind) => state.model.schematic.with_undo(
+                format!("drop {}", kind.display_name()),
+                |schematic| {
                     schematic.add_component(*kind, grid_pos);
-                })
-        }
-        SchematicShelfDragPayload::LibraryCell(binding) => {
-            let binding = (**binding).clone();
-            state.schematic.with_undo("drop library cell", |schematic| {
-                schematic.add_library_cell_component(grid_pos, binding);
-            })
-        }
-        SchematicShelfDragPayload::Stimulus(placement) => {
-            let placement = (**placement).clone();
-            state
-                .schematic
-                .with_undo(format!("drop {}", placement.definition()), |schematic| {
-                    schematic.add_stimulus_component(&placement, grid_pos);
-                })
-        }
-    };
+                },
+            ),
+            SchematicShelfDragPayload::LibraryCell(binding) => {
+                let binding = (**binding).clone();
+                state
+                    .model
+                    .schematic
+                    .with_undo("drop library cell", |schematic| {
+                        schematic.add_library_cell_component(grid_pos, binding);
+                    })
+            }
+            SchematicShelfDragPayload::Stimulus(placement) => {
+                let placement = (**placement).clone();
+                state.model.schematic.with_undo(
+                    format!("drop {}", placement.definition()),
+                    |schematic| {
+                        schematic.add_stimulus_component(&placement, grid_pos);
+                    },
+                )
+            }
+        };
     if !changed {
         return ShelfDropOutcome::ReadOnly;
     }
 
-    if state.schematic.session.editor.tool.is_place_tool() {
-        state.schematic.cancel_tool();
-        state.schematic.session.editor.pending_library_cell = None;
+    if state.model.schematic.session.editor.tool.is_place_tool() {
+        state.model.schematic.cancel_tool();
+        state.model.schematic.session.editor.pending_library_cell = None;
     }
     state.prompt(format!(
         "Placed {label} at ({}, {}).",
@@ -195,7 +199,7 @@ fn apply_placement_transform(
 pub(super) fn something_floats(state: &AppState) -> bool {
     state.dialogs.floating_paste.is_some()
         || state.dialogs.move_selection.armed
-        || state.schematic.session.editor.tool.is_place_tool()
+        || state.model.schematic.session.editor.tool.is_place_tool()
 }
 
 /// Turn what floats under the pointer. R and M take this path, and so do
@@ -207,8 +211,8 @@ pub(super) fn turn_what_floats(state: &mut AppState, transform: PlacementTransfo
     } else if state.dialogs.move_selection.armed {
         turn_the_move(state, transform);
         true
-    } else if state.schematic.session.editor.tool.is_place_tool() {
-        apply_placement_transform(&mut state.schematic, transform);
+    } else if state.model.schematic.session.editor.tool.is_place_tool() {
+        apply_placement_transform(&mut state.model.schematic, transform);
         true
     } else {
         false
@@ -247,7 +251,7 @@ pub(crate) fn handle_pre_render_placement_transform(
         ctx.request_repaint();
         return true;
     }
-    let click_placement_active = state.schematic.session.editor.tool.is_place_tool()
+    let click_placement_active = state.model.schematic.session.editor.tool.is_place_tool()
         && (canvas_has_focus || pointer_over_canvas);
     let shelf_drag_over_canvas = super::shelf_drag_over_schematic_canvas(ctx);
     if !click_placement_active && !shelf_drag_over_canvas {
@@ -256,7 +260,7 @@ pub(crate) fn handle_pre_render_placement_transform(
     let Some(transform) = ctx.input_mut(consume_placement_transform) else {
         return false;
     };
-    apply_placement_transform(&mut state.schematic, transform);
+    apply_placement_transform(&mut state.model.schematic, transform);
     ctx.request_repaint();
     true
 }
@@ -285,7 +289,7 @@ pub(super) fn handle_placement_transform_keys(
     state: &mut AppState,
     shelf_drag_over_canvas: bool,
 ) -> bool {
-    let click_placement_active = state.schematic.session.editor.tool.is_place_tool()
+    let click_placement_active = state.model.schematic.session.editor.tool.is_place_tool()
         && (response.has_focus() || response.contains_pointer());
     if (!click_placement_active && !shelf_drag_over_canvas)
         || state.application_modal_open()
@@ -298,7 +302,7 @@ pub(super) fn handle_placement_transform_keys(
     let Some(transform) = transform else {
         return false;
     };
-    apply_placement_transform(&mut state.schematic, transform);
+    apply_placement_transform(&mut state.model.schematic, transform);
     response.ctx.request_repaint();
     true
 }
@@ -368,10 +372,10 @@ mod tests {
     #[test]
     fn primitive_drop_commits_rotation_and_mirror_as_one_undoable_placement() {
         let mut state = AppState::default();
-        state.schematic.session.editor.preview_rotation = Rotation::R90;
-        state.schematic.session.editor.preview_mirror_h = true;
-        state.schematic.session.editor.tool = Tool::Place(ComponentType::Capacitor);
-        state.schematic.session.editor.pending_library_cell = Some(
+        state.model.schematic.session.editor.preview_rotation = Rotation::R90;
+        state.model.schematic.session.editor.preview_mirror_h = true;
+        state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Capacitor);
+        state.model.schematic.session.editor.pending_library_cell = Some(
             rspice_schematic_editor::session::placement::PendingLibraryCellPlacement::new(
                 LibraryCellInstance::new("work", "stale", "schematic"),
                 crate::workbench::app::schematic_editor_request_source(&state),
@@ -385,30 +389,31 @@ mod tests {
             ShelfDropOutcome::Placed
         );
 
-        assert_eq!(state.schematic.document().components.len(), 1);
-        let placed = &state.schematic.document().components[0];
+        assert_eq!(state.model.schematic.document().components.len(), 1);
+        let placed = &state.model.schematic.document().components[0];
         assert_eq!(placed.kind, ComponentType::Resistor);
         assert_eq!(placed.pos, Point::new(30, 40));
         assert_eq!(placed.rotation, Rotation::R90);
         assert!(placed.mirror_h);
-        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .pending_library_cell
                 .is_none()
         );
-        assert!(state.schematic.can_undo());
-        state.schematic.undo();
-        assert!(state.schematic.document().components.is_empty());
+        assert!(state.model.schematic.can_undo());
+        state.model.schematic.undo();
+        assert!(state.model.schematic.document().components.is_empty());
     }
 
     #[test]
     fn library_drop_uses_payload_binding_and_preserves_a_non_placement_tool() {
         let mut state = AppState::default();
-        state.schematic.session.editor.tool = Tool::Wire;
+        state.model.schematic.session.editor.tool = Tool::Wire;
         let binding = LibraryCellInstance::new("work", "ota", "schematic");
         let payload = SchematicShelfDragPayload::library_cell(binding.clone());
 
@@ -418,19 +423,19 @@ mod tests {
         );
 
         assert_eq!(
-            state.schematic.document().components[0]
+            state.model.schematic.document().components[0]
                 .library_cell
                 .as_ref(),
             Some(&binding)
         );
-        assert_eq!(state.schematic.session.editor.tool, Tool::Wire);
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Wire);
     }
 
     #[test]
     fn read_only_drop_is_a_no_op_and_preserves_the_active_tool() {
         let mut state = AppState::default();
-        state.schematic.session.read_only = true;
-        state.schematic.session.editor.tool = Tool::Place(ComponentType::Resistor);
+        state.model.schematic.session.read_only = true;
+        state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Resistor);
         let payload =
             SchematicShelfDragPayload::primitive(ComponentType::Capacitor).expect("placeable");
 
@@ -438,12 +443,12 @@ mod tests {
             commit_shelf_drop(&mut state, &payload, Point::origin()),
             ShelfDropOutcome::ReadOnly
         );
-        assert!(state.schematic.document().components.is_empty());
+        assert!(state.model.schematic.document().components.is_empty());
         assert_eq!(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             Tool::Place(ComponentType::Resistor)
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     #[test]
@@ -463,7 +468,7 @@ mod tests {
     fn focused_click_placement_consumes_direct_r_and_m_canvas_gestures() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.session.editor.tool = Tool::Place(ComponentType::Resistor);
+        state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Resistor);
 
         let (handled, _) = run_transform_frame(
             &ctx,
@@ -473,7 +478,7 @@ mod tests {
         );
         assert!(handled);
         assert_eq!(
-            state.schematic.session.editor.preview_rotation,
+            state.model.schematic.session.editor.preview_rotation,
             Rotation::R90
         );
 
@@ -485,14 +490,14 @@ mod tests {
         );
         assert!(handled);
         assert!(!m_still_available);
-        assert!(state.schematic.session.editor.preview_mirror_h);
+        assert!(state.model.schematic.session.editor.preview_mirror_h);
     }
 
     #[test]
     fn shelf_drag_owns_transform_keys_without_canvas_pointer_focus() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.session.editor.tool = Tool::Select;
+        state.model.schematic.session.editor.tool = Tool::Select;
 
         let (handled, _) = run_transform_frame(
             &ctx,
@@ -502,15 +507,15 @@ mod tests {
         );
 
         assert!(handled);
-        assert!(state.schematic.session.editor.preview_mirror_h);
-        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+        assert!(state.model.schematic.session.editor.preview_mirror_h);
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
     }
 
     #[test]
     fn pre_render_transform_wins_before_the_global_r_shortcut() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.session.editor.tool = Tool::Place(ComponentType::Capacitor);
+        state.model.schematic.session.editor.tool = Tool::Place(ComponentType::Capacitor);
 
         let mut handled = false;
         let _ = ctx.run_ui(placement_key_input(Key::R, Modifiers::NONE), |ctx| {
@@ -519,11 +524,11 @@ mod tests {
 
         assert!(handled);
         assert_eq!(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             Tool::Place(ComponentType::Capacitor)
         );
         assert_eq!(
-            state.schematic.session.editor.preview_rotation,
+            state.model.schematic.session.editor.preview_rotation,
             Rotation::R90
         );
         assert!(!ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::R)));

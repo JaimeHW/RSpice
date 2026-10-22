@@ -12,9 +12,13 @@ use crate::workbench::ScalarPreference;
 
 /// Open Plot properties on what the Results workspace is showing.
 pub(crate) fn open_properties(state: &mut AppState) {
-    let draft = match active_document_id(state)
-        .and_then(|document_id| state.workspace.content.visualization_document(document_id))
-    {
+    let draft = match active_document_id(state).and_then(|document_id| {
+        state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+    }) {
         Some(document) => {
             let presentation = document.presentation();
             PropertiesDraft {
@@ -38,7 +42,13 @@ pub(crate) fn open_properties(state: &mut AppState) {
 /// What the properties apply to: the open document, or every quick view.
 pub(super) fn scope(state: &AppState) -> String {
     active_document_id(state)
-        .and_then(|document_id| state.workspace.content.visualization_document(document_id))
+        .and_then(|document_id| {
+            state
+                .model
+                .workspace
+                .content
+                .visualization_document(document_id)
+        })
         .map_or_else(
             || "Quick view".to_owned(),
             |document| document.title().to_owned(),

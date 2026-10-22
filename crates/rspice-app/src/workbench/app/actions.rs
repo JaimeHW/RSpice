@@ -42,7 +42,7 @@ impl RSpiceApp {
             self.state.shortcut_resolver.reset();
             return;
         }
-        let active_view = self.state.workspace.content.active_view_type();
+        let active_view = self.state.model.workspace.content.active_view_type();
         let canvas_focus =
             engineering_canvas_has_focus(ctx, self.state.workbench.workspace, active_view);
         if crate::schematic::view::handle_pre_render_placement_transform(
@@ -165,22 +165,22 @@ impl RSpiceApp {
     /// answer `None` rather than a position that would sort as the oldest
     /// record in the session.
     fn active_document_undo_sequence(&self) -> Option<crate::state::UndoSequence> {
-        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return None;
         }
-        self.state.schematic.history().undo_sequence()
+        self.state.model.schematic.history().undo_sequence()
     }
 
     /// Where the active document's next redo step sits in the global order.
     fn active_document_redo_sequence(&self) -> Option<crate::state::UndoSequence> {
-        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return None;
         }
-        self.state.schematic.history().redo_sequence()
+        self.state.model.schematic.history().redo_sequence()
     }
 
     fn try_active_document_undo(&mut self) -> bool {
-        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return match self.state.undo_active_symbol_document() {
                 Ok(stepped) => stepped,
                 Err(error) => {
@@ -189,11 +189,18 @@ impl RSpiceApp {
                 }
             };
         }
-        if !self.state.schematic.can_undo() {
+        if !self.state.model.schematic.can_undo() {
             return false;
         }
-        if self.state.schematic.undo() {
-            self.state.ui.schematic_snap = self.state.schematic.session.editor.snap_engine.clone();
+        if self.state.model.schematic.undo() {
+            self.state.ui.schematic_snap = self
+                .state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .clone();
             self.state.sync_active_schematic_to_workspace();
             return true;
         }
@@ -201,7 +208,7 @@ impl RSpiceApp {
     }
 
     fn try_active_document_redo(&mut self) -> bool {
-        if self.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+        if self.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
             return match self.state.redo_active_symbol_document() {
                 Ok(stepped) => stepped,
                 Err(error) => {
@@ -213,8 +220,15 @@ impl RSpiceApp {
         if !self.state.can_redo_active_schematic() {
             return false;
         }
-        if self.state.schematic.redo() {
-            self.state.ui.schematic_snap = self.state.schematic.session.editor.snap_engine.clone();
+        if self.state.model.schematic.redo() {
+            self.state.ui.schematic_snap = self
+                .state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .clone();
             self.state.sync_active_schematic_to_workspace();
             return true;
         }
@@ -377,12 +391,23 @@ mod shortcut_ownership_tests {
     fn assert_grid_pitch_contract(app: &RSpiceApp, pitch: crate::state::SchematicGridPitch) {
         let expected = pitch.canvas_grid_size();
         assert_eq!(
-            app.state.schematic.document().document_policy.grid_pitch,
+            app.state
+                .model
+                .schematic
+                .document()
+                .document_policy
+                .grid_pitch,
             pitch
         );
-        assert_eq!(app.state.schematic.document().grid_size, expected);
+        assert_eq!(app.state.model.schematic.document().grid_size, expected);
         assert_eq!(
-            app.state.schematic.session.editor.snap_engine.grid_size,
+            app.state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .grid_size,
             expected
         );
         assert_eq!(app.state.ui.schematic_snap.grid_size, expected);
@@ -397,6 +422,7 @@ mod shortcut_ownership_tests {
 
         assert!(
             app.state
+                .model
                 .schematic
                 .with_undo("change schematic grid pitch", |schematic| {
                     schematic.document_mut_for_test().document_policy.grid_pitch =
@@ -407,7 +433,7 @@ mod shortcut_ownership_tests {
                         SchematicGridPitch::Mil25.canvas_grid_size();
                 })
         );
-        app.state.ui.schematic_snap = app.state.schematic.session.editor.snap_engine.clone();
+        app.state.ui.schematic_snap = app.state.model.schematic.session.editor.snap_engine.clone();
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
 
         app.action_edit_undo();
@@ -425,9 +451,10 @@ mod shortcut_ownership_tests {
         use crate::workbench::app_state::DesignManagementHistoryEntry;
 
         state.open_project_session();
-        let owner = state.workspace.content.active_schematic_reference();
-        let before = (*state.workspace.content.design_management).clone();
+        let owner = state.model.workspace.content.active_schematic_reference();
+        let before = (*state.model.workspace.content.design_management).clone();
         let drawn = state
+            .model
             .schematic
             .document()
             .components
@@ -439,11 +466,12 @@ mod shortcut_ownership_tests {
             .bootstrap_for_cell_view(&owner.key(), "Sheet 1", drawn)
             .expect("bootstrap reviewed sheet catalog");
         let committed_revision = state
+            .model
             .workspace
             .content
             .replace_design_management(candidate)
             .expect("publish reviewed catalog");
-        let after = (*state.workspace.content.design_management).clone();
+        let after = (*state.model.workspace.content.design_management).clone();
         state.record_design_management_transaction(DesignManagementHistoryEntry {
             description: "assign objects to the active sheet".to_owned(),
             owner: owner.clone(),
@@ -468,22 +496,24 @@ mod shortcut_ownership_tests {
         let mut app = RSpiceApp::test_instance();
         assert!(
             app.state
+                .model
                 .schematic
                 .with_undo("place resistor", |schematic| {
                     schematic.add_component(ComponentType::Resistor, Point::origin());
                 })
         );
-        let drawn = app.state.schematic.document().components.len();
+        let drawn = app.state.model.schematic.document().components.len();
         let owner = publish_sheet_assignment(&mut app.state);
 
         app.action_edit_undo();
         assert_eq!(
-            app.state.schematic.document().components.len(),
+            app.state.model.schematic.document().components.len(),
             drawn,
             "the edit made before the ascent is not what Undo owes the operator"
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -495,13 +525,14 @@ mod shortcut_ownership_tests {
         app.action_edit_redo();
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
                 .sheet_catalog(&owner.key())
                 .is_some()
         );
-        assert_eq!(app.state.schematic.document().components.len(), drawn);
+        assert_eq!(app.state.model.schematic.document().components.len(), drawn);
     }
 
     #[test]
@@ -511,6 +542,7 @@ mod shortcut_ownership_tests {
         let mut app = RSpiceApp::test_instance();
         assert!(
             app.state
+                .model
                 .schematic
                 .with_undo("place resistor", |schematic| {
                     schematic.add_component(ComponentType::Resistor, Point::origin());
@@ -519,21 +551,23 @@ mod shortcut_ownership_tests {
         let owner = publish_sheet_assignment(&mut app.state);
         assert!(
             app.state
+                .model
                 .schematic
                 .with_undo("place capacitor", |schematic| {
                     schematic.add_component(ComponentType::Capacitor, Point::new(40, 0));
                 })
         );
-        assert_eq!(app.state.schematic.document().components.len(), 2);
+        assert_eq!(app.state.model.schematic.document().components.len(), 2);
 
         app.action_edit_undo();
         assert_eq!(
-            app.state.schematic.document().components.len(),
+            app.state.model.schematic.document().components.len(),
             1,
             "the newest step is the document edit made after the transaction"
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -544,6 +578,7 @@ mod shortcut_ownership_tests {
         app.action_edit_undo();
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -551,10 +586,10 @@ mod shortcut_ownership_tests {
                 .is_none(),
             "the transaction is next, ahead of the older document edit"
         );
-        assert_eq!(app.state.schematic.document().components.len(), 1);
+        assert_eq!(app.state.model.schematic.document().components.len(), 1);
 
         app.action_edit_undo();
-        assert!(app.state.schematic.document().components.is_empty());
+        assert!(app.state.model.schematic.document().components.is_empty());
     }
 
     fn app_on_a_symbol_view() -> RSpiceApp {
@@ -567,7 +602,7 @@ mod shortcut_ownership_tests {
         SymbolDocument::default().store_in_view(&mut view).unwrap();
         cell.add_view(view);
         library.add_cell(cell);
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         app.state
             .open_workspace_view(CellViewRef::new("dispatch", "amp", "symbol"));
         app.state
@@ -592,7 +627,7 @@ mod shortcut_ownership_tests {
             .activate(crate::workbench::state::Workspace::Design);
         let mut symbol = app_on_a_symbol_view();
         for app in [&mut schematic, &mut symbol] {
-            let view = app.state.workspace.content.active_view_type();
+            let view = app.state.model.workspace.content.active_view_type();
             let mut bypassed = Vec::new();
             for &command in COMMAND_REGISTRY {
                 let reached = dispatch_probe::reached(|| app.execute_shortcut_command(command));
@@ -650,8 +685,8 @@ mod shortcut_ownership_tests {
                 )]);
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(analysis);
-        app.state.simulation.retained.runs = vec![run].into();
-        assert!(app.state.simulation.select_run(0));
+        app.state.model.simulation.retained.runs = vec![run].into();
+        assert!(app.state.model.simulation.select_run(0));
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Results);
@@ -675,16 +710,22 @@ mod shortcut_ownership_tests {
         use crate::state::{Bus, BusDeclaration, Point};
 
         let mut app = RSpiceApp::test_instance();
-        app.state.schematic.document_mut_for_test().buses.push(
-            Bus::segment(
-                87,
-                Point::new(0, 0),
-                Point::new(20, 0),
-                Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
-            )
-            .unwrap(),
-        );
         app.state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(
+                Bus::segment(
+                    87,
+                    Point::new(0, 0),
+                    Point::new(20, 0),
+                    Some(BusDeclaration::parse("DATA[7:0]").unwrap()),
+                )
+                .unwrap(),
+            );
+        app.state
+            .model
             .schematic
             .session
             .editor
@@ -709,7 +750,7 @@ mod shortcut_ownership_tests {
         app.execute_shortcut_command(ShortcutCommand::Cancel);
         assert!(!app.state.dialogs.object_properties.open);
         assert_eq!(
-            app.state.schematic.document().buses[0].declaration,
+            app.state.model.schematic.document().buses[0].declaration,
             Some(BusDeclaration::parse("DATA[7:0]").unwrap())
         );
     }
@@ -744,7 +785,12 @@ mod shortcut_ownership_tests {
         // The tour's position is the shared current finding, named by the
         // canonical identity its published record carries, so the Problems
         // grid's current row is the finding the canvas just jumped to.
-        let subject = app.state.workspace.content.active_schematic_reference();
+        let subject = app
+            .state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference();
         let identities = app.state.design_rule_finding_identities(&subject);
         assert_eq!(identities.len(), 2, "both findings were published");
 
@@ -753,7 +799,10 @@ mod shortcut_ownership_tests {
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Design
         );
-        assert_eq!(app.state.diagnostics.current_finding(), Some(identities[0]));
+        assert_eq!(
+            app.state.model.diagnostics.current_finding(),
+            Some(identities[0])
+        );
 
         let snapshot = ShortcutInputSnapshot::from_events_for_test(
             &[egui::Event::Key {
@@ -768,7 +817,7 @@ mod shortcut_ownership_tests {
         let profile = app.state.ui.preferences.shortcuts().clone();
         let environment = ShortcutEnvironment {
             workspace: app.state.workbench.workspace,
-            active_view: app.state.workspace.content.active_view_type(),
+            active_view: app.state.model.workspace.content.active_view_type(),
             canvas_focus: false,
             source_editor_focus: false,
         };
@@ -785,7 +834,10 @@ mod shortcut_ownership_tests {
         assert_eq!(resolution.command, Some(ShortcutCommand::NextViolation));
 
         app.execute_shortcut_command(resolution.command.unwrap());
-        assert_eq!(app.state.diagnostics.current_finding(), Some(identities[1]));
+        assert_eq!(
+            app.state.model.diagnostics.current_finding(),
+            Some(identities[1])
+        );
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Design
@@ -818,7 +870,7 @@ mod symbol_action_tests {
         .unwrap();
         cell.add_view(view);
         library.add_cell(cell);
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         app.state.open_workspace_view(reference);
         app.state
             .workbench

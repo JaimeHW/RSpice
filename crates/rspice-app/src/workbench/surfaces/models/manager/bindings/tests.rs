@@ -9,13 +9,14 @@ use crate::workbench::app_state::AppState;
 /// A design with `count` instances naming a model nothing provides.
 fn design_with_unresolved(count: u64) -> AppState {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("alpha");
     library.add_model(DeviceModel::new("nch", ModelType::Nmos));
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
 
-    state.workspace.ensure_active_buffer();
+    state.model.workspace.ensure_active_buffer();
     let mut schematic = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -26,9 +27,9 @@ fn design_with_unresolved(count: u64) -> AppState {
         component.params = format!("model=absent{index}");
         schematic.document_mut_for_test().components.push(component);
     }
-    state.workspace.save_active_schematic(&schematic);
-    state.schematic = schematic.clone();
-    state.workspace.save_active_schematic(&schematic);
+    state.model.workspace.save_active_schematic(&schematic);
+    state.model.schematic = schematic.clone();
+    state.model.workspace.save_active_schematic(&schematic);
     state
 }
 
@@ -76,13 +77,14 @@ fn every_unresolved_instance_is_a_row_of_its_own() {
 #[test]
 fn an_instance_bound_to_the_wrong_provider_says_which_one_wins() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     for name in ["alpha", "beta"] {
         let mut library = ModelLibrary::new(name);
         library.add_model(DeviceModel::new("nch", ModelType::Nmos));
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
     }
     state
+        .model
         .model_library_manager
         .resolve_definition_provider(
             ModelConsumerScope::PrimitiveModel,
@@ -91,8 +93,9 @@ fn an_instance_bound_to_the_wrong_provider_says_which_one_wins() {
             "provider-aware binding test",
         )
         .expect("the contested provider can be resolved");
-    state.workspace.ensure_active_buffer();
+    state.model.workspace.ensure_active_buffer();
     let mut schematic = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -101,7 +104,7 @@ fn an_instance_bound_to_the_wrong_provider_says_which_one_wins() {
     component.name = "M1".to_owned();
     component.params = "model=nch model_library=beta".to_owned();
     schematic.document_mut_for_test().components.push(component);
-    state.workspace.save_active_schematic(&schematic);
+    state.model.workspace.save_active_schematic(&schematic);
 
     let diagnostics = diagnostics(&mut state);
     assert_eq!(diagnostics.len(), 1);

@@ -36,6 +36,7 @@ pub(super) fn preview(state: &AppState, draft: &MeasurementDraft) -> Measurement
     let pane = active_document_id(state).and_then(|document_id| {
         let (_, pane_id) = super::super::persistent_document::reading_position(state, document_id)?;
         let document = state
+            .model
             .workspace
             .content
             .visualization_document(document_id)?;

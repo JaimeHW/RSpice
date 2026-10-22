@@ -568,7 +568,8 @@ pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
 /// Every plot sheet does; the structured documents (OP, specs, table, XF,
 /// manifest) have no viewport at all and must not offer the gesture.
 pub(crate) fn fit_gesture_available(state: &AppState) -> bool {
-    state.simulation.retained.has_results() && viewer_draws_a_pane(state.ui.results.session.viewer)
+    state.model.simulation.retained.has_results()
+        && viewer_draws_a_pane(state.ui.results.session.viewer)
 }
 
 /// Whether this sheet draws a plot pane at all.
@@ -593,7 +594,7 @@ pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
 /// Only the unit-pane stack exposes the retained extents a zoom step has to
 /// be computed against; the single-canvas viewers own their own gestures.
 pub(crate) fn zoom_gesture_available(state: &AppState) -> bool {
-    state.simulation.retained.has_results()
+    state.model.simulation.retained.has_results()
         && viewer_uses_wave_stack(state.ui.results.session.viewer)
 }
 
@@ -682,8 +683,8 @@ impl<'a> SheetContext<'a> {
     fn of(state: &'a mut AppState) -> Self {
         Self {
             policy: state.ui.preferences.quantity_presentation_policy(),
-            simulation: &state.simulation,
-            workspace: &state.workspace,
+            simulation: &state.model.simulation,
+            workspace: &state.model.workspace,
             results: &mut state.ui.results,
         }
     }
@@ -788,6 +789,7 @@ pub(super) fn place_marker(
         .persistent_pane_context
         .and_then(|context| {
             let document = state
+                .model
                 .workspace
                 .content
                 .visualization_document(context.document_id)?;
@@ -824,21 +826,27 @@ pub(super) fn place_marker(
         return quick_fallback(state, reason);
     };
 
-    let receipt = match state.workspace.content.transact_visualization_document(
-        context.document_id,
-        revision,
-        vec![
-            crate::results::visualization_document::DocumentEdit::AddTypedMarker {
-                pane_id: context.pane_id,
-                trace_id,
-                coordinate: crate::results::visualization_document::TypedValue::Real(retained_x),
-                label: trace_name.clone(),
-                kind: retained_kind_of_marker(MarkerKind::default()),
-                scope: crate::results::visualization_document::PlotMarkerScope::Pane,
-                source_specification: None,
-            },
-        ],
-    ) {
+    let receipt = match state
+        .model
+        .workspace
+        .content
+        .transact_visualization_document(
+            context.document_id,
+            revision,
+            vec![
+                crate::results::visualization_document::DocumentEdit::AddTypedMarker {
+                    pane_id: context.pane_id,
+                    trace_id,
+                    coordinate: crate::results::visualization_document::TypedValue::Real(
+                        retained_x,
+                    ),
+                    label: trace_name.clone(),
+                    kind: retained_kind_of_marker(MarkerKind::default()),
+                    scope: crate::results::visualization_document::PlotMarkerScope::Pane,
+                    source_specification: None,
+                },
+            ],
+        ) {
         Ok(receipt) => receipt,
         Err(error) => {
             return quick_fallback(
@@ -891,6 +899,7 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
             ..
         } => {
             let Some(revision) = state
+                .model
                 .workspace
                 .content
                 .visualization_document(document_id)
@@ -898,15 +907,20 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
             else {
                 return;
             };
-            if let Err(error) = state.workspace.content.transact_visualization_document(
-                document_id,
-                revision,
-                vec![
-                    crate::results::visualization_document::DocumentEdit::Remove(
-                        crate::results::visualization_document::EntityRef::Marker(marker_id),
-                    ),
-                ],
-            ) {
+            if let Err(error) = state
+                .model
+                .workspace
+                .content
+                .transact_visualization_document(
+                    document_id,
+                    revision,
+                    vec![
+                        crate::results::visualization_document::DocumentEdit::Remove(
+                            crate::results::visualization_document::EntityRef::Marker(marker_id),
+                        ),
+                    ],
+                )
+            {
                 state.prompt(format!("Could not remove the marker: {error}"));
                 return;
             }
@@ -965,6 +979,7 @@ pub(super) fn commit_marker_edit(
                 .unwrap_or_default();
             let label = retained_marker_label(note, &trace_name).to_owned();
             let retained = state
+                .model
                 .workspace
                 .content
                 .visualization_document(document_id)
@@ -986,6 +1001,7 @@ pub(super) fn commit_marker_edit(
                 );
             };
             state
+                .model
                 .workspace
                 .content
                 .transact_visualization_document(
@@ -1086,6 +1102,7 @@ pub(crate) fn restore_markers(
             // A discarded dataset does not make its allocated labels reusable.
             highest = highest.max(marker.id);
             state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -1104,6 +1121,7 @@ fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> boo
         return false;
     }
     state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -1149,6 +1167,7 @@ pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePrese
         .into_iter()
         .filter(|pane| {
             state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -1168,6 +1187,7 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
     state.ui.results.analysis_expr_cache.clear();
     for group in groups {
         let retained = state
+            .model
             .simulation
             .retained
             .runs
@@ -1185,7 +1205,7 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
     state
         .ui
         .results
-        .reconcile_expression_projection(&state.simulation);
+        .reconcile_expression_projection(&state.model.simulation);
 }
 
 /// Whether one analysis' retained evidence passes its own validator.
@@ -1207,8 +1227,9 @@ pub(crate) fn retained_evidence_is_valid(
         .ui
         .results
         .retained_evidence_validity
-        .get_or_insert_with(&state.simulation, analysis, || {
+        .get_or_insert_with(&state.model.simulation, analysis, || {
             state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -1296,7 +1317,7 @@ pub(crate) fn analysis_answers_structural_gate(
         .ui
         .results
         .structural_gates
-        .get_or_insert_with(&state.simulation, key, || {
+        .get_or_insert_with(&state.model.simulation, key, || {
             structural_gate_is_answered_directly(gate, analysis)
         })
 }
@@ -1316,14 +1337,14 @@ pub(crate) fn retained_dataset_digest(
     state: &AppState,
     run: &SimulationRun,
 ) -> crate::product::ContentDigest {
-    state
-        .ui
-        .results
-        .dataset_digests
-        .get_or_insert_with(&state.simulation, run.dataset_id, || {
+    state.ui.results.dataset_digests.get_or_insert_with(
+        &state.model.simulation,
+        run.dataset_id,
+        || {
             frame_work::note(frame_work::DatasetWalk::DatasetDigest);
             run.dataset_content_digest()
-        })
+        },
+    )
 }
 
 /// The two halves of a pinned view: the abscissa window, then the ordinate
@@ -1570,7 +1591,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
     if app.state.ui.results.session.marker_edit.is_some() {
         return;
     }
-    if !app.state.simulation.retained.has_results() {
+    if !app.state.model.simulation.retained.has_results() {
         return;
     }
     let plain = ctx
@@ -1690,12 +1711,16 @@ fn consume_command_key(
 /// immutable, so a trace leaves the plot by losing visibility and comes back
 /// from the pane's add-signal menu.
 fn hide_selected_trace(state: &mut AppState) {
-    let Some(selected) = state.ui.results.valid_selected_trace(&state.simulation) else {
+    let Some(selected) = state
+        .ui
+        .results
+        .valid_selected_trace(&state.model.simulation)
+    else {
         return;
     };
     let analysis_key = selected.analysis_key();
     let source_name = selected.source_name().to_owned();
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return;
     };
     let located = run
@@ -1772,6 +1797,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     prepare_viewer_state(app);
     let plan_before_docbar = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -1791,6 +1817,7 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     );
     let plan_after_docbar = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -1826,6 +1853,7 @@ fn result_stage_bar_visible(state: &AppState) -> bool {
     (state.ui.results.session.viewer == ResultViewer::Specs
         && state.ui.results.session.spec_drafts.is_some())
         || (state
+            .model
             .simulation
             .active_run()
             .is_some_and(|run| !run.analyses.is_empty())
@@ -1931,10 +1959,10 @@ pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     app.state
         .ui
         .results
-        .reconcile_retained_datasets(&app.state.simulation);
-    let data_version = app.state.simulation.view.data_version;
+        .reconcile_retained_datasets(&app.state.model.simulation);
+    let data_version = app.state.model.simulation.view.data_version;
     let results = &mut app.state.ui.results;
-    results.synchronize_wave_caches(&app.state.simulation);
+    results.synchronize_wave_caches(&app.state.model.simulation);
     if results.seen_version != data_version {
         results.seen_version = data_version;
         results.session.clear_cursors();
@@ -1974,6 +2002,7 @@ fn synchronize_quick_view_dataset_authority(state: &mut AppState) -> bool {
         return false;
     };
     let Some(run_index) = state
+        .model
         .simulation
         .retained
         .runs
@@ -1982,10 +2011,10 @@ fn synchronize_quick_view_dataset_authority(state: &mut AppState) -> bool {
     else {
         return false;
     };
-    if state.simulation.view.active_run_idx == Some(run_index) {
+    if state.model.simulation.view.active_run_idx == Some(run_index) {
         return false;
     }
-    state.simulation.select_run(run_index)
+    state.model.simulation.select_run(run_index)
 }
 
 /// Record what a single-canvas sheet's axes just spanned.
@@ -2090,7 +2119,9 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
         return;
     }
 
-    if viewer_requires_retained_results(viewer) && !app.state.simulation.retained.has_results() {
+    if viewer_requires_retained_results(viewer)
+        && !app.state.model.simulation.retained.has_results()
+    {
         let shortcut = app.state.ui.preferences.shortcuts().resolved_label(
             &crate::workbench::commands::vocabulary::CommandRegistry,
             crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
@@ -2237,7 +2268,7 @@ fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
 }
 
 fn hidden_wave_strip_count(state: &AppState) -> usize {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return 0;
     };
     state
@@ -2288,7 +2319,7 @@ fn memoized_incomplete_evidence_reason(
 
 /// The same question for whichever analysis the active sheet is speaking for.
 fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     if viewer_uses_wave_stack(state.ui.results.session.viewer) {
         // The stack draws every analysis of the run at once, so the bar
         // speaks for the run: one failed strip makes the sheet's evidence
@@ -2297,7 +2328,11 @@ fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
             memoized_incomplete_evidence_reason(state, run.dataset_id, analysis)
         });
     }
-    memoized_incomplete_evidence_reason(state, run.dataset_id, state.simulation.active_analysis()?)
+    memoized_incomplete_evidence_reason(
+        state,
+        run.dataset_id,
+        state.model.simulation.active_analysis()?,
+    )
 }
 
 fn sheet_purpose(state: &AppState) -> String {
@@ -2339,7 +2374,7 @@ fn reconcile_active_viewer(state: &mut AppState) {
     if viewer_availability(state, state.ui.results.session.viewer).available {
         return;
     }
-    if state.simulation.active_run().is_none() {
+    if state.model.simulation.active_run().is_none() {
         return;
     }
     if let Some(viewer) =
@@ -2350,7 +2385,7 @@ fn reconcile_active_viewer(state: &mut AppState) {
 }
 
 fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailability {
-    let active_run = state.simulation.active_run();
+    let active_run = state.model.simulation.active_run();
     match viewer {
         ResultViewer::Waves => {
             if active_run.is_some_and(|run| {
@@ -2448,18 +2483,23 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             // its detail policy and its export all describe the latter, so
             // the coherent answer is to offer the tab only where the sheet
             // has something to say.
-            if state.simulation.active_analysis().is_some_and(|analysis| {
-                analysis.analysis_type == crate::state::AnalysisType::DcOp
-                    && (analysis.dc_op.is_some()
-                        || analysis
-                            .device_op
-                            .as_ref()
-                            .is_some_and(|report| !report.is_empty())
-                        || matches!(
-                            analysis.result_payload,
-                            Some(crate::state::AnalysisResultPayload::OperatingPoint { .. })
-                        ))
-            }) {
+            if state
+                .model
+                .simulation
+                .active_analysis()
+                .is_some_and(|analysis| {
+                    analysis.analysis_type == crate::state::AnalysisType::DcOp
+                        && (analysis.dc_op.is_some()
+                            || analysis
+                                .device_op
+                                .as_ref()
+                                .is_some_and(|report| !report.is_empty())
+                            || matches!(
+                                analysis.result_payload,
+                                Some(crate::state::AnalysisResultPayload::OperatingPoint { .. })
+                            ))
+                })
+            {
                 ViewerAvailability::available("Operating-point results are available")
             } else {
                 // The gate reads the *active analysis*, and accepts any of
@@ -2524,7 +2564,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
                     .iter()
                     .any(|analysis| !analysis.measurements.is_empty())
             });
-            if !state.workspace.content.specs.is_empty() || has_measurements {
+            if !state.model.workspace.content.specs.is_empty() || has_measurements {
                 ViewerAvailability::available("Specification or measurement data is available")
             } else {
                 ViewerAvailability::unavailable("Requires specifications or measured results")
@@ -2534,6 +2574,7 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
             // The table reads whatever the WAVES stage can plot: if a strip
             // exists, its retained samples can be listed.
             if state
+                .model
                 .simulation
                 .active_run()
                 .is_some_and(|run| run.analyses.iter().any(|a| !a.waveforms.is_empty()))
@@ -2547,10 +2588,14 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::Smith => smith::availability(state),
         ResultViewer::Polar => {
             if active_run.is_some_and(|run| {
-                state.simulation.active_analysis().is_some_and(|analysis| {
-                    !polar::quantities(analysis).is_empty()
-                        && analysis_evidence_is_valid(state, run.dataset_id, analysis)
-                })
+                state
+                    .model
+                    .simulation
+                    .active_analysis()
+                    .is_some_and(|analysis| {
+                        !polar::quantities(analysis).is_empty()
+                            && analysis_evidence_is_valid(state, run.dataset_id, analysis)
+                    })
             }) {
                 ViewerAvailability::available(
                     "Retained complex responses are available for the active analysis",
@@ -2565,10 +2610,14 @@ fn viewer_availability(state: &AppState, viewer: ResultViewer) -> ViewerAvailabi
         ResultViewer::NetworkMatrix => network_matrix::availability(state),
         ResultViewer::Scatter | ResultViewer::BoxViolin => {
             if active_run.is_some_and(|run| {
-                state.simulation.active_analysis().is_some_and(|analysis| {
-                    rspice_results::population::is_a_population(analysis)
-                        && analysis_evidence_is_valid(state, run.dataset_id, analysis)
-                })
+                state
+                    .model
+                    .simulation
+                    .active_analysis()
+                    .is_some_and(|analysis| {
+                        rspice_results::population::is_a_population(analysis)
+                            && analysis_evidence_is_valid(state, run.dataset_id, analysis)
+                    })
             }) {
                 ViewerAvailability::available(
                     "A retained Monte Carlo population is available for the active analysis",
@@ -2635,6 +2684,7 @@ fn specialized_availability(state: &AppState, viewer: ActiveViewer) -> ViewerAva
 fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> bool {
     let Some(analysis_type) = app
         .state
+        .model
         .simulation
         .active_analysis()
         .map(|analysis| analysis.analysis_type)
@@ -2657,7 +2707,7 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             true
         }
         DerivedViewerLoadState::Loading => {
-            let data_version = app.state.simulation.view.data_version;
+            let data_version = app.state.model.simulation.view.data_version;
             app.state.ui.results.record_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
                 "Preparing and validating derived data from the active transient.",

@@ -121,6 +121,7 @@ impl OverviewIntent {
             Self::OpenRun(index) => {
                 let has_retained_dataset = app
                     .state
+                    .model
                     .simulation
                     .retained
                     .runs
@@ -130,7 +131,7 @@ impl OverviewIntent {
                     has_retained_dataset,
                     app.state.is_netlist_first_without_schematic(),
                 );
-                if app.state.simulation.select_run(index) {
+                if app.state.model.simulation.select_run(index) {
                     Command::OpenWorkspace(destination).execute(app);
                 }
             }
@@ -268,7 +269,7 @@ fn command_gate(app: &RSpiceApp, command: Command) -> (bool, Option<&'static str
 fn source_deck_snapshot(
     state: &crate::workbench::app_state::AppState,
 ) -> Option<SourceDeckSnapshot> {
-    let document = state.workspace.content.netlist_document.as_ref()?;
+    let document = state.model.workspace.content.netlist_document.as_ref()?;
     let name = document
         .provenance()
         .imported()
@@ -280,6 +281,7 @@ fn source_deck_snapshot(
         })
         .or_else(|| {
             state
+                .model
                 .workspace
                 .content
                 .netlist_source_path
@@ -393,32 +395,34 @@ fn source_deck_snapshot(
 impl OverviewSnapshot {
     fn capture(app: &RSpiceApp) -> Self {
         let state = &app.state;
-        let project = &state.workspace.content.project;
+        let project = &state.model.workspace.content.project;
         let dirty_documents = dirty_document_count(state);
         let netlist_first = state.is_netlist_first_without_schematic();
         let source_deck = source_deck_snapshot(state);
         let configuration = configuration_snapshot(app);
         let checks = checks_snapshot(app);
         let models = model_snapshot(app);
-        let library_count = state.library_manager.library_count();
-        let model_library_count = state.model_library_manager.library_count();
-        let cell_count = state.library_manager.total_cell_count();
-        let view_count = state.library_manager.total_view_count();
+        let library_count = state.model.library_manager.library_count();
+        let model_library_count = state.model.model_library_manager.library_count();
+        let cell_count = state.model.library_manager.total_cell_count();
+        let view_count = state.model.library_manager.total_view_count();
         let root_reference = CellViewRef::new(
             &project.root_library,
             &project.top_cell,
             crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
         );
-        let root_schematic = if state.workspace.content.active_view == root_reference {
-            Some(state.schematic.editor_ref().design)
+        let root_schematic = if state.model.workspace.content.active_view == root_reference {
+            Some(state.model.schematic.editor_ref().design)
         } else {
             state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
                 .get(&root_reference.key())
         };
         let root_sheet_count = state
+            .model
             .workspace
             .content
             .design_management
@@ -433,7 +437,7 @@ impl OverviewSnapshot {
             rspice_design::connectivity::summary::design_nets(schematic).len()
         });
 
-        let latest_run_status = state.simulation.retained.runs.first().map_or_else(
+        let latest_run_status = state.model.simulation.retained.runs.first().map_or_else(
             || {
                 let command = Command::OpenWorkspace(run_destination(false, netlist_first));
                 let (enabled, disabled_reason) = command_gate(app, command);
@@ -579,6 +583,7 @@ impl OverviewSnapshot {
         };
 
         let open_documents = state
+            .model
             .workspace
             .content
             .open_views
@@ -586,7 +591,7 @@ impl OverviewSnapshot {
             .map(|document| OpenDocumentSnapshot {
                 reference: document.reference.clone(),
                 view_type: document.view_type,
-                active: document.reference == state.workspace.content.active_view,
+                active: document.reference == state.model.workspace.content.active_view,
                 dirty: document.dirty,
             })
             .collect();
@@ -594,6 +599,7 @@ impl OverviewSnapshot {
         let now_ms =
             u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX);
         let mut operations = state
+            .model
             .simulation
             .retained
             .runs
@@ -637,8 +643,8 @@ impl OverviewSnapshot {
             })
             .collect::<Vec<_>>();
         let mut retained_revision_ids = BTreeSet::new();
-        for schematic in std::iter::once(state.schematic.editor_ref().design)
-            .chain(state.workspace.content.schematic_buffers.values())
+        for schematic in std::iter::once(state.model.schematic.editor_ref().design)
+            .chain(state.model.workspace.content.schematic_buffers.values())
         {
             for revision in schematic
                 .document()
@@ -682,6 +688,7 @@ impl OverviewSnapshot {
         // sequence and no timestamp, so this time-ordered register could only
         // show them by inventing a `when` for them.
         for publication in state
+            .model
             .workspace
             .content
             .project
@@ -716,15 +723,21 @@ impl OverviewSnapshot {
         // Counted from the retained records themselves, not from what the loops
         // above collected: each of those is capped, so reporting their length
         // would describe the cap rather than the project.
-        let retained_revision_total = std::iter::once(state.schematic.editor_ref().design)
-            .chain(state.workspace.content.schematic_buffers.values())
+        let retained_revision_total = std::iter::once(state.model.schematic.editor_ref().design)
+            .chain(state.model.workspace.content.schematic_buffers.values())
             .flat_map(|schematic| schematic.document().validated_revisions.records().iter())
             .map(|revision| revision.id().as_uuid())
             .collect::<BTreeSet<_>>()
             .len();
-        let operation_total = state.simulation.retained.runs.len()
+        let operation_total = state.model.simulation.retained.runs.len()
             + retained_revision_total
-            + state.workspace.content.project.library_publications().len();
+            + state
+                .model
+                .workspace
+                .content
+                .project
+                .library_publications()
+                .len();
         let operations = operations
             .into_iter()
             .take(5)
@@ -761,7 +774,7 @@ impl OverviewSnapshot {
             open_documents,
             operations,
             operation_total,
-            run_plan_name: state.sim_setup.active_plan_name().as_str().to_owned(),
+            run_plan_name: state.model.sim_setup.active_plan_name().as_str().to_owned(),
             execution_target: crate::state::ExecutionTarget::current().label().to_owned(),
         }
     }
@@ -1057,6 +1070,7 @@ fn overview_header(
                         command_gate(app, Command::NewCell);
                     let has_writable_library = app
                         .state
+                        .model
                         .library_manager
                         .libraries_sorted()
                         .iter()
@@ -1174,8 +1188,8 @@ fn context_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewInte
 
 fn open_project_root(app: &mut RSpiceApp) {
     let reference = CellViewRef::new(
-        &app.state.workspace.content.project.root_library,
-        &app.state.workspace.content.project.top_cell,
+        &app.state.model.workspace.content.project.root_library,
+        &app.state.model.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     app.state.open_workspace_view(reference);
@@ -1185,6 +1199,7 @@ fn open_project_root(app: &mut RSpiceApp) {
 fn project_persistence_location(app: &RSpiceApp) -> String {
     let fallback = || {
         app.state
+            .model
             .workspace
             .content
             .project
@@ -1975,8 +1990,8 @@ fn checks_snapshot(app: &RSpiceApp) -> HealthCopy {
 fn problem_snapshot(app: &RSpiceApp) -> Option<ProblemSnapshot> {
     let root_path = format!(
         "{}/{}",
-        app.state.workspace.content.project.root_library,
-        app.state.workspace.content.project.top_cell
+        app.state.model.workspace.content.project.root_library,
+        app.state.model.workspace.content.project.top_cell
     );
     let result = match app.state.simulation_root_design_check_status() {
         DesignCheckStatus::Current(receipt) => &receipt.result,
@@ -2076,7 +2091,7 @@ fn drc_copy(current: bool, summary: Option<DrcCounts>) -> HealthCopy {
 }
 
 fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
-    let catalog = &app.state.workspace.content.configuration_sets;
+    let catalog = &app.state.model.workspace.content.configuration_sets;
     if let Err(error) = catalog.validate() {
         let active = catalog.active();
         return ConfigurationSnapshot {
@@ -2107,11 +2122,15 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
             tone: Tone::Warn,
         };
     };
-    let projection = app.state.workspace.configuration_execution_projection(
-        &app.state.library_manager,
-        &app.state.workspace.content.active_view,
-        &app.state.schematic,
-    );
+    let projection = app
+        .state
+        .model
+        .workspace
+        .configuration_execution_projection(
+            &app.state.model.library_manager,
+            &app.state.model.workspace.content.active_view,
+            &app.state.model.schematic,
+        );
     let (detail, tone) = match projection {
         Ok(projection) => (
             format!(
@@ -2136,7 +2155,7 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
 }
 
 fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
-    let manager = &app.state.model_library_manager;
+    let manager = &app.state.model.model_library_manager;
     let library_count = manager.library_count();
     let model_count = manager.total_model_count();
     let mut sources = BTreeSet::new();
@@ -2146,8 +2165,14 @@ fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
         }
     }
     let source_count = sources.len();
-    let scan_errors = &app.state.pdk_config.scan_errors;
-    let binding = app.state.workspace.content.project.technology_binding();
+    let scan_errors = &app.state.model.pdk_config.scan_errors;
+    let binding = app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding();
     let contract_error =
         binding.and_then(|_| app.state.validate_project_technology_contract().err());
     let source_contract_error = manager.libraries_sorted().into_iter().find_map(|library| {

@@ -32,7 +32,7 @@ pub(super) fn handle_floating_paste(
         state.prompt(format!("Paste cancelled: {reason}."));
         return true;
     }
-    let grid = state.schematic.document().grid_size;
+    let grid = state.model.schematic.document().grid_size;
     let on_canvas = |position| {
         on_grid(
             resolve_grid_pointer(state, viewport, position).snapped_position,
@@ -90,25 +90,32 @@ pub(super) fn draw_floating_paste_preview(
     symbol_context: &SchematicSymbolContext,
     symbol_library: Option<&SymbolLibrary>,
 ) {
-    let content_version = state.schematic.content_version();
+    let content_version = state.model.schematic.content_version();
     let Some(floating) = state.dialogs.floating_paste.as_ref() else {
         return;
     };
     if floating.current_preview(content_version).is_none() {
         let at = floating.at();
-        let mut candidate = state.schematic.clone();
-        let result =
-            candidate.paste_at_checked(&floating.objects, at, off_active_sheet(&state.workspace));
+        let mut candidate = state.model.schematic.clone();
+        let result = candidate.paste_at_checked(
+            &floating.objects,
+            at,
+            off_active_sheet(&state.model.workspace),
+        );
         if matches!(result, Ok(true)) {
-            with_active_wire_topology_in(&state.workspace, &mut candidate, |candidate, scope| {
-                candidate.connect_pasted_selection(
-                    |component| symbol_context.terminal_points(component),
-                    scope,
-                );
-            });
+            with_active_wire_topology_in(
+                &state.model.workspace,
+                &mut candidate,
+                |candidate, scope| {
+                    candidate.connect_pasted_selection(
+                        |component| symbol_context.terminal_points(component),
+                        scope,
+                    );
+                },
+            );
         }
         let diff = preview::TransformCandidateDiff::between(
-            state.schematic.document(),
+            state.model.schematic.document(),
             candidate.document(),
         );
         if let Some(floating) = state.dialogs.floating_paste.as_mut() {
@@ -140,7 +147,7 @@ pub(super) fn draw_floating_paste_preview(
             &preview_view(state),
             &preview_state.diff,
             &transform_preview_style(state, symbol_context, symbol_library),
-            || state.workspace.content.active_view.display_path(),
+            || state.model.workspace.content.active_view.display_path(),
         );
     }
     preview::draw_transform_feedback(painter, response, valid, detail);

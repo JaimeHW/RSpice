@@ -27,7 +27,7 @@ impl ShortcutContext {
             // result sheet.
             Self::EditContext => {
                 app.state.workbench.workspace == Workspace::Results
-                    || match app.state.workspace.content.active_view_type() {
+                    || match app.state.model.workspace.content.active_view_type() {
                         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
                             app.state.workbench.workspace == Workspace::Design
                         }
@@ -41,7 +41,7 @@ impl ShortcutContext {
             Self::EngineeringCanvas => {
                 app.state.workbench.workspace == Workspace::Design
                     && matches!(
-                        app.state.workspace.content.active_view_type(),
+                        app.state.model.workspace.content.active_view_type(),
                         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
                     )
             }
@@ -49,7 +49,7 @@ impl ShortcutContext {
                 matches!(
                     app.state.workbench.workspace,
                     Workspace::Design | Workspace::Models
-                ) && app.state.workspace.content.active_view_type()
+                ) && app.state.model.workspace.content.active_view_type()
                     == crate::state::ViewType::Symbol
             }
             Self::DesignWorkspace => app.state.workbench.workspace == Workspace::Design,
@@ -1181,10 +1181,11 @@ impl Command {
             Self::SheetFormatManager
                 if app
                     .state
+                    .model
                     .workspace
                     .content
                     .design_management
-                    .sheet_catalog(&app.state.workspace.content.active_key())
+                    .sheet_catalog(&app.state.model.workspace.content.active_key())
                     .and_then(|catalog| catalog.active())
                     .is_none() =>
             {
@@ -1234,8 +1235,8 @@ impl Command {
             // why it cannot start; this row is grey only while one runs, or,
             // on the netlist page, while the deck there cannot run.
             Self::RunSimulation
-                if app.state.simulation.execution.has_active_execution()
-                    || app.state.simulation.execution.trigger_simulation =>
+                if app.state.model.simulation.execution.has_active_execution()
+                    || app.state.model.simulation.execution.trigger_simulation =>
             {
                 "a run is already in progress"
             }
@@ -1247,7 +1248,7 @@ impl Command {
                 "the active simulation plan has no stable analysis identity to add to"
             }
             Self::OpenNetlist | Self::ImportNetlist
-                if app.state.simulation.execution.has_active_execution() =>
+                if app.state.model.simulation.execution.has_active_execution() =>
             {
                 "an active simulation execution still owns the project"
             }
@@ -1257,29 +1258,31 @@ impl Command {
             Self::NewVerilogADevice => "no library can be written",
             Self::NewView => "select a cell in a writable library",
             Self::StopSimulation
-                if app.state.simulation.execution.has_active_execution()
+                if app.state.model.simulation.execution.has_active_execution()
                     && !crate::simulation::execution::execution_target_supports_cancellation() =>
             {
                 "cancellation is unavailable for the current execution target"
             }
-            Self::StopSimulation if app.state.simulation.cancellation_is_pending() => {
+            Self::StopSimulation if app.state.model.simulation.cancellation_is_pending() => {
                 "simulation cancellation is already in progress"
             }
-            Self::StopSimulation if app.state.simulation.execution.has_active_execution() => {
+            Self::StopSimulation if app.state.model.simulation.execution.has_active_execution() => {
                 "the active simulation execution cannot accept cancellation"
             }
             Self::StopSimulation => "no simulation is running",
             Self::PreflightChecks => "the engine is still building the decks of the last check",
-            Self::ClearResults if app.state.simulation.execution.has_active_execution() => {
+            Self::ClearResults if app.state.model.simulation.execution.has_active_execution() => {
                 "an active simulation execution still owns result history"
             }
-            Self::ImportResultDataset if app.state.simulation.execution.has_active_execution() => {
+            Self::ImportResultDataset
+                if app.state.model.simulation.execution.has_active_execution() =>
+            {
                 "an active simulation execution still owns result history"
             }
             Self::ImportResultDataset if app.state.workbench.safe_mode.project_read_only() => {
                 "the project is open read-only"
             }
-            Self::ExportWaveformsCsv if app.state.simulation.retained.has_results() => {
+            Self::ExportWaveformsCsv if app.state.model.simulation.retained.has_results() => {
                 "open a result document in Results"
             }
             Self::ClearResults | Self::ExportWaveformsCsv => "no result dataset is available",
@@ -1306,7 +1309,7 @@ impl Command {
             Self::FamilySlicing
                 if app.state.workbench.current_route().surface_id()
                     == crate::workbench::SurfaceId::Results
-                    && app.state.simulation.retained.has_results() =>
+                    && app.state.model.simulation.retained.has_results() =>
             {
                 "the result holds no sweep, corner or Monte Carlo family"
             }
@@ -1768,13 +1771,13 @@ mod tests {
 
         Command::PlaceOffSheetConnector.execute(&mut app);
         assert_eq!(
-            app.state.schematic.session.editor.tool,
+            app.state.model.schematic.session.editor.tool,
             crate::state::Tool::OffSheetConnector
         );
 
         Command::PlaceLabel.execute(&mut app);
         assert_eq!(
-            app.state.schematic.session.editor.tool,
+            app.state.model.schematic.session.editor.tool,
             crate::state::Tool::Label
         );
     }
@@ -1793,6 +1796,7 @@ mod tests {
         app.state.workbench.workspace = Workspace::Design;
         app.state.open_project_session();
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -1801,15 +1805,18 @@ mod tests {
         let origin = Point::new(20, 20);
         let load_id = app
             .state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, origin);
         let unmapped_id = app
             .state
+            .model
             .schematic
             .add_component(ComponentType::Capacitor, origin + Point::new(20, 0));
         for (id, name) in [(load_id, "R1"), (unmapped_id, "C9")] {
             if let Some(component) = app
                 .state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .components
@@ -1820,11 +1827,11 @@ mod tests {
             }
         }
 
-        let view = app.state.workspace.content.active_view.key();
+        let view = app.state.model.workspace.content.active_view.key();
         let cell = format!(
             "{}/{}",
-            app.state.workspace.content.active_view.library,
-            app.state.workspace.content.active_view.cell
+            app.state.model.workspace.content.active_view.library,
+            app.state.model.workspace.content.active_view.cell
         );
         let digest = crate::state::content_digest("instance-locator-input");
         let artifact = GeneratedArtifact::try_from_utf8(
@@ -1850,12 +1857,15 @@ mod tests {
         )
         .expect("artifact");
 
-        app.state.netlist_artifacts.generated_source = SHOW_IN_NETLIST_DECK.to_owned();
-        app.state.netlist_artifacts.generated_document = Some(
+        app.state.model.netlist_artifacts.generated_source = SHOW_IN_NETLIST_DECK.to_owned();
+        app.state.model.netlist_artifacts.generated_document = Some(
             NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).expect("document"),
         );
-        app.state.netlist_artifacts.generated_input_digest = Some(digest);
-        app.state.netlist_artifacts.current_generation_input_digest = Some(digest);
+        app.state.model.netlist_artifacts.generated_input_digest = Some(digest);
+        app.state
+            .model
+            .netlist_artifacts
+            .current_generation_input_digest = Some(digest);
         app.state.ui.netlist.active_document_initialized = true;
         (app, load_id, unmapped_id)
     }
@@ -1896,6 +1906,7 @@ mod tests {
         );
 
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1907,6 +1918,7 @@ mod tests {
         );
 
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1918,13 +1930,14 @@ mod tests {
         );
 
         app.state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(load_id);
-        app.state.netlist_artifacts.generated_document = None;
-        app.state.netlist_artifacts.generated_source.clear();
+        app.state.model.netlist_artifacts.generated_document = None;
+        app.state.model.netlist_artifacts.generated_source.clear();
         assert_eq!(
             Command::ShowInNetlist.availability(&app),
             CommandAvailability::Disabled(
@@ -1936,6 +1949,7 @@ mod tests {
         // "select one instance" would send the engineer to the wrong place.
         let (mut app, load_id, _) = app_with_generated_deck();
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1955,6 +1969,7 @@ mod tests {
     fn show_in_netlist_opens_the_generated_deck_without_moving_the_selection() {
         let (mut app, load_id, _) = app_with_generated_deck();
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1972,6 +1987,7 @@ mod tests {
         assert_eq!(app.state.ui.netlist.cursor_line, 2);
         assert_eq!(
             app.state
+                .model
                 .schematic
                 .session
                 .editor

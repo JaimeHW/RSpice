@@ -75,11 +75,19 @@ pub(crate) fn arm_stretch_selection(state: &mut AppState) {
     if state.schematic_edit_read_only() {
         return;
     }
-    if !state.schematic.session.editor.selection.probes.is_empty() {
+    if !state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .probes
+        .is_empty()
+    {
         state.prompt("A probe marker cannot be stretched. Move it instead.");
         return;
     }
-    let Some(target) = state.schematic.default_stretch_target() else {
+    let Some(target) = state.model.schematic.default_stretch_target() else {
         return;
     };
     if state.dialogs.move_selection.armed {
@@ -93,7 +101,7 @@ pub(crate) fn arm_stretch_selection(state: &mut AppState) {
         .dialogs
         .stretch_selection
         .arm(SchematicEditAuthority::capture(state), target, policy);
-    state.schematic.arm_tool(Tool::StretchSelection);
+    state.model.schematic.arm_tool(Tool::StretchSelection);
 }
 
 fn validate_draft(state: &AppState) -> Result<(), String> {
@@ -108,7 +116,7 @@ fn validate_draft(state: &AppState) -> Result<(), String> {
     let Some(target) = draft.canvas.target else {
         return Err("Stretch is not armed.".to_owned());
     };
-    if !state.schematic.is_stretch_target_eligible(target) {
+    if !state.model.schematic.is_stretch_target_eligible(target) {
         return Err(
             "What this stretch was armed on is no longer there. Select it again.".to_owned(),
         );
@@ -118,7 +126,7 @@ fn validate_draft(state: &AppState) -> Result<(), String> {
 
 pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), String> {
     let draft = &state.dialogs.stretch_selection;
-    if !draft.armed || state.schematic.session.editor.tool != Tool::StretchSelection {
+    if !draft.armed || state.model.schematic.session.editor.tool != Tool::StretchSelection {
         return Err("Stretch is not armed.".to_owned());
     }
     validate_draft(state)
@@ -126,8 +134,8 @@ pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), 
 
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
     state.dialogs.stretch_selection.close();
-    if state.schematic.session.editor.tool == Tool::StretchSelection {
-        state.schematic.cancel_tool();
+    if state.model.schematic.session.editor.tool == Tool::StretchSelection {
+        state.model.schematic.cancel_tool();
     }
 }
 
@@ -139,8 +147,19 @@ mod tests {
     fn selected_wire_segment() -> AppState {
         let mut state = AppState::default();
         let wire = Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]);
-        state.schematic.document_mut_for_test().wires.push(wire);
-        state.schematic.session.editor.selection.select_wire(7);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .wires
+            .push(wire);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(7);
         state
     }
 
@@ -162,7 +181,10 @@ mod tests {
             })
         );
         assert!(draft.authority.is_some());
-        assert_eq!(state.schematic.session.editor.tool, Tool::StretchSelection);
+        assert_eq!(
+            state.model.schematic.session.editor.tool,
+            Tool::StretchSelection
+        );
     }
 
     /// The check box starts where the sheet is drawn: a 45-degree sheet does
@@ -185,6 +207,9 @@ mod tests {
         let mut state = AppState::default();
         arm_stretch_selection(&mut state);
         assert!(!state.dialogs.stretch_selection.armed);
-        assert_ne!(state.schematic.session.editor.tool, Tool::StretchSelection);
+        assert_ne!(
+            state.model.schematic.session.editor.tool,
+            Tool::StretchSelection
+        );
     }
 }

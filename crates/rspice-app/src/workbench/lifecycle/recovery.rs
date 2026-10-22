@@ -185,14 +185,22 @@ pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
         .collect::<Vec<_>>();
     let mut live_paths = app
         .state
+        .model
         .workspace
         .content
         .schematic_buffers
         .keys()
-        .filter_map(|key| app.state.workspace.session.schematic_sessions.get(key))
+        .filter_map(|key| {
+            app.state
+                .model
+                .workspace
+                .session
+                .schematic_sessions
+                .get(key)
+        })
         .filter_map(|session| session.current_file.clone())
         .collect::<Vec<_>>();
-    if let Some(path) = app.state.schematic.session.current_file.clone() {
+    if let Some(path) = app.state.model.schematic.session.current_file.clone() {
         live_paths.push(path);
     }
 
@@ -551,41 +559,44 @@ fn pristine_execution_context(
 }
 
 fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences, String> {
-    let current_execution =
-        crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
-            .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
+    let current_execution = crate::io::capture_execution_context(
+        &state.model.sim_setup,
+        &state.model.model_library_manager,
+    )
+    .map_err(|error| format!("current simulation/model state is invalid: {error}"))?;
     let current_execution = canonical_execution_context(&current_execution)?;
 
-    let current_results = crate::io::capture_simulation_results(&state.simulation);
+    let current_results = crate::io::capture_simulation_results(&state.model.simulation);
     current_results
         .validate()
         .map_err(|error| format!("current simulation results are invalid: {error}"))?;
 
-    let (saved_execution, saved_results) = if let Some(project_path) =
-        state.workspace.content.project.path.as_deref()
-    {
-        let project = crate::io::load_project_file(project_path).map_err(|error| {
-            format!(
-                "saved project snapshot '{}' could not be loaded: {error}",
-                project_path.display()
+    let (saved_execution, saved_results) =
+        if let Some(project_path) = state.model.workspace.content.project.path.as_deref() {
+            let project = crate::io::load_project_file(project_path).map_err(|error| {
+                format!(
+                    "saved project snapshot '{}' could not be loaded: {error}",
+                    project_path.display()
+                )
+            })?;
+            if let Some(warning) = project.file.simulation_results_warning.as_deref() {
+                return Err(format!(
+                    "saved project result snapshot could not be verified: {warning}"
+                ));
+            }
+            let execution = match project.file.execution_context.as_ref() {
+                Some(context) => canonical_execution_context(context)?,
+                None => canonical_execution_context(&pristine_execution_context(
+                    &state.model.sim_setup,
+                )?)?,
+            };
+            (execution, project.file.simulation_results)
+        } else {
+            (
+                canonical_execution_context(&pristine_execution_context(&state.model.sim_setup)?)?,
+                ProjectSimulationResults::default(),
             )
-        })?;
-        if let Some(warning) = project.file.simulation_results_warning.as_deref() {
-            return Err(format!(
-                "saved project result snapshot could not be verified: {warning}"
-            ));
-        }
-        let execution = match project.file.execution_context.as_ref() {
-            Some(context) => canonical_execution_context(context)?,
-            None => canonical_execution_context(&pristine_execution_context(&state.sim_setup)?)?,
         };
-        (execution, project.file.simulation_results)
-    } else {
-        (
-            canonical_execution_context(&pristine_execution_context(&state.sim_setup)?)?,
-            ProjectSimulationResults::default(),
-        )
-    };
 
     Ok(ProjectOwnedDifferences {
         execution_or_models: current_execution != saved_execution,
@@ -597,13 +608,13 @@ fn project_owned_differences(state: &AppState) -> Result<ProjectOwnedDifferences
 /// destroy state that cannot be reconstructed from its saved project (or from
 /// the documented pristine state of an unsaved project).
 pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<String> {
-    if state.schematic.session.is_dirty || state.workspace.any_dirty() {
+    if state.model.schematic.session.is_dirty || state.model.workspace.any_dirty() {
         return Some(
             "Recovery comparison is blocked because the current design has unsaved changes. Save or close the current project before opening recovery work."
                 .to_owned(),
         );
     }
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         return Some(
             "Recovery comparison is blocked because a simulation run is active. Stop the run, then save or close the current project before opening recovery work."
                 .to_owned(),
@@ -629,7 +640,7 @@ pub(crate) fn recovery_replacement_block_reason(state: &AppState) -> Option<Stri
     if differences.results {
         changed.push("simulation result history or selection");
     }
-    let baseline = if state.workspace.content.project.path.is_some() {
+    let baseline = if state.model.workspace.content.project.path.is_some() {
         "the last saved project snapshot"
     } else {
         "pristine unsaved-project defaults"
@@ -678,12 +689,13 @@ pub(crate) fn open_comparison(
         "Opened recovery comparison for '{}'; the saved project and checkpoint are unchanged.",
         candidate.display_name
     ));
-    app.state.library_manager = comparison.libraries;
-    app.state.workspace = comparison.workspace;
-    app.state.schematic = comparison.active;
+    app.state.model.library_manager = comparison.libraries;
+    app.state.model.workspace = comparison.workspace;
+    app.state.model.schematic = comparison.active;
     app.state.bump_active_schematic_epoch();
-    app.state.sim_setup = crate::workbench::app_state::SimSetupState::new();
-    app.state.model_library_manager = crate::workbench::app_state::default_model_library_manager();
+    app.state.model.sim_setup = crate::workbench::app_state::SimSetupState::new();
+    app.state.model.model_library_manager =
+        crate::workbench::app_state::default_model_library_manager();
     app.state.workbench.activate(Workspace::Design);
     if let Some(notice) = baseline_notice {
         app.state
@@ -870,7 +882,7 @@ pub(crate) fn start_local_safe_mode(
         .safe_mode
         .activate(options, preserved_session);
     if options.open_project_read_only {
-        app.state.schematic.session.read_only = true;
+        app.state.model.schematic.session.read_only = true;
     }
     app.state.workbench.activate(Workspace::Project);
     let mut enforced = Vec::new();
@@ -941,7 +953,7 @@ fn session_log_text(state: &AppState, home: Option<&str>) -> String {
     use std::fmt::Write as _;
 
     let mut text = String::new();
-    for entry in state.log_buffer.entries() {
+    for entry in state.model.log_buffer.entries() {
         writeln!(
             text,
             "{} [{}] [{}] {}",
@@ -1219,12 +1231,14 @@ mod tests {
 
         let mut changed_plan = pristine.clone();
         let transient = changed_plan
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("default stable plan")
             .instances()[0]
             .id();
         changed_plan
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("default stable plan")
@@ -1249,8 +1263,8 @@ mod tests {
         ));
         run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
             .expect("synthetic historical result has valid unattributed legacy provenance");
-        changed_results.simulation.retained.runs.push(run);
-        changed_results.simulation.retained.next_run_id = 1;
+        changed_results.model.simulation.retained.runs.push(run);
+        changed_results.model.simulation.retained.next_run_id = 1;
         let reason = recovery_replacement_block_reason(&changed_results)
             .expect("unsaved result history must block replacement");
         assert!(reason.contains("simulation result history or selection"));
@@ -1273,6 +1287,7 @@ mod tests {
         );
         let restored: AppState = serde_json::from_value(session).expect("current session restores");
         let plan = restored
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan restored");
@@ -1305,12 +1320,14 @@ mod tests {
         assert_eq!(recovery_replacement_block_reason(&state), None);
 
         let transient = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("saved stable plan")
             .instances()[0]
             .id();
         state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("saved stable plan")

@@ -96,7 +96,7 @@ fn closed_projects_expose_only_the_project_workspace() {
 #[test]
 fn new_cell_command_captures_exact_library_catalog_revision() {
     let mut app = RSpiceApp::test_instance();
-    let revision = app.state.library_manager.revision();
+    let revision = app.state.model.library_manager.revision();
 
     Command::NewCell.execute(&mut app);
 
@@ -182,7 +182,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
             "wrong closed-project reason for {command:?}"
         );
 
-        let before = app.state.log_buffer.revision();
+        let before = app.state.model.log_buffer.revision();
         command.execute(&mut app);
 
         assert_eq!(
@@ -191,7 +191,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
             "closed-project command changed workspace: {command:?}"
         );
         assert_eq!(
-            app.state.log_buffer.revision(),
+            app.state.model.log_buffer.revision(),
             before,
             "a disabled command is silent: {command:?}"
         );
@@ -207,7 +207,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
 fn standalone_schematic_save_remains_available_without_a_project() {
     let mut app = RSpiceApp::test_instance();
     app.state.close_project_session();
-    app.state.schematic.session.current_file = Some("standalone.rsch".into());
+    app.state.model.schematic.session.current_file = Some("standalone.rsch".into());
 
     assert!(!Command::Save.requires_open_project());
     assert!(Command::Save.is_enabled(&app));
@@ -216,7 +216,7 @@ fn standalone_schematic_save_remains_available_without_a_project() {
         CommandAvailability::Available
     );
 
-    app.state.schematic.session.current_file = None;
+    app.state.model.schematic.session.current_file = None;
     app.state.browser_schematic_save_name = Some("browser-import.rsch".to_owned());
     assert!(Command::Save.is_enabled(&app));
     assert_eq!(

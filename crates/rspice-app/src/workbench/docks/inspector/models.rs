@@ -27,7 +27,13 @@ fn declared(ui: &mut Ui, label: &str, value: &str) {
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some(library) = app.state.model_library_manager.current_library().cloned() else {
+    let Some(library) = app
+        .state
+        .model
+        .model_library_manager
+        .current_library()
+        .cloned()
+    else {
         return;
     };
     section_header(ui, "Library", None);
@@ -35,6 +41,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         ui,
         "Library",
         app.state
+            .model
             .model_library_manager
             .selected_library
             .as_deref()

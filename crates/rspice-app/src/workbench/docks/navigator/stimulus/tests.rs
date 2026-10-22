@@ -79,7 +79,7 @@ fn prompt_says(state: &AppState, fragment: &str) -> bool {
 /// The mockup's fourteen definitions, with nothing adopted, in the workspace
 /// whose navigator lists them.
 fn library(state: &mut AppState) {
-    state.workspace.content.stimulus_library = fixtures::library();
+    state.model.workspace.content.stimulus_library = fixtures::library();
     state.workbench.activate(Workspace::Stimulus);
     state.workbench.selected_stimulus_definition = Some("sensor_diff_1k".to_owned());
 }
@@ -87,6 +87,7 @@ fn library(state: &mut AppState) {
 /// One placed source carrying `definition`, wired across two nets.
 fn adopt(state: &mut AppState, id: u64, reference: &str, definition: &str) {
     let held = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -97,6 +98,7 @@ fn adopt(state: &mut AppState, id: u64, reference: &str, definition: &str) {
     component.name = reference.to_owned();
     held.adopt_onto(&mut component).expect("adopt");
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -178,6 +180,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
 
     let saved = app
         .state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -200,6 +203,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
     // outright, so it is a draft the deck would not take.
     let ramp = app
         .state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -335,6 +339,7 @@ fn the_footer_states_only_what_the_library_needs_acting_on() {
 
     let mut draft = DefinitionDraft::new(
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -344,6 +349,7 @@ fn the_footer_states_only_what_the_library_needs_acting_on() {
     );
     draft.edit(|working| working.params = "v2=20m per=1m".to_owned());
     app.state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -385,6 +391,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
     // redraws rather than showing the picture it had.
     let mut draft = DefinitionDraft::new(
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -394,6 +401,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
     );
     draft.edit(|working| working.params = "va=9m freq=1k".to_owned());
     app.state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -591,6 +599,7 @@ fn editing_the_purpose_goes_through_the_draft_and_is_undoable() {
     // for every other field.
     assert!(
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -612,11 +621,12 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
     stimulus_verbs::place_selected_definition(&mut app.state);
 
     assert_eq!(
-        app.state.schematic.session.editor.tool,
+        app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::VoltageSourceSin)
     );
     let armed = app
         .state
+        .model
         .schematic
         .session
         .editor
@@ -632,6 +642,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
 
     let saved = app
         .state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -653,6 +664,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
     );
     assert_eq!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -692,6 +704,7 @@ fn print_stimulus_docks_for_review() {
             adopt(&mut app.state, 2, "V2", "bridge_cal_step");
             let held = app
                 .state
+                .model
                 .workspace
                 .content
                 .stimulus_library

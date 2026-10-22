@@ -8,11 +8,13 @@ use crate::state::{NetLabel, NetNamingPolicy, Wire};
 fn global_alias_repairs_are_derived_from_real_label_ids() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(10, Point::new(0, 0), "VDD!"));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
@@ -35,24 +37,29 @@ fn global_alias_repairs_are_derived_from_real_label_ids() {
 fn technology_catalog_promotes_exact_declared_aliases() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(10, Point::new(0, 0), "VCC"));
-    state.workspace.content.connectivity.technology_global_nets =
-        Some(crate::state::TechnologyGlobalNetCatalog {
-            authority: "demo-pdk@1.0".to_owned(),
-            nets: vec![crate::state::ConnectivityAliasGroup {
-                canonical_name: "VDD".to_owned(),
-                aliases: vec!["VCC".to_owned()],
-            }],
-        });
+    state
+        .model
+        .workspace
+        .content
+        .connectivity
+        .technology_global_nets = Some(crate::state::TechnologyGlobalNetCatalog {
+        authority: "demo-pdk@1.0".to_owned(),
+        nets: vec![crate::state::ConnectivityAliasGroup {
+            canonical_name: "VDD".to_owned(),
+            aliases: vec!["VCC".to_owned()],
+        }],
+    });
     state.sync_active_schematic_to_workspace();
     let policy = ConnectivityPolicy {
         global_promotion: GlobalNetPromotionPolicy::TechnologyDefinedOnly,
         ..ConnectivityPolicy::default()
     };
-    validate_policy_authority(&policy, &state.workspace.content.connectivity).unwrap();
+    validate_policy_authority(&policy, &state.model.workspace.content.connectivity).unwrap();
     let projection = preview_projection(&state, &policy).expect("a design projection");
     let globals = build_global_rows(&state, &policy, &projection);
     assert_eq!(globals.len(), 1);
@@ -269,11 +276,13 @@ fn creating_a_bus_is_a_command_form_without_constant_rows() {
 fn the_bus_report_is_exactly_the_schematics_typed_buses() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(10, Point::origin(), "SENSE_P"));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -282,7 +291,10 @@ fn the_bus_report_is_exactly_the_schematics_typed_buses() {
 
     let report = build_report(&state, &ConnectivityPolicy::default()).expect("a resolved design");
 
-    assert_eq!(report.buses.len(), state.schematic.document().buses.len());
+    assert_eq!(
+        report.buses.len(),
+        state.model.schematic.document().buses.len()
+    );
 }
 
 /// Give the workspace an active configuration that cannot resolve: its DUT
@@ -290,8 +302,9 @@ fn the_bus_report_is_exactly_the_schematics_typed_buses() {
 /// projection refuses such a configuration, so a report produced
 /// afterwards would be a report on the editor buffer.
 fn unresolve_configuration(state: &mut AppState) {
-    let root = state.workspace.content.active_view.clone();
+    let root = state.model.workspace.content.active_view.clone();
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -315,11 +328,13 @@ fn unresolve_configuration(state: &mut AppState) {
 fn the_report_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(1, Point::origin(), Point::new(20, 0)));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
@@ -357,20 +372,23 @@ fn only_this_views_findings_are_net_issues_and_repairs() {
         crate::state::ViewType::Schematic,
     ));
     work.add_cell(pad);
-    state.library_manager.add_library(work);
+    state.model.library_manager.add_library(work);
     let mut master = SchematicState::default();
     master.add_component(crate::state::ComponentType::Resistor, Point::new(30, 0));
     state
+        .model
         .workspace
         .insert_schematic_editor("work/pad/schematic".to_owned(), master);
     for x in [400, 600] {
         let mut binding = crate::state::LibraryCellInstance::new("work", "pad", "schematic");
         binding.bind_interface(&[]);
         state
+            .model
             .schematic
             .add_library_cell_component(Point::new(x, 400), binding);
     }
     let resistor = state
+        .model
         .schematic
         .add_component(crate::state::ComponentType::Resistor, Point::new(30, 0));
     state.sync_active_schematic_to_workspace();
@@ -441,7 +459,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
         ));
     }
     work.add_cell(amp);
-    state.library_manager.add_library(work);
+    state.model.library_manager.add_library(work);
 
     // Two sources across one pair of nodes: a loop, which is an Error.
     let mut drawn = SchematicState::default();
@@ -477,18 +495,22 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
             .expect("the two terminals are joined");
     }
     state
+        .model
         .workspace
         .insert_schematic_editor("work/amp/schematic".to_owned(), drawn);
     state
+        .model
         .workspace
         .insert_schematic_editor("work/amp/fixed".to_owned(), SchematicState::default());
 
     let mut binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
     binding.bind_interface(&[]);
     let placed = state
+        .model
         .schematic
         .add_library_cell_component(Point::new(400, 400), binding);
     let dut = state
+        .model
         .schematic
         .document()
         .components
@@ -499,14 +521,16 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
     // An alias the manager offers to repair.
     for (id, x, name) in [(10, 0, "VDD!"), (11, 1, "VDD")] {
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(id, Point::new(x, 0), name));
     }
     state.sync_active_schematic_to_workspace();
-    let root = state.workspace.content.active_view.clone();
+    let root = state.model.workspace.content.active_view.clone();
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -525,7 +549,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
         })
         .expect("the fixture configuration is well formed");
 
-    let policy = state.workspace.content.connectivity.policy.clone();
+    let policy = state.model.workspace.content.connectivity.policy.clone();
     let report = build_report(&state, &policy).expect("the configuration resolves");
     assert!(
         report
@@ -541,7 +565,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
         .iter()
         .find(|repair| repair.action.is_some())
         .expect("the alias is offered as a repair");
-    let mut candidate = state.schematic.clone();
+    let mut candidate = state.model.schematic.clone();
     apply_repair_to_candidate(&mut candidate, repair).expect("the repair applies");
     candidate.recalculate_runtime_state();
 
@@ -550,11 +574,11 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
     // refused every repair here.
     let projection = preview_projection(&state, &policy).expect("a design projection");
     let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
     let drawn = rspice_design::drc::run_check_with_hierarchy(
         &candidate,
         &hierarchy,
-        state.design_check_config(&state.workspace.content.active_view),
+        state.design_check_config(&state.model.workspace.content.active_view),
     );
     assert!(
         drawn
@@ -575,6 +599,7 @@ fn a_repair_candidate_is_checked_as_the_configuration_runs_it() {
 fn every_pane_reads_one_projection_of_the_design() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
@@ -604,7 +629,7 @@ fn buses_on_two_sheets() -> AppState {
     use crate::state::{Bus, SheetDefinition, SheetPortPolicy, SheetTemplate};
     let declared = |text| Some(BusDeclaration::parse(text).unwrap());
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().buses = vec![
+    state.model.schematic.document_mut_for_test().buses = vec![
         Bus::segment(
             1,
             Point::new(0, 0),
@@ -628,8 +653,13 @@ fn buses_on_two_sheets() -> AppState {
         .unwrap(),
     ];
     state.sync_active_schematic_to_workspace();
-    let key = state.workspace.content.active_schematic_reference().key();
-    let management = &mut state.workspace.content.design_management;
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let management = &mut state.model.workspace.content.design_management;
     let first = management
         .bootstrap_for_cell_view(&key, "Sheet 1", vec![1, 2, 3])
         .expect("first sheet");

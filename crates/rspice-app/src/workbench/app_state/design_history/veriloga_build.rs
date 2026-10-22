@@ -119,7 +119,7 @@ impl VerilogABuildSettingsRecord {
         state: &AppState,
         operation: &str,
     ) -> Result<(), String> {
-        if !state.project_open.is_open() {
+        if !state.model.project_open.is_open() {
             return Err(format!(
                 "Build settings cannot be {operation} without an open project."
             ));
@@ -131,6 +131,7 @@ impl VerilogABuildSettingsRecord {
         }
         if let Some(binding) = &self.binding {
             let library = state
+                .model
                 .library_manager
                 .get_library(&binding.view.library)
                 .ok_or_else(|| format!("Library '{}' no longer exists.", binding.view.library))?;
@@ -190,6 +191,7 @@ impl VerilogABuildSettingsRecord {
 
 fn bundle_revision(state: &AppState, bundle: ProjectSourceId) -> Option<ObjectRevision> {
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -199,6 +201,7 @@ fn bundle_revision(state: &AppState, bundle: ProjectSourceId) -> Option<ObjectRe
 
 fn bound_module<'a>(state: &'a AppState, view: &CellViewRef) -> Option<&'a String> {
     state
+        .model
         .library_manager
         .get_library(&view.library)?
         .get_cell(&view.cell)?
@@ -216,6 +219,7 @@ fn restore_bundle(
     retained: ObjectRevision,
 ) -> Result<ObjectRevision, String> {
     state
+        .model
         .workspace
         .content
         .restore_project_source_bundle_revision(bundle, current, retained)
@@ -224,6 +228,7 @@ fn restore_bundle(
         .ok_or_else(|| "The Verilog-A source no longer exists.".to_owned())?;
     state.ui.code_workspace.veriloga.void_evidence();
     let owner = state
+        .model
         .workspace
         .content
         .project_sources
@@ -231,6 +236,7 @@ fn restore_bundle(
         .map(|bundle| bundle.owner().clone());
     if let Some(crate::state::ProjectSourceOwner::CellView { reference }) = owner
         && let Some(open) = state
+            .model
             .workspace
             .content
             .open_views
@@ -244,7 +250,7 @@ fn restore_bundle(
 
 /// Bind `view` to `module`, or to none.
 fn bind_module(state: &mut AppState, view: &CellViewRef, module: Option<&str>) {
-    let Some(mut library) = state.library_manager.edit_library(&view.library) else {
+    let Some(mut library) = state.model.library_manager.edit_library(&view.library) else {
         return;
     };
     let Some(mut metadata) = library
@@ -261,5 +267,5 @@ fn bind_module(state: &mut AppState, view: &CellViewRef, module: Option<&str>) {
     };
     library.replace_view_metadata(&view.cell, &view.view, metadata);
     library.mark_view_modified(&view.cell, &view.view);
-    state.workspace.content.project_metadata_dirty = true;
+    state.model.workspace.content.project_metadata_dirty = true;
 }

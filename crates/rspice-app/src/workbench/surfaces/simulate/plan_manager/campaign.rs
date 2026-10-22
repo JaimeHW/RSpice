@@ -481,8 +481,8 @@ pub(super) fn commit_simulation_campaign(
     name: &str,
     member_ids: &[SimulationPlanId],
 ) -> Result<String, String> {
-    if app.state.simulation.execution.has_active_execution()
-        || app.state.simulation.execution.trigger_simulation
+    if app.state.model.simulation.execution.has_active_execution()
+        || app.state.model.simulation.execution.trigger_simulation
     {
         return Err("A simulation is already running or waiting to start".to_owned());
     }
@@ -508,27 +508,34 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let root = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         let second = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
         let third = setup
             .create_plan("Startup and recovery")
             .expect("a second fresh root plan is created");
-        app.state.workspace.content.migrate_active_plan_data(root);
         app.state
+            .model
+            .workspace
+            .content
+            .migrate_active_plan_data(root);
+        app.state
+            .model
             .workspace
             .content
             .migrate_inactive_plan_data(second);
         app.state
+            .model
             .workspace
             .content
             .migrate_inactive_plan_data(third);
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         // `create_plan` activates what it creates, so the last one made leads
         // the projection and the other two are the retained entries.
         (app, [third, root, second])
@@ -700,14 +707,14 @@ mod tests {
     #[test]
     fn the_commit_walks_the_members_in_the_declared_order() {
         let (mut app, plans) = app_with_three_plans();
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         setup
             .archive_plan(plans[1])
             .expect("an inactive plan archives");
         setup
             .archive_plan(plans[2])
             .expect("an inactive plan archives");
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         let records = plan_catalog_records(&app);
         let second = record_of(&records, plans[1]).name.clone();
         let third = record_of(&records, plans[2]).name.clone();
@@ -788,12 +795,12 @@ mod tests {
     #[test]
     fn a_member_that_does_not_validate_is_counted_and_not_summed_as_zero() {
         let (mut app, plans) = app_with_three_plans();
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         // A nested composition with a zero maximum depth is a declared
         // run-space error, so the active plan forecasts nothing.
         setup.run_set.composition.mode = RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         let records = plan_catalog_records(&app);
         assert_eq!(record_of(&records, plans[0]).task_count(), None);
 

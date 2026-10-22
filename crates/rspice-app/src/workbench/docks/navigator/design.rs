@@ -413,7 +413,7 @@ fn flexible_tab_widths<const N: usize>(available: f32, desired: [f32; N]) -> [f3
 
 fn navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let enter_rows = navigator_search(ui, &mut app.state);
-    let (occurrence, master, can_ascend) = navigator_path(&app.state.workspace);
+    let (occurrence, master, can_ascend) = navigator_path(&app.state.model.workspace);
     let t = Tokens::get(ui.ctx());
     let mut ascend = false;
     // A cell view with one sheet has nothing to scope, so the control is
@@ -606,10 +606,10 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
     // The rail lists the nets the configured design has. When that design
     // does not resolve, the reason takes the list's place: a rail populated
     // from the editor buffer would offer conductors the run has no name for.
-    let projection = match app.state.workspace.design_projection(
-        &app.state.library_manager,
-        &app.state.workspace.content.active_view,
-        &app.state.schematic,
+    let projection = match app.state.model.workspace.design_projection(
+        &app.state.model.library_manager,
+        &app.state.model.workspace.content.active_view,
+        &app.state.model.schematic,
     ) {
         Ok(projection) => projection,
         Err(error) => {
@@ -620,9 +620,9 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     };
     let nets = rspice_design::connectivity::summary::projection_nets(
-        app.state.library_manager.catalog(),
+        app.state.model.library_manager.catalog(),
         &projection,
-        &app.state.workspace.content.active_view.key(),
+        &app.state.model.workspace.content.active_view.key(),
     )
     .iter()
     .filter(|net| net_is_in_scope(&app.state, scope, net))
@@ -647,6 +647,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
         } else if net.wire_ids.is_empty() {
             net.terminals.iter().any(|terminal| {
                 app.state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -657,6 +658,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
             net.wire_ids.iter().copied().collect::<HashSet<_>>()
                 == app
                     .state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -704,6 +706,7 @@ fn net_section(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn net_anchor(state: &AppState, net: &DesignNet) -> Option<crate::state::Point> {
     state
+        .model
         .schematic
         .document()
         .net_labels
@@ -712,6 +715,7 @@ fn net_anchor(state: &AppState, net: &DesignNet) -> Option<crate::state::Point> 
         .map(|label| label.pos)
         .or_else(|| {
             state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -722,6 +726,7 @@ fn net_anchor(state: &AppState, net: &DesignNet) -> Option<crate::state::Point> 
         .or_else(|| {
             net.terminals.iter().find_map(|terminal| {
                 state
+                    .model
                     .schematic
                     .document()
                     .components
@@ -810,6 +815,7 @@ fn port_rows(
 ) -> Vec<PortRow> {
     let mut declared: BTreeMap<String, usize> = BTreeMap::new();
     for spec in state
+        .model
         .schematic
         .document()
         .components
@@ -819,6 +825,7 @@ fn port_rows(
         *declared.entry(spec.name.to_ascii_lowercase()).or_default() += 1;
     }
     let mut rows = state
+        .model
         .schematic
         .document()
         .components
@@ -890,6 +897,7 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 alert: port.duplicated,
                 selected: app
                     .state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -901,13 +909,20 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
         .on_hover_text(port.tooltip());
         if response.clicked() {
             app.state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_only_component(port.component_id);
-            app.state.schematic.session.editor.net_highlight.clear();
-            app.state.schematic.session.editor.center_request = Some(port.position);
+            app.state
+                .model
+                .schematic
+                .session
+                .editor
+                .net_highlight
+                .clear();
+            app.state.model.schematic.session.editor.center_request = Some(port.position);
         }
         navigator_object_context_menu(
             &response,
@@ -940,20 +955,20 @@ fn port_section(ui: &mut Ui, app: &mut RSpiceApp) {
 /// being edited only one of them is the sheet in front of the reader — and the
 /// other is a row that has to stay.
 fn whole_design_sources(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedSource> {
-    let plan = app.state.sim_setup.analysis_plan.as_ref();
-    let stimulus_library = &app.state.workspace.content.stimulus_library;
+    let plan = app.state.model.sim_setup.analysis_plan.as_ref();
+    let stimulus_library = &app.state.model.workspace.content.stimulus_library;
     let mut rows = crate::simulation::placed_sources::placed_sources(
-        &app.state.schematic,
+        &app.state.model.schematic,
         stimulus_library,
         plan,
     );
     let Some(projection) = design_projection(app) else {
         return rows;
     };
-    let active = app.state.workspace.content.occurrence_path();
+    let active = app.state.model.workspace.content.occurrence_path();
     rows.extend(
         crate::simulation::placed_sources::design_sources(
-            &app.state.library_manager,
+            &app.state.model.library_manager,
             stimulus_library,
             &projection,
             plan,
@@ -966,16 +981,17 @@ fn whole_design_sources(app: &RSpiceApp) -> Vec<crate::simulation::placed_source
 
 /// The same two readings for the RF-port rail.
 fn whole_design_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedRfPort> {
-    let plan = app.state.sim_setup.analysis_plan.as_ref();
-    let mut rows = crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, plan);
+    let plan = app.state.model.sim_setup.analysis_plan.as_ref();
+    let mut rows =
+        crate::simulation::placed_sources::placed_rf_ports(&app.state.model.schematic, plan);
     let Some(projection) = design_projection(app) else {
         return rows;
     };
-    let active = app.state.workspace.content.occurrence_path();
+    let active = app.state.model.workspace.content.occurrence_path();
     rows.extend(
         crate::simulation::placed_sources::design_rf_ports(
-            &app.state.library_manager,
-            &app.state.workspace.content.stimulus_library,
+            &app.state.model.library_manager,
+            &app.state.model.workspace.content.stimulus_library,
             &projection,
             plan,
         )
@@ -1005,11 +1021,12 @@ fn design_projection(
     app: &RSpiceApp,
 ) -> Option<std::sync::Arc<crate::state::workspace::DesignProjection>> {
     app.state
+        .model
         .workspace
         .design_projection(
-            &app.state.library_manager,
-            &app.state.workspace.content.active_view,
-            &app.state.schematic,
+            &app.state.model.library_manager,
+            &app.state.model.workspace.content.active_view,
+            &app.state.model.schematic,
         )
         .ok()
 }
@@ -1027,7 +1044,8 @@ fn derived_row_is_in_scope(
     occurrence: Option<&crate::state::InstancePath>,
     component_id: u64,
 ) -> bool {
-    if occurrence.is_some_and(|occurrence| *occurrence != state.workspace.content.occurrence_path())
+    if occurrence
+        .is_some_and(|occurrence| *occurrence != state.model.workspace.content.occurrence_path())
     {
         return true;
     }
@@ -1040,7 +1058,7 @@ fn row_is_elsewhere<'a>(
     state: &crate::workbench::app_state::AppState,
     occurrence: Option<&'a crate::state::InstancePath>,
 ) -> Option<&'a crate::state::InstancePath> {
-    occurrence.filter(|occurrence| **occurrence != state.workspace.content.occurrence_path())
+    occurrence.filter(|occurrence| **occurrence != state.model.workspace.content.occurrence_path())
 }
 
 /// Land the session on the occurrence a row names, then select and centre the
@@ -1064,10 +1082,11 @@ fn descend_to_placed(
     component_id: u64,
 ) {
     hierarchy_tree::open_occurrence(state, occurrence);
-    if state.workspace.content.occurrence_path() != *occurrence {
+    if state.model.workspace.content.occurrence_path() != *occurrence {
         return;
     }
     let Some(position) = state
+        .model
         .schematic
         .document()
         .components
@@ -1078,13 +1097,14 @@ fn descend_to_placed(
         return;
     };
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(component_id);
-    state.schematic.session.editor.net_highlight.clear();
-    state.schematic.session.editor.center_request = Some(position);
+    state.model.schematic.session.editor.net_highlight.clear();
+    state.model.schematic.session.editor.center_request = Some(position);
 }
 
 /// Every RF port the design places, in the order an S-parameter matrix indexes
@@ -1184,6 +1204,7 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 selected: elsewhere.is_none()
                     && app
                         .state
+                        .model
                         .schematic
                         .session
                         .editor
@@ -1208,13 +1229,20 @@ fn rf_port_section(ui: &mut Ui, app: &mut RSpiceApp) {
             None => {
                 if response.clicked() {
                     app.state
+                        .model
                         .schematic
                         .session
                         .editor
                         .selection
                         .select_only_component(port.component_id);
-                    app.state.schematic.session.editor.net_highlight.clear();
-                    app.state.schematic.session.editor.center_request = None;
+                    app.state
+                        .model
+                        .schematic
+                        .session
+                        .editor
+                        .net_highlight
+                        .clear();
+                    app.state.model.schematic.session.editor.center_request = None;
                 }
             }
         }
@@ -1397,6 +1425,7 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
                 selected: elsewhere.is_none()
                     && app
                         .state
+                        .model
                         .schematic
                         .session
                         .editor
@@ -1421,13 +1450,20 @@ fn excitation_section(ui: &mut Ui, app: &mut RSpiceApp) {
             None => {
                 if response.clicked() {
                     app.state
+                        .model
                         .schematic
                         .session
                         .editor
                         .selection
                         .select_only_component(source.component_id);
-                    app.state.schematic.session.editor.net_highlight.clear();
-                    app.state.schematic.session.editor.center_request = None;
+                    app.state
+                        .model
+                        .schematic
+                        .session
+                        .editor
+                        .net_highlight
+                        .clear();
+                    app.state.model.schematic.session.editor.center_request = None;
                 }
             }
         }
@@ -1456,6 +1492,7 @@ fn placed_object(
     reference: &str,
 ) -> Option<NavigatorObject> {
     let position = state
+        .model
         .schematic
         .document()
         .components
@@ -1520,10 +1557,11 @@ fn named_signal_section(ui: &mut Ui, app: &mut RSpiceApp) {
     // sheet scope has nothing to say about it and it is listed either way.
     let probes = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
         .map(|payload| {
             payload
                 .saved_outputs
@@ -1582,6 +1620,7 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
     match target {
         RawProbeTarget::Current(component_name) => {
             let Some(component) = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -1594,19 +1633,20 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
             let id = component.id;
             let position = component.pos;
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_only_component(id);
-            state.schematic.session.editor.net_highlight.clear();
-            state.schematic.session.editor.center_request = Some(position);
+            state.model.schematic.session.editor.net_highlight.clear();
+            state.model.schematic.session.editor.center_request = Some(position);
         }
         RawProbeTarget::Voltage { positive, negative } => {
-            let resolved = state.workspace.design_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+            let resolved = state.model.workspace.design_projection(
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             );
             let projection = match resolved {
                 Ok(projection) => projection,
@@ -1617,9 +1657,9 @@ fn reveal_probe_expression(state: &mut AppState, expression: &str) {
                 }
             };
             let nets = rspice_design::connectivity::summary::projection_nets(
-                state.library_manager.catalog(),
+                state.model.library_manager.catalog(),
                 &projection,
-                &state.workspace.content.active_view.key(),
+                &state.model.workspace.content.active_view.key(),
             );
             let requested = std::iter::once(positive)
                 .chain(negative)
@@ -1689,13 +1729,14 @@ fn select_navigator_object(state: &mut AppState, object: &NavigatorObject) {
     match object {
         NavigatorObject::Component { id, position, .. } => {
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_only_component(*id);
-            state.schematic.session.editor.net_highlight.clear();
-            state.schematic.session.editor.center_request = Some(*position);
+            state.model.schematic.session.editor.net_highlight.clear();
+            state.model.schematic.session.editor.center_request = Some(*position);
         }
         NavigatorObject::Net {
             name,
@@ -1705,6 +1746,7 @@ fn select_navigator_object(state: &mut AppState, object: &NavigatorObject) {
         } => {
             select_navigator_net(state, wire_ids, component_ids, *position);
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -1729,6 +1771,7 @@ fn select_navigator_design_net(
         .collect::<Vec<_>>();
     select_navigator_net(state, &net.wire_ids, &component_ids, position);
     state
+        .model
         .schematic
         .session
         .editor
@@ -1742,9 +1785,10 @@ fn select_navigator_net(
     component_ids: &[u64],
     position: Option<crate::state::Point>,
 ) {
-    state.schematic.session.editor.selection.clear();
+    state.model.schematic.session.editor.selection.clear();
     for wire_id in wire_ids {
         state
+            .model
             .schematic
             .session
             .editor
@@ -1754,6 +1798,7 @@ fn select_navigator_net(
     if wire_ids.is_empty() {
         for component_id in component_ids {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -1762,12 +1807,13 @@ fn select_navigator_net(
         }
     }
     state
+        .model
         .schematic
         .session
         .editor
         .net_highlight
         .highlight_wires(wire_ids.iter().copied().collect());
-    state.schematic.session.editor.center_request = position;
+    state.model.schematic.session.editor.center_request = position;
 }
 
 fn sorted_unique(values: impl IntoIterator<Item = u64>) -> Vec<u64> {
@@ -1779,6 +1825,7 @@ fn sorted_unique(values: impl IntoIterator<Item = u64>) -> Vec<u64> {
 
 fn navigator_net_selection_matches(state: &AppState, net: &DesignNet) -> bool {
     if !state
+        .model
         .schematic
         .session
         .editor
@@ -1787,6 +1834,7 @@ fn navigator_net_selection_matches(state: &AppState, net: &DesignNet) -> bool {
         .as_deref()
         .is_some_and(|name| name.eq_ignore_ascii_case(&net.name))
         || state
+            .model
             .schematic
             .session
             .editor
@@ -1799,7 +1847,7 @@ fn navigator_net_selection_matches(state: &AppState, net: &DesignNet) -> bool {
 
     let wire_ids = sorted_unique(net.wire_ids.iter().copied());
     let component_ids = sorted_unique(net.terminals.iter().map(|terminal| terminal.component_id));
-    let concrete = &state.schematic.session.editor.selection;
+    let concrete = &state.model.schematic.session.editor.selection;
     let no_other_classes = concrete.wire_segments.is_empty()
         && concrete.wire_vertices.is_empty()
         && concrete.junctions.is_empty()

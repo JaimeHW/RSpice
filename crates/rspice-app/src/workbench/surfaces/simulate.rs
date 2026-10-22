@@ -406,12 +406,12 @@ pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut
 /// would be the worse answer: the reader pressed a control, and an insert
 /// against a broken plan refuses in its own words rather than in silence.
 fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.sim_setup.session.palette_open {
+    if !app.state.model.sim_setup.session.palette_open {
         return;
     }
     let participation = participation::PlanParticipation::resolve(&app.state);
     let rows = analysis_stack_rows(app, &participation).unwrap_or_default();
-    let Some(kind) = analysis_catalog_window(ctx, &mut app.state.sim_setup, &rows) else {
+    let Some(kind) = analysis_catalog_window(ctx, &mut app.state.model.sim_setup, &rows) else {
         return;
     };
     let Some(id) = insert_analysis_instance(app, kind) else {
@@ -1035,7 +1035,7 @@ fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunS
     let Some(PriorPlanRun { index, .. }) = prior_plan_run(app) else {
         return Vec::new();
     };
-    let Some(run) = app.state.simulation.retained.runs.get(index) else {
+    let Some(run) = app.state.model.simulation.retained.runs.get(index) else {
         return Vec::new();
     };
     let Some(receipt) = run.prepared_receipt() else {
@@ -1064,7 +1064,7 @@ fn analysis_stack_rows(
     app: &RSpiceApp,
     participation: &participation::PlanParticipation,
 ) -> Result<Vec<AnalysisStackRow>, String> {
-    let setup = &app.state.sim_setup;
+    let setup = &app.state.model.sim_setup;
     let plan = setup.stable_analysis_plan()?;
     let issues = plan.validation_issues();
     let run_states = instance_run_states(app);
@@ -1145,11 +1145,12 @@ impl PriorPlanRun {
 fn prior_plan_run(app: &RSpiceApp) -> Option<PriorPlanRun> {
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())?;
-    let simulation = &app.state.simulation;
+    let simulation = &app.state.model.simulation;
     let index = simulation.retained.runs.iter().position(|run| {
         !run.analyses.is_empty()
             && run
@@ -1175,12 +1176,18 @@ fn prior_plan_run(app: &RSpiceApp) -> Option<PriorPlanRun> {
 }
 
 fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
-    let plan_name = app.state.sim_setup.active_plan_name().as_str().to_owned();
+    let plan_name = app
+        .state
+        .model
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
     // The heading is the plan's name. What the plan holds is the rail's, and
     // its last run is the hop's: the hop's label and its own availability read
     // the one derivation, so they cannot disagree.
     let prior = prior_plan_run(app);
-    let plan_available = app.state.sim_setup.stable_analysis_plan().is_ok();
+    let plan_available = app.state.model.sim_setup.stable_analysis_plan().is_ok();
 
     // The split toggle sits beside the hop because both answer "and now show
     // me what the last run produced" — one by leaving this page, one by
@@ -1299,7 +1306,12 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     if clone_plan {
         app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
             ClonePlanDraft::for_source(
-                app.state.sim_setup.stable_analysis_plan().unwrap().id(),
+                app.state
+                    .model
+                    .sim_setup
+                    .stable_analysis_plan()
+                    .unwrap()
+                    .id(),
                 &plan_name,
             ),
         ));
@@ -1313,7 +1325,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     if open_prior && let Some(PriorPlanRun { index, .. }) = prior {
         // Selecting first is what carries the object: the command owns the
         // workspace half of the destination and nothing else.
-        if app.state.simulation.select_run(index) {
+        if app.state.model.simulation.select_run(index) {
             Command::OpenRunInResults.execute(app);
         }
     }
@@ -1702,7 +1714,7 @@ fn analysis_editor(
     // commit an unintended edit on the way out of the page.
     if open_prior_dataset
         && let Some(PriorPlanRun { index, .. }) = prior_run
-        && app.state.simulation.select_run(index)
+        && app.state.model.simulation.select_run(index)
     {
         Command::OpenRunInResults.execute(app);
         return;
@@ -2003,12 +2015,12 @@ fn plan_statement_for(
     controller: &SimulationController,
     draft: &AnalysisDraft,
 ) -> Result<String, String> {
-    let stored_plans = std::mem::take(&mut state.sim_setup.inactive_plans);
-    let restore = state.sim_setup.clone();
-    state.sim_setup.apply_analysis_draft_projection(draft);
+    let stored_plans = std::mem::take(&mut state.model.sim_setup.inactive_plans);
+    let restore = state.model.sim_setup.clone();
+    state.model.sim_setup.apply_analysis_draft_projection(draft);
     let statement = controller.analysis_draft_directive(state, draft);
-    state.sim_setup = restore;
-    state.sim_setup.inactive_plans = stored_plans;
+    state.model.sim_setup = restore;
+    state.model.sim_setup.inactive_plans = stored_plans;
     statement
 }
 
@@ -2210,19 +2222,22 @@ fn analysis_form_body(
     option_edits: &mut Vec<advanced_options::OptionEdit>,
     checkpoint_action: &mut Option<checkpoint_exchange::Action>,
 ) -> f32 {
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     let previous_state = app
         .state
+        .model
         .simulation
         .retained
         .has_retained_op_state(project_revision, false);
     let compatible_previous_state = app
         .state
+        .model
         .simulation
         .retained
         .has_retained_op_state(project_revision, true);
     let soa_violations = app
         .state
+        .model
         .simulation
         .active_soa_violation_context(project_revision)
         .is_some();
@@ -2236,20 +2251,21 @@ fn analysis_form_body(
     // plan's, and the only way to guarantee that is to give them no copy of
     // their own to state instead.
     let run_space = analysis_form::RunSpaceContext {
-        run_set: &app.state.sim_setup.run_set,
-        reference: app.state.sim_setup.reference_pvt,
+        run_set: &app.state.model.sim_setup.run_set,
+        reference: app.state.model.sim_setup.reference_pvt,
         // Borrowed, not `plan_payload`: that clones the whole payload, and
         // this runs once per analysis form per frame for one Copy enum.
         nominal_failure: app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id())
-            .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id))
+            .and_then(|plan_id| app.state.model.workspace.content.plan_data(plan_id))
             .map(|payload| payload.specification_policy.nominal_failure)
             .unwrap_or_default(),
-        model_binding_count: app.state.sim_setup.model_bindings.len(),
+        model_binding_count: app.state.model.sim_setup.model_bindings.len(),
         parallelism: crate::simulation::execution::execution_target_parallelism(),
     };
     // The noise and transfer-function forms ask for the same two quantities —
@@ -2265,7 +2281,7 @@ fn analysis_form_body(
     // Only the stability forms offer the drawing's loop probes, and the scan
     // allocates. Every other analysis leaves it unmeasured.
     let placed_loop_probes = if analysis_form::offers_placed_loop_probes(draft) {
-        app.state.schematic.placed_loop_probe_names()
+        app.state.model.schematic.placed_loop_probe_names()
     } else {
         Vec::new()
     };
@@ -2273,7 +2289,9 @@ fn analysis_form_body(
     // derivation walks the design's nets. Every other analysis leaves it
     // unmeasured.
     let placed_rf_ports = matches!(draft, AnalysisDraft::SParameter(_))
-        .then(|| crate::simulation::placed_sources::placed_rf_ports(&app.state.schematic, None))
+        .then(|| {
+            crate::simulation::placed_sources::placed_rf_ports(&app.state.model.schematic, None)
+        })
         .unwrap_or_default();
     // Only the transfer-function form offers to fill itself from the deck, and
     // reading one costs a netlist build. Every other analysis leaves it
@@ -2288,6 +2306,7 @@ fn analysis_form_body(
             | AnalysisDraft::Corner(_)
     ) {
         app.state
+            .model
             .sim_setup
             .analysis_plan
             .as_ref()
@@ -2356,7 +2375,7 @@ fn analysis_form_body(
                     *checkpoint_action = analysis_form::checkpoint_sources(
                         ui,
                         setup,
-                        &app.state.simulation,
+                        &app.state.model.simulation,
                         selected,
                     );
                 }
@@ -2364,7 +2383,7 @@ fn analysis_form_body(
                     *checkpoint_action = analysis_form::transient_checkpoint_sources(
                         ui,
                         setup,
-                        &app.state.simulation,
+                        &app.state.model.simulation,
                         selected,
                     )
                     .map(checkpoint_exchange::Action::Transient);
@@ -2382,7 +2401,8 @@ fn analysis_validation_error(
     draft: &AnalysisDraft,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
 ) -> Option<String> {
-    app.sim_setup
+    app.model
+        .sim_setup
         .analysis_draft_validation_error(draft)
         .or_else(|| match (draft, envelope_sources) {
             (AnalysisDraft::Envelope(setup), Some(catalog)) => setup

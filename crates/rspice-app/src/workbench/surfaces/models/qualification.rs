@@ -207,7 +207,7 @@ pub(super) enum QualificationPageAction {
 
 pub(crate) fn qualification_summaries(app: &RSpiceApp) -> Vec<QualificationModelSummary> {
     let mut summaries = Vec::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
+    for library in app.state.model.model_library_manager.libraries_sorted() {
         // Authenticating the closure digests every retained byte, and it
         // depends on the library alone. Doing it per model — which is what
         // resolving each model separately does — made this whole function cost
@@ -801,6 +801,7 @@ pub(super) fn selected_qualification_summary<'a>(
 ) -> Option<&'a QualificationModelSummary> {
     let library = app
         .state
+        .model
         .model_library_manager
         .selected_library
         .as_deref()?;
@@ -904,7 +905,13 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
         }
         return;
     }
-    let Some(library) = app.state.model_library_manager.selected_library.clone() else {
+    let Some(library) = app
+        .state
+        .model
+        .model_library_manager
+        .selected_library
+        .clone()
+    else {
         app.state
             .prompt("Select a model family before opening qualification.");
         return;

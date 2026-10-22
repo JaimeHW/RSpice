@@ -33,6 +33,7 @@ pub(super) fn pack_catalog(
             let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
             let source_available = app
                 .state
+                .model
                 .model_library_manager
                 .spice_pack_entry_available(&pack.id);
             let facet_match = match facet {
@@ -103,7 +104,7 @@ pub(super) fn pack_catalog(
                     let built_in = is_builtin_pack(app, &pack.id);
                     let source_available = app
                         .state
-                        .model_library_manager
+                        .model.model_library_manager
                         .spice_pack_entry_available(&pack.id);
                     let state = if built_in {
                         "built in"
@@ -156,6 +157,7 @@ pub(super) fn pack_catalog(
                     || !pack.redistributable
                     || !app
                         .state
+                        .model
                         .model_library_manager
                         .spice_pack_entry_available(&pack.id)
             })
@@ -179,6 +181,7 @@ fn pack_facet_count(
                     || !pack.redistributable
                     || !app
                         .state
+                        .model
                         .model_library_manager
                         .spice_pack_entry_available(&pack.id)
             }
@@ -218,6 +221,7 @@ fn pack_detail(
     let built_in = is_builtin_pack(app, &pack.id);
     let catalog_source_available = app
         .state
+        .model
         .model_library_manager
         .spice_pack_entry_available(&pack.id);
     let model_source_job_idle = !app.state.workbench.models_view.model_import_in_progress;
@@ -251,7 +255,7 @@ fn pack_detail(
                 .clicked()
                 && app
                     .state
-                    .model_library_manager
+                    .model.model_library_manager
                     .get_library(library)
                     .is_some()
             {

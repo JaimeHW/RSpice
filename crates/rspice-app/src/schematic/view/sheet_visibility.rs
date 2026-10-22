@@ -58,8 +58,14 @@ pub(crate) fn object_is_in_scope(state: &AppState, scope: SheetScope, object_id:
 /// when it answers `None`, so none of them can offer a control with one
 /// position or a page number with one page.
 pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     state
+        .model
         .workspace
         .content
         .design_management
@@ -69,8 +75,14 @@ pub(crate) fn multi_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
 
 /// The active cell view's sheet catalog, however many sheets it holds.
 pub(crate) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     state
+        .model
         .workspace
         .content
         .design_management
@@ -88,6 +100,7 @@ pub(crate) fn active_sheet_net_geometry(
     state: &AppState,
 ) -> &rspice_simulation::netlist_gen::SheetNetGeometry {
     state
+        .model
         .simulation
         .source
         .cross_probe
@@ -113,7 +126,7 @@ fn sheet_scope_id() -> Id {
 }
 
 pub(crate) fn object_is_on_active_sheet(state: &AppState, object_id: u64) -> bool {
-    object_is_on_active_sheet_in_workspace(&state.workspace, object_id)
+    object_is_on_active_sheet_in_workspace(&state.model.workspace, object_id)
 }
 
 fn object_is_on_active_sheet_in_workspace(
@@ -143,7 +156,7 @@ pub(super) fn objects_on_active_sheet<'a, T: Clone>(
 /// This is also the sheet-switch boundary: stale IDs from a previously active
 /// sheet can never flow into keyboard commands or context-menu actions.
 pub(super) fn selection_on_active_sheet(state: &AppState) -> Selection {
-    selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection)
+    selection_filtered_to_active_sheet(state, &state.model.schematic.session.editor.selection)
 }
 
 pub(crate) fn selection_filtered_to_active_sheet(
@@ -161,13 +174,13 @@ pub(crate) fn selection_filtered_to_active_sheet(
         rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
     };
 
-    for object in &state.schematic.document().components {
+    for object in &state.model.schematic.document().components {
         if source.has_component(object.id) && on_sheet(object.id) {
             selection.select_component(object.id);
         }
     }
     let wire_parts = !source.wire_segments.is_empty() || !source.wire_vertices.is_empty();
-    for object in &state.schematic.document().wires {
+    for object in &state.model.schematic.document().wires {
         let whole = source.has_wire(object.id);
         if !(whole || wire_parts) || !on_sheet(object.id) {
             continue;
@@ -192,37 +205,37 @@ pub(crate) fn selection_filtered_to_active_sheet(
             );
         }
     }
-    for object in &state.schematic.document().junctions {
+    for object in &state.model.schematic.document().junctions {
         if source.has_junction(object.pos) && on_sheet(object.id) {
             selection.select_junction(object.pos);
         }
     }
-    for object in &state.schematic.document().buses {
+    for object in &state.model.schematic.document().buses {
         if source.has_bus(object.id) && on_sheet(object.id) {
             selection.select_bus(object.id);
         }
     }
-    for object in &state.schematic.document().bus_taps {
+    for object in &state.model.schematic.document().bus_taps {
         if source.has_bus_tap(object.id) && on_sheet(object.id) {
             selection.select_bus_tap(object.id);
         }
     }
-    for object in &state.schematic.document().net_labels {
+    for object in &state.model.schematic.document().net_labels {
         if source.has_net_label(object.id) && on_sheet(object.id) {
             selection.select_net_label(object.id);
         }
     }
-    for object in &state.schematic.document().design_notes {
+    for object in &state.model.schematic.document().design_notes {
         if source.has_design_note(object.id) && on_sheet(object.id) {
             selection.select_design_note(object.id);
         }
     }
-    for object in &state.schematic.document().documentation_shapes {
+    for object in &state.model.schematic.document().documentation_shapes {
         if source.has_documentation_shape(object.id) && on_sheet(object.id) {
             selection.select_documentation_shape(object.id);
         }
     }
-    for object in &state.schematic.document().probes {
+    for object in &state.model.schematic.document().probes {
         if source.has_probe(object.id) && on_sheet(object.id) {
             selection.select_probe(object.id);
         }
@@ -232,7 +245,7 @@ pub(crate) fn selection_filtered_to_active_sheet(
 
 pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
     let selection = selection_on_active_sheet(state);
-    state.schematic.session.editor.selection = selection;
+    state.model.schematic.session.editor.selection = selection;
 }
 
 /// Every complete object on the active sheet the session's selection filter
@@ -245,53 +258,53 @@ pub(crate) fn selectable_objects_on_active_sheet(state: &AppState) -> Selection 
     let filter = state.ui.schematic_selection_filter;
     let mut selection = Selection::default();
     if filter.instances {
-        for object in &state.schematic.document().components {
+        for object in &state.model.schematic.document().components {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_component(object.id);
             }
         }
     }
     if filter.wires {
-        for object in &state.schematic.document().wires {
+        for object in &state.model.schematic.document().wires {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_wire(object.id);
             }
         }
-        for object in &state.schematic.document().junctions {
+        for object in &state.model.schematic.document().junctions {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_junction(object.pos);
             }
         }
-        for object in &state.schematic.document().buses {
+        for object in &state.model.schematic.document().buses {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_bus(object.id);
             }
         }
-        for object in &state.schematic.document().bus_taps {
+        for object in &state.model.schematic.document().bus_taps {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_bus_tap(object.id);
             }
         }
     }
     if filter.labels {
-        for object in &state.schematic.document().net_labels {
+        for object in &state.model.schematic.document().net_labels {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_net_label(object.id);
             }
         }
     }
     if filter.annotations {
-        for object in &state.schematic.document().design_notes {
+        for object in &state.model.schematic.document().design_notes {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_design_note(object.id);
             }
         }
-        for object in &state.schematic.document().documentation_shapes {
+        for object in &state.model.schematic.document().documentation_shapes {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_documentation_shape(object.id);
             }
         }
-        for object in &state.schematic.document().probes {
+        for object in &state.model.schematic.document().probes {
             if object_is_on_active_sheet(state, object.id) {
                 selection.select_probe(object.id);
             }
@@ -310,18 +323,19 @@ pub(super) fn select_in_rect_on_active_sheet(
         retain_selection_on_active_sheet(state);
     }
     let selected_before = if add_to_selection {
-        state.schematic.session.editor.selection.count()
+        state.model.schematic.session.editor.selection.count()
     } else {
         0
     };
-    let (document, editor) = state.schematic.document_and_editor();
+    let (document, editor) = state.model.schematic.document_and_editor();
     symbol_context.select_in_rect(document, &mut editor.selection, window, add_to_selection);
     retain_selection_on_active_sheet(state);
     state
         .ui
         .schematic_selection_filter
-        .retain_matching(&mut state.schematic.session.editor.selection);
+        .retain_matching(&mut state.model.schematic.session.editor.selection);
     state
+        .model
         .schematic
         .session
         .editor
@@ -347,8 +361,9 @@ pub(crate) fn with_active_wire_topology<R>(
     operation: impl FnOnce(&mut SchematicState, &ActiveSheetTopology) -> R,
 ) -> R {
     state
+        .model
         .schematic
-        .with_active_wire_topology(off_active_sheet(&state.workspace), operation)
+        .with_active_wire_topology(off_active_sheet(&state.model.workspace), operation)
 }
 
 /// Whether an object belongs to one of the cell view's other sheets.
@@ -395,11 +410,11 @@ pub(crate) fn off_active_sheet(
 pub(super) fn active_sheet_connectivity(
     state: &AppState,
 ) -> Cow<'_, rspice_design::schematic::document::SchematicDocument> {
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     if multi_sheet_catalog(state).is_none() {
         return Cow::Borrowed(document);
     }
-    let off_sheet = off_active_sheet(&state.workspace);
+    let off_sheet = off_active_sheet(&state.model.workspace);
     let on_sheet = |id: u64| !off_sheet(id);
     Cow::Owned(rspice_design::schematic::document::SchematicDocument {
         components: kept(&document.components, |object| on_sheet(object.id)),
@@ -437,60 +452,70 @@ pub(crate) fn with_active_wire_topology_in<R>(
 /// the route can neither split nor dot them.
 pub(crate) fn finish_wire_on_active_sheet(state: &mut AppState) -> Option<u64> {
     state
+        .model
         .schematic
-        .finish_wire(off_active_sheet(&state.workspace))
+        .finish_wire(off_active_sheet(&state.model.workspace))
 }
 
 pub(super) fn active_sheet_has_objects(state: &AppState) -> bool {
     state
+        .model
         .schematic
         .document()
         .components
         .iter()
         .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .wires
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .buses
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .bus_taps
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .junctions
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .net_labels
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .design_notes
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .documentation_shapes
             .iter()
             .any(|object| object_is_on_active_sheet(state, object.id))
         || state
+            .model
             .schematic
             .document()
             .probes
@@ -505,19 +530,26 @@ pub(crate) fn two_sheet_state(active_ids: &[u64], hidden_ids: &[u64]) -> AppStat
     use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate};
 
     let mut state = AppState::default();
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let all_ids = active_ids
         .iter()
         .chain(hidden_ids)
         .copied()
         .collect::<Vec<_>>();
     let first = state
+        .model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", all_ids)
         .expect("first sheet");
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -570,8 +602,14 @@ mod tests {
         let mut single = AppState::default();
         assert!(multi_sheet_catalog(&single).is_none());
 
-        let key = single.workspace.content.active_schematic_reference().key();
+        let key = single
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         single
+            .model
             .workspace
             .content
             .design_management
@@ -585,7 +623,7 @@ mod tests {
     #[test]
     fn overlapping_hidden_object_is_removed_before_marquee_selection() {
         let mut state = two_sheet_state(&[10], &[20]);
-        state.schematic.document_mut_for_test().components = vec![
+        state.model.schematic.document_mut_for_test().components = vec![
             Component::new(20, ComponentType::Capacitor, Point::new(10, 10)),
             Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         ];
@@ -597,18 +635,35 @@ mod tests {
             false,
         );
 
-        assert!(state.schematic.session.editor.selection.has_component(10));
-        assert!(!state.schematic.session.editor.selection.has_component(20));
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(10)
+        );
+        assert!(
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(20)
+        );
     }
 
     #[test]
     fn select_all_and_sheet_switch_selection_are_membership_aware() {
         let mut state = two_sheet_state(&[10], &[20]);
-        state.schematic.document_mut_for_test().components = vec![
+        state.model.schematic.document_mut_for_test().components = vec![
             Component::new(10, ComponentType::Resistor, Point::origin()),
             Component::new(20, ComponentType::Capacitor, Point::origin()),
         ];
         state
+            .model
             .schematic
             .session
             .editor
@@ -616,26 +671,50 @@ mod tests {
             .select_component(20);
 
         retain_selection_on_active_sheet(&mut state);
-        assert!(state.schematic.session.editor.selection.is_empty());
+        assert!(state.model.schematic.session.editor.selection.is_empty());
 
-        state.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
-        assert!(state.schematic.session.editor.selection.has_component(10));
-        assert!(!state.schematic.session.editor.selection.has_component(20));
+        state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(10)
+        );
+        assert!(
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(20)
+        );
     }
 
     #[test]
     fn select_all_honors_the_persisted_schematic_selection_filter() {
         let mut state = two_sheet_state(&[10, 11], &[]);
-        state.schematic.document_mut_for_test().components =
+        state.model.schematic.document_mut_for_test().components =
             vec![Component::new(10, ComponentType::Resistor, Point::origin())];
-        state.schematic.document_mut_for_test().wires =
+        state.model.schematic.document_mut_for_test().wires =
             vec![Wire::segment(11, Point::origin(), Point::new(20, 0))];
         state.ui.schematic_selection_filter.instances = false;
 
-        state.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
+        state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
 
-        assert!(!state.schematic.session.editor.selection.has_component(10));
-        assert!(state.schematic.session.editor.selection.has_wire(11));
+        assert!(
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(10)
+        );
+        assert!(state.model.schematic.session.editor.selection.has_wire(11));
     }
 
     #[test]
@@ -643,14 +722,14 @@ mod tests {
         let mut state = two_sheet_state(&[10, 11], &[20, 21]);
         let origin = Point::new(10, 10);
         let destination = Point::new(15, 15);
-        state.schematic.document_mut_for_test().wires = vec![
+        state.model.schematic.document_mut_for_test().wires = vec![
             Wire::segment(20, origin, Point::new(30, 10)),
             Wire::segment(10, origin, Point::new(10, 30)),
         ];
-        state.schematic.document_mut_for_test().junctions =
+        state.model.schematic.document_mut_for_test().junctions =
             vec![Junction::new(21, origin), Junction::new(11, origin)];
-        let hidden_wire = state.schematic.document().wires[0].clone();
-        let hidden_junction = state.schematic.document().junctions[0];
+        let hidden_wire = state.model.schematic.document().wires[0].clone();
+        let hidden_junction = state.model.schematic.document().junctions[0];
 
         assert!(with_active_wire_topology(&mut state, |schematic, scope| {
             schematic.move_all_vertices_at(origin, destination, scope)
@@ -658,6 +737,7 @@ mod tests {
 
         assert_eq!(
             state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -667,6 +747,7 @@ mod tests {
         );
         assert_eq!(
             state
+                .model
                 .schematic
                 .document()
                 .junctions
@@ -676,6 +757,7 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -685,6 +767,7 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .schematic
                 .document()
                 .junctions
@@ -701,21 +784,21 @@ mod tests {
     fn a_route_drawn_on_one_sheet_leaves_another_sheets_wire_whole() {
         let mut state = two_sheet_state(&[], &[20]);
         let hidden = Wire::segment(20, Point::new(0, 100), Point::new(200, 100));
-        state.schematic.document_mut_for_test().wires = vec![hidden.clone()];
-        state.schematic.init_undo_history();
+        state.model.schematic.document_mut_for_test().wires = vec![hidden.clone()];
+        state.model.schematic.init_undo_history();
 
-        state.schematic.start_wire(Point::new(100, 0));
-        state.schematic.extend_wire(Point::new(100, 100));
+        state.model.schematic.start_wire(Point::new(100, 0));
+        state.model.schematic.extend_wire(Point::new(100, 100));
         let drawn = finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
 
-        let wires = &state.schematic.document().wires;
+        let wires = &state.model.schematic.document().wires;
         assert_eq!(wires.iter().find(|wire| wire.id == 20), Some(&hidden));
         assert_eq!(wires.len(), 2, "the hidden wire was not split");
         assert!(object_is_on_active_sheet(&state, drawn));
-        assert!(state.schematic.document().junctions.is_empty());
+        assert!(state.model.schematic.document().junctions.is_empty());
 
-        assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document().wires, vec![hidden]);
+        assert!(state.model.schematic.undo());
+        assert_eq!(state.model.schematic.document().wires, vec![hidden]);
     }
 
     /// Joining collinear wires reaches only the active sheet. Sheet 2's wire
@@ -725,7 +808,7 @@ mod tests {
     fn joining_collinear_wires_leaves_another_sheets_wire_whole() {
         let mut state = two_sheet_state(&[1, 2], &[3]);
         let hidden = Wire::segment(3, Point::new(100, 0), Point::new(160, 0));
-        state.schematic.document_mut_for_test().wires = vec![
+        state.model.schematic.document_mut_for_test().wires = vec![
             Wire::segment(1, Point::new(0, 0), Point::new(40, 0)),
             Wire::segment(2, Point::new(40, 0), Point::new(100, 0)),
             hidden.clone(),
@@ -735,7 +818,7 @@ mod tests {
             schematic.join_collinear_wires(scope)
         }));
 
-        let wires = &state.schematic.document().wires;
+        let wires = &state.model.schematic.document().wires;
         assert_eq!(wires.len(), 2, "{wires:?}");
         assert_eq!(wires.iter().find(|wire| wire.id == 3), Some(&hidden));
         assert_eq!(
@@ -753,6 +836,7 @@ mod tests {
     fn another_sheets_pin_under_a_route_corner_adds_no_dot() {
         let mut state = two_sheet_state(&[], &[20]);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -761,16 +845,22 @@ mod tests {
                 ComponentType::Resistor,
                 Point::new(20, 0),
             ));
-        let pin = state.schematic.document().components[0].terminal_positions()[0].1;
-        state.schematic.init_undo_history();
+        let pin = state.model.schematic.document().components[0].terminal_positions()[0].1;
+        state.model.schematic.init_undo_history();
 
-        state.schematic.start_wire(Point::new(pin.x - 40, pin.y));
-        state.schematic.extend_wire(pin);
-        state.schematic.extend_wire(Point::new(pin.x, pin.y + 40));
+        state
+            .model
+            .schematic
+            .start_wire(Point::new(pin.x - 40, pin.y));
+        state.model.schematic.extend_wire(pin);
+        state
+            .model
+            .schematic
+            .extend_wire(Point::new(pin.x, pin.y + 40));
         finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
 
-        assert!(state.schematic.document().junctions.is_empty());
-        assert_eq!(state.schematic.document().components.len(), 1);
+        assert!(state.model.schematic.document().junctions.is_empty());
+        assert_eq!(state.model.schematic.document().components.len(), 1);
     }
 
     /// A deletion on Sheet 1 leaves Sheet 2's objects alone, even a dot
@@ -779,23 +869,30 @@ mod tests {
     #[test]
     fn a_deletion_keeps_another_sheets_objects_and_undo_restores_both_sheets() {
         let mut state = two_sheet_state(&[10], &[21]);
-        state.schematic.document_mut_for_test().wires =
+        state.model.schematic.document_mut_for_test().wires =
             vec![Wire::segment(10, Point::origin(), Point::new(20, 0))];
-        state.schematic.document_mut_for_test().junctions =
+        state.model.schematic.document_mut_for_test().junctions =
             vec![Junction::new(21, Point::new(200, 200))];
-        state.schematic.session.editor.selection.select_wire(10);
-        state.schematic.init_undo_history();
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(10);
+        state.model.schematic.init_undo_history();
 
         assert!(state.delete_schematic_selection());
-        assert!(state.schematic.document().wires.is_empty());
+        assert!(state.model.schematic.document().wires.is_empty());
         assert_eq!(
-            state.schematic.document().junctions,
+            state.model.schematic.document().junctions,
             vec![Junction::new(21, Point::new(200, 200))]
         );
 
-        assert!(state.schematic.undo());
+        assert!(state.model.schematic.undo());
         assert!(
             state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -803,7 +900,7 @@ mod tests {
                 .any(|wire| wire.id == 10)
         );
         assert_eq!(
-            state.schematic.document().junctions,
+            state.model.schematic.document().junctions,
             vec![Junction::new(21, Point::new(200, 200))]
         );
     }

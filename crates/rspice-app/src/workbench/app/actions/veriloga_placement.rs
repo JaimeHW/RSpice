@@ -21,6 +21,7 @@ impl AppState {
         let schematic = |reference: &CellViewRef| {
             reference.cell != handoff.view.cell
                 && self
+                    .model
                     .library_manager
                     .get_library(&reference.library)
                     .and_then(|library| library.get_cell(&reference.cell))
@@ -30,13 +31,14 @@ impl AppState {
                     })
         };
         let open = |reference: &CellViewRef| {
-            self.workspace
+            self.model
+                .workspace
                 .content
                 .open_views
                 .iter()
                 .any(|open| &open.reference == reference)
         };
-        let project = &self.workspace.content.project;
+        let project = &self.model.workspace.content.project;
         let top = CellViewRef::new(
             &project.root_library,
             &project.top_cell,
@@ -72,14 +74,17 @@ impl AppState {
         let (handoff, target) = self
             .offered_veriloga_placement()
             .ok_or_else(|| "No schematic is open to place the device in.".to_owned())?;
-        let candidate = library_cell_placement_candidates(&self.library_manager, &self.workspace)
-            .into_iter()
-            .find(|candidate| {
-                candidate.library == handoff.view.library
-                    && candidate.cell == handoff.view.cell
-                    && candidate.view == handoff.view.view
-            })
-            .ok_or_else(|| format!("{} is no longer a cell view.", handoff.view.display_path()))?;
+        let candidate =
+            library_cell_placement_candidates(&self.model.library_manager, &self.model.workspace)
+                .into_iter()
+                .find(|candidate| {
+                    candidate.library == handoff.view.library
+                        && candidate.cell == handoff.view.cell
+                        && candidate.view == handoff.view.view
+                })
+                .ok_or_else(|| {
+                    format!("{} is no longer a cell view.", handoff.view.display_path())
+                })?;
         if !candidate.ready {
             return Err(format!(
                 "{} cannot be placed yet: {}.",

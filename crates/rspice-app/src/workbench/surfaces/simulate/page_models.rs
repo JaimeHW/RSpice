@@ -79,19 +79,21 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
     if source_drift_needs_scan(&app.state) {
         scan_source_drift(&mut app.state);
     }
-    let bindings = app.state.sim_setup.model_bindings.clone();
+    let bindings = app.state.model.sim_setup.model_bindings.clone();
     // One name cannot be contested by one library, so a closure that loaded a
     // single library skips the index entirely. That check is free and the index
     // walks every model of every loaded library.
-    let definitions: Vec<DefinitionRow> = if app.state.model_library_manager.library_count() > 1 {
-        definition_index(&app.state)
-    } else {
-        Vec::new()
-    };
+    let definitions: Vec<DefinitionRow> =
+        if app.state.model.model_library_manager.library_count() > 1 {
+            definition_index(&app.state)
+        } else {
+            Vec::new()
+        };
     let invalid = bindings
         .iter()
         .filter(|binding| {
             app.state
+                .model
                 .model_library_manager
                 .validate_simulation_plan_bindings(std::slice::from_ref(binding))
                 .is_err()
@@ -150,6 +152,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
         .collect::<std::collections::HashSet<_>>();
     let available = app
         .state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -226,6 +229,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
             for (index, binding) in bindings.iter().enumerate() {
                 let library = app
                     .state
+                    .model
                     .model_library_manager
                     .get_library(&binding.library_name);
                 let corners = corner_options(app, &binding.library_name);
@@ -326,6 +330,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
                 let validation = app
                     .state
+                    .model
                     .model_library_manager
                     .validate_simulation_plan_bindings(std::slice::from_ref(binding));
                 let (source_text, source_tone) = match (library, validation) {
@@ -442,6 +447,7 @@ enum ModelBindingAction {
 
 fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
     app.state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -455,7 +461,7 @@ fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
 }
 
 fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
-    let mut candidate = app.state.sim_setup.clone();
+    let mut candidate = app.state.model.sim_setup.clone();
     let detail = match action {
         ModelBindingAction::SetCorner { index, corner } => {
             let Some(binding) = candidate.model_bindings.get_mut(index) else {
@@ -487,6 +493,7 @@ fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
         ModelBindingAction::Attach(name) => {
             let binding = match app
                 .state
+                .model
                 .model_library_manager
                 .simulation_plan_binding(&name)
             {
@@ -500,6 +507,7 @@ fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
     };
     if let Err(error) = app
         .state
+        .model
         .model_library_manager
         .validate_simulation_plan_bindings(&candidate.model_bindings)
     {
@@ -507,7 +515,7 @@ fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
     }
     match candidate.commit_active_plan_configuration_change(detail) {
         Ok(receipt) => {
-            app.state.sim_setup = candidate;
+            app.state.model.sim_setup = candidate;
             app.invalidate_simulation_preflight();
             app.state.record_plan_receipt(receipt.status_line());
         }
@@ -732,6 +740,7 @@ fn gate_status(reading: &GateReading) -> Option<(String, Tone)> {
 fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
     let bound = app
         .state
+        .model
         .sim_setup
         .model_bindings
         .iter()
@@ -829,7 +838,7 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
-    let bindings = &app.state.sim_setup.model_bindings;
+    let bindings = &app.state.model.sim_setup.model_bindings;
     let with_corner = bindings
         .iter()
         .filter(|binding| binding.selected_corner.is_some())
@@ -838,6 +847,7 @@ fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
         .iter()
         .filter_map(|binding| {
             app.state
+                .model
                 .model_library_manager
                 .get_library(&binding.library_name)
         })
@@ -874,11 +884,13 @@ fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
 fn reproducibility(ui: &mut Ui, app: &RSpiceApp) {
     let libraries = app
         .state
+        .model
         .sim_setup
         .model_bindings
         .iter()
         .filter_map(|binding| {
             app.state
+                .model
                 .model_library_manager
                 .get_library(&binding.library_name)
         })
@@ -943,6 +955,7 @@ mod tests {
 
     fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
         app.state
+            .model
             .sim_setup
             .analysis_plan
             .as_ref()
@@ -952,6 +965,7 @@ mod tests {
 
     fn add_sectioned_library(app: &mut RSpiceApp, source_name: &str, model: &str) -> String {
         app.state
+            .model
             .model_library_manager
             .load_library_bytes(
                 source_name,
@@ -968,23 +982,28 @@ mod tests {
     #[test]
     fn model_binding_actions_commit_exact_order_corner_and_removal() {
         let mut app = RSpiceApp::test_instance();
-        app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        app.state.model.model_library_manager =
+            crate::state::model_library::ModelLibraryManager::new();
         let first = add_sectioned_library(&mut app, "models-first.lib", "first_nch");
         let second = add_sectioned_library(&mut app, "models-second.lib", "second_nch");
         let initial_revision = active_plan_revision(&app);
         app.state.workbench.preflight.report =
             Some(crate::state::PreflightReport::retained_for_test(
-                app.state.workspace.content.project.revision().get(),
+                app.state.model.workspace.content.project.revision().get(),
             ));
 
         apply_model_binding_action(&mut app, ModelBindingAction::Attach(first.clone()));
-        assert_eq!(app.state.sim_setup.model_bindings[0].library_name, first);
+        assert_eq!(
+            app.state.model.sim_setup.model_bindings[0].library_name,
+            first
+        );
         assert_ne!(active_plan_revision(&app), initial_revision);
         assert!(app.state.workbench.preflight.report.is_none());
 
         apply_model_binding_action(&mut app, ModelBindingAction::Attach(second.clone()));
         assert_eq!(
             app.state
+                .model
                 .sim_setup
                 .model_bindings
                 .iter()
@@ -996,6 +1015,7 @@ mod tests {
         apply_model_binding_action(&mut app, ModelBindingAction::MoveUp(1));
         assert_eq!(
             app.state
+                .model
                 .sim_setup
                 .model_bindings
                 .iter()
@@ -1012,25 +1032,29 @@ mod tests {
             },
         );
         assert_eq!(
-            app.state.sim_setup.model_bindings[0]
+            app.state.model.sim_setup.model_bindings[0]
                 .selected_corner
                 .as_deref(),
             Some("FF")
         );
 
         apply_model_binding_action(&mut app, ModelBindingAction::Remove(1));
-        assert_eq!(app.state.sim_setup.model_bindings.len(), 1);
-        assert_eq!(app.state.sim_setup.model_bindings[0].library_name, second);
+        assert_eq!(app.state.model.sim_setup.model_bindings.len(), 1);
+        assert_eq!(
+            app.state.model.sim_setup.model_bindings[0].library_name,
+            second
+        );
         assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
     fn refused_model_binding_actions_preserve_plan_state_and_revision() {
         let mut app = RSpiceApp::test_instance();
-        app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        app.state.model.model_library_manager =
+            crate::state::model_library::ModelLibraryManager::new();
         let library = add_sectioned_library(&mut app, "models-valid.lib", "valid_nch");
         apply_model_binding_action(&mut app, ModelBindingAction::Attach(library));
-        let before_bindings = app.state.sim_setup.model_bindings.clone();
+        let before_bindings = app.state.model.sim_setup.model_bindings.clone();
         let before_revision = active_plan_revision(&app);
 
         apply_model_binding_action(
@@ -1040,7 +1064,7 @@ mod tests {
                 corner: Some("NONEXISTENT".to_owned()),
             },
         );
-        assert_eq!(app.state.sim_setup.model_bindings, before_bindings);
+        assert_eq!(app.state.model.sim_setup.model_bindings, before_bindings);
         assert_eq!(active_plan_revision(&app), before_revision);
         assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
 
@@ -1048,7 +1072,7 @@ mod tests {
             &mut app,
             ModelBindingAction::Attach("missing-library".to_owned()),
         );
-        assert_eq!(app.state.sim_setup.model_bindings, before_bindings);
+        assert_eq!(app.state.model.sim_setup.model_bindings, before_bindings);
         assert_eq!(active_plan_revision(&app), before_revision);
         assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
     }
@@ -1228,7 +1252,8 @@ mod tests {
     #[test]
     fn gate_totals_equal_the_sum_over_the_workspace_summaries() {
         let mut app = RSpiceApp::test_instance();
-        app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+        app.state.model.model_library_manager =
+            crate::state::model_library::ModelLibraryManager::new();
         let definition = crate::state::model_library::ProjectModelDefinition {
             name: "nch_gated".to_owned(),
             spice_type: "NMOS".to_owned(),
@@ -1240,6 +1265,7 @@ mod tests {
             string_parameters: std::collections::BTreeMap::new(),
         };
         app.state
+            .model
             .model_library_manager
             .create_project_model("owned-models", &definition)
             .expect("create project model");

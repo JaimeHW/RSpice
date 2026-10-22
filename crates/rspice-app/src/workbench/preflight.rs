@@ -62,8 +62,8 @@ use super::state::{PreflightCheck, Workspace};
 /// queued when [`poll`] finds that they authorize it, and not before.
 pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController, queue: bool) {
     if queue {
-        if state.simulation.execution.has_active_execution()
-            || state.simulation.execution.trigger_simulation
+        if state.model.simulation.execution.has_active_execution()
+            || state.model.simulation.execution.trigger_simulation
         {
             state.prompt("A simulation is already running or waiting to start.");
             return;
@@ -144,7 +144,7 @@ fn checks_the_design_as_it_stands(
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     controller.preflight_is_current(state)
         && report.is_current_for(
-            state.workspace.content.project.revision().get(),
+            state.model.workspace.content.project.revision().get(),
             &topology_root,
             topology_revision,
             &topology_closure,
@@ -257,7 +257,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
     // the pass would authorize is held to what its dispatch holds it to: the
     // inputs captured at the press, the design-check rules among them.
     let unedited = report.is_current_for(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -335,7 +335,7 @@ fn conclude(
     let current_plan = state.active_plan_revision();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let blocked = !report.is_runnable_for(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -397,7 +397,7 @@ fn conclude(
 /// Queue a retained authorized report only while every revision it names is
 /// still current.
 fn queue_retained_run(state: &mut AppState) -> bool {
-    let project_revision = state.workspace.content.project.revision().get();
+    let project_revision = state.model.workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let current_plan = state.active_plan_revision();
     let runnable = state
@@ -429,7 +429,7 @@ fn queue_retained_run(state: &mut AppState) -> bool {
 /// cannot disagree; a design checked since its last edit is not checked
 /// again.
 fn ensure_configured_design_check(state: &mut AppState) -> Result<(), String> {
-    let root = state.workspace.content.simulation_root_reference();
+    let root = state.model.workspace.content.simulation_root_reference();
     state.ensure_design_check(root, CheckScope::Design)
 }
 
@@ -470,11 +470,11 @@ fn design_rule_blocker(
 fn collect(state: &AppState) -> PreflightReport {
     let mut blockers = Vec::new();
     let mut advisories = Vec::new();
-    let root_reference = state.workspace.content.simulation_root_reference();
-    let inspection = state.workspace.inspect_design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    let root_reference = state.model.workspace.content.simulation_root_reference();
+    let inspection = state.model.workspace.inspect_design_projection(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     );
     let execution_projection = inspection
         .clone()
@@ -578,7 +578,7 @@ fn collect(state: &AppState) -> PreflightReport {
         }
     }
 
-    match state.sim_setup.stable_analysis_plan() {
+    match state.model.sim_setup.stable_analysis_plan() {
         Err(error) => blockers.push(PreflightIssue {
             check: "Analysis-instance plan".to_owned(),
             observed: error,
@@ -603,6 +603,7 @@ fn collect(state: &AppState) -> PreflightReport {
                 .filter(|instance| instance.enabled())
             {
                 if let Some(error) = state
+                    .model
                     .sim_setup
                     .analysis_draft_validation_error(instance.draft())
                 {
@@ -625,7 +626,7 @@ fn collect(state: &AppState) -> PreflightReport {
     // that needs none, on a project that has none, is not a finding at all:
     // reporting it made every clean pass without a technology a warning.
     let demand = state.technology_demand();
-    match state.workspace.content.project.technology_binding() {
+    match state.model.workspace.content.project.technology_binding() {
         None if demand.is_empty() => {}
         None => blockers.extend(demand.reasons().iter().map(|reason| PreflightIssue {
             check: "Project technology contract".to_owned(),
@@ -635,6 +636,7 @@ fn collect(state: &AppState) -> PreflightReport {
         })),
         Some(binding) => {
             if state
+                .model
                 .workspace
                 .content
                 .project
@@ -652,6 +654,7 @@ fn collect(state: &AppState) -> PreflightReport {
                 });
             }
             if let Err(error) = state
+                .model
                 .model_library_manager
                 .catalog()
                 .validate_attached_technology(Some(binding))
@@ -664,6 +667,7 @@ fn collect(state: &AppState) -> PreflightReport {
                 });
             }
             if let Err(error) = state
+                .model
                 .pdk_config
                 .technology_registry
                 .validate_project_binding(binding)
@@ -684,10 +688,11 @@ fn collect(state: &AppState) -> PreflightReport {
     // only remediation that resolves it; a second row would contradict it.
     if (state.project_technology_in_effect() || demand.is_empty())
         && let Err(error) = state
+            .model
             .model_library_manager
-            .reference_process_model_cards(state.sim_setup.reference_pvt.process)
+            .reference_process_model_cards(state.model.sim_setup.reference_pvt.process)
     {
-        let process = state.sim_setup.reference_pvt.process;
+        let process = state.model.sim_setup.reference_pvt.process;
         // The check is asked of the whole closure and its answer is a sentence
         // about the closure, so the destination is resolved from what the
         // failure *names* — the process — rather than parsed back out of that
@@ -697,6 +702,7 @@ fn collect(state: &AppState) -> PreflightReport {
         // library the reader has to pick, because Corners & sections renders
         // from a selection and landing there with none is landing nowhere.
         let providers = state
+            .model
             .model_library_manager
             .libraries_declaring_process(process);
         let (required, remediation) = match providers.as_slice() {
@@ -727,7 +733,7 @@ fn collect(state: &AppState) -> PreflightReport {
     let simulation_plan = state.active_plan_revision();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     PreflightReport {
-        project_revision: state.workspace.content.project.revision().get(),
+        project_revision: state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
         topology_closure,
@@ -751,8 +757,9 @@ fn collect(state: &AppState) -> PreflightReport {
 /// a run expands. Every corner the project is authoring is checked on the
 /// Corners page, where authoring one is what a reader is doing.
 fn temperature_validity_advisories(state: &AppState) -> Vec<PreflightAdvisory> {
-    let requested = state.sim_setup.requested_temperatures_celsius();
+    let requested = state.model.sim_setup.requested_temperatures_celsius();
     state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()

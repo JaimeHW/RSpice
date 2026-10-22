@@ -451,7 +451,7 @@ mod tests {
                 );
             }
             crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(&mut app);
-            let sources = app.state.workspace.content.project_sources.clone();
+            let sources = app.state.model.workspace.content.project_sources.clone();
             let mut render = |events| {
                 let _ = ctx.run_ui(
                     egui::RawInput {
@@ -483,7 +483,7 @@ mod tests {
                 search.replacement,
                 if read_only { "" } else { "replacement" }
             );
-            assert!(app.state.workspace.content.project_sources == sources);
+            assert!(app.state.model.workspace.content.project_sources == sources);
         }
     }
 

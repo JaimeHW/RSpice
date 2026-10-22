@@ -79,19 +79,20 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
     // creates the catalog here, as one undoable step, with everything drawn
     // as Sheet 1.
     if state
+        .model
         .workspace
         .content
         .design_management
-        .sheet_catalog(&state.workspace.content.active_key())
+        .sheet_catalog(&state.model.workspace.content.active_key())
         .is_none()
     {
         crate::workbench::app::sheets::ensure_sheet_catalog(state)?;
     }
-    let designs = &state.workspace.content.design_management;
+    let designs = &state.model.workspace.content.design_management;
     let edit = crate::workbench::app::SchematicEditAuthority::capture(state);
     edit.validate(state, "Sheet Format Manager")?;
     let preview_content = DrawingSheetPreviewContent::from_state(state);
-    let owner_key = state.workspace.content.active_key();
+    let owner_key = state.model.workspace.content.active_key();
     let catalog = designs.sheet_catalog(&owner_key).ok_or_else(|| {
         "Give the open sheet a property in Sheet properties before managing document formats."
             .to_owned()
@@ -493,13 +494,13 @@ fn validate_manager_authority(
     app: &AppState,
     state: &SheetFormatManagerState,
 ) -> Result<(), String> {
-    let designs = &app.workspace.content.design_management;
+    let designs = &app.model.workspace.content.design_management;
     state
         .edit
         .as_ref()
         .ok_or_else(|| "Sheet Format Manager has no edit authority.".to_owned())?
         .validate(app, "Sheet Format Manager")?;
-    if app.workspace.content.active_key() != state.owner_key {
+    if app.model.workspace.content.active_key() != state.owner_key {
         return Err("The active cell/view changed. Close and reopen Sheet Formats.".to_owned());
     }
     if designs.revision() != state.design_management_revision {
@@ -551,7 +552,7 @@ fn apply_sheet_format_manager(app: &mut RSpiceApp) -> Result<String, String> {
         .try_update(|draft| draft.inheritance = inheritance)
         .map_err(|error| error.to_string())?
         .without_project_owned_title_values();
-    let before = (*app.state.workspace.content.design_management).clone();
+    let before = (*app.state.model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let mut changed = 0_usize;
     let mut applied_sheet_ids = Vec::new();
@@ -679,16 +680,22 @@ fn commit_candidate(
     let schematic_tx = app
         .state
         .prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = app.state.workspace.content.active_schematic_reference();
+    let owner = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference();
     let committed_revision = app
         .state
+        .model
         .workspace
         .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     app.state
         .apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*app.state.workspace.content.design_management).clone();
+    let after = (*app.state.model.workspace.content.design_management).clone();
     app.state
         .record_design_management_transaction(DesignManagementHistoryEntry {
             description: description.to_owned(),
@@ -986,14 +993,15 @@ mod tests {
     #[test]
     fn manager_refuses_to_open_without_schematic_edit_authority() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
+        let key = app.state.model.workspace.content.active_key();
         app.state
+            .model
             .workspace
             .content
             .design_management
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
-        app.state.schematic.session.read_only = true;
+        app.state.model.schematic.session.read_only = true;
 
         let error = open_sheet_format_manager(&mut app.state)
             .expect_err("read-only documents must not start an edit transaction");
@@ -1016,9 +1024,10 @@ mod tests {
     #[test]
     fn opening_the_manager_on_a_drawing_without_a_catalog_creates_it() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
+        let key = app.state.model.workspace.content.active_key();
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1030,6 +1039,7 @@ mod tests {
 
         let catalog = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1043,9 +1053,10 @@ mod tests {
     #[test]
     fn manager_partially_applies_and_names_organization_managed_skips() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
+        let key = app.state.model.workspace.content.active_key();
         let first = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1054,6 +1065,7 @@ mod tests {
         let (managed, ordinary) = {
             let catalog = app
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1110,6 +1122,7 @@ mod tests {
         {
             let catalog = app
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1125,7 +1138,7 @@ mod tests {
                 .unwrap();
             catalog.set_active(first).unwrap();
         }
-        let topology = app.state.schematic.topology_version();
+        let topology = app.state.model.schematic.topology_version();
         open_sheet_format_manager(&mut app.state).unwrap();
         for row in &mut app.state.dialogs.drawing_sheet_support.manager.rows {
             row.selected = true;
@@ -1135,6 +1148,7 @@ mod tests {
 
         let catalog = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1154,6 +1168,7 @@ mod tests {
         assert!(message.contains("Managed"));
         let receipt = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1170,7 +1185,7 @@ mod tests {
         assert_eq!(receipt.unchanged_sheet_ids, vec![first]);
         assert_eq!(receipt.skipped[0].sheet_id, managed);
         assert!(app.state.can_undo_project_design());
-        assert_eq!(app.state.schematic.topology_version(), topology);
+        assert_eq!(app.state.model.schematic.topology_version(), topology);
     }
 
     /// The manager's way out to the open sheet's own properties closes it and
@@ -1178,8 +1193,9 @@ mod tests {
     #[test]
     fn the_manager_hands_the_open_sheet_to_sheet_properties() {
         let mut app = RSpiceApp::test_instance();
-        let key = app.state.workspace.content.active_key();
+        let key = app.state.model.workspace.content.active_key();
         app.state
+            .model
             .workspace
             .content
             .design_management

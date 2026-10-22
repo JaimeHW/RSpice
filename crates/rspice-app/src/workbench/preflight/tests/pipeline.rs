@@ -43,6 +43,7 @@ fn await_workers(app: &RSpiceApp, workers: usize) {
 
 fn stated(app: &RSpiceApp, prefix: &str) -> bool {
     app.state
+        .model
         .log_buffer
         .entries()
         .any(|entry| entry.message.starts_with(prefix))
@@ -75,13 +76,13 @@ fn a_press_returns_before_its_run_is_prepared_or_checked() {
         app.state.workbench.preflight.checking.is_some(),
         "a frame without a verdict finishes nothing"
     );
-    assert!(!app.state.simulation.execution.trigger_simulation);
+    assert!(!app.state.model.simulation.execution.trigger_simulation);
 
     release.send(()).expect("the worker waits to prepare");
     app.settle_preflight();
 
     assert!(
-        app.state.simulation.execution.trigger_simulation,
+        app.state.model.simulation.execution.trigger_simulation,
         "the authorized run is queued"
     );
     let prepared = app
@@ -138,9 +139,10 @@ fn stop_during_preparation_queues_nothing_and_leaves_nothing_behind() {
     assert!(app.simulation_controller.preflight_stage().is_none());
     assert!(app.simulation_controller.retained_run_deck().is_none());
     assert!(app.state.workbench.preflight.report.is_none());
-    assert!(!app.state.simulation.execution.trigger_simulation);
+    assert!(!app.state.model.simulation.execution.trigger_simulation);
     assert!(
         !app.state
+            .model
             .diagnostics
             .batches()
             .any(|batch| batch.inputs.owner() == DiagnosticOwner::Dispatch),
@@ -172,13 +174,14 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
     start(&mut app.state, &mut app.simulation_controller, true);
 
     app.state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(300, 300));
     app.invalidate_simulation_preflight();
     release.send(()).expect("the worker waits to prepare");
     app.settle_preflight();
 
-    assert!(!app.state.simulation.execution.trigger_simulation);
+    assert!(!app.state.model.simulation.execution.trigger_simulation);
     assert!(app.simulation_controller.retained_run_deck().is_none());
     assert!(
         app.state.workbench.preflight.report.is_none(),
@@ -186,6 +189,7 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
     );
     let dispatch = app
         .state
+        .model
         .diagnostics
         .batches()
         .find(|batch| batch.inputs.owner() == DiagnosticOwner::Dispatch)
@@ -225,7 +229,7 @@ fn a_second_run_press_on_the_unedited_design_joins_the_pass_in_flight() {
     release.send(()).expect("the worker waits to prepare");
     app.settle_preflight();
 
-    assert!(app.state.simulation.execution.trigger_simulation);
+    assert!(app.state.model.simulation.execution.trigger_simulation);
     await_workers(&app, 1);
     assert_eq!(
         app.simulation_controller
@@ -251,6 +255,7 @@ fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
     start(&mut app.state, &mut app.simulation_controller, true);
 
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -258,7 +263,7 @@ fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
         .find(|component| component.name == "VDD")
         .expect("the inverter draws VDD")
         .value = "3.25".to_owned();
-    app.state.schematic.bump_topology_version();
+    app.state.model.schematic.bump_topology_version();
     app.invalidate_simulation_preflight();
     start(&mut app.state, &mut app.simulation_controller, true);
     release.send(()).expect("the stale worker waits to prepare");
@@ -270,7 +275,7 @@ fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
         "the press was not absorbed into the stale pass"
     );
     assert!(
-        app.state.simulation.execution.trigger_simulation,
+        app.state.model.simulation.execution.trigger_simulation,
         "the edited design's run is queued"
     );
     let report = app
@@ -283,7 +288,7 @@ fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     assert!(report.is_runnable_for(
-        app.state.workspace.content.project.revision().get(),
+        app.state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -316,7 +321,7 @@ impl RSpiceApp {
         start(&mut self.state, &mut self.simulation_controller, true);
         self.settle_preflight();
         assert!(
-            self.state.simulation.execution.trigger_simulation,
+            self.state.model.simulation.execution.trigger_simulation,
             "the pass queues the run it authorized"
         );
         self.state
@@ -374,7 +379,7 @@ impl RSpiceApp {
     fn finish_the_run(&mut self) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
         while self.simulation_controller.is_running()
-            || self.state.simulation.execution.has_active_execution()
+            || self.state.model.simulation.execution.has_active_execution()
         {
             assert!(std::time::Instant::now() < deadline, "the run did not end");
             self.simulation_controller
@@ -415,9 +420,9 @@ const DESIGN_CHANGED: &str = "The design changed after it was checked; run again
 /// What a refused dispatch leaves: no run, the stated reason, the input that
 /// moved named on the status bar, and no report left to queue it again.
 fn assert_refused_for(app: &RSpiceApp, moved: &str) {
-    assert!(!app.state.simulation.execution.has_active_execution());
-    assert!(app.state.simulation.retained.runs.is_empty());
-    assert_eq!(app.state.simulation.execution.status, DESIGN_CHANGED);
+    assert!(!app.state.model.simulation.execution.has_active_execution());
+    assert!(app.state.model.simulation.retained.runs.is_empty());
+    assert_eq!(app.state.model.simulation.execution.status, DESIGN_CHANGED);
     let stated = format!("{DESIGN_CHANGED} · {moved} changed");
     assert_eq!(
         app.state.prompt_text(),
@@ -442,9 +447,10 @@ fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
         prepared.is_empty(),
         "the dispatch frame prepares nothing: {prepared:?}"
     );
-    assert!(app.state.simulation.execution.has_active_execution());
+    assert!(app.state.model.simulation.execution.has_active_execution());
     let dispatched = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -467,7 +473,7 @@ fn the_dispatch_frame_runs_the_checked_snapshot_and_prepares_nothing() {
 fn an_edit_after_the_check_refuses_the_dispatch() {
     let mut app = inverter_over_a_run_set();
     app.queued_by_its_check();
-    app.state.schematic.document_mut_for_test().components[0]
+    app.state.model.schematic.document_mut_for_test().components[0]
         .value
         .push('0');
 
@@ -489,6 +495,7 @@ fn a_library_change_after_the_check_refuses_the_dispatch() {
     cells.queued_by_its_check();
     cells
         .state
+        .model
         .library_manager
         .add_library(rspice_design::library::Library::new("scratch"));
     assert!(cells.dispatch_frame().is_empty());
@@ -498,6 +505,7 @@ fn a_library_change_after_the_check_refuses_the_dispatch() {
     models.queued_by_its_check();
     models
         .state
+        .model
         .model_library_manager
         .add_library(rspice_model_library::ModelLibrary {
             name: "scratch".to_owned(),
@@ -516,6 +524,7 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
     let authorized = app.queued_by_its_check();
     let symbol = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -524,6 +533,7 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
         .expect("the inverter draws a symbol that writes no card")
         .id;
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -533,9 +543,10 @@ fn a_selection_the_run_does_not_read_does_not_refuse_it() {
 
     assert!(app.dispatch_frame().is_empty());
 
-    assert!(app.state.simulation.execution.has_active_execution());
+    assert!(app.state.model.simulation.execution.has_active_execution());
     assert_eq!(
         app.state
+            .model
             .simulation
             .retained
             .runs
@@ -556,6 +567,7 @@ fn selecting_a_device_refuses_a_run_with_an_operating_point() {
     app.queued_by_its_check();
     let pull_down = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -564,6 +576,7 @@ fn selecting_a_device_refuses_a_run_with_an_operating_point() {
         .expect("the inverter draws MN")
         .id;
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -587,6 +600,7 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
     assert_eq!(
         unchanged
             .state
+            .model
             .simulation
             .retained
             .runs
@@ -600,7 +614,12 @@ fn the_run_automation_prepares_is_checked_at_dispatch_as_a_run_press_is() {
 
     let mut edited = inverter_over_a_run_set();
     edited.queued_as_automation_queues();
-    edited.state.schematic.document_mut_for_test().components[0]
+    edited
+        .state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components[0]
         .value
         .push('0');
     assert!(edited.dispatch_frame().is_empty());
@@ -613,7 +632,7 @@ fn rc_lowpass() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     enable_only(&mut app.state, &[]);
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.model.schematic);
     app
 }
 
@@ -632,7 +651,7 @@ fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
     assert!(prepared.is_empty(), "{prepared:?}");
 
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.simulation.execution.has_active_execution());
+    assert!(app.state.model.simulation.execution.has_active_execution());
     let (in_flight, prepared) = app.evidence_check(&inputs);
     assert_eq!(in_flight, Ok(()));
     assert!(prepared.is_empty(), "{prepared:?}");
@@ -640,6 +659,7 @@ fn an_automation_evidence_check_on_an_unedited_design_prepares_nothing() {
     app.finish_the_run();
     let run = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -664,6 +684,7 @@ fn edit_the_transient(
     use crate::simulation::plan::AnalysisDraft;
 
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("a default state owns a stable plan");
@@ -707,6 +728,7 @@ impl RSpiceApp {
         self.finish_the_run();
         let run = self
             .state
+            .model
             .simulation
             .retained
             .runs
@@ -768,13 +790,13 @@ fn an_automation_run_resuming_from_a_checkpoint_keeps_its_evidence() {
     let (authorized, inputs) = app.queued_resuming_from_a_checkpoint();
 
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.simulation.execution.has_active_execution());
+    assert!(app.state.model.simulation.execution.has_active_execution());
     let (in_flight, prepared) = app.evidence_check(&inputs);
     assert_eq!(in_flight, Ok(()));
     assert!(prepared.is_empty(), "{prepared:?}");
 
     app.finish_the_run();
-    let runs = &app.state.simulation.retained.runs;
+    let runs = &app.state.model.simulation.retained.runs;
     assert_eq!(runs.len(), 2, "the run joins the one it resumes from");
     assert!(runs[0].success, "{:?}", runs[0].analyses);
     assert_eq!(
@@ -802,16 +824,17 @@ fn an_automation_run_resuming_from_a_checkpoint_keeps_its_evidence() {
 fn an_unrelated_run_added_to_the_history_leaves_a_resuming_run_current() {
     let mut app = rc_lowpass();
     let (authorized, inputs) = app.queued_resuming_from_a_checkpoint();
-    app.state.simulation.start_run();
+    app.state.model.simulation.start_run();
 
     let (verdict, prepared) = app.evidence_check(&inputs);
     assert_eq!(verdict, Ok(()));
     assert!(prepared.is_empty(), "{prepared:?}");
 
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.simulation.execution.has_active_execution());
+    assert!(app.state.model.simulation.execution.has_active_execution());
     assert_eq!(
         app.state
+            .model
             .simulation
             .retained
             .runs
@@ -837,14 +860,14 @@ fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_dispatch_and_
     type Edit = (&'static str, fn(&mut AppState));
     let edits: [Edit; 2] = [
         ("removed", |state| {
-            state.simulation.retained.runs.remove(0);
+            state.model.simulation.retained.runs.remove(0);
         }),
         ("replaced", |state| {
-            let mut run = state.simulation.retained.runs.remove(0);
+            let mut run = state.model.simulation.retained.runs.remove(0);
             for analysis in &mut run.analyses {
                 analysis.provenance = None;
             }
-            state.simulation.retained.runs.insert(0, run);
+            state.model.simulation.retained.runs.insert(0, run);
         }),
     ];
     for (edited, edit) in edits {
@@ -852,7 +875,7 @@ fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_dispatch_and_
         let (_, inputs) = app.queued_resuming_from_a_checkpoint();
         assert_eq!(app.evidence_check(&inputs).0, Ok(()), "{edited}");
         edit(&mut app.state);
-        let retained = app.state.simulation.retained.runs.len();
+        let retained = app.state.model.simulation.retained.runs.len();
 
         let (verdict, prepared) = app.evidence_check(&inputs);
         assert!(prepared.is_empty(), "{edited}: {prepared:?}");
@@ -865,16 +888,16 @@ fn removing_or_replacing_the_run_a_checkpoint_resumes_from_refuses_dispatch_and_
         assert!(app.dispatch_frame().is_empty(), "{edited}");
 
         assert!(
-            !app.state.simulation.execution.has_active_execution(),
+            !app.state.model.simulation.execution.has_active_execution(),
             "{edited}"
         );
         assert_eq!(
-            app.state.simulation.retained.runs.len(),
+            app.state.model.simulation.retained.runs.len(),
             retained,
             "{edited}: no run starts"
         );
         assert_eq!(
-            app.state.simulation.execution.status, DESIGN_CHANGED,
+            app.state.model.simulation.execution.status, DESIGN_CHANGED,
             "{edited}"
         );
         assert_eq!(
@@ -893,9 +916,9 @@ fn an_edit_after_automation_prepared_its_run_is_named_by_its_evidence_check() {
     let mut app = inverter_over_a_run_set();
     let (_, inputs) = app.queued_as_automation_queues();
     assert!(app.dispatch_frame().is_empty());
-    assert!(app.state.simulation.execution.has_active_execution());
+    assert!(app.state.model.simulation.execution.has_active_execution());
 
-    app.state.schematic.document_mut_for_test().components[0]
+    app.state.model.schematic.document_mut_for_test().components[0]
         .value
         .push('0');
     let (verdict, prepared) = app.evidence_check(&inputs);
@@ -922,12 +945,13 @@ fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
     type Edit = (&'static str, fn(&mut AppState));
     let edits: [Edit; 3] = [
         ("the design", |state| {
-            state.schematic.document_mut_for_test().components[0]
+            state.model.schematic.document_mut_for_test().components[0]
                 .value
                 .push('0');
         }),
         ("the model library", |state| {
             state
+                .model
                 .model_library_manager
                 .add_library(rspice_model_library::ModelLibrary {
                     name: "scratch".to_owned(),
@@ -936,6 +960,7 @@ fn the_evidence_check_and_the_dispatch_agree_for_the_same_edit() {
         }),
         ("the simulation setup", |state| {
             state
+                .model
                 .sim_setup
                 .set_reference_pvt(crate::product::ProcessCorner::TT, 125.0)
                 .expect("a physical temperature");
@@ -969,7 +994,10 @@ fn a_run_prepared_off_the_ui_thread_is_the_one_the_frame_would_have_prepared() {
     let mut lowpass = RSpiceApp::test_instance();
     lowpass.state.open_project_session();
     enable_only(&mut lowpass.state, &[]);
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut lowpass.state.schematic);
+    crate::workbench::examples::load_example(
+        "RC Lowpass Filter",
+        &mut lowpass.state.model.schematic,
+    );
     add_operating_point(&mut lowpass.state);
 
     for (label, mut app, points) in [

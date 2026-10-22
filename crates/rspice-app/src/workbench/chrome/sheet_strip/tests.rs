@@ -22,19 +22,21 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.document_mut_for_test().components = vec![Component::new(
+    app.state.model.schematic.document_mut_for_test().components = vec![Component::new(
         10,
         ComponentType::Resistor,
         Point::new(20, 20),
     )];
     let key = app
         .state
+        .model
         .workspace
         .content
         .active_schematic_reference()
         .key();
     let first = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -42,6 +44,7 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
         .expect("first sheet");
     let catalog = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -272,8 +275,13 @@ fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = app_with_sheets(2);
-    app.state.schematic.session.editor.needs_fit = false;
-    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    app.state.model.schematic.session.editor.needs_fit = false;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit = false;
     let entries = sheet_actions::sheet_entries(&app.state);
     let mut desk = Desk {
         ctx,
@@ -310,7 +318,7 @@ fn after_a_sheet_tab_the_canvas_still_takes_its_keys() {
             }]
         })
     };
-    let tool = |app: &RSpiceApp| app.state.schematic.session.editor.tool;
+    let tool = |app: &RSpiceApp| app.state.model.schematic.session.editor.tool;
 
     desk.frame(Vec::new());
     let named = desk.frame(Vec::new());
@@ -363,6 +371,7 @@ fn a_strip_action_routes_straight_to_the_sheet_actions() {
     let mut app = app_with_sheets(2);
     let entries = sheet_actions::sheet_entries(&app.state);
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -375,7 +384,15 @@ fn a_strip_action_routes_straight_to_the_sheet_actions() {
         sheet_actions::active_sheet_id(&app.state),
         Some(entries[1].id)
     );
-    assert!(app.state.schematic.session.editor.selection.is_empty());
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .is_empty()
+    );
 
     apply(
         &mut app,

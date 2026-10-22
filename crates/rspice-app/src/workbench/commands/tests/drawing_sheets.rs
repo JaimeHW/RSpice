@@ -71,14 +71,22 @@ fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
 fn sheet_properties_open_the_inspector_on_the_sheet() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.model.schematic);
     app.state.select_all_schematic_objects();
     app.state.workbench.inspector_visible = false;
     assert!(Command::SheetProperties.is_enabled(&app));
 
     Command::SheetProperties.execute(&mut app);
 
-    assert!(app.state.schematic.session.editor.selection.is_empty());
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .is_empty()
+    );
     assert!(app.state.workbench.inspector_visible);
     assert!(app.state.workbench.reveal_sheet_section);
 }
@@ -88,8 +96,9 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.workspace = Workspace::Design;
-    let key = app.state.workspace.content.active_key();
+    let key = app.state.model.workspace.content.active_key();
     app.state
+        .model
         .workspace
         .content
         .design_management
@@ -125,14 +134,15 @@ fn sheet_format_manager_requires_live_schematic_edit_authority() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.workspace = Workspace::Design;
-    let key = app.state.workspace.content.active_key();
+    let key = app.state.model.workspace.content.active_key();
     app.state
+        .model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&key, "Main", [])
         .unwrap();
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
 
     assert_eq!(
         Command::SheetFormatManager.availability(&app),

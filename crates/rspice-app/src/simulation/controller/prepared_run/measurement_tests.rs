@@ -28,7 +28,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     use crate::simulation::execution::PreparedRunAuthorization;
     use crate::state::workspace::MeasurementReferenceSource;
     let mut state = super::tests::runnable_state();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let transient = plan
         .instances()
         .iter()
@@ -55,6 +55,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
         contents: "TIME,V(out)\n0,2.5\n0.000001,2.5\n".into(),
     });
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
@@ -85,6 +86,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     // Reference content is execution identity even when the netlist is unchanged.
     spec.measurement_reference.as_mut().unwrap().contents = "TIME,V(out)\n0,0\n0.000001,0\n".into();
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
@@ -119,11 +121,12 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     spec.define_measurement = false;
     spec.expression = "Manual comparison".into();
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n".into());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some("Manual reference\nV1 out 0 2.5\nR1 out 0 1k\n.tran 100n 1u\n.MEAS TRAN fit ERROR V(out) FILE=studio-reference.csv COMP_FUNCTION=INFNORM INDEPVARCOL=0 DEPVARCOL=1\n.end\n".into());
     let manual =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
             .unwrap();
@@ -137,6 +140,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
     ] {
         spec.measurement_reference = reference;
         state
+            .model
             .workspace
             .content
             .replace_active_specification_definitions(plan_id, vec![spec.clone()]);
@@ -150,7 +154,7 @@ fn studio_measurement_reference_survives_project_preparation_and_dispatch() {
 #[test]
 fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
     let mut state = super::tests::runnable_state();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let transient = plan
         .instances()
         .iter()
@@ -188,6 +192,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
         definition.producing_analysis = Some(transient);
     }
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, definitions.clone());
@@ -268,6 +273,7 @@ fn authored_plan_measurements_reach_sealed_source_results_and_saved_projects() {
             .all(|definition| definition.measurement_statement().unwrap().is_none())
     );
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, legacy);

@@ -179,6 +179,7 @@ fn split_results_is_truthfully_gated_by_context_and_materialized_evidence() {
         CommandAvailability::Disabled("no retained result dataset is available")
     );
     app.state
+        .model
         .simulation
         .start_run()
         .add_analysis(crate::state::AnalysisResult::new(
@@ -200,7 +201,7 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
     let retained_dataset = {
-        let run = app.state.simulation.start_run();
+        let run = app.state.model.simulation.start_run();
         run.add_analysis(crate::state::AnalysisResult::new(
             1,
             crate::state::AnalysisType::Transient,
@@ -208,20 +209,24 @@ fn enabling_split_selects_latest_materialized_run_without_copying_results() {
         ));
         run.dataset_id
     };
-    app.state.simulation.start_run();
-    assert_eq!(app.state.simulation.view.active_run_idx, Some(0));
-    let history_len = app.state.simulation.retained.runs.len();
+    app.state.model.simulation.start_run();
+    assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
+    let history_len = app.state.model.simulation.retained.runs.len();
 
     Command::ToggleResultsSplit.execute(&mut app);
 
     assert!(app.state.workbench.split_with_results);
-    assert_eq!(app.state.simulation.view.active_run_idx, Some(1));
+    assert_eq!(app.state.model.simulation.view.active_run_idx, Some(1));
     assert_eq!(
-        app.state.simulation.active_run().map(|run| run.dataset_id),
+        app.state
+            .model
+            .simulation
+            .active_run()
+            .map(|run| run.dataset_id),
         Some(retained_dataset)
     );
     assert_eq!(
-        app.state.simulation.retained.runs.len(),
+        app.state.model.simulation.retained.runs.len(),
         history_len,
         "the split projects the canonical dataset instead of cloning it"
     );
@@ -243,7 +248,7 @@ fn result_dataset_import_has_mockup_authoritative_command_identity_and_gates() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     assert!(Command::ImportResultDataset.is_enabled(&app));
-    app.state.simulation.execution.is_running = true;
+    app.state.model.simulation.execution.is_running = true;
     assert!(!Command::ImportResultDataset.is_enabled(&app));
 }
 
@@ -273,9 +278,9 @@ fn exporting_the_dataset_requires_an_open_result_document() {
         ]),
     );
     let dataset_id = run.dataset_id;
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
-    app.state.simulation.view.active_analysis_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.view.active_analysis_idx = Some(0);
 
     // Retained, but nothing open to export from: the refusal names what is
     // missing rather than claiming there is no dataset.

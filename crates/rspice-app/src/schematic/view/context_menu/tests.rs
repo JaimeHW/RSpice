@@ -60,7 +60,12 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
     use crate::state::stimulus_library::definition::StimulusDefinition;
 
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
     let mut definition = StimulusDefinition::new(
         "sensor_drive",
         ComponentType::VoltageSourceSin,
@@ -75,6 +80,7 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
         definition.adopt_onto(&mut source).expect("adopt");
     }
     state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -82,6 +88,7 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
         .expect("insert");
     for edit in 0..library_edits {
         let held = state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -91,17 +98,25 @@ fn state_with_selected_source(library_edits: usize, adopt: bool) -> AppState {
         let mut draft = crate::state::stimulus_library::draft::DefinitionDraft::new(held);
         draft.edit(|working| working.params = format!("va=1 freq={}k", edit + 2));
         state
+            .model
             .workspace
             .content
             .stimulus_library
             .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     }
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(source);
-    state.schematic.session.editor.selection.select_component(7);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(7);
     state
 }
 
@@ -121,7 +136,12 @@ fn select_a_veriloga_instance(state: &mut AppState) -> (u64, crate::state::CellV
         ProjectSourceLanguage, ProjectSourceOwner, View, ViewType,
     };
 
-    state.schematic.document_mut_for_test().components.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
     let reference = CellViewRef::new("behavioral", "gain", "veriloga");
     let mut view = View::new("veriloga", ViewType::VerilogA);
     view.metadata
@@ -132,8 +152,9 @@ fn select_a_veriloga_instance(state: &mut AppState) -> (u64, crate::state::CellV
     cell.add_view(view);
     let mut library = Library::new("behavioral");
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -161,9 +182,11 @@ fn select_a_veriloga_instance(state: &mut AppState) -> (u64, crate::state::CellV
         },
     ]);
     let id = state
+        .model
         .schematic
         .add_library_cell_component(Point::new(100, 0), binding);
     state
+        .model
         .schematic
         .session
         .editor
@@ -261,11 +284,13 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
     // A schematic instance, and a wire: the master rows, Descend first.
     let mut resistor = AppState::default();
     resistor
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .clear();
     let id = resistor
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 0));
     for target in [ContextTarget::Component(id), ContextTarget::Wire(17)] {
@@ -318,9 +343,10 @@ fn open_veriloga_view_opens_the_instances_module_in_design() {
         &symbol_context,
     );
 
-    assert_eq!(state.workspace.content.active_view, reference);
+    assert_eq!(state.model.workspace.content.active_view, reference);
     assert_eq!(state.workbench.workspace, Workspace::Design);
     let open = state
+        .model
         .workspace
         .content
         .open_views
@@ -351,7 +377,7 @@ fn the_descend_shortcut_opens_a_veriloga_instances_view_as_its_row_does() {
 
     Command::DescendHierarchyDirect.execute(&mut app);
 
-    assert_eq!(app.state.workspace.content.active_view, reference);
+    assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
 }
 
@@ -371,6 +397,7 @@ fn new_veriloga_device_opens_the_form_from_the_canvas() {
     assert!(state.dialogs.new_veriloga_device.open);
 
     let names = state
+        .model
         .library_manager
         .libraries_sorted()
         .iter()
@@ -378,6 +405,7 @@ fn new_veriloga_device_opens_the_form_from_the_canvas() {
         .collect::<Vec<_>>();
     for name in names {
         state
+            .model
             .library_manager
             .get_library_mut(&name)
             .expect("the library")
@@ -461,10 +489,11 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     let mut behind = state_with_selected_source(1, true);
     assert!(action_availability(ContextAction::ReadoptStimulus, &behind).0);
     stimulus::execute(ContextAction::ReadoptStimulus, &mut behind);
-    let source = &behind.schematic.document().components[0];
+    let source = &behind.model.schematic.document().components[0];
     assert!(source.params.contains("freq=2k"), "{}", source.params);
     assert_eq!(
         behind
+            .model
             .workspace
             .content
             .stimulus_library
@@ -487,7 +516,7 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     // With nothing in the library there is nothing to adopt, and the row says
     // what to do about it rather than opening a dialog that refuses.
     let mut empty = state_with_selected_source(0, false);
-    empty.workspace.content.stimulus_library = crate::state::StimulusLibrary::default();
+    empty.model.workspace.content.stimulus_library = crate::state::StimulusLibrary::default();
     let (enabled, reason) = action_availability(ContextAction::AdoptStimulus, &empty);
     assert!(!enabled);
     assert!(reason.contains("save this source"), "{reason}");
@@ -496,18 +525,30 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
 #[test]
 fn header_summary_uses_the_selected_instance_identity_and_master() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
     let mut component =
         Component::new(7, ComponentType::CellInstance, Point::origin()).with_library_cell(
             LibraryCellInstance::new("vendor_analog", "OPA189_A", "schematic"),
         );
     component.name = "U1".to_owned();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(component);
-    state.schematic.session.editor.selection.select_component(7);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(7);
 
     let summary = selection_summary(&state, ContextTarget::Canvas);
 
@@ -520,13 +561,20 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.clear();
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
+        state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(7, ComponentType::Resistor, Point::origin()));
         state
+            .model
             .schematic
             .session
             .editor
@@ -573,6 +621,7 @@ fn actions_are_truthfully_disabled_without_a_compatible_selection() {
     assert!(!action_availability(ContextAction::OperatingPoint, &state).0);
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -583,23 +632,26 @@ fn actions_are_truthfully_disabled_without_a_compatible_selection() {
     assert!(!action_availability(ContextAction::Delete, &state).0);
 
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_component(999);
     assert!(!action_availability(ContextAction::Copy, &state).0);
-    state.schematic.session.read_only = true;
+    state.model.schematic.session.read_only = true;
     assert!(!action_availability(ContextAction::Probe, &state).0);
 
     let mut junction_state = AppState::default();
     let point = Point::new(4, 4);
     junction_state
+        .model
         .schematic
         .document_mut_for_test()
         .junctions
         .push(Junction::new(81, point));
     junction_state
+        .model
         .schematic
         .session
         .editor
@@ -629,12 +681,29 @@ fn properties_context_action_is_available_for_one_live_bus_or_tap() {
         BusTapOrientation::Down,
     )
     .unwrap();
-    state.schematic.document_mut_for_test().buses.push(bus);
-    state.schematic.document_mut_for_test().bus_taps.push(tap);
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .buses
+        .push(bus);
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .bus_taps
+        .push(tap);
 
-    state.schematic.session.editor.selection.select_only_bus(31);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_bus(31);
     assert!(action_availability(ContextAction::Properties, &state).0);
     state
+        .model
         .schematic
         .session
         .editor
@@ -642,7 +711,7 @@ fn properties_context_action_is_available_for_one_live_bus_or_tap() {
         .select_only_bus_tap(32);
     assert!(action_availability(ContextAction::Properties, &state).0);
 
-    state.schematic.session.read_only = true;
+    state.model.schematic.session.read_only = true;
     assert!(!action_availability(ContextAction::Properties, &state).0);
 }
 
@@ -650,9 +719,9 @@ fn properties_context_action_is_available_for_one_live_bus_or_tap() {
 fn pointer_target_prefers_a_junction_over_its_underlying_wire() {
     let mut state = AppState::default();
     let point = Point::new(10, 10);
-    state.schematic.document_mut_for_test().wires =
+    state.model.schematic.document_mut_for_test().wires =
         vec![Wire::new(17, vec![Point::new(0, 10), Point::new(20, 10)])];
-    state.schematic.document_mut_for_test().junctions = vec![Junction::new(18, point)];
+    state.model.schematic.document_mut_for_test().junctions = vec![Junction::new(18, point)];
     let symbol_context = schematic_symbol_context(&state);
     let ctx = Context::default();
     let viewport = pointer_viewport();
@@ -669,10 +738,25 @@ fn pointer_target_prefers_a_junction_over_its_underlying_wire() {
 
     assert!(matches!(target, ContextTarget::Canvas));
     assert_eq!(
-        state.schematic.session.editor.selection.single_junction(),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_junction(),
         Some(point)
     );
-    assert!(state.schematic.session.editor.selection.wires.is_empty());
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .wires
+            .is_empty()
+    );
 }
 
 #[test]
@@ -680,11 +764,13 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
     let mut state = AppState::default();
     let label = NetLabel::new(73, Point::new(40, 40), "afe_out");
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(label.clone());
     state
+        .model
         .schematic
         .session
         .editor
@@ -724,11 +810,13 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
     )
     .unwrap();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .design_notes
         .push(note.clone());
     state
+        .model
         .schematic
         .session
         .editor
@@ -773,11 +861,13 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
     )
     .unwrap();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .documentation_shapes
         .push(shape.clone());
     state
+        .model
         .schematic
         .session
         .editor
@@ -810,18 +900,25 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
 #[test]
 fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
-    state.schematic.document_mut_for_test().wires.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    state.model.schematic.document_mut_for_test().wires.clear();
     let mut component = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     component.name = "R1".to_owned();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(component);
     state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
     state
+        .model
         .schematic
         .session
         .editor
@@ -830,30 +927,33 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
 
     state.duplicate_schematic_selection_at(Point::new(22, 32));
     assert!(state.place_floating_paste());
-    assert_eq!(state.schematic.document().components.len(), 2);
-    assert!(state.schematic.can_undo());
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().components.len(), 1);
+    assert_eq!(state.model.schematic.document().components.len(), 2);
+    assert!(state.model.schematic.can_undo());
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().components.len(), 1);
 
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_component(41);
     state.delete_schematic_selection();
-    assert!(state.schematic.document().components.is_empty());
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().components.len(), 1);
+    assert!(state.model.schematic.document().components.is_empty());
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().components.len(), 1);
 
     let label = NetLabel::new(73, Point::new(40, 40), "sense_out");
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(label.clone());
     state.sync_active_schematic_to_workspace();
     state
+        .model
         .schematic
         .session
         .editor
@@ -862,21 +962,25 @@ fn duplicate_and_delete_rows_run_the_real_undoable_commands() {
 
     state.duplicate_schematic_selection_at(Point::new(42, 42));
     assert!(state.place_floating_paste());
-    assert_eq!(state.schematic.document().net_labels.len(), 2);
-    assert!(state.schematic.can_undo());
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().net_labels, vec![label.clone()]);
+    assert_eq!(state.model.schematic.document().net_labels.len(), 2);
+    assert!(state.model.schematic.can_undo());
+    assert!(state.model.schematic.undo());
+    assert_eq!(
+        state.model.schematic.document().net_labels,
+        vec![label.clone()]
+    );
 
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_net_label(label.id);
     state.delete_schematic_selection();
-    assert!(state.schematic.document().net_labels.is_empty());
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().net_labels, vec![label]);
+    assert!(state.model.schematic.document().net_labels.is_empty());
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().net_labels, vec![label]);
 }
 
 /// The canvas row asks the schematic the same staleness question the
@@ -899,12 +1003,15 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     let mut binding = LibraryCellInstance::new("work", "div", "schematic");
     binding.bind_interface(&master.interface_ports());
     state
+        .model
         .workspace
         .insert_schematic_editor(MASTER.to_owned(), master);
     let instance = state
+        .model
         .schematic
         .add_library_cell_component(Point::new(100, 0), binding);
     state
+        .model
         .schematic
         .session
         .editor
@@ -917,6 +1024,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     );
 
     state
+        .model
         .workspace
         .schematic_editor_mut(MASTER)
         .expect("the fixture registers the master")
@@ -939,7 +1047,7 @@ fn the_interface_repair_row_is_offered_and_runs_only_for_a_stale_instance() {
     );
 
     assert_eq!(
-        state.schematic.document().components[0]
+        state.model.schematic.document().components[0]
             .library_cell
             .as_ref()
             .expect("the instance stays bound")
@@ -961,12 +1069,15 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
     );
 
     let first = state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSource, Point::new(40, 0));
     let second = state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSource, Point::new(120, 0));
     state
+        .model
         .schematic
         .session
         .editor
@@ -980,6 +1091,7 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
     );
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -991,6 +1103,7 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
     );
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -1016,11 +1129,13 @@ fn state_with_reported_device_op(device: &str) -> AppState {
     let mut component = Component::new(1, ComponentType::Nmos, Point::new(40, 30));
     component.name = device.to_owned();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(component);
     state
+        .model
         .schematic
         .session
         .editor
@@ -1038,9 +1153,9 @@ fn state_with_reported_device_op(device: &str) -> AppState {
     });
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    state.simulation.retained.runs.insert(0, run);
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs.insert(0, run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state
 }
 
@@ -1067,11 +1182,13 @@ fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreporte
     let mut unreported = Component::new(2, ComponentType::Nmos, Point::new(80, 30));
     unreported.name = "M2".to_owned();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(unreported);
     state
+        .model
         .schematic
         .session
         .editor
@@ -1104,15 +1221,17 @@ fn operating_point_hop_selects_the_operating_point_analysis() {
     let mut state = state_with_reported_device_op("M1");
     let transient = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
     state
+        .model
         .simulation
         .retained
         .runs
         .first_mut()
         .expect("the fixture run is retained")
         .add_analysis(transient);
-    state.simulation.view.active_analysis_idx = Some(1);
+    state.model.simulation.view.active_analysis_idx = Some(1);
     assert_eq!(
         state
+            .model
             .simulation
             .active_analysis()
             .expect("the fixture selects an analysis")
@@ -1125,6 +1244,7 @@ fn operating_point_hop_selects_the_operating_point_analysis() {
 
     assert_eq!(
         state
+            .model
             .simulation
             .active_analysis()
             .expect("the hop leaves an analysis selected")
@@ -1162,9 +1282,15 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
         "none",
     ] {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.clear();
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
         for id in [7, 8] {
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .components
@@ -1174,8 +1300,9 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
                     Point::new(id as i32 * 10, 0),
                 ));
         }
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         state
+            .model
             .schematic
             .session
             .editor
@@ -1189,6 +1316,7 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
         match change {
             "source" => state.bump_active_schematic_epoch(),
             "selection" => state
+                .model
                 .schematic
                 .session
                 .editor
@@ -1198,32 +1326,35 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
                 state.dialogs.interaction.context_target =
                     Some((ContextTarget::Component(8), (80, 0)))
             }
-            "tool" => state.schematic.session.editor.tool = Tool::Wire,
-            "read-only" => state.schematic.session.read_only = true,
+            "tool" => state.model.schematic.session.editor.tool = Tool::Wire,
+            "read-only" => state.model.schematic.session.read_only = true,
             "modal" => state.dialogs.preferences_open = true,
             "none" => {}
             _ => unreachable!(),
         }
-        let before = state.schematic.document().clone();
-        let selection = state.schematic.session.editor.selection.clone();
+        let before = state.model.schematic.document().clone();
+        let selection = state.model.schematic.session.editor.selection.clone();
         let symbol_context = schematic_symbol_context(&state);
         apply_context_request(&mut state, request, &symbol_context);
         if change == "none" {
-            assert_eq!(state.schematic.document().components.len(), 1);
-            assert_eq!(state.schematic.document().components[0].id, 8);
-            assert!(state.schematic.undo());
-            assert_eq!(state.schematic.document().components, before.components);
+            assert_eq!(state.model.schematic.document().components.len(), 1);
+            assert_eq!(state.model.schematic.document().components[0].id, 8);
+            assert!(state.model.schematic.undo());
+            assert_eq!(
+                state.model.schematic.document().components,
+                before.components
+            );
         } else {
             assert_eq!(
-                state.schematic.document().components,
+                state.model.schematic.document().components,
                 before.components,
                 "{change}"
             );
             assert_eq!(
-                state.schematic.session.editor.selection, selection,
+                state.model.schematic.session.editor.selection, selection,
                 "{change}"
             );
-            assert!(!state.schematic.can_undo(), "{change}");
+            assert!(!state.model.schematic.can_undo(), "{change}");
         }
     }
 }
@@ -1243,6 +1374,7 @@ fn render_the_per_target_context_menus_for_review() {
 
     let mut instance = AppState::default();
     instance
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1251,11 +1383,13 @@ fn render_the_per_target_context_menus_for_review() {
     resistor.name = "R1".to_owned();
     resistor.value = "10k".to_owned();
     instance
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(resistor);
     instance
+        .model
         .schematic
         .session
         .editor
@@ -1314,7 +1448,7 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
     let r4 = Component::new(3, ComponentType::Resistor, Point::new(100, 0));
     let r3_right = r3.terminal_positions()[1].1;
     let r4_left = r4.terminal_positions()[0].1;
-    let drawing = state.schematic.document_mut_for_test();
+    let drawing = state.model.schematic.document_mut_for_test();
     drawing.components.extend([r3, r4]);
     drawing.wires.push(Wire::segment(2, r3_right, r4_left));
     drawing
@@ -1326,7 +1460,7 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
     drawing
         .junctions
         .push(Junction::new(6, Point::new(50, -50)));
-    let selection = &mut state.schematic.session.editor.selection;
+    let selection = &mut state.model.schematic.session.editor.selection;
     for id in [1, 3] {
         selection.select_component(id);
     }
@@ -1365,8 +1499,8 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
     let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
     let here = Wire::segment(1, Point::new(0, 100), Point::new(200, 100));
     let there = Wire::segment(2, Point::new(100, 0), Point::new(100, 200));
-    state.schematic.document_mut_for_test().wires = vec![here.clone(), there.clone()];
-    state.schematic.init_undo_history();
+    state.model.schematic.document_mut_for_test().wires = vec![here.clone(), there.clone()];
+    state.model.schematic.init_undo_history();
     let stub = Wire::segment(9, Point::new(0, 0), Point::new(0, 50));
     state.ui.schematic_clipboard =
         ClipboardData::from_selection(Vec::new(), vec![stub], Vec::new());
@@ -1376,13 +1510,13 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
         Ok(true)
     );
     assert_eq!(
-        state.schematic.document().wires,
+        state.model.schematic.document().wires,
         vec![here.clone(), there.clone()],
         "a floating paste changes nothing until it is placed"
     );
     assert!(state.place_floating_paste());
 
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     assert_eq!(
         document.wires.iter().find(|wire| wire.id == 2),
         Some(&there),
@@ -1410,9 +1544,9 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
         1
     );
 
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().wires, vec![here, there]);
-    assert!(state.schematic.document().junctions.is_empty());
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().wires, vec![here, there]);
+    assert!(state.model.schematic.document().junctions.is_empty());
 }
 
 /// G-1 and G-12: while a duplicate floats under the pointer, R turns it, and
@@ -1421,17 +1555,24 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
 #[test]
 fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
     let mut part = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     part.name = "R1".to_owned();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(part);
     state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
     state
+        .model
         .schematic
         .session
         .editor
@@ -1450,6 +1591,7 @@ fn the_rotate_row_turns_a_floating_duplicate_not_its_original() {
     assert!(state.place_floating_paste());
     let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
     let turned: Vec<_> = state
+        .model
         .schematic
         .document()
         .components
@@ -1474,18 +1616,25 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     use crate::schematic::view::selection_transform::SelectionTransform;
 
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
-    state.schematic.document_mut_for_test().wires.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    state.model.schematic.document_mut_for_test().wires.clear();
     let mut part = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     part.name = "R1".to_owned();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(part);
     state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
     state
+        .model
         .schematic
         .session
         .editor
@@ -1521,7 +1670,7 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
         Point::origin(),
         &symbol_context,
     );
-    assert!(state.schematic.document().components.is_empty());
+    assert!(state.model.schematic.document().components.is_empty());
     assert_eq!(state.ui.schematic_clipboard.components.len(), 1);
     assert!(action_availability(ContextAction::Paste, &state).0);
 
@@ -1529,11 +1678,12 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
     let offset = click - state.ui.schematic_clipboard.origin;
     execute_context_action(ContextAction::Paste, &mut state, click, &symbol_context);
     assert!(state.place_floating_paste());
-    let pasted = state.schematic.document().components.clone();
+    let pasted = state.model.schematic.document().components.clone();
     assert_eq!(pasted.len(), 1);
     assert_eq!(pasted[0].pos, Point::new(20, 30) + offset);
     assert!(
         state
+            .model
             .schematic
             .session
             .editor
@@ -1548,14 +1698,14 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
         click,
         &symbol_context,
     );
-    let mirrored = &state.schematic.document().components[0];
+    let mirrored = &state.model.schematic.document().components[0];
     assert_ne!(
         (mirrored.mirror_v, mirrored.mirror_h, mirrored.rotation),
         (pasted[0].mirror_v, pasted[0].mirror_h, pasted[0].rotation),
         "the part was not flipped"
     );
     assert_eq!(
-        state.schematic.undo_description(),
+        state.model.schematic.undo_description(),
         Some(SelectionTransform::MirrorVertical.description())
     );
 }
@@ -1567,9 +1717,15 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
 #[test]
 fn the_arrange_page_snaps_the_selection_to_the_grid() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
-    state.schematic.document_mut_for_test().wires.clear();
     state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    state.model.schematic.document_mut_for_test().wires.clear();
+    state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1579,7 +1735,7 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
             Point::new(323, 367),
         ));
     state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
     let symbol_context = schematic_symbol_context(&state);
     let snap = ARRANGE_ENTRIES
         .iter()
@@ -1599,6 +1755,7 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
     );
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -1607,17 +1764,17 @@ fn the_arrange_page_snaps_the_selection_to_the_grid() {
     assert!(action_availability(snap.action, &state).0);
     execute_context_action(snap.action, &mut state, Point::origin(), &symbol_context);
 
-    assert_eq!(state.schematic.document().grid_size, 10);
+    assert_eq!(state.model.schematic.document().grid_size, 10);
     assert_eq!(
-        state.schematic.document().components[0].pos,
+        state.model.schematic.document().components[0].pos,
         Point::new(320, 370)
     );
     assert_ne!(
-        state.schematic.document().components[0].pos,
+        state.model.schematic.document().components[0].pos,
         Point::new(323, 367)
     );
     assert_eq!(
-        state.schematic.undo_description(),
+        state.model.schematic.undo_description(),
         Some("snap selection to grid")
     );
 }
@@ -1635,7 +1792,7 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
     use rspice_schematic_editor::requests::{EditorAction, EditorRequest};
 
     fn lit(state: &AppState) -> Option<String> {
-        let highlight = &state.schematic.session.editor.net_highlight;
+        let highlight = &state.model.schematic.session.editor.net_highlight;
         highlight
             .active
             .then(|| highlight.selected_net_name.clone())
@@ -1644,7 +1801,7 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
     fn click(state: &mut AppState, id: u64) {
         let request = EditorRequest {
             source: super::super::requests::editor_request_source(state),
-            selection: state.schematic.session.editor.selection.clone(),
+            selection: state.model.schematic.session.editor.selection.clone(),
             action: EditorAction::SelectPointer {
                 target: Some(PointerTarget::Component(id)),
                 additive: false,
@@ -1661,6 +1818,7 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
         SchematicNetHighlighting::SelectedNetAcrossHierarchy;
     let component_named = |state: &AppState, name: &str| {
         state
+            .model
             .schematic
             .document()
             .components
@@ -1679,7 +1837,13 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
             click(&mut state, x1);
         }
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(x1)
         );
         assert_eq!(lit(&state).as_deref(), Some("in"), "menu {by_menu}");
@@ -1694,10 +1858,11 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
         assert_eq!(lit(&state).as_deref(), Some("IN"), "X1's port is lit");
         state.ascend_workspace_level();
         assert_eq!(lit(&state).as_deref(), Some("in"), "back up, in is lit");
-        state.schematic.session.editor.selection.clear();
+        state.model.schematic.session.editor.selection.clear();
     }
 
     let part = state
+        .model
         .schematic
         .document()
         .components

@@ -13,6 +13,7 @@ use crate::workbench::workflows::export_workflow::{ExportWorkflowIo, SaveDialogC
 /// every export used to propose the fallback.
 fn export_file_stem(state: &AppState, fallback: &str) -> String {
     if let Some(stem) = state
+        .model
         .schematic
         .session
         .current_file
@@ -21,7 +22,7 @@ fn export_file_stem(state: &AppState, fallback: &str) -> String {
     {
         return stem.to_string_lossy().into_owned();
     }
-    let reference = state.workspace.content.active_schematic_reference();
+    let reference = state.model.workspace.content.active_schematic_reference();
     match (reference.cell.trim(), reference.view.trim()) {
         ("", _) => fallback.to_owned(),
         (cell, "" | "schematic") => cell.to_owned(),
@@ -39,19 +40,25 @@ pub(super) fn action_export_svg_with_io(
 
     let config = SvgExportConfig::default();
     let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
-        state.library_manager.catalog(),
-        &state.workspace.content.schematic_buffers,
+        state.model.library_manager.catalog(),
+        &state.model.workspace.content.schematic_buffers,
     );
-    let view_path = state.workspace.content.active_view.display_path();
-    let sheet_key = state.workspace.content.active_schematic_reference().key();
+    let view_path = state.model.workspace.content.active_view.display_path();
+    let sheet_key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let svg_content = export_to_svg_with_symbol_resolver_and_context(
-        state.schematic.document(),
+        state.model.schematic.document(),
         &config,
         &resolver,
         SvgDesignContext {
             view_path: &view_path,
             // What the canvas shows: the active sheet.
             sheet_catalog: state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -100,13 +107,16 @@ pub(crate) fn action_export_netlist_with_io(
 ) {
     let netlist_content =
         if state.workbench.workspace == crate::workbench::state::Workspace::Netlist {
-            if state.netlist_artifacts.generated_source.is_empty() {
+            if state.model.netlist_artifacts.generated_source.is_empty() {
                 state.prompt("There is no generated netlist to export.");
                 return;
             }
-            if state.netlist_artifacts.generation_error.is_some()
-                || state.netlist_artifacts.generated_input_digest
-                    != state.netlist_artifacts.current_generation_input_digest
+            if state.model.netlist_artifacts.generation_error.is_some()
+                || state.model.netlist_artifacts.generated_input_digest
+                    != state
+                        .model
+                        .netlist_artifacts
+                        .current_generation_input_digest
             {
                 state.prompt("The generated netlist is out of date; regenerate it to export.");
                 return;
@@ -114,13 +124,13 @@ pub(crate) fn action_export_netlist_with_io(
             match format {
                 crate::io::NetlistFormat::Spectre => {
                     super::netlist_compat::spice_to_ahdl_compatible_netlist(
-                        &state.netlist_artifacts.generated_source,
+                        &state.model.netlist_artifacts.generated_source,
                     )
                 }
-                _ => state.netlist_artifacts.generated_source.clone(),
+                _ => state.model.netlist_artifacts.generated_source.clone(),
             }
         } else {
-            if state.schematic.document().components.is_empty() {
+            if state.model.schematic.document().components.is_empty() {
                 state.prompt("No circuit to export. Add components first.");
                 return;
             }
@@ -193,7 +203,7 @@ pub(crate) fn action_export_generated_netlist_with_options(
     include_source_map: bool,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) -> bool {
-    let Some(document) = state.netlist_artifacts.generated_document.as_ref() else {
+    let Some(document) = state.model.netlist_artifacts.generated_document.as_ref() else {
         state.prompt("There is no generated netlist to export.");
         return false;
     };
@@ -201,10 +211,13 @@ pub(crate) fn action_export_generated_netlist_with_options(
         state.prompt("The selected document is not a generated netlist.");
         return false;
     };
-    if state.netlist_artifacts.generation_error.is_some()
-        || state.netlist_artifacts.generated_input_digest
-            != state.netlist_artifacts.current_generation_input_digest
-        || state.netlist_artifacts.generated_input_digest
+    if state.model.netlist_artifacts.generation_error.is_some()
+        || state.model.netlist_artifacts.generated_input_digest
+            != state
+                .model
+                .netlist_artifacts
+                .current_generation_input_digest
+        || state.model.netlist_artifacts.generated_input_digest
             != Some(artifact.provenance().input().digest())
     {
         state.prompt("The generated netlist is out of date; regenerate it to export.");
@@ -353,7 +366,7 @@ fn generated_export_source(source: &str, format: crate::io::NetlistFormat) -> St
 }
 
 pub(crate) fn action_view_netlist(state: &mut AppState) {
-    if state.schematic.document().components.is_empty() {
+    if state.model.schematic.document().components.is_empty() {
         state.prompt("No circuit to netlist. Add components first.");
         return;
     }
@@ -375,7 +388,7 @@ pub(crate) fn action_view_netlist(state: &mut AppState) {
 
     // The Netlist workspace this command opens shows the deck itself.
     let total_lines = netlist_content.lines().count();
-    state.simulation.source.netlist_content = netlist_content;
+    state.model.simulation.source.netlist_content = netlist_content;
     state.record(
         LogSeverity::Info,
         LogSource::Studio,
@@ -399,11 +412,12 @@ pub(crate) fn build_menu_netlist(
     format: crate::io::NetlistFormat,
 ) -> Result<GeneratedNetlist, Vec<String>> {
     let execution_projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| vec![error.to_string()])?;
     let root_reference = execution_projection.root().clone();
@@ -411,10 +425,11 @@ pub(crate) fn build_menu_netlist(
         .root_schematic()
         .expect("a successful execution projection has a materialized root");
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &execution_projection,
     );
     let analysis_instances = state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -424,6 +439,7 @@ pub(crate) fn build_menu_netlist(
         .map(crate::simulation::plan::AnalysisInstance::id)
         .collect::<Vec<_>>();
     let Some(plan_id) = state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -433,7 +449,7 @@ pub(crate) fn build_menu_netlist(
             "the design has no active simulation plan to write the deck from".to_owned(),
         ]);
     };
-    let Some(plan_payload) = state.workspace.content.plan_data(plan_id) else {
+    let Some(plan_payload) = state.model.workspace.content.plan_data(plan_id) else {
         return Err(vec![format!(
             "simulation plan {plan_id} has no configuration of its own"
         )]);
@@ -470,6 +486,7 @@ pub(crate) fn build_menu_netlist(
     }
 
     let spice_netlist = state
+        .model
         .workspace
         .content
         .bind_generated_netlist_provenance(generation.netlist);
@@ -512,6 +529,7 @@ pub(super) fn action_export_publication_snapshot_with_io(
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {
     let stem = state
+        .model
         .schematic
         .session
         .current_file
@@ -684,6 +702,7 @@ mod tests {
 
     fn last_log_message(state: &AppState) -> String {
         state
+            .model
             .log_buffer
             .entries()
             .last()
@@ -695,7 +714,8 @@ mod tests {
     #[test]
     fn svg_export_uses_dialog_defaults_and_writes_svg_file() {
         let mut state = AppState::default();
-        state.schematic.session.current_file = Some(PathBuf::from("designs").join("rc_filter.sch"));
+        state.model.schematic.session.current_file =
+            Some(PathBuf::from("designs").join("rc_filter.sch"));
         let io = MockExportWorkflowIo::returning_path(PathBuf::from("exports").join("rc_filter"));
 
         action_export_svg_with_io(&mut state, &io);
@@ -729,8 +749,9 @@ mod tests {
     #[test]
     fn svg_export_without_a_file_is_named_after_the_cell() {
         let mut state = AppState::default();
-        state.schematic.session.current_file = None;
+        state.model.schematic.session.current_file = None;
         let cell = state
+            .model
             .workspace
             .content
             .active_schematic_reference()

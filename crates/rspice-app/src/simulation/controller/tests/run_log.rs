@@ -16,19 +16,20 @@ const TWO_ANALYSES: &str = "* run log fixture\n\
 
 fn start_manual_batch(source: &str) -> (AppState, SimulationController) {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
         .expect("the fixture deck prepares");
-    state.simulation.execution.trigger_simulation = true;
+    state.model.simulation.execution.trigger_simulation = true;
     controller.update(&mut state, &MockExportWorkflowIo::default());
     (state, controller)
 }
 
 fn inventory_lines(state: &AppState, run_sequence: u64) -> usize {
     state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -84,7 +85,7 @@ fn a_run_writes_its_start_and_end_in_the_session_and_its_account_in_its_own_log(
         controller.update(&mut state, &export_io);
     }
 
-    let session: Vec<_> = state.log_buffer.entries().collect();
+    let session: Vec<_> = state.model.log_buffer.entries().collect();
     assert_eq!(session.len(), 2, "{session:?}");
     for entry in &session {
         assert_eq!(entry.source, LogSource::Run);
@@ -103,6 +104,7 @@ fn a_run_writes_its_start_and_end_in_the_session_and_its_account_in_its_own_log(
     );
 
     let run = state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -162,6 +164,7 @@ fn a_typed_decks_parse_warnings_are_warnings_in_its_runs_log() {
         controller.update(&mut state, &export_io);
     }
     let run = state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -191,7 +194,7 @@ fn a_typed_decks_parse_warnings_are_warnings_in_its_runs_log() {
 #[test]
 fn a_live_preview_that_cannot_be_shown_says_why_once_in_its_runs_log() {
     let mut state = AppState::default();
-    let run_sequence = state.simulation.start_run().id;
+    let run_sequence = state.model.simulation.start_run().id;
     let mut controller = SimulationController::new();
     controller.current_run_id = Some(run_sequence);
 
@@ -199,6 +202,7 @@ fn a_live_preview_that_cannot_be_shown_says_why_once_in_its_runs_log() {
     controller.publish_live_preview(&mut state);
 
     let run = state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -216,11 +220,12 @@ fn a_live_preview_that_cannot_be_shown_says_why_once_in_its_runs_log() {
             "Live preview stopped: the running analysis could not be identified"
         )]
     );
-    assert!(state.log_buffer.is_empty());
+    assert!(state.model.log_buffer.is_empty());
 
     controller.live_transient.clear();
     controller.publish_live_preview(&mut state);
     let run = state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)

@@ -79,6 +79,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     // is shown; leaving it for a quick view drops them.
     app.state.ui.results.session.document_presentation = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -256,6 +257,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
 /// frame. The pane the reader works in moves to that page's first pane.
 pub(super) fn select_page(state: &mut AppState, document_id: ResultDocumentId, index: usize) {
     let Some(page_id) = state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -278,6 +280,7 @@ pub(super) fn reading_position(
     document_id: ResultDocumentId,
 ) -> Option<(PageId, PaneId)> {
     let document = state
+        .model
         .workspace
         .content
         .visualization_document(document_id)?;
@@ -334,12 +337,18 @@ fn compatible_active_viewer(
 }
 
 fn current_result_source_digest(state: &AppState) -> Option<ContentDigest> {
-    let netlist = &state.netlist_artifacts;
+    let netlist = &state.model.netlist_artifacts;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
-        && !state.simulation.source.netlist_content.trim().is_empty())
-    .then(|| crate::state::content_digest(&state.simulation.source.netlist_content))
+        && !state
+            .model
+            .simulation
+            .source
+            .netlist_content
+            .trim()
+            .is_empty())
+    .then(|| crate::state::content_digest(&state.model.simulation.source.netlist_content))
 }
 
 fn run_matches_current_authority(
@@ -391,7 +400,12 @@ fn degraded_tracking_reason(cause: &str) -> String {
 fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -> LatestBinding {
     use crate::results::visualization_document::{DocumentEdit, ResultDocumentTrackingMode};
 
-    let Some(document) = state.workspace.content.visualization_document(document_id) else {
+    let Some(document) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+    else {
         return LatestBinding::Missing(
             "The selected project result document no longer exists.".to_owned(),
         );
@@ -423,10 +437,11 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
             "This document retains no pane binding for Latest tracking to advance.",
         ));
     };
-    let project_revision = state.workspace.content.project.revision();
+    let project_revision = state.model.workspace.content.project.revision();
     let source_digest = current_result_source_digest(state);
 
     let Some(candidate) = state
+        .model
         .simulation
         .retained
         .runs
@@ -470,6 +485,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
     }
 
     let prepared = state
+        .model
         .simulation
         .retained
         .runs
@@ -507,6 +523,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
         }
     };
     let Some(revision) = state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -516,15 +533,20 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
             "The selected project result document is no longer retained.".to_owned(),
         );
     };
-    if let Err(error) = state.workspace.content.transact_visualization_document(
-        document_id,
-        revision,
-        vec![DocumentEdit::RetargetTrackedDataset {
-            previous,
-            next: next_source,
-            analysis_id,
-        }],
-    ) {
+    if let Err(error) = state
+        .model
+        .workspace
+        .content
+        .transact_visualization_document(
+            document_id,
+            revision,
+            vec![DocumentEdit::RetargetTrackedDataset {
+                previous,
+                next: next_source,
+                analysis_id,
+            }],
+        )
+    {
         return refuse(
             state,
             format!("This document could not be retargeted onto the newest run: {error}."),
@@ -535,7 +557,12 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
 }
 
 pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> bool {
-    let Some(document) = state.workspace.content.visualization_document(document_id) else {
+    let Some(document) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+    else {
         return false;
     };
     let selected_page_id = state
@@ -582,6 +609,7 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
 
 fn projection(state: &AppState, document_id: ResultDocumentId) -> Option<DocumentProjection> {
     let document = state
+        .model
         .workspace
         .content
         .visualization_document(document_id)?;
@@ -693,6 +721,7 @@ fn render_pane(
         let activated_pane_id = pane_header(ui, app, pane, viewer, is_active);
         let digits = app
             .state
+            .model
             .workspace
             .content
             .visualization_document(pane.document_id)
@@ -860,10 +889,12 @@ fn project_pane_presentation(
     viewer: ResultViewer,
 ) -> Result<(), String> {
     let run = state
+        .model
         .simulation
         .active_run()
         .ok_or_else(|| "The pane's retained dataset is not active.".to_owned())?;
     let analysis = state
+        .model
         .simulation
         .active_analysis()
         .ok_or_else(|| "The pane's retained analysis is not active.".to_owned())?;
@@ -912,7 +943,7 @@ fn project_pane_presentation(
     };
     state.ui.results.session.cursors.a = cursor_position("A");
     state.ui.results.session.cursors.b = cursor_position("B");
-    state.ui.results.session.cursor_strip = state.simulation.view.active_analysis_idx;
+    state.ui.results.session.cursor_strip = state.model.simulation.view.active_analysis_idx;
     // Retained markers project into their own overlay. They are entities of
     // this document, not quick-view annotations of the dataset, so they carry
     // the document's full-width serial and never enter the project's
@@ -977,6 +1008,7 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
     let view = state.ui.results.session.persistent_plot_view(viewer);
     let cursors = state.ui.results.session.cursors;
     let Some(document) = state
+        .model
         .workspace
         .content
         .visualization_document(pane.document_id)
@@ -1049,11 +1081,11 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
     if edits.is_empty() {
         return;
     }
-    if let Err(error) =
-        state
-            .workspace
-            .content
-            .transact_visualization_document(pane.document_id, revision, edits)
+    if let Err(error) = state
+        .model
+        .workspace
+        .content
+        .transact_visualization_document(pane.document_id, revision, edits)
     {
         // A prompt, not a record: this runs every frame, and a refused write
         // is refused again until the reader's change is undone.
@@ -1078,6 +1110,7 @@ fn select_pane_context(state: &mut AppState, pane: &PaneProjection) -> Result<()
 
 fn bound_viewer_projection(state: &AppState, viewer: ResultViewer) -> ResultViewer {
     state
+        .model
         .simulation
         .active_analysis()
         .map_or(viewer, |analysis| {
@@ -1101,15 +1134,15 @@ fn select_pane_binding(state: &mut AppState, pane: &Pane) -> Result<(), String> 
         .binding
         .ok_or_else(|| "This result pane is not bound to a run.".to_owned())?;
     let (run_index, analysis_index) = resolve_binding(state, binding)?;
-    if state.simulation.view.active_run_idx == Some(run_index)
-        && state.simulation.view.active_analysis_idx == Some(analysis_index)
+    if state.model.simulation.view.active_run_idx == Some(run_index)
+        && state.model.simulation.view.active_analysis_idx == Some(analysis_index)
     {
         return Ok(());
     }
-    if !state.simulation.select_run(run_index) {
+    if !state.model.simulation.select_run(run_index) {
         return Err("The retained dataset could not be selected.".to_owned());
     }
-    if !state.simulation.select_analysis(analysis_index) {
+    if !state.model.simulation.select_analysis(analysis_index) {
         return Err("The retained analysis could not be selected.".to_owned());
     }
     Ok(())
@@ -1120,13 +1153,14 @@ pub(super) fn resolve_binding(
     binding: PaneDataBinding,
 ) -> Result<(usize, usize), String> {
     let run_index = state
+        .model
         .simulation
         .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
         .ok_or_else(|| "The pane's run is no longer in the run history.".to_owned())?;
-    let run = &state.simulation.retained.runs[run_index];
+    let run = &state.model.simulation.retained.runs[run_index];
     if run.dataset_content_digest() != binding.dataset.content_digest {
         return Err(
             "The run's results no longer match the ones this pane was bound to.".to_owned(),

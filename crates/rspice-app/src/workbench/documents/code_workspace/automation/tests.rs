@@ -202,6 +202,7 @@ fn unscoped_network_and_process_permissions_fail_closed() {
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -219,6 +220,7 @@ fn unscoped_network_and_process_permissions_fail_closed() {
         .replace("network = \"deny\"", "network = \"allow\"")
         .replace("process_spawn = \"deny\"", "process_spawn = \"allow\"");
     app.state
+        .model
         .workspace
         .content
         .replace_project_source_bundle_file(bundle_id, &permissions_path, permissions)
@@ -226,6 +228,7 @@ fn unscoped_network_and_process_permissions_fail_closed() {
 
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources

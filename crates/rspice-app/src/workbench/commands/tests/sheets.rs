@@ -42,12 +42,14 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
     app.state.workbench.activate(Workspace::Design);
     let key = app
         .state
+        .model
         .workspace
         .content
         .active_schematic_reference()
         .key();
     let first = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -55,6 +57,7 @@ fn app_with_sheets(count: usize) -> RSpiceApp {
         .expect("first sheet");
     let catalog = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -157,7 +160,7 @@ fn sheet_commands_state_why_they_are_unavailable() {
     );
 
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert_eq!(
         Command::NewSheet.availability(&app),
         CommandAvailability::Disabled("the active schematic is read-only")
@@ -167,7 +170,7 @@ fn sheet_commands_state_why_they_are_unavailable() {
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     for command in [
         Command::NextSheet,
         Command::PreviousSheet,

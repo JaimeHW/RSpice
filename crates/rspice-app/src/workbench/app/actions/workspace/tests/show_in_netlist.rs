@@ -19,16 +19,20 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
     let mut state = AppState::default();
     let origin = Point::new(20, 20);
     let source_id = state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSource, origin);
     let load_id = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, origin + Point::new(20, 0));
     let unmapped_id = state
+        .model
         .schematic
         .add_component(ComponentType::Capacitor, origin + Point::new(40, 0));
     for (id, name) in [(source_id, "V1"), (load_id, "R1"), (unmapped_id, "C9")] {
         if let Some(component) = state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -39,10 +43,11 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
         }
     }
 
-    let view = state.workspace.content.active_view.key();
+    let view = state.model.workspace.content.active_view.key();
     let cell = format!(
         "{}/{}",
-        state.workspace.content.active_view.library, state.workspace.content.active_view.cell
+        state.model.workspace.content.active_view.library,
+        state.model.workspace.content.active_view.cell
     );
     let entry = |line: usize, instance: &str, id: u64| {
         GeneratedSourceMapEntry::try_new(
@@ -71,12 +76,15 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
     )
     .expect("artifact");
 
-    state.netlist_artifacts.generated_source = DECK.to_owned();
-    state.netlist_artifacts.generated_document = Some(
+    state.model.netlist_artifacts.generated_source = DECK.to_owned();
+    state.model.netlist_artifacts.generated_document = Some(
         NetlistDocument::from_generated(NetlistDocumentId::new(), artifact).expect("document"),
     );
-    state.netlist_artifacts.generated_input_digest = Some(digest);
-    state.netlist_artifacts.current_generation_input_digest = Some(digest);
+    state.model.netlist_artifacts.generated_input_digest = Some(digest);
+    state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = Some(digest);
     // The engineer is looking at their own deck, so the jump has a document
     // transition to make rather than a no-op reactivation to skip.
     state.ui.netlist.active_document =
@@ -102,6 +110,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     );
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -112,6 +121,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     // The instance's own card is the first of its lines, never the
     // continuation the map also carries.
     state
+        .model
         .schematic
         .session
         .editor
@@ -121,6 +131,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     assert_eq!(state.ui.netlist.requested_line, Some(3));
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -132,6 +143,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     );
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -143,13 +155,14 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
     );
 
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(source_id);
-    state.netlist_artifacts.generated_document = None;
-    state.netlist_artifacts.generated_source.clear();
+    state.model.netlist_artifacts.generated_document = None;
+    state.model.netlist_artifacts.generated_source.clear();
     assert_eq!(
         state.selected_instance_netlist_block(),
         Some("no generated netlist yet — open the Netlist workspace to generate one")
@@ -163,6 +176,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
 fn showing_an_instance_opens_the_generated_primary_at_its_card() {
     let (mut state, _, load_id, _) = located_instance_state();
     state
+        .model
         .schematic
         .session
         .editor
@@ -177,7 +191,7 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
     );
     assert!(state.ui.netlist.active_dependency_identity.is_none());
-    assert_eq!(state.simulation.source.netlist_content, DECK);
+    assert_eq!(state.model.simulation.source.netlist_content, DECK);
     // The outline and the source-mapping panel both read the active line, so
     // the caret request and the cursor have to agree about which card it is.
     assert_eq!(state.ui.netlist.requested_line, Some(3));
@@ -192,13 +206,16 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
 fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
     let (mut state, source_id, _, _) = located_instance_state();
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(source_id);
-    state.netlist_artifacts.current_generation_input_digest =
-        Some(crate::state::content_digest("edited-schematic"));
+    state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = Some(crate::state::content_digest("edited-schematic"));
 
     assert_eq!(state.selected_instance_netlist_block(), None);
     state.show_selected_instance_in_netlist();
@@ -217,6 +234,7 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
 fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
     let (mut state, _, load_id, _) = located_instance_state();
     state
+        .model
         .schematic
         .session
         .editor
@@ -225,7 +243,13 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
 
     state.show_selected_instance_in_netlist();
     assert_eq!(
-        state.schematic.session.editor.selection.single_component(),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_component(),
         Some(load_id)
     );
 
@@ -233,6 +257,7 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
     // does: the active line, its map entry, and the component it names.
     let active_line = state.ui.netlist.cursor_line.saturating_add(1);
     let revealed = state
+        .model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -242,15 +267,22 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
         .expect("the active line names a component");
     assert_eq!(revealed, load_id);
 
-    state.schematic.session.editor.selection.clear();
+    state.model.schematic.session.editor.selection.clear();
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_component(revealed);
     assert_eq!(
-        state.schematic.session.editor.selection.single_component(),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_component(),
         Some(load_id)
     );
     assert_eq!(state.selected_instance_netlist_block(), None);

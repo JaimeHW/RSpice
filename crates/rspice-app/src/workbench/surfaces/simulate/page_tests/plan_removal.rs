@@ -173,6 +173,7 @@ impl Registry {
     fn variables(&self) -> Vec<String> {
         self.app
             .state
+            .model
             .workspace
             .content
             .plan_data(self.plan())
@@ -189,6 +190,7 @@ impl Registry {
     fn outputs(&self) -> Vec<String> {
         self.app
             .state
+            .model
             .workspace
             .content
             .plan_data(self.plan())
@@ -205,6 +207,7 @@ impl Registry {
     fn groups(&self) -> Vec<String> {
         self.app
             .state
+            .model
             .workspace
             .content
             .plan_data(self.plan())
@@ -226,6 +229,7 @@ impl Registry {
 /// handlers that take more than that.
 fn plan_of(state: &AppState) -> SimulationPlanId {
     state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance has a stable plan")
@@ -247,6 +251,7 @@ fn seed_variable(state: &mut AppState, name: &str) {
     )
     .expect("valid design variable");
     state
+        .model
         .workspace
         .content
         .add_design_variable(id, variable)
@@ -268,6 +273,7 @@ fn seed_output(state: &mut AppState, name: &str, expression: &str) {
     )
     .expect("valid saved output");
     state
+        .model
         .workspace
         .content
         .add_saved_output(id, output)
@@ -278,6 +284,7 @@ fn seed_output(state: &mut AppState, name: &str, expression: &str) {
 /// Switch every analysis off, so the plan resolves a variable into nothing.
 fn disable_every_analysis(state: &mut AppState) {
     let ids = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
@@ -286,6 +293,7 @@ fn disable_every_analysis(state: &mut AppState) {
         .map(|instance| instance.id())
         .collect::<Vec<_>>();
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan");
@@ -387,6 +395,7 @@ fn removing_an_output_a_specification_reads_opens_the_review() {
         seed_output(state, "vout", "V(out)");
         let id = plan_of(state);
         let payload = state
+            .model
             .workspace
             .content
             .plan_data_mut(id)
@@ -427,6 +436,7 @@ fn a_confirmed_output_removal_commits_with_its_receipt() {
             InstancePath::parse_legacy("/").expect("scope"),
         ));
         state
+            .model
             .workspace
             .content
             .add_capture_group(id, group)
@@ -487,6 +497,7 @@ fn seed_capture_group(state: &mut AppState, name: &str, holding: bool) {
     ));
     group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
     let group_id = state
+        .model
         .workspace
         .content
         .add_capture_group(id, group)
@@ -586,6 +597,7 @@ fn bound_pair() -> (
     let mut app = RSpiceApp::test_instance();
     let dependent = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan")
@@ -599,6 +611,7 @@ fn bound_pair() -> (
     );
     let prerequisite = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
@@ -608,6 +621,7 @@ fn bound_pair() -> (
         .target();
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan");
@@ -644,6 +658,7 @@ fn an_analysis_something_is_bound_to_refuses_removal_instead_of_reviewing_it() {
     );
     assert!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -746,6 +761,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     let mut app = RSpiceApp::test_instance();
     let ac = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan")
@@ -764,7 +780,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
             .expect("test provenance is valid"),
         ),
     );
-    app.state.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.retained.runs = vec![run].into();
 
     remove_analysis_instance(&mut app, ac);
     assert_eq!(
@@ -797,6 +813,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     );
     assert!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -813,6 +830,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     );
     assert!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -851,6 +869,7 @@ fn an_analysis_with_no_dependents_and_no_results_is_removed_at_once() {
     let mut app = RSpiceApp::test_instance();
     let ac = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan")
@@ -866,6 +885,7 @@ fn an_analysis_with_no_dependents_and_no_results_is_removed_at_once() {
     );
     assert!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -901,6 +921,7 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
 
     assert!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")

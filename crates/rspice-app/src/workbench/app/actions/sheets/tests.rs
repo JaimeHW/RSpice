@@ -9,18 +9,25 @@ use crate::state::{
 /// One cell view with two governed sheets, and one component on each.
 fn two_sheet_state() -> (AppState, SheetId, SheetId) {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components = vec![
+    state.model.schematic.document_mut_for_test().components = vec![
         Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         Component::new(20, ComponentType::Capacitor, Point::new(40, 10)),
     ];
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let first = state
+        .model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [10, 20])
         .expect("first sheet");
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -45,8 +52,14 @@ fn two_sheet_state() -> (AppState, SheetId, SheetId) {
 }
 
 fn delete_behavior(state: &mut AppState, behavior: SheetDeleteBehavior) {
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -81,27 +94,29 @@ fn the_strip_projects_every_sheet_in_catalog_order() {
 fn activating_a_sheet_retires_the_selection_and_frames_the_new_drawing() {
     let (mut state, _, second) = two_sheet_state();
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_component(10);
-    state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
 
     activate_sheet(&mut state, second).expect("activation publishes");
 
     assert_eq!(active_sheet_id(&state), Some(second));
-    assert!(state.schematic.session.editor.selection.is_empty());
-    assert!(!state.schematic.session.editor.net_highlight.active);
-    assert!(state.schematic.session.editor.needs_drawing_sheet_fit);
-    assert!(!state.schematic.session.editor.needs_fit);
+    assert!(state.model.schematic.session.editor.selection.is_empty());
+    assert!(!state.model.schematic.session.editor.net_highlight.active);
+    assert!(state.model.schematic.session.editor.needs_drawing_sheet_fit);
+    assert!(!state.model.schematic.session.editor.needs_fit);
 }
 
 #[test]
 fn re_activating_the_current_sheet_publishes_nothing() {
     let (mut state, first, _) = two_sheet_state();
-    let revision = state.workspace.content.design_management.revision();
+    let revision = state.model.workspace.content.design_management.revision();
     state
+        .model
         .schematic
         .session
         .editor
@@ -111,11 +126,17 @@ fn re_activating_the_current_sheet_publishes_nothing() {
     activate_sheet(&mut state, first).expect("an inert activation still succeeds");
 
     assert_eq!(
-        state.workspace.content.design_management.revision(),
+        state.model.workspace.content.design_management.revision(),
         revision
     );
     assert!(
-        state.schematic.session.editor.selection.has_component(10),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(10),
         "a chip redrawn every frame must not clear the selection"
     );
 }
@@ -137,8 +158,14 @@ fn page_navigation_wraps_around_both_ends() {
 #[test]
 fn a_single_sheet_catalog_offers_no_navigation() {
     let mut state = AppState::default();
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     state
+        .model
         .workspace
         .content
         .design_management
@@ -171,7 +198,7 @@ fn a_new_sheet_lands_after_the_active_one_and_becomes_current() {
 #[test]
 fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components = vec![
+    state.model.schematic.document_mut_for_test().components = vec![
         Component::new(10, ComponentType::Resistor, Point::new(10, 10)),
         Component::new(20, ComponentType::Capacitor, Point::new(40, 10)),
     ];
@@ -202,7 +229,7 @@ fn a_new_sheet_on_a_single_drawing_keeps_the_drawing_as_sheet_1() {
         active_sheet_catalog(&state).is_none(),
         "one undo gives back the single drawing"
     );
-    assert_eq!(state.schematic.document().components.len(), 2);
+    assert_eq!(state.model.schematic.document().components.len(), 2);
 }
 
 #[test]
@@ -307,8 +334,14 @@ fn a_confirmed_delete_whose_outcome_changed_deletes_nothing() {
 #[test]
 fn the_last_sheet_of_a_catalog_is_retained() {
     let mut state = AppState::default();
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let only = state
+        .model
         .workspace
         .content
         .design_management

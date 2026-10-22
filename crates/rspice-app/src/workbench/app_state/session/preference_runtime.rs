@@ -27,11 +27,11 @@ impl RSpiceApp {
     /// once: otherwise the markers and rows it produced would wait for the
     /// reader's next input to be drawn.
     fn refresh_live_checks_at(&mut self, ctx: &egui::Context, now: Instant) {
-        let published = self.state.diagnostics.generation();
+        let published = self.state.model.diagnostics.generation();
         if let Some(wait) = self.state.refresh_live_checks(now) {
             ctx.request_repaint_after(wait);
         }
-        if self.state.diagnostics.generation() != published {
+        if self.state.model.diagnostics.generation() != published {
             ctx.request_repaint();
         }
     }
@@ -71,6 +71,7 @@ mod tests {
         assert_ne!(frame(&mut app, &ctx, start), Duration::ZERO, "settled");
 
         app.state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(400, 400));
         let waiting = frame(&mut app, &ctx, start);

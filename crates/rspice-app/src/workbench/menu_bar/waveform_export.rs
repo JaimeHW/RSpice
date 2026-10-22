@@ -54,7 +54,7 @@ const TYPED_RESULT_TOUCHSTONE_REFUSAL: &str =
 const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one selected analysis; maximize one displayed strip or select CSV export.";
 
 fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
-    let data_version = state.simulation.view.data_version;
+    let data_version = state.model.simulation.view.data_version;
     state.ui.results.record_runtime_condition(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         detail,
@@ -65,7 +65,7 @@ fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
 /// A finished export. The Console keeps `message`, and the status bar shows
 /// it to the reader who just chose the file.
 fn note_result_export_success(state: &mut AppState, format: &str, message: String) {
-    let data_version = state.simulation.view.data_version;
+    let data_version = state.model.simulation.view.data_version;
     state.ui.results.record_runtime_recovery_if(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         format!("{format} publication succeeded after the recorded export failure."),
@@ -164,7 +164,7 @@ pub(crate) fn action_export_result_selection_with_io(
     let contents =
         match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
             keys,
-            &state.simulation.retained.runs,
+            &state.model.simulation.retained.runs,
         ) {
             Ok(contents) => contents,
             Err(message) => {
@@ -175,7 +175,7 @@ pub(crate) fn action_export_result_selection_with_io(
     let name_source = if keys.len() == 1 {
         crate::workbench::documents::result_document::result_browser_selection_stable_path(
             &keys[0],
-            &state.simulation.retained.runs,
+            &state.model.simulation.retained.runs,
         )
         .ok()
         .and_then(|path| path.rsplit('/').next().map(str::to_owned))
@@ -501,7 +501,7 @@ fn prepare_active_sheet_csv(
                 // is not an operating point is the case the sheet has to
                 // speak for: the router underneath would report on waveform
                 // samples, which is not what the reader pressed.
-                let selected = state.simulation.active_analysis()?;
+                let selected = state.model.simulation.active_analysis()?;
                 if !selected.success || selected.analysis_type == crate::state::AnalysisType::DcOp {
                     return None;
                 }
@@ -554,7 +554,7 @@ fn prepare_active_sheet_csv(
         // bound the sheet never showed.
         ResultViewer::Specs => Some(result_document::export_specs_csv(
             displayed.run(state)?,
-            &state.workspace.content.specs,
+            &state.model.workspace.content.specs,
         )),
         ResultViewer::Optimization => {
             result_document::export_optimization_csv(displayed.primary_analysis(state)?)

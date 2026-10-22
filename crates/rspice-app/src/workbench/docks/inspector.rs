@@ -98,6 +98,7 @@ pub(crate) fn validate_component_model_catalog_binding(
     model_name: &str,
 ) -> Result<(), String> {
     let component = state
+        .model
         .schematic
         .document()
         .components
@@ -105,6 +106,7 @@ pub(crate) fn validate_component_model_catalog_binding(
         .find(|component| component.id == component_id)
         .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
     let library = state
+        .model
         .model_library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
@@ -153,10 +155,13 @@ pub(crate) fn validate_component_model_catalog_binding(
             candidate,
         )?;
     }
-    let effective = state.model_library_manager.effective_definition_provider(
-        crate::state::model_library::ModelConsumerScope::PrimitiveModel,
-        model_name,
-    )?;
+    let effective = state
+        .model
+        .model_library_manager
+        .effective_definition_provider(
+            crate::state::model_library::ModelConsumerScope::PrimitiveModel,
+            model_name,
+        )?;
     let effective = effective
         .ok_or_else(|| format!("Model '{model_name}' has no executable catalog provider."))?;
     if !effective.library.eq_ignore_ascii_case(library_name) {
@@ -183,6 +188,7 @@ pub(crate) fn bind_component_model_from_catalog(
     validate_component_model_catalog_binding(&app.state, component_id, library_name, model_name)?;
     let component = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -203,6 +209,7 @@ pub(crate) fn bind_component_model_from_catalog(
 
     let effective = app
         .state
+        .model
         .model_library_manager
         .effective_definition_provider(
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
@@ -274,14 +281,15 @@ fn inspector_body(ui: &mut Ui, app: &mut RSpiceApp) {
         // A symbol cellview is edited against its pin contract, not against a
         // schematic selection.
         Workspace::Design
-            if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol =>
+            if app.state.model.workspace.content.active_view_type()
+                == crate::state::ViewType::Symbol =>
         {
             symbol::show(ui, &mut app.state);
         }
         // A Verilog-A module is inspected for what it compiles to, not for a
         // schematic selection it does not have.
         Workspace::Design
-            if app.state.workspace.content.active_view_type()
+            if app.state.model.workspace.content.active_view_type()
                 == crate::state::ViewType::VerilogA =>
         {
             veriloga::show(ui, app);
@@ -305,8 +313,8 @@ fn inspector_scroll_identity(app: &RSpiceApp) -> String {
     format!(
         "{}|{}|{:?}",
         route,
-        app.state.workspace.content.active_display_path(),
-        app.state.schematic.session.editor.selection
+        app.state.model.workspace.content.active_display_path(),
+        app.state.model.schematic.session.editor.selection
     )
 }
 
@@ -314,13 +322,17 @@ fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && app.state.workbench.results_split_visible(
             app.state.project_lifecycle.is_open(),
-            app.state.simulation.retained.has_retained_result_dataset(),
+            app.state
+                .model
+                .simulation
+                .retained
+                .has_retained_result_dataset(),
         )
         && app
             .state
             .ui
             .results
-            .valid_selected_trace(&app.state.simulation)
+            .valid_selected_trace(&app.state.model.simulation)
             .is_some()
 }
 
@@ -405,7 +417,7 @@ fn project(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
-    let project = &app.state.workspace.content;
+    let project = &app.state.model.workspace.content;
     let active_configuration = project.configuration_sets.active();
     let testbench = active_configuration.map_or_else(
         || "not configured".to_owned(),
@@ -482,7 +494,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Checks", &reason);
         }
     }
-    if let Some(advisory) = app.state.pdk_config.scan_errors.first() {
+    if let Some(advisory) = app.state.model.pdk_config.scan_errors.first() {
         property_row(ui, "Model advisory", advisory);
     }
 
@@ -499,7 +511,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
-    let library = app.state.library_manager.current_library();
+    let library = app.state.model.library_manager.current_library();
     let library_path = library
         .and_then(|item| item.path.as_ref())
         .map_or_else(|| "not bound".to_owned(), |path| path.display().to_string());
@@ -510,11 +522,11 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
             item.technology.as_str()
         }
     });
-    let view = app.state.library_manager.current_view();
+    let view = app.state.model.library_manager.current_view();
     let view_type = view.map_or("—", |item| item.view_type.display_name());
     let open_target = match (
-        app.state.library_manager.current_library(),
-        app.state.library_manager.current_cell(),
+        app.state.model.library_manager.current_library(),
+        app.state.model.library_manager.current_cell(),
         view,
     ) {
         (Some(library), Some(cell), Some(view)) => Some((
@@ -607,7 +619,13 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
-    let active = app.state.workspace.content.configuration_sets.active();
+    let active = app
+        .state
+        .model
+        .workspace
+        .content
+        .configuration_sets
+        .active();
     let name = active.map_or_else(
         || "No active configuration".to_owned(),
         |item| item.name().to_owned(),
@@ -650,8 +668,12 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
         .project_dependency_selection
         .clone()
         .unwrap_or_else(|| "No dependency selected".to_owned());
-    let design_library = app.state.library_manager.get_library(&selection);
-    let model_library = app.state.model_library_manager.get_library(&selection);
+    let design_library = app.state.model.library_manager.get_library(&selection);
+    let model_library = app
+        .state
+        .model
+        .model_library_manager
+        .get_library(&selection);
 
     section_header(ui, "Resolved dependency", None);
     property_row(ui, "Name", &selection);
@@ -695,6 +717,7 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
         "Technology",
         if app
             .state
+            .model
             .workspace
             .content
             .project
@@ -834,6 +857,7 @@ fn project_module_evidence(
 ) -> Option<ComponentModelEvidence> {
     let reference = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
     let view = state
+        .model
         .library_manager
         .get_library(&reference.library)?
         .get_cell(&reference.cell)?
@@ -847,6 +871,7 @@ fn project_module_evidence(
         .cloned()
         .unwrap_or_else(|| binding.cell.clone());
     let bundle = state
+        .model
         .workspace
         .content
         .project_sources
@@ -891,7 +916,11 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
         if let Some(evidence) = project_module_evidence(state, binding) {
             return evidence;
         }
-        if let Some(library) = state.model_library_manager.get_library(&binding.library) {
+        if let Some(library) = state
+            .model
+            .model_library_manager
+            .get_library(&binding.library)
+        {
             let candidates = [
                 binding.module_name.as_deref(),
                 Some(binding.cell.as_str()),
@@ -918,6 +947,7 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
         }
 
         let project_view_exists = state
+            .model
             .library_manager
             .get_library(&binding.library)
             .and_then(|library| library.get_cell(&binding.cell))
@@ -944,10 +974,12 @@ fn component_model_evidence(state: &AppState, component: &Component) -> Componen
             ComponentModelEvidence::failed(model_name, Problem::Failure, text)
         };
         return match state
+            .model
             .model_library_manager
             .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model_name)
         {
             Ok(Some(provider)) => state
+                .model
                 .model_library_manager
                 .get_library(&provider.library)
                 .and_then(|library| {
@@ -1029,7 +1061,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .state
         .ui
         .results
-        .valid_selected_trace(&app.state.simulation)
+        .valid_selected_trace(&app.state.model.simulation)
         .cloned();
     let selected_artifact = app
         .state
@@ -1038,7 +1070,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .session
         .selected_result_artifact
         .clone()
-        .filter(|key| key.resolve(&app.state.simulation.retained.runs).is_some());
+        .filter(|key| {
+            key.resolve(&app.state.model.simulation.retained.runs)
+                .is_some()
+        });
 
     // What is being read comes before where it came from: a reader adjusting
     // a pane needs its axes and bindings first, and the dataset provenance
@@ -1052,7 +1087,13 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
 
     // The workspace's memoized projection: taking it fresh re-digested the run.
     let manifest = active_manifest(&mut app.state);
-    let details = match app.state.simulation.active_run().zip(manifest.as_deref()) {
+    let details = match app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .zip(manifest.as_deref())
+    {
         Some((run, manifest)) => result_authority::result_run(ui, run, &manifest.model),
         None => {
             muted_inspector_copy(ui, "No run selected.");
@@ -1071,10 +1112,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
     }
 
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = app.state.model.simulation.active_run() else {
         return;
     };
-    if let Some(index) = app.state.simulation.view.active_analysis_idx
+    if let Some(index) = app.state.model.simulation.view.active_analysis_idx
         && let Some(analysis) = run.analyses.get(index)
     {
         result_authority::result_convergence(ui, analysis);
@@ -1087,11 +1128,12 @@ fn selected_result_artifact(
     app: &mut RSpiceApp,
     selected: &rspice_results::result_presentation::ResultArtifactPresentationKey,
 ) {
-    let Some((run_index, _, analysis)) = selected.resolve(&app.state.simulation.retained.runs)
+    let Some((run_index, _, analysis)) =
+        selected.resolve(&app.state.model.simulation.retained.runs)
     else {
         return;
     };
-    let run = &app.state.simulation.retained.runs[run_index];
+    let run = &app.state.model.simulation.retained.runs[run_index];
     // Memoized per dataset generation: the validator walks every retained
     // sample. Intact data is the normal state and says nothing.
     let corrupted = analysis_evidence_failure(&app.state, run.dataset_id, analysis);
@@ -1110,7 +1152,7 @@ fn selected_result_trace(
     app: &mut RSpiceApp,
     selected: &rspice_results_ui::selection::SelectedResultTrace,
 ) {
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = app.state.model.simulation.active_run() else {
         return;
     };
     let Some((analysis_index, waveform_index, analysis, waveform)) = selected.resolve(run) else {
@@ -1214,7 +1256,7 @@ fn active_result_pane(
     if !crate::workbench::documents::result_document::viewer_draws_a_pane(viewer) {
         return;
     }
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = app.state.model.simulation.active_run() else {
         return;
     };
     let analysis_index = selected
@@ -1223,7 +1265,7 @@ fn active_result_pane(
                 .resolve(run)
                 .map(|(analysis_index, _, _, _)| analysis_index)
         })
-        .or(app.state.simulation.view.active_analysis_idx)
+        .or(app.state.model.simulation.view.active_analysis_idx)
         .unwrap_or(0);
     let Some(analysis) = run.analyses.get(analysis_index) else {
         return;
@@ -1448,10 +1490,11 @@ fn set_selected_trace_color(
     color: Color32,
 ) {
     let color = format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b());
-    let Some(run_index) = state.simulation.view.active_run_idx else {
+    let Some(run_index) = state.model.simulation.view.active_run_idx else {
         return;
     };
     let Some((analysis_index, waveform_index)) = state
+        .model
         .simulation
         .retained
         .runs
@@ -1465,6 +1508,7 @@ fn set_selected_trace_color(
         return;
     };
     if let Some(waveform) = state
+        .model
         .simulation
         .retained
         .runs
@@ -1477,8 +1521,9 @@ fn set_selected_trace_color(
     } else {
         return;
     }
-    if state.simulation.view.active_analysis_idx == Some(analysis_index)
+    if state.model.simulation.view.active_analysis_idx == Some(analysis_index)
         && let Some(waveform) = state
+            .model
             .simulation
             .view
             .waveforms
@@ -1504,15 +1549,15 @@ fn schematic_cross_probe_unavailability(
             "{signal} is a device current or derived quantity; no single schematic net carries it."
         ));
     };
-    let map = &state.simulation.source.cross_probe;
-    let topology = state.schematic.topology_version();
-    if !map.is_current_for(&state.workspace.content.active_view, topology) {
+    let map = &state.model.simulation.source.cross_probe;
+    let topology = state.model.schematic.topology_version();
+    if !map.is_current_for(&state.model.workspace.content.active_view, topology) {
         return Some(
             "The schematic changed since this result was produced; run again to cross-probe it."
                 .to_owned(),
         );
     }
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return Some("The selected result dataset is no longer retained.".to_owned());
     };
     if run.dataset_id != selected.dataset_id() || selected.resolve(run).is_none() {
@@ -1524,13 +1569,13 @@ fn schematic_cross_probe_unavailability(
                 .to_owned(),
         );
     };
-    if receipt.project_revision() != state.workspace.content.project.revision() {
+    if receipt.project_revision() != state.model.workspace.content.project.revision() {
         return Some(
             "The selected result was produced from a different project revision; run again before cross-probing it."
                 .to_owned(),
         );
     }
-    let here = state.workspace.content.occurrence_path(); // only that occurrence answers for a trace
+    let here = state.model.workspace.content.occurrence_path(); // only that occurrence answers for a trace
     // A trace is scoped by written instance names, `xamp` for a cell drawn
     // `amp`, so its scope is compared with the drawn occurrence by those names
     // and named to the reader as the occurrence the run drew.
@@ -1568,7 +1613,7 @@ fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<Stri
         .state
         .ui
         .results
-        .valid_selected_trace(&app.state.simulation)
+        .valid_selected_trace(&app.state.model.simulation)
         .ok_or_else(|| "No result trace is selected.".to_owned())?;
     if let Some(reason) = schematic_cross_probe_unavailability(&app.state, selected, signal) {
         return Err(reason);
@@ -1589,7 +1634,7 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.workbench.verification_page {
         VerificationPage::Yield => yield_details(ui, app),
         VerificationPage::Corners => {
-            let failed = app.state.simulation.active_run().and_then(|run| {
+            let failed = app.state.model.simulation.active_run().and_then(|run| {
                 run.analyses.iter().find(|analysis| {
                     analysis.analysis_type == crate::state::AnalysisType::Corner
                         && !analysis.success
@@ -1637,9 +1682,13 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
-    let run = app.state.simulation.active_run();
-    let evidence = app.state.simulation.yield_results_for_active_dataset();
-    let provenance = evidence.and(app.state.simulation.retained.yield_provenance());
+    let run = app.state.model.simulation.active_run();
+    let evidence = app
+        .state
+        .model
+        .simulation
+        .yield_results_for_active_dataset();
+    let provenance = evidence.and(app.state.model.simulation.retained.yield_provenance());
     let results = evidence.unwrap_or_default();
 
     section_header(ui, "Monte Carlo", None);
@@ -2138,6 +2187,7 @@ fn empty_diagnostic_row(ui: &mut Ui, message: &str) {
 /// deck, and a marked line when the deck is not the one the schematic implies.
 fn generated_provenance(ui: &mut Ui, state: &AppState) {
     let source = state
+        .model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -2159,10 +2209,10 @@ fn generated_provenance(ui: &mut Ui, state: &AppState) {
 /// about them; the document state reported success in catalog words. What is
 /// left is the file and a marked line when the deck needs attention.
 fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
-    if let Some(path) = state.workspace.content.netlist_source_path.as_ref() {
+    if let Some(path) = state.model.workspace.content.netlist_source_path.as_ref() {
         property_row(ui, "File", &path.display().to_string());
     }
-    let digest = crate::state::content_digest(&state.simulation.source.netlist_content);
+    let digest = crate::state::content_digest(&state.model.simulation.source.netlist_content);
     if let Some(label) = owned_source_state(state, digest) {
         // The same split the deck toolbar paints, and for the same reason:
         // not yet checked is where the deck is, not a verdict on it. A file
@@ -2239,6 +2289,7 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
         );
     }
     let owned = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -2272,7 +2323,7 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
 /// What is wrong with the generated deck, or nothing when it matches the
 /// schematic. A deck that is current — validated or not — says nothing.
 fn generated_state(state: &AppState) -> Option<(&'static str, Problem)> {
-    let netlist = &state.netlist_artifacts;
+    let netlist = &state.model.netlist_artifacts;
     if netlist.generated_source.is_empty() {
         Some(("Not generated yet", Problem::Warning))
     } else if netlist.generation_error.is_some() {

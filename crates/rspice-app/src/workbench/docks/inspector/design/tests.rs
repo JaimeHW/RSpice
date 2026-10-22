@@ -6,6 +6,7 @@
 //! design contract.
 
 mod off_sheet_connectors;
+mod veriloga_modules;
 
 use super::*;
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
@@ -16,9 +17,11 @@ use crate::state::{
 fn state_with_two_components() -> AppState {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
     state
+        .model
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(40, 0));
     state
@@ -30,7 +33,7 @@ fn app_with_model_bound_instance() -> (RSpiceApp, u64) {
     library.add_model(DeviceModel::new("OPA189_A", ModelType::Other));
     library.add_model(DeviceModel::new("OPA189_B", ModelType::Other));
     library.add_model(DeviceModel::new("unrelated_nmos", ModelType::Nmos));
-    app.state.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.add_library(library);
 
     let mut binding = LibraryCellInstance::new("vendor_analog", "OPA189", "spice");
     binding.module_name = Some("OPA189_A".to_owned());
@@ -40,11 +43,12 @@ fn app_with_model_bound_instance() -> (RSpiceApp, u64) {
         .with_library_cell(binding)
         .with_name_value("XU1", "OPA189");
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(component);
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.init_undo_history();
     (app, 41)
 }
 
@@ -165,25 +169,32 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
 
     const PROBE: u64 = 77;
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic.document_mut_for_test().probes.push(
-        SchematicProbe::new(
-            PROBE,
-            Point::new(10, 20),
-            "V(OUT)",
-            Some("V(OUT)".to_owned()),
-        )
-        .expect("the fixture probe is well formed"),
-    );
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .probes
+        .push(
+            SchematicProbe::new(
+                PROBE,
+                Point::new(10, 20),
+                "V(OUT)",
+                Some("V(OUT)".to_owned()),
+            )
+            .expect("the fixture probe is well formed"),
+        );
     app.state.sync_active_schematic_to_workspace();
 
     let key = app
         .state
+        .model
         .workspace
         .content
         .active_schematic_reference()
         .key();
     let first = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -192,6 +203,7 @@ fn app_with_probe_on_last_sheet(sheets: usize) -> (RSpiceApp, u64) {
     if sheets > 1 {
         let catalog = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -249,6 +261,7 @@ fn an_empty_selection_inspects_the_sheet() {
 fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
     let mut state = state_with_two_components();
     let ids: Vec<u64> = state
+        .model
         .schematic
         .document()
         .components
@@ -257,6 +270,7 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
         .collect();
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -265,6 +279,7 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
     assert_eq!(subject(&state, &[]), DesignSubject::Component(ids[0]));
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -276,10 +291,11 @@ fn one_instance_beats_the_set_and_several_fall_through_to_multi() {
 #[test]
 fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().probes.push(
+    state.model.schematic.document_mut_for_test().probes.push(
         SchematicProbe::new(73, Point::new(10, 20), "V(out)", Some("V(out)".to_owned())).unwrap(),
     );
     state
+        .model
         .schematic
         .session
         .editor
@@ -288,7 +304,13 @@ fn one_probe_has_its_own_inspector_and_mixed_selection_falls_back_to_multi() {
 
     assert_eq!(subject(&state, &[]), DesignSubject::Probe(73));
 
-    state.schematic.session.editor.selection.select_wire(9);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(9);
     assert_eq!(subject(&state, &[]), DesignSubject::Multi);
 }
 
@@ -314,14 +336,32 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
         },
     ];
 
-    state.schematic.session.editor.selection.select_wire(7);
-    state.schematic.session.editor.selection.select_wire(8);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(7);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(8);
     assert_eq!(
         subject(&state, &nets),
         DesignSubject::Net("vout".to_owned())
     );
 
-    state.schematic.session.editor.selection.select_wire(9);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(9);
     assert_eq!(subject(&state, &nets), DesignSubject::Multi);
 }
 
@@ -329,6 +369,7 @@ fn conductors_on_one_net_inspect_that_net_and_a_split_falls_back_to_multi() {
 fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -338,12 +379,14 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
             Point::origin(),
         ));
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(71);
     state
+        .model
         .schematic
         .session
         .editor
@@ -366,7 +409,7 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
         subject(&state, &nets),
         DesignSubject::Net("PORT_OUT".to_owned())
     );
-    state.schematic.session.editor.net_highlight.clear();
+    state.model.schematic.session.editor.net_highlight.clear();
     assert_eq!(subject(&state, &nets), DesignSubject::Component(71));
 }
 
@@ -374,6 +417,7 @@ fn wireless_semantic_net_selection_routes_to_the_exact_net_inspector() {
 fn explicit_junction_selection_resolves_its_live_net() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -383,6 +427,7 @@ fn explicit_junction_selection_resolves_its_live_net() {
             Point::new(20, 0),
         ));
     state
+        .model
         .schematic
         .session
         .editor
@@ -409,11 +454,13 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
     let port =
         Component::new(77, ComponentType::Port, Point::origin()).with_name_value("P1", "VIN");
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(port);
     state
+        .model
         .schematic
         .session
         .editor
@@ -434,7 +481,13 @@ fn a_selected_interface_port_routes_to_the_shared_net_inspector() {
 #[test]
 fn a_conductor_with_no_resolved_net_never_claims_one() {
     let mut state = AppState::default();
-    state.schematic.session.editor.selection.select_wire(42);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(42);
 
     // One unresolved wire is a single selected object, not a net.
     assert_eq!(subject(&state, &[]), DesignSubject::Multi);
@@ -444,6 +497,7 @@ fn a_conductor_with_no_resolved_net_never_claims_one() {
 fn isolated_instance_terminals_are_open_not_bound_to_synthetic_nodes() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -487,7 +541,7 @@ fn open_terminal_rows_are_disabled_while_bound_rows_remain_actionable() {
 fn a_net_below_the_root_is_read_under_its_instance_path() {
     let mut state = AppState::default();
     assert_eq!(net_engine_name(&state, "OUT").as_deref(), Some("out"));
-    state.workspace.descend_into(
+    state.model.workspace.descend_into(
         "X1".to_owned(),
         CellViewRef::new("user", "inverter", "schematic"),
         ViewType::Schematic,
@@ -502,6 +556,7 @@ fn a_net_below_the_root_is_read_under_its_instance_path() {
 fn the_net_panel_states_scope_and_pins_only() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -574,11 +629,11 @@ fn checks_header_speaks_only_when_the_check_is_not_current_and_clean() {
     assert_eq!(checks_status(&state).as_deref(), Some("not run"));
 
     state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
-    state.dialogs.drc_checked_version = state.schematic.topology_version().wrapping_add(1);
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version().wrapping_add(1);
     assert!(!checks_current(&state));
     assert_eq!(checks_status(&state).as_deref(), Some("stale"));
 
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
     assert!(checks_current(&state));
     assert_eq!(checks_status(&state), None);
 }
@@ -642,13 +697,13 @@ fn sheet_check_rows_report_real_unconnected_and_floating_counts() {
         }
     }
     state.dialogs.drc_results = Some(result);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
 
     assert_eq!(sheet_open_pin_findings(&state).len(), 1);
     assert_eq!(sheet_floating_net_findings(&state).len(), 1);
 
     // A check of an earlier drawing reports nothing about this one.
-    state.dialogs.drc_checked_version = state.schematic.topology_version() + 1;
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version() + 1;
     assert!(sheet_open_pin_findings(&state).is_empty());
 }
 
@@ -662,6 +717,7 @@ fn a_component_does_not_claim_a_placed_cells_finding_of_the_same_name() {
 
     let state = state_with_two_components();
     let resistor = state
+        .model
         .schematic
         .document()
         .components
@@ -767,13 +823,13 @@ fn soa_display_does_not_invent_evidence() {
 #[test]
 fn an_instance_has_a_checks_section_only_for_its_own_findings() {
     let (mut app, id) = app_with_model_bound_instance();
-    let component = app.state.schematic.document().components[0].clone();
+    let component = app.state.model.schematic.document().components[0].clone();
     let painted = painted_panel(|ui| component_checks(ui, &app, &component));
     assert!(painted.is_empty(), "unchecked: {painted}");
 
     let mut result = rspice_design::drc::DrcResult::new();
     app.state.dialogs.drc_results = Some(result.clone());
-    app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+    app.state.dialogs.drc_checked_version = app.state.model.schematic.topology_version();
     let painted = painted_panel(|ui| component_checks(ui, &app, &component));
     assert!(painted.is_empty(), "clean: {painted}");
 
@@ -798,30 +854,38 @@ fn inherited_temperature_materializes_one_undoable_instance_override() {
     let mut app = RSpiceApp::test_instance();
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
-    app.state.schematic.init_undo_history();
-    let component = app.state.schematic.document().components[0].clone();
+    app.state.model.schematic.init_undo_history();
+    let component = app.state.model.schematic.document().components[0].clone();
     let field = InlineEditField::Parameter(TEMPERATURE_PARAM.to_owned());
 
     assert_eq!(field_value(&component, &field), "");
     assert!(begin_edit(&mut app, id, field.clone()));
     update_edit(&mut app, "85°C".to_owned());
-    assert_eq!(app.state.schematic.document().components[0], component);
+    assert_eq!(
+        app.state.model.schematic.document().components[0],
+        component
+    );
     assert!(app.state.commit_inline_component_edit().unwrap());
 
     assert_eq!(
-        crate::state::parse_params_string(&app.state.schematic.document().components[0].params)
-            .get(TEMPERATURE_PARAM)
-            .map(String::as_str),
+        crate::state::parse_params_string(
+            &app.state.model.schematic.document().components[0].params
+        )
+        .get(TEMPERATURE_PARAM)
+        .map(String::as_str),
         Some("85")
     );
-    assert!(app.state.schematic.undo());
+    assert!(app.state.model.schematic.undo());
     assert!(
-        !crate::state::parse_params_string(&app.state.schematic.document().components[0].params)
-            .contains_key(TEMPERATURE_PARAM)
+        !crate::state::parse_params_string(
+            &app.state.model.schematic.document().components[0].params
+        )
+        .contains_key(TEMPERATURE_PARAM)
     );
-    assert!(!app.state.schematic.can_undo());
+    assert!(!app.state.model.schematic.can_undo());
 }
 
 #[test]
@@ -829,32 +893,36 @@ fn free_form_parameters_edit_is_atomic_and_undoable() {
     let mut app = RSpiceApp::test_instance();
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::CellInstance, Point::origin());
-    app.state.schematic.init_undo_history();
-    let component = app.state.schematic.document().components[0].clone();
+    app.state.model.schematic.init_undo_history();
+    let component = app.state.model.schematic.document().components[0].clone();
     let field = InlineEditField::Parameters;
 
     assert_eq!(field_value(&component, &field), "");
     assert!(begin_edit(&mut app, id, field.clone()));
     for candidate in ["m=2", "m=2 tc1=0.01"] {
         update_edit(&mut app, candidate.to_owned());
-        assert_eq!(app.state.schematic.document().components[0], component);
+        assert_eq!(
+            app.state.model.schematic.document().components[0],
+            component
+        );
     }
     assert!(app.state.commit_inline_component_edit().unwrap());
 
     assert_eq!(
-        app.state.schematic.document().components[0].params,
+        app.state.model.schematic.document().components[0].params,
         "m=2 tc1=0.01"
     );
-    assert!(app.state.schematic.undo());
+    assert!(app.state.model.schematic.undo());
     assert!(
-        app.state.schematic.document().components[0]
+        app.state.model.schematic.document().components[0]
             .params
             .is_empty()
     );
     assert!(
-        !app.state.schematic.can_undo(),
+        !app.state.model.schematic.can_undo(),
         "one inline session must create exactly one undo entry"
     );
 }
@@ -863,14 +931,16 @@ fn free_form_parameters_edit_is_atomic_and_undoable() {
 fn an_instance_rename_is_rejected_when_it_collides_or_is_empty() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 0));
-    state.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
-    state.schematic.document_mut_for_test().components[1].name = "R2".to_owned();
-    let subject = state.schematic.document().components[0].clone();
+    state.model.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
+    state.model.schematic.document_mut_for_test().components[1].name = "R2".to_owned();
+    let subject = state.model.schematic.document().components[0].clone();
 
     assert!(field_rejection(&state, &subject, &InlineEditField::Instance, "R7").is_none());
     assert!(
@@ -886,8 +956,8 @@ fn an_instance_rename_is_rejected_when_it_collides_or_is_empty() {
 #[test]
 fn an_instance_rename_still_obeys_the_family_designator_rule() {
     let mut state = state_with_two_components();
-    state.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
-    let resistor = state.schematic.document().components[0].clone();
+    state.model.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
+    let resistor = state.model.schematic.document().components[0].clone();
 
     let rejected = field_rejection(&state, &resistor, &InlineEditField::Instance, "C1")
         .expect("a resistor cannot take a capacitor designator");
@@ -897,7 +967,7 @@ fn an_instance_rename_still_obeys_the_family_designator_rule() {
 #[test]
 fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
     let state = state_with_two_components();
-    let subject = state.schematic.document().components[0].clone();
+    let subject = state.model.schematic.document().components[0].clone();
 
     assert!(field_rejection(&state, &subject, &InlineEditField::Value, "10k").is_none());
     assert!(field_rejection(&state, &subject, &InlineEditField::Value, "").is_none());
@@ -941,9 +1011,10 @@ fn declared_parameters_are_typed_while_unknown_extensions_remain_lossless() {
 fn an_inline_source_edit_is_refused_by_the_gate_the_editor_commits_through() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSourcePwl, Point::new(0, 0));
-    let subject = state.schematic.document().components[0].clone();
+    let subject = state.model.schematic.document().components[0].clone();
     let field = InlineEditField::Parameter("td".to_owned());
 
     let inline =
@@ -1002,7 +1073,7 @@ fn component_identity_reports_occurrence_and_graphical_execution_views() {
     let mut state = AppState::default();
     assert_eq!(containing_occurrence_path(&state), "/");
 
-    state.workspace.descend_into(
+    state.model.workspace.descend_into(
         "XAFE".to_owned(),
         CellViewRef::new("user", "afe_core", "schematic"),
         ViewType::Schematic,
@@ -1014,7 +1085,7 @@ fn component_identity_reports_occurrence_and_graphical_execution_views() {
         .with_name_value("RGAIN", "499");
 
     assert_eq!(containing_occurrence_path(&state), "/XAFE");
-    state.workspace.descend_into(
+    state.model.workspace.descend_into(
         "XBIAS".to_owned(),
         CellViewRef::new("user", "bias", "schematic"),
         ViewType::Schematic,
@@ -1030,27 +1101,42 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     let mut app = RSpiceApp::test_instance();
     let component_id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
-    app.state.schematic.document_mut_for_test().components[0].name = "RLOAD".to_owned();
-    app.state.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
-    let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+    app.state.model.schematic.document_mut_for_test().components[0].name = "RLOAD".to_owned();
+    app.state.model.schematic.document_mut_for_test().components[0].value = "10k".to_owned();
+    let plan_id = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap()
+        .id();
     let variables_before = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
         .unwrap()
         .design_variables
         .len();
-    let topology_before = app.state.schematic.topology_version();
+    let topology_before = app.state.model.schematic.topology_version();
 
     stage_component_tuning(&mut app, component_id).expect("resistor literal is tunable");
 
-    assert_eq!(app.state.schematic.document().components[0].value, "10k");
-    assert_eq!(app.state.schematic.topology_version(), topology_before);
+    assert_eq!(
+        app.state.model.schematic.document().components[0].value,
+        "10k"
+    );
+    assert_eq!(
+        app.state.model.schematic.topology_version(),
+        topology_before
+    );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1089,10 +1175,17 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
     let mut app = RSpiceApp::test_instance();
     let component_id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
-    app.state.schematic.document_mut_for_test().components[0].value = "{RGAIN}".to_owned();
-    let plan_id = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+    app.state.model.schematic.document_mut_for_test().components[0].value = "{RGAIN}".to_owned();
+    let plan_id = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap()
+        .id();
     let variable = crate::state::DesignVariable::new(
         "RGAIN",
         "499 ohm",
@@ -1106,6 +1199,7 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
     .unwrap();
     let variable_id = variable.id;
     app.state
+        .model
         .workspace
         .content
         .add_design_variable(plan_id, variable)
@@ -1126,6 +1220,7 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
     assert!(session.tuning_variables.iter().all(|draft| !draft.proposed));
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1141,9 +1236,10 @@ fn value_tuning_fails_closed_when_no_truthful_quantity_exists() {
     let mut app = RSpiceApp::test_instance();
     let component_id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Inductor, Point::origin());
-    app.state.schematic.document_mut_for_test().components[0].value = "10u".to_owned();
+    app.state.model.schematic.document_mut_for_test().components[0].value = "10u".to_owned();
 
     let error = stage_component_tuning(&mut app, component_id)
         .expect_err("inductance is not representable by the current typed variable schema");
@@ -1162,10 +1258,11 @@ fn value_tuning_fails_closed_when_no_truthful_quantity_exists() {
 fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .add_component(ComponentType::Inductor, Point::origin());
-    app.state.schematic.document_mut_for_test().components[0].value = "10u".to_owned();
-    let component = app.state.schematic.document().components[0].clone();
+    app.state.model.schematic.document_mut_for_test().components[0].value = "10u".to_owned();
+    let component = app.state.model.schematic.document().components[0].clone();
 
     let reason = component_tuning_action_block_reason(&app, &component)
         .expect("an unsupported typed quantity cannot expose an enabled Tune action");
@@ -1186,16 +1283,19 @@ fn unsupported_value_tuning_action_is_disabled_with_the_staging_reason() {
 fn applying_a_field_reports_whether_the_design_actually_changed() {
     let mut app = RSpiceApp::test_instance();
     app.state = state_with_two_components();
-    let id = app.state.schematic.document().components[0].id;
-    let before = app.state.schematic.topology_version();
+    let id = app.state.model.schematic.document().components[0].id;
+    let before = app.state.model.schematic.topology_version();
 
     assert!(begin_edit(&mut app, id, InlineEditField::Value));
     update_edit(&mut app, "10k".to_owned());
     assert!(app.state.commit_inline_component_edit().unwrap());
-    assert_eq!(app.state.schematic.document().components[0].value, "10k");
-    assert!(app.state.schematic.topology_version() > before);
+    assert_eq!(
+        app.state.model.schematic.document().components[0].value,
+        "10k"
+    );
+    assert!(app.state.model.schematic.topology_version() > before);
 
-    let settled = app.state.schematic.topology_version();
+    let settled = app.state.model.schematic.topology_version();
     assert!(begin_edit(&mut app, id, InlineEditField::Value));
     update_edit(&mut app, "10k".to_owned());
     assert!(
@@ -1203,7 +1303,7 @@ fn applying_a_field_reports_whether_the_design_actually_changed() {
         "rewriting the same text is not a change"
     );
     assert_eq!(
-        app.state.schematic.topology_version(),
+        app.state.model.schematic.topology_version(),
         settled,
         "an unchanged write must not advance topology"
     );
@@ -1214,6 +1314,7 @@ fn model_choices_stay_inside_the_bound_library_and_device_family() {
     let (app, id) = app_with_model_bound_instance();
     let component = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -1237,6 +1338,7 @@ fn bound_model_choices_reject_other_family_and_polarity_collisions() {
     let (mut app, id) = app_with_model_bound_instance();
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library_mut("vendor_analog")
         .expect("fixture library");
@@ -1246,13 +1348,13 @@ fn bound_model_choices_reject_other_family_and_polarity_collisions() {
     let mut pjf = DeviceModel::new("PJF_MODEL", ModelType::Other);
     pjf.spice_type = Some("PJF".to_owned());
     library.add_model(pjf);
-    app.state.schematic.document_mut_for_test().components[0]
+    app.state.model.schematic.document_mut_for_test().components[0]
         .library_cell
         .as_mut()
         .expect("fixture binding")
         .module_name = Some("NJF_MODEL".to_owned());
 
-    let component = &app.state.schematic.document().components[0];
+    let component = &app.state.model.schematic.document().components[0];
     let choices = bound_model_choices(&app.state, component, "NJF_MODEL");
     assert_eq!(
         choices
@@ -1261,11 +1363,11 @@ fn bound_model_choices_reject_other_family_and_polarity_collisions() {
             .collect::<Vec<_>>(),
         ["NJF_MODEL"]
     );
-    let before = app.state.schematic.topology_version();
+    let before = app.state.model.schematic.topology_version();
     let error = apply_bound_model_choice(&mut app, id, "PJF_MODEL")
         .expect_err("P-channel JFET must not replace an N-channel JFET");
     assert!(error.contains("incompatible"), "{error}");
-    assert_eq!(app.state.schematic.topology_version(), before);
+    assert_eq!(app.state.model.schematic.topology_version(), before);
 }
 
 #[test]
@@ -1278,7 +1380,7 @@ fn bound_model_choices_accept_same_family_across_catalog_model_types() {
     let mut varactor = DeviceModel::new("VARACTOR_B", ModelType::Varactor);
     varactor.spice_type = Some("D".to_owned());
     library.add_model(varactor);
-    app.state.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.add_library(library);
 
     let mut binding = LibraryCellInstance::new("junctions", "junction", "spice");
     binding.module_name = Some("DIODE_A".to_owned());
@@ -1287,15 +1389,16 @@ fn bound_model_choices_accept_same_family_across_catalog_model_types() {
         .with_library_cell(binding)
         .with_name_value("D1", "junction");
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(component);
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.init_undo_history();
 
     let choices = bound_model_choices(
         &app.state,
-        &app.state.schematic.document().components[0],
+        &app.state.model.schematic.document().components[0],
         "DIODE_A",
     );
     assert_eq!(
@@ -1323,7 +1426,7 @@ fn bound_model_choices_offer_a_binned_family_once() {
         card.spice_type = Some("NMOS".to_owned());
         kit.add_model(card);
     }
-    app.state.model_library_manager.add_library(kit);
+    app.state.model.model_library_manager.add_library(kit);
     let mut binding = LibraryCellInstance::new("kit", "nch_cell", "spice");
     binding.module_name = Some("nch.1".to_owned());
     binding.netlist_template = Some("M{name} {nodes} {model} {params}".to_owned());
@@ -1331,13 +1434,14 @@ fn bound_model_choices_offer_a_binned_family_once() {
         .with_library_cell(binding)
         .with_name_value("XM1", "nch_cell");
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(component);
-    app.state.schematic.init_undo_history();
+    app.state.model.schematic.init_undo_history();
 
-    let component = app.state.schematic.document().components[0].clone();
+    let component = app.state.model.schematic.document().components[0].clone();
     let choices = bound_model_choices(&app.state, &component, "nch.1");
     let owned = |pairs: &[(&str, &str)]| {
         pairs
@@ -1355,7 +1459,7 @@ fn bound_model_choices_offer_a_binned_family_once() {
     );
 
     assert!(apply_bound_model_choice(&mut app, 61, "nch").expect("the family validates"));
-    let component = app.state.schematic.document().components[0].clone();
+    let component = app.state.model.schematic.document().components[0].clone();
     assert_eq!(
         component
             .library_cell
@@ -1380,7 +1484,7 @@ fn a_veriloga_cell_opens_its_exact_code_source_target() {
     cell.add_view(View::new("veriloga", ViewType::VerilogA));
     let mut library = Library::new("behavioral");
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     let binding = LibraryCellInstance::new("behavioral", "sensor_bridge", "veriloga");
     let component = Component::new(7, ComponentType::CellInstance, Point::origin())
         .with_library_cell(binding)
@@ -1399,22 +1503,22 @@ fn a_veriloga_cell_opens_its_exact_code_source_target() {
 #[test]
 fn selecting_a_bound_model_is_atomic_undoable_and_netlist_authoritative() {
     let (mut app, id) = app_with_model_bound_instance();
-    let before = app.state.schematic.topology_version();
+    let before = app.state.model.schematic.topology_version();
     assert!(
         apply_bound_model_choice(&mut app, id, "OPA189_B")
             .expect("same opaque cell-model family is compatible")
     );
-    let binding = app.state.schematic.document().components[0]
+    let binding = app.state.model.schematic.document().components[0]
         .library_cell
         .as_ref()
         .expect("binding");
     assert_eq!(binding.module_name.as_deref(), Some("OPA189_B"));
-    assert!(app.state.schematic.topology_version() > before);
-    assert!(app.state.schematic.can_undo());
+    assert!(app.state.model.schematic.topology_version() > before);
+    assert!(app.state.model.schematic.can_undo());
 
-    assert!(app.state.schematic.undo());
+    assert!(app.state.model.schematic.undo());
     assert_eq!(
-        app.state.schematic.document().components[0]
+        app.state.model.schematic.document().components[0]
             .library_cell
             .as_ref()
             .and_then(|binding| binding.module_name.as_deref()),
@@ -1427,35 +1531,38 @@ fn the_default_section_choice_removes_the_instance_override() {
     let (mut app, id) = app_with_model_bound_instance();
     apply_bound_model_section(&mut app, id, "");
     assert_eq!(
-        app.state.schematic.document().components[0]
+        app.state.model.schematic.document().components[0]
             .library_cell
             .as_ref()
             .and_then(|binding| binding.model_section.as_deref()),
         None
     );
-    assert!(app.state.schematic.can_undo());
+    assert!(app.state.model.schematic.can_undo());
 }
 
 #[test]
 fn an_inline_session_folds_its_keystrokes_into_one_undo_entry() {
     let mut app = RSpiceApp::test_instance();
     app.state = state_with_two_components();
-    let id = app.state.schematic.document().components[0].id;
-    app.state.schematic.init_undo_history();
-    let before = app.state.schematic.document().components[0].clone();
+    let id = app.state.model.schematic.document().components[0].id;
+    app.state.model.schematic.init_undo_history();
+    let before = app.state.model.schematic.document().components[0].clone();
     assert!(begin_edit(&mut app, id, InlineEditField::Value));
 
     for text in ["1", "1k", "15k"] {
         update_edit(&mut app, text.to_owned());
-        assert_eq!(app.state.schematic.document().components[0], before);
+        assert_eq!(app.state.model.schematic.document().components[0], before);
     }
     assert!(app.state.commit_inline_component_edit().unwrap());
-    assert_eq!(app.state.schematic.document().components[0].value, "15k");
+    assert_eq!(
+        app.state.model.schematic.document().components[0].value,
+        "15k"
+    );
 
-    assert!(app.state.schematic.undo());
-    assert_eq!(app.state.schematic.document().components[0], before);
+    assert!(app.state.model.schematic.undo());
+    assert_eq!(app.state.model.schematic.document().components[0], before);
     assert!(
-        !app.state.schematic.can_undo(),
+        !app.state.model.schematic.can_undo(),
         "three keystrokes produced more than one undo step"
     );
 }
@@ -1544,8 +1651,9 @@ fn a_mos_operating_point_shows_the_designer_set_in_engineering_units() {
 #[test]
 fn a_level_1_mosfet_is_offered_only_the_parameters_its_card_reads() {
     let mut state = AppState::default();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut state.schematic);
+    crate::workbench::examples::load_example("CMOS Inverter", &mut state.model.schematic);
     let mut component = state
+        .model
         .schematic
         .document()
         .components
@@ -1600,7 +1708,7 @@ fn a_device_below_the_root_is_read_under_its_instance_path() {
         device_engine_name(&state, &component).as_deref(),
         Some("mn")
     );
-    state.workspace.descend_into(
+    state.model.workspace.descend_into(
         "X1".to_owned(),
         CellViewRef::new("user", "inverter", "schematic"),
         ViewType::Schematic,
@@ -1737,10 +1845,15 @@ fn terminal_rows_start_at_the_panel_inset_with_no_empty_caret_column() {
 #[test]
 fn an_unbound_probe_states_its_missing_signal_as_a_problem() {
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic.document_mut_for_test().probes.push(
-        SchematicProbe::new(5, Point::new(10, 20), "P1", None)
-            .expect("an unbound probe is well formed"),
-    );
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .probes
+        .push(
+            SchematicProbe::new(5, Point::new(10, 20), "P1", None)
+                .expect("an unbound probe is well formed"),
+        );
     let nodes = accesskit_nodes(|ui| probe_panel(ui, &mut app, 5));
     assert!(
         nodes.iter().any(|(_, node)| {
@@ -1765,8 +1878,9 @@ fn an_unbound_probe_states_its_missing_signal_as_a_problem() {
 /// projection refuses such a configuration, so a surface that still shows
 /// connectivity afterwards is showing the editor buffer's.
 fn unresolve_configuration(state: &mut AppState) {
-    let root = state.workspace.content.active_view.clone();
+    let root = state.model.workspace.content.active_view.clone();
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -1790,6 +1904,7 @@ fn unresolve_configuration(state: &mut AppState) {
 fn the_inspector_states_an_unresolved_configuration_instead_of_buffer_connectivity() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -1832,6 +1947,7 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
     // document it read, which is what this pins.
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -1841,6 +1957,7 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
             Point::new(40, 0),
         ));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -1851,19 +1968,26 @@ fn the_inspector_reads_the_projection_so_coincident_pages_stay_two_nets() {
         ));
     state.sync_active_schematic_to_workspace();
     assert_eq!(
-        rspice_design::connectivity::summary::design_nets(&state.schematic).len(),
+        rspice_design::connectivity::summary::design_nets(&state.model.schematic).len(),
         1,
         "the editor buffer holds one coordinate space, so its pages overlap"
     );
 
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let first = state
+        .model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&key, "Page 1", [FIRST_WIRE])
         .expect("a fresh cell view accepts its first governed sheet");
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -1898,11 +2022,11 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
     use crate::state::model_library::ModelConsumerScope;
 
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     for name in ["alpha", "beta"] {
         let mut library = ModelLibrary::new(name);
         library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
     }
     let component = Component::new(77, ComponentType::Diode, Point::origin())
         .with_name_value("D77", "shared_diode");
@@ -1924,6 +2048,7 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
     // `beta`, so the inspector must stop calling the same reference ambiguous
     // and must offer the source of the copy that actually wins.
     state
+        .model
         .model_library_manager
         .resolve_definition_provider(
             ModelConsumerScope::PrimitiveModel,
@@ -1944,369 +2069,6 @@ fn a_resolved_contested_model_reads_as_resolved_and_keeps_its_source_jump() {
     );
 }
 
-/// A compiled module parameter, as a clean compile states it.
-fn module_parameter(
-    name: &str,
-    default: Option<&str>,
-    units: Option<&str>,
-    description: Option<&str>,
-) -> rspice_design::library::metadata::CellParameter {
-    use rspice_design::library::metadata::{
-        CellParameter, ParameterDeclaration, ParameterScope, ParameterValueType,
-    };
-    CellParameter {
-        name: name.to_owned(),
-        aliases: Vec::new(),
-        required: false,
-        default_value: default.map(str::to_owned),
-        declaration: Some(ParameterDeclaration {
-            value_type: ParameterValueType::Real,
-            scope: ParameterScope::Instance,
-            range: None,
-            units: units.map(str::to_owned),
-            description: description.map(str::to_owned),
-        }),
-    }
-}
-
-/// An instance `X1` setting `params` of `behavioral/amp`, whose `veriloga`
-/// view's compile stated `contract`.
-fn app_with_compiled_veriloga_instance(
-    contract: &[rspice_design::library::metadata::CellParameter],
-    params: &str,
-) -> (RSpiceApp, Component) {
-    let mut app = RSpiceApp::test_instance();
-    let mut view = View::new("veriloga", ViewType::VerilogA);
-    view.metadata
-        .insert("veriloga.module".to_owned(), "amp".to_owned());
-    view.metadata
-        .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
-    view.metadata.insert(
-        rspice_design::library::metadata::VERILOGA_PARAMETER_CONTRACT_KEY.to_owned(),
-        rspice_design::library::metadata::encode_veriloga_parameter_contract(contract)
-            .expect("a compiled contract encodes"),
-    );
-    let mut cell = Cell::new("amp");
-    cell.add_view(view);
-    let mut library = Library::new("behavioral");
-    library.add_cell(cell);
-    app.state.library_manager.add_library(library);
-    let mut binding = LibraryCellInstance::new("behavioral", "amp", "veriloga");
-    binding.terminal_order = vec!["p".to_owned(), "n".to_owned()];
-    let mut component = Component::new(51, ComponentType::CellInstance, Point::origin())
-        .with_library_cell(binding)
-        .with_name_value("X1", "amp");
-    component.params = params.to_owned();
-    app.state
-        .schematic
-        .document_mut_for_test()
-        .components
-        .push(component.clone());
-    app.state.schematic.init_undo_history();
-    (app, component)
-}
-
-/// The unit a parameter is in sits beside its field and what it is sits on
-/// its label's hover, for a compiled module's parameter and for a native
-/// device's alike; a module's computed default reads as such.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn parameter_rows_carry_units_and_descriptions_for_modules_and_native_devices() {
-    let (mut app, component) = app_with_compiled_veriloga_instance(
-        &[
-            module_parameter("gain", Some("2.5"), Some("S"), Some("Transconductance")),
-            module_parameter("vmax", None, Some("V"), None),
-        ],
-        "",
-    );
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
-    let row = |key: &str| {
-        rows.iter()
-            .find(|row| row.key == key)
-            .unwrap_or_else(|| panic!("a {key} row: {rows:?}"))
-    };
-    assert_eq!(row("gain").unit.as_deref(), Some("S"));
-    assert_eq!(row("gain").hint, "2.5");
-    assert!(
-        row("gain")
-            .description
-            .as_deref()
-            .is_some_and(|description| description.starts_with("Transconductance.")),
-        "{:?}",
-        row("gain").description
-    );
-    assert_eq!(row("vmax").hint, "computed");
-
-    let evidence = super::super::component_model_evidence(&app.state, &component);
-    let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
-    assert!(
-        painted.lines().any(|line| line == "S") && painted.lines().any(|line| line == "V"),
-        "each unit is painted beside its field:\n{painted}"
-    );
-    let nodes = accesskit_nodes(|ui| parameters_section(ui, &mut app, &component, &evidence));
-    assert!(
-        nodes.iter().any(|(_, node)| {
-            node.label() == Some("gain")
-                && node
-                    .description()
-                    .is_some_and(|description| description.starts_with("Transconductance."))
-        }),
-        "the field is described by the module's own words"
-    );
-
-    let capacitor = Component::new(9, ComponentType::Capacitor, Point::origin());
-    let rows = inline_parameter_contract(&app.state, &capacitor, &HashMap::new());
-    let tc1 = rows
-        .iter()
-        .find(|row| row.key == "tc1")
-        .expect("a capacitor's temperature coefficient row");
-    assert_eq!(tc1.unit.as_deref(), Some("1/°C"));
-    assert_eq!(
-        tc1.description.as_deref(),
-        Some("First-order temperature coefficient")
-    );
-}
-
-/// `m` is a module's `$mfactor`: a module instance keeps its multiplicity
-/// row, and an edit there sets the typed multiplicity the deck emits, never
-/// parameter text the netlister would refuse.
-#[test]
-fn m_on_a_module_instance_is_its_typed_multiplicity() {
-    let (mut app, component) = app_with_compiled_veriloga_instance(
-        &[module_parameter("gain", Some("2.5"), None, None)],
-        "",
-    );
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
-    assert!(rows.iter().any(|row| row.key == "m"), "{rows:?}");
-
-    let field = InlineEditField::Parameter("m".to_owned());
-    assert!(begin_edit(&mut app, component.id, field.clone()));
-    update_edit(&mut app, "2".to_owned());
-    app.state
-        .commit_inline_component_edit()
-        .expect("a multiplicity of 2 commits");
-    let edited = app.state.schematic.document().components[0].clone();
-    assert_eq!(
-        edited
-            .multiplicity
-            .map(crate::state::InstanceMultiplicity::value),
-        Some(2.0)
-    );
-    assert!(
-        crate::state::parse_params_string(&edited.params).is_empty(),
-        "m is never written as parameter text: {}",
-        edited.params
-    );
-    assert_eq!(field_value(&edited, &field), "2");
-}
-
-/// A module reads `$temperature`, so an instance of one is offered `temp`
-/// only as a parameter its module declares, as that parameter's own row.
-#[test]
-fn temp_is_offered_on_a_module_instance_only_as_a_declared_parameter() {
-    let (app, component) = app_with_compiled_veriloga_instance(
-        &[module_parameter("gain", Some("2.5"), None, None)],
-        "",
-    );
-    assert!(!supports_instance_temperature(&app.state, &component));
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
-    assert!(
-        rows.iter().all(|row| row.key != TEMPERATURE_PARAM),
-        "{rows:?}"
-    );
-
-    let (app, component) = app_with_compiled_veriloga_instance(
-        &[
-            module_parameter("gain", Some("2.5"), None, None),
-            module_parameter("Temp", Some("27"), Some("C"), None),
-        ],
-        "",
-    );
-    assert!(!supports_instance_temperature(&app.state, &component));
-    let rows = inline_parameter_contract(&app.state, &component, &HashMap::new());
-    let temp = rows
-        .iter()
-        .find(|row| row.key == TEMPERATURE_PARAM)
-        .expect("the module's own temp row");
-    assert_eq!((temp.label.as_str(), temp.hint.as_str()), ("Temp", "27"));
-
-    // A native device still takes the instance temperature.
-    let resistor = Component::new(9, ComponentType::Resistor, Point::origin());
-    assert!(supports_instance_temperature(&app.state, &resistor));
-}
-
-/// A value for a parameter the module no longer declares is shown, flagged,
-/// and removable, and the remove is one undoable edit that touches nothing
-/// else.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn an_undeclared_parameter_value_is_flagged_and_removable() {
-    let (mut app, component) = app_with_compiled_veriloga_instance(
-        &[module_parameter("gain", Some("2.5"), None, None)],
-        "gain=3 offset=1m",
-    );
-    let declared = crate::state::parse_params_string(&component.params);
-    let rows = inline_parameter_contract(&app.state, &component, &declared);
-    let offset = rows
-        .iter()
-        .find(|row| row.key == "offset")
-        .expect("the stale value has a row");
-    assert!(offset.undeclared && !offset.editable, "{offset:?}");
-    assert!(
-        rows.iter()
-            .filter(|row| row.key == "gain")
-            .all(|row| !row.undeclared)
-    );
-
-    let evidence = super::super::component_model_evidence(&app.state, &component);
-    let painted = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
-    assert!(
-        painted.contains(UNDECLARED_PARAMETER_NOTE)
-            && painted.contains(REMOVE_UNDECLARED_PARAMETER),
-        "{painted}"
-    );
-
-    assert!(
-        app.state
-            .remove_undeclared_instance_parameter(component.id, "gain")
-            .is_err(),
-        "a declared parameter is edited, not removed"
-    );
-    assert_eq!(
-        app.state
-            .remove_undeclared_instance_parameter(component.id, "offset"),
-        Ok(true)
-    );
-    let removed = &app.state.schematic.document().components[0];
-    assert_eq!(removed.params, "gain=3");
-    assert!(app.state.schematic.can_undo());
-}
-
-/// [`app_with_compiled_veriloga_instance`] whose view owns its module's
-/// source, compiled, and whose cell has the symbol a compile generates.
-fn app_with_owned_veriloga_instance() -> (RSpiceApp, Component) {
-    let (mut app, component) = app_with_compiled_veriloga_instance(
-        &[module_parameter("gain", Some("10"), Some("V/V"), None)],
-        "gain=5",
-    );
-    let reference = CellViewRef::new("behavioral", "amp", "veriloga");
-    let ports = [
-        crate::state::PortSpec {
-            name: "p".to_owned(),
-            direction: PortDirection::InOut,
-        },
-        crate::state::PortSpec {
-            name: "n".to_owned(),
-            direction: PortDirection::InOut,
-        },
-    ];
-    let mut symbol = View::new("symbol", ViewType::Symbol);
-    rspice_design::symbol::generated::store_generated_symbol(&mut symbol, &ports, |_| None)
-        .expect("the symbol stores");
-    app.state
-        .library_manager
-        .get_library_mut("behavioral")
-        .and_then(|library| library.get_cell_mut("amp"))
-        .expect("the cell")
-        .add_view(symbol);
-    let bundle = crate::state::ProjectSourceBundle::try_new(
-        crate::state::ProjectSourceOwner::cell_view(reference),
-        crate::state::ProjectSourceLanguage::VerilogA,
-        "amp.va",
-        "module amp(p, n);\n  inout p, n;\n  electrical p, n;\n  parameter real gain = 10;\n  analog I(p, n) <+ gain * V(p, n);\nendmodule\n",
-        [],
-        [],
-    )
-    .expect("a cell-view bundle");
-    let id = bundle.id();
-    let sources = &mut app.state.workspace.content.project_sources;
-    sources
-        .insert_bundle(bundle)
-        .expect("one bundle per cell view");
-    sources
-        .mark_bundle_validated(id)
-        .expect("the module compiled");
-    (app, component)
-}
-
-/// An instance of a module says what it is and nothing a model library
-/// would: its view is a Verilog-A module, it runs that module, and no model
-/// card or library section is offered. A current compile is not a warning.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-fn a_module_instance_states_its_view_and_module_and_no_model_library_rows() {
-    let (mut app, component) = app_with_owned_veriloga_instance();
-
-    let evidence = super::super::component_model_evidence(&app.state, &component);
-    assert_eq!(evidence.model.as_deref(), Some("amp"));
-    assert_eq!(evidence.problem, None, "a current compile says nothing");
-
-    let identity = painted_panel(|ui| identity_section(ui, &mut app, &component));
-    assert!(
-        identity.lines().any(|line| line == "veriloga"),
-        "{identity}"
-    );
-    assert!(!identity.contains("spice"), "{identity}");
-    assert!(
-        identity.lines().any(|line| line == "Open Verilog-A view")
-            && !identity.contains("model source"),
-        "{identity}"
-    );
-    let parameters = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
-    let labels = parameters.lines().collect::<Vec<_>>();
-    assert!(
-        !labels.contains(&"Module"),
-        "the module is the cell the Library cell row names: {parameters}"
-    );
-    assert!(
-        !labels.contains(&"editable"),
-        "a writable document is the normal state: {parameters}"
-    );
-    assert!(
-        !labels.contains(&"Model") && !labels.contains(&"Section"),
-        "{parameters}"
-    );
-
-    // An edit since the compile is worth a look, and says so.
-    let bundle = app
-        .state
-        .workspace
-        .content
-        .project_sources
-        .bundle_for_owner(&crate::state::ProjectSourceOwner::cell_view(
-            CellViewRef::new("behavioral", "amp", "veriloga"),
-        ))
-        .expect("the bundle")
-        .id();
-    app.state
-        .workspace
-        .content
-        .project_sources
-        .replace_bundle_file_content(
-            bundle,
-            "amp.va",
-            "module amp(p, n);\nendmodule\n".to_owned(),
-        )
-        .expect("the edit applies");
-    let evidence = super::super::component_model_evidence(&app.state, &component);
-    assert_eq!(
-        evidence.problem.as_ref().map(|(problem, _)| *problem),
-        Some(Problem::Warning)
-    );
-    let parameters = painted_panel(|ui| parameters_section(ui, &mut app, &component, &evidence));
-    assert!(parameters.contains("Recompile needed"), "{parameters}");
-}
-
-/// A component's title says what it is: a cell instance by its cell, a
-/// primitive by its device kind.
-#[test]
-fn a_components_title_names_what_it_instantiates() {
-    let (_, module) = app_with_owned_veriloga_instance();
-    assert_eq!(component_title_kind(&module), "amp");
-    let resistor = Component::new(9, ComponentType::Resistor, Point::origin());
-    assert_eq!(component_title_kind(&resistor), "Resistor");
-}
-
 /// The component panel opens on its title and names the occurrence only below
 /// the design root, where it says something.
 #[cfg(not(target_arch = "wasm32"))]
@@ -2321,7 +2083,7 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
         "the title leads the panel and says nothing of the root: {painted}"
     );
 
-    app.state.workspace.descend_into(
+    app.state.model.workspace.descend_into(
         "XAFE".to_owned(),
         CellViewRef::new("user", "afe_core", "schematic"),
         ViewType::Schematic,
@@ -2344,9 +2106,10 @@ fn the_component_title_states_the_occurrence_only_below_the_root() {
 #[test]
 fn the_cmos_inverter_example_binds_models_the_library_resolves() {
     let mut state = AppState::default();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut state.schematic);
+    crate::workbench::examples::load_example("CMOS Inverter", &mut state.model.schematic);
     for (name, model) in [("MP", "RSPICE_PMOS"), ("MN", "RSPICE_NMOS")] {
         let component = state
+            .model
             .schematic
             .document()
             .components

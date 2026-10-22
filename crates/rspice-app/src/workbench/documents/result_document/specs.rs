@@ -30,7 +30,7 @@ use super::ResultViewer;
 fn untracked_measurements(state: &AppState) -> Vec<String> {
     let mut names = Vec::new();
     let mut seen = HashSet::new();
-    if let Some(run) = state.simulation.active_run() {
+    if let Some(run) = state.model.simulation.active_run() {
         for analysis in &run.analyses {
             for name in analysis.scalar_evidence_names() {
                 if seen.insert(name.to_ascii_lowercase()) {
@@ -43,6 +43,7 @@ fn untracked_measurements(state: &AppState) -> Vec<String> {
         .into_iter()
         .filter(|name| {
             !state
+                .model
                 .workspace
                 .content
                 .specs
@@ -63,9 +64,9 @@ fn untracked_measurements(state: &AppState) -> Vec<String> {
 /// the verdict the run had actually earned, and moved the identity of an
 /// immutable result.
 pub(crate) fn active_run_specifications(state: &AppState) -> Vec<SpecEntry> {
-    state.simulation.active_run().map_or_else(
-        || state.workspace.content.specs.clone(),
-        |run| resolved_specifications(run, &state.workspace.content.specs).into_owned(),
+    state.model.simulation.active_run().map_or_else(
+        || state.model.workspace.content.specs.clone(),
+        |run| resolved_specifications(run, &state.model.workspace.content.specs).into_owned(),
     )
 }
 
@@ -97,17 +98,18 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     let focus_analysis = rspice_results_ui::specs::show(
         ui,
-        state.simulation.active_run().map(|run| &run.data),
-        &state.workspace.content.specs,
+        state.model.simulation.active_run().map(|run| &run.data),
+        &state.model.workspace.content.specs,
         state.workbench.selected_specification.as_deref(),
     );
     if let Some(analysis_index) = focus_analysis {
         let viewer = state
+            .model
             .simulation
             .active_run()
             .and_then(|run| run.analyses.get(analysis_index))
             .map_or(ResultViewer::Manifest, source_viewer);
-        if state.simulation.select_analysis(analysis_index) {
+        if state.model.simulation.select_analysis(analysis_index) {
             state.ui.results.session.viewer = viewer;
             state.ui.results.session.clear_cursors();
         }
@@ -146,6 +148,7 @@ fn source_viewer(analysis: &crate::state::AnalysisResult) -> ResultViewer {
 fn show_editor(ui: &mut Ui, state: &mut AppState) {
     let untracked = untracked_measurements(state);
     let analysis_options = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| {
@@ -170,7 +173,7 @@ fn show_editor(ui: &mut Ui, state: &mut AppState) {
         ("All PVT points".to_owned(), SpecPointScope::AllPoints),
         ("Nominal only".to_owned(), SpecPointScope::Nominal),
     ];
-    if let Some(dimension) = state.sim_setup.run_set.enabled_dimension_of(
+    if let Some(dimension) = state.model.sim_setup.run_set.enabled_dimension_of(
         rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection,
     ) {
         scope_options.extend(dimension.values.iter().map(|value| {
@@ -212,13 +215,14 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
         }
     }
     let Ok(plan_id) = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(crate::simulation::plan::SimulationPlan::id)
     else {
         return false;
     };
-    let mut workspace = state.workspace.clone();
+    let mut workspace = state.model.workspace.clone();
     workspace
         .content
         .replace_active_specification_definitions(plan_id, specs);
@@ -229,15 +233,15 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
     {
         return false;
     }
-    let mut setup = state.sim_setup.clone();
+    let mut setup = state.model.sim_setup.clone();
     if setup
         .commit_active_plan_configuration_change("Updated output specifications.")
         .is_err()
     {
         return false;
     }
-    state.workspace = workspace;
-    state.sim_setup = setup;
+    state.model.workspace = workspace;
+    state.model.sim_setup = setup;
     state.workbench.preflight = Default::default();
     state.ui.results.session.spec_drafts = None;
     true
@@ -246,12 +250,14 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
 /// Open the editor seeded from the current workspace specs.
 pub fn open_editor(state: &mut AppState) {
     let drafts = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(crate::simulation::plan::SimulationPlan::id)
         .map_or_else(Vec::new, |plan_id| {
             state
+                .model
                 .workspace
                 .content
                 .plan_data(plan_id)
@@ -265,6 +271,7 @@ pub fn open_editor(state: &mut AppState) {
                 })
                 .unwrap_or_else(|| {
                     state
+                        .model
                         .workspace
                         .content
                         .specs
@@ -284,8 +291,8 @@ pub fn open_editor(state: &mut AppState) {
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     rspice_results_ui::specs::right_panel(
         ui,
-        state.simulation.active_run().map(|run| &run.data),
-        &state.workspace.content.specs,
+        state.model.simulation.active_run().map(|run| &run.data),
+        &state.model.workspace.content.specs,
     );
 }
 

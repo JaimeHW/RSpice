@@ -46,10 +46,11 @@ impl SheetBarHost for Host<'_> {
                 // empty Results landing so the destination boundary does
                 // not immediately reopen the editor the user dismissed.
                 let selected_plan_dataset = state
+                    .model
                     .sim_setup
                     .stable_analysis_plan()
                     .ok()
-                    .and_then(|plan| state.simulation.active_run_for_plan(plan.id()));
+                    .and_then(|plan| state.model.simulation.active_run_for_plan(plan.id()));
                 if selected_plan_dataset.is_none() {
                     state.ui.results.session.viewer = ResultViewer::Waves;
                 }

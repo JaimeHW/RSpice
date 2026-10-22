@@ -30,25 +30,28 @@ fn inverter_bound_to_the_family(label: &str, length: &str) -> (AppState, std::pa
     fs::write(&path, FAMILY).expect("write the family");
 
     let mut state = AppState::default();
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind
             == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
         {
             dimension.enabled = false;
         }
     }
-    crate::workbench::examples::load_example("CMOS Inverter", &mut state.schematic);
+    crate::workbench::examples::load_example("CMOS Inverter", &mut state.model.schematic);
     let library = state
+        .model
         .model_library_manager
         .load_library_file(&path, None)
         .expect("load the kit");
-    state.sim_setup.model_bindings.push(
+    state.model.sim_setup.model_bindings.push(
         state
+            .model
             .model_library_manager
             .simulation_plan_binding(&library)
             .expect("bind the kit to the plan"),
     );
     let pull_down = state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -60,7 +63,7 @@ fn inverter_bound_to_the_family(label: &str, length: &str) -> (AppState, std::pa
     let mut drc = DrcResult::new();
     drc.completed = true;
     state.dialogs.drc_results = Some(drc);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
     (state, directory)
 }
 

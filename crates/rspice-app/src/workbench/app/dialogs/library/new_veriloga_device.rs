@@ -66,8 +66,8 @@ pub(crate) struct NewVerilogADeviceFormState {
 /// Open New Verilog-A device… on the library holding the active design,
 /// remembering the schematic it was opened from.
 pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
-    let libraries = writable_libraries(&state.library_manager);
-    let active = &state.workspace.content.active_view;
+    let libraries = writable_libraries(&state.model.library_manager);
+    let active = &state.model.workspace.content.active_view;
     let library = libraries
         .iter()
         .find(|name| **name == active.library)
@@ -75,7 +75,7 @@ pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
         .cloned()
         .unwrap_or_default();
     let origin = matches!(
-        state.workspace.content.active_view_type(),
+        state.model.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     )
     .then(|| active.clone());
@@ -90,7 +90,7 @@ pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
 /// Whether New Verilog-A device… can make anything at all: it needs a
 /// library it can write.
 pub(crate) fn new_veriloga_device_available(state: &AppState) -> bool {
-    !writable_libraries(&state.library_manager).is_empty()
+    !writable_libraries(&state.model.library_manager).is_empty()
 }
 
 /// What the typed draft is, measured against the live catalog.
@@ -107,7 +107,7 @@ enum Draft {
 fn draft(state: &AppState) -> Draft {
     let form = &state.dialogs.new_veriloga_device;
     let messages = state.ui.messages();
-    if !writable_libraries(&state.library_manager).contains(&form.library) {
+    if !writable_libraries(&state.model.library_manager).contains(&form.library) {
         return Draft::Refused(messages.text(MessageId::VerilogADeviceNoLibrary));
     }
     match typed_cell(state, &messages) {
@@ -138,6 +138,7 @@ fn typed_cell(state: &AppState, messages: &MessageCatalog) -> Option<Result<Stri
     }
     let requested = crate::state::canonical_cell_view_owner_key(&form.library, cell, "");
     let taken = state
+        .model
         .library_manager
         .get_library(&form.library)
         .is_some_and(|library| {
@@ -262,7 +263,7 @@ pub(super) fn seed_veriloga_view(
     )
     .map_err(|error| format!("The Verilog-A source could not be created: {error}"))?;
     let receipt = compile_project_bundle_receipt(
-        state.workspace.content.project.id(),
+        state.model.workspace.content.project.id(),
         &bundle,
         Some(&module_name),
     )
@@ -297,7 +298,7 @@ pub(super) fn seed_veriloga_view(
         .map_err(|error| format!("The Verilog-A source could not be retained: {error}"))?;
     apply_receipt_interface(
         libraries,
-        &state.workspace.content.schematic_buffers,
+        &state.model.workspace.content.schematic_buffers,
         reference,
         receipt,
     )
@@ -310,7 +311,7 @@ impl RSpiceApp {
             return;
         }
         let messages = self.state.ui.messages();
-        let libraries = writable_libraries(&self.state.library_manager);
+        let libraries = writable_libraries(&self.state.model.library_manager);
         let current = draft(&self.state);
         let form = &self.state.dialogs.new_veriloga_device;
         // A refusal about a field stands under that field. The status line
@@ -406,12 +407,12 @@ impl RSpiceApp {
         let library = self.state.dialogs.new_veriloga_device.library.clone();
         let reference = CellViewRef::new(&library, &cell, VERILOGA_VIEW);
 
-        let mut libraries = self.state.library_manager.clone();
+        let mut libraries = self.state.model.library_manager.clone();
         libraries
             .edit_library(&library)
             .ok_or_else(|| format!("Library '{library}' not found"))?
             .add_cell(Cell::new(&cell));
-        let mut sources = self.state.workspace.content.project_sources.clone();
+        let mut sources = self.state.model.workspace.content.project_sources.clone();
         let receipt = seed_veriloga_view(
             &self.state,
             &mut libraries,
@@ -426,9 +427,9 @@ impl RSpiceApp {
             },
         )?;
 
-        self.state.workspace.content.project_sources = sources;
-        self.state.workspace.content.project_sources_dirty = true;
-        self.state.library_manager = libraries;
+        self.state.model.workspace.content.project_sources = sources;
+        self.state.model.workspace.content.project_sources_dirty = true;
+        self.state.model.library_manager = libraries;
         self.state.publish_project_library_mutation(prepared);
         let form = std::mem::take(&mut self.state.dialogs.new_veriloga_device);
         // The starter compile above is not the reader's: the device is offered

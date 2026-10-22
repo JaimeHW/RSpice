@@ -147,16 +147,16 @@ fn draw_parent(
         return;
     };
     let key = session.parent.key();
-    let buffers = &state.workspace.content.schematic_buffers;
+    let buffers = &state.model.workspace.content.schematic_buffers;
     let Some(parent) = buffers.get(&key) else {
         return;
     };
-    let resolver = SymbolResolver::new(state.library_manager.catalog(), buffers);
+    let resolver = SymbolResolver::new(state.model.library_manager.catalog(), buffers);
     let symbols = SchematicSymbolContext::new(
         parent.document(),
         None,
         &resolver,
-        state.library_manager.revision(),
+        state.model.library_manager.revision(),
     );
     scene::draw_content(
         painter,
@@ -167,6 +167,7 @@ fn draw_parent(
                 document: parent.document(),
                 canvas_cache: None,
                 sheet_catalog: state
+                    .model
                     .workspace
                     .content
                     .design_management

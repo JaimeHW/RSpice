@@ -47,6 +47,7 @@ fn the_ports_rail_lists_the_interface_in_the_order_the_deck_has_it() {
 fn a_vector_pin_states_the_conductors_its_name_declares() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -83,16 +84,19 @@ fn a_port_name_declared_twice_is_marked_on_both_rows() {
     // Folded for case, because the netlist folds it: `SENSE` and `sense` are
     // one node, declared twice.
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(port(405, "SENSE", Some(1), PortDirection::In, ""));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(port(406, "sense", Some(2), PortDirection::In, ""));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -149,6 +153,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
     );
     source.name = "VIN".to_owned();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -156,9 +161,9 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
     app.state.sync_active_schematic_to_workspace();
 
     let sources = crate::simulation::placed_sources::placed_sources(
-        &app.state.schematic,
-        &app.state.workspace.content.stimulus_library,
-        app.state.sim_setup.analysis_plan.as_ref(),
+        &app.state.model.schematic,
+        &app.state.model.workspace.content.stimulus_library,
+        app.state.model.sim_setup.analysis_plan.as_ref(),
     );
     let placed = sources
         .iter()
@@ -177,6 +182,7 @@ fn an_excitation_row_stands_for_the_instance_the_object_menu_acts_on() {
     // A source the sheet holds no instance for is offered no menu rather than a
     // menu of commands that would act on nothing.
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -207,6 +213,7 @@ fn rf_bench(ports: Vec<crate::state::Component>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -218,8 +225,8 @@ fn rf_bench(ports: Vec<crate::state::Component>) -> RSpiceApp {
 /// The ports the rail lists, resolved the way the section resolves them.
 fn listed_rf_ports(app: &RSpiceApp) -> Vec<crate::simulation::placed_sources::PlacedRfPort> {
     crate::simulation::placed_sources::placed_rf_ports(
-        &app.state.schematic,
-        app.state.sim_setup.analysis_plan.as_ref(),
+        &app.state.model.schematic,
+        app.state.model.sim_setup.analysis_plan.as_ref(),
     )
 }
 
@@ -322,7 +329,7 @@ fn an_rf_port_row_names_the_s_parameter_run_that_reads_it() {
     // A transient reaches the port as the two-terminal element the netlist
     // already carries, which is not readership: it would make every plan read
     // every port.
-    app.state.sim_setup.analysis_plan =
+    app.state.model.sim_setup.analysis_plan =
         Some(plan_with(crate::simulation::plan::AnalysisKind::Transient));
     let loaded = rf_port_meta(&listed_rf_ports(&app)[0]);
     assert!(
@@ -330,7 +337,7 @@ fn an_rf_port_row_names_the_s_parameter_run_that_reads_it() {
         "only an `.sp` run indexes a port: {loaded}"
     );
 
-    app.state.sim_setup.analysis_plan =
+    app.state.model.sim_setup.analysis_plan =
         Some(plan_with(crate::simulation::plan::AnalysisKind::SParameter));
     let read = rf_port_meta(&listed_rf_ports(&app)[0]);
     assert!(
@@ -436,16 +443,19 @@ fn hierarchical_excitations() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(source(701, ComponentType::VoltageSource, "VDD", "dc=5"));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(placed(702, "XA", "work", "afe"));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -537,16 +547,22 @@ fn an_excitation_of_another_occurrence_opens_it_rather_than_selecting_here() {
     let state = &panel.app.state;
 
     assert_eq!(
-        state.workspace.content.occurrence_path(),
+        state.model.workspace.content.occurrence_path(),
         occurrence,
         "the click lands the session on the occurrence the row names"
     );
     assert_eq!(
-        state.workspace.content.active_view,
+        state.model.workspace.content.active_view,
         CellViewRef::new("work", "afe", "schematic")
     );
     assert!(
-        state.schematic.session.editor.selection.has_component(711),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(711),
         "and selects the instance there, once the session is standing on it"
     );
 }
@@ -568,6 +584,7 @@ fn the_sheet_scope_leaves_the_rows_of_another_occurrence_alone() {
         .child("XA")
         .expect("the fixture instance is nameable");
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components

@@ -37,6 +37,7 @@ const KINDS: &str = "  (* desc=\"Small-signal gain\", units=\"S\", type=\"instan
 fn stated_contract(app: &RSpiceApp, reference: &CellViewRef) -> Vec<CellParameter> {
     let cell = app
         .state
+        .model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -62,18 +63,21 @@ fn range_text(parameter: &CellParameter) -> Option<String> {
 /// the allowlist its contract states now, under a configuration that executes
 /// Verilog-A views.
 fn place_from_shelf(state: &mut AppState, reference: &CellViewRef) -> u64 {
-    let candidate =
-        crate::state::library_cell_placement_candidates(&state.library_manager, &state.workspace)
-            .into_iter()
-            .find(|candidate| {
-                candidate.library == reference.library
-                    && candidate.cell == reference.cell
-                    && candidate.view == reference.view
-            })
-            .expect("the view is on the shelf");
+    let candidate = crate::state::library_cell_placement_candidates(
+        &state.model.library_manager,
+        &state.model.workspace,
+    )
+    .into_iter()
+    .find(|candidate| {
+        candidate.library == reference.library
+            && candidate.cell == reference.cell
+            && candidate.view == reference.view
+    })
+    .expect("the view is on the shelf");
     assert!(candidate.ready, "{}", candidate.unavailable_reason);
     state.open_workspace_view(CellViewRef::default_top());
     let id = state
+        .model
         .schematic
         .add_library_cell_component(Point::new(20, 20), candidate.binding);
     ensure_veriloga_configuration(state);
@@ -82,6 +86,7 @@ fn place_from_shelf(state: &mut AppState, reference: &CellViewRef) -> u64 {
 
 fn placed(state: &AppState, id: u64) -> crate::state::Component {
     state
+        .model
         .schematic
         .document()
         .components
@@ -93,6 +98,7 @@ fn placed(state: &AppState, id: u64) -> crate::state::Component {
 
 fn set_params(state: &mut AppState, id: u64, params: &str) {
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -161,19 +167,19 @@ fn a_clean_compile_states_the_modules_parameters_and_an_unchanged_one_writes_not
         "vmax is computed from stages"
     );
     assert_eq!(range_text(&stated[3]).as_deref(), Some("from (0:vmax]"));
-    assert!(app.state.workspace.content.project_metadata_dirty);
+    assert!(app.state.model.workspace.content.project_metadata_dirty);
 
-    app.state.workspace.content.project_metadata_dirty = false;
-    let revision = app.state.library_manager.revision();
+    app.state.model.workspace.content.project_metadata_dirty = false;
+    let revision = app.state.model.library_manager.revision();
     let before = view(&app, &reference, "veriloga").map(|view| view.metadata.clone());
     compile_and_publish(&mut app);
     assert_eq!(
         view(&app, &reference, "veriloga").map(|view| view.metadata.clone()),
         before
     );
-    assert_eq!(app.state.library_manager.revision(), revision);
+    assert_eq!(app.state.model.library_manager.revision(), revision);
     assert!(
-        !app.state.workspace.content.project_metadata_dirty,
+        !app.state.model.workspace.content.project_metadata_dirty,
         "an unchanged recompile dirties nothing"
     );
 }
@@ -188,6 +194,7 @@ fn a_read_only_library_is_never_given_a_parameter_contract() {
         let reference = add_module_cell(&mut app.state, "amp", "amp", &module("amp", KINDS));
         if with_schematic {
             app.state
+                .model
                 .library_manager
                 .get_library_mut(LIBRARY)
                 .and_then(|library| library.get_cell_mut("amp"))
@@ -208,12 +215,13 @@ fn a_read_only_library_is_never_given_a_parameter_contract() {
                 port.value = name.to_owned();
                 port.params = "dir=inout".to_owned();
             }
-            app.state.workspace.insert_schematic_editor(
+            app.state.model.workspace.insert_schematic_editor(
                 CellViewRef::new(LIBRARY, "amp", "schematic").key(),
                 master,
             );
         }
         app.state
+            .model
             .library_manager
             .get_library_mut(LIBRARY)
             .expect("the library")
@@ -251,11 +259,12 @@ fn the_property_sheet_and_configured_materialization_read_one_allowlist() {
 
     let state = &app.state;
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .expect("the configured design resolves");
     let materialized = projection
@@ -529,6 +538,7 @@ fn render_the_veriloga_parameters_for_review() {
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -551,7 +561,7 @@ fn render_the_veriloga_parameters_for_review() {
     );
 
     // The same rows where the schematic cannot be edited.
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     let canvas = crate::ui::raster::render(DESKTOP, |ui, _| app.render_frame_chrome(ui));
     write(
         "veriloga-instance-read-only-1440x900",

@@ -32,11 +32,12 @@ fn planned_cells(
     let Ok(modules) = &form.modules else {
         return Vec::new();
     };
-    let active = &state.workspace.content.active_view;
+    let active = &state.model.workspace.content.active_view;
     let schematic_ports = |reference: &CellViewRef| {
         if reference == active {
             return Some(
                 state
+                    .model
                     .schematic
                     .document()
                     .interface_ports()
@@ -46,6 +47,7 @@ fn planned_cells(
             );
         }
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -67,7 +69,7 @@ fn planned_cells(
         .iter()
         .map(|module| {
             let (reference, new_cell) = veriloga_cell_for_module(
-                &state.library_manager,
+                &state.model.library_manager,
                 &interface_of,
                 &form.library,
                 module,
@@ -107,7 +109,7 @@ impl RSpiceApp {
             return;
         };
         let messages = self.state.ui.messages();
-        let libraries = writable_libraries(&self.state.library_manager);
+        let libraries = writable_libraries(&self.state.model.library_manager);
         let plan = planned_cells(&self.state, &form);
         let refusal = match &form.modules {
             Err(reason) => Some(messages.format(
@@ -238,13 +240,13 @@ impl RSpiceApp {
             .import_form
             .clone()
             .ok_or_else(|| "No Verilog-A import is open.".to_owned())?;
-        if form.project_id != self.state.workspace.content.project.id() {
+        if form.project_id != self.state.model.workspace.content.project.id() {
             return Err("The active project changed while the import was open.".to_owned());
         }
         if let Err(reason) = &form.modules {
             return Err(format!("{} cannot be read: {reason}", form.file_name));
         }
-        if !writable_libraries(&self.state.library_manager).contains(&form.library) {
+        if !writable_libraries(&self.state.model.library_manager).contains(&form.library) {
             return Err(format!("Library '{}' cannot be written.", form.library));
         }
         let plan = planned_cells(&self.state, &form);
@@ -252,8 +254,8 @@ impl RSpiceApp {
             return Err(format!("{} declares no module.", form.file_name));
         };
 
-        let mut libraries = self.state.library_manager.clone();
-        let mut sources = self.state.workspace.content.project_sources.clone();
+        let mut libraries = self.state.model.library_manager.clone();
+        let mut sources = self.state.model.workspace.content.project_sources.clone();
         for (module, reference, _) in &plan {
             let bundle = ProjectSourceBundle::try_new(
                 ProjectSourceOwner::cell_view(reference.clone()),
@@ -282,9 +284,9 @@ impl RSpiceApp {
             }
         };
         let prepared = self.state.preflight_project_library_mutation(mutation)?;
-        self.state.workspace.content.project_sources = sources;
-        self.state.workspace.content.project_sources_dirty = true;
-        self.state.library_manager = libraries;
+        self.state.model.workspace.content.project_sources = sources;
+        self.state.model.workspace.content.project_sources_dirty = true;
+        self.state.model.library_manager = libraries;
         self.state.publish_project_library_mutation(prepared);
         self.state.ui.code_workspace.veriloga.import_form = None;
         if form.library == VERILOGA_LIBRARY_NAME {

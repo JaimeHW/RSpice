@@ -28,6 +28,7 @@ pub(in crate::workbench) fn placed_instance(
         return;
     }
     let position = state
+        .model
         .schematic
         .document()
         .components
@@ -35,13 +36,14 @@ pub(in crate::workbench) fn placed_instance(
         .find(|component| component.id == component_id)
         .map(|component| component.pos);
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(component_id);
-    state.schematic.session.editor.net_highlight.clear();
-    state.schematic.session.editor.center_request = position;
+    state.model.schematic.session.editor.net_highlight.clear();
+    state.model.schematic.session.editor.center_request = position;
 }
 
 /// Whether the buffer on screen is the one this occurrence names.
@@ -51,5 +53,6 @@ pub(in crate::workbench) fn placed_instance(
 /// this first, because the component id it holds means nothing anywhere else.
 #[must_use]
 pub(in crate::workbench) fn reaches(state: &AppState, occurrence: Option<&InstancePath>) -> bool {
-    occurrence.is_none_or(|occurrence| *occurrence == state.workspace.content.occurrence_path())
+    occurrence
+        .is_none_or(|occurrence| *occurrence == state.model.workspace.content.occurrence_path())
 }

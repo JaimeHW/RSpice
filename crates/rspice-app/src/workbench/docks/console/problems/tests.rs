@@ -57,7 +57,7 @@ fn record(state: &AppState, code: &str, level: DiagnosticLevel, message: &str) -
             message,
         ),
         level,
-        DiagnosticSubject::new(state.workspace.content.project.id(), "Node 'n1'"),
+        DiagnosticSubject::new(state.model.workspace.content.project.id(), "Node 'n1'"),
         message,
     )
 }
@@ -102,6 +102,7 @@ fn state_with_design_findings() -> AppState {
 /// drawing. Returns the resistor the error is about.
 fn publish_design_findings(state: &mut AppState) -> u64 {
     let resistor = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 40));
     state.sync_active_schematic_to_workspace();
@@ -288,7 +289,7 @@ impl Harness {
         if self.ctx.cumulative_pass_nr() == 0 {
             // This context counts passes from zero; a memo another harness
             // took of the same session must not answer for them.
-            state.diagnostics.forget_pass();
+            state.model.diagnostics.forget_pass();
         }
         let output = self.ctx.run_ui(input, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -1156,11 +1157,13 @@ fn the_canvas_tour_and_the_grid_stand_on_one_finding() {
     let mut state = state_with_design_findings();
     crate::schematic::view::violations::cycle_violation(&mut state, 1);
     let standing = state
+        .model
         .diagnostics
         .current_finding()
         .expect("the tour stands on a finding");
 
     let message = state
+        .model
         .diagnostics
         .batches()
         .flat_map(|batch| batch.records.iter())
@@ -1235,7 +1238,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
     let render = harness.frame(&mut state, sized(egui::RawInput::default()));
     let _ = harness.frame(&mut state, click_on(&render, "R1 has no resistance"));
     assert!(
-        state.diagnostics.take_pending_route().is_some(),
+        state.model.diagnostics.take_pending_route().is_some(),
         "precondition: the click followed the finding",
     );
     harness.settle(&mut state);
@@ -1292,9 +1295,14 @@ fn design_app() -> crate::workbench::RSpiceApp {
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
-    app.state.schematic = crate::state::SchematicState::default();
-    app.state.schematic.session.editor.needs_fit = false;
-    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    app.state.model.schematic = crate::state::SchematicState::default();
+    app.state.model.schematic.session.editor.needs_fit = false;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit = false;
     app
 }
 
@@ -1338,6 +1346,7 @@ fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
     );
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1358,6 +1367,7 @@ fn following_a_finding_to_the_drawing_gives_the_canvas_the_keyboard() {
     let _ = app_frame(&harness.ctx, &mut app, keyed(egui::Key::Delete));
     assert!(
         app.state
+            .model
             .schematic
             .document()
             .components
@@ -1393,12 +1403,15 @@ fn escape_on_the_first_focused_frame_is_the_tables_and_not_cancel() {
     // A row with nowhere to go gives the table focus on the frame it is
     // clicked, which leaves the next frame its first focused one.
     let _ = app_frame(&harness.ctx, &mut app, click_on(&render, "finding 01"));
-    assert_eq!(app.state.diagnostics.current_finding(), Some(order[1]));
+    assert_eq!(
+        app.state.model.diagnostics.current_finding(),
+        Some(order[1])
+    );
     assert_eq!(harness.focused(), Some(grid::body_id()));
 
     let _ = app_frame(&harness.ctx, &mut app, keyed(egui::Key::Escape));
     assert_eq!(
-        app.state.diagnostics.current_finding(),
+        app.state.model.diagnostics.current_finding(),
         None,
         "the Escape cleared the row",
     );
@@ -1414,13 +1427,13 @@ fn clicking_a_row_with_nowhere_to_go_keeps_the_keyboard_in_the_table() {
     harness.settle(&mut state);
     let render = harness.frame(&mut state, sized(egui::RawInput::default()));
     let _ = harness.frame(&mut state, click_on(&render, "finding 01"));
-    assert_eq!(state.diagnostics.current_finding(), Some(order[1]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[1]));
     assert_eq!(harness.focused(), Some(grid::body_id()));
-    assert!(state.diagnostics.take_pending_route().is_none());
+    assert!(state.model.diagnostics.take_pending_route().is_none());
 
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
-    assert_eq!(state.diagnostics.current_finding(), Some(order[2]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[2]));
 }
 
 /// The arrows move the one shared selection, Enter follows the current row —
@@ -1445,19 +1458,19 @@ fn the_keyboard_moves_follows_and_clears_the_current_finding() {
     harness.focus_table();
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
     assert_eq!(
-        state.diagnostics.current_finding(),
+        state.model.diagnostics.current_finding(),
         Some(order[0]),
         "Down from nothing current stands on the first listed finding",
     );
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
-    assert_eq!(state.diagnostics.current_finding(), Some(order[1]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[1]));
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowUp));
-    assert_eq!(state.diagnostics.current_finding(), Some(order[0]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[0]));
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
 
     let _ = harness.frame(&mut state, keyed(egui::Key::Enter));
     assert_eq!(
-        state.diagnostics.take_pending_route(),
+        state.model.diagnostics.take_pending_route(),
         Some(second_route),
         "Enter follows the finding the keys stand on",
     );
@@ -1471,7 +1484,7 @@ fn the_keyboard_moves_follows_and_clears_the_current_finding() {
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::Escape));
     assert_eq!(
-        state.diagnostics.current_finding(),
+        state.model.diagnostics.current_finding(),
         None,
         "Escape clears the current finding",
     );
@@ -1484,12 +1497,12 @@ fn the_keyboard_moves_follows_and_clears_the_current_finding() {
 fn escape_straight_after_focusing_the_table_clears_the_row() {
     let mut state = state_with_findings(3);
     let order = reported(&state);
-    state.diagnostics.set_current_finding(Some(order[1]));
+    state.model.diagnostics.set_current_finding(Some(order[1]));
     let harness = Harness::new();
     harness.settle(&mut state);
     harness.focus_table();
     let _ = harness.frame(&mut state, keyed(egui::Key::Escape));
-    assert_eq!(state.diagnostics.current_finding(), None);
+    assert_eq!(state.model.diagnostics.current_finding(), None);
 }
 
 /// Arrows on consecutive frames, the first of them on the frame the table
@@ -1504,7 +1517,7 @@ fn arrows_on_consecutive_frames_move_one_row_each() {
     harness.focus_table();
     for expected in &order[..4] {
         let _ = harness.frame(&mut state, keyed(egui::Key::ArrowDown));
-        assert_eq!(state.diagnostics.current_finding(), Some(*expected));
+        assert_eq!(state.model.diagnostics.current_finding(), Some(*expected));
         assert_eq!(harness.focused(), Some(grid::body_id()));
     }
 }
@@ -1520,22 +1533,25 @@ fn home_end_and_the_page_keys_move_through_the_list() {
     harness.focus_table();
 
     let _ = harness.frame(&mut state, keyed(egui::Key::End));
-    assert_eq!(state.diagnostics.current_finding(), order.last().copied());
+    assert_eq!(
+        state.model.diagnostics.current_finding(),
+        order.last().copied()
+    );
     let _ = harness.frame(&mut state, keyed(egui::Key::PageDown));
     assert_eq!(
-        state.diagnostics.current_finding(),
+        state.model.diagnostics.current_finding(),
         order.last().copied(),
         "a page key stops at the end of the list",
     );
     let _ = harness.frame(&mut state, keyed(egui::Key::Home));
-    assert_eq!(state.diagnostics.current_finding(), Some(order[0]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[0]));
     let _ = harness.frame(&mut state, keyed(egui::Key::PageUp));
-    assert_eq!(state.diagnostics.current_finding(), Some(order[0]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[0]));
 
     let _ = harness.frame(&mut state, keyed(egui::Key::PageDown));
     let paged = order
         .iter()
-        .position(|finding| state.diagnostics.current_finding() == Some(*finding))
+        .position(|finding| state.model.diagnostics.current_finding() == Some(*finding))
         .expect("a listed finding is current");
     assert!(
         paged > 1 && paged < order.len() - 1,
@@ -1602,7 +1618,7 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
         "and left the keyboard in the table",
     );
     assert_eq!(state.problems_view.current_group.as_deref(), Some(label));
-    assert_eq!(state.diagnostics.current_finding(), None);
+    assert_eq!(state.model.diagnostics.current_finding(), None);
 
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowRight));
@@ -1610,7 +1626,7 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowRight));
     assert_eq!(
-        state.diagnostics.current_finding(),
+        state.model.diagnostics.current_finding(),
         Some(first_of_group),
         "Right on an open header goes to its first finding",
     );
@@ -1622,7 +1638,7 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
         Some(label),
         "Left on a finding goes to its header",
     );
-    assert_eq!(state.diagnostics.current_finding(), None);
+    assert_eq!(state.model.diagnostics.current_finding(), None);
     assert!(!state.problems_view.is_collapsed(label));
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowLeft));
     assert!(
@@ -1670,7 +1686,7 @@ fn with_every_group_closed_the_arrows_still_move() {
     assert_eq!(standing(&state).as_ref(), Some(&labels[1]));
     let _ = harness.frame(&mut state, keyed(egui::Key::Home));
     assert_eq!(standing(&state).as_ref(), Some(&labels[0]));
-    assert_eq!(state.diagnostics.current_finding(), None);
+    assert_eq!(state.model.diagnostics.current_finding(), None);
     assert_eq!(harness.focused(), Some(grid::body_id()));
 }
 
@@ -1691,7 +1707,7 @@ fn arrow_up_on_the_first_focused_frame_stays_in_the_table() {
         "the arrow did not carry the keyboard to a heading",
     );
     assert_eq!(
-        state.diagnostics.current_finding(),
+        state.model.diagnostics.current_finding(),
         order.last().copied(),
         "Up from nothing stands on the last line",
     );
@@ -1703,7 +1719,7 @@ fn arrow_up_on_the_first_focused_frame_stays_in_the_table() {
 fn the_focus_ring_shows_after_tab_and_not_after_a_press() {
     let mut state = state_with_findings(5);
     let order = reported(&state);
-    state.diagnostics.set_current_finding(Some(order[2]));
+    state.model.diagnostics.set_current_finding(Some(order[2]));
     let accent = crate::ui::tokens::Tokens::default().color.accent;
     let ring = |render: &Render| {
         render
@@ -1750,7 +1766,7 @@ fn the_focus_ring_shows_after_tab_and_not_after_a_press() {
 fn the_table_takes_no_keys_while_it_is_unfocused() {
     let mut state = state_with_design_findings();
     let order = reported(&state);
-    state.diagnostics.set_current_finding(Some(order[0]));
+    state.model.diagnostics.set_current_finding(Some(order[0]));
     let harness = Harness::new();
     harness.settle(&mut state);
     for key in [
@@ -1761,12 +1777,12 @@ fn the_table_takes_no_keys_while_it_is_unfocused() {
     ] {
         let _ = harness.frame(&mut state, keyed(key));
         assert_eq!(
-            state.diagnostics.current_finding(),
+            state.model.diagnostics.current_finding(),
             Some(order[0]),
             "{key:?}"
         );
     }
-    assert!(state.diagnostics.take_pending_route().is_none());
+    assert!(state.model.diagnostics.take_pending_route().is_none());
 }
 
 /// The table is one Tab stop. Tab from the last heading lands on it, the next
@@ -1776,7 +1792,7 @@ fn the_table_takes_no_keys_while_it_is_unfocused() {
 fn the_table_is_one_tab_stop() {
     let mut state = state_with_findings(5);
     let order = reported(&state);
-    state.diagnostics.set_current_finding(Some(order[2]));
+    state.model.diagnostics.set_current_finding(Some(order[2]));
     let harness = Harness::new();
     harness.settle(&mut state);
     let last_heading = egui::Id::new(("workbench.problems.header", ProblemColumn::Message.label()));
@@ -1787,7 +1803,7 @@ fn the_table_is_one_tab_stop() {
 
     let _ = harness.frame(&mut state, keyed(egui::Key::Tab));
     assert_eq!(harness.focused(), Some(grid::body_id()));
-    assert_eq!(state.diagnostics.current_finding(), Some(order[2]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[2]));
 
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::Tab));
@@ -1803,7 +1819,7 @@ fn the_table_is_one_tab_stop() {
             .all(|finding| after != Some(grid::row_id(*finding))),
         "and does not stop on a row",
     );
-    assert_eq!(state.diagnostics.current_finding(), Some(order[2]));
+    assert_eq!(state.model.diagnostics.current_finding(), Some(order[2]));
 
     harness.settle(&mut state);
     let _ = harness.frame(
@@ -1833,7 +1849,7 @@ fn a_finding_made_current_elsewhere_is_scrolled_into_view() {
         "precondition: the finding starts out of view",
     );
 
-    state.diagnostics.set_current_finding(Some(order[45]));
+    state.model.diagnostics.set_current_finding(Some(order[45]));
     harness.settle(&mut state);
     let render = harness.frame(&mut state, sized(egui::RawInput::default()));
     assert!(harness.shows_whole(&render, "finding 45"));
@@ -1849,7 +1865,7 @@ fn a_half_shown_row_made_current_is_scrolled_whole() {
     // row cut at rest. A reader's scrolling can stop anywhere: scrolled back
     // by less than a row, the body's top edge cuts one.
     let harness = Harness::new();
-    state.diagnostics.set_current_finding(Some(order[45]));
+    state.model.diagnostics.set_current_finding(Some(order[45]));
     harness.settle(&mut state);
     harness.settle(&mut state);
     harness.scroll_body_to(harness.body_offset() - 7.0);
@@ -1866,7 +1882,10 @@ fn a_half_shown_row_made_current_is_scrolled_whole() {
         .expect("precondition: the body's top edge cuts a row");
 
     let index: usize = cut["finding ".len()..].parse().expect("a numbered finding");
-    state.diagnostics.set_current_finding(Some(order[index]));
+    state
+        .model
+        .diagnostics
+        .set_current_finding(Some(order[index]));
     harness.settle(&mut state);
     let render = harness.frame(&mut state, sized(egui::RawInput::default()));
     assert!(harness.shows_whole(&render, &cut), "{cut} shows whole");
@@ -1929,7 +1948,7 @@ fn a_shrinking_body_brings_back_the_current_row_it_hid() {
     let order = reported(&state);
     // The detail region is open throughout, so the only height the body
     // loses is the dock's own.
-    state.diagnostics.set_current_finding(Some(order[0]));
+    state.model.diagnostics.set_current_finding(Some(order[0]));
     let harness = Harness::new();
     harness.settle(&mut state);
     let render = harness.frame(&mut state, sized(egui::RawInput::default()));
@@ -1937,7 +1956,10 @@ fn a_shrinking_body_brings_back_the_current_row_it_hid() {
     let index: usize = lowest["finding ".len()..]
         .parse()
         .expect("a numbered finding");
-    state.diagnostics.set_current_finding(Some(order[index]));
+    state
+        .model
+        .diagnostics
+        .set_current_finding(Some(order[index]));
     harness.settle(&mut state);
 
     let smaller = || {
@@ -1961,7 +1983,7 @@ fn a_shrinking_body_brings_back_the_current_row_it_hid() {
 fn a_shrinking_body_keeps_the_readers_place_away_from_the_current_row() {
     let mut state = state_with_findings(60);
     let order = reported(&state);
-    state.diagnostics.set_current_finding(Some(order[2]));
+    state.model.diagnostics.set_current_finding(Some(order[2]));
     let harness = Harness::new();
     harness.settle(&mut state);
     harness.settle(&mut state);
@@ -2019,6 +2041,7 @@ fn a_wrapped_note_takes_its_wrapped_height_from_the_body() {
         .publish_active_design_check_result(result)
         .expect("the fixture publishes a current receipt");
     state
+        .model
         .diagnostics
         .set_current_finding(reported(&state).first().copied());
     let narrow = || egui::RawInput {
@@ -2033,8 +2056,13 @@ fn a_wrapped_note_takes_its_wrapped_height_from_the_body() {
     let _ = harness.frame(&mut state, narrow());
     let without_note = harness.table().height();
 
-    state.workspace.content.connectivity.policy.width_mismatch =
-        crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+    state
+        .model
+        .workspace
+        .content
+        .connectivity
+        .policy
+        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     let _ = harness.frame(&mut state, narrow());
     let render = harness.frame(&mut state, narrow());
     let note = render
@@ -2086,7 +2114,7 @@ fn every_row_announces_as_an_option_of_the_list() {
         .filter_map(|index| listed.row(index))
         .find(|row| row.message == "R1 has no resistance")
         .map(|row| row.id);
-    state.diagnostics.set_current_finding(followed);
+    state.model.diagnostics.set_current_finding(followed);
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     for (message, selected, description) in [
@@ -2160,7 +2188,7 @@ fn closing_or_replacing_the_project_forgets_the_reading_position() {
 #[test]
 fn a_logged_failure_is_not_a_problem() {
     let mut state = open_state();
-    state.log_buffer.log(
+    state.model.log_buffer.log(
         crate::diagnostics::LogSeverity::Error,
         crate::diagnostics::LogSource::Engine,
         "the engine printed a failure",
@@ -2290,6 +2318,7 @@ fn the_arrangement_is_rebuilt_only_when_what_it_was_built_from_changes() {
 
     let extra = record(&state, "T-99", DiagnosticLevel::Error, "finding 99");
     let mut records: Vec<DiagnosticRecord> = state
+        .model
         .diagnostics
         .batches()
         .flat_map(|batch| batch.records.iter().cloned())
@@ -2318,6 +2347,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
     };
     let republish = |state: &mut AppState, change: &dyn Fn(&mut DiagnosticRecord)| {
         let mut records: Vec<DiagnosticRecord> = state
+            .model
             .diagnostics
             .batches()
             .flat_map(|batch| batch.records.iter().cloned())
@@ -2374,8 +2404,13 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
     let mut design = state_with_design_findings();
     let current = arranged(&design);
     let rows = listing(&design).len();
-    design.workspace.content.connectivity.policy.width_mismatch =
-        crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+    design
+        .model
+        .workspace
+        .content
+        .connectivity
+        .policy
+        .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
     assert_eq!(listing(&design).len(), rows, "precondition: no row left");
     assert!(
         !Arc::ptr_eq(&current, &arranged(&design)),
@@ -2406,6 +2441,7 @@ fn a_frame_with_no_edit_digests_nothing_and_an_edit_is_seen_next_frame() {
     assert_eq!(listing(&app.state).counts().stale, 0);
 
     app.state
+        .model
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(400, 400));
     let _ = app_frame(&harness.ctx, &mut app, sized(egui::RawInput::default()));

@@ -72,7 +72,7 @@ pub(super) fn include_page(
     // handful of nodes and a name index. Cloning the libraries themselves to
     // dodge the borrow, which is what this did, copied the whole model corpus
     // and its retained source bytes on every frame.
-    if app.state.model_library_manager.library_count() == 0 {
+    if app.state.model.model_library_manager.library_count() == 0 {
         page_empty_state(
             ui,
             "No model-source closure is loaded",
@@ -135,7 +135,7 @@ fn closure_nodes(app: &ManagerRenderContext<'_>) -> ClosureGraph {
     // the root itself includes; anything reached through another file is a
     // transitive member and folds away.
     let direct_only = app.state.workbench.models_view.include_direct_only;
-    let libraries = app.state.model_library_manager.libraries_sorted();
+    let libraries = app.state.model.model_library_manager.libraries_sorted();
     let mut nodes = Vec::new();
     let mut matching = 0usize;
     for library in &libraries {
@@ -496,7 +496,7 @@ pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<
     // model and subcircuit, and asking the catalog again per definition would
     // turn one pass over the corpus into one per name in it.
     let mut sections = BTreeMap::<(ModelConsumerScope, String), BTreeSet<String>>::new();
-    for library in state.model_library_manager.libraries_sorted() {
+    for library in state.model.model_library_manager.libraries_sorted() {
         let active_sections = library.active_section_names();
         for model in library.models.values() {
             let key = (
@@ -555,6 +555,7 @@ pub(in crate::workbench::surfaces) fn definition_index(state: &AppState) -> Vec<
         .map(|(key, candidates)| {
             let (scope, definition) = key.clone();
             let resolved_provider = state
+                .model
                 .model_library_manager
                 .model_resolution_record(scope, &definition)
                 .map(|record| record.provider_library.clone());
@@ -684,6 +685,7 @@ fn include_definition_table(
                         } else if row.scope == ModelConsumerScope::Subcircuit
                             && let Ok(Some(provider)) = app
                                 .state
+                                .model
                                 .model_library_manager
                                 .effective_definition_provider(row.scope, &row.definition)
                         {
@@ -697,6 +699,7 @@ fn include_definition_table(
     if let Some((definition, scope, providers)) = conflict {
         let selected_provider = app
             .state
+            .model
             .model_library_manager
             .model_resolution_record(scope, &definition)
             .map(|record| record.provider_library.clone())
@@ -830,14 +833,14 @@ const UNBOUND_ROWS: usize = 4;
 ///
 /// [index]: super::bindings::ConsumerIndex
 fn unbound_instances(state: &AppState, definitions: &[DefinitionRow]) -> Vec<UnboundInstance> {
-    let Some(schematic) = state.workspace.active_schematic() else {
+    let Some(schematic) = state.model.workspace.active_schematic() else {
         return Vec::new();
     };
     let defined = definitions
         .iter()
         .map(|row| row.definition.as_str())
         .collect::<BTreeSet<_>>();
-    let sheet = state.workspace.content.active_view.display_path();
+    let sheet = state.model.workspace.content.active_view.display_path();
     let mut unbound = schematic
         .document()
         .components
@@ -968,6 +971,7 @@ fn instance_binding_card(
     });
     if let Some(component_id) = bind {
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -977,6 +981,7 @@ fn instance_binding_card(
     }
     if let Some(component_id) = locate {
         app.state
+            .model
             .schematic
             .session
             .editor

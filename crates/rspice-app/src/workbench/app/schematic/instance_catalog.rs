@@ -57,8 +57,8 @@ impl InstanceCatalogEntry {
     ) -> Result<SchematicReplacementTargetSpec, String> {
         let resolved = self.template.library_cell.as_ref().and_then(|binding| {
             SymbolResolver::new(
-                &state.library_manager,
-                &state.workspace.content.schematic_buffers,
+                &state.model.library_manager,
+                &state.model.workspace.content.schematic_buffers,
             )
             .resolve_binding(binding)
         });
@@ -316,7 +316,9 @@ fn primitive_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
 
 fn library_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
     let mut entries = Vec::new();
-    for candidate in library_cell_placement_candidates(&state.library_manager, &state.workspace) {
+    for candidate in
+        library_cell_placement_candidates(&state.model.library_manager, &state.model.workspace)
+    {
         if !candidate.ready
             || candidate.parameter_contract_error.is_some()
             || candidate.binding.terminal_order.is_empty()

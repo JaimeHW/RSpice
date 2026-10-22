@@ -145,7 +145,7 @@ fn the_instrument_survives_each_degenerate_trace_alone() {
     for (label, waveform) in degenerate_waveforms() {
         eprintln!("degenerate case: {label}");
         let mut state = AppState::default();
-        state.simulation.start_run().add_analysis(
+        state.model.simulation.start_run().add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform]),
         );
         arm_cursors(&mut state);
@@ -157,6 +157,7 @@ fn the_instrument_survives_each_degenerate_trace_alone() {
 fn the_instrument_survives_a_degenerate_run() {
     let mut state = AppState::default();
     state
+        .model
         .simulation
         .start_run()
         .add_analysis(degenerate_transient());
@@ -168,7 +169,7 @@ fn the_instrument_survives_a_degenerate_run() {
     // one NaN admitted here maps the entire run to nowhere.
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -213,7 +214,7 @@ fn a_long_run_that_diverges_partway_still_draws() {
         })
         .collect::<Vec<_>>();
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#0af")]),
     );
@@ -225,7 +226,7 @@ fn a_long_run_that_diverges_partway_still_draws() {
 #[test]
 fn the_log_frequency_sheets_survive_a_non_positive_abscissa() {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     // A sweep carrying DC, and a PSD that went negative. log10 of the first
     // is -inf and the square root of the second is NaN, and both are shapes
     // a real engine emits — an .ac list starting at 0, a subtracted noise

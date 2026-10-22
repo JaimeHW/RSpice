@@ -201,7 +201,7 @@ const PROOF_MINIMUM_HEIGHT: f32 = 120.0;
 const SEAM: f32 = 1.0;
 
 pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
-    if state.workspace.content.stimulus_library.is_empty() {
+    if state.model.workspace.content.stimulus_library.is_empty() {
         show_empty(ui, state);
         return;
     }
@@ -279,7 +279,13 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
 /// frame a delete lands on.
 fn resolve(state: &mut AppState) -> Option<Stage> {
     let name = state.workbench.selected_stimulus_definition.clone()?;
-    let saved = state.workspace.content.stimulus_library.get(&name)?.clone();
+    let saved = state
+        .model
+        .workspace
+        .content
+        .stimulus_library
+        .get(&name)?
+        .clone();
     let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(state);
     let editor = &mut state.workbench.stimulus_editor;
     let draft = editor.draft_for(&saved);
@@ -327,11 +333,20 @@ fn select_first_if_unresolved(state: &mut AppState) {
         .workbench
         .selected_stimulus_definition
         .as_deref()
-        .is_some_and(|name| state.workspace.content.stimulus_library.get(name).is_some());
+        .is_some_and(|name| {
+            state
+                .model
+                .workspace
+                .content
+                .stimulus_library
+                .get(name)
+                .is_some()
+        });
     if resolved {
         return;
     }
     state.workbench.selected_stimulus_definition = state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -398,6 +413,7 @@ fn name_findings(state: &AppState, record: &StimulusDefinition) -> Vec<String> {
     }
     let selected = state.workbench.selected_stimulus_definition.as_deref();
     let collides = state
+        .model
         .workspace
         .content
         .stimulus_library

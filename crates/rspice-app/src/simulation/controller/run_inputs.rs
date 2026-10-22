@@ -69,7 +69,7 @@ pub(crate) const NETLIST_CHANGED_SINCE_VALIDATION: &str =
 /// as a blocked run.
 pub(super) fn state_refused_dispatch(state: &mut AppState, error: &PreparationError) {
     state.prompt(error.to_string());
-    state.simulation.execution.status =
+    state.model.simulation.execution.status =
         [DESIGN_CHANGED_SINCE_CHECK, NETLIST_CHANGED_SINCE_VALIDATION]
             .into_iter()
             .find(|status| error.message().starts_with(status))
@@ -531,10 +531,10 @@ impl ManualDeckReads {
 
 /// The configured root's projection key; `None` when it cannot be taken.
 fn projection_key(state: &AppState) -> Option<rspice_design::projection::DesignProjectionKey> {
-    state.workspace.design_projection_key(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    state.model.workspace.design_projection_key(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     )
 }
 
@@ -543,6 +543,7 @@ fn projection_key(state: &AppState) -> Option<rspice_design::projection::DesignP
 /// does not.
 fn topology_revisions(state: &AppState, open: u64) -> Vec<(String, u64)> {
     let mut topology = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -574,7 +575,7 @@ fn origin_identity(origin: Option<&Path>) -> Option<PathBuf> {
 /// else it reads is setup, held by the setup's own identity, so two equal
 /// lowerings under one setup read the same devices and the same evidence.
 fn operating_point_reads(state: &AppState) -> Vec<Result<AnalysisSpec, String>> {
-    let Some(plan) = state.sim_setup.analysis_plan.as_ref() else {
+    let Some(plan) = state.model.sim_setup.analysis_plan.as_ref() else {
         return Vec::new();
     };
     let inputs = analysis_inputs(state);
@@ -602,11 +603,11 @@ fn operating_point_reads(state: &AppState) -> Vec<Result<AnalysisSpec, String>> 
 /// prepared to resume is not expired by the run its own dispatch starts,
 /// though that run captures checkpoints of its own.
 fn checkpoint_resume_reads<'a>(state: &'a AppState, live: &LiveInputs<'a>) -> Vec<ResumeRead<'a>> {
-    let Some(plan) = state.sim_setup.analysis_plan.as_ref() else {
+    let Some(plan) = state.model.sim_setup.analysis_plan.as_ref() else {
         return Vec::new();
     };
     // Every retained result, newest run first, as preparation offers them.
-    let runs = &state.simulation.retained.runs;
+    let runs = &state.model.simulation.retained.runs;
     let results = || {
         runs.iter()
             .flat_map(|run| run.analyses.iter().map(|analysis| &analysis.data))
@@ -1032,8 +1033,8 @@ impl RetainedRunInputs {
             return refuse(PreparationStage::Authorization, &format!("{input} changed"));
         }
         if let Err(error) = rspice_simulation::model_sources::verify_plan_external_model_sources(
-            state.model_library_manager.catalog(),
-            &state.sim_setup.model_bindings,
+            state.model.model_library_manager.catalog(),
+            &state.model.sim_setup.model_bindings,
         ) {
             return refuse(PreparationStage::ModelBindings, &error);
         }

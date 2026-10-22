@@ -159,7 +159,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
         return;
     }
     // Check and save is greyed on a read-only project or schematic.
-    if state.schematic.session.read_only
+    if state.model.schematic.session.read_only
         || state.active_view_read_only()
         || state.workbench.safe_mode.project_read_only()
     {
@@ -211,6 +211,7 @@ impl RSpiceApp {
         };
         let project = self
             .state
+            .model
             .workspace
             .content
             .project
@@ -352,6 +353,7 @@ impl RSpiceApp {
     fn repair_stale_instance_interface(&mut self, instance: &str) {
         let Some(component_id) = self
             .state
+            .model
             .schematic
             .document()
             .components
@@ -365,15 +367,20 @@ impl RSpiceApp {
             return;
         };
         self.state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(component_id);
-        let outcome = self.state.schematic.update_selected_instance_interface(
-            &self.state.library_manager,
-            &self.state.workspace.content.schematic_buffers,
-        );
+        let outcome = self
+            .state
+            .model
+            .schematic
+            .update_selected_instance_interface(
+                &self.state.model.library_manager,
+                &self.state.model.workspace.content.schematic_buffers,
+            );
         self.state.prompt(match outcome {
             Ok(summary) => summary,
             Err(error) => error.to_string(),
@@ -437,15 +444,21 @@ impl RSpiceApp {
             return;
         }
 
-        let original_journal = self.state.schematic.document().validated_revisions.clone();
-        let original_dirty = self.state.schematic.session.is_dirty;
+        let original_journal = self
+            .state
+            .model
+            .schematic
+            .document()
+            .validated_revisions
+            .clone();
+        let original_dirty = self.state.model.schematic.session.is_dirty;
         let target_view_key = fresh_report.active_view().key();
         if original_journal.is_empty()
             && let Some(accepted) =
                 crate::workbench::lifecycle::project_lifecycle::accepted_active_schematic(
                     &self.state,
                 )
-            && let Err(error) = self.state.schematic.seed_accepted_revision_baseline(
+            && let Err(error) = self.state.model.schematic.seed_accepted_revision_baseline(
                 &accepted,
                 fresh_report.project_id(),
                 fresh_report.project_revision(),
@@ -475,6 +488,7 @@ impl RSpiceApp {
         };
         let (revision_id, original_journal, expected_journal, expected_design_digest) = match self
             .state
+            .model
             .schematic
             .record_validated_save_revision(request, original_journal, original_dirty)
         {
@@ -653,10 +667,15 @@ fn rollback_validated_save(
     message: &str,
 ) {
     clear_pending_save_state(state);
-    let active_key = state.workspace.content.active_schematic_reference().key();
+    let active_key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let rollback_result = if active_key == target_view_key {
         rollback_exact_journal(
-            &mut state.schematic,
+            &mut state.model.schematic,
             &original_journal,
             &expected_journal,
             expected_design_digest,
@@ -665,6 +684,7 @@ fn rollback_validated_save(
         .inspect(|()| state.sync_active_schematic_to_workspace())
     } else {
         state
+            .model
             .workspace
             .schematic_editor_mut(target_view_key)
             .ok_or_else(|| "the validated source document is no longer open".to_owned())
@@ -1178,7 +1198,10 @@ mod tests {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
-        crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+        crate::workbench::examples::load_example(
+            "RC Lowpass Filter",
+            &mut app.state.model.schematic,
+        );
         open_check_and_save_dialog(&mut app.state);
         assert!(app.state.dialogs.check_and_save.open);
 
@@ -1283,7 +1306,10 @@ mod tests {
             app.state
                 .workbench
                 .activate(crate::workbench::state::Workspace::Design);
-            crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+            crate::workbench::examples::load_example(
+                "RC Lowpass Filter",
+                &mut app.state.model.schematic,
+            );
             open_check_and_save_dialog(&mut app.state);
             assert!(app.state.dialogs.check_and_save.open);
             let canvas = crate::ui::raster::render(size, |ui, _| {

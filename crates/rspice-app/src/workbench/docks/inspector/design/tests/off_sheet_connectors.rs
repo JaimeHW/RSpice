@@ -14,13 +14,20 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
     };
 
     let mut state = AppState::default();
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(1, Point::origin(), "LOCAL"));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
@@ -31,6 +38,7 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
             CrossSheetPortDirection::Output,
         ));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
@@ -51,12 +59,14 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
     assert_eq!(lone.partners, "none \u{2014} no partner on another sheet");
 
     let first = state
+        .model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&key, "Input", [1, 2])
         .expect("sheet ownership");
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -86,6 +96,7 @@ fn the_net_inspector_states_the_sheets_a_connector_partners_with() {
 
     // Read from the far side the answer is the other page, never both.
     state
+        .model
         .workspace
         .content
         .design_management
@@ -123,7 +134,7 @@ fn the_net_inspector_folds_case_the_way_connectivity_does() {
         NetNamingPolicy::SpiceCompatibleRelaxed,
     ] {
         let mut state = AppState::default();
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.document_policy.net_naming = policy;
         for (id, x, name, direction) in [
             (1, 20, "BIAS", CrossSheetPortDirection::Output),

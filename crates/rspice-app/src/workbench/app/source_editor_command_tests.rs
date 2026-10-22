@@ -15,6 +15,7 @@ const FIRST_LINE: &str = "// Behavioral conductance.";
 
 fn root_text(app: &RSpiceApp, bundle_id: ProjectSourceId) -> String {
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -61,11 +62,18 @@ fn veriloga_with_selected_first_line() -> (egui::Context, RSpiceApp, ProjectSour
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(7, Point::new(0, 0), Point::new(100, 0)));
-    app.state.schematic.session.editor.selection.select_wire(7);
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_wire(7);
     let editor =
         code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
@@ -151,11 +159,18 @@ fn edit_cut_cuts_the_source_selection_and_leaves_the_schematic_alone() {
         "the cut text went to the clipboard"
     );
     assert!(
-        app.state.schematic.session.editor.selection.has_wire(7),
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_wire(7),
         "the schematic selection behind the source page is untouched"
     );
     assert!(
         app.state
+            .model
             .schematic
             .document()
             .wires
@@ -537,6 +552,7 @@ fn on_a_read_only_source_the_menu_disables_cut_and_paste() {
 fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
     let (ctx, mut app, bundle_id) = veriloga_with_focused_editor();
     app.state
+        .model
         .workspace
         .content
         .replace_project_source_bundle_file(bundle_id, "model.va", NAVIGABLE_MODULE.to_owned())

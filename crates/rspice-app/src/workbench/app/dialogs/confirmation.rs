@@ -72,7 +72,7 @@ impl RSpiceApp {
     fn render_save_confirmation_dialog(&mut self, ctx: &Context) {
         let (title, consequence) = match self.state.dialogs.confirmation_dialog.pending_action {
             Some(action) => (
-                action.prompt_title(self.state.workspace.content.project.name().trim()),
+                action.prompt_title(self.state.model.workspace.content.project.name().trim()),
                 action.prompt_consequence(),
             ),
             None => (
@@ -181,7 +181,7 @@ impl RSpiceApp {
                 format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
             ));
         }
-        if self.state.simulation.execution.has_active_execution() {
+        if self.state.model.simulation.execution.has_active_execution() {
             self.render_close_blocked_by_run(ctx, &unsaved);
         } else if documents.is_empty() && unsaved.is_empty() {
             self.state.dialogs.project_review_dialog.close();
@@ -197,7 +197,7 @@ impl RSpiceApp {
         never_saved: bool,
         unsaved: &[(WorkbenchIcon, String)],
     ) {
-        let project = self.state.workspace.content.project.name().trim();
+        let project = self.state.model.workspace.content.project.name().trim();
         let title = if project.is_empty() {
             "Save changes before closing?".to_owned()
         } else {
@@ -242,8 +242,8 @@ impl RSpiceApp {
     }
 
     fn render_close_blocked_by_run(&mut self, ctx: &Context, unsaved: &[(WorkbenchIcon, String)]) {
-        let stopping = self.state.simulation.cancellation_is_pending();
-        let can_stop = self.state.simulation.can_request_abort_active_run();
+        let stopping = self.state.model.simulation.cancellation_is_pending();
+        let can_stop = self.state.model.simulation.can_request_abort_active_run();
         // With no stop to request, Cancel is the only verb, so it is the primary.
         let primary = if stopping {
             "Stopping\u{2026}"
@@ -269,7 +269,7 @@ impl RSpiceApp {
         });
         match choice {
             DialogChoice::Primary if can_stop => {
-                if let Err(error) = self.state.simulation.request_abort_active_run() {
+                if let Err(error) = self.state.model.simulation.request_abort_active_run() {
                     self.state
                         .prompt(format!("The run was not stopped: {error}."));
                 }
@@ -435,6 +435,7 @@ mod tests {
     fn unsaved_project_closing() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .workspace
             .content
             .project
@@ -508,6 +509,7 @@ mod tests {
     fn save_prompt_asks_one_question_on_the_narrow_confirmation_surface() {
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .workspace
             .content
             .project
@@ -594,12 +596,12 @@ mod tests {
     #[test]
     fn close_project_review_during_a_run_offers_stop_and_no_save_verbs() {
         let mut app = unsaved_project_closing();
-        let run = app.state.simulation.start_run();
+        let run = app.state.model.simulation.start_run();
         run.mark_running().expect("fixture enters running state");
         let identity = run
             .execution_identity()
             .expect("running fixture has an identity");
-        app.state.simulation.execution.active_execution = Some(identity);
+        app.state.model.simulation.execution.active_execution = Some(identity);
 
         let painted = painted_text(&render_close_review(&mut app, egui::vec2(1_280.0, 800.0)));
         let shows = |wanted: &str| painted.iter().any(|(text, _)| text == wanted);

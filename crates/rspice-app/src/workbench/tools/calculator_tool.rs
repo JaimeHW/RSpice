@@ -68,7 +68,8 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
         .inner_margin(egui::Margin::symmetric(12, 10))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let (panel, simulation) = (&mut app.state.calculator_panel, &app.state.simulation);
+            let (panel, simulation) =
+                (&mut app.state.calculator_panel, &app.state.model.simulation);
             panel.show_body(ui, simulation);
         });
 
@@ -77,7 +78,7 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
     let hint = app
         .state
         .calculator_panel
-        .context_hint(&app.state.simulation);
+        .context_hint(&app.state.model.simulation);
     ui.painter().hline(
         ui.max_rect().x_range(),
         ui.cursor().top(),
@@ -106,7 +107,7 @@ fn body(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     if Button::new("Evaluate").show(ui).clicked() {
                         let (panel, simulation) =
-                            (&mut app.state.calculator_panel, &app.state.simulation);
+                            (&mut app.state.calculator_panel, &app.state.model.simulation);
                         panel.evaluate(simulation);
                     }
                     if Button::new("Clear").ghost().show(ui).clicked() {
@@ -127,12 +128,12 @@ fn plot_expression(app: &mut RSpiceApp) {
     if expression.is_empty() {
         return;
     }
-    let Some(analysis_index) = app.state.simulation.view.active_analysis_idx else {
+    let Some(analysis_index) = app.state.model.simulation.view.active_analysis_idx else {
         app.state
             .prompt("Select a retained result analysis before plotting an expression.");
         return;
     };
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = app.state.model.simulation.active_run() else {
         return;
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
@@ -142,14 +143,16 @@ fn plot_expression(app: &mut RSpiceApp) {
         run.dataset_id,
         analysis,
     );
-    app.state.calculator_panel.evaluate(&app.state.simulation);
+    app.state
+        .calculator_panel
+        .evaluate(&app.state.model.simulation);
     if let Some(Err(error)) = app.state.calculator_panel.outcome.as_ref() {
         app.state
             .prompt(format!("Expression was not plotted: {error}"));
         return;
     }
     let added = app.state.ui.results.add_expression_trace(
-        &app.state.simulation,
+        &app.state.model.simulation,
         analysis_key,
         expression.clone(),
     );
@@ -161,7 +164,11 @@ fn plot_expression(app: &mut RSpiceApp) {
         }
     };
     if added {
-        app.state.workspace.content.visualization_documents_dirty = true;
+        app.state
+            .model
+            .workspace
+            .content
+            .visualization_documents_dirty = true;
     }
     app.state.ui.results.session.viewer =
         crate::workbench::documents::result_document::ResultViewer::Waves;
@@ -201,8 +208,8 @@ mod tests {
                 ]);
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(analysis);
-        app.state.simulation.retained.runs = vec![run].into();
-        assert!(app.state.simulation.select_run(0));
+        app.state.model.simulation.retained.runs = vec![run].into();
+        assert!(app.state.model.simulation.select_run(0));
         app.state.dialogs.waveform_calculator_dialog = true;
         app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
@@ -228,7 +235,13 @@ mod tests {
             .expect("trace recorded");
         assert_eq!(traces.len(), 1, "the same expression plotted twice");
         assert_eq!(traces[0].text, "V(out)/V(in)");
-        assert!(app.state.workspace.content.visualization_documents_dirty);
+        assert!(
+            app.state
+                .model
+                .workspace
+                .content
+                .visualization_documents_dirty
+        );
         assert!(
             app.state.dialogs.waveform_calculator_dialog,
             "plotting must not close a modeless tool"

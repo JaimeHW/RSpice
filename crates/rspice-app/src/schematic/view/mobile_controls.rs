@@ -50,8 +50,8 @@ const fn product_command(action: MobileCanvasAction) -> Option<Command> {
 /// cancel on the canvas.
 fn operation_live(app: &RSpiceApp) -> bool {
     let state = &app.state;
-    let editor = &state.schematic.session.editor;
-    state.schematic.canvas_settings_change_blocked()
+    let editor = &state.model.schematic.session.editor;
+    state.model.schematic.canvas_settings_change_blocked()
         || editor.tool != Tool::Select
         || editor.zoom_box.armed
         || state.dialogs.move_selection.armed
@@ -86,7 +86,7 @@ fn execute_action(ctx: &Context, app: &mut RSpiceApp, request: MobileCanvasReque
     if request.source != super::requests::editor_request_source(&app.state)
         || app.state.workbench.current_route().surface_id() != SurfaceId::Design
         || !matches!(
-            app.state.workspace.content.active_view_type(),
+            app.state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
         || app.state.application_modal_open()

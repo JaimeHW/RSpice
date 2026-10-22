@@ -34,21 +34,26 @@ pub(super) fn populated_session() -> AppState {
 
     // The project, its drawing and its library browser.
     state
+        .model
         .workspace
         .content
         .project
         .rename("Precision AFE")
         .expect("valid project name");
-    state.schematic.add_component(
+    state.model.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::new(17, 29),
     );
-    state.workspace.save_active_schematic(&state.schematic);
-    state.library_manager.filter_text = "afe".to_owned();
+    state
+        .model
+        .workspace
+        .save_active_schematic(&state.model.schematic);
+    state.model.library_manager.filter_text = "afe".to_owned();
 
     // The plan, through the isolated execution context: an operating point
     // ahead of the transient, and a project-owned model.
     let operating_point = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -57,6 +62,7 @@ pub(super) fn populated_session() -> AppState {
         .expect("an operating point inserts ahead of the transient")
         .0;
     state
+        .model
         .model_library_manager
         .create_project_model(
             "owned-models",
@@ -75,10 +81,10 @@ pub(super) fn populated_session() -> AppState {
         .workbench
         .model_editor
         .open(
-            &state.model_library_manager,
+            &state.model.model_library_manager,
             "owned-models",
             "nch_owned",
-            state.workspace.content.project.revision(),
+            state.model.workspace.content.project.revision(),
         )
         .expect("the model editor opens on the project model");
     state
@@ -108,13 +114,13 @@ pub(super) fn populated_session() -> AppState {
     );
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .expect("legacy fixture provenance seals");
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.retained.next_run_id = 3;
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 3;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 
     // Authority over the canonical project, on each host.
-    let project_id = state.workspace.content.project.id().to_string();
+    let project_id = state.model.workspace.content.project.id().to_string();
     state.native_project_binding_receipt = Some(
         crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
@@ -319,8 +325,9 @@ fn populate_workbench(state: &mut AppState, operating_point: crate::product::Ana
 /// saves is the one written, after this step.
 fn as_restored(mut state: AppState) -> AppState {
     state
+        .model
         .workspace
-        .ensure_library_model(&mut state.library_manager);
+        .ensure_library_model(&mut state.model.library_manager);
     state
 }
 
@@ -412,9 +419,12 @@ fn a_populated_session_restores_and_saves_again_unchanged() {
 
     let restored = relaunch(saved);
 
-    assert_eq!(restored.workspace.content.project.name(), "Precision AFE");
+    assert_eq!(
+        restored.model.workspace.content.project.name(),
+        "Precision AFE"
+    );
     assert!(!restored.project_lifecycle.is_open());
-    assert_eq!(restored.simulation.retained.run_count(), 1);
+    assert_eq!(restored.model.simulation.retained.run_count(), 1);
     assert!(
         restored.workbench.model_editor.draft.is_some(),
         "the unsaved model edit reopens"
@@ -473,9 +483,9 @@ fn a_populated_session_kept_without_its_runs_restores_everything_else() {
 
     let restored = relaunch(lean(&state));
 
-    assert_eq!(restored.simulation.retained.run_count(), 0);
+    assert_eq!(restored.model.simulation.retained.run_count(), 0);
     assert_eq!(
-        restored.simulation.retained.next_run_id, 3,
+        restored.model.simulation.retained.next_run_id, 3,
         "the next run is not numbered as the one left out"
     );
     let state = as_restored(state);

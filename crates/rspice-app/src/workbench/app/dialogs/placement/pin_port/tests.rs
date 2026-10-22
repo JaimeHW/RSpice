@@ -42,9 +42,11 @@ fn open_with(state: &mut AppState, names: &str) {
 /// collide with.
 fn place_port(state: &mut AppState, name: &str) {
     let id = state
+        .model
         .schematic
         .add_component(crate::state::ComponentType::Port, Point::origin());
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -68,6 +70,7 @@ fn names_split_on_whitespace_and_each_is_validated_in_the_models_words() {
     app.state.dialogs.pin_port.fields.names = "DATA[3]".to_owned();
     let expected = app
         .state
+        .model
         .schematic
         .validate_new_port_name("DATA[3]")
         .expect_err("one member of a bus is not a pin")
@@ -205,11 +208,12 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
 
     assert!(!app.state.dialogs.pin_port.open);
     assert_eq!(
-        app.state.schematic.session.editor.tool,
+        app.state.model.schematic.session.editor.tool,
         Tool::Place(crate::state::ComponentType::Port)
     );
     let sequence = app
         .state
+        .model
         .schematic
         .session
         .editor
@@ -227,9 +231,9 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     assert_eq!(sequence.authority, authority);
     assert!(app.state.dialogs.pin_port.authority.is_none());
 
-    assert!(app.state.schematic.document().components.is_empty());
-    assert!(!app.state.schematic.session.is_dirty);
-    assert!(!app.state.schematic.can_undo());
+    assert!(app.state.model.schematic.document().components.is_empty());
+    assert!(!app.state.model.schematic.session.is_dirty);
+    assert!(!app.state.model.schematic.can_undo());
     // The canvas owns the keyboard, so R, M and Esc work before the pointer
     // has moved over it.
     assert_eq!(
@@ -255,6 +259,7 @@ fn reopening_while_armed_offers_the_remaining_names() {
         app.render_pin_port_dialog(ctx)
     });
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -294,7 +299,7 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
     let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
         app.render_pin_port_dialog(ctx)
     });
-    app.state.schematic.cancel_tool();
+    app.state.model.schematic.cancel_tool();
     place_port(&mut app.state, "BIAS");
 
     open_create_pins(&mut app.state);
@@ -307,15 +312,16 @@ fn a_read_only_or_changed_document_blocks_the_form_and_says_so() {
     open_with(&mut app.state, "EN");
     // Same-document edits are allowed; names and interface order are read live.
     app.state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
     assert_eq!(draft(&app.state), Draft::Ready(vec!["EN".to_owned()]));
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert_eq!(draft(&app.state), Draft::Blocked(READ_ONLY));
 
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     assert!(matches!(draft(&app.state), Draft::Ready(_)));
-    app.state.active_schematic_epoch = app.state.active_schematic_epoch.wrapping_add(1);
+    app.state.model.active_schematic_epoch = app.state.model.active_schematic_epoch.wrapping_add(1);
     assert_eq!(draft(&app.state), Draft::Blocked(DOCUMENT_CHANGED));
 }
 
@@ -336,11 +342,14 @@ fn a_blocked_form_never_arms_on_enter() {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         let master = CellViewRef::new("work", "pin_child", "schematic");
-        app.state
-            .workspace
-            .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+        app.state.model.workspace.descend_into(
+            "X1".to_owned(),
+            master.clone(),
+            ViewType::Schematic,
+        );
         let first = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -351,17 +360,20 @@ fn a_blocked_form_never_arms_on_enter() {
             app.render_pin_port_dialog(ctx)
         });
         match change {
-            "document" => app.state.active_schematic_epoch += 1,
-            "design" => app.state.design_execution_epoch += 1,
+            "document" => app.state.model.active_schematic_epoch += 1,
+            "design" => app.state.model.design_execution_epoch += 1,
             "occurrence" => {
-                app.state.workspace.ascend_one().unwrap();
-                app.state
-                    .workspace
-                    .descend_into("X2".to_owned(), master, ViewType::Schematic);
+                app.state.model.workspace.ascend_one().unwrap();
+                app.state.model.workspace.descend_into(
+                    "X2".to_owned(),
+                    master,
+                    ViewType::Schematic,
+                );
             }
             "sheet" => {
                 let catalog = app
                     .state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -381,7 +393,7 @@ fn a_blocked_form_never_arms_on_enter() {
                 catalog.set_active(second).unwrap();
             }
             "missing" => app.state.dialogs.pin_port.authority = None,
-            "read-only" => app.state.schematic.session.read_only = true,
+            "read-only" => app.state.model.schematic.session.read_only = true,
             "safe-mode" => app.state.workbench.safe_mode.activate(
                 crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
@@ -402,17 +414,18 @@ fn a_blocked_form_never_arms_on_enter() {
         });
 
         assert!(app.state.dialogs.pin_port.open);
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
         assert!(
             app.state
+                .model
                 .schematic
                 .session
                 .editor
                 .pending_port_sequence
                 .is_none()
         );
-        assert!(app.state.schematic.document().components.is_empty());
-        assert!(!app.state.schematic.can_undo());
+        assert!(app.state.model.schematic.document().components.is_empty());
+        assert!(!app.state.model.schematic.can_undo());
         if !matches!(change, "read-only" | "safe-mode") {
             app.state.dialogs.pin_port.close();
             open_with(&mut app.state, "EN");
@@ -440,13 +453,14 @@ fn escape_closes_the_form_at_once() {
     assert!(!app.state.dialogs.pin_port.open);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
             .pending_port_sequence
             .is_none()
     );
-    assert!(app.state.schematic.document().components.is_empty());
+    assert!(app.state.model.schematic.document().components.is_empty());
 }
 
 /// A duplicate of a name already on the sheet is refused before arming, in the
@@ -458,6 +472,7 @@ fn a_name_already_on_the_sheet_is_refused_before_arming() {
     open_with(&mut app.state, "bias_en");
     let expected = app
         .state
+        .model
         .schematic
         .validate_new_port_name("bias_en")
         .expect_err("a taken name is refused")
@@ -575,7 +590,7 @@ fn render_create_pins() {
         }),
         ("read-only", |state: &mut AppState| {
             state.dialogs.pin_port.fields.names = "INP INN".to_owned();
-            state.schematic.session.read_only = true;
+            state.model.schematic.session.read_only = true;
         }),
     ] {
         for (size_stem, size) in [

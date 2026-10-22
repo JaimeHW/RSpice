@@ -127,7 +127,7 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
         return false;
     }
 
-    let kind = if state.schematic.session.editor.tool == Tool::OffSheetConnector {
+    let kind = if state.model.schematic.session.editor.tool == Tool::OffSheetConnector {
         NetLabelKind::OffSheet {
             direction: CrossSheetPortDirection::default(),
         }
@@ -247,7 +247,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
     if names.len() > MAX_NAMES {
         return DraftValidation::Invalid(format!("Name at most {MAX_NAMES} nets at once."));
     }
-    let policy = state.schematic.document().document_policy.net_naming;
+    let policy = state.model.schematic.document().document_policy.net_naming;
     for name in &names {
         if let Err(reason) = NetLabel::validate_name(name, policy) {
             return DraftValidation::Invalid(if names.len() > 1 {
@@ -268,7 +268,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
 
 /// Whether a bus on the active sheet runs through `anchor`.
 fn anchor_on_bus(state: &AppState, anchor: Point) -> bool {
-    state.schematic.document().buses.iter().any(|bus| {
+    state.model.schematic.document().buses.iter().any(|bus| {
         bus.contains_point(anchor)
             && crate::schematic::view::sheet_visibility::object_is_on_active_sheet(state, bus.id)
     })
@@ -279,6 +279,7 @@ fn anchor_on_bus(state: &AppState, anchor: Point) -> bool {
 /// click; with none armed, the click opens the entry.
 pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> bool {
     let Some(mut sequence) = state
+        .model
         .schematic
         .session
         .editor
@@ -288,7 +289,12 @@ pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> 
         return false;
     };
     let Some(name) = sequence.next_name() else {
-        state.schematic.session.editor.pending_net_label_sequence = None;
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .pending_net_label_sequence = None;
         return false;
     };
     if state.dialogs.application_modal_open() {
@@ -298,9 +304,14 @@ pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> 
         state.deny_read_only_edit();
         return true;
     }
-    let policy = state.schematic.document().document_policy.net_naming;
+    let policy = state.model.schematic.document().document_policy.net_naming;
     if let Err(reason) = NetLabel::validate_name(&name, policy) {
-        state.schematic.session.editor.pending_net_label_sequence = None;
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .pending_net_label_sequence = None;
         state.prompt(format!("{name}: net name: {reason}."));
         return true;
     }
@@ -310,15 +321,19 @@ pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> 
     } else {
         "place net label"
     };
-    let placed = state.schematic.with_undo(undo_label, |schematic| {
+    let placed = state.model.schematic.with_undo(undo_label, |schematic| {
         schematic.add_net_label_with_kind(anchor, name.clone(), kind);
     });
     if !placed {
         state.prompt(format!("{name} was not placed."));
         return true;
     }
-    state.schematic.session.editor.pending_net_label_sequence =
-        sequence.advance().then_some(sequence);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_net_label_sequence = sequence.advance().then_some(sequence);
     state.sync_active_schematic_to_workspace();
     true
 }
@@ -333,7 +348,7 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
         .validate(state, if off_sheet { CONNECTOR_TITLE } else { TITLE })?;
     NetLabel::validate_name(
         &commit.name,
-        state.schematic.document().document_policy.net_naming,
+        state.model.schematic.document().document_policy.net_naming,
     )
     .map_err(|reason| format!("Net name: {reason}."))?;
 
@@ -343,14 +358,19 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
     } else {
         "place net label"
     };
-    let changed = state.schematic.with_undo(undo_label, |schematic| {
+    let changed = state.model.schematic.with_undo(undo_label, |schematic| {
         let id = schematic.add_net_label_with_kind(commit.anchor, commit.name, kind);
         placed_id = Some(id);
     });
     match (changed, placed_id) {
         (true, Some(id)) => {
             // The tool stays armed with the next name, which the ghost shows.
-            state.schematic.session.editor.pending_net_label_sequence = commit.following;
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .pending_net_label_sequence = commit.following;
             state.sync_active_schematic_to_workspace();
             Ok(id)
         }
@@ -387,12 +407,12 @@ mod tests {
     }
 
     fn open_at(app: &mut RSpiceApp, anchor: Point) {
-        app.state.schematic.session.editor.tool = Tool::Label;
+        app.state.model.schematic.session.editor.tool = Tool::Label;
         assert!(open_net_label_placement(&mut app.state, anchor));
     }
 
     fn open_connector_at(app: &mut RSpiceApp, anchor: Point) {
-        app.state.schematic.session.editor.tool = Tool::OffSheetConnector;
+        app.state.model.schematic.session.editor.tool = Tool::OffSheetConnector;
         assert!(open_net_label_placement(&mut app.state, anchor));
     }
 
@@ -420,18 +440,21 @@ mod tests {
                 },
             );
             assert_eq!(app.state.dialogs.net_label_placement.name, "BUSY");
-            assert!(app.state.schematic.document().net_labels.is_empty());
+            assert!(app.state.model.schematic.document().net_labels.is_empty());
         }
     }
 
     #[test]
     fn anchor_capture_is_non_mutating_and_valid_commit_is_one_undo_unit() {
         let mut app = RSpiceApp::test_instance();
-        let topology_before = app.state.schematic.topology_version();
+        let topology_before = app.state.model.schematic.topology_version();
         open_at(&mut app, Point::new(40, -20));
-        assert!(app.state.schematic.document().net_labels.is_empty());
-        assert!(!app.state.schematic.can_undo());
-        assert_eq!(app.state.schematic.topology_version(), topology_before);
+        assert!(app.state.model.schematic.document().net_labels.is_empty());
+        assert!(!app.state.model.schematic.can_undo());
+        assert_eq!(
+            app.state.model.schematic.topology_version(),
+            topology_before
+        );
 
         app.state.dialogs.net_label_placement.name = "DATA[7]".to_owned();
         let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
@@ -439,14 +462,14 @@ mod tests {
         };
         let id = apply_commit(&mut app.state, *commit).expect("placement");
         assert_eq!(
-            app.state.schematic.document().net_labels,
+            app.state.model.schematic.document().net_labels,
             vec![NetLabel::new(id, Point::new(40, -20), "DATA[7]")]
         );
-        assert!(app.state.schematic.can_undo());
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Label);
-        assert!(app.state.schematic.undo());
-        assert!(app.state.schematic.document().net_labels.is_empty());
-        assert!(!app.state.schematic.can_undo());
+        assert!(app.state.model.schematic.can_undo());
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
+        assert!(app.state.model.schematic.undo());
+        assert!(app.state.model.schematic.document().net_labels.is_empty());
+        assert!(!app.state.model.schematic.can_undo());
     }
 
     #[test]
@@ -464,21 +487,21 @@ mod tests {
             DraftValidation::Invalid(message) => assert!(message.starts_with("DATA[7:")),
             other => panic!("a list with a bad name was accepted: {other:?}"),
         }
-        assert!(app.state.schematic.document().net_labels.is_empty());
-        assert!(!app.state.schematic.can_undo());
+        assert!(app.state.model.schematic.document().net_labels.is_empty());
+        assert!(!app.state.model.schematic.can_undo());
 
         app.state.dialogs.net_label_placement.name = "DATA[7".to_owned();
         assert!(matches!(
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
-        assert!(app.state.schematic.document().net_labels.is_empty());
-        assert!(!app.state.schematic.can_undo());
+        assert!(app.state.model.schematic.document().net_labels.is_empty());
+        assert!(!app.state.model.schematic.can_undo());
     }
 
     /// Place what the entry names at `anchor`.
     fn commit_entry(state: &mut AppState, anchor: Point, entry: &str) {
-        state.schematic.session.editor.tool = Tool::Label;
+        state.model.schematic.session.editor.tool = Tool::Label;
         assert!(open_net_label_placement(state, anchor));
         state.dialogs.net_label_placement.name = entry.to_owned();
         let DraftValidation::Valid(commit) = validate_draft(state) else {
@@ -490,6 +513,7 @@ mod tests {
 
     fn label_names(app: &RSpiceApp) -> Vec<String> {
         app.state
+            .model
             .schematic
             .document()
             .net_labels
@@ -500,6 +524,7 @@ mod tests {
 
     fn next_name(app: &RSpiceApp) -> Option<String> {
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -521,12 +546,12 @@ mod tests {
         assert!(!app.state.dialogs.net_label_placement.open);
         assert_eq!(label_names(&app), ["D0", "D1", "D2"]);
         assert_eq!(next_name(&app).as_deref(), Some("D3"));
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Label);
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
 
-        assert!(app.state.schematic.undo());
+        assert!(app.state.model.schematic.undo());
         assert_eq!(label_names(&app), ["D0", "D1"]);
         // Esc ends the tool and the sequence with it.
-        app.state.schematic.cancel_interaction_step();
+        app.state.model.schematic.cancel_interaction_step();
         assert_eq!(next_name(&app), None);
     }
 
@@ -553,10 +578,15 @@ mod tests {
         }
 
         let mut app = RSpiceApp::test_instance();
-        app.state.schematic.document_mut_for_test().buses.push(
-            crate::state::Bus::segment(90, Point::new(-50, 0), Point::new(50, 0), None)
-                .expect("bus"),
-        );
+        app.state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .buses
+            .push(
+                crate::state::Bus::segment(90, Point::new(-50, 0), Point::new(50, 0), None)
+                    .expect("bus"),
+            );
         commit_entry(&mut app.state, Point::new(0, 0), "D<0:2>");
         assert_eq!(label_names(&app), ["D<0:2>"]);
         assert_eq!(next_name(&app), None);
@@ -571,9 +601,9 @@ mod tests {
         app.state.dialogs.net_label_placement.name = "sense".to_owned();
         app.state.dialogs.net_label_placement.close();
         assert!(!app.state.dialogs.net_label_placement.open);
-        assert!(app.state.schematic.document().net_labels.is_empty());
-        assert!(!app.state.schematic.can_undo());
-        assert_eq!(app.state.schematic.session.editor.tool, Tool::Label);
+        assert!(app.state.model.schematic.document().net_labels.is_empty());
+        assert!(!app.state.model.schematic.can_undo());
+        assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
     }
 
     #[test]
@@ -581,23 +611,23 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::origin());
         app.state.dialogs.net_label_placement.name = "sense".to_owned();
-        app.state.schematic.session.read_only = true;
+        app.state.model.schematic.session.read_only = true;
         assert!(matches!(
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
-        app.state.schematic.session.read_only = false;
+        app.state.model.schematic.session.read_only = false;
         let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
             panic!("authority should recover after read-only mode is cleared");
         };
-        app.state.schematic.bump_topology_version();
+        app.state.model.schematic.bump_topology_version();
         assert!(matches!(
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
         assert!(apply_commit(&mut app.state, *commit).is_err());
-        assert!(app.state.schematic.document().net_labels.is_empty());
-        assert!(!app.state.schematic.can_undo());
+        assert!(app.state.model.schematic.document().net_labels.is_empty());
+        assert!(!app.state.model.schematic.can_undo());
     }
 
     /// Enter places the label; Escape leaves at once, because the entry owns
@@ -618,10 +648,10 @@ mod tests {
         });
         assert!(!app.state.dialogs.net_label_placement.open);
         assert_eq!(
-            app.state.schematic.document().net_labels[0].name,
+            app.state.model.schematic.document().net_labels[0].name,
             "sense_out"
         );
-        assert!(app.state.schematic.can_undo());
+        assert!(app.state.model.schematic.can_undo());
 
         open_at(&mut app, Point::new(60, 50));
         app.state.dialogs.net_label_placement.name = "discard_me".to_owned();
@@ -632,7 +662,7 @@ mod tests {
             app.render_net_label_dialog(ctx)
         });
         assert!(!app.state.dialogs.net_label_placement.open);
-        assert_eq!(app.state.schematic.document().net_labels.len(), 1);
+        assert_eq!(app.state.model.schematic.document().net_labels.len(), 1);
     }
 
     /// The entry sits where the click did, not in the middle of the screen,
@@ -679,12 +709,14 @@ mod tests {
 
         let key = app
             .state
+            .model
             .workspace
             .content
             .active_schematic_reference()
             .key();
         let retained = app
             .state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -716,7 +748,7 @@ mod tests {
         let id = apply_commit(&mut app.state, *commit).expect("placement");
 
         assert_eq!(
-            app.state.schematic.document().net_labels,
+            app.state.model.schematic.document().net_labels,
             vec![NetLabel::off_sheet(
                 id,
                 Point::new(60, -40),
@@ -725,12 +757,12 @@ mod tests {
             )]
         );
         assert_eq!(
-            app.state.schematic.undo_description(),
+            app.state.model.schematic.undo_description(),
             Some("place off-sheet connector"),
             "history must name what was placed"
         );
-        assert!(app.state.schematic.undo());
-        assert!(app.state.schematic.document().net_labels.is_empty());
+        assert!(app.state.model.schematic.undo());
+        assert!(app.state.model.schematic.document().net_labels.is_empty());
 
         // The plain label tool still publishes a local label through the same
         // transaction. The primary action closes the dialog after a commit,

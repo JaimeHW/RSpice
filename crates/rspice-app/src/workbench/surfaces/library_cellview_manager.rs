@@ -141,7 +141,7 @@ struct CatalogSnapshot {
 }
 
 fn catalog_snapshot(app: &RSpiceApp) -> CatalogSnapshot {
-    let libraries = app.state.library_manager.libraries_sorted();
+    let libraries = app.state.model.library_manager.libraries_sorted();
     CatalogSnapshot {
         libraries: libraries.len(),
         cells: libraries.iter().map(|library| library.cell_count()).sum(),
@@ -157,14 +157,17 @@ fn header_context(ui: &mut Ui, app: &RSpiceApp, snapshot: CatalogSnapshot, token
     header_chip(
         ui,
         "Project",
-        &format!("r{}", app.state.workspace.content.project.revision().get()),
+        &format!(
+            "r{}",
+            app.state.model.workspace.content.project.revision().get()
+        ),
         None,
         tokens,
     );
     header_chip(
         ui,
         "Catalog",
-        &format!("r{}", app.state.library_manager.revision()),
+        &format!("r{}", app.state.model.library_manager.revision()),
         None,
         tokens,
     );
@@ -344,7 +347,11 @@ fn symbol_form_page(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn symbol_projection(app: &RSpiceApp) -> Option<SymbolProjection> {
     let reference = resolve_symbol_reference(app)?;
-    let library = app.state.library_manager.get_library(&reference.library)?;
+    let library = app
+        .state
+        .model
+        .library_manager
+        .get_library(&reference.library)?;
     let view = library
         .get_cell(&reference.cell)?
         .get_view(&reference.view)?;
@@ -358,7 +365,7 @@ fn symbol_projection(app: &RSpiceApp) -> Option<SymbolProjection> {
 }
 
 fn resolve_symbol_reference(app: &RSpiceApp) -> Option<CellViewRef> {
-    let manager = &app.state.library_manager;
+    let manager = &app.state.model.library_manager;
     let selected = manager.current_library().and_then(|library| {
         let cell = manager.current_cell()?;
         let view = manager.current_view()?;
@@ -369,7 +376,7 @@ fn resolve_symbol_reference(app: &RSpiceApp) -> Option<CellViewRef> {
         return selected;
     }
 
-    let active = &app.state.workspace.content.active_view;
+    let active = &app.state.model.workspace.content.active_view;
     let active_is_symbol = manager
         .get_library(&active.library)
         .and_then(|library| library.get_cell(&active.cell))
@@ -384,6 +391,7 @@ fn resolve_symbol_reference(app: &RSpiceApp) -> Option<CellViewRef> {
 
 fn first_symbol_reference(app: &RSpiceApp, typed_only: bool) -> Option<CellViewRef> {
     app.state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -437,7 +445,10 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
                         context_value(
                             ui,
                             "Project",
-                            &format!("r{}", app.state.workspace.content.project.revision().get()),
+                            &format!(
+                                "r{}",
+                                app.state.model.workspace.content.project.revision().get()
+                            ),
                             None,
                             &tokens,
                         );
@@ -445,7 +456,7 @@ fn symbol_context(ui: &mut Ui, app: &RSpiceApp, projection: Option<&SymbolProjec
                         context_value(
                             ui,
                             "Catalog",
-                            &format!("r{}", app.state.library_manager.revision()),
+                            &format!("r{}", app.state.model.library_manager.revision()),
                             None,
                             &tokens,
                         );
@@ -632,6 +643,7 @@ fn project_write_block_reason(app: &RSpiceApp) -> Option<&'static str> {
         Some("The project is read-only in local safe mode.")
     } else if !app
         .state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -1180,8 +1192,9 @@ mod tests {
         cell.add_view(view);
         let mut library = Library::new("authoring");
         library.add_cell(cell);
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         app.state
+            .model
             .library_manager
             .select_view("authoring", "amp", "symbol");
         app.state.workbench.library_cellview_page = LibraryCellviewPage::SymbolForm;
@@ -1262,7 +1275,7 @@ mod tests {
     fn exact_selected_symbol_wins_over_an_unrelated_active_document() {
         let app = app_with_typed_symbol();
         assert_ne!(
-            app.state.workspace.content.active_view,
+            app.state.model.workspace.content.active_view,
             CellViewRef::new("authoring", "amp", "symbol")
         );
         assert_eq!(
@@ -1305,8 +1318,9 @@ mod tests {
         let mut cell = Cell::new("amp");
         cell.add_view(View::new("symbol", ViewType::Symbol));
         library.add_cell(cell);
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         app.state
+            .model
             .library_manager
             .select_view("legacy", "amp", "symbol");
         app.state.workbench.library_cellview_page = LibraryCellviewPage::SymbolForm;

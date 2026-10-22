@@ -119,7 +119,7 @@ impl RSpiceApp {
                         &mut self.state,
                     )
                 } else if self.action_file_save() {
-                    if self.state.schematic.session.is_dirty {
+                    if self.state.model.schematic.session.is_dirty {
                         crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyOnly
                     } else {
                         crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete
@@ -497,7 +497,7 @@ mod tests {
         state: crate::workbench::app_state::AppState,
         file_io: TestFileWorkflowIo,
     ) -> RSpiceApp {
-        let automation_runtime_project_id = state.workspace.content.project.id();
+        let automation_runtime_project_id = state.model.workspace.content.project.id();
         RSpiceApp {
             state,
             first_frame: false,
@@ -522,6 +522,7 @@ mod tests {
         state: &mut crate::workbench::app_state::AppState,
     ) -> crate::product::AnalysisInstanceId {
         state
+            .model
             .sim_setup
             .analysis_plan
             .as_mut()
@@ -588,9 +589,9 @@ mod tests {
             )
             .expect("seed canonical project");
             state.workbench.activate(workspace);
-            state.schematic.session.current_file = Some(schematic_path);
-            state.schematic.session.is_dirty = true;
-            state.workspace.content.set_active_dirty(true);
+            state.model.schematic.session.current_file = Some(schematic_path);
+            state.model.schematic.session.is_dirty = true;
+            state.model.workspace.content.set_active_dirty(true);
             let mut app = test_app_with_file_io(
                 state,
                 TestFileWorkflowIo {
@@ -617,6 +618,7 @@ mod tests {
     fn cancelled_project_open_after_discard_confirmation_keeps_live_schematic() {
         let mut state = crate::workbench::app_state::AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -625,10 +627,11 @@ mod tests {
                 ComponentType::Resistor,
                 Point::new(10, 20),
             ));
-        state.schematic.session.is_dirty = true;
-        let active_key = state.workspace.content.active_key();
+        state.model.schematic.session.is_dirty = true;
+        let active_key = state.model.workspace.content.active_key();
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -653,9 +656,9 @@ mod tests {
             |_state| false,
         );
 
-        assert_eq!(app.state.schematic.document().components.len(), 1);
-        assert_eq!(app.state.schematic.document().components[0].id, 42);
-        assert!(app.state.schematic.session.is_dirty);
+        assert_eq!(app.state.model.schematic.document().components.len(), 1);
+        assert_eq!(app.state.model.schematic.document().components[0].id, 42);
+        assert!(app.state.model.schematic.session.is_dirty);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -669,6 +672,7 @@ mod tests {
 
         let mut target_state = crate::workbench::app_state::AppState::default();
         target_state
+            .model
             .workspace
             .content
             .project
@@ -693,8 +697,9 @@ mod tests {
             DestinationAuthority::UserSelected,
         )
         .expect("create source project");
-        let active_key = project_source.workspace.content.active_key();
+        let active_key = project_source.model.workspace.content.active_key();
         project_source
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(7, 3));
         let project_ac_id = insert_ac_analysis(&mut project_source);
@@ -755,7 +760,7 @@ mod tests {
             "opening a recent project must Save All before replacement"
         );
         assert_eq!(
-            project_app.state.workspace.content.project.name(),
+            project_app.state.model.workspace.content.project.name(),
             "Recent target project"
         );
 
@@ -773,6 +778,7 @@ mod tests {
         )
         .expect("reset source baseline");
         schematic_source
+            .model
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(8, 4));
         let schematic_ac_id = insert_ac_analysis(&mut schematic_source);
@@ -811,7 +817,7 @@ mod tests {
                 .file
                 .workspace
                 .schematic_buffers
-                .get(&schematic_app.state.workspace.content.active_key())
+                .get(&schematic_app.state.model.workspace.content.active_key())
                 .expect("saved active schematic")
                 .document()
                 .components
@@ -831,6 +837,7 @@ mod tests {
         assert_eq!(
             schematic_app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .expect("live plan retained")
@@ -865,6 +872,7 @@ mod tests {
         );
 
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(2, 4));
         insert_ac_analysis(&mut state);
@@ -878,11 +886,11 @@ mod tests {
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
         ));
 
-        let project_id = state.workspace.content.project.id();
-        state.simulation.execution.is_running = true;
+        let project_id = state.model.workspace.content.project.id();
+        state.model.simulation.execution.is_running = true;
         assert!(!crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
         assert!(state.project_lifecycle.is_open());
-        assert_eq!(state.workspace.content.project.id(), project_id);
+        assert_eq!(state.model.workspace.content.project.id(), project_id);
         assert!(matches!(
             state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
@@ -946,8 +954,9 @@ mod tests {
             DestinationAuthority::UserSelected,
         )
         .expect("seed canonical project");
-        let active_key = state.workspace.content.active_key();
+        let active_key = state.model.workspace.content.active_key();
         state
+            .model
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(3, 8));
         let close_ac_id = insert_ac_analysis(&mut state);
@@ -1015,6 +1024,7 @@ mod tests {
         )
         .expect("seed canonical project");
         state
+            .model
             .schematic
             .add_component(ComponentType::Inductor, Point::new(6, 10));
         crate::workbench::workflows::project_workflow::request_close_project(&mut state);
@@ -1031,7 +1041,7 @@ mod tests {
         app.begin_close_project_after_save();
 
         assert!(app.state.project_lifecycle.is_open());
-        assert_eq!(app.state.schematic.document().components.len(), 1);
+        assert_eq!(app.state.model.schematic.document().components.len(), 1);
         assert!(matches!(
             app.state.dialogs.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)

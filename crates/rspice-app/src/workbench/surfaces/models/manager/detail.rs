@@ -121,7 +121,13 @@ fn project_selection<'a>(
     app: &ManagerRenderContext<'_>,
     consumers: &'a ConsumerIndex,
 ) -> Result<SelectedModelDetail<'a>, (&'static str, &'static str)> {
-    let Some(library_name) = app.state.model_library_manager.selected_library.as_deref() else {
+    let Some(library_name) = app
+        .state
+        .model
+        .model_library_manager
+        .selected_library
+        .as_deref()
+    else {
         return Err((
             "Select a model to inspect its source and resolved contract.",
             "The detail area never invents a model when the catalog selection is empty.",
@@ -137,7 +143,12 @@ fn project_selection<'a>(
         "The selected model no longer resolves.",
         "Rescan or clear the selection; stale identities are never retargeted automatically.",
     );
-    let Some(library) = app.state.model_library_manager.get_library(library_name) else {
+    let Some(library) = app
+        .state
+        .model
+        .model_library_manager
+        .get_library(library_name)
+    else {
         return Err(stale);
     };
     // A binned family's selection is one of its bins, and naming the family
@@ -190,6 +201,7 @@ fn project_selection<'a>(
         .filter(|_| binding_block_reason.is_none())
         .and_then(|component_id| {
             app.state
+                .model
                 .schematic
                 .document()
                 .components
@@ -494,7 +506,12 @@ pub(super) fn selected_model_detail(
 /// a library: the retained source bytes are the largest thing in one, and this
 /// click is the only place that reads them.
 fn open_model_source(app: &mut ManagerRenderContext<'_>, library_name: &str, model_name: &str) {
-    let Some(library) = app.state.model_library_manager.get_library(library_name) else {
+    let Some(library) = app
+        .state
+        .model
+        .model_library_manager
+        .get_library(library_name)
+    else {
         return;
     };
     let Some(model) = library.get_model(model_name) else {

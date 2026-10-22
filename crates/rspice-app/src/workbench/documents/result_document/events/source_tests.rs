@@ -6,14 +6,14 @@ use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
 fn state_with(analysis: AnalysisResult) -> AppState {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(analysis);
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
-    state.simulation.complete_run();
+    state.model.simulation.complete_run();
     state
 }
 
@@ -90,16 +90,17 @@ fn event_source_import_readout_survives_restoration_and_source_changes() {
         ResultImportFormat::Fst,
         ResultImportFormat::CsvRfc4180,
     ] {
-        state.simulation.retained.runs[0].analyses[0].import_source = Some(ResultImportSource {
-            coordinate: None,
-            source_name: "renamed.capture".to_owned(),
-            format,
-        });
+        state.model.simulation.retained.runs[0].analyses[0].import_source =
+            Some(ResultImportSource {
+                coordinate: None,
+                source_name: "renamed.capture".to_owned(),
+                format,
+            });
         let restored = crate::io::simulation_state_from_results(
-            crate::io::capture_simulation_results(&state.simulation),
+            crate::io::capture_simulation_results(&state.model.simulation),
         )
         .unwrap();
-        state.simulation = restored;
+        state.model.simulation = restored;
         let text = panel_text(&mut state);
         assert!(text.contains(format.canonical_id()), "{text}");
         assert!(text.contains("renamed.capture"), "{text}");
@@ -148,7 +149,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
     })
     .unwrap();
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "events")
             .with_result_payload(viewer::test_support::committed_events(&[(0.0, 4)]))
@@ -161,7 +162,7 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
     run.mark_running().unwrap();
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
-    state.simulation.complete_run();
+    state.model.simulation.complete_run();
     pick(&mut state, EventSelectionSource::ExactDigital, "clk", 0);
     let text = panel_text(&mut state);
     assert!(text.contains("Drive strength"), "{text}");
@@ -169,14 +170,14 @@ fn event_source_native_receipt_keeps_the_retained_drive_strength() {
     // A natively solved event is the normal case and names no source.
     assert!(!text.contains("RSpice prepared execution"), "{text}");
     assert!(!text.contains("canonical strengths"), "{text}");
-    state.simulation.retained.runs[0].analyses[0].import_source =
+    state.model.simulation.retained.runs[0].analyses[0].import_source =
         Some(crate::state::ResultImportSource {
             coordinate: None,
             source_name: "inconsistent.vcd".to_owned(),
             format: crate::state::ResultImportFormat::Vcd,
         });
     assert!(
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .validate_retained_evidence()
             .is_err()
     );
@@ -191,9 +192,11 @@ fn pick(
     point: usize,
 ) -> DigitalEventSelection {
     paint(state, false);
-    let analysis = state.simulation.active_analysis().unwrap();
-    let key =
-        AnalysisPresentationKey::new(state.simulation.active_run().unwrap().dataset_id, analysis);
+    let analysis = state.model.simulation.active_analysis().unwrap();
+    let key = AnalysisPresentationKey::new(
+        state.model.simulation.active_run().unwrap().dataset_id,
+        analysis,
+    );
     let cache = state.ui.results.event_order_cache.as_ref().unwrap();
     let selection = cache
         .order
@@ -229,8 +232,8 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
             .len(),
         4
     );
-    let version = state.simulation.view.data_version;
-    let mut replacement = state.simulation.clone();
+    let version = state.model.simulation.view.data_version;
+    let mut replacement = state.model.simulation.clone();
     let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
         replacement.retained.runs[0].analyses[0]
             .result_payload
@@ -240,11 +243,11 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
     };
     digital_traces[1].points.pop();
     digital_traces[1].points[1].value_code = 4;
-    state.simulation = crate::io::simulation_state_from_results(
+    state.model.simulation = crate::io::simulation_state_from_results(
         crate::io::capture_simulation_results(&replacement),
     )
     .unwrap();
-    assert_eq!(state.simulation.view.data_version, version);
+    assert_eq!(state.model.simulation.view.data_version, version);
     paint(&mut state, false);
     let cache = state.ui.results.event_order_cache.as_ref().unwrap();
     assert_eq!(cache.order.rows().len(), 3);
@@ -313,7 +316,7 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
         for change_time in [false, true] {
             let (mut state, name) = scalar_state(source);
             let selection = pick(&mut state, source, name, 1);
-            let analysis = &mut state.simulation.retained.runs[0].analyses[0];
+            let analysis = &mut state.model.simulation.retained.runs[0].analyses[0];
             match source {
                 EventSelectionSource::ExactDigital => {
                     let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
@@ -361,7 +364,7 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
 fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
     let (mut state, name) = scalar_state(EventSelectionSource::ExactDigital);
     let selection = pick(&mut state, EventSelectionSource::ExactDigital, name, 1);
-    state.simulation.retained.runs[0].analyses[0]
+    state.model.simulation.retained.runs[0].analyses[0]
         .waveforms
         .push(RetainedTrace::new(
             "V(out)",
@@ -370,7 +373,7 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
             "#fff",
         ));
     assert!(
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .validate_retained_evidence()
             .is_err()
     );
@@ -382,7 +385,7 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
         state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
-    state.simulation.retained.runs[0].analyses[0]
+    state.model.simulation.retained.runs[0].analyses[0]
         .waveforms
         .clear();
     assert!(event_selection_block(&mut state, &selection).is_none());
@@ -395,7 +398,7 @@ fn event_source_bus_selection_detects_changed_members_before_a_frame() {
     });
     let selection = pick(&mut state, EventSelectionSource::Bus, "count", 0);
     let Some(AnalysisResultPayload::TransientEvents { digital_buses, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .result_payload
             .as_mut()
     else {
@@ -403,7 +406,7 @@ fn event_source_bus_selection_detects_changed_members_before_a_frame() {
     };
     digital_buses[0].members.reverse();
     assert!(
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .validate_retained_evidence()
             .is_ok()
     );
@@ -422,7 +425,7 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
     });
     let selection = pick(&mut state, EventSelectionSource::Bus, "count", 1);
     let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .result_payload
             .as_mut()
     else {
@@ -471,15 +474,15 @@ fn event_source_navigation_keeps_a_retained_selection() {
         data: viewer::test_support::two_bit_counter(),
     };
     other.id = 2;
-    state.simulation.retained.runs[0].add_analysis(other);
-    assert!(state.simulation.select_analysis(1));
+    state.model.simulation.retained.runs[0].add_analysis(other);
+    assert!(state.model.simulation.select_analysis(1));
     paint(&mut state, true);
     assert_eq!(
         state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
     paint(&mut state, false);
-    assert!(state.simulation.select_analysis(0));
+    assert!(state.model.simulation.select_analysis(0));
     paint(&mut state, true);
     assert_eq!(
         state.ui.results.session.selected_digital_event.as_ref(),
@@ -489,26 +492,27 @@ fn event_source_navigation_keeps_a_retained_selection() {
     let other_run = state_with(AnalysisResult {
         data: viewer::test_support::two_bit_counter(),
     })
+    .model
     .simulation
     .retained
     .runs[0]
         .clone();
-    state.simulation.retained.runs.push(other_run);
-    assert!(state.simulation.select_run(1));
+    state.model.simulation.retained.runs.push(other_run);
+    assert!(state.model.simulation.select_run(1));
     paint(&mut state, true);
     assert_eq!(
         state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
     paint(&mut state, false);
-    assert!(state.simulation.select_run(0));
+    assert!(state.model.simulation.select_run(0));
     paint(&mut state, true);
     assert_eq!(
         state.ui.results.session.selected_digital_event.as_ref(),
         Some(&selection)
     );
-    state.simulation.retained.runs.remove(0);
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs.remove(0);
+    assert!(state.model.simulation.select_run(0));
     paint(&mut state, true);
     assert!(state.ui.results.session.selected_digital_event.is_none());
 }
@@ -528,7 +532,7 @@ fn event_source_same_time_selection_survives_trace_reordering() {
     );
     let selection = pick(&mut state, EventSelectionSource::ExactDigital, "clk", 2);
     let Some(AnalysisResultPayload::TransientEvents { digital_traces, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .result_payload
             .as_mut()
     else {
@@ -538,7 +542,7 @@ fn event_source_same_time_selection_survives_trace_reordering() {
     assert!(event_selection_block(&mut state, &selection).is_none());
     let order = event_order(&mut state).unwrap();
     let event = event_row_for_selection(
-        state.simulation.active_analysis().unwrap(),
+        state.model.simulation.active_analysis().unwrap(),
         order.buses(),
         BusRadix::Binary,
         &selection,
@@ -560,7 +564,7 @@ fn event_source_bus_selection_detects_strength_and_range_changes() {
             digital_traces,
             digital_buses,
             ..
-        }) = state.simulation.retained.runs[0].analyses[0]
+        }) = state.model.simulation.retained.runs[0].analyses[0]
             .result_payload
             .as_mut()
         else {
@@ -573,14 +577,14 @@ fn event_source_bus_selection_detects_strength_and_range_changes() {
             digital_traces[1].points[1].value_code = 4;
         }
         assert!(
-            state.simulation.retained.runs[0].analyses[0]
+            state.model.simulation.retained.runs[0].analyses[0]
                 .validate_retained_evidence()
                 .is_ok()
         );
         let order = event_order(&mut state).unwrap();
         assert_eq!(
             event_row_at_name(
-                state.simulation.active_analysis().unwrap(),
+                state.model.simulation.active_analysis().unwrap(),
                 order.buses(),
                 BusRadix::Binary,
                 EventSelectionSource::Bus,
@@ -618,7 +622,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
     );
     let original = event_order(&mut state).unwrap();
     let mut other = AppState::default();
-    other.simulation = state.simulation.clone();
+    other.model.simulation = state.model.simulation.clone();
     other.ui.results = state.ui.results.clone();
     let work = WorkCounts::reset();
     for _ in 0..12 {
@@ -627,24 +631,26 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
         assert!(Arc::ptr_eq(&original, &event_order(&mut other).unwrap()));
     }
     assert_eq!(work.since().total(), 0);
-    other.simulation.view.data_version = other.simulation.view.data_version.wrapping_add(1);
+    other.model.simulation.view.data_version =
+        other.model.simulation.view.data_version.wrapping_add(1);
     let work = WorkCounts::reset();
     assert!(event_selection_block(&mut other, &selection).is_none());
     assert_eq!(work.since().get(DatasetWalk::EventOrder), 1);
     assert!(Arc::ptr_eq(&original, &event_order(&mut state).unwrap()));
 
-    let version = state.simulation.view.data_version;
-    state.simulation = crate::io::simulation_state_from_results(
-        crate::io::capture_simulation_results(&state.simulation),
+    let version = state.model.simulation.view.data_version;
+    state.model.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&state.model.simulation),
     )
     .unwrap();
-    assert_eq!(state.simulation.view.data_version, version);
+    assert_eq!(state.model.simulation.view.data_version, version);
     assert!(event_selection_block(&mut state, &selection).is_none());
     assert!(!Arc::ptr_eq(&original, &event_order(&mut state).unwrap()));
 
     // Retention must release a large event order without drawing EVENTS again.
     let cached = Arc::downgrade(&event_order(&mut state).unwrap());
     state
+        .model
         .simulation
         .retained
         .runs
@@ -652,8 +658,9 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
     state
+        .model
         .simulation
         .retained
         .runs
@@ -661,15 +668,15 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
     assert!(cached.upgrade().is_some(), "a retained order stays cached");
     state.ui.results.session.viewer = rspice_results::result_presentation::ResultViewer::Table;
-    state.simulation.retained.runs.retain(|_| false);
+    state.model.simulation.retained.runs.retain(|_| false);
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
-    assert_eq!(state.simulation.view.data_version, version);
+        .reconcile_retained_datasets(&state.model.simulation);
+    assert_eq!(state.model.simulation.view.data_version, version);
     assert!(
         cached.upgrade().is_none(),
         "discarding the dataset must release its event order without another event frame"
@@ -680,7 +687,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
 fn event_source_failed_analysis_is_unavailable_but_live_partial_can_be_inspected() {
     let payload = viewer::test_support::committed_events(&[(0.0, 0), (1.0, 1)]);
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
             .with_result_payload(payload.clone()),
@@ -688,10 +695,10 @@ fn event_source_failed_analysis_is_unavailable_but_live_partial_can_be_inspected
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     let selection = pick(&mut state, EventSelectionSource::ExactDigital, "clk", 1);
     assert!(event_selection_block(&mut state, &selection).is_none());
-    state.simulation.retained.runs[0].analyses[0] =
+    state.model.simulation.retained.runs[0].analyses[0] =
         AnalysisResult::failed(1, AnalysisType::Transient, "TRAN", "convergence")
             .with_result_payload(payload);
     assert_eq!(
@@ -753,7 +760,7 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
         ]),
     );
     assert!(
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .validate_retained_evidence()
             .is_err()
     );
@@ -761,11 +768,11 @@ fn event_source_real_projection_rejects_nan_and_preserves_a_late_initial_value()
     assert!(event_order(&mut state).is_none());
     assert!(
         crate::io::simulation_state_from_results(crate::io::capture_simulation_results(
-            &state.simulation
+            &state.model.simulation
         ))
         .is_err()
     );
-    state.simulation.retained.runs[0].analyses[0].waveforms = vec![RetainedTrace::new(
+    state.model.simulation.retained.runs[0].analyses[0].waveforms = vec![RetainedTrace::new(
         "E(level)",
         vec![99_999.0],
         vec![0.5],

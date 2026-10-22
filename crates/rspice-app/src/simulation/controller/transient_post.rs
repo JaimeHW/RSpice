@@ -436,14 +436,14 @@ impl SimulationController {
         &self,
         state: &AppState,
     ) -> Option<SpecializedViewerCacheProvenance> {
-        let analysis = state.simulation.active_analysis()?;
+        let analysis = state.model.simulation.active_analysis()?;
         Self::analysis_supports_transient_derivation(analysis.analysis_type)
             .then(|| state.active_specialized_viewer_cache_provenance())
             .flatten()
     }
 
     fn current_transient_waveform_source(&self, state: &AppState) -> Option<DerivedWaveformSource> {
-        let analysis = state.simulation.active_analysis()?;
+        let analysis = state.model.simulation.active_analysis()?;
         let analysis_key = self.active_transient_analysis_key(state)?;
         let preferred_source = state.analysis.fft_state.selected_source.as_deref();
         let (source_name, waveform) =
@@ -737,8 +737,8 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         let stale = state.active_specialized_viewer_cache_provenance().unwrap();
         let mut controller = SimulationController::new();
         let (sender, cancelled) = install_fft_task(&mut controller, stale);
@@ -747,8 +747,8 @@ mod tests {
         // Reuse the display indices and sequence numbers in the replacement design.
         let mut replacement = SimulationRun::new(1);
         replacement.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.retained.runs = vec![replacement].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![replacement].into();
+        assert!(state.model.simulation.select_run(0));
         let active = state.active_specialized_viewer_cache_provenance().unwrap();
         assert_ne!(active, stale);
         seed_fft(&mut state, active);
@@ -841,8 +841,8 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
 
         state.analysis.fft_state.window = WindowFunction::Rectangular;
         let mut samples = vec![0.0; 16];
@@ -897,8 +897,8 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
 
         state.analysis.fft_state.window = WindowFunction::Rectangular;
         state

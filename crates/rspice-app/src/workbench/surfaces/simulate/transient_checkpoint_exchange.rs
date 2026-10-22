@@ -40,8 +40,8 @@ struct Owner {
 impl Owner {
     fn of(state: &AppState) -> Self {
         Self {
-            project: state.workspace.content.project.id(),
-            epoch: state.design_execution_epoch,
+            project: state.model.workspace.content.project.id(),
+            epoch: state.model.design_execution_epoch,
         }
     }
 }
@@ -76,6 +76,7 @@ pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
         Action::Remove(digest) => {
             if app
                 .state
+                .model
                 .simulation
                 .retained
                 .imported_transient_checkpoints
@@ -123,6 +124,7 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                         .map_err(|error| error.to_string())
                         .and_then(|checkpoint| {
                             app.state
+                                .model
                                 .simulation
                                 .retained
                                 .imported_transient_checkpoints

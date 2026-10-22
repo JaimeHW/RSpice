@@ -35,15 +35,18 @@ pub(crate) fn transform_selection_on_active_sheet(
     }
     retain_selection_on_active_sheet(state);
     let Some(bounds) = symbol_context.selection_bounds(
-        state.schematic.document(),
-        &state.schematic.session.editor.selection,
+        state.model.schematic.document(),
+        &state.model.schematic.session.editor.selection,
     ) else {
         return false;
     };
-    let pivot = snapped_middle(bounds, state.schematic.document().grid_size);
+    let pivot = snapped_middle(bounds, state.model.schematic.document().grid_size);
     // The undo step opens with every sheet present; the other sheets step
     // out of reach only while the wires are rerouted and tidied.
-    state.schematic.begin_operation(transform.description());
+    state
+        .model
+        .schematic
+        .begin_operation(transform.description());
     with_active_wire_topology(state, |schematic, scope| {
         schematic.transform_selection(
             transform,
@@ -52,7 +55,7 @@ pub(crate) fn transform_selection_on_active_sheet(
             scope,
         )
     });
-    let recorded = state.schematic.end_operation();
+    let recorded = state.model.schematic.end_operation();
     if recorded {
         state.sync_active_schematic_to_workspace();
     }
@@ -83,11 +86,12 @@ mod tests {
         let pin = symbols.terminal_points(&part)[0];
         let ending_on_the_pin = Wire::segment(20, Point::new(pin.x - 200, pin.y), pin);
         let through_the_middle = Wire::segment(21, Point::new(100, -1000), Point::new(100, 1000));
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components.push(part);
         document.wires = vec![ending_on_the_pin.clone(), through_the_middle.clone()];
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         state
+            .model
             .schematic
             .session
             .editor
@@ -101,7 +105,7 @@ mod tests {
             SelectionTransform::RotateClockwise,
         ));
 
-        let document = state.schematic.document();
+        let document = state.model.schematic.document();
         assert_eq!(document.components[0].rotation, Rotation::R90);
         assert_eq!(
             document.wires,
@@ -109,8 +113,8 @@ mod tests {
         );
         assert!(document.junctions.is_empty());
 
-        assert!(state.schematic.undo());
-        let document = state.schematic.document();
+        assert!(state.model.schematic.undo());
+        let document = state.model.schematic.document();
         assert_eq!(document.components[0].rotation, Rotation::R0);
         assert_eq!(document.wires, vec![ending_on_the_pin, through_the_middle]);
     }

@@ -35,7 +35,7 @@ fn safe_mode_disables_schematic_mutation_commands_but_keeps_canvas_settings_avai
     assert!(Command::GridSnapRouting.is_enabled(&app));
 
     Command::PlaceWire.execute(&mut app);
-    assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+    assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
 }
 
 #[test]
@@ -101,9 +101,9 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
     app.state.workbench.workspace = Workspace::Design;
 
     Command::PlaceBus.execute(&mut app);
-    assert_eq!(app.state.schematic.session.editor.tool, Tool::Bus);
+    assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Bus);
 
-    app.state.schematic.session.editor.tool = Tool::Select;
+    app.state.model.schematic.session.editor.tool = Tool::Select;
     Command::PlaceBusTap.execute(&mut app);
     assert!(app.state.dialogs.bus_tap.open);
     assert_eq!(
@@ -112,18 +112,26 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
             &app.state
         ))
     );
-    assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
-    assert!(app.state.schematic.session.editor.pending_bus_tap.is_none());
+    assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .pending_bus_tap
+            .is_none()
+    );
 }
 
 #[test]
 fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let components = app.state.schematic.document().components.clone();
-    let topology = app.state.schematic.topology_version();
-    let dirty = app.state.schematic.session.is_dirty;
-    let tool = app.state.schematic.session.editor.tool;
+    let components = app.state.model.schematic.document().components.clone();
+    let topology = app.state.model.schematic.topology_version();
+    let dirty = app.state.model.schematic.session.is_dirty;
+    let tool = app.state.model.schematic.session.editor.tool;
 
     Command::PlacePin.execute(&mut app);
 
@@ -138,29 +146,30 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
         app.state.dialogs.pin_port.fields.signal_type,
         crate::state::PortSignalType::Analog
     );
-    assert_eq!(app.state.schematic.document().components, components);
-    assert_eq!(app.state.schematic.topology_version(), topology);
-    assert_eq!(app.state.schematic.session.is_dirty, dirty);
-    assert_eq!(app.state.schematic.session.editor.tool, tool);
+    assert_eq!(app.state.model.schematic.document().components, components);
+    assert_eq!(app.state.model.schematic.topology_version(), topology);
+    assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
+    assert_eq!(app.state.model.schematic.session.editor.tool, tool);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
             .pending_port_sequence
             .is_none()
     );
-    assert!(!app.state.schematic.can_undo());
+    assert!(!app.state.model.schematic.can_undo());
 }
 
 #[test]
 fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let notes = app.state.schematic.document().design_notes.clone();
-    let topology = app.state.schematic.topology_version();
-    let dirty = app.state.schematic.session.is_dirty;
-    let tool = app.state.schematic.session.editor.tool;
+    let notes = app.state.model.schematic.document().design_notes.clone();
+    let topology = app.state.model.schematic.topology_version();
+    let dirty = app.state.model.schematic.session.is_dirty;
+    let tool = app.state.model.schematic.session.editor.tool;
 
     Command::PlaceText.execute(&mut app);
 
@@ -168,29 +177,36 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
     // The form opens empty. The sample it used to open holding was written
     // into the field as a value, so an untouched form placed a note saying it.
     assert_eq!(app.state.dialogs.design_note.text, "");
-    assert_eq!(app.state.schematic.document().design_notes, notes);
-    assert_eq!(app.state.schematic.topology_version(), topology);
-    assert_eq!(app.state.schematic.session.is_dirty, dirty);
-    assert_eq!(app.state.schematic.session.editor.tool, tool);
+    assert_eq!(app.state.model.schematic.document().design_notes, notes);
+    assert_eq!(app.state.model.schematic.topology_version(), topology);
+    assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
+    assert_eq!(app.state.model.schematic.session.editor.tool, tool);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
             .pending_design_note
             .is_none()
     );
-    assert!(!app.state.schematic.can_undo());
+    assert!(!app.state.model.schematic.can_undo());
 }
 
 #[test]
 fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let shapes = app.state.schematic.document().documentation_shapes.clone();
-    let topology = app.state.schematic.topology_version();
-    let dirty = app.state.schematic.session.is_dirty;
-    let tool = app.state.schematic.session.editor.tool;
+    let shapes = app
+        .state
+        .model
+        .schematic
+        .document()
+        .documentation_shapes
+        .clone();
+    let topology = app.state.model.schematic.topology_version();
+    let dirty = app.state.model.schematic.session.is_dirty;
+    let tool = app.state.model.schematic.session.editor.tool;
 
     Command::PlaceShape.execute(&mut app);
 
@@ -199,19 +215,23 @@ fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_docume
         app.state.dialogs.documentation_shape.kind,
         crate::state::DocumentationShapeKind::Rectangle
     );
-    assert_eq!(app.state.schematic.document().documentation_shapes, shapes);
-    assert_eq!(app.state.schematic.topology_version(), topology);
-    assert_eq!(app.state.schematic.session.is_dirty, dirty);
-    assert_eq!(app.state.schematic.session.editor.tool, tool);
+    assert_eq!(
+        app.state.model.schematic.document().documentation_shapes,
+        shapes
+    );
+    assert_eq!(app.state.model.schematic.topology_version(), topology);
+    assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
+    assert_eq!(app.state.model.schematic.session.editor.tool, tool);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
             .pending_documentation_shape
             .is_none()
     );
-    assert!(!app.state.schematic.can_undo());
+    assert!(!app.state.model.schematic.can_undo());
 }
 
 #[test]
@@ -222,37 +242,40 @@ fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
     Command::Place(ComponentType::Port).execute(&mut app);
 
     assert!(app.state.dialogs.pin_port.open);
-    assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+    assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
             .pending_port_sequence
             .is_none()
     );
-    assert!(app.state.schematic.document().components.is_empty());
+    assert!(app.state.model.schematic.document().components.is_empty());
 }
 
 #[test]
 fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     let pending = crate::state::PendingPortPlacement::new(
         "BIAS_EN",
         crate::state::PortDirectionType::InputLogic,
         crate::state::PortDiscipline::Logic,
-        app.state.schematic.topology_version(),
-        app.state.schematic.next_interface_order(),
+        app.state.model.schematic.topology_version(),
+        app.state.model.schematic.next_interface_order(),
     );
     app.state
+        .model
         .schematic
         .place_pending_port(crate::state::Point::origin(), pending)
         .expect("port places");
     app.state.sync_active_schematic_to_workspace();
     let symbol_ports = |app: &RSpiceApp| {
         app.state
+            .model
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -263,7 +286,7 @@ fn port_undo_and_redo_resynchronize_the_generated_symbol_contract() {
     assert_eq!(symbol_ports(&app).as_deref(), Some("BIAS_EN:in"));
 
     Command::Undo.execute(&mut app);
-    assert!(app.state.schematic.document().components.is_empty());
+    assert!(app.state.model.schematic.document().components.is_empty());
     assert!(symbol_ports(&app).is_none());
 
     Command::Redo.execute(&mut app);
@@ -280,13 +303,13 @@ fn bus_authoring_commands_are_unavailable_on_read_only_schematics() {
     assert!(Command::PlaceText.is_enabled(&app));
     assert!(Command::PlaceShape.is_enabled(&app));
 
-    app.state.schematic.session.read_only = true;
+    app.state.model.schematic.session.read_only = true;
     assert!(!Command::PlaceBus.is_enabled(&app));
     assert!(!Command::PlaceBusTap.is_enabled(&app));
     assert!(!Command::PlacePin.is_enabled(&app));
     assert!(!Command::PlaceText.is_enabled(&app));
     assert!(!Command::PlaceShape.is_enabled(&app));
-    app.state.schematic.session.read_only = false;
+    app.state.model.schematic.session.read_only = false;
     app.state.workbench.workspace = Workspace::Results;
     assert!(!Command::PlacePin.is_enabled(&app));
     assert!(!Command::PlaceText.is_enabled(&app));

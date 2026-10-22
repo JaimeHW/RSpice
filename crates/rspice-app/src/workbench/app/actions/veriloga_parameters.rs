@@ -45,6 +45,7 @@ fn bound_view<'a>(state: &'a AppState, component: &Component) -> Option<(&'a Cel
         .as_ref()
         .filter(|binding| !binding.is_executable_builtin())?;
     let cell = state
+        .model
         .library_manager
         .get_library(&binding.library)?
         .get_cell(&binding.cell)?;
@@ -108,6 +109,7 @@ impl AppState {
         key: &str,
     ) -> Result<bool, String> {
         let component = self
+            .model
             .schematic
             .document()
             .components

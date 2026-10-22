@@ -23,9 +23,9 @@ fn document_fixture(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
     let mut app = RSpiceApp::test_instance();
     let run = transient_run(1);
     let dataset_id = run.dataset_id;
-    app.state.simulation.retained.runs = vec![run].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name: "Transient review".to_owned(),
@@ -43,6 +43,7 @@ fn document_fixture(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
 
 fn retained(app: &RSpiceApp, document_id: ResultDocumentId) -> &VisualizationDocument {
     app.state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -123,7 +124,7 @@ fn a_pane_from_another_run_attaches_that_run_to_the_document() {
     let (mut app, document_id) = document_fixture("single-pane");
     let second = transient_run(2);
     let second_dataset = second.dataset_id;
-    app.state.simulation.retained.runs.push(second);
+    app.state.model.simulation.retained.runs.push(second);
     show_document(&mut app, document_id);
 
     open_add_pane(&mut app.state);
@@ -170,7 +171,7 @@ fn the_add_pane_form_draws_over_the_document() {
 #[test]
 fn add_pane_is_offered_only_over_a_project_result_document() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![transient_run(1)].into();
+    app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
     assert!(!add_pane_available(&app.state));
     open_add_pane(&mut app.state);
     assert!(app.state.workbench.result_document_dialog.is_none());
@@ -207,7 +208,7 @@ fn removing_a_linked_pane_takes_it_out_of_its_link_group() {
 
 /// Save the document and load it back, as a project round trip does.
 fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
-    let documents = &mut app.state.workspace.content.visualization_documents;
+    let documents = &mut app.state.model.workspace.content.visualization_documents;
     let index = documents
         .iter()
         .position(|document| document.id() == document_id)
@@ -218,7 +219,7 @@ fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
 
 /// The fixture run's one analysis, as a pane binding.
 fn fixture_binding(app: &RSpiceApp) -> PaneDataBinding {
-    let run = &app.state.simulation.retained.runs[0];
+    let run = &app.state.model.simulation.retained.runs[0];
     PaneDataBinding {
         analysis_id: super::super::create_document::source_analysis_identity(run, &run.analyses[0]),
         dataset: DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
@@ -388,7 +389,7 @@ fn a_comparison_over_a_document_is_kept_with_it() {
     let (mut app, document_id) = document_fixture("single-pane");
     let baseline = baseline_run(2);
     let baseline_id = baseline.dataset_id;
-    app.state.simulation.retained.runs.push(baseline);
+    app.state.model.simulation.retained.runs.push(baseline);
     show_document(&mut app, document_id);
 
     let outcome = run_comparison(&mut app);
@@ -419,11 +420,12 @@ fn a_comparison_over_a_document_is_kept_with_it() {
 #[test]
 fn a_comparison_over_a_quick_view_keeps_nothing() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![transient_run(1), baseline_run(2)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![transient_run(1), baseline_run(2)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     let digests = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -435,6 +437,7 @@ fn a_comparison_over_a_quick_view_keeps_nothing() {
     assert_eq!(outcome.signals.len(), 2);
     assert!(
         app.state
+            .model
             .workspace
             .content
             .visualization_documents
@@ -442,6 +445,7 @@ fn a_comparison_over_a_quick_view_keeps_nothing() {
     );
     assert_eq!(
         app.state
+            .model
             .simulation
             .retained
             .runs
@@ -469,9 +473,9 @@ fn compare_is_refused_without_a_compatible_baseline() {
             ),
         ]),
     );
-    app.state.simulation.retained.runs = vec![transient_run(1), incompatible].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![transient_run(1), incompatible].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.workspace = Workspace::Results;
 
     assert!(!compare_available(&app.state));
@@ -570,9 +574,9 @@ fn a_measurement_must_reduce_to_a_number() {
 #[test]
 fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![transient_run(1)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
 
     let preview = measurement_preview(&mut app, "max(V(out))");
     assert_eq!(
@@ -590,6 +594,7 @@ fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
     );
     assert!(
         app.state
+            .model
             .workspace
             .content
             .visualization_documents
@@ -662,9 +667,9 @@ fn drawn_rows(app: &RSpiceApp) -> Option<Vec<usize>> {
 #[test]
 fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![soa_run(1)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
 
     apply_family_slice(&mut app, "time <= 0.5");
     assert_eq!(app.state.ui.results.session.family_policies.len(), 1);
@@ -678,7 +683,7 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
     use crate::results::visualization_document::{
         ColumnRole, SourceColumn, SourceDataset, SourceRow, TypedValue, ValueType,
     };
-    let run = &app.state.simulation.retained.runs[0];
+    let run = &app.state.model.simulation.retained.runs[0];
     let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
     let analysis_id =
         super::super::create_document::source_analysis_identity(run, &run.analyses[0]);
@@ -740,6 +745,7 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
         .expect("the pane binds the run");
     let document_id = app
         .state
+        .model
         .workspace
         .content
         .insert_visualization_document(document)
@@ -762,9 +768,9 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
 #[test]
 fn a_saved_pane_family_slice_is_drawn_as_saved() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![soa_run(1)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     let document_id = family_document(&mut app);
     app.state.ui.results.session.viewer = ResultViewer::Waves;
     show_document(&mut app, document_id);
@@ -789,9 +795,9 @@ fn a_saved_pane_family_slice_is_drawn_as_saved() {
 #[test]
 fn drawing_a_pane_family_slice_keeps_the_pane_cursors() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![soa_run(1)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     let document_id = family_document(&mut app);
     let pane_id = retained(&app, document_id).panes()[0].id;
     let edits = links::cursor_pair_edits(
@@ -836,9 +842,9 @@ fn drawing_a_pane_family_slice_keeps_the_pane_cursors() {
 #[test]
 fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![soa_run(1)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     let document_id = family_document(&mut app);
     app.state.ui.results.session.viewer = ResultViewer::Waves;
     show_document(&mut app, document_id);
@@ -926,9 +932,9 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
 #[test]
 fn quick_view_properties_are_the_reader_s_own() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![transient_run(1)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.workspace = Workspace::Results;
 
     apply_properties(&mut app, 5, true);
@@ -936,6 +942,7 @@ fn quick_view_properties_are_the_reader_s_own() {
     assert!(app.state.ui.results.session.phase_continuous);
     assert!(
         app.state
+            .model
             .workspace
             .content
             .visualization_documents
@@ -976,9 +983,9 @@ fn render_the_result_document_forms_for_review() {
     review("measurement", form, |ui| show(ui.ctx(), &mut app));
 
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.retained.runs = vec![soa_run(1)].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![soa_run(1)].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.workspace = Workspace::Results;
     app.state.ui.results.session.viewer = ResultViewer::Waves;
     open_family(&mut app.state);
@@ -991,7 +998,12 @@ fn render_the_result_document_forms_for_review() {
     review("properties", form, |ui| show(ui.ctx(), &mut app));
 
     let (mut app, document_id) = document_fixture("single-pane");
-    app.state.simulation.retained.runs.push(baseline_run(2));
+    app.state
+        .model
+        .simulation
+        .retained
+        .runs
+        .push(baseline_run(2));
     show_document(&mut app, document_id);
     app.state.workbench.workspace = Workspace::Results;
     open_compare(&mut app.state);

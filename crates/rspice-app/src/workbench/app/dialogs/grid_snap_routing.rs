@@ -74,23 +74,32 @@ pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
     if state.dialogs.grid_snap_routing.open {
         return false;
     }
-    if state.schematic.canvas_settings_change_blocked() {
+    if state.model.schematic.canvas_settings_change_blocked() {
         state.prompt("Finish or cancel the drawing in progress before changing snap or routing.");
         return false;
     }
 
-    let spacing = if state.schematic.session.editor.snap_engine.enabled {
-        GridSnapSpacingChoice::from_pitch(state.schematic.document().document_policy.grid_pitch)
+    let spacing = if state.model.schematic.session.editor.snap_engine.enabled {
+        GridSnapSpacingChoice::from_pitch(
+            state.model.schematic.document().document_policy.grid_pitch,
+        )
     } else {
         GridSnapSpacingChoice::Free
     };
     let draft = GridSnapRoutingDraft {
         grid_style: state.ui.grid,
         snap_spacing: spacing,
-        snap_engine: state.schematic.session.editor.snap_engine.clone(),
+        snap_engine: state.model.schematic.session.editor.snap_engine.clone(),
         // A session left in angled routing opens on Orthogonal where the
         // document cannot take angled wires, so the draft can be applied.
-        wire_routing: match state.schematic.session.editor.wire_drawing.routing_mode {
+        wire_routing: match state
+            .model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .routing_mode
+        {
             mode if mode.is_orthogonal() || angled_routing_allowed(state) => mode,
             _ => WireRoutingMode::HorizontalFirst,
         },
@@ -166,7 +175,7 @@ impl GridSnapRoutingCommitError {
 
 fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingCommitError> {
     let transaction = state.dialogs.grid_snap_routing.clone();
-    if state.schematic.canvas_settings_change_blocked() {
+    if state.model.schematic.canvas_settings_change_blocked() {
         return Err(GridSnapRoutingCommitError::new(
             "Finish or cancel the active canvas authoring gesture before applying snap or routing settings.",
             None,
@@ -181,7 +190,7 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
 
     let requested_pitch = transaction.draft.snap_spacing.pitch();
     let pitch_changed = requested_pitch
-        .is_some_and(|pitch| pitch != state.schematic.document().document_policy.grid_pitch);
+        .is_some_and(|pitch| pitch != state.model.schematic.document().document_policy.grid_pitch);
     if pitch_changed && state.schematic_edit_read_only() {
         return Err(GridSnapRoutingCommitError::new(
             "Snap spacing is project-owned and cannot be changed in this read-only view.",
@@ -200,18 +209,24 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
     let mut snap_engine = transaction.draft.snap_engine.clone();
     snap_engine.enabled = requested_pitch.is_some();
     snap_engine.grid_size = requested_pitch
-        .unwrap_or(state.schematic.document().document_policy.grid_pitch)
+        .unwrap_or(state.model.schematic.document().document_policy.grid_pitch)
         .canvas_grid_size();
     let routing_mode = canonical_routing_mode(
         transaction.draft.wire_routing,
-        state.schematic.session.editor.wire_drawing.routing_mode,
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .routing_mode,
     );
     if !routing_mode.is_orthogonal() && !angled_routing_allowed(state) {
         return Err(GridSnapRoutingCommitError::new(ANGLED_ROUTING_REASON, None));
     }
 
     if let Some(pitch) = requested_pitch.filter(|_| pitch_changed) {
-        let changed = state.schematic.change_grid_pitch(pitch);
+        let changed = state.model.schematic.change_grid_pitch(pitch);
         if !changed {
             return Err(GridSnapRoutingCommitError::new(
                 "The schematic grid pitch could not be changed.",
@@ -221,15 +236,22 @@ fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingC
     }
 
     state.ui.set_grid_style(transaction.draft.grid_style);
-    state.schematic.session.editor.snap_engine = snap_engine.clone();
+    state.model.schematic.session.editor.snap_engine = snap_engine.clone();
     state.ui.schematic_snap = snap_engine;
     state
+        .model
         .schematic
         .session
         .editor
         .wire_drawing
         .set_routing_mode(routing_mode);
-    state.schematic.session.editor.bus_drawing.routing_mode = routing_mode;
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .bus_drawing
+        .routing_mode = routing_mode;
     state.ui.schematic_routing_mode = routing_mode;
     state.ui.schematic_visibility.wire_routing = routing_style(routing_mode);
     if pitch_changed {
@@ -255,7 +277,12 @@ const ANGLED_ROUTING_REASON: &str = "45\u{00b0} and free routing need the any-an
 /// Angled wires are drawn only where the document's junction policy keeps
 /// dots at angled joins too.
 fn angled_routing_allowed(state: &AppState) -> bool {
-    state.schematic.document().document_policy.wire_junctions
+    state
+        .model
+        .schematic
+        .document()
+        .document_policy
+        .wire_junctions
         == crate::state::WireJunctionPolicy::AnyAngle
 }
 
@@ -387,15 +414,22 @@ mod tests {
     fn open_captures_an_isolated_exact_draft_and_models_free_without_fake_pitch() {
         let mut state = AppState::default();
         state.ui.set_grid_style(GridStyle::Lines);
-        state.schematic.session.editor.snap_engine.enabled = false;
-        state.schematic.session.editor.snap_engine.snap_radius = 7;
+        state.model.schematic.session.editor.snap_engine.enabled = false;
+        state.model.schematic.session.editor.snap_engine.snap_radius = 7;
         state
+            .model
             .schematic
             .session
             .editor
             .snap_engine
             .snap_to_wire_segments = false;
-        state.schematic.session.editor.wire_drawing.routing_mode = WireRoutingMode::VerticalFirst;
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .routing_mode = WireRoutingMode::VerticalFirst;
 
         assert!(open_grid_snap_routing_dialog(&mut state));
         let draft = &state.dialogs.grid_snap_routing.draft;
@@ -418,6 +452,7 @@ mod tests {
         let mut state = AppState::default();
         // 45° routing is offered only under the any-angle junction policy.
         state
+            .model
             .schematic
             .document_mut_for_test()
             .document_policy
@@ -438,19 +473,50 @@ mod tests {
 
         assert_eq!(state.ui.grid, GridStyle::Lines);
         assert_eq!(
-            state.schematic.document().document_policy.grid_pitch,
+            state.model.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil25
         );
-        assert_eq!(state.schematic.document().grid_size, 5);
-        assert!(state.schematic.can_undo());
-        assert!(state.schematic.session.editor.snap_engine.enabled);
-        assert_eq!(state.schematic.session.editor.snap_engine.grid_size, 5);
-        assert_eq!(state.schematic.session.editor.snap_engine.snap_radius, 9);
-        assert!(!state.schematic.session.editor.snap_engine.snap_to_grid);
-        assert!(!state.schematic.session.editor.snap_engine.snap_to_terminals);
-        assert!(!state.schematic.session.editor.snap_engine.snap_to_junctions);
+        assert_eq!(state.model.schematic.document().grid_size, 5);
+        assert!(state.model.schematic.can_undo());
+        assert!(state.model.schematic.session.editor.snap_engine.enabled);
+        assert_eq!(
+            state.model.schematic.session.editor.snap_engine.grid_size,
+            5
+        );
+        assert_eq!(
+            state.model.schematic.session.editor.snap_engine.snap_radius,
+            9
+        );
         assert!(
             !state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_grid
+        );
+        assert!(
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_terminals
+        );
+        assert!(
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_junctions
+        );
+        assert!(
+            !state
+                .model
                 .schematic
                 .session
                 .editor
@@ -459,6 +525,7 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -467,14 +534,26 @@ mod tests {
         );
         assert_eq!(
             state.ui.schematic_snap,
-            state.schematic.session.editor.snap_engine
+            state.model.schematic.session.editor.snap_engine
         );
         assert_eq!(
-            state.schematic.session.editor.wire_drawing.routing_mode,
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .routing_mode,
             WireRoutingMode::FortyFiveDegree
         );
         assert_eq!(
-            state.schematic.session.editor.bus_drawing.routing_mode,
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .bus_drawing
+                .routing_mode,
             WireRoutingMode::FortyFiveDegree
         );
         assert_eq!(
@@ -498,12 +577,19 @@ mod tests {
                 .expect_err("an orthogonal junction policy refuses angled routing");
             assert!(error.message.contains("junction"), "{}", error.message);
             assert_eq!(
-                state.schematic.session.editor.wire_drawing.routing_mode,
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .wire_drawing
+                    .routing_mode,
                 WireRoutingMode::HorizontalFirst
             );
 
             let mut state = AppState::default();
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .document_policy
@@ -512,7 +598,13 @@ mod tests {
             state.dialogs.grid_snap_routing.draft.wire_routing = mode;
             assert!(commit_grid_snap_routing(&mut state).is_ok());
             assert_eq!(
-                state.schematic.session.editor.wire_drawing.routing_mode,
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .wire_drawing
+                    .routing_mode,
                 mode
             );
         }
@@ -523,12 +615,13 @@ mod tests {
         let mut state = AppState::default();
         // Free routing is offered only under the any-angle junction policy.
         state
+            .model
             .schematic
             .document_mut_for_test()
             .document_policy
             .wire_junctions = crate::state::WireJunctionPolicy::AnyAngle;
-        let topology = state.schematic.topology_version();
-        let pitch = state.schematic.document().document_policy.grid_pitch;
+        let topology = state.model.schematic.topology_version();
+        let pitch = state.model.schematic.document().document_policy.grid_pitch;
         assert!(open_grid_snap_routing_dialog(&mut state));
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Off;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Free;
@@ -536,18 +629,27 @@ mod tests {
 
         assert!(commit_grid_snap_routing(&mut state).is_ok());
 
-        assert_eq!(state.schematic.document().document_policy.grid_pitch, pitch);
-        assert_eq!(state.schematic.topology_version(), topology);
-        assert!(!state.schematic.can_undo());
-        assert!(!state.schematic.session.editor.snap_engine.enabled);
         assert_eq!(
-            state.schematic.session.editor.snap_engine.grid_size,
+            state.model.schematic.document().document_policy.grid_pitch,
+            pitch
+        );
+        assert_eq!(state.model.schematic.topology_version(), topology);
+        assert!(!state.model.schematic.can_undo());
+        assert!(!state.model.schematic.session.editor.snap_engine.enabled);
+        assert_eq!(
+            state.model.schematic.session.editor.snap_engine.grid_size,
             pitch.canvas_grid_size(),
             "Free keeps the active document pitch ready without enabling snapping"
         );
         assert_eq!(state.ui.grid, GridStyle::Off);
         assert_eq!(
-            state.schematic.session.editor.wire_drawing.routing_mode,
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .routing_mode,
             WireRoutingMode::Diagonal
         );
     }
@@ -555,8 +657,8 @@ mod tests {
     #[test]
     fn read_only_pitch_change_rejects_the_whole_transaction_without_partial_apply() {
         let mut state = AppState::default();
-        state.schematic.session.read_only = true;
-        let original_snap = state.schematic.session.editor.snap_engine.clone();
+        state.model.schematic.session.read_only = true;
+        let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(&mut state));
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
@@ -575,19 +677,22 @@ mod tests {
             Some(GridSnapRoutingFocusTarget::SnapSpacing)
         );
         assert_eq!(state.ui.grid, GridStyle::Dots);
-        assert_eq!(state.schematic.session.editor.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document().document_policy.grid_pitch,
+            state.model.schematic.session.editor.snap_engine,
+            original_snap
+        );
+        assert_eq!(
+            state.model.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(state.dialogs.grid_snap_routing.open);
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     #[test]
     fn late_safe_mode_activation_rejects_pitch_change_without_partial_apply() {
         let mut state = AppState::default();
-        let original_snap = state.schematic.session.editor.snap_engine.clone();
+        let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(&mut state));
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
@@ -608,12 +713,15 @@ mod tests {
             Some(GridSnapRoutingFocusTarget::SnapSpacing)
         );
         assert_eq!(state.ui.grid, GridStyle::Dots);
-        assert_eq!(state.schematic.session.editor.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document().document_policy.grid_pitch,
+            state.model.schematic.session.editor.snap_engine,
+            original_snap
+        );
+        assert_eq!(
+            state.model.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     #[test]
@@ -627,39 +735,50 @@ mod tests {
             .draft
             .snap_engine
             .snap_to_terminals = false;
-        state.schematic.bump_topology_version();
+        state.model.schematic.bump_topology_version();
 
         let error = commit_grid_snap_routing(&mut state).expect_err("stale authority must fail");
 
         assert!(error.message.contains("topology"));
         assert_eq!(state.ui.grid, GridStyle::Dots);
-        assert!(state.schematic.session.editor.snap_engine.snap_to_terminals);
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_terminals
+        );
         assert!(state.dialogs.grid_snap_routing.open);
     }
 
     #[test]
     fn wire_gesture_started_after_open_rejects_every_candidate_without_cancelling_it() {
         let mut state = AppState::default();
-        let original_snap = state.schematic.session.editor.snap_engine.clone();
+        let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(&mut state));
         state.dialogs.grid_snap_routing.draft.grid_style = GridStyle::Lines;
         state.dialogs.grid_snap_routing.draft.snap_spacing = GridSnapSpacingChoice::Mil25;
-        state.schematic.arm_tool(Tool::Wire);
-        state.schematic.session.editor.wire_drawing.active = true;
+        state.model.schematic.arm_tool(Tool::Wire);
+        state.model.schematic.session.editor.wire_drawing.active = true;
 
         let error =
             commit_grid_snap_routing(&mut state).expect_err("started wire must block stale apply");
 
         assert!(error.message.contains("authoring gesture"));
-        assert_eq!(state.schematic.session.editor.tool, Tool::Wire);
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Wire);
         assert_eq!(state.ui.grid, GridStyle::Dots);
-        assert_eq!(state.schematic.session.editor.snap_engine, original_snap);
         assert_eq!(
-            state.schematic.document().document_policy.grid_pitch,
+            state.model.schematic.session.editor.snap_engine,
+            original_snap
+        );
+        assert_eq!(
+            state.model.schematic.document().document_policy.grid_pitch,
             SchematicGridPitch::Mil50
         );
         assert!(state.dialogs.grid_snap_routing.open);
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     #[test]
@@ -684,15 +803,16 @@ mod tests {
             commit_grid_snap_routing(&mut state).expect("valid pitch applies");
 
             assert_eq!(
-                state.schematic.session.editor.snap_engine.grid_size,
+                state.model.schematic.session.editor.snap_engine.grid_size,
                 expected_size
             );
-            let snapped = state.schematic.session.editor.snap_engine.find_snap_target(
-                Point::new(6, 6),
-                &[],
-                &[],
-                &[],
-            );
+            let snapped = state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .find_snap_target(Point::new(6, 6), &[], &[], &[]);
             assert_eq!(
                 snapped.snapped_position, expected_position,
                 "{choice:?} must be the snap engine's real behavior, not display-only state"
@@ -703,7 +823,7 @@ mod tests {
     #[test]
     fn enabled_spacing_requires_at_least_one_actionable_snap_target() {
         let mut state = AppState::default();
-        let original_snap = state.schematic.session.editor.snap_engine.clone();
+        let original_snap = state.model.schematic.session.editor.snap_engine.clone();
         assert!(open_grid_snap_routing_dialog(&mut state));
         let draft = &mut state.dialogs.grid_snap_routing.draft;
         draft.grid_style = GridStyle::Lines;
@@ -723,8 +843,11 @@ mod tests {
             Some(GridSnapRoutingFocusTarget::SnapTargets)
         );
         assert_eq!(state.ui.grid, GridStyle::Dots);
-        assert_eq!(state.schematic.session.editor.snap_engine, original_snap);
-        assert!(!state.schematic.can_undo());
+        assert_eq!(
+            state.model.schematic.session.editor.snap_engine,
+            original_snap
+        );
+        assert!(!state.model.schematic.can_undo());
         assert!(state.dialogs.grid_snap_routing.open);
     }
 

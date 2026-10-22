@@ -43,10 +43,11 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
 
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
     apply(&ctx, &mut app, Action::Import);
-    app.state.design_execution_epoch += 1;
+    app.state.model.design_execution_epoch += 1;
     poll(&ctx, &mut app);
     assert!(
         app.state
+            .model
             .simulation
             .retained
             .imported_transient_checkpoints
@@ -77,6 +78,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     );
     assert_eq!(
         app.state
+            .model
             .simulation
             .retained
             .imported_transient_checkpoints
@@ -108,7 +110,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
             .accepted_time(),
         checkpoint.accepted_time()
     );
-    app.state.design_execution_epoch += 1;
+    app.state.model.design_execution_epoch += 1;
     poll(&ctx, &mut app);
     assert!(
         ctx.data(|data| data.get_temp::<Inspection>(inspection_id()))
@@ -117,6 +119,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     apply(&ctx, &mut app, Action::Remove(checkpoint.digest()));
     assert!(
         app.state
+            .model
             .simulation
             .retained
             .imported_transient_checkpoints
@@ -129,6 +132,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     poll(&ctx, &mut app);
     assert!(
         app.state
+            .model
             .simulation
             .retained
             .imported_transient_checkpoints

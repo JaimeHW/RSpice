@@ -32,9 +32,9 @@ fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentI
         ]),
     );
     let dataset_id = run.dataset_id;
-    app.state.simulation.retained.runs = vec![run].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name: "Durable transient review".to_owned(),
@@ -70,12 +70,12 @@ fn drive_frame(body: impl FnMut(&mut Ui)) {
 fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| show(ui, &mut app, document_id));
-    let settled = app.state.simulation.view.data_version;
+    let settled = app.state.model.simulation.view.data_version;
 
     for frame in 0..4 {
         drive_frame(|ui| show(ui, &mut app, document_id));
         assert_eq!(
-            app.state.simulation.view.data_version, settled,
+            app.state.model.simulation.view.data_version, settled,
             "idle frame {frame} of an open persistent document advanced the data version"
         );
     }
@@ -89,8 +89,8 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| show(ui, &mut app, document_id));
     let analysis = super::super::AnalysisPresentationKey::new(
-        app.state.simulation.retained.runs[0].dataset_id,
-        &app.state.simulation.retained.runs[0].analyses[0],
+        app.state.model.simulation.retained.runs[0].dataset_id,
+        &app.state.model.simulation.retained.runs[0].analyses[0],
     );
     app.state.ui.results.session.selected_trace = Some(
         super::super::SelectedResultTrace::from_identity(analysis, "V(out)"),
@@ -165,6 +165,7 @@ fn placement(
 
 fn retained_markers(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Marker> {
     app.state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -187,6 +188,7 @@ fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
     let (trace_id, revision) = {
         let document = app
             .state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -194,6 +196,7 @@ fn projecting_a_retained_marker_never_adopts_it_into_the_quick_list() {
         (document.traces()[0].id, document.revision())
     };
     app.state
+        .model
         .workspace
         .content
         .transact_visualization_document(
@@ -245,6 +248,7 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
     let (analysis, anchor) = active_analysis_anchor(&mut app.state);
     let revision_before = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -271,6 +275,7 @@ fn placing_a_marker_on_a_persistent_pane_transacts_against_the_document() {
     assert_eq!(retained[0].coordinate, TypedValue::Real(0.5));
     assert_ne!(
         app.state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -500,6 +505,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
         .unwrap();
     let revision_before = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -512,6 +518,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     assert_eq!(retained_markers(&app, document_id).len(), 1);
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -527,6 +534,7 @@ fn removing_a_marker_row_reaches_only_the_store_that_owns_it() {
     assert!(app.state.ui.results.session.document_markers.is_empty());
     assert_ne!(
         app.state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -610,12 +618,12 @@ fn matching_marker_text_on_another_dataset_is_preserved_on_load() {
         .expect("document marker");
     let retained = retained_markers(&app, document_id).remove(0);
     let mut another_run = SimulationRun::new(2);
-    another_run.add_analysis(app.state.simulation.retained.runs[0].analyses[0].clone());
+    another_run.add_analysis(app.state.model.simulation.retained.runs[0].analyses[0].clone());
     let another_analysis = super::super::AnalysisPresentationKey::new(
         another_run.dataset_id,
         &another_run.analyses[0],
     );
-    app.state.simulation.retained.runs.push(another_run);
+    app.state.model.simulation.retained.runs.push(another_run);
     let mut another_anchor = anchor;
     another_anchor.analysis = another_analysis;
     let marker = super::super::ResultMarker {
@@ -642,6 +650,7 @@ fn projection_carries_every_document_owned_pane_entity() {
     let pane = &projected.pages[0].panes[0];
     let document = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -664,15 +673,17 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     select_pane_binding(&mut app.state, &pane).expect("pane binding");
     project_pane_presentation(&mut app.state, &pane, ResultViewer::Waves)
         .expect("presentation projects");
-    let retained_default = app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
+    let retained_default =
+        app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
 
     super::super::waves::toggle_visibility(&mut app.state, 0, 0);
     assert_eq!(
-        app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
+        app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
         retained_default
     );
     assert!(
         !app.state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -682,8 +693,8 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
     );
 
     let analysis = super::super::AnalysisPresentationKey::new(
-        app.state.simulation.retained.runs[0].dataset_id,
-        &app.state.simulation.retained.runs[0].analyses[0],
+        app.state.model.simulation.retained.runs[0].dataset_id,
+        &app.state.model.simulation.retained.runs[0].analyses[0],
     );
     let view =
         app.state
@@ -698,6 +709,7 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
 
     let document = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -716,7 +728,13 @@ fn persistent_trace_axis_and_cursor_interactions_commit_without_mutating_results
             .iter()
             .any(|cursor| { cursor.label == "A" && cursor.position == TypedValue::Real(0.5) })
     );
-    assert!(app.state.workspace.content.visualization_documents_dirty);
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .visualization_documents_dirty
+    );
 }
 
 fn completed_prepared_run(
@@ -770,7 +788,7 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
         open: true,
         name: "Second transient review".to_owned(),
         name_touched: true,
-        dataset_id: Some(app.state.simulation.retained.runs[0].dataset_id),
+        dataset_id: Some(app.state.model.simulation.retained.runs[0].dataset_id),
         family_id: "waveform-worksheet".to_owned(),
         viewer_id: "viewer-waveform".to_owned(),
         layout_id: "two-linked-panes".to_owned(),
@@ -791,6 +809,7 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
     // The reader works in the second pane of the two-pane document.
     let second_panes: Vec<PaneId> = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(second)
@@ -862,8 +881,8 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
         .persistent_document_page(document_id)
         .expect("the document selected a page");
     let analysis = super::super::AnalysisPresentationKey::new(
-        app.state.simulation.retained.runs[0].dataset_id,
-        &app.state.simulation.retained.runs[0].analyses[0],
+        app.state.model.simulation.retained.runs[0].dataset_id,
+        &app.state.model.simulation.retained.runs[0].analyses[0],
     );
     app.state.ui.results.session.selected_trace = Some(
         super::super::SelectedResultTrace::from_identity(analysis, "V(out)"),
@@ -935,8 +954,8 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
     let (mut app, document_id) = persistent_transient_fixture();
     let pane = projected_pane(&mut app.state, document_id);
     let analysis = super::super::AnalysisPresentationKey::new(
-        app.state.simulation.retained.runs[0].dataset_id,
-        &app.state.simulation.retained.runs[0].analyses[0],
+        app.state.model.simulation.retained.runs[0].dataset_id,
+        &app.state.model.simulation.retained.runs[0].analyses[0],
     );
 
     // The volts pane — the one the document's vertical axis states.
@@ -961,6 +980,7 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
 
     let vertical = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -1007,7 +1027,7 @@ fn zooming_one_unit_pane_of_a_document_never_restates_another_pane_axis() {
 
 /// Save the document and load it back, as a project round trip does.
 fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
-    let documents = &mut app.state.workspace.content.visualization_documents;
+    let documents = &mut app.state.model.workspace.content.visualization_documents;
     let index = documents
         .iter()
         .position(|document| document.id() == document_id)
@@ -1032,6 +1052,7 @@ fn saved_x_range(
     pane_id: PaneId,
 ) -> Option<AxisRange> {
     app.state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -1044,6 +1065,7 @@ fn saved_x_range(
 
 fn saved_cursor_a(app: &RSpiceApp, document_id: ResultDocumentId, pane_id: PaneId) -> Option<f64> {
     app.state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -1070,8 +1092,8 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
         .remove(0);
     let (first, second) = (&page.panes[0], &page.panes[1]);
     let analysis = super::super::AnalysisPresentationKey::new(
-        app.state.simulation.retained.runs[0].dataset_id,
-        &app.state.simulation.retained.runs[0].analyses[0],
+        app.state.model.simulation.retained.runs[0].dataset_id,
+        &app.state.model.simulation.retained.runs[0].analyses[0],
     );
 
     draw_pane(&mut app, first, |state| {
@@ -1144,6 +1166,7 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
     super::super::toggle_linked_cursors(&mut app.state);
     let document = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -1211,18 +1234,21 @@ fn latest_tracking_fixture() -> LatestFixture {
     let mut app = RSpiceApp::test_instance();
     // Latest tracking only follows runs the current authored source
     // authorizes, so the fixture has to be that source.
-    app.state.simulation.source.netlist_content =
+    app.state.model.simulation.source.netlist_content =
         "* latest tracking\nV1 out 0 1\n.end\n".to_owned();
     let input_digest = digest(0x60);
-    app.state.netlist_artifacts.generation_error = None;
-    app.state.netlist_artifacts.generated_input_digest = Some(input_digest);
-    app.state.netlist_artifacts.current_generation_input_digest = Some(input_digest);
+    app.state.model.netlist_artifacts.generation_error = None;
+    app.state.model.netlist_artifacts.generated_input_digest = Some(input_digest);
+    app.state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = Some(input_digest);
     let source_digest = current_result_source_digest(&app.state)
         .expect("the fixture states a current authored source");
 
     let plan_id = SimulationPlanId::new();
     let authored_analysis_id = AnalysisInstanceId::new();
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     let run = authored_run(
         1,
         plan_id,
@@ -1232,9 +1258,9 @@ fn latest_tracking_fixture() -> LatestFixture {
         "V(out)",
     );
     let dataset_id = run.dataset_id;
-    app.state.simulation.retained.runs = vec![run].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name: "Latest transient review".to_owned(),
@@ -1249,12 +1275,14 @@ fn latest_tracking_fixture() -> LatestFixture {
         super::super::create_document::commit(&mut app).expect("persistent document commits");
     let revision = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
         .expect("retained document")
         .revision();
     app.state
+        .model
         .workspace
         .content
         .transact_visualization_document(
@@ -1290,11 +1318,11 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
         authored_analysis_id,
         source_digest,
     } = latest_tracking_fixture();
-    let good_dataset = app.state.simulation.retained.runs[0].dataset_id;
-    let project_revision = app.state.workspace.content.project.revision();
+    let good_dataset = app.state.model.simulation.retained.runs[0].dataset_id;
+    let project_revision = app.state.model.workspace.content.project.revision();
     // The newest run of the same authored analysis no longer carries the
     // signal this document's traces name.
-    app.state.simulation.retained.runs.push(authored_run(
+    app.state.model.simulation.retained.runs.push(authored_run(
         2,
         plan_id,
         project_revision,
@@ -1302,7 +1330,7 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
         authored_analysis_id,
         "V(renamed)",
     ));
-    let stale_dataset = app.state.simulation.retained.runs[1].dataset_id;
+    let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
     assert_ne!(good_dataset, stale_dataset);
 
     let LatestBinding::Degraded(reason) = refresh_latest_binding(&mut app.state, document_id)
@@ -1332,6 +1360,7 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
     assert_eq!(context.document_id, document_id);
     assert_eq!(
         app.state
+            .model
             .simulation
             .active_run()
             .expect("an active run")
@@ -1353,8 +1382,8 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
         authored_analysis_id,
         source_digest,
     } = latest_tracking_fixture();
-    let project_revision = app.state.workspace.content.project.revision();
-    app.state.simulation.retained.runs.push(authored_run(
+    let project_revision = app.state.model.workspace.content.project.revision();
+    app.state.model.simulation.retained.runs.push(authored_run(
         2,
         plan_id,
         project_revision,
@@ -1362,7 +1391,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
         authored_analysis_id,
         "V(renamed)",
     ));
-    let stale_dataset = app.state.simulation.retained.runs[1].dataset_id;
+    let stale_dataset = app.state.model.simulation.retained.runs[1].dataset_id;
 
     assert!(matches!(
         refresh_latest_binding(&mut app.state, document_id),
@@ -1377,6 +1406,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
         .to_owned();
     let revision_after_first = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -1399,6 +1429,7 @@ fn a_refused_latest_retarget_is_not_re_attempted_every_frame() {
     );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -1576,8 +1607,8 @@ fn retained_frequency_document_restores_its_noise_projection() {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
     run.add_analysis(noise);
-    state.simulation.retained.runs = vec![run].into();
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run(0));
 
     assert_eq!(
         bound_viewer_projection(&state, ResultViewer::Bode),

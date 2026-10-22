@@ -90,6 +90,7 @@ fn prepare_field_edit(
     }
     candidate.validate_reference_designator(&candidate.name)?;
     if state
+        .model
         .schematic
         .document()
         .components
@@ -267,6 +268,7 @@ pub(super) fn begin_edit(app: &mut RSpiceApp, component_id: u64, field: InlineEd
     }
     let Some(component) = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -473,21 +475,29 @@ pub(super) fn prepare_component_tuning(
     })?;
     let (plan_id, plan_revision) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| (plan.id(), plan.revision()))
         .map_err(|error| format!("the active simulation plan is unavailable: {error}"))?;
     let variables = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
         .map(|payload| payload.design_variables.clone())
         .ok_or_else(|| "the active simulation plan has no configuration payload".to_owned())?;
-    let source_view = app.state.workspace.content.active_schematic_reference();
-    let source_topology_version = app.state.schematic.topology_version();
+    let source_view = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference();
+    let source_topology_version = app.state.model.schematic.topology_version();
     let active_plan_run = app
         .state
+        .model
         .simulation
         .active_run()
         .filter(|run| {
@@ -614,6 +624,7 @@ pub(super) fn component_tuning_action_block_reason(
 pub(super) fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> Result<(), String> {
     let component = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -940,6 +951,7 @@ pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffS
     // extraction joins `Out` and `out`, so their connectors are one net's.
     let same_name = |candidate: &str| candidate.eq_ignore_ascii_case(name);
     let connectors: Vec<&crate::state::NetLabel> = state
+        .model
         .schematic
         .document()
         .net_labels
@@ -963,8 +975,14 @@ pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffS
         .collect::<Vec<_>>()
         .join(", ");
 
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -974,6 +992,7 @@ pub(super) fn off_sheet_declaration(state: &AppState, name: &str) -> Option<OffS
     if let Some(catalog) = catalog {
         for label in &connectors {
             let Some(sheet) = state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1051,6 +1070,7 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
         for terminal in &terminals {
             let value = app
                 .state
+                .model
                 .schematic
                 .document()
                 .components
@@ -1150,10 +1170,17 @@ pub(super) fn net_panel(ui: &mut Ui, app: &mut RSpiceApp, name: &str, nets: &[De
                     .show(ui)
                     .clicked()
             {
-                app.state.schematic.session.editor.selection.clear();
-                app.state.schematic.session.editor.net_highlight.clear();
+                app.state.model.schematic.session.editor.selection.clear();
+                app.state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .net_highlight
+                    .clear();
                 for id in &connected {
                     app.state
+                        .model
                         .schematic
                         .session
                         .editor
@@ -1178,6 +1205,7 @@ pub(super) struct NetAnnotation {
 /// the top sheet.
 pub(super) fn net_engine_name(state: &AppState, name: &str) -> Option<String> {
     state
+        .model
         .workspace
         .content
         .occurrence_path()
@@ -1191,7 +1219,7 @@ pub(super) fn net_operating_point(state: &AppState, net: &str) -> Option<NetAnno
     let bare = net_engine_name(state, net)?;
     let wrapped = format!("v({bare})");
     let current = active_run_matches_design(state);
-    state.simulation.active_run().and_then(|run| {
+    state.model.simulation.active_run().and_then(|run| {
         run.analyses.iter().find_map(|analysis| {
             analysis.dc_op.as_ref().and_then(|op| {
                 op.node_voltages
@@ -1212,14 +1240,14 @@ pub(super) fn net_operating_point(state: &AppState, net: &str) -> Option<NetAnno
 }
 
 pub(super) fn active_run_matches_design(state: &AppState) -> bool {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
     run.prepared_receipt().is_some_and(|receipt| {
-        receipt.project_revision() == state.workspace.content.project.revision()
-    }) && state.simulation.source.cross_probe.is_current_for(
-        &state.workspace.content.active_view,
-        state.schematic.topology_version(),
+        receipt.project_revision() == state.model.workspace.content.project.revision()
+    }) && state.model.simulation.source.cross_probe.is_current_for(
+        &state.model.workspace.content.active_view,
+        state.model.schematic.topology_version(),
     )
 }
 
@@ -1282,13 +1310,14 @@ pub(super) fn violation_targets_net(violation: &DrcViolation, net: &DesignNet) -
 pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usize {
     // Which labels stand on this net is the one extraction's answer, so the
     // collision count describes the node the deck emits.
-    let connectivity = extract(&state.schematic, None);
+    let connectivity = extract(&state.model.schematic, None);
     let wire_ids = net
         .wire_ids
         .iter()
         .copied()
         .collect::<std::collections::HashSet<_>>();
     let mut names = state
+        .model
         .schematic
         .document()
         .net_labels
@@ -1305,6 +1334,7 @@ pub(super) fn net_name_collision_count(state: &AppState, net: &DesignNet) -> usi
         .collect::<std::collections::HashSet<_>>();
     for terminal in &net.terminals {
         if let Some(port) = state
+            .model
             .schematic
             .document()
             .components
@@ -1329,6 +1359,7 @@ pub(super) fn normalized_net_name(name: &str) -> String {
 pub(super) fn select_component(app: &mut RSpiceApp, id: u64) {
     let position = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -1336,21 +1367,29 @@ pub(super) fn select_component(app: &mut RSpiceApp, id: u64) {
         .find(|component| component.id == id)
         .map(|component| component.pos);
     app.state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(id);
-    app.state.schematic.session.editor.net_highlight.clear();
-    app.state.schematic.session.editor.center_request = position;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .net_highlight
+        .clear();
+    app.state.model.schematic.session.editor.center_request = position;
 }
 
 /// Select every conductor of a net and highlight it — the same transaction
 /// the navigator's net rows commit.
 pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
-    app.state.schematic.session.editor.selection.clear();
+    app.state.model.schematic.session.editor.selection.clear();
     for wire in &net.wire_ids {
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1360,6 +1399,7 @@ pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
     if net.wire_ids.is_empty() {
         for component_id in net.terminals.iter().map(|terminal| terminal.component_id) {
             app.state
+                .model
                 .schematic
                 .session
                 .editor
@@ -1368,6 +1408,7 @@ pub(super) fn select_net(app: &mut RSpiceApp, net: &DesignNet) {
         }
     }
     app.state
+        .model
         .schematic
         .session
         .editor

@@ -26,7 +26,7 @@ impl Command {
             }
             Self::Save => {
                 state.project_lifecycle.is_open()
-                    || state.schematic.session.current_file.is_some()
+                    || state.model.schematic.session.current_file.is_some()
                     || state.browser_schematic_save_name.is_some()
             }
             Self::SaveAs => state.project_lifecycle.is_open(),
@@ -37,7 +37,7 @@ impl Command {
             Self::RevertActiveDocument => {
                 state.project_lifecycle.accepted().is_some()
                     && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(state)
-                    && !state.simulation.execution.has_active_execution()
+                    && !state.model.simulation.execution.has_active_execution()
             }
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
@@ -47,12 +47,12 @@ impl Command {
             Self::NewView => state.new_view_target().is_some(),
             Self::NewVerilogADevice => crate::workbench::app::new_veriloga_device_available(state),
             Self::OpenNetlist => {
-                !state.simulation.execution.has_active_execution()
+                !state.model.simulation.execution.has_active_execution()
             }
             Self::ImportNetlist => {
                 state.project_lifecycle.is_open()
                     && !state.workbench.safe_mode.project_read_only()
-                    && !state.simulation.execution.has_active_execution()
+                    && !state.model.simulation.execution.has_active_execution()
             }
             Self::PublishToWeb => {
                 matches!(
@@ -82,9 +82,9 @@ impl Command {
                     && !state.schematic_edit_read_only()
                     && !state.dialogs.drawing_sheet_support.manager.open
                     && state
-                        .workspace
+                        .model.workspace
                         .content.design_management
-                        .sheet_catalog(&state.workspace.content.active_key())
+                        .sheet_catalog(&state.model.workspace.content.active_key())
                         .is_some_and(|catalog| catalog.active().is_some())
             }
             Self::CustomSheetSizes => {
@@ -119,7 +119,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && state.schematic.can_undo()
+                        && state.model.schematic.can_undo()
                 }
             }
             Self::Redo => {
@@ -147,7 +147,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && schematic_selection_has_live_object(&state.schematic)
+                        && schematic_selection_has_live_object(&state.model.schematic)
                 }
             }
             Self::Delete => {
@@ -157,7 +157,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && schematic_selection_has_deletable_object(&state.schematic)
+                        && schematic_selection_has_deletable_object(&state.model.schematic)
                 }
             }
             Self::Duplicate => {
@@ -167,7 +167,7 @@ impl Command {
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && schematic_selection_has_duplicable_object(&state.schematic)
+                        && schematic_selection_has_duplicable_object(&state.model.schematic)
                 }
             }
             Self::Copy => {
@@ -177,7 +177,7 @@ impl Command {
                     !state.ui.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
-                        && schematic_selection_has_live_object(&state.schematic)
+                        && schematic_selection_has_live_object(&state.model.schematic)
                 }
             }
             Self::Paste => {
@@ -208,7 +208,7 @@ impl Command {
             | Self::MirrorSelectionVertical => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && (schematic_selection_has_live_object(&state.schematic)
+                    && (schematic_selection_has_live_object(&state.model.schematic)
                         || state.dialogs.floating_paste.is_some())
             }
             Self::AlignSelectionLeft
@@ -233,22 +233,22 @@ impl Command {
             Self::SnapSelectionToGrid => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && !state.schematic.session.editor.selection.is_empty()
+                    && !state.model.schematic.session.editor.selection.is_empty()
             }
             Self::MoveSelection => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.schematic.has_live_movable_selection()
+                    && state.model.schematic.has_live_movable_selection()
             }
             Self::StretchSelection => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.schematic.default_stretch_target().is_some()
+                    && state.model.schematic.default_stretch_target().is_some()
             }
             Self::ArraySelection => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.schematic.validate_array_source_selection().is_ok()
+                    && state.model.schematic.validate_array_source_selection().is_ok()
             }
             Self::ReplaceInstance => {
                 active_schematic_editor(app)
@@ -262,10 +262,10 @@ impl Command {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
                     && state
-                        .schematic
+                        .model.schematic
                         .selected_instance_interface_is_stale(
-                            &state.library_manager,
-                            &state.workspace.content.schematic_buffers,
+                            &state.model.library_manager,
+                            &state.model.workspace.content.schematic_buffers,
                         )
             }
             Self::CreateHierarchy => {
@@ -321,7 +321,7 @@ impl Command {
             }
             Self::ZoomOneToOne => active_symbol_editor(app) || active_schematic_editor(app),
             Self::ZoomToSelection => {
-                active_schematic_editor(app) && schematic_selection_has_live_object(&state.schematic)
+                active_schematic_editor(app) && schematic_selection_has_live_object(&state.model.schematic)
             }
             Self::ZoomBox => active_schematic_editor(app),
             Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
@@ -364,7 +364,7 @@ impl Command {
             Self::ToggleResultsSplit => {
                 state.project_lifecycle.is_open()
                     && state.workbench.supports_results_split()
-                    && state.simulation.retained.has_retained_result_dataset()
+                    && state.model.simulation.retained.has_retained_result_dataset()
             }
             Self::PreviousDocument | Self::NextDocument => {
                 crate::workbench::chrome::document_bar::document_descriptors(state)
@@ -445,7 +445,7 @@ impl Command {
                 active_symbol_editor(app) && state.symbol_in_place().is_some()
             }
             Self::AscendHierarchy => {
-                active_schematic_editor(app) && state.workspace.content.hierarchy_stack.len() > 1
+                active_schematic_editor(app) && state.model.workspace.content.hierarchy_stack.len() > 1
             }
             Self::DescendHierarchy => {
                 active_schematic_editor(app) && state.selected_hierarchy_master().is_some()
@@ -490,8 +490,8 @@ impl Command {
                 if state.workbench.workspace == Workspace::Netlist {
                     app.manual_deck_run_block_reason().is_none()
                 } else {
-                    !state.simulation.execution.has_active_execution()
-                        && !state.simulation.execution.trigger_simulation
+                    !state.model.simulation.execution.has_active_execution()
+                        && !state.model.simulation.execution.trigger_simulation
                 }
             }
             Self::PreflightChecks => state.workbench.preflight.checking.is_none(),
@@ -499,7 +499,7 @@ impl Command {
             // identity, so a project whose plan never migrated to it has
             // nothing to select, nothing to add to, and no dialog worth opening.
             Self::ManageSimulationPlans | Self::AddAnalysis => {
-                state.sim_setup.stable_analysis_plan().is_ok()
+                state.model.sim_setup.stable_analysis_plan().is_ok()
             }
             // Each of these opens a window that only the netlist page draws.
             // Availability therefore has to name the page, not just the
@@ -515,7 +515,7 @@ impl Command {
                 netlist_page_is_visible(state)
                     && state.ui.netlist.active_document
                         != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-                    && !state.simulation.source.netlist_content.trim().is_empty()
+                    && !state.model.simulation.source.netlist_content.trim().is_empty()
             }
             // Unlike its neighbours this one belongs to the source documents,
             // the Automation page and a Verilog-A cell view, not the netlist
@@ -565,19 +565,19 @@ impl Command {
             Self::CompareGeneratedRevisions => {
                 netlist_page_is_visible(state)
                     && !state.ui.netlist.generated_history.is_empty()
-                    && state.netlist_artifacts.generated_document.is_some()
+                    && state.model.netlist_artifacts.generated_document.is_some()
             }
             Self::StopSimulation => {
                 state.workbench.preflight.checking.is_some()
-                    || stop_simulation_enabled(&state.simulation)
+                    || stop_simulation_enabled(&state.model.simulation)
             }
             Self::ClearResults => {
-                state.simulation.retained.has_results()
-                    && !state.simulation.execution.has_active_execution()
+                state.model.simulation.retained.has_results()
+                    && !state.model.simulation.execution.has_active_execution()
             }
             Self::ImportResultDataset => {
                 !state.workbench.safe_mode.project_read_only()
-                    && !state.simulation.execution.has_active_execution()
+                    && !state.model.simulation.execution.has_active_execution()
             }
             // Waves is the workspace's default sheet, and its empty state is
             // the workspace's landing, so this route stays actionable before a
@@ -589,13 +589,13 @@ impl Command {
                 crate::workbench::documents::result_document::viewer_is_available(state, viewer)
             }
             Self::ToggleLinkedCursors => {
-                state.workbench.workspace == Workspace::Results && state.simulation.retained.has_results()
+                state.workbench.workspace == Workspace::Results && state.model.simulation.retained.has_results()
             }
             Self::DatasetManifestBrowser => {
-                state.project_lifecycle.is_open() && !state.simulation.retained.runs.is_empty()
+                state.project_lifecycle.is_open() && !state.model.simulation.retained.runs.is_empty()
             }
             Self::CreateResultDocument => {
-                state.project_lifecycle.is_open() && state.simulation.retained.has_results()
+                state.project_lifecycle.is_open() && state.model.simulation.retained.has_results()
             }
             Self::CompareResultDatasets => {
                 crate::workbench::documents::result_document::compare_available(state)
@@ -719,7 +719,7 @@ impl Command {
             // view it evaluates without keeping, so it needs only a result.
             Self::MeasurementLibrary => {
                 state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && state.simulation.retained.has_results()
+                    && state.model.simulation.retained.has_results()
             }
             Self::FamilySlicing => {
                 state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
@@ -727,7 +727,7 @@ impl Command {
             }
             Self::VisualizationDocumentProperties => {
                 state.workbench.current_route().surface_id() == crate::workbench::SurfaceId::Results
-                    && state.simulation.retained.has_results()
+                    && state.model.simulation.retained.has_results()
             }
             // Both return edges are judged on the dataset, never on the
             // surface the reader is standing on: they exist precisely to be
@@ -735,20 +735,20 @@ impl Command {
             Self::OpenRunInResults => {
                 state.project_lifecycle.is_open()
                     && state
-                        .simulation
+                        .model.simulation
                         .active_run()
                         .is_some_and(|run| !run.analyses.is_empty())
             }
             Self::OpenProducingPlan => result_navigation::producing_plan_hop(app).is_ok(),
             Self::OpenTaskDeck => result_navigation::task_deck_hop(app).is_ok(),
             Self::RevealProducerLog => result_navigation::producer_log_hop(app).is_ok(),
-            Self::ExpressionDiagnostics => state.simulation.retained.has_results(),
+            Self::ExpressionDiagnostics => state.model.simulation.retained.has_results(),
             Self::ExportWaveformsCsv => result_navigation::dataset_export_is_resolvable(state),
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {
                 ConsolePage::Console => {
                     state.workbench.console_view.channel == ConsoleChannel::Session
-                        && !state.log_buffer.is_empty()
+                        && !state.model.log_buffer.is_empty()
                 }
                 ConsolePage::Problems | ConsolePage::Measurements | ConsolePage::TaskLog => false,
             },

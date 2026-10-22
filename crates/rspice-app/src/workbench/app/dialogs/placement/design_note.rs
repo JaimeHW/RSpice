@@ -54,7 +54,13 @@ impl RSpiceApp {
         } else {
             validation.as_ref().err().cloned()
         };
-        let view_path = self.state.workspace.content.active_view.display_path();
+        let view_path = self
+            .state
+            .model
+            .workspace
+            .content
+            .active_view
+            .display_path();
 
         let draft = &mut self.state.dialogs.design_note;
         let choice = CommandForm::new(TITLE, PRIMARY)
@@ -75,8 +81,13 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => {
                 if let Ok(pending) = validate_draft(&self.state) {
-                    self.state.schematic.session.editor.pending_design_note = Some(pending);
-                    self.state.schematic.arm_tool(Tool::DesignNote);
+                    self.state
+                        .model
+                        .schematic
+                        .session
+                        .editor
+                        .pending_design_note = Some(pending);
+                    self.state.model.schematic.arm_tool(Tool::DesignNote);
                     self.state.dialogs.design_note.close();
                 }
             }
@@ -96,20 +107,20 @@ fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String
     let Some(source) = draft.source.as_ref() else {
         return Err("Reopen Place text or note to capture the active schematic.".to_owned());
     };
-    if source.design_epoch != state.design_execution_epoch {
+    if source.design_epoch != state.model.design_execution_epoch {
         return Err("The design document changed. Close and reopen Place text or note.".to_owned());
     }
-    if source.document_epoch != state.active_schematic_epoch {
+    if source.document_epoch != state.model.active_schematic_epoch {
         return Err(
             "The active schematic buffer changed. Close and reopen Place text or note.".to_owned(),
         );
     }
-    if source.topology_version != state.schematic.topology_version() {
+    if source.topology_version != state.model.schematic.topology_version() {
         return Err(
             "The schematic topology changed. Close and reopen Place text or note.".to_owned(),
         );
     }
-    if source.document.display_path() != state.workspace.content.active_view.display_path() {
+    if source.document.display_path() != state.model.workspace.content.active_view.display_path() {
         return Err(
             "The active cell/view changed. Close and reopen Place text or note.".to_owned(),
         );
@@ -123,7 +134,7 @@ fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String
         draft.kind,
         draft.text.clone(),
         source.topology_version,
-        &state.schematic.document().design_notes,
+        &state.model.schematic.document().design_notes,
     ) {
         Ok(pending) => Ok(pending.with_source(source.clone())),
         Err(error) => Err(error.to_string()),
@@ -178,7 +189,7 @@ mod tests {
             app.state.dialogs.design_note.text,
             "Browser recovery qualification"
         );
-        assert!(app.state.schematic.document().design_notes.is_empty());
+        assert!(app.state.model.schematic.document().design_notes.is_empty());
     }
 
     /// The content bug this form shipped: the sample text was written into
@@ -191,7 +202,7 @@ mod tests {
         state.dialogs.design_note.open(source);
         assert_eq!(state.dialogs.design_note.text, "");
         assert!(validate_draft(&state).is_err());
-        assert!(state.schematic.document().design_notes.is_empty());
+        assert!(state.model.schematic.document().design_notes.is_empty());
     }
 
     #[test]
@@ -210,7 +221,7 @@ mod tests {
         state.dialogs.design_note.close();
         assert!(state.dialogs.design_note.source.is_none());
         assert_eq!(pending.source, Some(source));
-        assert!(state.schematic.document().design_notes.is_empty());
+        assert!(state.model.schematic.document().design_notes.is_empty());
     }
 
     #[test]
@@ -228,10 +239,13 @@ mod tests {
         ] {
             let mut state = AppState::default();
             let master = CellViewRef::new("work", "note_child", "schematic");
-            state
-                .workspace
-                .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+            state.model.workspace.descend_into(
+                "X1".to_owned(),
+                master.clone(),
+                ViewType::Schematic,
+            );
             let first = state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -242,15 +256,18 @@ mod tests {
             state.dialogs.design_note.text = "Check the bias network".to_owned();
             assert!(validate_draft(&state).is_ok());
             match change {
-                "document" => state.design_execution_epoch += 1,
+                "document" => state.model.design_execution_epoch += 1,
                 "occurrence" => {
-                    state.workspace.ascend_one().unwrap();
-                    state
-                        .workspace
-                        .descend_into("X2".to_owned(), master, ViewType::Schematic);
+                    state.model.workspace.ascend_one().unwrap();
+                    state.model.workspace.descend_into(
+                        "X2".to_owned(),
+                        master,
+                        ViewType::Schematic,
+                    );
                 }
                 "sheet" => {
                     let catalog = state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -270,7 +287,7 @@ mod tests {
                     catalog.set_active(second).unwrap();
                 }
                 "content" => {
-                    let topology = state.schematic.topology_version();
+                    let topology = state.model.schematic.topology_version();
                     let pending = PendingDesignNotePlacement::new(
                         crate::state::DesignNoteKind::PlainText,
                         "Another note",
@@ -279,14 +296,18 @@ mod tests {
                     )
                     .unwrap();
                     state
+                        .model
                         .schematic
                         .place_pending_design_note(Point::origin(), pending)
                         .unwrap();
-                    assert_eq!(state.schematic.topology_version(), topology);
-                    assert_ne!(state.schematic.content_version(), source.content_version);
-                    state.schematic.init_undo_history();
+                    assert_eq!(state.model.schematic.topology_version(), topology);
+                    assert_ne!(
+                        state.model.schematic.content_version(),
+                        source.content_version
+                    );
+                    state.model.schematic.init_undo_history();
                 }
-                "read-only" => state.schematic.session.read_only = true,
+                "read-only" => state.model.schematic.session.read_only = true,
                 "safe-mode" => state.workbench.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
@@ -296,7 +317,7 @@ mod tests {
                 ),
                 _ => unreachable!(),
             }
-            let notes = state.schematic.document().design_notes.clone();
+            let notes = state.model.schematic.document().design_notes.clone();
             assert!(validate_draft(&state).is_err(), "{change}");
             assert_eq!(state.dialogs.design_note.source, Some(source));
             if !state.schematic_edit_read_only() {
@@ -307,8 +328,8 @@ mod tests {
                 state.dialogs.design_note.text = "Check the bias network".to_owned();
                 assert!(validate_draft(&state).is_ok(), "fresh {change}");
             }
-            assert_eq!(state.schematic.document().design_notes, notes);
-            assert!(!state.schematic.can_undo());
+            assert_eq!(state.model.schematic.document().design_notes, notes);
+            assert!(!state.model.schematic.can_undo());
         }
     }
 }

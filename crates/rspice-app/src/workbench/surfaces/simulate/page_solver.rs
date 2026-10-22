@@ -72,7 +72,7 @@ pub(super) const PRESET_INTENT: [&str; 4] = [
 
 /// The preset the effective options match exactly, if any.
 pub(super) fn active_preset(app: &RSpiceApp) -> Option<&'static str> {
-    app.state.sim_setup.options.preset_name()
+    app.state.model.sim_setup.options.preset_name()
 }
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -81,7 +81,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     card_row(ui, app, convergence_criteria, continuation_ladder);
     card_row(ui, app, iteration_budgets, time_integration);
     card_row(ui, app, matrix_policy, |ui, app| {
-        if temperature_reference(ui, &mut app.state.sim_setup) {
+        if temperature_reference(ui, &mut app.state.model.sim_setup) {
             commit_draft(app);
         }
     });
@@ -100,6 +100,7 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 .collect();
             let current = app
                 .state
+                .model
                 .sim_setup
                 .session
                 .options_draft
@@ -109,8 +110,14 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
             let mut picked = None;
             let mut connect_rules_response = None;
             let mut connect_rules_picked = None;
-            let rule_choices =
-                connect_rule_choices(&app.state.sim_setup.session.options_draft.connect_rules);
+            let rule_choices = connect_rule_choices(
+                &app.state
+                    .model
+                    .sim_setup
+                    .session
+                    .options_draft
+                    .connect_rules,
+            );
             field_pair(
                 ui,
                 (
@@ -136,8 +143,13 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         let text_width = ((width - gap) * 0.5).max(1.0);
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = gap;
-                            let rules =
-                                &mut app.state.sim_setup.session.options_draft.connect_rules;
+                            let rules = &mut app
+                                .state
+                                .model
+                                .sim_setup
+                                .session
+                                .options_draft
+                                .connect_rules;
                             connect_rules_response = Some(mono_input(
                                 ui,
                                 SimulationOptions::CONNECT_RULES_LABEL,
@@ -163,20 +175,28 @@ fn compatibility_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 )),
             );
             if let Some(index) = picked {
-                app.state.sim_setup.session.options_draft.compatibility =
-                    SimulationCompatibility::ALL[index];
+                app.state
+                    .model
+                    .sim_setup
+                    .session
+                    .options_draft
+                    .compatibility = SimulationCompatibility::ALL[index];
                 commit_draft(app);
             }
             if let Some(response) = connect_rules_response {
                 commit_on_release(app, &response);
             }
             if let Some(choice) = connect_rules_picked.and_then(|index| rule_choices.get(index)) {
-                app.state.sim_setup.session.options_draft.connect_rules =
-                    if choice == DESIGN_DEFAULT_RULES {
-                        String::new()
-                    } else {
-                        choice.clone()
-                    };
+                app.state
+                    .model
+                    .sim_setup
+                    .session
+                    .options_draft
+                    .connect_rules = if choice == DESIGN_DEFAULT_RULES {
+                    String::new()
+                } else {
+                    choice.clone()
+                };
                 commit_draft(app);
             }
         });
@@ -292,22 +312,23 @@ fn policy_strip(ui: &mut Ui, app: &mut RSpiceApp) {
             .find(|(name, _)| *name == label)
     {
         let mut options = build();
-        options.compatibility = app.state.sim_setup.options.compatibility;
+        options.compatibility = app.state.model.sim_setup.options.compatibility;
         // A resistor in the circuit, not a numerical setting: no preset
         // places or removes it. Nor does one choose the connect rules.
-        options.rshunt = app.state.sim_setup.options.rshunt;
+        options.rshunt = app.state.model.sim_setup.options.rshunt;
         options
             .connect_rules
-            .clone_from(&app.state.sim_setup.options.connect_rules);
-        app.state.sim_setup.session.options_draft = OptionsDialogState::from_options(&options);
+            .clone_from(&app.state.model.sim_setup.options.connect_rules);
+        app.state.model.sim_setup.session.options_draft =
+            OptionsDialogState::from_options(&options);
         apply_options(app, &options);
     }
     if apply && let PendingChange::Ready(options) = pending {
         apply_options(app, &options);
     }
     if revert {
-        app.state.sim_setup.session.options_draft =
-            OptionsDialogState::from_options(&app.state.sim_setup.options);
+        app.state.model.sim_setup.session.options_draft =
+            OptionsDialogState::from_options(&app.state.model.sim_setup.options);
     }
 }
 
@@ -383,14 +404,14 @@ enum PendingChange {
 }
 
 fn pending_change(app: &RSpiceApp) -> PendingChange {
-    let options = match app.state.sim_setup.session.options_draft.to_options() {
+    let options = match app.state.model.sim_setup.session.options_draft.to_options() {
         Ok(options) => options,
         Err(errors) => return PendingChange::Invalid(errors),
     };
     if let Err(errors) = options.validate() {
         return PendingChange::Invalid(errors.into_iter().map(|e| e.to_string()).collect());
     }
-    let current = serde_json::to_vec(&app.state.sim_setup.options).ok();
+    let current = serde_json::to_vec(&app.state.model.sim_setup.options).ok();
     let requested = serde_json::to_vec(&options).ok();
     if current.is_some() && current == requested {
         PendingChange::None
@@ -408,7 +429,8 @@ fn pending_change(app: &RSpiceApp) -> PendingChange {
 fn apply_options(app: &mut RSpiceApp, options: &SimulationOptions) {
     match commit_options_transaction(app, options) {
         Ok(_) => {
-            app.state.sim_setup.session.options_draft = OptionsDialogState::from_options(options);
+            app.state.model.sim_setup.session.options_draft =
+                OptionsDialogState::from_options(options);
         }
         Err(error) => {
             app.state
@@ -435,20 +457,20 @@ pub(super) fn commit_options_transaction(
             .collect::<Vec<_>>()
             .join(" · ")
     })?;
-    let current_bytes = serde_json::to_vec(&app.state.sim_setup.options)
+    let current_bytes = serde_json::to_vec(&app.state.model.sim_setup.options)
         .map_err(|error| format!("Could not compare the current solver options: {error}"))?;
     let requested_bytes = serde_json::to_vec(options)
         .map_err(|error| format!("Could not compare the requested solver options: {error}"))?;
     if current_bytes == requested_bytes {
         return Ok(false);
     }
-    let mut candidate = app.state.sim_setup.clone();
+    let mut candidate = app.state.model.sim_setup.clone();
     candidate.commit_options(options);
     candidate.session.options_draft = OptionsDialogState::from_options(options);
     let receipt = candidate
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .map_err(|error| error.to_string())?;
-    app.state.sim_setup = candidate;
+    app.state.model.sim_setup = candidate;
     app.invalidate_simulation_preflight();
     app.state.record_plan_receipt(receipt.status_line());
     Ok(true)
@@ -519,7 +541,7 @@ fn criterion_row(
     let response = mono_input(
         &mut cell,
         meaning,
-        field(&mut app.state.sim_setup.session.options_draft),
+        field(&mut app.state.model.sim_setup.session.options_draft),
         width,
     );
     commit_on_release(app, &response);
@@ -543,7 +565,7 @@ fn iteration_budgets(ui: &mut Ui, app: &mut RSpiceApp) {
                 |draft| &mut draft.itl1,
             );
             let native_time_controls =
-                app.state.sim_setup.options.compatibility != SimulationCompatibility::Xyce;
+                app.state.model.sim_setup.options.compatibility != SimulationCompatibility::Xyce;
             ui.add_enabled_ui(native_time_controls, |ui| {
                 budget_row(
                     ui,
@@ -624,7 +646,7 @@ fn budget_row(
     let response = mono_input(
         &mut cell,
         meaning,
-        field(&mut app.state.sim_setup.session.options_draft),
+        field(&mut app.state.model.sim_setup.session.options_draft),
         width,
     );
     commit_on_release(app, &response);
@@ -667,11 +689,29 @@ fn continuation_ladder(ui: &mut Ui, app: &mut RSpiceApp) {
             LadderControl::Terminal,
         ),
     ];
-    let enabled_rungs = 1
-        + usize::from(app.state.sim_setup.session.options_draft.gmin_stepping)
-        + usize::from(app.state.sim_setup.session.options_draft.source_stepping)
-        + usize::from(app.state.sim_setup.session.options_draft.pseudo_transient)
-        + usize::from(app.state.sim_setup.session.options_draft.arc_length);
+    let enabled_rungs =
+        1 + usize::from(
+            app.state
+                .model
+                .sim_setup
+                .session
+                .options_draft
+                .gmin_stepping,
+        ) + usize::from(
+            app.state
+                .model
+                .sim_setup
+                .session
+                .options_draft
+                .source_stepping,
+        ) + usize::from(
+            app.state
+                .model
+                .sim_setup
+                .session
+                .options_draft
+                .pseudo_transient,
+        ) + usize::from(app.state.model.sim_setup.session.options_draft.arc_length);
     let status = format!("{enabled_rungs} of 5 rungs enabled");
     card(
         ui,
@@ -775,7 +815,7 @@ fn ladder_stage(
                 .iter()
                 .map(|strategy| strategy.display_name().to_owned())
                 .collect();
-            let current = app.state.sim_setup.session.options_draft.damping;
+            let current = app.state.model.sim_setup.session.options_draft.damping;
             let selected = options
                 .get(current)
                 .cloned()
@@ -788,18 +828,40 @@ fn ladder_stage(
                 &options,
                 LADDER_CONTROL_WIDTH,
             ) {
-                app.state.sim_setup.session.options_draft.damping = picked;
+                app.state.model.sim_setup.session.options_draft.damping = picked;
                 commit_draft(app);
             }
         }
         LadderControl::Toggle(stage) => {
             let value = match stage {
-                Stage::Gmin => &mut app.state.sim_setup.session.options_draft.gmin_stepping,
-                Stage::Source => &mut app.state.sim_setup.session.options_draft.source_stepping,
-                Stage::PseudoTransient => {
-                    &mut app.state.sim_setup.session.options_draft.pseudo_transient
+                Stage::Gmin => {
+                    &mut app
+                        .state
+                        .model
+                        .sim_setup
+                        .session
+                        .options_draft
+                        .gmin_stepping
                 }
-                Stage::ArcLength => &mut app.state.sim_setup.session.options_draft.arc_length,
+                Stage::Source => {
+                    &mut app
+                        .state
+                        .model
+                        .sim_setup
+                        .session
+                        .options_draft
+                        .source_stepping
+                }
+                Stage::PseudoTransient => {
+                    &mut app
+                        .state
+                        .model
+                        .sim_setup
+                        .session
+                        .options_draft
+                        .pseudo_transient
+                }
+                Stage::ArcLength => &mut app.state.model.sim_setup.session.options_draft.arc_length,
             };
             let selected = if *value { "Enabled" } else { "Skipped" }.to_owned();
             let options = vec!["Enabled".to_owned(), "Skipped".to_owned()];
@@ -838,7 +900,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     .iter()
                     .map(|method| method.display_name().to_owned())
                     .collect();
-                let method_index = app.state.sim_setup.session.options_draft.method;
+                let method_index = app.state.model.sim_setup.session.options_draft.method;
                 let method_selected = methods
                     .get(method_index)
                     .cloned()
@@ -859,7 +921,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     None,
                 );
                 if let Some(index) = picked_method {
-                    app.state.sim_setup.session.options_draft.method = index;
+                    app.state.model.sim_setup.session.options_draft.method = index;
                     commit_draft(app);
                 }
 
@@ -871,7 +933,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         min_response = Some(mono_input(
                             ui,
                             "Minimum timestep",
-                            &mut app.state.sim_setup.session.options_draft.min_timestep,
+                            &mut app.state.model.sim_setup.session.options_draft.min_timestep,
                             width,
                         ));
                     }),
@@ -879,7 +941,7 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         max_response = Some(mono_input(
                             ui,
                             "Maximum timestep",
-                            &mut app.state.sim_setup.session.options_draft.max_timestep,
+                            &mut app.state.model.sim_setup.session.options_draft.max_timestep,
                             width,
                         ));
                     })),
@@ -889,7 +951,13 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
 
                 let mut bypass_picked = None;
-                let bypass_on = app.state.sim_setup.session.options_draft.bypass_enabled;
+                let bypass_on = app
+                    .state
+                    .model
+                    .sim_setup
+                    .session
+                    .options_draft
+                    .bypass_enabled;
                 let bypass_options = vec!["Enabled".to_owned(), "Disabled".to_owned()];
                 let bypass_selected = if bypass_on { "Enabled" } else { "Disabled" }.to_owned();
                 field_pair(
@@ -907,7 +975,12 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                     None,
                 );
                 if let Some(index) = bypass_picked {
-                    app.state.sim_setup.session.options_draft.bypass_enabled = index == 0;
+                    app.state
+                        .model
+                        .sim_setup
+                        .session
+                        .options_draft
+                        .bypass_enabled = index == 0;
                     commit_draft(app);
                 }
 
@@ -919,7 +992,13 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         bypass_reltol = Some(mono_input(
                             ui,
                             "Bypass relative bound",
-                            &mut app.state.sim_setup.session.options_draft.bypass_reltol,
+                            &mut app
+                                .state
+                                .model
+                                .sim_setup
+                                .session
+                                .options_draft
+                                .bypass_reltol,
                             width,
                         ));
                     }),
@@ -927,7 +1006,13 @@ fn time_integration(ui: &mut Ui, app: &mut RSpiceApp) {
                         bypass_abstol = Some(mono_input(
                             ui,
                             "Bypass voltage floor",
-                            &mut app.state.sim_setup.session.options_draft.bypass_abstol,
+                            &mut app
+                                .state
+                                .model
+                                .sim_setup
+                                .session
+                                .options_draft
+                                .bypass_abstol,
                             width,
                         ));
                     })),
@@ -970,6 +1055,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                 .collect();
             let index = app
                 .state
+                .model
                 .sim_setup
                 .session
                 .options_draft
@@ -994,13 +1080,13 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                     gmin_response = Some(mono_input(
                         ui,
                         "GMIN floor",
-                        &mut app.state.sim_setup.session.options_draft.gmin,
+                        &mut app.state.model.sim_setup.session.options_draft.gmin,
                         width,
                     ));
                 })),
             );
             if let Some(index) = picked {
-                app.state.sim_setup.session.options_draft.solver = index;
+                app.state.model.sim_setup.session.options_draft.solver = index;
                 commit_draft(app);
             }
             if let Some(response) = gmin_response {
@@ -1017,7 +1103,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         pivrel_response = Some(mono_input(
                             ui,
                             "Relative pivot \u{b7} PIVREL",
-                            &mut app.state.sim_setup.session.options_draft.pivrel,
+                            &mut app.state.model.sim_setup.session.options_draft.pivrel,
                             width,
                         ));
                     },
@@ -1028,7 +1114,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         pivtol_response = Some(mono_input(
                             ui,
                             "Absolute pivot \u{b7} PIVTOL",
-                            &mut app.state.sim_setup.session.options_draft.pivtol,
+                            &mut app.state.model.sim_setup.session.options_draft.pivtol,
                             width,
                         ));
                     },
@@ -1047,7 +1133,7 @@ fn matrix_policy(ui: &mut Ui, app: &mut RSpiceApp) {
                         rshunt_response = Some(mono_input(
                             ui,
                             "Node shunt to ground \u{b7} RSHUNT",
-                            &mut app.state.sim_setup.session.options_draft.rshunt,
+                            &mut app.state.model.sim_setup.session.options_draft.rshunt,
                             width,
                         ));
                     },
@@ -1372,12 +1458,13 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
 
 /// What the plan states before any analysis departs from it.
 pub(super) fn plan_policy_rows(app: &RSpiceApp) -> Vec<PolicyRow> {
-    let options = &app.state.sim_setup.options;
+    let options = &app.state.model.sim_setup.options;
     // A row scoped to time integration is a claim about a run, so it is only
     // shown when a solve that steps time is enabled — the alternative states a
     // policy for a solve that will never happen.
     let time_stepped = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .is_ok_and(|plan| {
@@ -1531,8 +1618,8 @@ fn optional_preset(value: Option<f64>) -> String {
 pub(super) fn analysis_overrides(app: &RSpiceApp) -> Vec<PolicyRow> {
     use crate::simulation::plan::AnalysisDraft;
 
-    let options = &app.state.sim_setup.options;
-    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+    let options = &app.state.model.sim_setup.options;
+    let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
         return Vec::new();
     };
     let mut rows = Vec::new();
@@ -1715,7 +1802,7 @@ fn prepared_numeric_record(
     option: NumericOverrideOption,
     authored: &str,
 ) -> Result<AnalysisNumericOverride, String> {
-    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    let plan = app.state.model.sim_setup.stable_analysis_plan()?;
     let target = plan
         .instance(instance)
         .ok_or_else(|| "The selected analysis is no longer in the plan.".to_owned())?;
@@ -1821,6 +1908,7 @@ mod ledger_head_tests {
 
         let mut app = app;
         app.state
+            .model
             .sim_setup
             .analysis_plan
             .as_mut()
@@ -1883,20 +1971,22 @@ mod transaction_tests {
         let mut app = RSpiceApp::test_instance();
         let (plan_id, source_revision) = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .map(|plan| (plan.id(), plan.revision()))
             .expect("default plan");
         let topology_root = app
             .state
+            .model
             .workspace
             .content
             .simulation_root_reference()
             .key();
-        let topology_revision = app.state.schematic.topology_version();
+        let topology_revision = app.state.model.schematic.topology_version();
         let topology_closure = vec![(topology_root.to_ascii_lowercase(), topology_revision)];
         app.state.workbench.preflight.report = Some(crate::state::PreflightReport {
-            project_revision: app.state.workspace.content.project.revision().get(),
+            project_revision: app.state.model.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,
@@ -1906,7 +1996,7 @@ mod transaction_tests {
             advisories: Vec::new(),
             prepared: None,
         });
-        let mut options = app.state.sim_setup.options.clone();
+        let mut options = app.state.model.sim_setup.options.clone();
         options.reltol *= 2.0;
 
         assert!(
@@ -1916,13 +2006,14 @@ mod transaction_tests {
 
         assert_eq!(
             app.state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .expect("plan remains available")
                 .revision(),
             source_revision.next().expect("revision advances")
         );
-        assert_eq!(app.state.sim_setup.options.reltol, options.reltol);
+        assert_eq!(app.state.model.sim_setup.options.reltol, options.reltol);
         assert!(app.state.workbench.preflight.report.is_none());
     }
 
@@ -1931,15 +2022,17 @@ mod transaction_tests {
         let mut app = RSpiceApp::test_instance();
         let revision = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("default plan")
             .revision();
-        let options = app.state.sim_setup.options.clone();
+        let options = app.state.model.sim_setup.options.clone();
 
         assert!(!commit_options_transaction(&mut app, &options).expect("no-op succeeds"));
         assert_eq!(
             app.state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .expect("plan remains available")

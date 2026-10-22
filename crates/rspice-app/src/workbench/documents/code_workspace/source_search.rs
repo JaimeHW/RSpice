@@ -51,6 +51,7 @@ pub(crate) fn open_source_search(
 ) -> Result<(), String> {
     let bundle_id = app
         .state
+        .model
         .workspace
         .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
@@ -71,6 +72,7 @@ pub(crate) fn open_source_search_in_bundle(
     }
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -99,7 +101,7 @@ pub(crate) fn open_source_search_in_bundle(
         .source_search
         .as_ref()
         .is_some_and(|search| {
-            search.project_id == app.state.workspace.content.project.id()
+            search.project_id == app.state.model.workspace.content.project.id()
                 && search.bundle_id == bundle.id()
                 && search.bundle_revision == bundle.revision().get()
                 && search.closure_digest == bundle.closure_digest()
@@ -117,13 +119,20 @@ pub(crate) fn open_source_search_in_bundle(
         return Ok(());
     }
     app.state.ui.code_workspace.source_search = Some(CodeSourceSearchState {
-        project_id: app.state.workspace.content.project.id(),
+        project_id: app.state.model.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
         generated_reference_revision: app.state.ui.netlist.revision,
         generated_reference_digest: ContentDigest::from_bytes(
-            Sha256::digest(app.state.netlist_artifacts.generated_source.as_bytes()).into(),
+            Sha256::digest(
+                app.state
+                    .model
+                    .netlist_artifacts
+                    .generated_source
+                    .as_bytes(),
+            )
+            .into(),
         ),
         language,
         active_path,
@@ -145,7 +154,7 @@ pub(crate) fn open_source_search_in_bundle(
 pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), String> {
     match super::active_source_language(
         app.state.workbench.workspace,
-        &app.state.workspace,
+        &app.state.model.workspace,
         app.state.ui.code_workspace.page,
     ) {
         None => {
@@ -166,6 +175,7 @@ pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), Strin
         Some(ProjectSourceLanguage::RSpiceAutomation) => {
             let bundle = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -343,6 +353,7 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
     }
     let changed_files = app
         .state
+        .model
         .workspace
         .content
         .replace_project_source_bundle_files_transactionally(search.bundle_id, replacements)
@@ -381,11 +392,12 @@ fn current_bundle<'a>(
     app: &'a RSpiceApp,
     search: &CodeSourceSearchState,
 ) -> Result<&'a ProjectSourceBundle, String> {
-    if search.project_id != app.state.workspace.content.project.id() {
+    if search.project_id != app.state.model.workspace.content.project.id() {
         return Err("The active project changed while search results were open.".to_owned());
     }
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -403,7 +415,14 @@ fn current_bundle<'a>(
     if search.include_generated_references
         && (app.state.ui.netlist.revision != search.generated_reference_revision
             || ContentDigest::from_bytes(
-                Sha256::digest(app.state.netlist_artifacts.generated_source.as_bytes()).into(),
+                Sha256::digest(
+                    app.state
+                        .model
+                        .netlist_artifacts
+                        .generated_source
+                        .as_bytes(),
+                )
+                .into(),
             ) != search.generated_reference_digest)
     {
         return Err(
@@ -464,9 +483,14 @@ fn search_documents<'a>(
             .collect::<Vec<_>>();
     if search.include_generated_references
         && search.scope == CodeSourceSearchScope::ActiveLanguageProject
-        && !app.state.netlist_artifacts.generated_source.is_empty()
+        && !app
+            .state
+            .model
+            .netlist_artifacts
+            .generated_source
+            .is_empty()
     {
-        let generated = app.state.netlist_artifacts.generated_source.as_str();
+        let generated = app.state.model.netlist_artifacts.generated_source.as_str();
         documents.push(SearchDocument {
             logical_path: GENERATED_REFERENCE_PATH,
             searchable_source: generated,
@@ -801,9 +825,9 @@ mod tests {
         cell.add_view(view);
         let mut library = crate::state::Library::new(&reference.library);
         library.add_cell(cell);
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         app.state
-            .workspace
+            .model.workspace
             .content
             .project_sources
             .insert_bundle(
@@ -819,6 +843,7 @@ mod tests {
             )
             .unwrap();
         app.state
+            .model
             .workspace
             .open_view(reference, crate::state::ViewType::VerilogA);
         app
@@ -890,6 +915,7 @@ mod tests {
         let (bundle_id, root) = {
             let bundle = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -898,6 +924,7 @@ mod tests {
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(
@@ -928,6 +955,7 @@ mod tests {
         commit_source_search_replace(&mut app).unwrap();
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -946,6 +974,7 @@ mod tests {
         let (bundle_id, original_path) = {
             let bundle = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -955,11 +984,13 @@ mod tests {
         };
         let retained_path = "Models/étage.va";
         app.state
+            .model
             .workspace
             .content
             .rename_project_source_bundle_file(bundle_id, &original_path, retained_path)
             .unwrap();
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(
@@ -987,6 +1018,7 @@ mod tests {
         let mut app = veriloga_view_app();
         let active_path = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -1007,13 +1039,14 @@ mod tests {
         commit_source_search_replace(&mut app).unwrap();
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
             .bundle_for_owner(&veriloga_owner())
             .unwrap();
         assert!(bundle.root().content().contains("stage_gain"));
-        assert!(app.state.workspace.content.project_sources_dirty);
+        assert!(app.state.model.workspace.content.project_sources_dirty);
         let root = bundle.root().logical_path().to_owned();
 
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
@@ -1026,6 +1059,7 @@ mod tests {
             .unwrap()
             .bundle_id;
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(
@@ -1045,6 +1079,7 @@ mod tests {
         let (bundle_id, root) = {
             let bundle = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1054,6 +1089,7 @@ mod tests {
         };
         let source = "module gain; // gain\nreal gain; /* gain */\nendmodule\n";
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(bundle_id, &root, source.to_owned())
@@ -1074,6 +1110,7 @@ mod tests {
         commit_source_search_replace(&mut app).unwrap();
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1088,10 +1125,12 @@ mod tests {
     #[test]
     fn generated_references_are_find_only_and_stale_bound() {
         let mut app = veriloga_view_app();
-        app.state.netlist_artifacts.generated_source = "XMODEL generated_reference\n".to_owned();
+        app.state.model.netlist_artifacts.generated_source =
+            "XMODEL generated_reference\n".to_owned();
         app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
         let active_path = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -1114,6 +1153,7 @@ mod tests {
         assert!(!results.matches[0].editable);
 
         app.state
+            .model
             .netlist_artifacts
             .generated_source
             .push_str("* changed\n");
@@ -1132,6 +1172,7 @@ mod tests {
         let (bundle_id, root) = {
             let bundle = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1140,6 +1181,7 @@ mod tests {
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(bundle_id, &root, "gain ".repeat(600))
@@ -1167,6 +1209,7 @@ mod tests {
         let (bundle_id, root) = {
             let bundle = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1175,6 +1218,7 @@ mod tests {
             (bundle.id(), bundle.root().logical_path().to_owned())
         };
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(
@@ -1197,6 +1241,7 @@ mod tests {
         assert!(!exact_results.truncated);
 
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(

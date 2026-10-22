@@ -75,7 +75,7 @@ fn bin_families(
     for card in &inspection.cards {
         let provider = app
             .state
-            .model_library_manager
+            .model.model_library_manager
             .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &card.model)?
             .ok_or_else(|| {
                 format!(

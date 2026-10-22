@@ -415,12 +415,14 @@ fn pinned_library(name: &str) -> crate::state::model_library::ModelLibrary {
 /// Seed one project whose catalog carries a drifted library and a clean one.
 fn drifted_project(state: &mut AppState, drifted: crate::state::model_library::ModelLibrary) {
     let name = drifted.name.clone();
-    state.model_library_manager.clear();
-    state.model_library_manager.add_library(drifted);
+    state.model.model_library_manager.clear();
+    state.model.model_library_manager.add_library(drifted);
     state
+        .model
         .model_library_manager
         .add_library(pinned_library("tsmc18_rf"));
     state
+        .model
         .model_library_manager
         .select_library(&name)
         .expect("the drifted fixture library is loaded");
@@ -685,7 +687,10 @@ fn render_every_model_hub_state() {
         (
             "shelf-retained-in-project",
             raster(ModelsCatalogScope::RSpiceLibrary, catalog(false), |state| {
-                state.model_library_manager.add_library(retained_fixture());
+                state
+                    .model
+                    .model_library_manager
+                    .add_library(retained_fixture());
             }),
         ),
         // The part detail below the mockup's container query, where the two
@@ -700,7 +705,10 @@ fn render_every_model_hub_state() {
                 ModelsCatalogScope::RSpiceLibrary,
                 catalog(false),
                 |state| {
-                    state.model_library_manager.add_library(retained_fixture());
+                    state
+                        .model
+                        .model_library_manager
+                        .add_library(retained_fixture());
                 },
             ),
         ),

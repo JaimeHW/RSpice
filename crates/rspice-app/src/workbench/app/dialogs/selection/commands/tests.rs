@@ -25,24 +25,31 @@ fn probe(id: u64, position: Point, reference: &str, expression: Option<&str>) ->
 
 fn state_with_two_resistors() -> AppState {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
-    state.schematic.document_mut_for_test().wires.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    state.model.schematic.document_mut_for_test().wires.clear();
     let mut first = Component::new(41, ComponentType::Resistor, Point::new(20, 30));
     first.name = "R1".to_owned();
     let mut second = Component::new(42, ComponentType::Resistor, Point::new(80, 30));
     second.name = "R2".to_owned();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(first);
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(second);
     state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
     state
 }
 
@@ -50,6 +57,7 @@ fn state_with_two_resistors() -> AppState {
 fn delete_removes_the_selection_immediately_as_one_undo_entry() {
     let mut state = state_with_two_resistors();
     state
+        .model
         .schematic
         .session
         .editor
@@ -58,34 +66,44 @@ fn delete_removes_the_selection_immediately_as_one_undo_entry() {
 
     assert!(state.delete_schematic_selection());
 
-    assert_eq!(state.schematic.document().components.len(), 1);
-    assert_eq!(state.schematic.undo_description(), Some("delete selection"));
+    assert_eq!(state.model.schematic.document().components.len(), 1);
+    assert_eq!(
+        state.model.schematic.undo_description(),
+        Some("delete selection")
+    );
     // The current topology resolver includes the two unlabelled terminal nets.
     assert_eq!(
         last_prompt(&state),
         "Deleted 1 object. Nets affected: net1, net2."
     );
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().components.len(), 2);
-    assert!(!state.schematic.can_undo());
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().components.len(), 2);
+    assert!(!state.model.schematic.can_undo());
 }
 
 #[test]
 fn delete_promotes_a_wire_handle_to_its_whole_conductor() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
     let wire = Wire::new(
         17,
         vec![Point::new(0, 0), Point::new(20, 0), Point::new(20, 20)],
     );
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(wire.clone());
     state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
     state
+        .model
         .schematic
         .session
         .editor
@@ -94,27 +112,37 @@ fn delete_promotes_a_wire_handle_to_its_whole_conductor() {
 
     assert!(state.delete_schematic_selection());
 
-    assert!(state.schematic.document().wires.is_empty());
+    assert!(state.model.schematic.document().wires.is_empty());
     assert_eq!(
         last_prompt(&state),
         "Deleted 1 object. Nets affected: net1."
     );
-    assert_eq!(state.schematic.undo_description(), Some("delete selection"));
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().wires, vec![wire]);
+    assert_eq!(
+        state.model.schematic.undo_description(),
+        Some("delete selection")
+    );
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().wires, vec![wire]);
 }
 
 #[test]
 fn a_stale_wire_handle_deletes_nothing_and_says_so() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
     state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::new(17, vec![Point::new(0, 0), Point::new(20, 0)]));
     state.sync_active_schematic_to_workspace();
     state
+        .model
         .schematic
         .session
         .editor
@@ -123,7 +151,7 @@ fn a_stale_wire_handle_deletes_nothing_and_says_so() {
 
     assert!(!state.delete_schematic_selection());
 
-    assert_eq!(state.schematic.document().wires.len(), 1);
+    assert_eq!(state.model.schematic.document().wires.len(), 1);
     assert_eq!(last_prompt(&state), "Select something first.");
 }
 
@@ -137,10 +165,21 @@ fn delete_names_the_nets_it_took_away() {
         Some(BusDeclaration::parse("DATA[3:0]").unwrap()),
     )
     .unwrap();
-    state.schematic.document_mut_for_test().buses.push(bus);
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .buses
+        .push(bus);
     state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
-    state.schematic.session.editor.selection.select_only_bus(5);
+    state.model.schematic.init_undo_history();
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_bus(5);
 
     assert!(state.delete_schematic_selection());
 
@@ -154,19 +193,21 @@ fn delete_names_the_nets_it_took_away() {
 fn delete_counts_the_records_that_still_reference_what_went() {
     let mut state = state_with_two_resistors();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(70, Point::new(20, 30), "vout"));
-    state.schematic.document_mut_for_test().probes.push(probe(
-        9,
-        Point::new(200, 200),
-        "P1",
-        Some("v(vout)"),
-    ));
-    state.sync_active_schematic_to_workspace();
-    state.schematic.init_undo_history();
     state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .probes
+        .push(probe(9, Point::new(200, 200), "P1", Some("v(vout)")));
+    state.sync_active_schematic_to_workspace();
+    state.model.schematic.init_undo_history();
+    state
+        .model
         .schematic
         .session
         .editor
@@ -218,6 +259,7 @@ fn the_impact_sentence_is_plural_correct_and_omits_empty_classes() {
 fn cut_copies_the_selection_and_then_removes_it() {
     let mut state = state_with_two_resistors();
     state
+        .model
         .schematic
         .session
         .editor
@@ -226,12 +268,12 @@ fn cut_copies_the_selection_and_then_removes_it() {
 
     assert!(state.cut_schematic_selection());
 
-    assert_eq!(state.schematic.document().components.len(), 1);
+    assert_eq!(state.model.schematic.document().components.len(), 1);
     assert_eq!(state.ui.schematic_clipboard.components.len(), 1);
     assert_eq!(state.ui.schematic_clipboard.components[0].name, "R1");
     assert_eq!(last_prompt(&state), "Cut 1 object.");
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().components.len(), 2);
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().components.len(), 2);
 }
 
 /// Duplicate landed everything two world units off its anchor, off every
@@ -243,21 +285,23 @@ fn a_duplicate_lands_on_the_grid_one_step_off_its_anchor() {
     let mut state = state_with_two_resistors();
     let capacitor = Component::new(43, ComponentType::Capacitor, Point::new(40, 70));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(capacitor);
-    let selection = &mut state.schematic.session.editor.selection;
+    let selection = &mut state.model.schematic.session.editor.selection;
     for id in [41, 42, 43] {
         selection.select_component(id);
     }
-    let grid = state.schematic.document().grid_size;
+    let grid = state.model.schematic.document().grid_size;
     let anchor = state.schematic_paste_anchor();
 
     assert!(state.duplicate_schematic_selection());
     assert!(state.place_floating_paste());
 
     let copies: Vec<Point> = state
+        .model
         .schematic
         .document()
         .components
@@ -291,6 +335,7 @@ fn the_prompt_clauses_are_plural_correct() {
 fn duplicate_leaves_the_clipboard_byte_identical() {
     let mut state = state_with_two_resistors();
     state
+        .model
         .schematic
         .session
         .editor
@@ -300,6 +345,7 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
     let before = serde_json::to_string(&state.ui.schematic_clipboard).expect("clipboard");
 
     state
+        .model
         .schematic
         .session
         .editor
@@ -308,7 +354,7 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
     assert!(state.duplicate_schematic_selection_at(Point::new(140, 30)));
     assert!(state.place_floating_paste());
 
-    assert_eq!(state.schematic.document().components.len(), 3);
+    assert_eq!(state.model.schematic.document().components.len(), 3);
     assert_eq!(
         serde_json::to_string(&state.ui.schematic_clipboard).expect("clipboard"),
         before,
@@ -321,6 +367,7 @@ fn duplicate_leaves_the_clipboard_byte_identical() {
 fn duplicate_selects_what_it_made_and_costs_one_undo_entry() {
     let mut state = state_with_two_resistors();
     state
+        .model
         .schematic
         .session
         .editor
@@ -331,6 +378,7 @@ fn duplicate_selects_what_it_made_and_costs_one_undo_entry() {
     assert!(state.place_floating_paste());
 
     let created = state
+        .model
         .schematic
         .document()
         .components
@@ -339,16 +387,25 @@ fn duplicate_selects_what_it_made_and_costs_one_undo_entry() {
         .expect("the duplicate exists");
     assert!(
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .has_component(created.id)
     );
-    assert!(!state.schematic.session.editor.selection.has_component(41));
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().components.len(), 2);
-    assert!(!state.schematic.can_undo());
+    assert!(
+        !state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(41)
+    );
+    assert!(state.model.schematic.undo());
+    assert_eq!(state.model.schematic.document().components.len(), 2);
+    assert!(!state.model.schematic.can_undo());
 }
 
 #[test]
@@ -360,13 +417,15 @@ fn duplicate_honours_the_persisted_external_net_preference() {
         let mut state = state_with_two_resistors();
         state.ui.duplicate_external_nets = preference;
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(70, Point::new(20, 30), "vout"));
         state.sync_active_schematic_to_workspace();
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         state
+            .model
             .schematic
             .session
             .editor
@@ -379,7 +438,7 @@ fn duplicate_honours_the_persisted_external_net_preference() {
         );
         assert!(state.place_floating_paste());
         assert_eq!(
-            state.schematic.document().components.len(),
+            state.model.schematic.document().components.len(),
             3,
             "{preference:?}"
         );
@@ -394,21 +453,29 @@ fn duplicate_honours_the_persisted_external_net_preference() {
 #[test]
 fn select_all_takes_every_class_the_filter_admits_including_annotations() {
     let mut base = AppState::default();
-    base.schematic.document_mut_for_test().components.clear();
-    base.schematic.document_mut_for_test().wires.clear();
-    base.schematic
+    base.model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    base.model.schematic.document_mut_for_test().wires.clear();
+    base.model
+        .schematic
         .document_mut_for_test()
         .components
         .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-    base.schematic
+    base.model
+        .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(2, Point::origin(), Point::new(20, 0)));
-    base.schematic
+    base.model
+        .schematic
         .document_mut_for_test()
         .net_labels
         .push(NetLabel::new(3, Point::new(20, 0), "vout"));
-    base.schematic
+    base.model
+        .schematic
         .document_mut_for_test()
         .probes
         .push(probe(4, Point::new(20, 0), "P1", None));
@@ -416,11 +483,27 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
 
     let mut state = base.clone();
     assert!(state.select_all_schematic_objects());
-    assert!(state.schematic.session.editor.selection.has_component(1));
-    assert!(state.schematic.session.editor.selection.has_wire(2));
-    assert!(state.schematic.session.editor.selection.has_net_label(3));
     assert!(
-        state.schematic.session.editor.selection.has_probe(4),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(1)
+    );
+    assert!(state.model.schematic.session.editor.selection.has_wire(2));
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_net_label(3)
+    );
+    assert!(
+        state.model.schematic.session.editor.selection.has_probe(4),
         "probes are annotations and Select all takes them"
     );
     assert_eq!(last_prompt(&state), "Selected 4 objects.");
@@ -441,26 +524,40 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
 
         assert!(state.select_all_schematic_objects(), "{class}");
         assert_eq!(
-            state.schematic.session.editor.selection.count(),
+            state.model.schematic.session.editor.selection.count(),
             1,
             "{class}"
         );
         assert_eq!(last_prompt(&state), "Selected 1 object.", "{class}");
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .has_component(present)
-                || state.schematic.session.editor.selection.has_wire(present)
                 || state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .has_wire(present)
+                || state
+                    .model
                     .schematic
                     .session
                     .editor
                     .selection
                     .has_net_label(present)
-                || state.schematic.session.editor.selection.has_probe(present),
+                || state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .has_probe(present),
             "{class}"
         );
     }
@@ -469,8 +566,13 @@ fn select_all_takes_every_class_the_filter_admits_including_annotations() {
 #[test]
 fn select_all_says_when_the_filter_admits_nothing() {
     let mut state = AppState::default();
-    state.schematic.document_mut_for_test().components.clear();
-    state.schematic.document_mut_for_test().wires.clear();
+    state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .clear();
+    state.model.schematic.document_mut_for_test().wires.clear();
     state.sync_active_schematic_to_workspace();
 
     assert!(!state.select_all_schematic_objects());
@@ -481,17 +583,18 @@ fn select_all_says_when_the_filter_admits_nothing() {
 fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     let mut state = state_with_two_resistors();
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(41);
-    state.schematic.session.read_only = true;
+    state.model.schematic.session.read_only = true;
     state.sync_active_schematic_to_workspace();
 
     // Every place these are offered greys them on a read-only schematic, so
     // reaching one anyway is answered by nothing at all.
-    let logged = state.log_buffer.len();
+    let logged = state.model.log_buffer.len();
     for command in [
         AppState::delete_schematic_selection as fn(&mut AppState) -> bool,
         AppState::cut_schematic_selection,
@@ -499,9 +602,9 @@ fn a_read_only_schematic_refuses_every_mutating_command_without_touching_it() {
     ] {
         assert!(!command(&mut state));
         assert!(state.workbench.prompt.is_none());
-        assert_eq!(state.log_buffer.len(), logged);
+        assert_eq!(state.model.log_buffer.len(), logged);
     }
-    assert_eq!(state.schematic.document().components.len(), 2);
+    assert_eq!(state.model.schematic.document().components.len(), 2);
     assert!(state.ui.schematic_clipboard.is_empty());
     assert!(
         state.select_all_schematic_objects(),
@@ -521,7 +624,7 @@ fn an_empty_selection_refuses_with_one_plain_line() {
         assert!(!command(&mut state));
         assert_eq!(last_prompt(&state), "Select something first.");
     }
-    assert_eq!(state.schematic.document().components.len(), 2);
+    assert_eq!(state.model.schematic.document().components.len(), 2);
 }
 
 /// The copy these commands ship is the prompt, so the words the review

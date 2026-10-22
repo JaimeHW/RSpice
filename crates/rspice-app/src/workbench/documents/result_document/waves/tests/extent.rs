@@ -15,7 +15,7 @@ use super::*;
 #[test]
 fn the_strip_extent_matches_the_walk_it_replaced() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0, 2.5], vec![0.0, 1.0, 2.0], "#fff"),
             RetainedTrace::new("V(b)", vec![-3.0, 0.5], vec![1.0, 2.0], "#0af"),
@@ -23,7 +23,7 @@ fn the_strip_extent_matches_the_walk_it_replaced() {
     );
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -48,7 +48,7 @@ fn the_strip_extent_matches_the_walk_it_replaced() {
 #[test]
 fn hiding_a_trace_moves_the_strip_extent() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
             RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
@@ -56,16 +56,16 @@ fn hiding_a_trace_moves_the_strip_extent() {
     );
     let presentation = state.ui.preferences.result_presentation_policy();
     let before = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
     assert_eq!(before[0].x_range, Some((0.0, 40.0)));
 
-    state.simulation.retained.runs[0].analyses[0].waveforms[1].visible = false;
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[1].visible = false;
     let after = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -85,7 +85,7 @@ fn hiding_a_trace_moves_the_strip_extent() {
 #[test]
 fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
             RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
@@ -93,7 +93,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
     );
     let presentation = state.ui.preferences.result_presentation_policy();
     let before = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -102,12 +102,12 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
 
     toggle_visibility(&mut state, 0, 1);
     assert!(
-        state.simulation.retained.runs[0].analyses[0].waveforms[1].visible,
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[1].visible,
         "the override path must not rewrite the retained data flag"
     );
 
     let after = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -134,7 +134,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
 #[test]
 fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
             RetainedTrace::new("V(b)", vec![0.0, 40.0], vec![1.0, 2.0], "#0af"),
@@ -145,7 +145,7 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
 
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -167,7 +167,7 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
 #[test]
 fn the_extent_is_walked_once_per_strip_per_cache_build() {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran A").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
@@ -182,7 +182,7 @@ fn the_extent_is_walked_once_per_strip_per_cache_build() {
 
     let baseline = WorkCounts::reset();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -197,7 +197,7 @@ fn the_extent_is_walked_once_per_strip_per_cache_build() {
     let baseline = WorkCounts::reset();
     for _ in 0..5 {
         let _ = cached_models(
-            &state.simulation,
+            &state.model.simulation,
             &mut state.ui.results,
             presentation.complex_number_display(),
             &Tokens::default(),

@@ -157,11 +157,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.workbench.workspace {
         // A symbol cellview is a design document with its own structure:
         // an ordered pin contract instead of a hierarchy of instances.
-        Workspace::Design if app.state.workspace.content.active_view_type() == ViewType::Symbol => {
+        Workspace::Design
+            if app.state.model.workspace.content.active_view_type() == ViewType::Symbol =>
+        {
             symbol::show(ui, app);
         }
         Workspace::Design
-            if app.state.workspace.content.active_view_type() == ViewType::VerilogA =>
+            if app.state.model.workspace.content.active_view_type() == ViewType::VerilogA =>
         {
             veriloga::show(ui, app);
         }
@@ -502,6 +504,7 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .to_ascii_lowercase();
     let libraries = app
         .state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -542,10 +545,10 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                 WorkbenchIcon::Project
             },
             &name,
-            app.state.library_manager.selected_library.as_deref() == Some(name.as_str()),
+            app.state.model.library_manager.selected_library.as_deref() == Some(name.as_str()),
             read_only.then_some("read-only"),
         ) {
-            app.state.library_manager.select_library(&name);
+            app.state.model.library_manager.select_library(&name);
         }
     }
 }
@@ -559,12 +562,14 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .to_ascii_lowercase();
     let active_id = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
         .active_configuration_id();
     let configurations = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -583,6 +588,7 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .collect::<Vec<_>>();
     let total = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -611,6 +617,7 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     // inspector cannot explain.
     if app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -630,6 +637,7 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .to_ascii_lowercase();
     let mut rows = app
         .state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -645,6 +653,7 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .chain(
             app.state
+                .model
                 .model_library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -769,9 +778,10 @@ fn nav_matches(query: &str, text: &str) -> bool {
 }
 
 fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
-    let enabled = app.state.sim_setup.enabled_analysis_instance_count();
+    let enabled = app.state.model.sim_setup.enabled_analysis_instance_count();
     let total = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map_or(0, |plan| plan.instances().len());
@@ -783,7 +793,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     // places. The forecast's point count does not depend on how many analyses
     // are enabled; only its task count does, so one validation answers both.
     let run_set_validation =
-        rspice_simulation_contract::run_set::validate(&app.state.sim_setup.run_set, enabled);
+        rspice_simulation_contract::run_set::validate(&app.state.model.sim_setup.run_set, enabled);
     let declared_points = run_set_validation
         .errors
         .is_empty()
@@ -793,9 +803,9 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     // digests every cell view and walks the configured hierarchy; nine rows
     // each asking would pay for it nine times to print one number once.
     let placed_sources = crate::simulation::placed_sources::whole_design_source_count(
-        &app.state.library_manager,
-        &app.state.workspace,
-        &app.state.schematic,
+        &app.state.model.library_manager,
+        &app.state.model.workspace,
+        &app.state.model.schematic,
     );
     // The nine routes are resolved before the head is drawn, because the head
     // is that section's own and a header over nothing is a claim the rail
@@ -844,7 +854,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             // rail reported a single process corner and a single temperature
             // while the plan was going to run twenty-seven points over four
             // dimensions, and nothing on the rail said so.
-            let run_set = &app.state.sim_setup.run_set;
+            let run_set = &app.state.model.sim_setup.run_set;
             // An axis answers for its own name, which is what the row states.
             // Matching the values instead would leave a row on screen for a
             // query the reader cannot see the reason for. Only the axes the
@@ -942,11 +952,12 @@ fn simulate_nav_meta(
 ) -> Option<String> {
     let payload = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id));
+        .and_then(|plan_id| app.state.model.workspace.content.plan_data(plan_id));
     let count = |value: usize| (value > 0).then(|| value.to_string());
     match page {
         SimulationPage::Analyses => Some(analyses.to_owned()),
@@ -965,11 +976,11 @@ fn simulate_nav_meta(
         SimulationPage::Save => None,
         SimulationPage::Specifications => count(payload.map_or(0, |data| data.specs.len())),
         SimulationPage::RunSet => points.map(|points| format!("{points} pt")),
-        SimulationPage::Models => count(app.state.sim_setup.model_bindings.len()),
+        SimulationPage::Models => count(app.state.model.sim_setup.model_bindings.len()),
         // The active numerical policy, not a count — the tree's job is to say
         // what each route currently holds, and for the solver that is which
         // preset the effective options match.
-        SimulationPage::Solver => Some(app.state.sim_setup.options.preset_label()),
+        SimulationPage::Solver => Some(app.state.model.sim_setup.options.preset_label()),
     }
 }
 
@@ -1088,25 +1099,35 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // A snapshot keeps the favorites predicate borrow-free inside the run map;
     // recency reads its owning accessor, which states the rank once.
     let favorite_signals = app.state.ui.results.session.favorite_signals.clone();
-    let active_run = app
+    let active_run = app.state.model.simulation.view.active_run_idx.or_else(|| {
+        app.state
+            .model
+            .simulation
+            .retained
+            .runs
+            .len()
+            .checked_sub(1)
+    });
+    let active_analysis = app
         .state
+        .model
         .simulation
         .view
-        .active_run_idx
-        .or_else(|| app.state.simulation.retained.runs.len().checked_sub(1));
-    let active_analysis = app.state.simulation.view.active_analysis_idx.or_else(|| {
-        active_run.and_then(|run| {
-            app.state
-                .simulation
-                .retained
-                .runs
-                .get(run)
-                .is_some_and(|run| !run.analyses.is_empty())
-                .then_some(0)
-        })
-    });
+        .active_analysis_idx
+        .or_else(|| {
+            active_run.and_then(|run| {
+                app.state
+                    .model
+                    .simulation
+                    .retained
+                    .runs
+                    .get(run)
+                    .is_some_and(|run| !run.analyses.is_empty())
+                    .then_some(0)
+            })
+        });
     let active_analysis_key = active_run
-        .and_then(|run| app.state.simulation.retained.runs.get(run))
+        .and_then(|run| app.state.model.simulation.retained.runs.get(run))
         .zip(active_analysis)
         .and_then(|(run, analysis_index)| {
             run.analyses
@@ -1117,7 +1138,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .state
         .ui
         .results
-        .valid_selected_trace(&app.state.simulation)
+        .valid_selected_trace(&app.state.model.simulation)
         .cloned();
     let selected_artifact = app
         .state
@@ -1126,12 +1147,15 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .session
         .selected_result_artifact
         .clone()
-        .filter(|key| key.resolve(&app.state.simulation.retained.runs).is_some());
+        .filter(|key| {
+            key.resolve(&app.state.model.simulation.retained.runs)
+                .is_some()
+        });
     let expression_source = active_analysis_key.map_or_else(Vec::new, |analysis| {
         app.state
             .ui
             .results
-            .expression_entries_for_analysis(&app.state.simulation, analysis)
+            .expression_entries_for_analysis(&app.state.model.simulation, analysis)
     });
     let expressions = expression_source
         .iter()
@@ -1146,6 +1170,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let expression_query_match = !query.is_empty() && !expressions.is_empty();
     let analysis_keys = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -1165,7 +1190,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         .collect::<std::collections::HashMap<_, _>>();
     let runs = app
         .state
-        .simulation
+        .model.simulation
         .retained.runs
         .iter()
         .enumerate()
@@ -1519,6 +1544,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
         let loaded = match tab {
             ResultsBrowserTab::Signals => app
                 .state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -1537,7 +1563,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         .sum::<usize>()
                 })
                 .sum(),
-            ResultsBrowserTab::Datasets => app.state.simulation.retained.runs.len(),
+            ResultsBrowserTab::Datasets => app.state.model.simulation.retained.runs.len(),
             ResultsBrowserTab::Expressions => expression_source.len(),
         };
         // Two numbers, no noun: the tab band above already names what is being
@@ -1629,11 +1655,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             .checked_result_quantities
             .clone();
         let checked_ordered =
-            ordered_checked_result_keys(&checked, &app.state.simulation.retained.runs);
+            ordered_checked_result_keys(&checked, &app.state.model.simulation.retained.runs);
         let exact_validation_error = checked_ordered.iter().find_map(|key| {
             crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
                 key,
-                &app.state.simulation.retained.runs,
+                &app.state.model.simulation.retained.runs,
             )
             .err()
         });
@@ -1645,7 +1671,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             .iter()
             .filter_map(ResultBrowserSelectionKey::waveform)
             .filter_map(|key| {
-                key.resolve(&app.state.simulation.retained.runs)
+                key.resolve(&app.state.model.simulation.retained.runs)
                     .map(|(.., waveform)| waveform.x.len())
             })
             .sum::<usize>();
@@ -1665,7 +1691,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 .filter_map(|key| {
                     crate::workbench::documents::result_document::result_browser_selection_canonical_name(
                         key,
-                        &app.state.simulation.retained.runs,
+                        &app.state.model.simulation.retained.runs,
                     )
                     .ok()
                 })
@@ -1747,7 +1773,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                                 .map(|key| {
                                     crate::workbench::documents::result_document::result_browser_selection_canonical_name(
                                         key,
-                                        &app.state.simulation.retained.runs,
+                                        &app.state.model.simulation.retained.runs,
                                     )
                                 })
                                 .collect::<Result<Vec<_>, _>>()
@@ -1772,7 +1798,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         if copy_exact.clicked() {
                             match crate::workbench::documents::result_document::exact_result_browser_selection_bundle(
                                 &checked_ordered,
-                                &app.state.simulation.retained.runs,
+                                &app.state.model.simulation.retained.runs,
                             ) {
                                 Ok(exact) if exact.len() <= RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT => {
                                     ui.ctx().copy_text(exact);
@@ -1857,7 +1883,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 if runs.is_empty() {
                     muted(
                         ui,
-                        if app.state.simulation.retained.runs.is_empty() {
+                        if app.state.model.simulation.retained.runs.is_empty() {
                             "No results yet. Run a simulation."
                         } else {
                             "No dataset or analysis matches this filter."
@@ -1867,7 +1893,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                 for run in runs {
                     let run_active = active_run == Some(run.run_index);
                     let run_meta = data_state_meta(run.data_state);
-                    let overlaid = app.state.simulation.is_dataset_overlaid(run.dataset_id);
+                    let overlaid = app
+                        .state
+                        .model
+                        .simulation
+                        .is_dataset_overlaid(run.dataset_id);
                     let responses = result_dataset_row(
                         ui,
                         if run.success {
@@ -1897,6 +1927,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                     });
                     if let Some(run_id) = app
                         .state
+                        .model
                         .simulation
                         .retained
                         .runs
@@ -1911,7 +1942,11 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         }
                     }
                     if responses.overlay.is_some_and(|response| response.clicked()) {
-                        let enabled = app.state.simulation.toggle_dataset_overlay(run.dataset_id);
+                        let enabled = app
+                            .state
+                            .model
+                            .simulation
+                            .toggle_dataset_overlay(run.dataset_id);
                         app.state.prompt(if enabled {
                             format!("Overlaying {} on the active result sheet.", run.label)
                         } else {
@@ -1942,7 +1977,13 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
             ResultsBrowserTab::Expressions => {
                 // Both ways of having no analysis read the same to the
                 // reader: there is one to pick and they have not picked it.
-                if app.state.simulation.view.active_analysis_idx.is_none()
+                if app
+                    .state
+                    .model
+                    .simulation
+                    .view
+                    .active_analysis_idx
+                    .is_none()
                     || active_analysis_key.is_none()
                 {
                     muted(ui, "Select an analysis to see its expressions.");
@@ -1976,10 +2017,14 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                         .state
                         .ui
                         .results
-                        .toggle_expression_visibility_by_key(&app.state.simulation, &identity)
+                        .toggle_expression_visibility_by_key(&app.state.model.simulation, &identity)
                     {
                         Ok(()) => {
-                            app.state.workspace.content.visualization_documents_dirty = true;
+                            app.state
+                                .model
+                                .workspace
+                                .content
+                                .visualization_documents_dirty = true;
                         }
                         Err(error) => app.state.prompt(error),
                     }
@@ -2349,6 +2394,7 @@ fn results_browser_toolbar(
         // opening the list.
         let producers = app
             .state
+            .model
             .simulation
             .retained
             .runs
@@ -3474,7 +3520,7 @@ fn show_virtualized_result_signals(
 ) {
     // A row labels the conductor the design drew; its identity stays the deck
     // name the engine answered under.
-    let notations = bus_notations(&app.state.workspace, &app.state.schematic);
+    let notations = bus_notations(&app.state.model.workspace, &app.state.model.schematic);
     let mut rows = Vec::new();
     let mut signal_rows = 0_usize;
     for (run_position, run) in runs.iter().enumerate() {
@@ -3903,7 +3949,7 @@ fn show_virtualized_result_signals(
     if signal_rows == 0 {
         muted(
             ui,
-            if app.state.simulation.retained.runs.is_empty() {
+            if app.state.model.simulation.retained.runs.is_empty() {
                 "No results yet. Run a simulation."
             } else {
                 match scope {
@@ -5141,7 +5187,7 @@ fn set_checked_signal_visibility(
     checked: &std::collections::HashSet<ResultBrowserSelectionKey>,
     visible: bool,
 ) {
-    let Some(run_index) = app.state.simulation.view.active_run_idx else {
+    let Some(run_index) = app.state.model.simulation.view.active_run_idx else {
         return;
     };
     let targets = checked
@@ -5149,7 +5195,7 @@ fn set_checked_signal_visibility(
         .filter_map(|key| {
             let key = key.waveform()?;
             let (target_run, analysis_index, waveform_index, waveform) =
-                key.resolve(&app.state.simulation.retained.runs)?;
+                key.resolve(&app.state.model.simulation.retained.runs)?;
             let currently_visible = app
                 .state
                 .ui
@@ -5174,11 +5220,11 @@ fn toggle_result_signal_visibility(
     key: &SourceWaveformPresentationKey,
 ) -> bool {
     let Some((run_index, analysis_index, waveform_index, _)) =
-        key.resolve(&app.state.simulation.retained.runs)
+        key.resolve(&app.state.model.simulation.retained.runs)
     else {
         return false;
     };
-    if app.state.simulation.view.active_run_idx != Some(run_index) {
+    if app.state.model.simulation.view.active_run_idx != Some(run_index) {
         return false;
     }
     crate::workbench::documents::result_document::toggle_visibility(
@@ -5192,6 +5238,7 @@ fn toggle_result_signal_visibility(
 fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
     let Some(dataset_id) = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -5212,6 +5259,7 @@ fn select_result_dataset(app: &mut RSpiceApp, run_index: usize) -> bool {
 fn select_result_analysis(app: &mut RSpiceApp, run_index: usize, analysis_index: usize) -> bool {
     if app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -5224,7 +5272,7 @@ fn select_result_analysis(app: &mut RSpiceApp, run_index: usize, analysis_index:
     if !select_result_dataset(app, run_index) {
         return false;
     }
-    if !app.state.simulation.select_analysis(analysis_index) {
+    if !app.state.model.simulation.select_analysis(analysis_index) {
         return false;
     }
     app.state.ui.results.session.selected_trace = None;
@@ -5235,6 +5283,7 @@ fn select_result_analysis(app: &mut RSpiceApp, run_index: usize, analysis_index:
 fn select_result_analysis_by_key(app: &mut RSpiceApp, key: AnalysisPresentationKey) -> bool {
     let Some((run_index, analysis_index)) = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -5256,7 +5305,7 @@ fn select_result_signal(
     analysis_index: usize,
     waveform_index: usize,
 ) -> bool {
-    let Some(run) = app.state.simulation.retained.runs.get(run_index) else {
+    let Some(run) = app.state.model.simulation.retained.runs.get(run_index) else {
         return false;
     };
     let Some(selected) = rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
@@ -5285,7 +5334,7 @@ fn select_result_signal(
 
 fn select_result_signal_by_key(app: &mut RSpiceApp, key: &SourceWaveformPresentationKey) -> bool {
     let Some((run_index, analysis_index, waveform_index, _)) =
-        key.resolve(&app.state.simulation.retained.runs)
+        key.resolve(&app.state.model.simulation.retained.runs)
     else {
         return false;
     };
@@ -5293,7 +5342,8 @@ fn select_result_signal_by_key(app: &mut RSpiceApp, key: &SourceWaveformPresenta
 }
 
 fn select_result_artifact(app: &mut RSpiceApp, key: &ResultArtifactPresentationKey) -> bool {
-    let Some((run_index, analysis_index, _)) = key.resolve(&app.state.simulation.retained.runs)
+    let Some((run_index, analysis_index, _)) =
+        key.resolve(&app.state.model.simulation.retained.runs)
     else {
         return false;
     };
@@ -5351,7 +5401,7 @@ fn result_artifact_context_menu(
     let exact_error =
         crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
             &ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
-            &app.state.simulation.retained.runs,
+            &app.state.model.simulation.retained.runs,
         )
         .err();
     let exact_available = exact_error.is_none();
@@ -5419,7 +5469,7 @@ fn result_artifact_context_menu(
         if copy_exact.clicked() {
             match exact_result_artifact_text(
                 &artifact.identity,
-                &app.state.simulation.retained.runs,
+                &app.state.model.simulation.retained.runs,
             ) {
                 Ok(value) => ui.ctx().copy_text(value),
                 Err(error) => app.state.prompt(error),
@@ -5451,7 +5501,7 @@ fn result_artifact_context_menu(
         }
         // Offered only while the session holds the run that produced it.
         if let Some(run) = producing_run(
-            &app.state.simulation.retained.runs,
+            &app.state.model.simulation.retained.runs,
             artifact.identity.analysis().dataset_id(),
         ) && ui.button("Open run log").clicked()
         {
@@ -5485,7 +5535,7 @@ fn result_signal_context_menu(
     let exact_error =
         crate::workbench::documents::result_document::validate_result_browser_selection_evidence(
             &ResultBrowserSelectionKey::Waveform(key.clone()),
-            &app.state.simulation.retained.runs,
+            &app.state.model.simulation.retained.runs,
         )
         .err();
     let exact_available = exact_error.is_none();
@@ -5567,7 +5617,7 @@ fn result_signal_context_menu(
         }
         ui.separator();
         if ui.button("Copy name").clicked() {
-            if let Some((.., waveform)) = key.resolve(&app.state.simulation.retained.runs) {
+            if let Some((.., waveform)) = key.resolve(&app.state.model.simulation.retained.runs) {
                 ui.ctx().copy_text(waveform.name.clone());
             }
             ui.close();
@@ -5582,7 +5632,7 @@ fn result_signal_context_menu(
         if copy_last.clicked() {
             match exact_result_signal_last_sample(
                 &key,
-                &app.state.simulation.retained.runs,
+                &app.state.model.simulation.retained.runs,
                 app.state.ui.preferences.quantity_presentation_policy(),
             ) {
                 Ok(value) => ui.ctx().copy_text(value),
@@ -5591,7 +5641,7 @@ fn result_signal_context_menu(
             ui.close();
         }
         let retained_samples = key
-            .resolve(&app.state.simulation.retained.runs)
+            .resolve(&app.state.model.simulation.retained.runs)
             .map_or(0, |(.., waveform)| waveform.x.len().max(waveform.y.len()));
         let may_copy_samples =
             exact_available && retained_samples <= RESULT_BROWSER_CLIPBOARD_SAMPLE_LIMIT;
@@ -5607,7 +5657,7 @@ fn result_signal_context_menu(
             );
         }
         if copy_samples.clicked() {
-            match exact_result_signal_tsv(&key, &app.state.simulation.retained.runs) {
+            match exact_result_signal_tsv(&key, &app.state.model.simulation.retained.runs) {
                 Ok(tsv) => ui.ctx().copy_text(tsv),
                 Err(error) => app.state.prompt(error),
             }
@@ -5626,7 +5676,7 @@ fn result_signal_context_menu(
             ui.close();
         }
         let signal_name = key
-            .resolve(&app.state.simulation.retained.runs)
+            .resolve(&app.state.model.simulation.retained.runs)
             .map(|(.., waveform)| waveform.name.clone());
         let cross_probe = ui.add_enabled(
             signal_name.is_some(),
@@ -5645,7 +5695,7 @@ fn result_signal_context_menu(
         }
         // Offered only while the session holds the run that produced it.
         if let Some(run) = producing_run(
-            &app.state.simulation.retained.runs,
+            &app.state.model.simulation.retained.runs,
             key.analysis().dataset_id(),
         ) && ui.button("Open run log").clicked()
         {
@@ -5790,11 +5840,12 @@ fn verification_flow_presentation(
     app: &RSpiceApp,
     page: VerificationPage,
 ) -> VerificationFlowPresentation {
-    let active_run = app.state.simulation.active_run();
+    let active_run = app.state.model.simulation.active_run();
     match page {
         VerificationPage::Yield => {
             let evidence = active_run.and_then(|run| {
                 app.state
+                    .model
                     .simulation
                     .retained
                     .yield_provenance()
@@ -5807,6 +5858,7 @@ fn verification_flow_presentation(
             let results = evidence
                 .and_then(|(run, _)| {
                     app.state
+                        .model
                         .simulation
                         .retained
                         .yield_results_for_dataset(run.dataset_id)
@@ -5865,10 +5917,11 @@ fn verification_flow_presentation(
         VerificationPage::Tuning => {
             let variable_count = app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
-                .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
+                .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
                 .map_or(0, |payload| payload.design_variables.len());
             let dirty_count = app
                 .state
@@ -5944,6 +5997,7 @@ fn verification_flow_presentation(
         VerificationPage::Regression => {
             let retained_runs = app
                 .state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -5988,10 +6042,11 @@ struct VerificationCoverage {
 }
 
 fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
-    let run = app.state.simulation.active_run();
-    let total = app.state.workspace.content.specs.len();
+    let run = app.state.model.simulation.active_run();
+    let total = app.state.model.workspace.content.specs.len();
     let values = app
         .state
+        .model
         .workspace
         .content
         .specs
@@ -6026,6 +6081,7 @@ fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
     let executed = values.iter().filter(|value| value.is_some()).count();
     let passed = app
         .state
+        .model
         .workspace
         .content
         .specs
@@ -6090,9 +6146,9 @@ mod tests {
         };
 
         let now = crate::time_compat::checked_unix_time_ms().expect("clock");
-        let name = state.workspace.content.project.name().to_owned();
+        let name = state.model.workspace.content.project.name().to_owned();
         state.dialogs.project_checkpoint_recovery.project_id =
-            Some(state.workspace.content.project.id().to_string());
+            Some(state.model.workspace.content.project.id().to_string());
         state.dialogs.project_checkpoint_recovery.initialized = true;
         state.dialogs.project_checkpoint_recovery.checkpoints = [
             (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),

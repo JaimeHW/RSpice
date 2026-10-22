@@ -173,6 +173,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
             // against, and the box's default grouping draws nothing without
             // one.
             app.state
+                .model
                 .workspace
                 .content
                 .specs
@@ -250,6 +251,7 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
         ResultViewer::TransferFunction => transfer_function_analysis(),
         ResultViewer::Specs => {
             app.state
+                .model
                 .workspace
                 .content
                 .specs
@@ -285,9 +287,9 @@ pub(super) fn app_showing(viewer: ResultViewer) -> RSpiceApp {
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
     run.lifecycle = crate::state::SimulationRunLifecycle::Completed;
-    app.state.simulation.retained.runs = vec![run].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
 
     // Three sheets read a cache the controller fills after a run rather
     // than the retained analysis itself. Derive it exactly as the
@@ -505,12 +507,14 @@ pub(super) fn transfer_function_analysis() -> AnalysisResult {
 pub(super) fn in_flight_cache_provenance(app: &RSpiceApp) -> SpecializedViewerCacheProvenance {
     let run = app
         .state
+        .model
         .simulation
         .active_run()
         .expect("the fixture retained one run");
     let dataset_id = run.dataset_id;
     let analysis = app
         .state
+        .model
         .simulation
         .active_analysis()
         .expect("the fixture selected one analysis");
@@ -520,6 +524,7 @@ pub(super) fn in_flight_cache_provenance(app: &RSpiceApp) -> SpecializedViewerCa
 pub(super) fn ac_complex_trace(app: &RSpiceApp) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
     let analysis = app
         .state
+        .model
         .simulation
         .active_analysis()
         .expect("the fixture selected one analysis");

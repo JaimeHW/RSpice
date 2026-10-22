@@ -13,10 +13,11 @@ pub(super) fn active_regression_specification_policy(
     app: &RSpiceApp,
 ) -> crate::state::RegressionSpecificationPolicy {
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.specification_policy.regression)
         .unwrap_or_default()
 }
@@ -359,14 +360,16 @@ pub(super) fn regression_run_pair(
 ) -> Option<(&crate::state::SimulationRun, &crate::state::SimulationRun)> {
     let plan_id = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)?;
-    let current = app.state.simulation.active_run()?;
+    let current = app.state.model.simulation.active_run()?;
     validate_regression_run_for_plan(current, plan_id).ok()?;
     let selected = active_regression_baseline(app).and_then(|id| {
         app.state
+            .model
             .simulation
             .retained
             .runs
@@ -585,11 +588,13 @@ pub(super) fn regression_run_seal(
 pub(super) fn active_regression_baseline(app: &RSpiceApp) -> Option<crate::product::RunId> {
     let plan_id = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)?;
     app.state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -603,6 +608,7 @@ pub(super) fn commit_regression_baseline(
 ) -> Result<(), String> {
     let plan_id = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -610,6 +616,7 @@ pub(super) fn commit_regression_baseline(
         .ok_or_else(|| "the active simulation plan is unavailable".to_owned())?;
     if !app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -620,6 +627,7 @@ pub(super) fn commit_regression_baseline(
     }
     let selected = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -630,6 +638,7 @@ pub(super) fn commit_regression_baseline(
         .map_err(|error| format!("retained run {run_id} is not an eligible baseline: {error}"))?;
     let candidate = app
         .state
+        .model
         .simulation
         .active_run()
         .ok_or_else(|| "no active candidate dataset is selected".to_owned())?;
@@ -647,9 +656,9 @@ pub(super) fn commit_regression_baseline(
         );
     }
 
-    let mut workspace = app.state.workspace.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let mut simulation = app.state.simulation.clone();
+    let mut workspace = app.state.model.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let mut simulation = app.state.model.simulation.clone();
     workspace
         .content
         .ensure_active_plan_data(plan_id)
@@ -664,9 +673,9 @@ pub(super) fn commit_regression_baseline(
             "selected regression baseline run {run_id}"
         ))
         .map_err(|error| error.to_string())?;
-    app.state.workspace = workspace;
-    app.state.sim_setup = setup;
-    app.state.simulation = simulation;
+    app.state.model.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.simulation = simulation;
     invalidate_plan_bound_preflight(app);
     app.state.workbench.verification.regression_baseline_run = Some(run_id);
     app.state.workbench.verification.regression_comparison = None;
@@ -789,10 +798,11 @@ pub(super) fn synchronize_regression_drafts(
 ) {
     let rules = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let state = &mut app.state.workbench.verification;
@@ -898,6 +908,7 @@ pub(super) fn parse_regression_draft(
 pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<(), String> {
     let plan_id = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -942,6 +953,7 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
     }
     let active_plan = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -958,7 +970,7 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
             ));
         }
     }
-    let mut workspace = app.state.workspace.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let payload = workspace.content.ensure_active_plan_data(plan_id);
     let draft_targets = parsed
         .iter()
@@ -978,6 +990,7 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
         .map(|payload| payload.regression_tolerances.as_slice())
         == app
             .state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -985,12 +998,12 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
     {
         return Ok(());
     }
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     setup
         .commit_active_plan_configuration_change("updated regression tolerance contract")
         .map_err(|error| error.to_string())?;
-    app.state.workspace = workspace;
-    app.state.sim_setup = setup;
+    app.state.model.workspace = workspace;
+    app.state.model.sim_setup = setup;
     invalidate_plan_bound_preflight(app);
     for draft in &mut app.state.workbench.verification.regression_tolerance_drafts {
         draft.dirty = false;
@@ -1009,12 +1022,13 @@ pub(super) fn remove_orphaned_regression_rules(
     }
     let plan_id = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
         .ok_or_else(|| "the active simulation plan is unavailable".to_owned())?;
-    let mut workspace = app.state.workspace.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let payload = workspace.content.ensure_active_plan_data(plan_id);
     let prior = payload.regression_tolerances.len();
     payload
@@ -1028,12 +1042,12 @@ pub(super) fn remove_orphaned_regression_rules(
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     setup
         .commit_active_plan_configuration_change("removed orphaned regression tolerance rules")
         .map_err(|error| error.to_string())?;
-    app.state.workspace = workspace;
-    app.state.sim_setup = setup;
+    app.state.model.workspace = workspace;
+    app.state.model.sim_setup = setup;
     invalidate_plan_bound_preflight(app);
     let verification = &mut app.state.workbench.verification;
     verification.regression_comparison = None;
@@ -1051,14 +1065,16 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
     }
     let rules = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let (plan_id, plan_revision) = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()

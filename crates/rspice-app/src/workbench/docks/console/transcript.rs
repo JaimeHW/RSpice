@@ -65,13 +65,13 @@ fn row_font() -> egui::FontId {
 /// reading is no longer held.
 fn source<'a>(state: &'a AppState, view: &mut ConsoleView) -> Source<'a> {
     Source::of(
-        &state.log_buffer,
-        &state.simulation.retained.runs,
+        &state.model.log_buffer,
+        &state.model.simulation.retained.runs,
         view.channel,
     )
     .unwrap_or_else(|| {
         view.open(ConsoleChannel::Session);
-        Source::Session(&state.log_buffer)
+        Source::Session(&state.model.log_buffer)
     })
 }
 

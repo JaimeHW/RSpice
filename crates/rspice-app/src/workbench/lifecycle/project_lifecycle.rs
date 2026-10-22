@@ -142,7 +142,7 @@ pub(crate) fn accepted_active_schematic(state: &AppState) -> Option<crate::state
     state.project_lifecycle.binding()?;
     state
         .project_lifecycle
-        .accepted_schematic_editor(&state.workspace.content.active_view.key())
+        .accepted_schematic_editor(&state.model.workspace.content.active_view.key())
 }
 
 /// Monotonic identity of the accepted canonical baseline. Validation receipts
@@ -161,13 +161,13 @@ fn capture_snapshot(
     content: SnapshotContent,
 ) -> Result<ProjectSnapshot, ProjectLifecycleError> {
     let mut sessions = SnapshotSessionCapture {
-        workspace: state.workspace.session.clone(),
-        active: &state.schematic.session,
+        workspace: state.model.workspace.session.clone(),
+        active: &state.model.schematic.session,
     };
     let file = ProjectWorkingSet {
-        workspace: &state.workspace.content,
-        active_schematic: state.schematic.editor_ref().design,
-        libraries: &state.library_manager,
+        workspace: &state.model.workspace.content,
+        active_schematic: state.model.schematic.editor_ref().design,
+        libraries: &state.model.library_manager,
     }
     .capture(
         content,
@@ -176,13 +176,21 @@ fn capture_snapshot(
             state
                 .project_lifecycle
                 .result_cache
-                .capture(&state.simulation)
+                .capture(&state.model.simulation)
         },
         || {
-            crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
-                .map_err(ProjectLifecycleError::InvalidState)
+            crate::io::capture_execution_context(
+                &state.model.sim_setup,
+                &state.model.model_library_manager,
+            )
+            .map_err(ProjectLifecycleError::InvalidState)
         },
-        || state.ui.results.project_presentation(&state.simulation),
+        || {
+            state
+                .ui
+                .results
+                .project_presentation(&state.model.simulation)
+        },
     )?;
     Ok(ProjectSnapshot {
         file,
@@ -220,7 +228,7 @@ pub(crate) fn operation_in_progress(state: &AppState) -> bool {
 pub(crate) fn active_document(state: &AppState) -> ProjectDocumentId {
     registry::active_document(
         state.workbench.workspace,
-        &state.workspace.content.active_view,
+        &state.model.workspace.content.active_view,
     )
 }
 
@@ -258,19 +266,23 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         // The working draft could not be compared with accepted content.
         // Preserve its authorship and show pending changes until a successful
         // refresh can establish which documents are actually clean.
-        state.schematic.session.is_dirty = true;
-        state.workspace.content.project_metadata_dirty = true;
-        state.workspace.content.netlist_source_dirty = true;
-        state.workspace.content.project_sources_dirty = true;
+        state.model.schematic.session.is_dirty = true;
+        state.model.workspace.content.project_metadata_dirty = true;
+        state.model.workspace.content.netlist_source_dirty = true;
+        state.model.workspace.content.project_sources_dirty = true;
         state
+            .model
             .workspace
             .for_each_schematic_editor_mut(|_, schematic| {
                 schematic.session.is_dirty = true;
             });
-        for view in &mut state.workspace.content.open_views {
+        for view in &mut state.model.workspace.content.open_views {
             view.dirty = true;
         }
-        state.library_manager.set_all_views_modified_runtime(true);
+        state
+            .model
+            .library_manager
+            .set_all_views_modified_runtime(true);
         return;
     }
     let cell_dirty = state
@@ -285,10 +297,11 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         })
         .collect::<Vec<_>>();
     for (reference, dirty) in &cell_dirty {
-        if let Some(mut buffer) = state.workspace.schematic_editor_mut(&reference.key()) {
+        if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&reference.key()) {
             buffer.editor.session.is_dirty = *dirty;
         }
         if let Some(open) = state
+            .model
             .workspace
             .content
             .open_views
@@ -297,7 +310,7 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
         {
             open.dirty = *dirty;
         }
-        let _ = state.library_manager.set_view_modified_runtime(
+        let _ = state.model.library_manager.set_view_modified_runtime(
             &reference.library,
             &reference.cell,
             &reference.view,
@@ -306,21 +319,21 @@ fn apply_registry_dirty_flags(state: &mut AppState) {
     }
     if let Some((_, dirty)) = cell_dirty
         .iter()
-        .find(|(reference, _)| *reference == state.workspace.content.active_view)
+        .find(|(reference, _)| *reference == state.model.workspace.content.active_view)
     {
-        state.schematic.session.is_dirty = *dirty;
+        state.model.schematic.session.is_dirty = *dirty;
     }
     // Project setup is dirty when it differs from the accepted baseline and at
     // no other time. A flag that only ever turned on left the unsaved marker
     // lit for the rest of the session, including after the save that published
     // the very edit that lit it.
-    state.workspace.content.project_metadata_dirty = state
+    state.model.workspace.content.project_metadata_dirty = state
         .project_lifecycle
         .authority
         .registry()
         .is_dirty(&ProjectDocumentId::ProjectConfiguration);
     if let Some(accepted) = state.project_lifecycle.accepted() {
-        accepted.apply_source_dirty_flags(&mut state.workspace.content);
+        accepted.apply_source_dirty_flags(&mut state.model.workspace.content);
     }
 }
 
@@ -336,11 +349,11 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let restored_path = state.workspace.content.project.path.clone();
+        let restored_path = state.model.workspace.content.project.path.clone();
         let receipt = state.native_project_binding_receipt.clone();
         match (restored_path, receipt) {
             (Some(path), Some(receipt)) => {
-                let session_project_id = state.workspace.content.project.id().to_string();
+                let session_project_id = state.model.workspace.content.project.id().to_string();
                 match persistence::restore_native_binding(&path, &session_project_id, &receipt) {
                     Ok((baseline, binding)) => {
                         state.project_lifecycle.restore_project(baseline, binding);
@@ -396,7 +409,7 @@ pub(crate) fn initialize_from_session(state: &mut AppState) {
     #[cfg(target_arch = "wasm32")]
     {
         if let Some(receipt) = state.browser_project_binding_receipt.clone() {
-            let project_id = state.workspace.content.project.id().to_string();
+            let project_id = state.model.workspace.content.project.id().to_string();
             if receipt.project_id != project_id {
                 state.browser_project_binding_receipt = None;
                 state.record(
@@ -443,7 +456,7 @@ pub(crate) fn poll_browser_binding_restore(state: &mut AppState) {
             );
         }
         persistence::BrowserRestoreResult::Restored { baseline, binding } => {
-            if baseline.file.workspace.project.id() != state.workspace.content.project.id() {
+            if baseline.file.workspace.project.id() != state.model.workspace.content.project.id() {
                 release_browser_binding_handle(&binding);
                 state.record(
                     LogSeverity::Warning,
@@ -529,7 +542,7 @@ pub(crate) fn accept_loaded_project(
     state.project_lifecycle.authority.open_session();
     state
         .project_lifecycle
-        .publish_open(&mut state.project_open);
+        .publish_open(&mut state.model.project_open);
     state.project_lifecycle.accept_project(baseline, binding);
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -573,7 +586,7 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
     };
     state
         .project_lifecycle
-        .publish_open(&mut state.project_open);
+        .publish_open(&mut state.model.project_open);
     let _ = refresh_registry(state);
 }
 
@@ -602,7 +615,7 @@ pub(crate) fn mark_project_closed(state: &mut AppState) {
     };
     state
         .project_lifecycle
-        .publish_open(&mut state.project_open);
+        .publish_open(&mut state.model.project_open);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -658,7 +671,7 @@ fn release_restore_result_handle(result: persistence::BrowserRestoreResult) {
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn browser_operation_context(state: &AppState) -> BrowserOperationContext {
     state.project_lifecycle.authority.browser_operation_context(
-        &state.workspace.content.project.id().to_string(),
+        &state.model.workspace.content.project.id().to_string(),
         state.browser_project_binding_receipt.as_ref(),
     )
 }
@@ -673,7 +686,7 @@ pub(crate) fn browser_operation_context_is_current(
         .authority
         .browser_operation_context_is_current(
             context,
-            &state.workspace.content.project.id().to_string(),
+            &state.model.workspace.content.project.id().to_string(),
             state.browser_project_binding_receipt.as_ref(),
         )
 }
@@ -987,7 +1000,7 @@ pub(crate) fn complete_browser_save(
     } = prepared;
     let completion = state.project_lifecycle.authority.complete_browser_save(
         save,
-        &state.workspace.content.project.id().to_string(),
+        &state.model.workspace.content.project.id().to_string(),
         state.browser_project_binding_receipt.as_ref(),
         publication,
         || persistence::release_browser_handle(handle_id),
@@ -1058,8 +1071,9 @@ fn rebase_pending_operation_dirty_state(
     candidate: &ProjectSnapshot,
     scope: SaveScope,
 ) {
-    if !state.schematic.has_pending_operation()
+    if !state.model.schematic.has_pending_operation()
         && !state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -1090,11 +1104,19 @@ fn rebase_pending_operation_dirty_state(
             })
             .unwrap_or(true)
     };
-    if state.schematic.has_pending_operation() {
-        let was_dirty = dirty(&state.workspace.content.active_schematic_reference().key());
-        state.schematic.set_pending_was_dirty(was_dirty);
+    if state.model.schematic.has_pending_operation() {
+        let was_dirty = dirty(
+            &state
+                .model
+                .workspace
+                .content
+                .active_schematic_reference()
+                .key(),
+        );
+        state.model.schematic.set_pending_was_dirty(was_dirty);
     }
     state
+        .model
         .workspace
         .for_each_schematic_editor_mut(|key, schematic| {
             if schematic.has_pending_operation() {
@@ -1124,13 +1146,14 @@ fn adopt_successful_save(
         {
             state
                 .retain_annotation_history_after_save_descriptor(&candidate.file.workspace.project);
-            state.workspace.content.project = candidate.file.workspace.project.clone();
+            state.model.workspace.content.project = candidate.file.workspace.project.clone();
         } else {
             // Saving one non-configuration document intentionally publishes a
             // candidate built on the accepted project descriptor. Preserve a
             // concurrent/unrelated live descriptor draft and update only the
             // canonical pathname established by this successful save.
-            state.workspace.content.project.path = candidate.file.workspace.project.path.clone();
+            state.model.workspace.content.project.path =
+                candidate.file.workspace.project.path.clone();
         }
     }
     state
@@ -1151,9 +1174,9 @@ fn adopt_successful_save(
     #[cfg(not(target_arch = "wasm32"))]
     match scope {
         SaveScope::AllDocuments => {
-            state.workspace.mark_all_clean();
-            state.schematic.session.is_dirty = false;
-            mark_all_library_views_clean(&mut state.library_manager);
+            state.model.workspace.mark_all_clean();
+            state.model.schematic.session.is_dirty = false;
+            mark_all_library_views_clean(&mut state.model.library_manager);
         }
         SaveScope::ActiveDocument => mark_active_document_clean(state),
     }
@@ -1295,13 +1318,14 @@ pub(crate) fn begin_browser_binding_promotion(state: &mut AppState) -> BrowserOp
 fn mark_active_document_clean(state: &mut AppState) {
     match active_document(state) {
         ProjectDocumentId::CellView(reference) => {
-            if let Some(mut buffer) = state.workspace.schematic_editor_mut(&reference.key()) {
+            if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&reference.key()) {
                 buffer.editor.session.is_dirty = false;
             }
-            if reference == state.workspace.content.active_view {
-                state.schematic.session.is_dirty = false;
+            if reference == state.model.workspace.content.active_view {
+                state.model.schematic.session.is_dirty = false;
             }
             if let Some(open) = state
+                .model
                 .workspace
                 .content
                 .open_views
@@ -1310,15 +1334,15 @@ fn mark_active_document_clean(state: &mut AppState) {
             {
                 open.dirty = false;
             }
-            let _ = state.library_manager.mark_view_clean_runtime(
+            let _ = state.model.library_manager.mark_view_clean_runtime(
                 &reference.library,
                 &reference.cell,
                 &reference.view,
             );
         }
         ProjectDocumentId::NetlistSource => {
-            state.workspace.content.netlist_source_dirty = false;
-            state.workspace.content.project_sources_dirty = false;
+            state.model.workspace.content.netlist_source_dirty = false;
+            state.model.workspace.content.project_sources_dirty = false;
         }
         _ => {}
     }
@@ -1329,7 +1353,7 @@ pub(crate) fn prepare_revert_active_document(
 ) -> Result<RevertReviewToken, ProjectLifecycleError> {
     require_open_project(state)?;
     let id = active_document(state);
-    if state.simulation.execution.has_active_execution()
+    if state.model.simulation.execution.has_active_execution()
         && matches!(
             id,
             ProjectDocumentId::SimulationPlan
@@ -1383,10 +1407,13 @@ fn revert_document_in_place(
     match id {
         ProjectDocumentId::ProjectConfiguration => {
             let callback_receipts = baseline.file.workspace.pdk_callback_receipts().to_vec();
-            state.workspace.content.project = baseline.file.workspace.project;
-            state.workspace.content.configuration_sets = baseline.file.workspace.configuration_sets;
-            state.workspace.content.design_management = baseline.file.workspace.design_management;
+            state.model.workspace.content.project = baseline.file.workspace.project;
+            state.model.workspace.content.configuration_sets =
+                baseline.file.workspace.configuration_sets;
+            state.model.workspace.content.design_management =
+                baseline.file.workspace.design_management;
             state
+                .model
                 .workspace
                 .content
                 .replace_pdk_callback_receipts_for_lifecycle(callback_receipts)
@@ -1400,20 +1427,22 @@ fn revert_document_in_place(
                     "accepted project has no simulation plan".to_owned(),
                 )
             })?;
-            state.sim_setup = crate::workbench::app_state::SimSetupState {
+            state.model.sim_setup = crate::workbench::app_state::SimSetupState {
                 setup: context.simulation_plan,
                 session: Default::default(),
             };
-            state.sim_setup.prepare_after_restore();
-            state.workspace.content.simulation_plan_payloads =
+            state.model.sim_setup.prepare_after_restore();
+            state.model.workspace.content.simulation_plan_payloads =
                 baseline.file.workspace.simulation_plan_payloads;
             if let Some(plan_id) = state
+                .model
                 .sim_setup
                 .analysis_plan
                 .as_ref()
                 .map(crate::simulation::plan::SimulationPlan::id)
             {
                 state
+                    .model
                     .workspace
                     .content
                     .sync_legacy_specs_projection(plan_id);
@@ -1428,7 +1457,7 @@ fn revert_document_in_place(
             let (_, manager, warnings) =
                 crate::io::restore_execution_context(context, baseline_project_id)
                     .map_err(ProjectLifecycleError::InvalidState)?;
-            state.model_library_manager = manager;
+            state.model.model_library_manager = manager;
             for warning in warnings {
                 state.record(LogSeverity::Warning, LogSource::Studio, warning);
             }
@@ -1440,12 +1469,13 @@ fn revert_document_in_place(
                 &mut simulation,
             )
             .map_err(ProjectLifecycleError::InvalidState)?;
-            state.simulation = simulation;
-            state.workspace.content.report_documents = baseline.file.workspace.report_documents;
-            state.workspace.content.report_documents_dirty = false;
-            state.workspace.content.visualization_documents =
+            state.model.simulation = simulation;
+            state.model.workspace.content.report_documents =
+                baseline.file.workspace.report_documents;
+            state.model.workspace.content.report_documents_dirty = false;
+            state.model.workspace.content.visualization_documents =
                 baseline.file.workspace.visualization_documents;
-            state.workspace.content.visualization_documents_dirty = false;
+            state.model.workspace.content.visualization_documents_dirty = false;
             crate::workbench::documents::result_document::restore_presentation(
                 state,
                 baseline.file.result_presentation,
@@ -1453,10 +1483,11 @@ fn revert_document_in_place(
             state.clear_specialized_viewer_data();
         }
         ProjectDocumentId::VerificationSpecifications => {
-            state.workspace.content.specs = baseline.file.workspace.specs;
+            state.model.workspace.content.specs = baseline.file.workspace.specs;
         }
         ProjectDocumentId::StimulusLibrary => {
-            state.workspace.content.stimulus_library = baseline.file.workspace.stimulus_library;
+            state.model.workspace.content.stimulus_library =
+                baseline.file.workspace.stimulus_library;
             // The reverted definitions may no longer hold the one the library
             // browser was reading, and a selection that resolves to nothing
             // leaves the workspace on an empty stage with a name in the dock.
@@ -1469,34 +1500,38 @@ fn revert_document_in_place(
             state.workbench.stimulus_browser.clear();
         }
         ProjectDocumentId::NetlistSource => {
-            state.workspace.content.netlist_source = baseline.file.workspace.netlist_source;
-            state.workspace.content.netlist_source_path =
+            state.model.workspace.content.netlist_source = baseline.file.workspace.netlist_source;
+            state.model.workspace.content.netlist_source_path =
                 baseline.file.workspace.netlist_source_path;
-            state.workspace.content.netlist_document = baseline.file.workspace.netlist_document;
-            state.workspace.content.netlist_descriptor = baseline.file.workspace.netlist_descriptor;
-            state.workspace.content.retained_netlist_decks =
+            state.model.workspace.content.netlist_document =
+                baseline.file.workspace.netlist_document;
+            state.model.workspace.content.netlist_descriptor =
+                baseline.file.workspace.netlist_descriptor;
+            state.model.workspace.content.retained_netlist_decks =
                 baseline.file.workspace.retained_netlist_decks;
             state
+                .model
                 .workspace
                 .content
                 .project_sources
                 .synchronize_code_workspace_bundles_from(&baseline.file.workspace.project_sources)
                 .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-            state.workspace.content.netlist_source_dirty = false;
-            state.workspace.content.project_sources_dirty = false;
+            state.model.workspace.content.netlist_source_dirty = false;
+            state.model.workspace.content.project_sources_dirty = false;
             state.ui.netlist = Default::default();
-            *state.netlist_artifacts = Default::default();
+            *state.model.netlist_artifacts = Default::default();
             *state.manual_run = Default::default();
             state.workbench.netlist_open_documents.clear();
-            state.simulation.source.netlist_content = state
+            state.model.simulation.source.netlist_content = state
+                .model
                 .workspace
                 .content
                 .netlist_source
                 .clone()
                 .unwrap_or_default();
-            state.simulation.execution.trigger_simulation = false;
+            state.model.simulation.execution.trigger_simulation = false;
             state.ui.netlist.rerun_queued = false;
-            state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
+            state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
         }
     }
     Ok(())
@@ -1520,7 +1555,7 @@ pub(crate) fn dirty_document_count(state: &AppState) -> usize {
 pub(crate) fn can_close_active_document(state: &AppState) -> bool {
     state.project_lifecycle.is_open()
         && state.workbench.workspace == crate::workbench::state::Workspace::Design
-        && state.workspace.content.open_views.len() > 1
+        && state.model.workspace.content.open_views.len() > 1
 }
 
 pub(crate) fn close_active_document(state: &mut AppState) -> Result<(), ProjectLifecycleError> {
@@ -1531,8 +1566,8 @@ pub(crate) fn close_active_document(state: &mut AppState) -> Result<(), ProjectL
     // Capture the live editor before removing only its presentation record.
     state.cancel_schematic_drag();
     state.sync_active_schematic_to_workspace();
-    let closing = state.workspace.content.active_view.clone();
-    state.workspace.content.close_view(&closing);
+    let closing = state.model.workspace.content.active_view.clone();
+    state.model.workspace.content.close_view(&closing);
     state.restore_active_schematic_from_workspace();
     refresh_registry(state)
 }
@@ -1540,7 +1575,7 @@ pub(crate) fn close_active_document(state: &mut AppState) -> Result<(), ProjectL
 pub(crate) fn begin_project_replacement(
     state: &mut AppState,
 ) -> Result<TransactionId, ProjectLifecycleError> {
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         return Err(ProjectLifecycleError::ActiveRun);
     }
     state
@@ -1566,7 +1601,7 @@ pub(crate) fn validate_project_replacement(
     state: &AppState,
     id: TransactionId,
 ) -> Result<(), ProjectLifecycleError> {
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         return Err(ProjectLifecycleError::ActiveRun);
     }
     state
@@ -1602,6 +1637,7 @@ fn revert_cell_view(
         .cloned();
     let Some(baseline_view) = baseline_view else {
         let removed = state
+            .model
             .library_manager
             .edit_library(&reference.library)
             .and_then(|mut library| library.remove_view(&reference.cell, &reference.view))
@@ -1610,6 +1646,7 @@ fn revert_cell_view(
             return Err(ProjectLifecycleError::NoAcceptedBaseline);
         }
         let source_changed = state
+            .model
             .workspace
             .content
             .project_sources
@@ -1626,6 +1663,7 @@ fn revert_cell_view(
         return Ok(());
     };
     state
+        .model
         .library_manager
         .edit_library(&reference.library)
         .and_then(|mut library| library.add_view(&reference.cell, baseline_view))
@@ -1635,21 +1673,23 @@ fn revert_cell_view(
     let key = reference.key();
     match baseline.clone_schematic_editor(&key) {
         Some(buffer) => {
-            state.workspace.insert_schematic_editor(key, buffer);
+            state.model.workspace.insert_schematic_editor(key, buffer);
         }
         None => {
-            state.workspace.remove_schematic_editor(&key);
+            state.model.workspace.remove_schematic_editor(&key);
         }
     }
     state
+        .model
         .workspace
         .content
         .synchronize_physical_layout_document_from(reference, &baseline.file.workspace)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
-    if reference == &state.workspace.content.active_view {
+    if reference == &state.model.workspace.content.active_view {
         state.restore_active_schematic_from_workspace();
     }
     let source_changed = state
+        .model
         .workspace
         .content
         .project_sources
@@ -1666,6 +1706,7 @@ fn restore_project_structure_preserving_documents(
     baseline: crate::state::LibraryManager,
 ) {
     let previous_references = state
+        .model
         .library_manager
         .libraries_by_key()
         .flat_map(|(library_key, library)| {
@@ -1676,11 +1717,12 @@ fn restore_project_structure_preserving_documents(
             })
         })
         .collect::<Vec<_>>();
-    state.library_manager = baseline.with_document_content_from(&state.library_manager);
+    state.model.library_manager = baseline.with_document_content_from(&state.model.library_manager);
     let removed_references = previous_references
         .into_iter()
         .filter(|reference| {
             state
+                .model
                 .library_manager
                 .get_library(&reference.library)
                 .and_then(|library| library.get_cell(&reference.cell))
@@ -1696,6 +1738,7 @@ fn restore_project_structure_preserving_documents(
         );
     }
     let retained = state
+        .model
         .library_manager
         .libraries_by_key()
         .flat_map(|(library_key, library)| {
@@ -1707,6 +1750,7 @@ fn restore_project_structure_preserving_documents(
         })
         .collect::<Vec<_>>();
     let removed = state
+        .model
         .workspace
         .content
         .project_sources
@@ -1729,8 +1773,9 @@ fn restore_project_structure_preserving_documents(
         state.ui.code_workspace.veriloga = Default::default();
     }
     state
+        .model
         .workspace
-        .ensure_library_model(&mut state.library_manager);
+        .ensure_library_model(&mut state.model.library_manager);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

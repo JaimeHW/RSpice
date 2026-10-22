@@ -34,6 +34,7 @@ fn studio_fixture() -> RSpiceApp {
     {
         let plan = app
             .state
+            .model
             .sim_setup
             .analysis_plan
             .as_mut()
@@ -78,14 +79,14 @@ fn studio_fixture() -> RSpiceApp {
             let _ = plan.set_enabled(id, false);
         }
     }
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+    for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
         dimension.enabled = matches!(
             dimension.kind,
             RunSetDimensionKind::Temperature | RunSetDimensionKind::ProcessSection
         );
     }
     let keys: Vec<String> =
-        rspice_simulation_contract::run_set::resolve(&app.state.sim_setup.run_set)
+        rspice_simulation_contract::run_set::resolve(&app.state.model.sim_setup.run_set)
             .map(|points| {
                 points
                     .iter()
@@ -96,6 +97,7 @@ fn studio_fixture() -> RSpiceApp {
             .unwrap_or_default();
     let of_kind = |app: &RSpiceApp, kind| {
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
@@ -108,7 +110,7 @@ fn studio_fixture() -> RSpiceApp {
     };
     let noise = of_kind(&app, AnalysisKind::Noise);
     let stb = of_kind(&app, AnalysisKind::Stb);
-    if let Some(plan) = app.state.sim_setup.analysis_plan.as_mut() {
+    if let Some(plan) = app.state.model.sim_setup.analysis_plan.as_mut() {
         if let Some(noise) = noise {
             let _ = plan.set_run_at(noise, AnalysisRunAt::NominalPoint);
         }
@@ -133,6 +135,7 @@ fn studio_form(kind: crate::simulation::plan::AnalysisKind) -> Option<RSpiceApp>
     app.state.workbench.simulation_page = SimulationPage::Analyses;
     let existing = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -147,6 +150,7 @@ fn studio_form(kind: crate::simulation::plan::AnalysisKind) -> Option<RSpiceApp>
         None => {
             let plan = app
                 .state
+                .model
                 .sim_setup
                 .analysis_plan
                 .as_mut()
@@ -178,6 +182,7 @@ fn studio_analysis_kinds() -> Vec<crate::simulation::plan::AnalysisKind> {
     use crate::simulation::plan::AnalysisInstance;
     studio_fixture()
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| {
@@ -347,6 +352,7 @@ pub(super) fn studio_route(
     if let Some(kind) = kind {
         let selected = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
@@ -389,6 +395,7 @@ pub(super) fn studio_routes() -> Vec<(
 fn first_enabled_instance(app: &RSpiceApp) -> crate::product::AnalysisInstanceId {
     use crate::simulation::plan::AnalysisInstance;
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -418,7 +425,7 @@ fn analysis_catalogue_fixtures() -> Vec<(String, RSpiceApp)> {
         .into_iter()
         .map(|page| {
             let mut app = studio_route(page, None);
-            app.state.sim_setup.session.palette_open = true;
+            app.state.model.sim_setup.session.palette_open = true;
             (format!("analysis catalogue · {page:?}"), app)
         })
         .collect::<Vec<_>>();
@@ -427,7 +434,7 @@ fn analysis_catalogue_fixtures() -> Vec<(String, RSpiceApp)> {
     // route — which is the whole claim, and the one the command makes true.
     let mut app = studio_route(SimulationPage::Solver, None);
     app.state.workbench.activate(Workspace::Results);
-    app.state.sim_setup.session.palette_open = true;
+    app.state.model.sim_setup.session.palette_open = true;
     fixtures.push(("analysis catalogue · Results workspace".to_owned(), app));
     fixtures
 }
@@ -514,7 +521,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
                 "1e-13",
             )
             .expect("an inheriting operating point carries its own conductance floor");
-        if let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() {
+        if let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan_mut() {
             let _ = plan.set_numeric_override(instance, Some(record));
         }
         overlays.push(("analysis options · Operating point".to_owned(), app));
@@ -524,11 +531,12 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     let mut app = studio_route(SimulationPage::Analyses, None);
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the fixture holds a stable plan")
         .id();
-    let plan_name = app.state.sim_setup.active_plan_name().to_string();
+    let plan_name = app.state.model.sim_setup.active_plan_name().to_string();
     app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(
         SimulationPlanManagerDraft::new(plan_id, plan_name),
     ));
@@ -566,11 +574,12 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     let mut app = studio_route(SimulationPage::Analyses, None);
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the fixture holds a stable plan")
         .id();
-    let plan_name = app.state.sim_setup.active_plan_name().to_string();
+    let plan_name = app.state.model.sim_setup.active_plan_name().to_string();
     app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
         ClonePlanDraft::for_source(plan_id, &plan_name),
     ));
@@ -589,6 +598,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     let mut app = studio_route(SimulationPage::Variables, None);
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the fixture holds a stable plan")

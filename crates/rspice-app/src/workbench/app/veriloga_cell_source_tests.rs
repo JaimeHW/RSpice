@@ -51,6 +51,7 @@ fn legacy_project_at(
 ) -> (String, crate::state::ProjectSourceId) {
     let mut state = AppState::default();
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -60,12 +61,14 @@ fn legacy_project_at(
         )
         .expect("one project-wide Verilog-A source");
     state
+        .model
         .workspace
         .content
         .project_sources
         .mark_validated(ProjectSourceLanguage::VerilogA)
         .expect("the legacy source was compiled");
     let id = state
+        .model
         .workspace
         .content
         .project_sources
@@ -101,8 +104,8 @@ fn veriloga_bundles(sources: &ProjectSourceRegistry) -> Vec<&ProjectSourceBundle
 /// An application over a loaded project, the way opening it installs one.
 fn install(project: ProjectSnapshot) -> RSpiceApp {
     let mut app = open_project_app();
-    app.state.library_manager = project.file.libraries;
-    app.state.workspace = crate::state::ProjectWorkspace::from_parts(
+    app.state.model.library_manager = project.file.libraries;
+    app.state.model.workspace = crate::state::ProjectWorkspace::from_parts(
         project.file.workspace,
         project.workspace_session,
     );
@@ -116,6 +119,7 @@ fn an_untouched_demo_loads_as_no_bundle_and_no_cell() {
     let text = legacy_project_text(RETIRED_DEMO, |_| {});
     let original = load(&text);
     let cells_before = AppState::default()
+        .model
         .library_manager
         .libraries_by_key()
         .map(|(_, library)| library.cell_count())
@@ -229,8 +233,8 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
     // binding resolves, and it opens in Design over the bundle it owns.
     let mut app = install(loaded);
     let binding = crate::state::workspace::project_veriloga_binding_for_view(
-        &app.state.workspace,
-        &app.state.library_manager,
+        &app.state.model.workspace,
+        &app.state.model.library_manager,
         &reference,
     )
     .expect("the view's module lookup resolves");
@@ -246,13 +250,14 @@ fn an_edited_project_wide_source_becomes_a_cell_view_once() {
 fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration() {
     let text = legacy_project_text(EDITED_MODULE, |state| {
         let bundle = state
+            .model
             .workspace
             .content
             .project_sources
             .bundle_for_owner(&code_workspace_owner())
             .expect("the legacy bundle");
         let key = crate::state::project_sources::project_veriloga_bundle_source_key(
-            state.workspace.content.project.id(),
+            state.model.workspace.content.project.id(),
             bundle,
             "sensor_bridge",
         )
@@ -261,7 +266,7 @@ fn a_deck_written_against_the_project_wide_source_still_prepares_after_migration
             &key,
             "sensor_bridge",
         );
-        state.workspace.content.netlist_source = Some(format!(
+        state.model.workspace.content.netlist_source = Some(format!(
             "bridge deck\nV1 inp 0 DC 1\nV2 inn 0 DC 0\nR1 out 0 1k\nX1 out inp inn sensor_bridge\n{directive}\n.op\n.end\n"
         ));
     });
@@ -412,15 +417,17 @@ fn a_module_never_lands_beside_a_cell_its_name_aliases() {
 #[test]
 fn a_migrated_source_whose_name_is_taken_in_another_case_lands_at_the_suffixed_cell() {
     let (text, legacy_id) = legacy_project_at("étage.va", "module broken(p, n;\n", |state| {
-        let library = state.workspace.content.project.root_library.clone();
+        let library = state.model.workspace.content.project.root_library.clone();
         let mut cell = Cell::new("ÉTAGE");
         cell.add_view(View::new("veriloga", ViewType::VerilogA));
         state
+            .model
             .library_manager
             .get_library_mut(&library)
             .expect("the design library")
             .add_cell(cell);
         state
+            .model
             .workspace
             .content
             .project_sources
@@ -488,6 +495,7 @@ fn rename_logical_path(value: &mut serde_json::Value, from: &str, to: &str) -> u
 fn a_legacy_source_holding_unicode_case_alias_paths_is_refused_at_load() {
     let text = legacy_project_text(EDITED_MODULE, |state| {
         let id = state
+            .model
             .workspace
             .content
             .project_sources
@@ -496,6 +504,7 @@ fn a_legacy_source_holding_unicode_case_alias_paths_is_refused_at_load() {
             .expect("the legacy bundle");
         for path in ["models/étage.vams", "models/other.vams"] {
             state
+                .model
                 .workspace
                 .content
                 .add_project_source_bundle_file(
@@ -526,15 +535,17 @@ fn a_legacy_source_holding_unicode_case_alias_paths_is_refused_at_load() {
 #[test]
 fn a_migrated_source_whose_name_is_taken_lands_at_the_suffixed_cell() {
     let text = legacy_project_text(EDITED_MODULE, |state| {
-        let library = state.workspace.content.project.root_library.clone();
+        let library = state.model.workspace.content.project.root_library.clone();
         let mut cell = Cell::new("sensor_bridge");
         cell.add_view(View::new("veriloga", ViewType::VerilogA));
         state
+            .model
             .library_manager
             .get_library_mut(&library)
             .expect("the design library")
             .add_cell(cell);
         state
+            .model
             .workspace
             .content
             .project_sources
@@ -580,7 +591,14 @@ const TWO_TOP_MODULES: &str = "`include \"disciplines.vams\"\nmodule child(p, n)
 #[test]
 fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     let mut app = open_project_app();
-    let library = app.state.workspace.content.active_view.library.clone();
+    let library = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_view
+        .library
+        .clone();
     code_workspace::import_dropped_veriloga_source(
         &mut app,
         "pair.va".to_owned(),
@@ -611,6 +629,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         let reference = CellViewRef::new(&library, cell, "veriloga");
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -619,8 +638,8 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         assert_eq!(bundle.root().logical_path(), "pair.va");
         assert_eq!(bundle.root().content(), TWO_TOP_MODULES);
         let binding = crate::state::workspace::project_veriloga_binding_for_view(
-            &app.state.workspace,
-            &app.state.library_manager,
+            &app.state.model.workspace,
+            &app.state.model.library_manager,
             &reference,
         )
         .expect("each view binds its module");
@@ -628,6 +647,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     }
     assert!(
         app.state
+            .model
             .library_manager
             .get_library(&library)
             .and_then(|library| library.get_cell("child"))
@@ -635,7 +655,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
         "an instantiated module is not a top"
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
-    assert_eq!(app.state.workspace.content.active_view, first);
+    assert_eq!(app.state.model.workspace.content.active_view, first);
     assert!(app.state.ui.code_workspace.veriloga.import_form.is_none());
 }
 
@@ -644,9 +664,10 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
 #[test]
 fn import_of_an_unparseable_file_creates_nothing() {
     let mut app = open_project_app();
-    let sources = app.state.workspace.content.project_sources.clone();
+    let sources = app.state.model.workspace.content.project_sources.clone();
     let cells = app
         .state
+        .model
         .library_manager
         .libraries_by_key()
         .map(|(_, library)| library.cell_count())
@@ -683,9 +704,10 @@ fn import_of_an_unparseable_file_creates_nothing() {
     assert!(refusal, "the status line states the refusal");
 
     assert!(app.commit_veriloga_import().is_err());
-    assert_eq!(app.state.workspace.content.project_sources, sources);
+    assert_eq!(app.state.model.workspace.content.project_sources, sources);
     assert_eq!(
         app.state
+            .model
             .library_manager
             .libraries_by_key()
             .map(|(_, library)| library.cell_count())
@@ -697,6 +719,7 @@ fn import_of_an_unparseable_file_creates_nothing() {
 /// The text of the root file `reference`'s bundle holds.
 fn root_text(app: &RSpiceApp, reference: &CellViewRef) -> String {
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -720,7 +743,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
-    let sources = app.state.workspace.content.project_sources.clone();
+    let sources = app.state.model.workspace.content.project_sources.clone();
     let text = root_text(&app, &reference);
 
     Command::ImportVerilogA.execute(&mut app);
@@ -745,7 +768,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
             .is_none()
     );
     assert_eq!(
-        app.state.workspace.content.project_sources, sources,
+        app.state.model.workspace.content.project_sources, sources,
         "nothing changes until the form commits"
     );
     assert_eq!(root_text(&app, &reference), text);
@@ -768,7 +791,7 @@ fn a_file_dropped_on_the_veriloga_editor_opens_the_import_form() {
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
     frame(&ctx, &mut app, DESKTOP);
-    let sources = app.state.workspace.content.project_sources.clone();
+    let sources = app.state.model.workspace.content.project_sources.clone();
     let text = root_text(&app, &reference);
 
     let _ = ctx.run_ui(
@@ -799,7 +822,7 @@ fn a_file_dropped_on_the_veriloga_editor_opens_the_import_form() {
         Some("pair.va"),
         "the drop opened the import form"
     );
-    assert_eq!(app.state.workspace.content.project_sources, sources);
+    assert_eq!(app.state.model.workspace.content.project_sources, sources);
     assert_eq!(root_text(&app, &reference), text);
 }
 
@@ -897,6 +920,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     pick_replacement(&ctx, &mut app);
     let bundle = |app: &RSpiceApp| {
         app.state
+            .model
             .workspace
             .content
             .project_sources
@@ -974,13 +998,14 @@ fn click(ctx: &egui::Context, app: &mut RSpiceApp, at: egui::Pos2) {
 fn deck_naming(app: &RSpiceApp, reference: &CellViewRef, module: &str) -> String {
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
         .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
         .expect("the view owns a bundle");
     let key = crate::state::project_sources::project_veriloga_bundle_source_key(
-        app.state.workspace.content.project.id(),
+        app.state.model.workspace.content.project.id(),
         bundle,
         module,
     )
@@ -997,7 +1022,7 @@ fn deck_naming(app: &RSpiceApp, reference: &CellViewRef, module: &str) -> String
 fn open_in_design_from_a_netlist_dependency_row_opens_the_tab() {
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
-    app.state.workspace.content.netlist_source = Some(deck_naming(&app, &reference, "gain"));
+    app.state.model.workspace.content.netlist_source = Some(deck_naming(&app, &reference, "gain"));
     app.state.workbench.activate(Workspace::Netlist);
     let ctx = themed_context();
     frame(&ctx, &mut app, DESKTOP);
@@ -1008,9 +1033,10 @@ fn open_in_design_from_a_netlist_dependency_row_opens_the_tab() {
     click(&ctx, &mut app, row);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
-    assert_eq!(app.state.workspace.content.active_view, reference);
+    assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert!(
         app.state
+            .model
             .workspace
             .content
             .open_views
@@ -1098,7 +1124,7 @@ fn render_the_veriloga_import_and_netlist_dependency_for_review() {
 
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
-    app.state.workspace.content.netlist_source = Some(deck_naming(&app, &reference, "gain"));
+    app.state.model.workspace.content.netlist_source = Some(deck_naming(&app, &reference, "gain"));
     app.state.workbench.activate(Workspace::Netlist);
     let canvas = crate::ui::raster::render(DESKTOP, |ui, _| app.render_frame_chrome(ui));
     write(

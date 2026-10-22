@@ -69,14 +69,18 @@ fn stop_simulation_enabled(simulation: &crate::state::SimulationState) -> bool {
 }
 
 fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
-    let discovered_files = app.state.pdk_config.discovered_files.len();
-    let scan_errors = &app.state.pdk_config.scan_errors;
-    let pack_definitions = app.state.model_library_manager.pack_definition_count();
+    let discovered_files = app.state.model.pdk_config.discovered_files.len();
+    let scan_errors = &app.state.model.pdk_config.scan_errors;
+    let pack_definitions = app
+        .state
+        .model
+        .model_library_manager
+        .pack_definition_count();
     let mut summary = format!(
         "Found {discovered_files} configured model file(s) and {pack_definitions} shipped pack \
          part(s)"
     );
-    let pack_error = app.state.model_library_manager.spice_pack_error();
+    let pack_error = app.state.model.model_library_manager.spice_pack_error();
     if let Some(error) = pack_error {
         summary = format!("{summary}; {error}");
     }
@@ -171,6 +175,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
     }
     let library_name = app
         .state
+        .model
         .model_library_manager
         .selected_library
         .as_deref()
@@ -183,6 +188,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
         .ok_or("select one model in Model & library catalog")?;
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library(library_name)
         .ok_or("the selected model library no longer exists")?;
@@ -201,7 +207,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
         }
     }
     crate::workbench::documents::model_editor::resolve_project_model_for_editor(
-        &app.state.model_library_manager,
+        &app.state.model.model_library_manager,
         library_name,
         model_name,
     )
@@ -220,6 +226,7 @@ fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'st
     }
     let library_name = app
         .state
+        .model
         .model_library_manager
         .selected_library
         .as_deref()
@@ -232,6 +239,7 @@ fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'st
         .ok_or("select one external or built-in model in Model & library catalog")?;
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library(library_name)
         .ok_or("the selected model library no longer exists")?;
@@ -677,7 +685,7 @@ impl Command {
                     app.state.ui.netlist.find.open = true;
                 } else if crate::workbench::documents::code_workspace::design_hosts_veriloga(
                     app.state.workbench.workspace,
-                    &app.state.workspace,
+                    &app.state.model.workspace,
                 ) {
                     // A Verilog-A cell view has no instances or nets to find;
                     // Find searches its source bundle instead.
@@ -714,7 +722,7 @@ impl Command {
                     app.state.ui.symbol.editor.zoom =
                         (app.state.ui.symbol.editor.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
                 } else {
-                    app.state.schematic.session.editor.zoom_request =
+                    app.state.model.schematic.session.editor.zoom_request =
                         Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
                 }
             }
@@ -730,7 +738,7 @@ impl Command {
                     app.state.ui.symbol.editor.zoom =
                         (app.state.ui.symbol.editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
                 } else {
-                    app.state.schematic.session.editor.zoom_request =
+                    app.state.model.schematic.session.editor.zoom_request =
                         Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
                 }
             }
@@ -749,13 +757,23 @@ impl Command {
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.needs_fit = true;
                 } else {
-                    app.state.schematic.session.editor.needs_drawing_sheet_fit = true;
-                    app.state.schematic.session.editor.needs_fit = false;
+                    app.state
+                        .model
+                        .schematic
+                        .session
+                        .editor
+                        .needs_drawing_sheet_fit = true;
+                    app.state.model.schematic.session.editor.needs_fit = false;
                 }
             }
             Self::FitSchematicContent => {
-                app.state.schematic.session.editor.needs_fit = true;
-                app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+                app.state.model.schematic.session.editor.needs_fit = true;
+                app.state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .needs_drawing_sheet_fit = false;
             }
             Self::ZoomOneToOne => {
                 if let Some(session) = app.state.symbol_in_place_mut() {
@@ -763,26 +781,28 @@ impl Command {
                 } else if active_symbol_editor(app) {
                     app.state.ui.symbol.editor.zoom = 1.0;
                 } else {
-                    app.state.schematic.session.editor.zoom_request = Some(ZoomRequest::To(1.0));
+                    app.state.model.schematic.session.editor.zoom_request =
+                        Some(ZoomRequest::To(1.0));
                 }
             }
             Self::ZoomToSelection => {
                 let symbol_context = schematic_symbol_context(&app.state);
-                let schematic = &app.state.schematic;
+                let schematic = &app.state.model.schematic;
                 if let Some((min_x, min_y, max_x, max_y)) = symbol_context
                     .selection_bounds(schematic.document(), &schematic.session.editor.selection)
                 {
-                    app.state.schematic.session.editor.zoom_request = Some(ZoomRequest::Frame((
-                        f64::from(min_x),
-                        f64::from(min_y),
-                        f64::from(max_x),
-                        f64::from(max_y),
-                    )));
+                    app.state.model.schematic.session.editor.zoom_request =
+                        Some(ZoomRequest::Frame((
+                            f64::from(min_x),
+                            f64::from(min_y),
+                            f64::from(max_x),
+                            f64::from(max_y),
+                        )));
                 }
             }
             Self::ZoomBox => {
                 activate_workspace(app, Workspace::Design);
-                app.state.schematic.session.editor.zoom_box.arm();
+                app.state.model.schematic.session.editor.zoom_box.arm();
             }
             Self::CycleGrid => cycle_canvas_grid(app),
             Self::GridSnapRouting => {
@@ -842,6 +862,7 @@ impl Command {
                 if enabled {
                     if let Some(run_index) = app
                         .state
+                        .model
                         .simulation
                         .retained
                         .newest_retained_result_run_index()
@@ -849,7 +870,7 @@ impl Command {
                         // The split starts on the newest materialized dataset,
                         // but remains the one canonical Results selection:
                         // there is no copied run, waveform, or document owner.
-                        app.state.simulation.select_run(run_index);
+                        app.state.model.simulation.select_run(run_index);
                         app.state.workbench.split_with_results = true;
                     }
                 } else {
@@ -986,7 +1007,13 @@ impl Command {
             Self::PlaceShape => {
                 activate_workspace(app, Workspace::Design);
                 let source = crate::workbench::app::schematic_editor_request_source(&app.state);
-                let expected_shapes = app.state.schematic.document().documentation_shapes.clone();
+                let expected_shapes = app
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .documentation_shapes
+                    .clone();
                 app.state
                     .dialogs
                     .documentation_shape
@@ -1008,10 +1035,14 @@ impl Command {
             // terminal the master dropped, so no route composes a second
             // account of what happened.
             Self::UpdateInstanceInterface => {
-                let outcome = app.state.schematic.update_selected_instance_interface(
-                    &app.state.library_manager,
-                    &app.state.workspace.content.schematic_buffers,
-                );
+                let outcome = app
+                    .state
+                    .model
+                    .schematic
+                    .update_selected_instance_interface(
+                        &app.state.model.library_manager,
+                        &app.state.model.workspace.content.schematic_buffers,
+                    );
                 app.state.prompt(match outcome {
                     Ok(summary) => summary,
                     Err(error) => error.to_string(),
@@ -1192,8 +1223,8 @@ impl Command {
                     app.state.workbench.inline_edit.end();
                 } else if app.state.cancel_schematic_drag() {
                     // A pointer edit is the innermost active interaction.
-                } else if app.state.schematic.session.editor.zoom_box.armed {
-                    app.state.schematic.session.editor.zoom_box.disarm();
+                } else if app.state.model.schematic.session.editor.zoom_box.armed {
+                    app.state.model.schematic.session.editor.zoom_box.disarm();
                 } else if app.state.dialogs.descend_hierarchy.open {
                     app.state.dialogs.descend_hierarchy.close();
                 } else if crate::workbench::app::cancel_floating_paste(&mut app.state) {
@@ -1215,7 +1246,7 @@ impl Command {
                 {
                     app.state.ui.results.session.clear_cursors();
                 } else {
-                    app.state.schematic.cancel_interaction_step();
+                    app.state.model.schematic.cancel_interaction_step();
                 }
             }
             Self::AscendHierarchy => {
@@ -1265,8 +1296,8 @@ impl Command {
                 if app.state.workbench.preflight.checking.is_some() {
                     // The frame loop stops it before it looks for a verdict.
                     app.state.workbench.preflight.request_check_cancel();
-                } else if stop_simulation_enabled(&app.state.simulation)
-                    && let Err(error) = app.state.simulation.request_abort_active_run()
+                } else if stop_simulation_enabled(&app.state.model.simulation)
+                    && let Err(error) = app.state.model.simulation.request_abort_active_run()
                 {
                     app.state.prompt(error);
                 }
@@ -1281,12 +1312,13 @@ impl Command {
             Self::ManageSimulationPlans => {
                 match app
                     .state
+                    .model
                     .sim_setup
                     .stable_analysis_plan()
                     .map(|plan| plan.id())
                 {
                     Ok(plan_id) => {
-                        let name = app.state.sim_setup.active_plan_name().clone();
+                        let name = app.state.model.sim_setup.active_plan_name().clone();
                         app.state.workbench.simulation_workflow =
                             Some(super::state::SimulationWorkflowDialog::PlanManager(
                                 super::state::SimulationPlanManagerDraft::new(
@@ -1373,7 +1405,7 @@ impl Command {
             }
             // Disabled while a run is executing.
             Self::ClearResults => {
-                if !app.state.simulation.execution.has_active_execution() {
+                if !app.state.model.simulation.execution.has_active_execution() {
                     app.state.clear_simulation_results();
                 }
             }
@@ -1494,7 +1526,7 @@ impl Command {
             Self::PdkSettings => app
                 .state
                 .pdk_settings_dialog
-                .open(app.state.pdk_config.clone()),
+                .open(app.state.model.pdk_config.clone()),
             Self::StimulusNewDefinition => {
                 crate::workbench::app::actions::stimulus::new_definition(&mut app.state);
             }
@@ -1521,8 +1553,8 @@ impl Command {
                 activate_workspace(app, Workspace::Design);
             }
             Self::RescanModelLibraries => {
-                crate::state::pdk_config::discover_model_files(&mut app.state.pdk_config);
-                app.state.model_library_manager.discover_spice_packs();
+                crate::state::pdk_config::discover_model_files(&mut app.state.model.pdk_config);
+                app.state.model.model_library_manager.discover_spice_packs();
                 // Reported here, so the toolbar, the menu and the palette all
                 // say the same. A clean rescan answers the gesture; one that
                 // could not read a library is worth interrupting for.

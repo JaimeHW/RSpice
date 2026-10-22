@@ -50,6 +50,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -66,7 +67,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .as_ref()
         .is_some_and(|receipt| {
             bundle.as_ref().is_none_or(|bundle| {
-                receipt.token.project_id != app.state.workspace.content.project.id()
+                receipt.token.project_id != app.state.model.workspace.content.project.id()
                     || receipt.token.revision != bundle.revision().get()
                     || receipt.token.content_digest != bundle.closure_digest()
             })
@@ -120,7 +121,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         let diagnostics = runtime
             .diagnostic_token
             .filter(|token| {
-                token.project_id == app.state.workspace.content.project.id()
+                token.project_id == app.state.model.workspace.content.project.id()
                     && token.revision == bundle.revision().get()
                     && token.content_digest == bundle.closure_digest()
             })
@@ -462,6 +463,7 @@ fn automation_busy(app: &RSpiceApp) -> bool {
 
 fn automation_workspace_available(app: &RSpiceApp) -> bool {
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -621,7 +623,7 @@ fn code_pane(
     );
     let runtime = &app.state.ui.code_workspace.automation;
     let validated = runtime.receipt.as_ref().is_some_and(|receipt| {
-        receipt.token.project_id == app.state.workspace.content.project.id()
+        receipt.token.project_id == app.state.model.workspace.content.project.id()
             && receipt.token.revision == bundle.revision().get()
             && receipt.token.content_digest == bundle.closure_digest()
     });
@@ -778,7 +780,7 @@ fn code_pane(
             crate::workbench::documents::code_workspace::toggle_automation_breakpoint(app, line);
         }
         if interaction.changed {
-            match app.state.workspace.content.replace_project_source_bundle_file(
+            match app.state.model.workspace.content.replace_project_source_bundle_file(
                 bundle.id(),
                 selected_path,
                 source.clone(),
@@ -1008,6 +1010,7 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 &messages.text(MessageId::AutomationProjectRevision),
                 &app.state
+                    .model
                     .workspace
                     .content
                     .project
@@ -1636,6 +1639,7 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
     use crate::simulation::plan::AnalysisKind;
     let (enabled, corner_enabled) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| {
@@ -1653,11 +1657,12 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
         .unwrap_or_default();
     let pvt_points = if corner_enabled {
         app.state
+            .model
             .sim_setup
             .corner
             .to_config(
-                &app.state.sim_setup.run_set,
-                app.state.sim_setup.reference_pvt,
+                &app.state.model.sim_setup.run_set,
+                app.state.model.sim_setup.reference_pvt,
             )
             .map_or(0, |config| config.num_corners())
     } else {
@@ -1665,12 +1670,18 @@ fn execution_preview(app: &RSpiceApp) -> ExecutionPreview {
     };
     let release_checks = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .map(crate::simulation::plan::SimulationPlan::id)
         .map_or(0, |plan_id| {
-            app.state.workspace.content.active_specs(plan_id).len()
+            app.state
+                .model
+                .workspace
+                .content
+                .active_specs(plan_id)
+                .len()
         });
     ExecutionPreview {
         task_points: crate::workbench::documents::code_workspace::automation_task_count(app)

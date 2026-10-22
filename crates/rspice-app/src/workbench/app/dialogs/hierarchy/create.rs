@@ -140,15 +140,24 @@ const TABLE_ROW_HEIGHT: f32 = 28.0;
 pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
     !state.schematic_edit_read_only()
         && !state
+            .model
             .schematic
             .session
             .editor
             .selection
             .components
             .is_empty()
-        && state.schematic.session.editor.selection.count()
-            == state.schematic.session.editor.selection.components.len()
+        && state.model.schematic.session.editor.selection.count()
+            == state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .components
+                .len()
         && state
+            .model
             .schematic
             .session
             .editor
@@ -157,6 +166,7 @@ pub(crate) fn create_hierarchy_available(state: &AppState) -> bool {
             .iter()
             .all(|id| {
                 state
+                    .model
                     .schematic
                     .document()
                     .components
@@ -182,7 +192,7 @@ pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
     state.dialogs.create_hierarchy.open(
         SchematicEditAuthority::capture(state),
         plan,
-        state.library_manager.revision(),
+        state.model.library_manager.revision(),
     );
 }
 
@@ -495,7 +505,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
                 .to_owned()
         })?;
     authority.validate(state, "Create hierarchy")?;
-    if state.dialogs.create_hierarchy.library_revision != state.library_manager.revision() {
+    if state.dialogs.create_hierarchy.library_revision != state.model.library_manager.revision() {
         return Err(
             "The library or symbol contract changed. Close and reopen Create hierarchy.".to_owned(),
         );
@@ -517,7 +527,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         }
         NetLabel::validate_name(
             draft.name.trim(),
-            state.schematic.document().document_policy.net_naming,
+            state.model.schematic.document().document_policy.net_naming,
         )
         .map_err(|error| format!("Port '{}': {error}", draft.name.trim()))?;
         if !names.insert(draft.name.trim().to_ascii_lowercase()) {
@@ -531,7 +541,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
 
     let cell_name = state.dialogs.create_hierarchy.cell_name.trim();
     let target = CellViewRef::new(
-        &state.workspace.content.active_view.library,
+        &state.model.workspace.content.active_view.library,
         cell_name,
         state.dialogs.create_hierarchy.target_view.display_name(),
     );
@@ -545,6 +555,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         return Err("Create hierarchy supports the schematic or symbol child view.".to_owned());
     }
     let library = state
+        .model
         .library_manager
         .get_library(&target.library)
         .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?;
@@ -564,6 +575,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     for view in ["schematic", "symbol"] {
         let reference = CellViewRef::new(&target.library, cell_name, view);
         if state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -582,6 +594,7 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
 fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     let symbols = schematic_symbol_context(state);
     let component_bounds = state
+        .model
         .schematic
         .document()
         .components
@@ -589,6 +602,7 @@ fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         .map(|component| (component.id, symbols.component_bounds_tuple(component)))
         .collect::<std::collections::HashMap<_, _>>();
     let terminals = state
+        .model
         .schematic
         .document()
         .components
@@ -612,11 +626,12 @@ fn source_plan(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
         .collect::<Vec<_>>();
     let result = generated_for(
         state,
-        &state.schematic,
-        &state.workspace.content.schematic_buffers,
-        &state.library_manager,
+        &state.model.schematic,
+        &state.model.workspace.content.schematic_buffers,
+        &state.model.library_manager,
     );
     state
+        .model
         .schematic
         .plan_hierarchy_extraction(
             &terminals,
@@ -644,8 +659,8 @@ pub(in crate::workbench) fn selected_component_sheet_move_plan(
     }
     source_plan(state)?
         .sheet_move_connectivity(
-            state.schematic.document(),
-            state.schematic.topology_version(),
+            state.model.schematic.document(),
+            state.model.schematic.topology_version(),
         )
         .map_err(|error| error.to_string())
 }
@@ -664,6 +679,7 @@ fn resolved_terminal_contract(
     };
     let reference = CellViewRef::new(&binding.library, &binding.cell, "schematic");
     let Some(master) = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -704,7 +720,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         return Err("The resolved connectivity or symbol geometry changed. Close and reopen Create hierarchy.".to_owned());
     }
 
-    let parent_ref = state.workspace.content.active_view.clone();
+    let parent_ref = state.model.workspace.content.active_view.clone();
     let library_name = parent_ref.library.clone();
     let cell_name = state.dialogs.create_hierarchy.cell_name.trim().to_owned();
     let target_view_type = state.dialogs.create_hierarchy.target_view;
@@ -712,6 +728,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let target_open_ref =
         CellViewRef::new(&library_name, &cell_name, target_view_type.display_name());
     let candidate = state
+        .model
         .schematic
         .materialize_hierarchy_extraction(
             &plan,
@@ -746,29 +763,29 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     symbol_view.modified = true;
     target_cell.add_view(symbol_view);
 
-    let open_views_before = state.workspace.content.open_views.clone();
-    let hierarchy_stack_before = state.workspace.content.hierarchy_stack.clone();
-    let hierarchy_instances_before = state.workspace.content.hierarchy_instances.clone();
+    let open_views_before = state.model.workspace.content.open_views.clone();
+    let hierarchy_stack_before = state.model.workspace.content.hierarchy_stack.clone();
+    let hierarchy_instances_before = state.model.workspace.content.hierarchy_instances.clone();
     let before_parent = source_schematic_with_canonical_connections(state);
-    let baseline_resolution = state.workspace.resolve_hierarchy_with_active(
-        &state.library_manager,
+    let baseline_resolution = state.model.workspace.resolve_hierarchy_with_active(
+        &state.model.library_manager,
         &parent_ref,
-        &state.schematic,
+        &state.model.schematic,
     );
     let baseline_failures = unresolved_hierarchy(&baseline_resolution);
     let baseline_generation = generated_for(
         state,
-        &state.schematic,
-        &state.workspace.content.schematic_buffers,
-        &state.library_manager,
+        &state.model.schematic,
+        &state.model.workspace.content.schematic_buffers,
+        &state.model.library_manager,
     );
 
-    let mut next_libraries = state.library_manager.clone();
+    let mut next_libraries = state.model.library_manager.clone();
     next_libraries
         .edit_library(&library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?
         .add_cell(target_cell.clone());
-    let mut next_workspace = state.workspace.clone();
+    let mut next_workspace = state.model.workspace.clone();
     next_workspace.insert_schematic_editor(parent_ref.key(), candidate.parent.clone());
     next_workspace.insert_schematic_editor(target_schematic_ref.key(), candidate.child.clone());
     let candidate_resolution = next_workspace.resolve_hierarchy(&next_libraries);
@@ -802,16 +819,16 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         &parent_generation.warnings,
     )?;
     validate_candidate_drc(
-        &state.schematic,
+        &state.model.schematic,
         &candidate.parent,
-        &state.workspace.content.schematic_buffers,
+        &state.model.workspace.content.schematic_buffers,
         &next_workspace.content.schematic_buffers,
-        &state.library_manager,
+        &state.model.library_manager,
         &next_libraries,
         // Both sides under the configuration the parent is checked under
         // everywhere else. A ground the extraction moves into the child is
         // still reached through the instance that places it.
-        state.design_check_config(&state.workspace.content.active_view),
+        state.design_check_config(&state.model.workspace.content.active_view),
     )?;
     candidate
         .validate_connectivity(
@@ -830,14 +847,16 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let hierarchy_stack_after = next_workspace.content.hierarchy_stack.clone();
     let hierarchy_instances_after = next_workspace.content.hierarchy_instances.clone();
 
-    state.library_manager = next_libraries;
-    state.workspace = next_workspace;
-    state.schematic = candidate.child.clone();
+    state.model.library_manager = next_libraries;
+    state.model.workspace = next_workspace;
+    state.model.schematic = candidate.child.clone();
     state.rebuild_active_connections_from_symbols();
     state.bump_active_schematic_epoch();
-    state
-        .library_manager
-        .select_view(&library_name, &cell_name, target_view_type.display_name());
+    state.model.library_manager.select_view(
+        &library_name,
+        &cell_name,
+        target_view_type.display_name(),
+    );
     state.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
         parent_ref,
         target_schematic_ref,
@@ -868,6 +887,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
 fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state::SchematicState {
     let symbols = schematic_symbol_context(state);
     let terminals = state
+        .model
         .schematic
         .document()
         .components
@@ -879,7 +899,7 @@ fn source_schematic_with_canonical_connections(state: &AppState) -> crate::state
                 .map(move |(name, point)| (component.id, name, point))
         })
         .collect::<Vec<_>>();
-    let mut schematic = state.schematic.clone();
+    let mut schematic = state.model.schematic.clone();
     schematic.rebuild_connections_from_terminals(&terminals);
     schematic
 }
@@ -1048,19 +1068,28 @@ mod tests {
     fn open_is_unavailable_for_mixed_selection() {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         let wire = state
+            .model
             .schematic
             .add_wire(vec![Point::origin(), Point::new(20, 0)])
             .expect("wire");
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_component(id);
-        state.schematic.session.editor.selection.select_wire(wire);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(wire);
         assert!(!create_hierarchy_available(&state));
     }
 
@@ -1082,33 +1111,40 @@ mod tests {
     fn commit_publishes_synchronized_cell_and_exact_project_history() {
         let mut state = AppState::default();
         let r1 = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         let r2 = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(80, 0));
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(160, 0));
         state
+            .model
             .schematic
             .add_wire(vec![Point::new(20, 0), Point::new(60, 0)]);
         state
+            .model
             .schematic
             .add_wire(vec![Point::new(100, 0), Point::new(140, 0)]);
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_component(r1);
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_component(r2);
-        let parent_ref = state.workspace.content.active_view.clone();
+        let parent_ref = state.model.workspace.content.active_view.clone();
         let library_name = parent_ref.library.clone();
 
         open_create_hierarchy_dialog(&mut state);
@@ -1116,8 +1152,9 @@ mod tests {
         commit_create_hierarchy(&mut state).expect("transaction commits");
 
         let target_ref = CellViewRef::new(&library_name, DEFAULT_CELL, "schematic");
-        assert_eq!(state.workspace.content.active_view, target_ref);
+        assert_eq!(state.model.workspace.content.active_view, target_ref);
         let target_cell = state
+            .model
             .library_manager
             .get_library(&library_name)
             .and_then(|library| library.get_cell(DEFAULT_CELL))
@@ -1128,9 +1165,13 @@ mod tests {
             Some("ports")
         );
         let symbol = SymbolDocument::load_from_view(symbol_view).expect("generated symbol");
-        assert_eq!(symbol.pins.len(), state.schematic.interface_ports().len());
+        assert_eq!(
+            symbol.pins.len(),
+            state.model.schematic.interface_ports().len()
+        );
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -1143,6 +1184,7 @@ mod tests {
         );
 
         state
+            .model
             .library_manager
             .get_library_mut(&library_name)
             .and_then(|library| library.get_cell_mut(DEFAULT_CELL))
@@ -1150,7 +1192,7 @@ mod tests {
             .views
             .values_mut()
             .for_each(|view| view.modified = false);
-        state.schematic.session.is_dirty = false;
+        state.model.schematic.session.is_dirty = false;
         assert!(
             state.can_undo_project_design(),
             "saving must not disable undo"
@@ -1159,9 +1201,10 @@ mod tests {
             state.undo_project_design().expect("undo"),
             Some("create hierarchical cell".to_owned())
         );
-        assert_eq!(state.workspace.content.active_view, parent_ref);
+        assert_eq!(state.model.workspace.content.active_view, parent_ref);
         assert!(
             state
+                .model
                 .library_manager
                 .get_library(&library_name)
                 .and_then(|library| library.get_cell(DEFAULT_CELL))
@@ -1172,16 +1215,18 @@ mod tests {
             state.redo_project_design().expect("redo"),
             Some("create hierarchical cell".to_owned())
         );
-        assert_eq!(state.workspace.content.active_view, target_ref);
+        assert_eq!(state.model.workspace.content.active_view, target_ref);
     }
 
     #[test]
     fn referenced_moved_instance_blocks_without_mutating_the_project() {
         let mut state = AppState::default();
         let selected = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         let selected_name = state
+            .model
             .schematic
             .document()
             .components
@@ -1191,18 +1236,21 @@ mod tests {
             .name
             .clone();
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_component(selected);
         let plan_id = state
+            .model
             .sim_setup
             .analysis_plan
             .as_ref()
             .expect("active plan")
             .id();
         state
+            .model
             .workspace
             .content
             .ensure_active_plan_data(plan_id)
@@ -1219,17 +1267,18 @@ mod tests {
                 )
                 .expect("saved output"),
             );
-        let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
+        let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
 
         open_create_hierarchy_dialog(&mut state);
         assert!(state.dialogs.create_hierarchy.open);
         let error = commit_create_hierarchy(&mut state).expect_err("reference must block");
         assert!(error.contains("saved output 'branch_current'"), "{error}");
-        assert!(before.is_equal_document(state.schematic.document()));
+        assert!(before.is_equal_document(state.model.schematic.document()));
         assert!(
             state
+                .model
                 .library_manager
-                .get_library(&state.workspace.content.active_view.library)
+                .get_library(&state.model.workspace.content.active_view.library)
                 .and_then(|library| library.get_cell(DEFAULT_CELL))
                 .is_none()
         );

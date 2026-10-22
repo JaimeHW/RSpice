@@ -65,6 +65,7 @@ pub(crate) fn open_symbol_parameter_form_dialog(state: &mut AppState) {
 /// remains open in the Design workspace.
 pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target: CellViewRef) {
     let writable = state
+        .model
         .library_manager
         .get_library(&target.library)
         .is_some_and(|library| !library.read_only);
@@ -76,6 +77,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         return;
     }
     let Some(view) = state
+        .model
         .library_manager
         .get_library(&target.library)
         .and_then(|library| library.get_cell(&target.cell))
@@ -131,11 +133,13 @@ fn writable_library_name(state: &AppState) -> Option<String> {
         return None;
     }
     state
+        .model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
             state
+                .model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
@@ -143,6 +147,7 @@ fn writable_library_name(state: &AppState) -> Option<String> {
         })
         .or_else(|| {
             state
+                .model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -152,8 +157,9 @@ fn writable_library_name(state: &AppState) -> Option<String> {
 }
 
 fn selected_symbol_reference(state: &AppState) -> Option<CellViewRef> {
-    let active = &state.workspace.content.active_view;
+    let active = &state.model.workspace.content.active_view;
     if state
+        .model
         .library_manager
         .get_library(&active.library)
         .and_then(|library| library.get_cell(&active.cell))
@@ -162,10 +168,11 @@ fn selected_symbol_reference(state: &AppState) -> Option<CellViewRef> {
     {
         return Some(active.clone());
     }
-    let library = state.library_manager.selected_library.as_deref()?;
-    let cell = state.library_manager.selected_cell.as_deref()?;
-    let view = state.library_manager.selected_view.as_deref()?;
+    let library = state.model.library_manager.selected_library.as_deref()?;
+    let cell = state.model.library_manager.selected_cell.as_deref()?;
+    let view = state.model.library_manager.selected_view.as_deref()?;
     (state
+        .model
         .library_manager
         .get_library(library)?
         .get_cell(cell)?
@@ -177,6 +184,7 @@ fn selected_symbol_reference(state: &AppState) -> Option<CellViewRef> {
 
 fn first_symbol_reference(state: &AppState) -> Option<CellViewRef> {
     state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -193,6 +201,7 @@ fn first_symbol_reference(state: &AppState) -> Option<CellViewRef> {
 
 fn first_model_bound_symbol_reference(state: &AppState) -> Option<CellViewRef> {
     state
+        .model
         .library_manager
         .libraries_sorted()
         .into_iter()
@@ -212,6 +221,7 @@ fn first_model_bound_symbol_reference(state: &AppState) -> Option<CellViewRef> {
 
 fn reference_has_typed_definition(state: &AppState, reference: &CellViewRef) -> bool {
     state
+        .model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -234,7 +244,7 @@ mod tests {
         assert!(state.dialogs.symbol_import.open);
         assert_eq!(
             state.dialogs.symbol_import.target_library,
-            state.workspace.content.active_view.library
+            state.model.workspace.content.active_view.library
         );
         assert!(state.dialogs.symbol_import.source_text.is_empty());
         assert!(!state.dialogs.symbol_import.dirty);
@@ -244,7 +254,7 @@ mod tests {
     fn form_action_loads_the_selected_typed_definition_as_the_next_revision() {
         let mut state = AppState::default();
         state.open_project_session();
-        let library_name = state.workspace.content.active_view.library.clone();
+        let library_name = state.model.workspace.content.active_view.library.clone();
         let cell_name = "review_form";
         let template = ModelBoundSymbolDefinition::review_only(&library_name, cell_name);
         let imported = SymbolDefinitionImport::from_bytes(
@@ -254,6 +264,7 @@ mod tests {
         )
         .expect("typed review definition");
         let library = state
+            .model
             .library_manager
             .get_library_mut(&library_name)
             .expect("project library");
@@ -262,6 +273,7 @@ mod tests {
             .commit(library)
             .expect("commit definition");
         state
+            .model
             .library_manager
             .select_view(&library_name, cell_name, "symbol");
 

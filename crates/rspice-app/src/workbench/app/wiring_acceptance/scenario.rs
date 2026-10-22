@@ -15,6 +15,7 @@ fn p(x: i32, y: i32) -> Point {
 fn wire_at(bench: &Bench, point: Point) -> u64 {
     bench
         .state()
+        .model
         .schematic
         .document()
         .wires
@@ -27,6 +28,7 @@ fn wire_at(bench: &Bench, point: Point) -> u64 {
 fn part(bench: &Bench, name: &str) -> u64 {
     bench
         .state()
+        .model
         .schematic
         .document()
         .components
@@ -97,7 +99,7 @@ fn a_wiring_session_keeps_the_deck_and_the_dots_right_through_undo_and_redo() {
     bench.draw_wire(&[p(520, 100), p(560, 100)]);
     bench.draw_wire(&[p(600, 100), p(680, 100)]);
     copy_from_parts_cell(&mut bench);
-    bench.state_mut().schematic.clear_undo_history();
+    bench.state_mut().model.schematic.clear_undo_history();
     assert_eq!(bench.active_sheet(), 0);
 
     let mut expected = vec![Expected {
@@ -225,6 +227,7 @@ fn a_wiring_session_keeps_the_deck_and_the_dots_right_through_undo_and_redo() {
     assert!(
         bench
             .state()
+            .model
             .schematic
             .document()
             .wires
@@ -251,6 +254,7 @@ fn a_wiring_session_keeps_the_deck_and_the_dots_right_through_undo_and_redo() {
     assert!(
         bench
             .state()
+            .model
             .schematic
             .document()
             .components

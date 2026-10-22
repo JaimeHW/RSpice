@@ -24,6 +24,7 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
                 receipt.simulation_plan_id()
                     == app
                         .state
+                        .model
                         .sim_setup
                         .stable_analysis_plan()
                         .ok()
@@ -33,12 +34,14 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
     });
     let source = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| (plan.id(), plan.revision()))
         .and_then(|(plan_id, revision)| {
             app.state
+                .model
                 .workspace
                 .content
                 .plan_data(plan_id)
@@ -164,7 +167,7 @@ fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable
     let session = &app.state.workbench.verification;
     let mut variables = session
         .tuning_plan_id
-        .and_then(|plan_id| app.state.workspace.content.plan_data(plan_id))
+        .and_then(|plan_id| app.state.model.workspace.content.plan_data(plan_id))
         .map(|payload| payload.design_variables.clone())
         .unwrap_or_default();
     if let Some(binding) = session
@@ -183,6 +186,7 @@ fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable
 fn tuning_baseline_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
     let run_id = app.state.workbench.verification.tuning_baseline_run?;
     app.state
+        .model
         .simulation
         .retained
         .runs
@@ -214,7 +218,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
     if !tuning_is_valid(app) {
         return Err(tuning_commit_block_reason(app));
     }
-    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    let plan = app.state.model.sim_setup.stable_analysis_plan()?;
     let plan_id = plan.id();
     let plan_revision = plan.revision();
     let verification = &app.state.workbench.verification;
@@ -257,9 +261,9 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
         })
         .transpose()?;
     let variable_change_count = changes.len() + usize::from(proposed_variable.is_some());
-    let original_workspace = app.state.workspace.clone();
-    let original_setup = app.state.sim_setup.clone();
-    let original_schematic = app.state.schematic.clone();
+    let original_workspace = app.state.model.workspace.clone();
+    let original_setup = app.state.model.sim_setup.clone();
+    let original_schematic = app.state.model.schematic.clone();
     let original_preflight = app.state.workbench.preflight.clone();
     let mut workspace = original_workspace.clone();
     let mut setup = original_setup.clone();
@@ -277,7 +281,14 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
             .map_err(|error| error.to_string())?;
     }
     let binding_changed = if let Some(binding) = binding.as_ref() {
-        if app.state.workspace.content.active_schematic_reference() != binding.source_view {
+        if app
+            .state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            != binding.source_view
+        {
             return Err(format!(
                 "the active schematic changed from {} while the tuning sandbox was open",
                 binding.source_view.display_path()
@@ -346,14 +357,14 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
         ))
         .map_err(|error| error.to_string())?;
 
-    app.state.workspace = workspace;
-    app.state.sim_setup = setup;
-    app.state.schematic = schematic;
+    app.state.model.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.schematic = schematic;
     app.state.workbench.preflight = Default::default();
     if let Some(reason) = app.state.simulation_run_block_reason() {
-        app.state.workspace = original_workspace;
-        app.state.sim_setup = original_setup;
-        app.state.schematic = original_schematic;
+        app.state.model.workspace = original_workspace;
+        app.state.model.sim_setup = original_setup;
+        app.state.model.schematic = original_schematic;
         app.state.workbench.preflight = original_preflight;
         return Err(format!(
             "the tuned revision was not committed because its required run is blocked: {reason}"
@@ -363,9 +374,9 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
         .simulation_controller
         .prepare_run_set_for_preflight(&app.state)
     {
-        app.state.workspace = original_workspace;
-        app.state.sim_setup = original_setup;
-        app.state.schematic = original_schematic;
+        app.state.model.workspace = original_workspace;
+        app.state.model.sim_setup = original_setup;
+        app.state.model.schematic = original_schematic;
         app.state.workbench.preflight = original_preflight;
         return Err(format!(
             "the tuned revision was not committed because the run could not be prepared: {}",
@@ -579,12 +590,14 @@ fn tuning_delta(
 pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
     let Some((_plan_id, _plan_revision, _committed_variables, specs)) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| (plan.id(), plan.revision()))
         .and_then(|(plan_id, revision)| {
             app.state
+                .model
                 .workspace
                 .content
                 .plan_data(plan_id)

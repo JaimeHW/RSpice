@@ -25,6 +25,7 @@ fn the_rename_dialog_refuses_a_rename_that_renames_nothing() {
         let mut app = RSpiceApp::test_instance();
         let instance = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the test instance owns a stable plan")
@@ -34,6 +35,7 @@ fn the_rename_dialog_refuses_a_rename_that_renames_nothing() {
             .id();
         let shown_as = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("plan")
@@ -77,6 +79,7 @@ fn the_rename_dialog_refuses_a_rename_that_renames_nothing() {
 
     let shown_as = RSpiceApp::test_instance()
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("plan")
@@ -117,12 +120,12 @@ fn the_analysis_catalogue_opens_over_a_plan_that_does_not_resolve() {
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.analysis_plan = None;
+    app.state.model.sim_setup.analysis_plan = None;
     assert!(
-        app.state.sim_setup.stable_analysis_plan().is_err(),
+        app.state.model.sim_setup.stable_analysis_plan().is_err(),
         "the fixture is a project whose plan has no stable analysis identity"
     );
-    app.state.sim_setup.session.palette_open = true;
+    app.state.model.sim_setup.session.palette_open = true;
 
     let mut run = || {
         ctx.run_ui(

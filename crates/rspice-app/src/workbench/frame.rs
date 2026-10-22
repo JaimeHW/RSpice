@@ -243,6 +243,7 @@ fn run_dataset_export(
 fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
     let runs = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -386,7 +387,7 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
     use crate::state::SimulationRunLifecycle as Lifecycle;
     use crate::ui::widgets::{NotificationAction, ToastKind};
 
-    let run = state.simulation.retained.run_by_stable_id(run_id)?;
+    let run = state.model.simulation.retained.run_by_stable_id(run_id)?;
     let sequence = run.id;
     let retained = run.analyses.len();
     let membership = run.campaign_membership();
@@ -481,6 +482,7 @@ fn run_notice(state: &AppState, run_id: crate::product::RunId) -> Option<RunNoti
         // failure still has an account of itself, and it starts at the
         // run's line in the session's log, which the run wrote as it ended.
         state
+            .model
             .log_buffer
             .entries()
             .filter(|entry| {
@@ -568,14 +570,16 @@ fn saved_detail(plan: Option<&str>, retained: usize, elapsed_seconds: f64) -> St
 /// the plan is gone.
 fn plan_name(state: &AppState, plan_id: crate::product::SimulationPlanId) -> Option<String> {
     if state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .is_some_and(|plan| plan.id() == plan_id)
     {
-        return Some(state.sim_setup.active_plan_name().as_str().to_owned());
+        return Some(state.model.sim_setup.active_plan_name().as_str().to_owned());
     }
     state
+        .model
         .sim_setup
         .inactive_plans()
         .iter()
@@ -764,7 +768,7 @@ pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     use crate::ui::widgets::{MirroredEntry, NotificationCategory, ToastKind};
 
-    let revision = app.state.log_buffer.revision();
+    let revision = app.state.model.log_buffer.revision();
     let observed = app.state.ui.toasts.observed_log_revision();
     if revision == observed {
         return;
@@ -775,6 +779,7 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     let wall_now = crate::time_compat::unix_epoch();
     let entries = app
         .state
+        .model
         .log_buffer
         .entries()
         .filter(|entry| entry.id >= observed && entry.severity == LogSeverity::Error)
@@ -934,6 +939,7 @@ mod tests {
 
         let line = app
             .state
+            .model
             .log_buffer
             .entries()
             .last()
@@ -998,7 +1004,7 @@ mod tests {
             1,
             "the mirrored line is the same notice"
         );
-        assert!(app.state.notices.is_empty());
+        assert!(app.state.model.notices.is_empty());
     }
 
     /// A completion is announced on the transition into a terminal lifecycle,
@@ -1018,14 +1024,14 @@ mod tests {
         for retained in [false, true] {
             let ctx = Context::default();
             let mut app = RSpiceApp::test_instance();
-            let run = app.state.simulation.start_run();
+            let run = app.state.model.simulation.start_run();
             if retained {
                 run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "partial"));
             }
             run.lifecycle = Lifecycle::Running;
             announce_run_completion(&ctx, &mut app);
-            app.state.simulation.retained.runs[0].success = false;
-            app.state.simulation.retained.runs[0]
+            app.state.model.simulation.retained.runs[0].success = false;
+            app.state.model.simulation.retained.runs[0]
                 .finish_lifecycle(Lifecycle::Aborted)
                 .unwrap();
             announce_run_completion(&ctx, &mut app);
@@ -1052,18 +1058,18 @@ mod tests {
             ] {
                 let ctx = Context::default();
                 let mut app = RSpiceApp::test_instance();
-                let run = app.state.simulation.start_run();
+                let run = app.state.model.simulation.start_run();
                 if retained {
                     run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "partial"));
                 }
                 run.lifecycle = Lifecycle::Running;
                 announce_run_completion(&ctx, &mut app);
-                app.state.simulation.retained.runs[0].success = false;
-                app.state.simulation.retained.runs[0]
+                app.state.model.simulation.retained.runs[0].success = false;
+                app.state.model.simulation.retained.runs[0]
                     .finish_lifecycle(lifecycle)
                     .unwrap();
                 // The line the run writes in the session's log as it ends.
-                let end_line = app.state.log_buffer.log_anchored(
+                let end_line = app.state.model.log_buffer.log_anchored(
                     LogSeverity::Error,
                     LogSource::Run,
                     title,
@@ -1099,11 +1105,12 @@ mod tests {
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .simulation
             .start_run()
             .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
-        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
-        app.state.simulation.retained.runs[0].success = true;
+        app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.model.simulation.retained.runs[0].success = true;
 
         announce_run_completion(&ctx, &mut app);
         assert!(
@@ -1111,11 +1118,11 @@ mod tests {
             "a run that was already finished when first seen did not just complete"
         );
 
-        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         announce_run_completion(&ctx, &mut app);
         assert!(app.state.ui.toasts.activity().is_empty());
 
-        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
         announce_run_completion(&ctx, &mut app);
         let activity = app.state.ui.toasts.activity();
         assert_eq!(
@@ -1159,17 +1166,18 @@ mod tests {
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .simulation
             .start_run()
             .add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
-        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         announce_run_completion(&ctx, &mut app);
 
         // What `finish_simulation_batch` leaves behind: a sealed lifecycle
         // and an anchored console line naming the run it sealed.
-        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
-        app.state.simulation.retained.runs[0].success = true;
-        app.state.log_buffer.log_anchored(
+        app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
+        app.state.model.simulation.retained.runs[0].success = true;
+        app.state.model.log_buffer.log_anchored(
             LogSeverity::Info,
             LogSource::Run,
             "Simulation completed successfully",
@@ -1217,14 +1225,14 @@ mod tests {
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        app.state.simulation.start_run();
-        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
+        app.state.model.simulation.start_run();
+        app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         announce_run_completion(&ctx, &mut app);
-        app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Failed;
-        app.state.simulation.retained.runs[0].success = false;
+        app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Failed;
+        app.state.model.simulation.retained.runs[0].success = false;
         // Exactly what `finish_simulation_batch` leaves behind for a run that
         // sealed with nothing retained.
-        let end_line = app.state.log_buffer.log_anchored(
+        let end_line = app.state.model.log_buffer.log_anchored(
             LogSeverity::Error,
             LogSource::Run,
             "Simulation completed with errors",
@@ -1308,13 +1316,13 @@ mod tests {
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
         announce_run_completion(&ctx, &mut app);
 
         // One update: the first run fails and the second starts.
-        let first = app.state.simulation.retained.runs[0].id;
-        app.state.simulation.retained.runs[0].lifecycle = Lifecycle::Failed;
-        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        let first = app.state.model.simulation.retained.runs[0].id;
+        app.state.model.simulation.retained.runs[0].lifecycle = Lifecycle::Failed;
+        app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
         announce_run_completion(&ctx, &mut app);
         let titles = |app: &RSpiceApp| {
             app.state
@@ -1327,8 +1335,8 @@ mod tests {
         };
         assert_eq!(titles(&app), [format!("Run {first} failed")]);
 
-        let second = app.state.simulation.retained.runs[0].id;
-        app.state.simulation.retained.runs[0].lifecycle = Lifecycle::Completed;
+        let second = app.state.model.simulation.retained.runs[0].id;
+        app.state.model.simulation.retained.runs[0].lifecycle = Lifecycle::Completed;
         announce_run_completion(&ctx, &mut app);
         announce_run_completion(&ctx, &mut app);
         assert_eq!(
@@ -1349,7 +1357,7 @@ mod tests {
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        let run = app.state.simulation.start_run();
+        let run = app.state.model.simulation.start_run();
         run.lifecycle = Lifecycle::Completed;
         let run_id = run.run_id;
         app.state.ui.run_watch.run_started(run_id);
@@ -1374,11 +1382,11 @@ mod tests {
         ] {
             let ctx = Context::default();
             let mut app = RSpiceApp::test_instance();
-            let run = app.state.simulation.start_run();
+            let run = app.state.model.simulation.start_run();
             run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "tran"));
             run.lifecycle = Lifecycle::Running;
             announce_run_completion(&ctx, &mut app);
-            let run = &mut app.state.simulation.retained.runs[0];
+            let run = &mut app.state.model.simulation.retained.runs[0];
             for _ in 0..warnings {
                 run.log
                     .push(run_log_line(LogSeverity::Warning, "gmin stepping was used"));
@@ -1409,11 +1417,13 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let plan_id = app
             .state
+            .model
             .sim_setup
             .create_plan("Nightly AC")
             .expect("a plan to run");
         let run = app
             .state
+            .model
             .simulation
             .start_prepared_run(plan_receipt(plan_id))
             .expect("a prepared run");
@@ -1426,7 +1436,7 @@ mod tests {
         ));
         run.lifecycle = Lifecycle::Running;
         announce_run_completion(&ctx, &mut app);
-        let run = &mut app.state.simulation.retained.runs[0];
+        let run = &mut app.state.model.simulation.retained.runs[0];
         run.lifecycle = Lifecycle::Failed;
         run.elapsed_time = 12.4;
 
@@ -1454,9 +1464,9 @@ mod tests {
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
         announce_run_completion(&ctx, &mut app);
-        let run = &mut app.state.simulation.retained.runs[0];
+        let run = &mut app.state.model.simulation.retained.runs[0];
         run.log.push(run_log_line(
             LogSeverity::Error,
             "Transient: timestep too small at 1.2 us",
@@ -1481,9 +1491,9 @@ mod tests {
         // With nothing but its end line, a run's failure has no account of
         // its own, and the detail says what it left instead.
         let mut app = RSpiceApp::test_instance();
-        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
         announce_run_completion(&ctx, &mut app);
-        let run = &mut app.state.simulation.retained.runs[0];
+        let run = &mut app.state.model.simulation.retained.runs[0];
         run.log.push(run_log_line(
             LogSeverity::Error,
             "Run 1 failed after 0.31 s",
@@ -1510,8 +1520,18 @@ mod tests {
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
         let campaign = crate::product::SimulationCampaignId::new();
-        let bias = app.state.sim_setup.create_plan("Bias").expect("a plan");
-        let sweep = app.state.sim_setup.create_plan("Sweep").expect("a plan");
+        let bias = app
+            .state
+            .model
+            .sim_setup
+            .create_plan("Bias")
+            .expect("a plan");
+        let sweep = app
+            .state
+            .model
+            .sim_setup
+            .create_plan("Sweep")
+            .expect("a plan");
         let start_member = |simulation: &mut crate::state::SimulationState,
                             plan: crate::product::SimulationPlanId,
                             index: u32|
@@ -1527,12 +1547,13 @@ mod tests {
             run.lifecycle = Lifecycle::Running;
             run.id
         };
-        let first = start_member(&mut app.state.simulation, bias, 1);
+        let first = start_member(&mut app.state.model.simulation, bias, 1);
         announce_run_completion(&ctx, &mut app);
 
         // One update: the first member fails and the second starts.
         let run = app
             .state
+            .model
             .simulation
             .retained
             .run_by_sequence_mut(first)
@@ -1542,7 +1563,7 @@ mod tests {
             "Operating point: no convergence",
         ));
         run.lifecycle = Lifecycle::Failed;
-        let end_line = app.state.log_buffer.log_anchored(
+        let end_line = app.state.model.log_buffer.log_anchored(
             LogSeverity::Error,
             LogSource::Run,
             "Run 1 failed after 0.20 s: Operating point: no convergence",
@@ -1550,7 +1571,7 @@ mod tests {
                 run_sequence: first,
             }),
         );
-        let second = start_member(&mut app.state.simulation, sweep, 2);
+        let second = start_member(&mut app.state.model.simulation, sweep, 2);
         announce_run_completion(&ctx, &mut app);
 
         let activity = app.state.ui.toasts.activity();
@@ -1569,12 +1590,13 @@ mod tests {
 
         // The second member finishes cleanly, which ends the campaign.
         app.state
+            .model
             .simulation
             .retained
             .run_by_sequence_mut(second)
             .expect("the second member")
             .lifecycle = Lifecycle::Completed;
-        let summary = app.state.log_buffer.log(
+        let summary = app.state.model.log_buffer.log(
             LogSeverity::Error,
             LogSource::Run,
             "Campaign 'Nightly' completed with errors: 1 completed, 1 failed",
@@ -1779,12 +1801,12 @@ mod tests {
                 .workspace_mut()
                 .unwrap()
                 .set_background_task_attention(attention);
-            app.state.simulation.start_run().lifecycle = Lifecycle::Running;
-            app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+            app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
+            app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
             announce_run_completion(&ctx, &mut app);
-            app.state.simulation.retained.runs[1].lifecycle = Lifecycle::Completed;
-            app.state.simulation.retained.runs[0].lifecycle = Lifecycle::Failed;
-            app.state.log_buffer.log(
+            app.state.model.simulation.retained.runs[1].lifecycle = Lifecycle::Completed;
+            app.state.model.simulation.retained.runs[0].lifecycle = Lifecycle::Failed;
+            app.state.model.log_buffer.log(
                 LogSeverity::Error,
                 LogSource::Studio,
                 "The project could not be saved",
@@ -1877,10 +1899,10 @@ mod tests {
 
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
-        app.state.simulation.start_run().lifecycle = Lifecycle::Running;
+        app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
+        app.state.model.simulation.start_run().lifecycle = Lifecycle::Running;
         announce_run_completion(&ctx, &mut app);
-        for run in &mut app.state.simulation.retained.runs {
+        for run in &mut app.state.model.simulation.retained.runs {
             run.lifecycle = Lifecycle::Failed;
             run.elapsed_time = 90.0;
         }
@@ -1946,7 +1968,7 @@ mod tests {
                 LogSeverity::Info,
                 LogSeverity::Debug,
             ] {
-                app.state.log_buffer.log(
+                app.state.model.log_buffer.log(
                     severity,
                     source,
                     format!("{} {}", source.name(), severity.name()),
@@ -1979,14 +2001,15 @@ mod tests {
     fn a_prompt_is_neither_logged_nor_notified() {
         let ctx = Context::default();
         let mut app = RSpiceApp::test_instance();
-        let revision = app.state.log_buffer.revision();
+        let revision = app.state.model.log_buffer.revision();
 
         app.state.prompt("Nothing was deleted.");
         synchronize_activity_stream(&ctx, &mut app);
 
-        assert_eq!(app.state.log_buffer.revision(), revision);
+        assert_eq!(app.state.model.log_buffer.revision(), revision);
         assert!(
             app.state
+                .model
                 .log_buffer
                 .entries()
                 .all(|entry| entry.message != "Nothing was deleted.")

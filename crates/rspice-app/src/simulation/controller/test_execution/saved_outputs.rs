@@ -60,14 +60,14 @@ pub(crate) fn run(
 
 fn manual(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     let mut state = super::AppState::default();
-    state.sim_setup.reference_pvt.temperature_celsius = 27.0;
+    state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
     let directive = rspice_simulation::analysis_preparation::analysis_spec_to_config(spec)
         .expect("fixture has an authored analysis configuration")
         .to_spice();
     let source =
         rspice_simulation::netlist_preparation::splice_before_terminal_end_card(deck, &directive);
     let queue = rspice_simulation::manual_deck::build_manual_deck_queue(
-        state.sim_setup.reference_pvt.temperature_celsius,
+        state.model.sim_setup.reference_pvt.temperature_celsius,
         &source,
     )
     .expect("fixture directive is accepted by authored-deck preparation");
@@ -77,8 +77,8 @@ fn manual(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         serde_json::to_value(spec).unwrap(),
         "fixture authoring must preserve every typed analysis control"
     );
-    state.simulation.execution.run_intent = super::SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(source);
+    state.model.simulation.execution.run_intent = super::SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source);
     let mut controller = super::SimulationController::new();
     controller.validate_manual_deck_document(&state).unwrap();
     let run = super::run_batch(

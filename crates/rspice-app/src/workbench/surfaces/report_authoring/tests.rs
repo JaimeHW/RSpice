@@ -88,13 +88,13 @@ fn contextual_report_commands_stay_out_of_the_searchable_registry() {
 #[test]
 fn opening_report_authoring_never_mutates_an_empty_project() {
     let mut state = AppState::default();
-    assert!(state.workspace.content.report_documents.is_empty());
-    assert!(!state.workspace.content.report_documents_dirty);
+    assert!(state.model.workspace.content.report_documents.is_empty());
+    assert!(!state.model.workspace.content.report_documents_dirty);
 
     synchronize_report_selection(&mut state);
 
-    assert!(state.workspace.content.report_documents.is_empty());
-    assert!(!state.workspace.content.report_documents_dirty);
+    assert!(state.model.workspace.content.report_documents.is_empty());
+    assert!(!state.model.workspace.content.report_documents_dirty);
     assert_eq!(state.workbench.report_authoring.selected_document, None);
     assert_eq!(state.workbench.report_authoring.selected_page, None);
 }
@@ -115,12 +115,12 @@ fn explicit_report_plan_creates_the_exact_mockup_outline_once() {
     for (page, (_, expected)) in document.pages().iter().zip(INITIAL_PAGES) {
         assert_eq!(page.title(), expected);
     }
-    assert!(app.state.workspace.content.report_documents_dirty);
+    assert!(app.state.model.workspace.content.report_documents_dirty);
     let document_id = app.state.workbench.report_authoring.selected_document;
     let page_id = app.state.workbench.report_authoring.selected_page;
     synchronize_report_selection(&mut app.state);
     synchronize_report_selection(&mut app.state);
-    assert_eq!(app.state.workspace.content.report_documents.len(), 1);
+    assert_eq!(app.state.model.workspace.content.report_documents.len(), 1);
     assert_eq!(
         app.state.workbench.report_authoring.selected_document,
         document_id
@@ -139,8 +139,8 @@ fn report_plan_binds_initial_pages_to_the_active_immutable_dataset() {
     ));
     let expected_binding =
         crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
     app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
 
     commit_create_document(&mut app);
@@ -177,7 +177,7 @@ fn report_page_settings_commit_canonical_revision_checked_transactions() {
     let initial_revision = active_document(&app.state)
         .expect("active report")
         .revision();
-    app.state.workspace.content.report_documents_dirty = false;
+    app.state.model.workspace.content.report_documents_dirty = false;
 
     commit_page_setting(
         &mut app,
@@ -213,7 +213,7 @@ fn report_page_settings_commit_canonical_revision_checked_transactions() {
         ReportBlockedGateTextPolicy::SummarizeWithLink
     );
     assert_eq!(document.revision().get(), initial_revision.get() + 4);
-    assert!(app.state.workspace.content.report_documents_dirty);
+    assert!(app.state.model.workspace.content.report_documents_dirty);
     assert!(
         app.state
             .workbench
@@ -236,7 +236,7 @@ fn report_page_order_controls_commit_revision_checked_moves() {
         .collect::<Vec<_>>();
     let page_to_move = page_ids[1];
     app.state.workbench.report_authoring.selected_page = Some(page_to_move);
-    app.state.workspace.content.report_documents_dirty = false;
+    app.state.model.workspace.content.report_documents_dirty = false;
 
     assert!(can_move_selected_page(
         &app.state,
@@ -257,13 +257,13 @@ fn report_page_order_controls_commit_revision_checked_moves() {
             .revision_note(),
         "Move report page earlier"
     );
-    assert!(app.state.workspace.content.report_documents_dirty);
+    assert!(app.state.model.workspace.content.report_documents_dirty);
     assert_eq!(
         app.state.workbench.report_authoring.selected_page,
         Some(page_to_move)
     );
 
-    app.state.workspace.content.report_documents_dirty = false;
+    app.state.model.workspace.content.report_documents_dirty = false;
     move_selected_page(&mut app, PageMoveDirection::Later);
     let document = active_document(&app.state).expect("active report");
     assert_eq!(
@@ -283,7 +283,7 @@ fn report_page_order_controls_commit_revision_checked_moves() {
             .revision_note(),
         "Move report page later"
     );
-    assert!(app.state.workspace.content.report_documents_dirty);
+    assert!(app.state.model.workspace.content.report_documents_dirty);
 }
 
 #[test]
@@ -293,7 +293,7 @@ fn report_page_order_controls_fail_closed_at_document_boundaries() {
     commit_create_document(&mut app);
     let first_page = active_document(&app.state).expect("active report").pages()[0].id();
     app.state.workbench.report_authoring.selected_page = Some(first_page);
-    app.state.workspace.content.report_documents_dirty = false;
+    app.state.model.workspace.content.report_documents_dirty = false;
     let revision = active_document(&app.state)
         .expect("active report")
         .revision();
@@ -310,7 +310,7 @@ fn report_page_order_controls_fail_closed_at_document_boundaries() {
             .revision(),
         revision
     );
-    assert!(!app.state.workspace.content.report_documents_dirty);
+    assert!(!app.state.model.workspace.content.report_documents_dirty);
 }
 
 #[test]
@@ -322,8 +322,8 @@ fn report_element_catalog_commits_every_non_plot_block_kind() {
         crate::state::AnalysisType::Transient,
         "retained transient",
     ));
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
     app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
 
@@ -454,7 +454,7 @@ fn publication_inspector_edits_are_canonical_document_transactions() {
     assert_eq!(document.output_formats(), output_formats);
     assert_eq!(document.publication_profile(), publication_profile);
     assert_eq!(document.revision().get(), initial_revision.get() + 2);
-    assert!(app.state.workspace.content.report_documents_dirty);
+    assert!(app.state.model.workspace.content.report_documents_dirty);
     assert!(
         app.state
             .workbench
@@ -511,6 +511,7 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
     let expected_page_id = source.pages()[0].id.get();
     let expected_pane_id = source.panes()[0].id.get();
     app.state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -590,8 +591,8 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
     let reference = figure.reference.clone();
     let retained_report = serde_json::to_vec(active_document(&app.state).unwrap()).unwrap();
     assert_eq!(rendered_binding_states(&mut app), ["bound"]);
-    let original_source = app.state.workspace.content.visualization_documents[0].clone();
-    let changed_source = &mut app.state.workspace.content.visualization_documents[0];
+    let original_source = app.state.model.workspace.content.visualization_documents[0].clone();
+    let changed_source = &mut app.state.model.workspace.content.visualization_documents[0];
     changed_source
         .transact(
             changed_source.revision(),
@@ -608,10 +609,16 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
     assert!(!report_reference_resolves(&app.state, &reference));
     assert_eq!(rendered_binding_states(&mut app), ["source missing"]);
 
-    app.state.workspace.content.visualization_documents.clear();
+    app.state
+        .model
+        .workspace
+        .content
+        .visualization_documents
+        .clear();
     assert!(!report_reference_resolves(&app.state, &reference));
     assert_eq!(rendered_binding_states(&mut app), ["source missing"]);
     app.state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -647,8 +654,15 @@ fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
 
     commit_create_document(&mut app);
 
-    assert!(app.state.workspace.content.report_documents.is_empty());
-    assert!(!app.state.workspace.content.report_documents_dirty);
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .report_documents
+            .is_empty()
+    );
+    assert!(!app.state.model.workspace.content.report_documents_dirty);
     assert_eq!(
         app.state
             .workbench
@@ -664,7 +678,7 @@ fn changing_active_run_does_not_mutate_the_project_report_document() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
-    app.state.simulation.retained.runs = vec![
+    app.state.model.simulation.retained.runs = vec![
         crate::state::SimulationRun::new(2),
         crate::state::SimulationRun::new(1),
     ]
@@ -672,8 +686,8 @@ fn changing_active_run_does_not_mutate_the_project_report_document() {
     let document = active_document(&app.state)
         .expect("report document")
         .clone();
-    app.state.simulation.view.active_run_idx = Some(0);
-    app.state.simulation.view.active_run_idx = Some(1);
+    app.state.model.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.view.active_run_idx = Some(1);
     assert_eq!(active_document(&app.state), Some(&document));
 }
 
@@ -744,7 +758,7 @@ fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
     }
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.content.specs = vec![
+    app.state.model.workspace.content.specs = vec![
         crate::state::SpecEntry {
             measurement: "gain".to_owned(),
             expression: String::new(),
@@ -782,8 +796,8 @@ fn report_summary_uses_verified_spec_and_exact_corner_evidence() {
     let mut run = crate::state::SimulationRun::new(1);
     run.add_analysis(checks);
     run.add_analysis(corners);
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
 
     let metrics = ReportSummaryMetrics::from_state(&app.state);
     assert_eq!(metrics.checks_passing, 1);

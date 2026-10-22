@@ -18,14 +18,14 @@ fn state_with(variable: MonteCarloVariableMetadata) -> AppState {
         },
     );
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(analysis);
     run.restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
-    state.simulation.complete_run();
+    state.model.simulation.complete_run();
     state
 }
 
@@ -80,8 +80,8 @@ fn paint(state: &mut AppState, panel: bool) -> String {
 fn hist_source_restoration_opens_the_current_population_without_cached_bins() {
     let original = state_with(super::tests::mc_variable("gain"));
     let mut state = AppState::default();
-    state.simulation = crate::io::simulation_state_from_results(
-        crate::io::capture_simulation_results(&original.simulation),
+    state.model.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&original.model.simulation),
     )
     .unwrap();
     assert!(state.viewer_capability(ActiveViewer::Histogram).available);
@@ -96,7 +96,7 @@ fn hist_selection_preserves_the_measurement_name_across_reordering_and_removal()
     let mut state = state_with(super::tests::mc_variable("gain"));
     state.analysis.histogram_state.selected = Some("gain".to_owned());
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {
@@ -114,7 +114,7 @@ fn hist_selection_preserves_the_measurement_name_across_reordering_and_removal()
     assert_eq!(histogram.name, "gain");
     assert_eq!(histogram.data_max, 3.0);
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {
@@ -190,13 +190,13 @@ fn hist_empirical_cdf_reuses_a_large_sorted_population() {
 #[test]
 fn hist_source_statistics_follow_nested_edits_and_active_analysis_changes() {
     let mut state = state_with(super::tests::mc_variable("gain"));
-    let mut other = state.simulation.retained.runs[0].analyses[0].clone();
+    let mut other = state.model.simulation.retained.runs[0].analyses[0].clone();
     other.id = 2;
-    state.simulation.retained.runs[0].add_analysis(other);
-    let version = state.simulation.view.data_version;
+    state.model.simulation.retained.runs[0].add_analysis(other);
+    let version = state.model.simulation.view.data_version;
     assert_eq!(hist_plan(&state, "gain").moments.unwrap().mean, 2.0);
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {
@@ -208,39 +208,42 @@ fn hist_source_statistics_follow_nested_edits_and_active_analysis_changes() {
     variable.std_dev = 10.0;
     variable.min = 10.0;
     variable.max = 30.0;
-    assert_eq!(state.simulation.view.data_version, version);
+    assert_eq!(state.model.simulation.view.data_version, version);
     assert_eq!(hist_plan(&state, "gain").moments.unwrap().mean, 20.0);
-    state.simulation.view.active_analysis_idx = Some(1);
+    state.model.simulation.view.active_analysis_idx = Some(1);
     assert_eq!(hist_plan(&state, "gain").moments.unwrap().mean, 2.0);
 }
 
 #[test]
 fn hist_source_yield_replacement_cannot_reuse_a_wrapped_generation() {
     let mut state = state_with(super::tests::mc_variable("gain"));
-    state.simulation.retained.runs[0].analyses[0].family_metadata = None;
-    let provenance = super::tests::provenance(&state.simulation.retained.runs[0]);
+    state.model.simulation.retained.runs[0].analyses[0].family_metadata = None;
+    let provenance = super::tests::provenance(&state.model.simulation.retained.runs[0]);
     let valid = super::tests::result("gain", 90.0);
     state
+        .model
         .simulation
         .replace_yield_evidence(vec![valid.clone()], Some(provenance));
-    let version = state.simulation.view.data_version;
+    let version = state.model.simulation.view.data_version;
     assert!(hist_plan(&state, "gain").yield_is_consistent);
     let mut invalid = valid;
     invalid.stats.mean += 1.0;
     state
+        .model
         .simulation
         .replace_yield_evidence(vec![invalid], Some(provenance));
-    state.simulation.view.data_version = version;
+    state.model.simulation.view.data_version = version;
     assert!(!hist_plan(&state, "gain").yield_is_consistent);
 }
 
 #[test]
 fn hist_source_yield_must_describe_the_displayed_monte_carlo_population() {
     let mut state = state_with(super::tests::mc_variable("gain"));
-    let provenance = super::tests::provenance(&state.simulation.retained.runs[0]);
+    let provenance = super::tests::provenance(&state.model.simulation.retained.runs[0]);
     let unrelated = super::tests::result("gain", 90.0);
     assert!(yield_result_is_consistent(&unrelated));
     state
+        .model
         .simulation
         .replace_yield_evidence(vec![unrelated], Some(provenance));
     assert!(!hist_plan(&state, "gain").yield_is_consistent);
@@ -249,13 +252,15 @@ fn hist_source_yield_must_describe_the_displayed_monte_carlo_population() {
 #[test]
 fn hist_source_yield_provenance_cannot_name_a_different_run() {
     let mut state = state_with(super::tests::mc_variable("gain"));
-    let mut provenance = super::tests::provenance(&state.simulation.retained.runs[0]);
+    let mut provenance = super::tests::provenance(&state.model.simulation.retained.runs[0]);
     provenance.source_run_id = crate::state::SimulationRun::new(99).run_id;
     state
+        .model
         .simulation
         .replace_yield_evidence(vec![super::tests::result("gain", 90.0)], Some(provenance));
     assert!(
         state
+            .model
             .simulation
             .yield_results_for_active_dataset()
             .is_none()
@@ -314,13 +319,13 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
     state.analysis.histogram_state.custom_max = f64::NAN;
     assert!(active_histogram(&state).is_none());
     state.analysis.histogram_state.custom_range = false;
-    state.simulation.retained.runs[0].analyses[0].success = false;
+    state.model.simulation.retained.runs[0].analyses[0].success = false;
     assert!(!histogram_is_available(&state));
     assert!(active_histogram(&state).is_none());
-    state.simulation.retained.runs[0].analyses[0].success = true;
+    state.model.simulation.retained.runs[0].analyses[0].success = true;
     assert_eq!(active_histogram(&state).unwrap().total_count, 3);
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {
@@ -329,7 +334,7 @@ fn hist_source_bins_follow_display_settings_and_repaired_evidence() {
     variables[0].samples[0] = f64::NAN;
     assert!(active_histogram(&state).is_none());
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {
@@ -351,14 +356,16 @@ fn hist_source_yield_requires_matching_seed_and_ordered_samples() {
         min: result.stats.min,
         max: result.stats.max,
     });
-    let provenance = super::tests::provenance(&state.simulation.retained.runs[0]);
+    let provenance = super::tests::provenance(&state.model.simulation.retained.runs[0]);
     state
+        .model
         .simulation
         .replace_yield_evidence(vec![result.clone()], Some(provenance));
     assert!(hist_plan(&state, "gain").yield_is_consistent);
     let mut wrong_seed = provenance;
     wrong_seed.seed += 1;
     state
+        .model
         .simulation
         .replace_yield_evidence(vec![result.clone()], Some(wrong_seed));
     assert!(!hist_plan(&state, "gain").yield_is_consistent);
@@ -367,6 +374,7 @@ fn hist_source_yield_requires_matching_seed_and_ordered_samples() {
     reordered.trail.reverse();
     assert!(yield_result_is_consistent(&reordered));
     state
+        .model
         .simulation
         .replace_yield_evidence(vec![reordered], Some(provenance));
     assert!(!hist_plan(&state, "gain").yield_is_consistent);

@@ -87,11 +87,14 @@ fn digest_of(bytes: &[u8]) -> String {
 /// depend on, and the reason neither of them carries a counter.
 fn scope(state: &AppState) -> ModelSourceDriftScope {
     ModelSourceDriftScope {
-        project_revision: state.workspace.content.project.revision().get(),
+        project_revision: state.model.workspace.content.project.revision().get(),
         // Cheap by construction: it hashes pins, paths and byte *lengths*, and
         // reads no source byte — so asking it every frame costs nothing the
         // paint-path hash gate would notice.
-        catalog_key: state.model_library_manager.design_inspection_catalog_key(),
+        catalog_key: state
+            .model
+            .model_library_manager
+            .design_inspection_catalog_key(),
     }
 }
 
@@ -103,6 +106,7 @@ pub(in crate::workbench::surfaces) fn needs_scan(state: &AppState) -> bool {
 /// Rehashes every pinned source and records what no longer matches.
 pub(in crate::workbench::surfaces) fn scan(state: &mut AppState) {
     let libraries = state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()

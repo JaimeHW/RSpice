@@ -50,10 +50,18 @@ pub(in crate::workbench) enum SheetDeletePlan {
 
 pub(in crate::workbench) fn active_sheet_catalog(state: &AppState) -> Option<&SheetCatalog> {
     state
+        .model
         .workspace
         .content
         .design_management
-        .sheet_catalog(&state.workspace.content.active_schematic_reference().key())
+        .sheet_catalog(
+            &state
+                .model
+                .workspace
+                .content
+                .active_schematic_reference()
+                .key(),
+        )
 }
 
 pub(in crate::workbench) fn sheet_entries(state: &AppState) -> Vec<SheetEntry> {
@@ -82,8 +90,8 @@ pub(crate) fn reveal_sheet_properties(state: &mut AppState) {
     if !crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state) {
         return;
     }
-    state.schematic.session.editor.selection.clear();
-    state.schematic.session.editor.net_highlight.clear();
+    state.model.schematic.session.editor.selection.clear();
+    state.model.schematic.session.editor.net_highlight.clear();
     state.workbench.inspector_visible = true;
     state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
     state.workbench.reveal_sheet_section = true;
@@ -446,10 +454,10 @@ fn activate(state: &mut AppState, id: SheetId, name: String) -> Result<String, S
 
 /// Retire everything that named the sheet just left and frame the new one.
 fn enter_active_sheet(state: &mut AppState) {
-    state.schematic.session.editor.selection.clear();
-    state.schematic.session.editor.net_highlight.clear();
-    state.schematic.session.editor.needs_drawing_sheet_fit = true;
-    state.schematic.session.editor.needs_fit = false;
+    state.model.schematic.session.editor.selection.clear();
+    state.model.schematic.session.editor.net_highlight.clear();
+    state.model.schematic.session.editor.needs_drawing_sheet_fit = true;
+    state.model.schematic.session.editor.needs_fit = false;
 }
 
 /// Give a drawing with no sheet catalog its catalog: everything already
@@ -462,9 +470,14 @@ pub(in crate::workbench) fn ensure_sheet_catalog(state: &mut AppState) -> Result
     }
     state.cancel_schematic_drag();
     state.sync_active_schematic_to_workspace();
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let objects = live_object_ids(state);
-    let before = (*state.workspace.content.design_management).clone();
+    let before = (*state.model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     candidate
         .bootstrap_for_cell_view(&key, "Sheet 1", objects)
@@ -479,9 +492,14 @@ pub(in crate::workbench) fn ensure_sheet_catalog(state: &mut AppState) -> Result
 fn second_sheet(state: &mut AppState) -> Result<String, String> {
     state.cancel_schematic_drag();
     state.sync_active_schematic_to_workspace();
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let objects = live_object_ids(state);
-    let before = (*state.workspace.content.design_management).clone();
+    let before = (*state.model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let first = candidate
         .bootstrap_for_cell_view(&key, "Sheet 1", objects)
@@ -518,6 +536,7 @@ fn create(
     insert_after: Option<SheetId>,
 ) -> Result<(SheetId, String), String> {
     let settings = state
+        .model
         .workspace
         .content
         .design_management
@@ -625,7 +644,7 @@ fn state_sheet_name(state: &AppState, id: SheetId) -> String {
 }
 
 fn live_object_ids(state: &AppState) -> Vec<u64> {
-    let schematic = &state.schematic;
+    let schematic = &state.model.schematic;
     let mut ids = std::collections::BTreeSet::new();
     ids.extend(
         schematic
@@ -676,8 +695,13 @@ fn edit_catalog<T>(
     description: &str,
     edit: impl FnOnce(&mut SheetCatalog) -> Result<T, String>,
 ) -> Result<T, String> {
-    let key = state.workspace.content.active_schematic_reference().key();
-    let before = (*state.workspace.content.design_management).clone();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let before = (*state.model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let catalog = candidate
         .sheet_catalog_mut(&key)
@@ -695,14 +719,15 @@ fn commit(
 ) -> Result<(), String> {
     candidate.validate().map_err(|error| error.to_string())?;
     let schematic_tx = state.prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = state.workspace.content.active_schematic_reference();
+    let owner = state.model.workspace.content.active_schematic_reference();
     let committed_revision = state
+        .model
         .workspace
         .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     state.apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*state.workspace.content.design_management).clone();
+    let after = (*state.model.workspace.content.design_management).clone();
     state.record_design_management_transaction(DesignManagementHistoryEntry {
         description: description.to_owned(),
         owner,

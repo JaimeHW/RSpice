@@ -146,13 +146,14 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
     // The command is greyed without an open project and a schematic editor.
     if !state.project_lifecycle.is_open()
         || !matches!(
-            state.workspace.content.active_view_type(),
+            state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
     {
         return;
     }
     let selected_note_id = state
+        .model
         .schematic
         .document()
         .design_notes
@@ -163,7 +164,7 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
         open: true,
         selected_note_id,
         authority: Some(SchematicEditAuthority::capture(state)),
-        expected_design_notes: state.schematic.document().design_notes.clone(),
+        expected_design_notes: state.model.schematic.document().design_notes.clone(),
         ..DesignReviewCommentsDialogState::default()
     };
 }
@@ -181,12 +182,12 @@ impl RSpiceApp {
 
         let current_revision = current_revision_identity(&self.state);
         normalize_selected_thread(
-            &self.state.schematic.document().design_notes,
+            &self.state.model.schematic.document().design_notes,
             &mut self.state.dialogs.design_review_comments,
             current_revision.as_deref(),
         );
         let stale = review_authority_error(&self.state);
-        let write_allowed = !self.state.schematic.session.read_only
+        let write_allowed = !self.state.model.schematic.session.read_only
             && !self.state.active_view_read_only()
             && !self.state.workbench.safe_mode.project_read_only();
         let selected = selected_review_note(&self.state).cloned();
@@ -244,7 +245,7 @@ impl RSpiceApp {
             dialog = dialog.hint(NO_REPLY_WRITTEN);
         }
 
-        let notes = self.state.schematic.document().design_notes.clone();
+        let notes = self.state.model.schematic.document().design_notes.clone();
         let mut action = ReviewAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = review_body(
@@ -299,12 +300,13 @@ impl RSpiceApp {
                 self.state.dialogs.design_review_comments.close();
                 self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
                 self.state
+                    .model
                     .schematic
                     .session
                     .editor
                     .selection
                     .select_only_design_note(id);
-                self.state.schematic.session.editor.center_request = Some(point);
+                self.state.model.schematic.session.editor.center_request = Some(point);
             }
             ReviewAction::ApplyAssignment(assignee) => {
                 self.apply_review_mutation(DesignReviewMutation::Assign { assignee });
@@ -370,6 +372,7 @@ impl RSpiceApp {
                 .expected_design_notes
                 .clone();
             self.state
+                .model
                 .schematic
                 .apply_design_review_mutation(id, &expected, mutation)
                 .map_err(|error| error.to_string())?;
@@ -382,7 +385,8 @@ impl RSpiceApp {
                 let authority = SchematicEditAuthority::capture(&self.state);
                 let dialog = &mut self.state.dialogs.design_review_comments;
                 dialog.authority = Some(authority);
-                dialog.expected_design_notes = self.state.schematic.document().design_notes.clone();
+                dialog.expected_design_notes =
+                    self.state.model.schematic.document().design_notes.clone();
                 dialog.reply.clear();
                 dialog.assignment_editor_open = false;
                 dialog.assignment.clear();
@@ -409,6 +413,7 @@ fn review_authority_error(state: &AppState) -> Option<String> {
 
 fn current_revision_identity(state: &AppState) -> Option<String> {
     state
+        .model
         .schematic
         .document()
         .validated_revisions
@@ -437,6 +442,7 @@ fn normalize_selected_thread(
 fn selected_review_note(state: &AppState) -> Option<&DesignNote> {
     let id = state.dialogs.design_review_comments.selected_note_id?;
     state
+        .model
         .schematic
         .document()
         .design_notes
@@ -446,6 +452,7 @@ fn selected_review_note(state: &AppState) -> Option<&DesignNote> {
 
 fn evidence_candidates(state: &AppState) -> Vec<EvidenceCandidate> {
     state
+        .model
         .simulation
         .retained
         .runs
@@ -1077,14 +1084,15 @@ mod tests {
         for action in [ReviewAction::Reply, ReviewAction::Resolve] {
             let mut app = RSpiceApp::test_instance();
             app.state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .design_notes
                 .push(review_note(1));
             open_design_review_comments(&mut app.state);
             app.state.dialogs.design_review_comments.reply = "Check the bias point".to_owned();
-            let notes = app.state.schematic.document().design_notes.clone();
-            let dirty = app.state.schematic.session.is_dirty;
+            let notes = app.state.model.schematic.document().design_notes.clone();
+            let dirty = app.state.model.schematic.session.is_dirty;
             for epoch in [
                 Err("clock unavailable"),
                 Ok(std::time::Duration::ZERO),
@@ -1093,8 +1101,8 @@ mod tests {
                 crate::time_compat::with_unix_epoch(epoch, || {
                     app.handle_design_review_action(action.clone())
                 });
-                assert_eq!(app.state.schematic.document().design_notes, notes);
-                assert_eq!(app.state.schematic.session.is_dirty, dirty);
+                assert_eq!(app.state.model.schematic.document().design_notes, notes);
+                assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
                 assert_eq!(
                     app.state.dialogs.design_review_comments.reply,
                     "Check the bias point"
@@ -1113,7 +1121,7 @@ mod tests {
             assert!(app.state.dialogs.design_review_comments.error.is_none());
             assert!(app.state.dialogs.design_review_comments.reply.is_empty());
             assert_eq!(
-                app.state.schematic.document().design_notes[0]
+                app.state.model.schematic.document().design_notes[0]
                     .review
                     .as_ref()
                     .unwrap()
@@ -1131,12 +1139,13 @@ mod tests {
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .design_notes
             .push(review_note(1));
         crate::workbench::commands::vocabulary::Command::ReviewComments.execute(&mut app);
-        let notes = app.state.schematic.document().design_notes.clone();
+        let notes = app.state.model.schematic.document().design_notes.clone();
         let _ = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1152,7 +1161,7 @@ mod tests {
             app.state.dialogs.design_review_comments.reply,
             "Check the bias point"
         );
-        assert_eq!(app.state.schematic.document().design_notes, notes);
+        assert_eq!(app.state.model.schematic.document().design_notes, notes);
     }
 
     #[test]
@@ -1164,6 +1173,7 @@ mod tests {
             let mut app = RSpiceApp::test_instance();
             if case != "empty" {
                 app.state
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .design_notes
@@ -1181,12 +1191,13 @@ mod tests {
             }
             if case == "stale" {
                 app.state
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .design_notes
                     .push(review_note(2));
             }
-            let notes = app.state.schematic.document().design_notes.clone();
+            let notes = app.state.model.schematic.document().design_notes.clone();
             let _ = ctx.run_ui(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -1203,7 +1214,7 @@ mod tests {
                 "{case}"
             );
             assert!(!ctx.memory(|memory| memory.has_focus(reply_id())), "{case}");
-            assert_eq!(app.state.schematic.document().design_notes, notes);
+            assert_eq!(app.state.model.schematic.document().design_notes, notes);
         }
     }
 
@@ -1304,7 +1315,7 @@ mod tests {
             app.state.dialogs.design_note.text,
             "Browser recovery qualification"
         );
-        assert!(app.state.schematic.document().design_notes.is_empty());
+        assert!(app.state.model.schematic.document().design_notes.is_empty());
     }
 
     #[test]
@@ -1341,6 +1352,7 @@ mod tests {
         let holder = license.licensed_to.clone();
         app.state.license = Some(license);
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .design_notes
@@ -1350,7 +1362,7 @@ mod tests {
 
         app.handle_design_review_action(ReviewAction::Reply);
 
-        let review = app.state.schematic.document().design_notes[0]
+        let review = app.state.model.schematic.document().design_notes[0]
             .review
             .clone()
             .expect("a review thread");

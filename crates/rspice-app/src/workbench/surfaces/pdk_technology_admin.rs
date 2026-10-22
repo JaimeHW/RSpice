@@ -329,9 +329,9 @@ fn browser_pdk_storage_status(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
-    let project = &app.state.workspace.content;
-    let registry = &app.state.pdk_config.technology_registry;
-    let display_registry = &app.state.pdk_config.display_profile_registry;
+    let project = &app.state.model.workspace.content;
+    let registry = &app.state.model.pdk_config.technology_registry;
+    let display_registry = &app.state.model.pdk_config.display_profile_registry;
     let runtime_display_profile_valid = display_registry.active_binding().is_none()
         || registry
             .active_package()
@@ -358,8 +358,20 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
         audit: registry.audit().to_vec(),
         validation_errors: registry.validation_errors().to_vec(),
         installed_count: registry.archives().len(),
-        trust_keys: app.state.pdk_config.publisher_trust_store.keys.clone(),
-        trust_audit: app.state.pdk_config.publisher_trust_store.audit().to_vec(),
+        trust_keys: app
+            .state
+            .model
+            .pdk_config
+            .publisher_trust_store
+            .keys
+            .clone(),
+        trust_audit: app
+            .state
+            .model
+            .pdk_config
+            .publisher_trust_store
+            .audit()
+            .to_vec(),
         display_profiles: display_registry.revisions().to_vec(),
         active_display_profile: display_registry.active_binding().cloned(),
         display_audit: display_registry.audit().to_vec(),
@@ -373,7 +385,7 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
         project_signed_package,
         project_callback_blocker,
         project_callback_receipts: project.pdk_callback_receipts().to_vec(),
-        technology_draft: app.state.pdk_config.technology_draft.clone(),
+        technology_draft: app.state.model.pdk_config.technology_draft.clone(),
     }
 }
 
@@ -3972,7 +3984,7 @@ fn apply_action(
     let result = match action {
         AdminAction::ChooseImport => unreachable!("handled before transaction dispatch"),
         AdminAction::Revalidate => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             let trust_store = candidate.publisher_trust_store.clone();
             match candidate
                 .technology_registry
@@ -3990,13 +4002,13 @@ fn apply_action(
                     let message = errors.join("; ");
                     // Persist no failed runtime cache: the current in-memory
                     // registry is still replaced so consumers fail closed.
-                    app.state.pdk_config.technology_registry = candidate.technology_registry;
+                    app.state.model.pdk_config.technology_registry = candidate.technology_registry;
                     Err(message)
                 }
             }
         }
         AdminAction::SaveTechnologyDraft(draft) => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             candidate.technology_draft = Some(draft.clone());
             persist_candidate(
                 ctx,
@@ -4013,7 +4025,7 @@ fn apply_action(
             )
         }
         AdminAction::DiscardTechnologyDraft => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             candidate.technology_draft = None;
             persist_candidate(
                 ctx,
@@ -4026,7 +4038,7 @@ fn apply_action(
             )
         }
         AdminAction::ExportTechnologyDraft(draft) => {
-            let registry = &app.state.pdk_config.technology_registry;
+            let registry = &app.state.model.pdk_config.technology_registry;
             let package = registry
                 .validated_packages()
                 .iter()
@@ -4058,7 +4070,7 @@ fn apply_action(
             })
         }
         AdminAction::Activate { binding, rollback } => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             let selected = candidate
                 .technology_registry
                 .validated_packages()
@@ -4111,7 +4123,7 @@ fn apply_action(
             })
         }
         AdminAction::ProvisionTrustKey(key) => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             let receipt = candidate
                 .publisher_trust_store
                 .provision_key(key, &authority(view), view.reason.trim())
@@ -4155,7 +4167,7 @@ fn apply_action(
             publisher_id,
             key_id,
         } => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             let receipt = candidate
                 .publisher_trust_store
                 .revoke_key(&publisher_id, &key_id, &authority(view), view.reason.trim())
@@ -4179,7 +4191,7 @@ fn apply_action(
             })
         }
         AdminAction::PublishDisplayProfile(draft) => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             let package = candidate
                 .technology_registry
                 .validated_packages()
@@ -4217,7 +4229,7 @@ fn apply_action(
             })
         }
         AdminAction::ActivateDisplayProfile { binding, rollback } => {
-            let mut candidate = app.state.pdk_config.clone();
+            let mut candidate = app.state.model.pdk_config.clone();
             let package = candidate
                 .technology_registry
                 .validated_packages()
@@ -4330,7 +4342,7 @@ fn persist_candidate(
     {
         let _ = ctx;
         crate::state::pdk_config::save(&candidate).map_err(|error| error.to_string())?;
-        app.state.pdk_config = candidate;
+        app.state.model.pdk_config = candidate;
         apply_admin_commit_effect(view, effect);
         Ok(Some(message))
     }
@@ -4424,7 +4436,7 @@ fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut A
     else {
         return;
     };
-    let base = app.state.pdk_config.clone();
+    let base = app.state.model.pdk_config.clone();
     let authority = authority(view);
     let reason = view.reason.trim().to_owned();
     let repaint = ctx.clone();
@@ -4437,7 +4449,7 @@ fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut A
 #[cfg(target_arch = "wasm32")]
 fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut AdminViewState) {
     let repaint = ctx.clone();
-    let base = app.state.pdk_config.clone();
+    let base = app.state.model.pdk_config.clone();
     let authority = authority(view);
     let reason = view.reason.trim().to_owned();
     view.package_import_in_progress = true;
@@ -4486,7 +4498,7 @@ fn poll_native_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
             .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
             .unwrap_or_default();
         view.package_import_in_progress = false;
-        match completion.resolve(&app.state.pdk_config) {
+        match completion.resolve(&app.state.model.pdk_config) {
             Ok(candidate) => {
                 view.selected = Some((candidate.package_id.clone(), candidate.revision.clone()));
                 let result = persist_candidate(
@@ -4521,7 +4533,7 @@ fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
                     .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
                     .unwrap_or_default();
                 view.package_import_in_progress = false;
-                match candidate.resolve(&app.state.pdk_config) {
+                match candidate.resolve(&app.state.model.pdk_config) {
                     Ok(candidate) => {
                         let pdk_import::PackageImportCandidate {
                             config,

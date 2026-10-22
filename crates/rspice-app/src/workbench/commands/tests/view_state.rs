@@ -12,24 +12,26 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
     app.state.ui.set_grid_style(crate::state::GridStyle::Dots);
-    app.state.schematic.session.editor.snap_engine.enabled = true;
+    app.state.model.schematic.session.editor.snap_engine.enabled = true;
     app.state
+        .model
         .schematic
         .session
         .editor
         .snap_engine
         .snap_to_wire_segments = false;
-    app.state.ui.schematic_snap = app.state.schematic.session.editor.snap_engine.clone();
+    app.state.ui.schematic_snap = app.state.model.schematic.session.editor.snap_engine.clone();
 
     assert_eq!(Command::CycleGrid.stable_id(), "cycle-grid");
     assert_eq!(Command::CycleGrid.spec().label, "Cycle grid display");
 
     Command::CycleGrid.execute(&mut app);
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Lines);
-    assert!(app.state.schematic.session.editor.snap_engine.enabled);
+    assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
     assert!(app.state.ui.schematic_snap.enabled);
     assert!(
         !app.state
+            .model
             .schematic
             .session
             .editor
@@ -40,7 +42,7 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
 
     Command::CycleGrid.execute(&mut app);
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
-    assert!(app.state.schematic.session.editor.snap_engine.enabled);
+    assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
 
     Command::CycleGrid.execute(&mut app);
     assert_eq!(app.state.ui.grid, crate::state::GridStyle::Dots);
@@ -72,44 +74,68 @@ fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
 fn schematic_zoom_commands_match_the_mockup_bounds_and_request_a_real_fit() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.session.editor.needs_fit = false;
-    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    app.state.model.schematic.session.editor.needs_fit = false;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit = false;
 
     // The canvas carries a zoom command out on its next frame, pivoting on
     // its middle (audit E-1), so each step draws one.
-    app.state.schematic.session.editor.zoom = 1.0;
+    app.state.model.schematic.session.editor.zoom = 1.0;
     Command::ZoomIn.execute(&mut app);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
-    assert!((app.state.schematic.session.editor.zoom - 1.2).abs() < f64::EPSILON);
+    assert!((app.state.model.schematic.session.editor.zoom - 1.2).abs() < f64::EPSILON);
 
-    app.state.schematic.session.editor.zoom = 1.0;
+    app.state.model.schematic.session.editor.zoom = 1.0;
     app.execute_shortcut_command(Command::ZoomOut);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
-    assert!((app.state.schematic.session.editor.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
+    assert!((app.state.model.schematic.session.editor.zoom - (1.0 / 1.2)).abs() < f64::EPSILON);
 
-    app.state.schematic.session.editor.zoom = 0.251;
+    app.state.model.schematic.session.editor.zoom = 0.251;
     Command::ZoomOut.execute(&mut app);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
-    assert_eq!(app.state.schematic.session.editor.zoom, 0.25);
+    assert_eq!(app.state.model.schematic.session.editor.zoom, 0.25);
 
-    app.state.schematic.session.editor.zoom = 7.99;
+    app.state.model.schematic.session.editor.zoom = 7.99;
     Command::ZoomIn.execute(&mut app);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
-    assert_eq!(app.state.schematic.session.editor.zoom, 8.0);
+    assert_eq!(app.state.model.schematic.session.editor.zoom, 8.0);
 
-    app.state.schematic.session.editor.zoom = 3.5;
-    app.state.schematic.session.editor.pan = (127.0, -81.0);
-    app.state.schematic.session.editor.needs_fit = false;
-    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    app.state.model.schematic.session.editor.zoom = 3.5;
+    app.state.model.schematic.session.editor.pan = (127.0, -81.0);
+    app.state.model.schematic.session.editor.needs_fit = false;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit = false;
     Command::ZoomFit.execute(&mut app);
-    assert_eq!(app.state.schematic.session.editor.zoom, 3.5);
-    assert_eq!(app.state.schematic.session.editor.pan, (127.0, -81.0));
-    assert!(!app.state.schematic.session.editor.needs_fit);
-    assert!(app.state.schematic.session.editor.needs_drawing_sheet_fit);
+    assert_eq!(app.state.model.schematic.session.editor.zoom, 3.5);
+    assert_eq!(app.state.model.schematic.session.editor.pan, (127.0, -81.0));
+    assert!(!app.state.model.schematic.session.editor.needs_fit);
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit
+    );
 
     Command::FitSchematicContent.execute(&mut app);
-    assert!(app.state.schematic.session.editor.needs_fit);
-    assert!(!app.state.schematic.session.editor.needs_drawing_sheet_fit);
+    assert!(app.state.model.schematic.session.editor.needs_fit);
+    assert!(
+        !app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit
+    );
 }
 
 /// Draw the schematic canvas for one frame in a `width` x `height` panel, so
@@ -137,7 +163,7 @@ fn draw_schematic_canvas(state: &mut AppState, width: f32, height: f32) {
 
 /// The world point under the middle of a `width` x `height` canvas.
 fn world_at_canvas_centre(app: &RSpiceApp, width: f64, height: f64) -> (f64, f64) {
-    let editor = &app.state.schematic.session.editor;
+    let editor = &app.state.model.schematic.session.editor;
     (
         (width / 2.0 - editor.pan.0) / editor.zoom,
         (height / 2.0 - editor.pan.1) / editor.zoom,
@@ -152,10 +178,15 @@ fn world_at_canvas_centre(app: &RSpiceApp, width: f64, height: f64) -> (f64, f64
 fn zoom_commands_keep_the_middle_of_the_canvas_where_it_was() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.session.editor.needs_fit = false;
-    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
-    app.state.schematic.session.editor.zoom = 0.5;
-    app.state.schematic.session.editor.pan = (400.0 - 2000.0 * 0.5, 300.0 - 100.0 * 0.5);
+    app.state.model.schematic.session.editor.needs_fit = false;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit = false;
+    app.state.model.schematic.session.editor.zoom = 0.5;
+    app.state.model.schematic.session.editor.pan = (400.0 - 2000.0 * 0.5, 300.0 - 100.0 * 0.5);
     draw_schematic_canvas(&mut app.state, 800.0, 600.0);
     assert_eq!(world_at_canvas_centre(&app, 800.0, 600.0), (2000.0, 100.0));
 
@@ -167,7 +198,7 @@ fn zoom_commands_keep_the_middle_of_the_canvas_where_it_was() {
     ] {
         app.execute_shortcut_command(command);
         draw_schematic_canvas(&mut app.state, 800.0, 600.0);
-        let editor = &app.state.schematic.session.editor;
+        let editor = &app.state.model.schematic.session.editor;
         assert!(
             (editor.zoom - zoom).abs() < 1e-9,
             "{command:?}: zoom {}",
@@ -195,7 +226,7 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
         .paper
         .as_tuple();
     let fits_on_screen = |app: &RSpiceApp| {
-        let editor = &app.state.schematic.session.editor;
+        let editor = &app.state.model.schematic.session.editor;
         let left = editor.pan.0 + paper.0 * editor.zoom;
         let top = editor.pan.1 + paper.1 * editor.zoom;
         let right = editor.pan.0 + paper.2 * editor.zoom;
@@ -211,18 +242,18 @@ fn fit_sheet_shows_the_whole_sheet_on_a_small_canvas() {
     assert!(
         fits_on_screen(&app),
         "Fit Sheet left the paper cropped at zoom {}",
-        app.state.schematic.session.editor.zoom
+        app.state.model.schematic.session.editor.zoom
     );
-    let fit_zoom = app.state.schematic.session.editor.zoom;
+    let fit_zoom = app.state.model.schematic.session.editor.zoom;
     assert!(fit_zoom < 0.25, "a small canvas needs less than 25 %");
 
-    app.state.schematic.session.editor.zoom = 0.25;
+    app.state.model.schematic.session.editor.zoom = 0.25;
     for _ in 0..20 {
         Command::ZoomOut.execute(&mut app);
         draw_schematic_canvas(&mut app.state, width, height);
     }
     assert!(
-        (app.state.schematic.session.editor.zoom - fit_zoom).abs() < 1e-9,
+        (app.state.model.schematic.session.editor.zoom - fit_zoom).abs() < 1e-9,
         "Zoom Out stops at the zoom that fits the sheet, not above or below it"
     );
 }
@@ -245,14 +276,20 @@ fn zoom_to_selection_and_zoom_box_are_commands() {
 fn zoom_to_selection_frames_what_is_selected() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.session.editor.needs_fit = false;
-    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+    app.state.model.schematic.session.editor.needs_fit = false;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit = false;
     let resistor = crate::state::Component::new(
         41,
         crate::state::ComponentType::Resistor,
         crate::state::Point::new(3000, 2000),
     );
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -267,6 +304,7 @@ fn zoom_to_selection_frames_what_is_selected() {
     );
 
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -283,7 +321,7 @@ fn zoom_to_selection_frames_what_is_selected() {
     );
     assert!((x - centre.0).abs() < 1e-6 && (y - centre.1).abs() < 1e-6);
     assert!(
-        app.state.schematic.session.editor.zoom > 1.0,
+        app.state.model.schematic.session.editor.zoom > 1.0,
         "one part fills the canvas"
     );
 }
@@ -314,16 +352,21 @@ fn drive_schematic_canvas(state: &mut AppState, ctx: &egui::Context, events: Vec
 fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.session.editor.needs_fit = false;
-    app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
-    app.state.schematic.session.editor.zoom = 1.0;
-    app.state.schematic.session.editor.pan = (0.0, 0.0);
+    app.state.model.schematic.session.editor.needs_fit = false;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .needs_drawing_sheet_fit = false;
+    app.state.model.schematic.session.editor.zoom = 1.0;
+    app.state.model.schematic.session.editor.pan = (0.0, 0.0);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     drive_schematic_canvas(&mut app.state, &ctx, Vec::new());
 
     app.execute_shortcut_command(Command::ZoomBox);
-    assert!(app.state.schematic.session.editor.zoom_box.armed);
+    assert!(app.state.model.schematic.session.editor.zoom_box.armed);
     let (from, to) = (egui::pos2(100.0, 100.0), egui::pos2(300.0, 250.0));
     let button = |pos, pressed| egui::Event::PointerButton {
         pos,
@@ -342,7 +385,7 @@ fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
         drive_schematic_canvas(&mut app.state, &ctx, events);
     }
 
-    let editor = &app.state.schematic.session.editor;
+    let editor = &app.state.model.schematic.session.editor;
     assert!(!editor.zoom_box.armed, "the box is one-shot");
     assert!(
         editor.zoom > 3.0,
@@ -355,7 +398,13 @@ fn zoom_box_frames_the_dragged_rectangle_and_lets_go() {
         "the box's middle is the canvas's middle, not ({x}, {y})"
     );
     assert!(
-        app.state.schematic.session.editor.selection.is_empty(),
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .is_empty(),
         "the drag drew a zoom box, not a selection marquee"
     );
 }
@@ -365,9 +414,9 @@ fn escape_lets_go_of_an_armed_zoom_box() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
     Command::ZoomBox.execute(&mut app);
-    assert!(app.state.schematic.session.editor.zoom_box.armed);
+    assert!(app.state.model.schematic.session.editor.zoom_box.armed);
     app.execute_shortcut_command(Command::Cancel);
-    assert!(!app.state.schematic.session.editor.zoom_box.armed);
+    assert!(!app.state.model.schematic.session.editor.zoom_box.armed);
 }
 
 #[test]

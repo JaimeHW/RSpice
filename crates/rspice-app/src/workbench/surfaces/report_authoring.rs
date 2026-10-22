@@ -54,7 +54,7 @@ pub(crate) fn can_save_document(state: &AppState) -> bool {
     state.workbench.current_route().surface_id() == SurfaceId::ReportAuthoring
         && report_mutation_allowed(state)
         && active_document(state).is_some()
-        && state.workspace.content.report_documents_dirty
+        && state.model.workspace.content.report_documents_dirty
 }
 
 pub(crate) fn can_add_page(state: &AppState) -> bool {
@@ -79,6 +79,7 @@ pub(crate) fn save_document(app: &mut RSpiceApp) {
     }
     let invalid = app
         .state
+        .model
         .workspace
         .content
         .report_documents
@@ -200,7 +201,7 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty |= changed;
+            app.state.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
             app.state.workbench.report_authoring.transaction_error = Some(error);
@@ -286,7 +287,7 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_page = Some(page_id);
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty |= changed;
+            app.state.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
             app.state.workbench.report_authoring.transaction_error = Some(error);
@@ -344,7 +345,7 @@ fn commit_document_publication_setting(
     });
     match result {
         Ok(changed) => {
-            app.state.workspace.content.report_documents_dirty |= changed;
+            app.state.model.workspace.content.report_documents_dirty |= changed;
             app.state.workbench.report_authoring.transaction_error = None;
         }
         Err(error) => {
@@ -400,7 +401,7 @@ fn set_report_block_enabled(
         Ok(changed) => {
             app.state.workbench.report_authoring.selected_report_block = Some(block_id);
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty |= changed;
+            app.state.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
             app.state.workbench.report_authoring.transaction_error = Some(error);
@@ -415,6 +416,7 @@ fn evidence_binding_label(state: &AppState, evidence_binding: ReportPageEvidence
             "Latest accepted run — resolve on draft build".to_owned()
         }
         ReportPageEvidenceBinding::ExactDataset { binding } => state
+            .model
             .simulation
             .retained
             .runs
@@ -438,6 +440,7 @@ fn evidence_binding_options(
     current: ReportPageEvidenceBinding,
 ) -> Vec<(String, ReportPageEvidenceBinding)> {
     let mut options = state
+        .model
         .simulation
         .retained
         .runs
@@ -522,9 +525,10 @@ struct ReportSummaryMetrics {
 
 impl ReportSummaryMetrics {
     fn from_state(state: &AppState) -> Self {
-        let run = state.simulation.active_run();
-        let checks_total = state.workspace.content.specs.len();
+        let run = state.model.simulation.active_run();
+        let checks_total = state.model.workspace.content.specs.len();
         let checks_passing = state
+            .model
             .workspace
             .content
             .specs
@@ -550,6 +554,7 @@ impl ReportSummaryMetrics {
             .count();
 
         let joint_yield = state
+            .model
             .simulation
             .yield_results_for_active_dataset()
             .and_then(ReportJointYield::from_results);
@@ -587,6 +592,7 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
     let snapshot = reference.snapshot();
     match &snapshot.source {
         ReportSourceId::VisualizationDocument { document_id } => state
+            .model
             .workspace
             .content
             .visualization_documents
@@ -599,7 +605,7 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
                         .is_ok_and(|digest| digest == snapshot.content_digest)
             }),
         ReportSourceId::Dataset { dataset_id } => {
-            state.simulation.retained.runs.iter().any(|run| {
+            state.model.simulation.retained.runs.iter().any(|run| {
                 run.dataset_id == *dataset_id
                     && run.dataset_content_digest() == snapshot.content_digest
                     && snapshot.dataset_bindings.iter().any(|binding| {
@@ -610,7 +616,7 @@ fn report_reference_resolves(state: &AppState, reference: &ReportReferenceMode) 
         }
         ReportSourceId::VerificationEvidence { .. } => {
             snapshot.dataset_bindings.iter().all(|binding| {
-                state.simulation.retained.runs.iter().any(|run| {
+                state.model.simulation.retained.runs.iter().any(|run| {
                     run.dataset_id == binding.dataset_id
                         && run.dataset_content_digest() == binding.content_digest
                 })
@@ -639,6 +645,7 @@ fn report_bound_result_label(state: &AppState, document: &ReportDocument) -> (St
         return ("No report pages are bound".to_owned(), false);
     };
     let label = state
+        .model
         .simulation
         .retained
         .runs
@@ -694,15 +701,17 @@ fn commit_create_document(app: &mut RSpiceApp) {
     );
     let initial_evidence_binding = app
         .state
+        .model
         .simulation
         .active_run()
         .filter(|run| !run.analyses.is_empty())
         .or_else(|| {
             app.state
+                .model
                 .simulation
                 .retained
                 .newest_retained_result_run_index()
-                .and_then(|index| app.state.simulation.retained.runs.get(index))
+                .and_then(|index| app.state.model.simulation.retained.runs.get(index))
         })
         .map(|run| ReportPageEvidenceBinding::ExactDataset {
             binding: crate::product::DatasetBinding::new(
@@ -754,8 +763,13 @@ fn commit_create_document(app: &mut RSpiceApp) {
         Ok(document) => {
             let document_id = document.id();
             let page_id = document.pages().first().map(|page| page.id());
-            app.state.workspace.content.report_documents.push(document);
-            app.state.workspace.content.report_documents_dirty = true;
+            app.state
+                .model
+                .workspace
+                .content
+                .report_documents
+                .push(document);
+            app.state.model.workspace.content.report_documents_dirty = true;
             let editor = &mut app.state.workbench.report_authoring;
             editor.selected_document = Some(document_id);
             editor.selected_page = page_id;
@@ -800,7 +814,7 @@ fn commit_add_page(app: &mut RSpiceApp) {
             app.state.workbench.report_authoring.selected_page = created_page;
             app.state.workbench.report_authoring.add_page_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty = true;
+            app.state.model.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
@@ -829,6 +843,7 @@ fn report_dataset_snapshot(
     filtered_run_index: usize,
 ) -> Result<(ReportReferenceSnapshot, crate::product::DatasetBinding), String> {
     let run = state
+        .model
         .simulation
         .retained
         .runs
@@ -1024,7 +1039,7 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
                 });
             app.state.workbench.report_authoring.add_report_element_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty = true;
+            app.state.model.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
@@ -1090,7 +1105,7 @@ fn commit_remove_report_block(app: &mut RSpiceApp) {
                 .report_authoring
                 .remove_report_block_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty = true;
+            app.state.model.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
@@ -1174,14 +1189,14 @@ fn commit_page_properties(app: &mut RSpiceApp) {
             app.state.workbench.report_authoring.inline_page_title_draft = inline_title;
             app.state.workbench.report_authoring.page_properties_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty |= changed;
+            app.state.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
 }
 
 fn synchronize_report_selection(state: &mut AppState) {
-    let documents = &state.workspace.content.report_documents;
+    let documents = &state.model.workspace.content.report_documents;
     let selected_is_valid = state
         .workbench
         .report_authoring
@@ -1229,13 +1244,13 @@ fn synchronize_report_selection(state: &mut AppState) {
 }
 
 fn active_document(state: &AppState) -> Option<&ReportDocument> {
-    let documents = &state.workspace.content.report_documents;
+    let documents = &state.model.workspace.content.report_documents;
     let id = state.workbench.report_authoring.selected_document?;
     documents.iter().find(|document| document.id() == id)
 }
 
 fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, String> {
-    let documents = &mut state.workspace.content.report_documents;
+    let documents = &mut state.model.workspace.content.report_documents;
     let id = state
         .workbench
         .report_authoring

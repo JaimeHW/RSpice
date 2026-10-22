@@ -26,6 +26,7 @@ const NAVIGATOR_WIDTH: f32 = 260.0;
 /// The first analysis of the default plan: the one the inspector selects.
 fn first_instance(app: &RSpiceApp) -> AnalysisInstanceId {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the default plan")
@@ -78,7 +79,7 @@ fn simulate_last_run_ok() -> RSpiceApp {
     let mut app = simulate_app();
     let instance = first_instance(&app);
     retain_run(
-        &mut app.state.simulation.retained.runs,
+        &mut app.state.model.simulation.retained.runs,
         instance,
         None,
         1.84,
@@ -90,7 +91,7 @@ fn simulate_last_run_failed() -> RSpiceApp {
     let mut app = simulate_app();
     let instance = first_instance(&app);
     retain_run(
-        &mut app.state.simulation.retained.runs,
+        &mut app.state.model.simulation.retained.runs,
         instance,
         Some("Timestep too small at t = 1.25 µs"),
         0.42,
@@ -108,7 +109,7 @@ fn verify_app(page: VerificationPage) -> RSpiceApp {
 
 fn verify_monte_carlo() -> RSpiceApp {
     let mut app = verify_app(VerificationPage::Yield);
-    app.state.workspace.content.specs.push(SpecEntry {
+    app.state.model.workspace.content.specs.push(SpecEntry {
         measurement: "gain".to_owned(),
         expression: String::new(),
         min: Some(40.0),
@@ -150,9 +151,10 @@ fn verify_monte_carlo() -> RSpiceApp {
         runs_completed: 40,
         sampling_mode: MonteCarloSamplingMode::PseudoRandom,
     };
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
     app.state
+        .model
         .simulation
         .replace_yield_evidence(vec![result], Some(provenance));
     app
@@ -306,7 +308,12 @@ fn a_run_of_another_analysis_is_not_this_ones_last_run() {
     let mut app = simulate_app();
     let other = AnalysisInstanceId::new();
     assert_ne!(other, first_instance(&app));
-    retain_run(&mut app.state.simulation.retained.runs, other, None, 1.84);
+    retain_run(
+        &mut app.state.model.simulation.retained.runs,
+        other,
+        None,
+        1.84,
+    );
     let painted = simulate_text(&mut app);
 
     assert!(
@@ -322,8 +329,8 @@ fn open_results_selects_the_last_run_in_the_results_workspace() {
     older
         .restore_lifecycle(SimulationRunLifecycle::Completed, 0.5)
         .expect("a finite elapsed time");
-    app.state.simulation.retained.runs.push(older);
-    app.state.simulation.view.active_run_idx = Some(1);
+    app.state.model.simulation.retained.runs.push(older);
+    app.state.model.simulation.view.active_run_idx = Some(1);
 
     let ctx = inspector_context();
     simulate_pass(&ctx, &mut app, Vec::new());
@@ -358,7 +365,7 @@ fn open_results_selects_the_last_run_in_the_results_workspace() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert_eq!(
-        app.state.simulation.active_run().map(|run| run.id),
+        app.state.model.simulation.active_run().map(|run| run.id),
         Some(12)
     );
 }

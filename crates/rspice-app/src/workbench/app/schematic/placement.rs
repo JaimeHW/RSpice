@@ -12,11 +12,11 @@ pub(crate) fn arm_library_cell_placement(
     binding: LibraryCellInstance,
 ) -> String {
     let label = format!("{}/{}", binding.library, binding.cell);
-    state.schematic.session.editor.pending_library_cell = Some(PendingLibraryCellPlacement::new(
-        binding,
-        schematic_editor_request_source(state),
-    ));
+    state.model.schematic.session.editor.pending_library_cell = Some(
+        PendingLibraryCellPlacement::new(binding, schematic_editor_request_source(state)),
+    );
     state
+        .model
         .schematic
         .arm_tool(Tool::Place(ComponentType::CellInstance));
     label
@@ -31,9 +31,9 @@ pub(crate) fn arm_pack_part(state: &mut AppState, placement: PartPlacement) -> S
             variant,
             model,
         } => {
-            state.schematic.session.editor.pending_library_cell = None;
-            state.schematic.arm_tool(Tool::Place(component_type));
-            state.schematic.session.editor.pending_part_model = Some(PendingPartModel {
+            state.model.schematic.session.editor.pending_library_cell = None;
+            state.model.schematic.arm_tool(Tool::Place(component_type));
+            state.model.schematic.session.editor.pending_part_model = Some(PendingPartModel {
                 tool: Tool::Place(component_type),
                 model: model.clone(),
                 variant,

@@ -131,24 +131,26 @@ impl AppState {
         // persisted through the project-file DTO.
         use serde::ser::SerializeStruct;
         let mut simulation_results = if with_runs {
-            crate::io::capture_simulation_results(&self.simulation)
+            crate::io::capture_simulation_results(&self.model.simulation)
         } else {
-            crate::io::capture_simulation_results_without_runs(&self.simulation)
+            crate::io::capture_simulation_results_without_runs(&self.model.simulation)
         };
         if simulation_results.validate().is_err() {
             simulation_results = ProjectSimulationResults::default();
         }
-        let execution_context =
-            crate::io::capture_execution_context(&self.sim_setup, &self.model_library_manager)
-                .map_err(|error| {
-                    <S::Error as serde::ser::Error>::custom(format!(
-                        "session execution context is structurally invalid: {error}"
-                    ))
-                })?;
+        let execution_context = crate::io::capture_execution_context(
+            &self.model.sim_setup,
+            &self.model.model_library_manager,
+        )
+        .map_err(|error| {
+            <S::Error as serde::ser::Error>::custom(format!(
+                "session execution context is structurally invalid: {error}"
+            ))
+        })?;
         if rspice_project::ProjectFile::validate_result_plan_references_for(
             &simulation_results,
             Some(&execution_context.simulation_plan),
-            self.workspace.content.project.revision(),
+            self.model.workspace.content.project.revision(),
         )
         .is_err()
         {
@@ -178,22 +180,23 @@ impl AppState {
         let mut state = serializer.serialize_struct("AppState", field_count)?;
         let mut committed_workspace;
         let workspace = if self
+            .model
             .workspace
             .content
             .schematic_buffers
             .values()
             .any(|schematic| schematic.pending_operation_id().is_some())
         {
-            committed_workspace = self.workspace.clone();
+            committed_workspace = self.model.workspace.clone();
             committed_workspace.for_each_schematic_editor_mut(|_, schematic| {
                 schematic.cancel_operation();
             });
             &committed_workspace
         } else {
-            &self.workspace
+            &self.model.workspace
         };
         state.serialize_field("project_workspace", workspace)?;
-        state.serialize_field("library_manager", &self.library_manager)?;
+        state.serialize_field("library_manager", &self.model.library_manager)?;
         state.serialize_field("ui_session", &UiSessionWire::from(&*self.ui))?;
         state.serialize_field("workbench", &WorkbenchWireRef::capture(&self.workbench))?;
         state.serialize_field("recent_files", &self.recent_files)?;
@@ -361,9 +364,6 @@ impl<'de> serde::Deserialize<'de> for AppState {
             "browser project binding receipt",
         );
         let mut state = Self {
-            schematic,
-            workspace: project_workspace,
-            library_manager,
             ui: Box::new((*de.ui).into()),
             recent_files: de.recent_files,
             license_key: de.license_key,
@@ -372,11 +372,14 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
+        state.model.schematic = schematic;
+        state.model.workspace = project_workspace;
+        state.model.library_manager = library_manager;
         de.workbench.scatter(&mut state.workbench);
         if de.no_project_open {
             state
                 .project_lifecycle
-                .close_restored_session(&mut state.project_open);
+                .close_restored_session(&mut state.model.project_open);
         }
         let annotation_outcome = match annotation_restoration {
             Ok(0) => None,
@@ -400,11 +403,23 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // editor presentation. Schematic documents deliberately skip them,
         // so restore the exact device-local settings after loading the active
         // document buffer and keep wire and bus gestures coherent.
-        state.schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
-        state.schematic.reconcile_grid_pitch_runtime();
-        state.ui.schematic_snap.grid_size = state.schematic.document().grid_size;
-        state.schematic.session.editor.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
-        state.schematic.session.editor.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
+        state.model.schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
+        state.model.schematic.reconcile_grid_pitch_runtime();
+        state.ui.schematic_snap.grid_size = state.model.schematic.document().grid_size;
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .routing_mode = state.ui.schematic_routing_mode;
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .bus_drawing
+            .routing_mode = state.ui.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
         let execution_warnings = match (de.execution_context_json, de.execution_context) {
@@ -418,8 +433,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
                     .and_then(|context| crate::io::restore_execution_context(context, project_id));
                 match restored {
                     Ok((simulation_plan, model_library_manager, warnings)) => {
-                        state.sim_setup = simulation_plan;
-                        state.model_library_manager = model_library_manager;
+                        state.model.sim_setup = simulation_plan;
+                        state.model.model_library_manager = model_library_manager;
                         warnings
                     }
                     Err(error) => vec![format!(
@@ -433,8 +448,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .and_then(|context| crate::io::restore_execution_context(context, project_id))
             {
                 Ok((simulation_plan, model_library_manager, warnings)) => {
-                    state.sim_setup = simulation_plan;
-                    state.model_library_manager = model_library_manager;
+                    state.model.sim_setup = simulation_plan;
+                    state.model.model_library_manager = model_library_manager;
                     warnings
                 }
                 Err(error) => vec![format!(
@@ -453,11 +468,11 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .and_then(|()| {
                 rspice_project::ProjectFile::validate_result_plan_references_for(
                     &simulation_results,
-                    Some(&state.sim_setup),
-                    state.workspace.content.project.revision(),
+                    Some(&state.model.sim_setup),
+                    state.model.workspace.content.project.revision(),
                 )
             })
-            .and_then(|()| crate::io::restore_simulation_results(simulation_results, &mut state.simulation))
+            .and_then(|()| crate::io::restore_simulation_results(simulation_results, &mut state.model.simulation))
             .err()
             .map(|error| {
                 format!(
@@ -475,8 +490,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
         }
         if let Some(recovery) = state.workbench.model_editor_recovery.clone() {
             match recovery.restore(
-                &state.model_library_manager,
-                state.workspace.content.project.revision(),
+                &state.model.model_library_manager,
+                state.model.workspace.content.project.revision(),
             ) {
                 Ok(draft) => state.workbench.model_editor.draft = Some(draft),
                 Err(error) => {
@@ -489,7 +504,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 }
             }
         }
-        state.workspace.save_active_schematic(&state.schematic);
+        state
+            .model
+            .workspace
+            .save_active_schematic(&state.model.schematic);
         Ok(state)
     }
 }
@@ -575,14 +593,14 @@ mod tests {
     #[test]
     fn cleared_run_sequence_survives_session_round_trip() {
         let mut state = AppState::default();
-        state.simulation.retained.next_run_id = 41;
-        assert_eq!(state.simulation.start_run().id, 42);
-        state.simulation.clear_runs();
+        state.model.simulation.retained.next_run_id = 41;
+        assert_eq!(state.model.simulation.start_run().id, 42);
+        state.model.simulation.clear_runs();
         let json = serde_json::to_string(&state).expect("session serializes");
         let mut restored: AppState = serde_json::from_str(&json).expect("session restores");
-        assert!(restored.simulation.retained.runs.is_empty());
-        assert_eq!(restored.simulation.retained.next_run_id, 42);
-        assert_eq!(restored.simulation.start_run().id, 43);
+        assert!(restored.model.simulation.retained.runs.is_empty());
+        assert_eq!(restored.model.simulation.retained.next_run_id, 42);
+        assert_eq!(restored.model.simulation.start_run().id, 43);
     }
 
     fn seal_legacy_unattributed(run: &mut crate::state::SimulationRun) {
@@ -600,9 +618,10 @@ mod tests {
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert!(!restored.schematic.session.editor.snap_engine.enabled);
+        assert!(!restored.model.schematic.session.editor.snap_engine.enabled);
         assert!(
             !restored
+                .model
                 .schematic
                 .session
                 .editor
@@ -610,11 +629,23 @@ mod tests {
                 .snap_to_wire_segments
         );
         assert_eq!(
-            restored.schematic.session.editor.wire_drawing.routing_mode,
+            restored
+                .model
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .routing_mode,
             crate::state::WireRoutingMode::FortyFiveDegree
         );
         assert_eq!(
-            restored.schematic.session.editor.bus_drawing.routing_mode,
+            restored
+                .model
+                .schematic
+                .session
+                .editor
+                .bus_drawing
+                .routing_mode,
             crate::state::WireRoutingMode::FortyFiveDegree
         );
     }
@@ -635,12 +666,12 @@ mod tests {
                 .with_waveforms(vec![waveform]),
         );
         seal_legacy_unattributed(&mut run);
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 3;
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
-        state.simulation.execution.is_running = true;
-        state.simulation.execution.trigger_abort = true;
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 3;
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.execution.is_running = true;
+        state.model.simulation.execution.trigger_abort = true;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         assert!(json.contains("simulation_results"));
@@ -651,18 +682,23 @@ mod tests {
             ("JSON", serde_json::from_str::<AppState>(&json).unwrap()),
             ("RON", AppState::from_session_ron(&ron).unwrap()),
         ] {
-            assert_eq!(restored.simulation.retained.run_count(), 1, "{format}");
+            assert_eq!(
+                restored.model.simulation.retained.run_count(),
+                1,
+                "{format}"
+            );
             assert_eq!(
                 restored
+                    .model
                     .simulation
                     .active_run()
                     .expect("active restored run")
                     .label,
                 "Run 3 (session fixture)"
             );
-            assert_eq!(restored.simulation.view.waveforms[0].name, "V(out)");
-            assert!(!restored.simulation.execution.is_running);
-            assert!(!restored.simulation.execution.trigger_abort);
+            assert_eq!(restored.model.simulation.view.waveforms[0].name, "V(out)");
+            assert!(!restored.model.simulation.execution.is_running);
+            assert!(!restored.model.simulation.execution.trigger_abort);
         }
     }
 
@@ -678,7 +714,7 @@ mod tests {
             let mut state = AppState::default();
             let receipt = BrowserBindingReceipt {
                 binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
-                project_id: state.workspace.content.project.id().to_string(),
+                project_id: state.model.workspace.content.project.id().to_string(),
                 accepted_generation: 23,
                 accepted_digest: "ab".repeat(32).parse().expect("valid digest fixture"),
                 backend,
@@ -696,8 +732,8 @@ mod tests {
                     "{backend:?} authority must survive {format} session recovery"
                 );
                 assert_eq!(
-                    restored.workspace.content.project.id(),
-                    state.workspace.content.project.id()
+                    restored.model.workspace.content.project.id(),
+                    state.model.workspace.content.project.id()
                 );
             }
         }
@@ -708,7 +744,7 @@ mod tests {
         let mut state = AppState::default();
         let receipt = crate::workbench::lifecycle::project_lifecycle::NativeBindingReceipt {
             canonical_path: std::path::PathBuf::from(r"C:\projects\precision-afe.rspiceproj"),
-            project_id: state.workspace.content.project.id().to_string(),
+            project_id: state.model.workspace.content.project.id().to_string(),
             accepted_digest: crate::product::ContentDigest::from_bytes([0x5a; 32]),
         };
         state.native_project_binding_receipt = Some(receipt.clone());
@@ -742,25 +778,29 @@ mod tests {
         ] {
             let mut state = AppState::default();
             state
+                .model
                 .workspace
                 .content
                 .project
                 .rename("Legacy saved circuit")
                 .unwrap();
-            state.schematic.add_component(
+            state.model.schematic.add_component(
                 crate::state::ComponentType::Resistor,
                 crate::state::Point::new(17, 29),
             );
-            state.workspace.save_active_schematic(&state.schematic);
+            state
+                .model
+                .workspace
+                .save_active_schematic(&state.model.schematic);
             let receipt = BrowserBindingReceipt {
                 binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
-                project_id: state.workspace.content.project.id().to_string(),
+                project_id: state.model.workspace.content.project.id().to_string(),
                 accepted_generation: 23,
                 accepted_digest: "ab".repeat(32).parse().unwrap(),
                 backend,
             };
             let legacy = ron::to_string(&LegacySession {
-                project_workspace: &state.workspace,
+                project_workspace: &state.model.workspace,
                 browser_project_binding_receipt: Some(&receipt),
             })
             .unwrap();
@@ -772,19 +812,20 @@ mod tests {
                 Some(&receipt)
             );
             assert_eq!(
-                restored.workspace.content.project.id(),
-                state.workspace.content.project.id()
+                restored.model.workspace.content.project.id(),
+                state.model.workspace.content.project.id()
             );
             assert_eq!(
-                restored.workspace.content.project.name(),
+                restored.model.workspace.content.project.name(),
                 "Legacy saved circuit"
             );
             assert_eq!(
-                restored.schematic.document().components,
-                state.schematic.document().components
+                restored.model.schematic.document().components,
+                state.model.schematic.document().components
             );
             assert!(
                 !restored
+                    .model
                     .log_buffer
                     .entries()
                     .any(|entry| entry.message.contains("browser project binding receipt"))
@@ -798,15 +839,16 @@ mod tests {
                     let recovered = AppState::from_session_ron(&corrupted).unwrap();
                     assert!(recovered.browser_project_binding_receipt.is_none());
                     assert_eq!(
-                        recovered.workspace.content.project.id(),
-                        state.workspace.content.project.id()
+                        recovered.model.workspace.content.project.id(),
+                        state.model.workspace.content.project.id()
                     );
                     assert_eq!(
-                        recovered.schematic.document().components,
-                        state.schematic.document().components
+                        recovered.model.schematic.document().components,
+                        state.model.schematic.document().components
                     );
                     assert!(
                         recovered
+                            .model
                             .log_buffer
                             .entries()
                             .any(|entry| entry.message.contains("browser project binding receipt"))
@@ -820,17 +862,21 @@ mod tests {
     fn malformed_or_future_receipts_drop_only_authority_and_preserve_working_session() {
         let mut state = AppState::default();
         state
+            .model
             .workspace
             .content
             .project
             .rename("Recovered receipt-corruption fixture")
             .expect("valid fixture name");
-        state.schematic.add_component(
+        state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(17, 29),
         );
-        state.workspace.save_active_schematic(&state.schematic);
-        let active_key = state.workspace.content.active_key();
+        state
+            .model
+            .workspace
+            .save_active_schematic(&state.model.schematic);
+        let active_key = state.model.workspace.content.active_key();
 
         let mut session = serde_json::to_value(&state).expect("serialize recovery fixture");
         let object = session.as_object_mut().expect("session object");
@@ -846,7 +892,7 @@ mod tests {
             "browser_project_binding_receipt".to_owned(),
             serde_json::json!({
                 "binding_id": uuid::Uuid::new_v4(),
-                "project_id": state.workspace.content.project.id().to_string(),
+                "project_id": state.model.workspace.content.project.id().to_string(),
                 "accepted_generation": 7,
                 "accepted_digest": "11".repeat(32),
                 "backend": "future-cloud-authority"
@@ -856,11 +902,12 @@ mod tests {
         let restored: AppState = serde_json::from_value(session)
             .expect("receipt corruption is independently recoverable");
         assert_eq!(
-            restored.workspace.content.project.name(),
+            restored.model.workspace.content.project.name(),
             "Recovered receipt-corruption fixture"
         );
         assert_eq!(
             restored
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -874,6 +921,7 @@ mod tests {
         assert!(restored.native_project_binding_receipt.is_none());
         assert!(restored.browser_project_binding_receipt.is_none());
         let messages = restored
+            .model
             .log_buffer
             .entries()
             .map(|entry| entry.message.as_str())
@@ -939,6 +987,7 @@ mod tests {
         let restored = ron::from_str::<Box<AppState>>(&legacy).expect("the session restores");
 
         let default = &restored
+            .model
             .workspace
             .content
             .design_management
@@ -991,6 +1040,7 @@ mod tests {
         eframe::Storage::set_string(&mut storage, eframe::APP_KEY, session);
         let restored = AppState::restore_eframe_session(&storage).expect("a stored session");
         let messages = restored
+            .model
             .log_buffer
             .entries()
             .map(|entry| entry.message.as_str())
@@ -1012,20 +1062,24 @@ mod tests {
     fn a_working_session_restores_on_the_next_launch_as_it_was_saved() {
         let mut state = AppState::default();
         state
+            .model
             .workspace
             .content
             .project
             .rename("Precision AFE")
             .expect("valid project name");
-        state.schematic.add_component(
+        state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(17, 29),
         );
-        state.schematic.add_component(
+        state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(60, 29),
         );
-        state.workspace.save_active_schematic(&state.schematic);
+        state
+            .model
+            .workspace
+            .save_active_schematic(&state.model.schematic);
 
         let mut run = crate::state::SimulationRun::new(3);
         run.label = "Run 3 (bias sweep)".to_owned();
@@ -1039,10 +1093,10 @@ mod tests {
                 )]),
         );
         seal_legacy_unattributed(&mut run);
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 3;
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 3;
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
 
         let workbench = &mut state.workbench;
         workbench.console_visible = true;
@@ -1063,6 +1117,7 @@ mod tests {
         workbench.selected_model = Some("nch".to_owned());
         workbench.command_query = "probe".to_owned();
         workbench.active_analysis_instance = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
@@ -1083,13 +1138,17 @@ mod tests {
 
         let restored = relaunch(saved_session(&state));
 
-        assert_eq!(restored.workspace.content.project.name(), "Precision AFE");
         assert_eq!(
-            restored.schematic.document().components,
-            state.schematic.document().components
+            restored.model.workspace.content.project.name(),
+            "Precision AFE"
+        );
+        assert_eq!(
+            restored.model.schematic.document().components,
+            state.model.schematic.document().components
         );
         assert_eq!(
             restored
+                .model
                 .simulation
                 .active_run()
                 .expect("the run is retained")
@@ -1118,6 +1177,7 @@ mod tests {
     fn a_session_saved_with_a_placed_and_scaled_title_block_restores() {
         let mut state = AppState::default();
         state
+            .model
             .workspace
             .content
             .project
@@ -1137,7 +1197,7 @@ mod tests {
         let restored = relaunch(legacy);
 
         assert_eq!(
-            restored.workspace.content.project.name(),
+            restored.model.workspace.content.project.name(),
             "Saved before the title block was fixed in place"
         );
     }
@@ -1168,11 +1228,11 @@ mod tests {
     fn legacy_session_without_results_loads_empty_result_history() {
         let restored: AppState = serde_json::from_str("{}").expect("legacy session loads");
 
-        assert_eq!(restored.simulation.retained.run_count(), 0);
-        assert!(restored.simulation.view.waveforms.is_empty());
-        assert!(!restored.simulation.execution.is_running);
+        assert_eq!(restored.model.simulation.retained.run_count(), 0);
+        assert!(restored.model.simulation.view.waveforms.is_empty());
+        assert!(!restored.model.simulation.execution.is_running);
         assert!(!restored.ui.browser_spoken_feedback);
-        assert!(restored.log_buffer.entries().any(|entry| {
+        assert!(restored.model.log_buffer.entries().any(|entry| {
             entry
                 .message
                 .contains("legacy session predates durable simulation plans")
@@ -1182,7 +1242,7 @@ mod tests {
     #[test]
     fn legacy_session_without_project_id_restores_a_reproducible_identity() {
         let state = AppState::default();
-        let original_id = state.workspace.content.project.id();
+        let original_id = state.model.workspace.content.project.id();
         let mut session = serde_json::to_value(&state).expect("session serializes");
         session["project_workspace"]["project"]
             .as_object_mut()
@@ -1207,17 +1267,29 @@ mod tests {
             serde_json::from_str(&legacy_json).expect("identical legacy session restores");
 
         assert_eq!(
-            first.workspace.content.project.id(),
-            second.workspace.content.project.id()
+            first.model.workspace.content.project.id(),
+            second.model.workspace.content.project.id()
         );
-        assert_ne!(first.workspace.content.project.id(), original_id);
-        assert!(!first.workspace.content.project.id().as_uuid().is_nil());
+        assert_ne!(first.model.workspace.content.project.id(), original_id);
+        assert!(
+            !first
+                .model
+                .workspace
+                .content
+                .project
+                .id()
+                .as_uuid()
+                .is_nil()
+        );
     }
 
     #[test]
     fn distinct_legacy_session_workspaces_do_not_alias_project_identity() {
         fn legacy_value(mut state: AppState) -> serde_json::Value {
-            state.workspace.save_active_schematic(&state.schematic);
+            state
+                .model
+                .workspace
+                .save_active_schematic(&state.model.schematic);
             let mut value = serde_json::to_value(state).expect("session serializes");
             let descriptor = value["project_workspace"]["project"]
                 .as_object_mut()
@@ -1234,7 +1306,7 @@ mod tests {
 
         let first = AppState::default();
         let mut second = AppState::default();
-        second.schematic.add_component(
+        second.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(40, 40),
         );
@@ -1249,12 +1321,12 @@ mod tests {
             serde_json::from_value(second_value).expect("second legacy session restores");
 
         assert_eq!(
-            first_restored.workspace.content.project.id(),
-            first_replay.workspace.content.project.id()
+            first_restored.model.workspace.content.project.id(),
+            first_replay.model.workspace.content.project.id()
         );
         assert_ne!(
-            first_restored.workspace.content.project.id(),
-            second_restored.workspace.content.project.id()
+            first_restored.model.workspace.content.project.id(),
+            second_restored.model.workspace.content.project.id()
         );
     }
 
@@ -1283,6 +1355,7 @@ mod tests {
 
         let mut state = AppState::default();
         let plan = state
+            .model
             .sim_setup
             .analysis_plan
             .as_mut()
@@ -1310,16 +1383,17 @@ mod tests {
         .expect("AC draft edit commits");
         plan.bind_dependency(ac_id, AnalysisKind::OperatingPoint, op_id)
             .expect("AC binds the exact OP identity");
-        state.model_library_manager.clear();
+        state.model.model_library_manager.clear();
         let mut library = ModelLibrary::new("unsaved_session_models");
         let mut model = DeviceModel::new("nch_session", ModelType::Nmos);
         model.add_parameter("kp", 1.25e-3);
         library.add_model(model);
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
         let restored_plan = restored
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("session restores stable plan");
@@ -1361,6 +1435,7 @@ mod tests {
         }
         assert!(
             restored
+                .model
                 .model_library_manager
                 .get_library("unsaved_session_models")
                 .and_then(|library| library.get_model("nch_session"))
@@ -1405,6 +1480,7 @@ mod tests {
     fn future_preferences_cannot_discard_the_recoverable_application_session() {
         let mut state = AppState::default();
         state
+            .model
             .workspace
             .content
             .project
@@ -1423,7 +1499,7 @@ mod tests {
         let restored: AppState =
             serde_json::from_value(wire).expect("future preferences remain isolated");
         assert_eq!(
-            restored.workspace.content.project.name(),
+            restored.model.workspace.content.project.name(),
             "Session with future preferences"
         );
         let rewritten = serde_json::to_value(&restored).expect("session rewrites");
@@ -1464,6 +1540,7 @@ mod tests {
     fn safe_mode_persists_the_exact_pre_isolation_session() {
         let mut state = AppState::default();
         state
+            .model
             .workspace
             .content
             .project
@@ -1472,6 +1549,7 @@ mod tests {
         let before = serde_json::to_string(&state).expect("baseline session serializes");
 
         state
+            .model
             .workspace
             .content
             .project
@@ -1485,7 +1563,7 @@ mod tests {
         let restored: AppState = serde_json::from_str(&persisted).expect("snapshot restores");
 
         assert_eq!(
-            restored.workspace.content.project.name(),
+            restored.model.workspace.content.project.name(),
             "Session before safe mode"
         );
         assert_eq!(
@@ -1504,10 +1582,10 @@ mod tests {
             "TRAN legacy session",
         ));
         seal_legacy_unattributed(&mut run);
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 3;
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 3;
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         let mut value = serde_json::to_value(&state).expect("session converts to JSON");
         let results = value["simulation_results"]
             .as_object_mut()
@@ -1539,10 +1617,12 @@ mod tests {
         let restored: AppState = serde_json::from_value(value).expect("legacy session migrates");
 
         let active_run = restored
+            .model
             .simulation
             .active_run()
             .expect("active run restores");
         let active_analysis = restored
+            .model
             .simulation
             .active_analysis()
             .expect("active analysis restores");
@@ -1570,16 +1650,17 @@ mod tests {
                 .with_family_metadata(metadata.clone()),
         );
         seal_legacy_unattributed(&mut run);
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 1;
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 1;
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
 
         let json = serde_json::to_string(&state).expect("session metadata serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session metadata restores");
 
         assert_eq!(
             restored
+                .model
                 .simulation
                 .active_analysis()
                 .and_then(|analysis| analysis.family_metadata.as_ref()),
@@ -1610,16 +1691,16 @@ mod tests {
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
                 .with_waveforms(vec![waveform]),
         );
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 3;
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 3;
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
         assert!(!json.contains("simulation_results"));
-        assert_eq!(restored.simulation.retained.run_count(), 0);
+        assert_eq!(restored.model.simulation.retained.run_count(), 0);
     }
 
     #[test]
@@ -1672,19 +1753,19 @@ mod tests {
             crate::state::AnalysisType::Transient,
             "TRAN",
         ));
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 3;
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 3;
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         let mut value = serde_json::to_value(&state).expect("session serializes");
         value["simulation_results"]["schema_version"] = serde_json::Value::from(999);
         let json = serde_json::to_string(&value).expect("mutated session serializes");
 
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert_eq!(restored.simulation.retained.run_count(), 0);
-        assert!(restored.simulation.view.waveforms.is_empty());
-        assert!(restored.log_buffer.entries().any(|entry| {
+        assert_eq!(restored.model.simulation.retained.run_count(), 0);
+        assert!(restored.model.simulation.view.waveforms.is_empty());
+        assert!(restored.model.log_buffer.entries().any(|entry| {
             entry
                 .message
                 .contains("Simulation results were not restored")
@@ -1695,6 +1776,7 @@ mod tests {
     fn app_state_session_drops_plan_result_with_an_orphaned_source_identity() {
         let mut state = AppState::default();
         let plan = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("default session has a stable plan");
@@ -1702,7 +1784,7 @@ mod tests {
         let plan_id = plan.id();
         let source_instance_id = transient.id();
         let source_revision = plan.revision();
-        let project_revision = state.workspace.content.project.revision();
+        let project_revision = state.model.workspace.content.project.revision();
         let prepared_snapshot_digest = crate::product::ContentDigest::from_bytes([0x73; 32]);
         let mut run = crate::state::SimulationRun::new(4);
         run.add_analysis(
@@ -1750,10 +1832,10 @@ mod tests {
             run_receipt,
         )))
         .expect("prepared run fixture seals");
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 4;
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 4;
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         let mut session = serde_json::to_value(&state).expect("session serializes");
         let orphaned_identity = crate::product::AnalysisInstanceId::new();
         session["simulation_results"]["runs"][0]["analyses"][0]["provenance"]["source_instance_id"] =
@@ -1764,8 +1846,8 @@ mod tests {
         let restored: AppState =
             serde_json::from_value(session).expect("orphaned result is recoverable");
 
-        assert_eq!(restored.simulation.retained.run_count(), 0);
-        assert!(restored.log_buffer.entries().any(|entry| {
+        assert_eq!(restored.model.simulation.retained.run_count(), 0);
+        assert!(restored.model.log_buffer.entries().any(|entry| {
             entry
                 .message
                 .contains("absent from the persisted plan and its tombstones")

@@ -150,7 +150,7 @@ impl AppState {
         self.dialogs.library_deletion_review.target = Some(target);
         self.dialogs
             .library_deletion_review
-            .expected_library_revision = self.library_manager.revision();
+            .expected_library_revision = self.model.library_manager.revision();
         self.dialogs.library_deletion_review.error = None;
         Ok(())
     }
@@ -164,7 +164,7 @@ impl AppState {
             .target
             .clone()
             .ok_or_else(|| "No library deletion is awaiting confirmation.".to_owned())?;
-        if self.library_manager.revision() != review.expected_library_revision {
+        if self.model.library_manager.revision() != review.expected_library_revision {
             return Err(
                 "The library catalog changed after this review opened. Review the deletion again."
                     .to_owned(),
@@ -200,7 +200,7 @@ impl RSpiceApp {
             return;
         };
         let impact = library_deletion_impact(&self.state, &target);
-        let revision_current = self.state.library_manager.revision()
+        let revision_current = self.state.model.library_manager.revision()
             == self
                 .state
                 .dialogs
@@ -374,7 +374,7 @@ impl RSpiceApp {
                 }
             };
             let mut deleted = false;
-            if let Some(mut lib) = self.state.library_manager.edit_library(&lib_name) {
+            if let Some(mut lib) = self.state.model.library_manager.edit_library(&lib_name) {
                 deleted = lib.remove_cell(&cell_name);
                 if deleted {
                     apply_design_management_removal(&mut self.state, ownership_removal);
@@ -440,7 +440,7 @@ impl RSpiceApp {
                 }
             };
             let mut deleted = false;
-            if let Some(mut lib) = self.state.library_manager.edit_library(&lib_name)
+            if let Some(mut lib) = self.state.model.library_manager.edit_library(&lib_name)
                 && let Some(removed) = lib.remove_view(&cell_name, &view_name)
             {
                 deleted = removed;
@@ -486,11 +486,12 @@ fn can_delete(
     resolution: Option<DeletionInstanceResolution>,
 ) -> Result<(), String> {
     validate_library_deletion_target(state, target)?;
-    let roots = state.workspace.content.configuration_sets.roots_in_scope(
-        target.library(),
-        target.cell(),
-        target.view(),
-    );
+    let roots = state
+        .model
+        .workspace
+        .content
+        .configuration_sets
+        .roots_in_scope(target.library(), target.cell(), target.view());
     if !roots.is_empty() {
         let mut names = roots
             .iter()
@@ -567,9 +568,10 @@ fn apply_instance_resolution(
         })
     };
 
-    let active = state.workspace.content.active_schematic_reference();
+    let active = state.model.workspace.content.active_schematic_reference();
     let active_key = active.key();
     let mut edited = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -582,6 +584,7 @@ fn apply_instance_resolution(
                 (
                     reference,
                     state
+                        .model
                         .workspace
                         .clone_schematic_editor(key)
                         .expect("retained drawing"),
@@ -590,13 +593,14 @@ fn apply_instance_resolution(
         })
         .collect::<Vec<_>>();
     if state
+        .model
         .schematic
         .document()
         .components
         .iter()
         .any(&places_target)
     {
-        edited.push((active, state.schematic.clone()));
+        edited.push((active, state.model.schematic.clone()));
     }
     if edited.is_empty() {
         return;
@@ -609,9 +613,12 @@ fn apply_instance_resolution(
         after.remove_master_placements(&library, &cell, view.as_deref());
         let key = reference.key();
         if key == active_key {
-            state.schematic = after.clone();
+            state.model.schematic = after.clone();
         }
-        state.workspace.insert_schematic_editor(key, after.clone());
+        state
+            .model
+            .workspace
+            .insert_schematic_editor(key, after.clone());
         documents.push((reference, before, after));
     }
     state.record_instance_removal_transaction(
@@ -647,6 +654,7 @@ fn validate_library_deletion_target(
         return Err("The project is open read-only; library objects cannot be deleted.".to_owned());
     }
     let library = state
+        .model
         .library_manager
         .get_library(target.library())
         .ok_or_else(|| format!("Library '{}' no longer exists.", target.library()))?;
@@ -686,6 +694,7 @@ fn library_deletion_impact(
             && target.view().is_none_or(|view| reference.view == view)
     };
     let views = state
+        .model
         .library_manager
         .get_library(target.library())
         .and_then(|library| library.get_cell(target.cell()))
@@ -696,6 +705,7 @@ fn library_deletion_impact(
             )
         });
     let open_views = state
+        .model
         .workspace
         .content
         .open_views
@@ -703,6 +713,7 @@ fn library_deletion_impact(
         .filter(|open| matches(&open.reference))
         .count();
     let dirty_open_views = state
+        .model
         .workspace
         .content
         .open_views
@@ -710,6 +721,7 @@ fn library_deletion_impact(
         .filter(|open| matches(&open.reference) && open.dirty)
         .count();
     let source_bundles = state
+        .model
         .workspace
         .content
         .project_sources
@@ -722,13 +734,14 @@ fn library_deletion_impact(
         })
         .count();
     let configuration_roots = state
+        .model
         .workspace
         .content
         .configuration_sets
         .roots_in_scope(target.library(), target.cell(), target.view())
         .len();
-    let project_root = state.workspace.content.project.root_library == target.library()
-        && state.workspace.content.project.top_cell == target.cell()
+    let project_root = state.model.workspace.content.project.root_library == target.library()
+        && state.model.workspace.content.project.top_cell == target.cell()
         && target
             .view()
             .is_none_or(|view| view == crate::state::workspace::DEFAULT_SCHEMATIC_VIEW);
@@ -746,9 +759,10 @@ fn library_deletion_impact(
             })
             .count()
     };
-    let active_key = state.workspace.content.active_view.key();
-    let instance_references = count_references(state.schematic.document())
+    let active_key = state.model.workspace.content.active_view.key();
+    let instance_references = count_references(state.model.schematic.document())
         + state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -778,7 +792,7 @@ fn prepare_design_management_removal(
     cell: &str,
     view: Option<&str>,
 ) -> Result<Option<PendingDesignManagementRemoval>, String> {
-    let mut catalog = (*state.workspace.content.design_management).clone();
+    let mut catalog = (*state.model.workspace.content.design_management).clone();
     let receipt = match view {
         Some(view) => catalog.remove_sheet_catalog_for_view(
             &crate::state::CellViewRef::new(library, cell, view).key(),
@@ -808,7 +822,7 @@ fn apply_design_management_removal(
     let Some(removal) = removal else {
         return false;
     };
-    *state.workspace.content.design_management = removal.catalog;
+    *state.model.workspace.content.design_management = removal.catalog;
     true
 }
 
@@ -819,6 +833,7 @@ fn remove_project_sources_for_deleted_scope(
     view: Option<&str>,
 ) {
     let removed = state
+        .model
         .workspace
         .content
         .project_sources
@@ -826,7 +841,7 @@ fn remove_project_sources_for_deleted_scope(
     if removed.is_empty() {
         return;
     }
-    state.workspace.content.project_sources_dirty = true;
+    state.model.workspace.content.project_sources_dirty = true;
     let transient_uses_removed = state
         .ui
         .code_workspace
@@ -855,7 +870,7 @@ mod tests {
     };
 
     fn app_with_state(state: crate::workbench::app_state::AppState) -> RSpiceApp {
-        let automation_runtime_project_id = state.workspace.content.project.id();
+        let automation_runtime_project_id = state.model.workspace.content.project.id();
         RSpiceApp {
             state,
             first_frame: false,
@@ -894,26 +909,28 @@ mod tests {
         let mut keep = Cell::new("keep");
         keep.add_view(View::new("schematic", ViewType::Schematic));
         library.add_cell(keep);
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
 
         let amp_ref = CellViewRef::new("work", "amp", "schematic");
         let keep_ref = CellViewRef::new("work", "keep", "schematic");
         let mut amp_schematic = SchematicState::default();
         amp_schematic.add_component(ComponentType::Resistor, Point::new(10, 10));
         state
+            .model
             .workspace
             .insert_schematic_editor(amp_ref.key(), amp_schematic.clone());
         state
+            .model
             .workspace
             .insert_schematic_editor(keep_ref.key(), SchematicState::default());
-        state.workspace.content.open_views = vec![
+        state.model.workspace.content.open_views = vec![
             OpenCellView::new(keep_ref.clone(), ViewType::Schematic),
             OpenCellView::new(amp_ref.clone(), ViewType::Schematic),
         ];
-        state.workspace.content.active_view = amp_ref.clone();
-        state.workspace.content.hierarchy_stack = vec![keep_ref, amp_ref.clone()];
-        state.workspace.content.hierarchy_instances = vec!["XAMP".to_string()];
-        state.schematic = amp_schematic;
+        state.model.workspace.content.active_view = amp_ref.clone();
+        state.model.workspace.content.hierarchy_stack = vec![keep_ref, amp_ref.clone()];
+        state.model.workspace.content.hierarchy_instances = vec!["XAMP".to_string()];
+        state.model.schematic = amp_schematic;
         state
     }
 
@@ -923,6 +940,7 @@ mod tests {
         view: &str,
     ) -> crate::state::ProjectSourceId {
         state
+            .model
             .library_manager
             .get_library_mut("work")
             .and_then(|library| library.get_cell_mut(cell))
@@ -939,6 +957,7 @@ mod tests {
         .expect("valid source bundle");
         let id = bundle.id();
         state
+            .model
             .workspace
             .content
             .project_sources
@@ -953,6 +972,7 @@ mod tests {
         root: CellViewRef,
     ) -> crate::state::ConfigurationSetId {
         state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -980,54 +1000,59 @@ mod tests {
             cell.add_view(View::new("schematic", ViewType::Schematic));
             library.add_cell(cell);
         }
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
 
         let top = CellViewRef::new("work", "top", "schematic");
         let amp = CellViewRef::new("work", "amp", "schematic");
         let leaf = CellViewRef::new("work", "leaf", "schematic");
         state
+            .model
             .workspace
             .insert_schematic_editor(top.key(), SchematicState::default());
         state
+            .model
             .workspace
             .insert_schematic_editor(amp.key(), SchematicState::default());
         state
+            .model
             .workspace
             .insert_schematic_editor(leaf.key(), SchematicState::default());
-        state.workspace.content.open_views = vec![
+        state.model.workspace.content.open_views = vec![
             OpenCellView::new(top.clone(), ViewType::Schematic),
             OpenCellView::new(amp.clone(), ViewType::Schematic),
             OpenCellView::new(leaf.clone(), ViewType::Schematic),
         ];
-        state.workspace.content.active_view = leaf.clone();
-        state.workspace.content.hierarchy_stack = vec![top, amp, leaf.clone()];
-        state.workspace.content.hierarchy_instances = vec!["XAMP".to_string(), "XLEAF".to_string()];
-        state.schematic = SchematicState::default();
+        state.model.workspace.content.active_view = leaf.clone();
+        state.model.workspace.content.hierarchy_stack = vec![top, amp, leaf.clone()];
+        state.model.workspace.content.hierarchy_instances =
+            vec!["XAMP".to_string(), "XLEAF".to_string()];
+        state.model.schematic = SchematicState::default();
         state
     }
 
     fn default_project_with_active_keep_cell() -> crate::workbench::app_state::AppState {
         let mut state = crate::workbench::app_state::AppState::default();
         let keep_ref = CellViewRef::new("user", "keep", "schematic");
-        if let Some(library) = state.library_manager.get_library_mut("user") {
+        if let Some(library) = state.model.library_manager.get_library_mut("user") {
             let mut keep = Cell::new("keep");
             keep.add_view(View::new("schematic", ViewType::Schematic));
             library.add_cell(keep);
         }
         state
+            .model
             .workspace
             .insert_schematic_editor(keep_ref.key(), SchematicState::default());
-        state.workspace.content.open_views = vec![
+        state.model.workspace.content.open_views = vec![
             OpenCellView::new(
                 CellViewRef::new("user", "top", "schematic"),
                 ViewType::Schematic,
             ),
             OpenCellView::new(keep_ref.clone(), ViewType::Schematic),
         ];
-        state.workspace.content.active_view = keep_ref.clone();
-        state.workspace.content.hierarchy_stack = vec![keep_ref];
-        state.workspace.content.hierarchy_instances.clear();
-        state.schematic = SchematicState::default();
+        state.model.workspace.content.active_view = keep_ref.clone();
+        state.model.workspace.content.hierarchy_stack = vec![keep_ref];
+        state.model.workspace.content.hierarchy_instances.clear();
+        state.model.schematic = SchematicState::default();
         state
     }
 
@@ -1035,7 +1060,7 @@ mod tests {
     fn default_project_with_two_drawings_instancing_amp() -> crate::workbench::app_state::AppState {
         let mut state = default_project_with_active_top_instancing_amp();
         let aux_ref = CellViewRef::new("user", "aux", "schematic");
-        if let Some(library) = state.library_manager.get_library_mut("user") {
+        if let Some(library) = state.model.library_manager.get_library_mut("user") {
             let mut aux = Cell::new("aux");
             aux.add_view(View::new("schematic", ViewType::Schematic));
             library.add_cell(aux);
@@ -1045,8 +1070,12 @@ mod tests {
             Point::new(40, 40),
             LibraryCellInstance::new("user", "amp", "schematic"),
         );
-        state.workspace.insert_schematic_editor(aux_ref.key(), aux);
         state
+            .model
+            .workspace
+            .insert_schematic_editor(aux_ref.key(), aux);
+        state
+            .model
             .workspace
             .content
             .open_views
@@ -1070,7 +1099,7 @@ mod tests {
         let amp_ref = CellViewRef::new("user", "amp", "schematic");
         let top_ref = CellViewRef::new("user", "top", "schematic");
 
-        if let Some(library) = state.library_manager.get_library_mut("user") {
+        if let Some(library) = state.model.library_manager.get_library_mut("user") {
             let mut amp = Cell::new("amp");
             amp.add_view(View::new("schematic", ViewType::Schematic));
             library.add_cell(amp);
@@ -1083,17 +1112,19 @@ mod tests {
         );
 
         state
+            .model
             .workspace
             .insert_schematic_editor(top_ref.key(), top.clone());
         state
+            .model
             .workspace
             .insert_schematic_editor(amp_ref.key(), SchematicState::default());
-        state.workspace.content.open_views =
+        state.model.workspace.content.open_views =
             vec![OpenCellView::new(top_ref.clone(), ViewType::Schematic)];
-        state.workspace.content.active_view = top_ref.clone();
-        state.workspace.content.hierarchy_stack = vec![top_ref];
-        state.workspace.content.hierarchy_instances.clear();
-        state.schematic = top;
+        state.model.workspace.content.active_view = top_ref.clone();
+        state.model.workspace.content.hierarchy_stack = vec![top_ref];
+        state.model.workspace.content.hierarchy_instances.clear();
+        state.model.schematic = top;
         state
     }
 
@@ -1126,6 +1157,7 @@ mod tests {
         assert!(state.dialogs.library_deletion_review.target.is_none());
         assert!(
             state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
@@ -1140,7 +1172,10 @@ mod tests {
         state
             .open_library_view_deletion_review("work", "amp", "symbol")
             .expect("writable exact view should open a deletion review");
-        state.library_manager.add_library(Library::new("unrelated"));
+        state
+            .model
+            .library_manager
+            .add_library(Library::new("unrelated"));
 
         let stale_error = state
             .confirm_library_deletion_review(DeletionInstanceResolution::KeepUnresolved)
@@ -1152,6 +1187,7 @@ mod tests {
         state.dialogs.library_deletion_review.close();
 
         state
+            .model
             .library_manager
             .get_library_mut("work")
             .expect("work library exists")
@@ -1168,6 +1204,7 @@ mod tests {
     fn deletion_review_reports_loaded_dependents_without_double_counting_active_buffer() {
         let mut state = state_with_open_amp_cell();
         state
+            .model
             .workspace
             .content
             .open_views
@@ -1176,6 +1213,7 @@ mod tests {
             .expect("amp schematic is open")
             .dirty = true;
         let mut stored_keep = state
+            .model
             .workspace
             .schematic_editor_mut(&CellViewRef::new("work", "keep", "schematic").key())
             .expect("keep schematic buffer exists");
@@ -1202,18 +1240,18 @@ mod tests {
     fn deleting_open_cell_prunes_workspace_references_and_restores_valid_focus() {
         let mut app = app_with_state(state_with_open_amp_cell());
         let source_id = insert_cell_source(&mut app.state, "amp", "behavior");
-        let project_revision_before = app.state.workspace.content.project.revision().get();
+        let project_revision_before = app.state.model.workspace.content.project.revision().get();
         app.state.pending_delete_cell = Some(("work".to_string(), "amp".to_string()));
 
         app.process_pending_library_deletions();
 
         assert_eq!(
-            app.state.workspace.content.project.revision().get(),
+            app.state.model.workspace.content.project.revision().get(),
             project_revision_before + 1
         );
         assert!(matches!(
             app.state
-                .workspace
+                .model.workspace
                 .content.project
                 .library_mutation_audit()
                 .last()
@@ -1221,9 +1259,10 @@ mod tests {
             Some(crate::state::ProjectLibraryMutation::DeleteCell { library, cell })
                 if library == "work" && cell == "amp"
         ));
-        assert!(app.state.workspace.content.project_metadata_dirty);
+        assert!(app.state.model.workspace.content.project_metadata_dirty);
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
@@ -1231,6 +1270,7 @@ mod tests {
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .open_views
@@ -1239,6 +1279,7 @@ mod tests {
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .hierarchy_stack
@@ -1247,25 +1288,33 @@ mod tests {
         );
         assert!(
             !app.state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
                 .contains_key("work/amp/schematic")
         );
         assert_ne!(
-            app.state.workspace.content.active_view,
+            app.state.model.workspace.content.active_view,
             CellViewRef::new("work", "amp", "schematic")
         );
-        assert!(app.state.workspace.active_context_schematic().is_some());
         assert!(
             app.state
+                .model
+                .workspace
+                .active_context_schematic()
+                .is_some()
+        );
+        assert!(
+            app.state
+                .model
                 .workspace
                 .content
                 .project_sources
                 .get_bundle(source_id)
                 .is_none()
         );
-        assert!(app.state.workspace.content.project_sources_dirty);
+        assert!(app.state.model.workspace.content.project_sources_dirty);
     }
 
     #[test]
@@ -1273,13 +1322,14 @@ mod tests {
         let mut state = state_with_open_amp_cell();
         let symbol_ref = CellViewRef::new("work", "amp", "symbol");
         state
+            .model
             .workspace
             .content
             .open_views
             .push(OpenCellView::new(symbol_ref.clone(), ViewType::Symbol));
-        state.workspace.content.active_view = symbol_ref.clone();
-        state.workspace.content.hierarchy_stack = vec![symbol_ref.clone()];
-        state.workspace.content.hierarchy_instances.clear();
+        state.model.workspace.content.active_view = symbol_ref.clone();
+        state.model.workspace.content.hierarchy_stack = vec![symbol_ref.clone()];
+        state.model.workspace.content.hierarchy_instances.clear();
         let mut app = app_with_state(state);
         app.state.pending_delete_view =
             Some(("work".to_string(), "amp".to_string(), "symbol".to_string()));
@@ -1288,7 +1338,7 @@ mod tests {
 
         assert!(matches!(
             app.state
-                .workspace
+                .model.workspace
                 .content.project
                 .library_mutation_audit()
                 .last()
@@ -1301,6 +1351,7 @@ mod tests {
         ));
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
@@ -1309,6 +1360,7 @@ mod tests {
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .open_views
@@ -1317,6 +1369,7 @@ mod tests {
         );
         assert!(
             !app.state
+                .model
                 .workspace
                 .content
                 .hierarchy_stack
@@ -1324,10 +1377,16 @@ mod tests {
                 .any(|reference| reference == &symbol_ref)
         );
         assert_eq!(
-            app.state.workspace.content.active_view,
+            app.state.model.workspace.content.active_view,
             CellViewRef::new("work", "amp", "schematic")
         );
-        assert!(app.state.workspace.active_context_schematic().is_some());
+        assert!(
+            app.state
+                .model
+                .workspace
+                .active_context_schematic()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1343,6 +1402,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1351,13 +1411,14 @@ mod tests {
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .project_sources
                 .get_bundle(retained_id)
                 .is_some()
         );
-        assert!(app.state.workspace.content.project_sources_dirty);
+        assert!(app.state.model.workspace.content.project_sources_dirty);
     }
 
     #[test]
@@ -1366,13 +1427,14 @@ mod tests {
         let root = CellViewRef::new("work", "amp", "schematic");
         let active = add_configuration_root(&mut state, "Release", root.clone());
         let inactive = state
+            .model
             .workspace
             .content
             .configuration_sets
             .clone_configuration(active, 1, "Characterization")
             .expect("inactive configuration");
         assert_ne!(active, inactive);
-        let before_catalog = state.workspace.content.configuration_sets.clone();
+        let before_catalog = state.model.workspace.content.configuration_sets.clone();
         let mut app = app_with_state(state);
 
         app.state.pending_delete_view =
@@ -1380,6 +1442,7 @@ mod tests {
         app.process_pending_library_deletions();
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
@@ -1391,13 +1454,14 @@ mod tests {
         app.process_pending_library_deletions();
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
                 .is_some()
         );
         assert_eq!(
-            app.state.workspace.content.configuration_sets,
+            app.state.model.workspace.content.configuration_sets,
             before_catalog
         );
     }
@@ -1410,9 +1474,19 @@ mod tests {
 
         app.process_pending_library_deletions();
 
-        assert_eq!(app.state.workspace.content.active_view, leaf);
-        assert_eq!(app.state.workspace.content.hierarchy_stack, vec![leaf]);
-        assert!(app.state.workspace.content.hierarchy_instances.is_empty());
+        assert_eq!(app.state.model.workspace.content.active_view, leaf);
+        assert_eq!(
+            app.state.model.workspace.content.hierarchy_stack,
+            vec![leaf]
+        );
+        assert!(
+            app.state
+                .model
+                .workspace
+                .content
+                .hierarchy_instances
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1424,6 +1498,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("user")
                 .and_then(|library| library.get_cell("top"))
@@ -1431,10 +1506,16 @@ mod tests {
             "deleted default top cell should not be recreated as fallback"
         );
         assert_ne!(
-            app.state.workspace.content.active_view,
+            app.state.model.workspace.content.active_view,
             CellViewRef::new("user", "top", "schematic")
         );
-        assert!(app.state.workspace.active_context_schematic().is_some());
+        assert!(
+            app.state
+                .model
+                .workspace
+                .active_context_schematic()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1450,6 +1531,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("user")
                 .and_then(|library| library.get_cell("top"))
@@ -1458,38 +1540,48 @@ mod tests {
             "deleted default top schematic view should not be recreated as fallback"
         );
         assert_ne!(
-            app.state.workspace.content.active_view,
+            app.state.model.workspace.content.active_view,
             CellViewRef::new("user", "top", "schematic")
         );
-        assert!(app.state.workspace.active_context_schematic().is_some());
+        assert!(
+            app.state
+                .model
+                .workspace
+                .active_context_schematic()
+                .is_some()
+        );
     }
 
     #[test]
     fn deleting_non_active_project_top_cell_repoints_root_and_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_keep_cell());
-        let original_epoch = app.state.design_execution_epoch;
+        let original_epoch = app.state.model.design_execution_epoch;
         app.state.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
 
         app.process_pending_library_deletions();
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("user")
                 .and_then(|library| library.get_cell("top"))
                 .is_none(),
             "deleted project top cell should stay deleted"
         );
-        assert_eq!(app.state.workspace.content.active_view.cell, "keep");
-        assert_eq!(app.state.workspace.content.project.root_library, "user");
-        assert_eq!(app.state.workspace.content.project.top_cell, "keep");
-        assert_ne!(app.state.design_execution_epoch, original_epoch);
+        assert_eq!(app.state.model.workspace.content.active_view.cell, "keep");
+        assert_eq!(
+            app.state.model.workspace.content.project.root_library,
+            "user"
+        );
+        assert_eq!(app.state.model.workspace.content.project.top_cell, "keep");
+        assert_ne!(app.state.model.design_execution_epoch, original_epoch);
     }
 
     #[test]
     fn deleting_non_active_project_top_schematic_repoints_root_and_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_keep_cell());
-        let original_epoch = app.state.design_execution_epoch;
+        let original_epoch = app.state.model.design_execution_epoch;
         app.state.pending_delete_view = Some((
             "user".to_string(),
             "top".to_string(),
@@ -1500,6 +1592,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("user")
                 .and_then(|library| library.get_cell("top"))
@@ -1507,16 +1600,19 @@ mod tests {
                 .is_none(),
             "deleted project top schematic should stay deleted"
         );
-        assert_eq!(app.state.workspace.content.active_view.cell, "keep");
-        assert_eq!(app.state.workspace.content.project.root_library, "user");
-        assert_eq!(app.state.workspace.content.project.top_cell, "keep");
-        assert_ne!(app.state.design_execution_epoch, original_epoch);
+        assert_eq!(app.state.model.workspace.content.active_view.cell, "keep");
+        assert_eq!(
+            app.state.model.workspace.content.project.root_library,
+            "user"
+        );
+        assert_eq!(app.state.model.workspace.content.project.top_cell, "keep");
+        assert_ne!(app.state.model.design_execution_epoch, original_epoch);
     }
 
     #[test]
     fn deleting_instanced_non_active_cell_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_top_instancing_amp());
-        let original_epoch = app.state.design_execution_epoch;
+        let original_epoch = app.state.model.design_execution_epoch;
         stage_cell_deletion(
             &mut app.state,
             "amp",
@@ -1525,16 +1621,19 @@ mod tests {
 
         app.process_pending_library_deletions();
 
-        assert_eq!(app.state.workspace.content.active_view.cell, "top");
-        assert_eq!(app.state.workspace.content.project.root_library, "user");
-        assert_eq!(app.state.workspace.content.project.top_cell, "top");
-        assert_ne!(app.state.design_execution_epoch, original_epoch);
+        assert_eq!(app.state.model.workspace.content.active_view.cell, "top");
+        assert_eq!(
+            app.state.model.workspace.content.project.root_library,
+            "user"
+        );
+        assert_eq!(app.state.model.workspace.content.project.top_cell, "top");
+        assert_ne!(app.state.model.design_execution_epoch, original_epoch);
     }
 
     #[test]
     fn deleting_instanced_non_active_schematic_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_top_instancing_amp());
-        let original_epoch = app.state.design_execution_epoch;
+        let original_epoch = app.state.model.design_execution_epoch;
         app.state.pending_delete_view = Some((
             "user".to_string(),
             "amp".to_string(),
@@ -1545,18 +1644,22 @@ mod tests {
 
         app.process_pending_library_deletions();
 
-        assert_eq!(app.state.workspace.content.active_view.cell, "top");
-        assert_eq!(app.state.workspace.content.project.root_library, "user");
-        assert_eq!(app.state.workspace.content.project.top_cell, "top");
-        assert_ne!(app.state.design_execution_epoch, original_epoch);
+        assert_eq!(app.state.model.workspace.content.active_view.cell, "top");
+        assert_eq!(
+            app.state.model.workspace.content.project.root_library,
+            "user"
+        );
+        assert_eq!(app.state.model.workspace.content.project.top_cell, "top");
+        assert_ne!(app.state.model.design_execution_epoch, original_epoch);
     }
 
     #[test]
     fn deleting_cell_blocks_live_variant_then_removes_and_tombstones_design_management_ownership() {
         let mut state = state_with_open_amp_cell();
-        let object_id = state.schematic.document().components[0].id;
+        let object_id = state.model.schematic.document().components[0].id;
         let owner = CellViewRef::new("work", "amp", "schematic").key();
         let sheet_id = state
+            .model
             .workspace
             .content
             .design_management
@@ -1565,6 +1668,7 @@ mod tests {
         let object = crate::state::SchematicObjectKey::new(&owner, object_id)
             .expect("scoped schematic object");
         let variant_id = state
+            .model
             .workspace
             .content
             .design_management
@@ -1602,6 +1706,7 @@ mod tests {
             }],
         };
         let preview = state
+            .model
             .workspace
             .content
             .design_management
@@ -1609,13 +1714,14 @@ mod tests {
             .preview_renumbering(&renumber_request)
             .expect("renumber preview");
         state
+            .model
             .workspace
             .content
             .design_management
             .annotation_mut()
             .commit_renumbering(&preview, &renumber_request)
             .expect("reviewed annotation");
-        let catalog_before_blocked_delete = state.workspace.content.design_management.clone();
+        let catalog_before_blocked_delete = state.model.workspace.content.design_management.clone();
         let mut app = app_with_state(state);
 
         app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
@@ -1623,6 +1729,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
@@ -1630,7 +1737,7 @@ mod tests {
             "a live scoped variant must block the library mutation"
         );
         assert_eq!(
-            app.state.workspace.content.design_management, catalog_before_blocked_delete,
+            app.state.model.workspace.content.design_management, catalog_before_blocked_delete,
             "blocked deletion must not partially mutate governed design state"
         );
         assert!(app.state.workbench.prompt.as_ref().is_some_and(|prompt| {
@@ -1642,6 +1749,7 @@ mod tests {
 
         let variant_revision = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1650,6 +1758,7 @@ mod tests {
             .expect("variant remains after blocked delete")
             .revision();
         app.state
+            .model
             .workspace
             .content
             .design_management
@@ -1669,6 +1778,7 @@ mod tests {
             .expect("variant reference is reviewed away");
         let annotation_journal_len = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1681,6 +1791,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
@@ -1688,6 +1799,7 @@ mod tests {
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1696,6 +1808,7 @@ mod tests {
         );
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1707,6 +1820,7 @@ mod tests {
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1717,6 +1831,7 @@ mod tests {
         );
         assert!(matches!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1730,7 +1845,7 @@ mod tests {
     #[test]
     fn deleting_cell_publishes_annotation_tombstones_without_a_sheet_catalog() {
         let mut state = state_with_open_amp_cell();
-        let object_id = state.schematic.document().components[0].id;
+        let object_id = state.model.schematic.document().components[0].id;
         let owner = CellViewRef::new("work", "amp", "schematic").key();
         let object = crate::state::SchematicObjectKey::new(&owner, object_id)
             .expect("scoped schematic object");
@@ -1754,6 +1869,7 @@ mod tests {
             }],
         };
         let preview = state
+            .model
             .workspace
             .content
             .design_management
@@ -1761,6 +1877,7 @@ mod tests {
             .preview_renumbering(&renumber_request)
             .expect("renumber preview");
         state
+            .model
             .workspace
             .content
             .design_management
@@ -1769,6 +1886,7 @@ mod tests {
             .expect("reviewed annotation");
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1776,6 +1894,7 @@ mod tests {
                 .is_none()
         );
         let journal_len = state
+            .model
             .workspace
             .content
             .design_management
@@ -1789,6 +1908,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("work")
                 .and_then(|library| library.get_cell("amp"))
@@ -1796,6 +1916,7 @@ mod tests {
         );
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1807,6 +1928,7 @@ mod tests {
         );
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1817,6 +1939,7 @@ mod tests {
         );
         assert!(matches!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1836,6 +1959,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("user")
                 .and_then(|library| library.get_cell("amp"))
@@ -1859,6 +1983,7 @@ mod tests {
 
         assert!(
             app.state
+                .model
                 .library_manager
                 .get_library("user")
                 .and_then(|library| library.get_cell("amp"))
@@ -1870,7 +1995,7 @@ mod tests {
     #[test]
     fn keeping_placements_leaves_them_drawn_and_unresolved() {
         let mut state = default_project_with_active_top_instancing_amp();
-        let binding = state.schematic.document_mut_for_test().components[0]
+        let binding = state.model.schematic.document_mut_for_test().components[0]
             .library_cell
             .as_mut()
             .expect("the fixture places amp");
@@ -1886,6 +2011,7 @@ mod tests {
 
         let top = app
             .state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -1907,8 +2033,9 @@ mod tests {
         );
         assert_eq!(
             app.state
+                .model
                 .workspace
-                .resolve_hierarchy(&app.state.library_manager)
+                .resolve_hierarchy(&app.state.model.library_manager)
                 .unresolved_instances(),
             1,
             "the navigator has an unresolved placement to show"
@@ -1931,7 +2058,7 @@ mod tests {
 
         for key in [&top_key, &aux_key] {
             assert!(
-                app.state.workspace.content.schematic_buffers[key]
+                app.state.model.workspace.content.schematic_buffers[key]
                     .document()
                     .components
                     .is_empty(),
@@ -1952,7 +2079,7 @@ mod tests {
         assert!(description.contains("user/amp"));
         for key in [&top_key, &aux_key] {
             assert_eq!(
-                app.state.workspace.content.schematic_buffers[key]
+                app.state.model.workspace.content.schematic_buffers[key]
                     .document()
                     .components
                     .len(),

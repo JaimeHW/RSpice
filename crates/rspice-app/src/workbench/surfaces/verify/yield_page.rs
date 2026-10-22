@@ -105,7 +105,7 @@ fn yield_rows(ctx: &egui::Context, app: &RSpiceApp, results: &[YieldResult]) -> 
     let key = egui::Id::new((
         "workbench.verify.yield.rows",
         verification_run(app).map(|run| run.dataset_id.to_string()),
-        app.state.simulation.view.data_version,
+        app.state.model.simulation.view.data_version,
         results.len(),
         results
             .iter()
@@ -167,6 +167,7 @@ pub(super) fn yield_summary(results: &[YieldResult]) -> Option<Summary> {
 pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
     let runs = run_choice(app, |run| {
         app.state
+            .model
             .simulation
             .retained
             .yield_results_for_dataset(run.dataset_id)
@@ -205,7 +206,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::EditSpecifications.execute(app);
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.simulation, index);
+        select_verification_run(&mut app.state.model.simulation, index);
     }
     action_problem_line(ui, app);
 

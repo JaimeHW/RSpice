@@ -79,7 +79,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .fill(Tokens::get(ui.ctx()).color.bg_app)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            header(ui, app.state.workspace.content.project.name());
+            header(ui, app.state.model.workspace.content.project.name());
             body(ui, &mut app.state, &mut action);
         });
     if let Some(action) = action {
@@ -559,8 +559,9 @@ struct DeckFacts {
 }
 
 fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFacts {
-    let document = state.workspace.content.netlist_document.as_ref();
+    let document = state.model.workspace.content.netlist_document.as_ref();
     let name = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -576,6 +577,7 @@ fn deck_facts(state: &AppState, index: &NetlistSourceIndex) -> DeckFacts {
         })
         .unwrap_or_else(|| "Untitled deck".to_owned());
     let dialect = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -812,7 +814,7 @@ mod tests {
 
         assert!(app.state.is_netlist_first_without_schematic());
 
-        app.state.schematic.add_component(
+        app.state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(0, 0),
         );
@@ -934,7 +936,7 @@ mod tests {
         let mut app = netlist_first_app();
         // An include file open in the editor, or nothing projected into it yet.
         for editor in ["* models.inc\n.model NFET NMOS (LEVEL=1)\n", ""] {
-            editor.clone_into(&mut app.state.simulation.source.netlist_content);
+            editor.clone_into(&mut app.state.model.simulation.source.netlist_content);
             let text = painted_text(vec2(1440.0, 900.0), |ui| show(ui, &mut app)).join("\n");
             assert!(text.contains("Precision front-end bench"), "{text}");
             assert!(!text.contains("* models.inc"), "{text}");

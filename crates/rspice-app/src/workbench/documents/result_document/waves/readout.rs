@@ -13,7 +13,7 @@ pub(super) use rspice_results_ui::waves::readout::{
 };
 
 pub(super) fn on_screen_strips(state: &AppState) -> Vec<AnalysisPresentationKey> {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return Vec::new();
     };
     let results = &state.ui.results;
@@ -39,7 +39,7 @@ fn with_readout<R>(
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = need_models.then(|| {
         cached_models(
-            &state.simulation,
+            &state.model.simulation,
             &mut state.ui.results,
             presentation.complex_number_display(),
             tokens,

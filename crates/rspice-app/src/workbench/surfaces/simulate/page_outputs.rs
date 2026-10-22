@@ -82,8 +82,9 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// spells them the same way tells the reader a run would capture nothing when
 /// in truth nothing here is known about the run at all.
 fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
-    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
     app.state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -304,7 +305,7 @@ fn registry(
                 empty_registry_row(
                     ui,
                     &empty_registry_text(
-                        app.state.sim_setup.save_policy.output_selection_mode,
+                        app.state.model.sim_setup.save_policy.output_selection_mode,
                         enabled_schematic_probe_outputs(app),
                     ),
                     Tone::Neutral,
@@ -348,6 +349,7 @@ fn registry(
     );
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
@@ -657,10 +659,11 @@ pub(super) fn empty_registry_outcome(
 /// registry is about.
 fn enabled_schematic_probe_outputs(app: &RSpiceApp) -> usize {
     app.state
+        .model
         .workspace
         .simulation_root_schematic(
-            &app.state.workspace.content.active_view,
-            &app.state.schematic,
+            &app.state.model.workspace.content.active_view,
+            &app.state.model.schematic,
         )
         .map_or(0, |schematic| {
             rspice_simulation::output_contract::selection::enabled_probe_output_count(
@@ -803,7 +806,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let handoff: std::cell::Cell<Option<EditorHandoff>> = std::cell::Cell::new(None);
     let view_trace = std::cell::Cell::new(false);
     let dataset = super::output_evidence::selected_plan_dataset(app).is_some();
-    let dataset_rule = if app.state.simulation.active_run().is_some() {
+    let dataset_rule = if app.state.model.simulation.active_run().is_some() {
         "The active dataset was not produced by this simulation plan, so its measurements and units cannot be used here."
     } else {
         EditorHandoff::DATASET_RULE
@@ -1009,6 +1012,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             && let Some(target) = target
             && let Ok(plan_id) = app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .map(|plan| plan.id())
@@ -1108,7 +1112,7 @@ pub(super) fn materialized_traces(
     output: &SavedOutput,
 ) -> Result<(usize, Vec<usize>), String> {
     let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
-        if app.state.simulation.active_run().is_some() {
+        if app.state.model.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so it holds no trace for this \
              output."
                 .to_owned()
@@ -1193,7 +1197,7 @@ pub(super) fn open_materialized_traces(
     use crate::workbench::documents::result_document::AnalysisPresentationKey;
     use rspice_results::result_presentation::SourceWaveformPresentationKey;
     use rspice_results_ui::selection::SelectedResultTrace;
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = app.state.model.simulation.active_run() else {
         return;
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
@@ -1222,7 +1226,7 @@ pub(super) fn open_materialized_traces(
     } else {
         None
     };
-    if !app.state.simulation.select_analysis(analysis_index) {
+    if !app.state.model.simulation.select_analysis(analysis_index) {
         return;
     }
     app.state.ui.results.reveal_waveforms(visibility);
@@ -1388,7 +1392,7 @@ fn compatibility_options(app: &RSpiceApp) -> Vec<(String, SavedOutputCompatibili
             SavedOutputCompatibility::OpTranAc,
         ),
     ];
-    if let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
+    if let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() {
         options.extend(
             plan.instances()
                 .iter()
@@ -1440,24 +1444,26 @@ fn replace_output(
 ) -> bool {
     let Ok(plan_id) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
     else {
         return false;
     };
-    let Some(mut replacement) =
-        app.state
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .and_then(|payload| {
-                payload
-                    .saved_outputs
-                    .iter()
-                    .find(|output| output.id == output_id)
-                    .cloned()
-            })
+    let Some(mut replacement) = app
+        .state
+        .model
+        .workspace
+        .content
+        .plan_data(plan_id)
+        .and_then(|payload| {
+            payload
+                .saved_outputs
+                .iter()
+                .find(|output| output.id == output_id)
+                .cloned()
+        })
     else {
         return false;
     };
@@ -1506,7 +1512,7 @@ fn storage_read(
                 &effective,
                 &reports,
                 &membership,
-                app.state.sim_setup.save_policy.output_selection_mode,
+                app.state.model.sim_setup.save_policy.output_selection_mode,
                 workload,
             );
             let named = ledger
@@ -1580,6 +1586,7 @@ mod tests {
         let (first, second, named) = {
             let plan = app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan_mut()
                 .expect("the test instance carries a stable plan");

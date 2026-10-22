@@ -9,16 +9,17 @@ use super::*;
 #[test]
 fn governed_design_print_selects_the_active_sheet_identity() {
     let mut app = RSpiceApp::test_instance();
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
         .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
             reference,
         ));
-    let key = app.state.workspace.content.active_key();
+    let key = app.state.model.workspace.content.active_key();
     let sheet_id = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -71,6 +72,7 @@ fn results_export_selects_the_active_project_document_pane_authority() {
     let document_id = document.id();
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -215,18 +217,20 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
 
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
         .activate(WorkspaceDocumentId::CellView(reference));
-    let key = app.state.workspace.content.active_key();
+    let key = app.state.model.workspace.content.active_key();
     let sheet_id = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -234,6 +238,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
         .unwrap();
     let catalog = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -273,6 +278,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
 
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .design_management
@@ -289,6 +295,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
     );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .hardcopy_setups
@@ -298,7 +305,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
             .setup(),
         &setup
     );
-    assert!(app.state.workspace.content.hardcopy_setups_dirty);
+    assert!(app.state.model.workspace.content.hardcopy_setups_dirty);
 }
 
 #[test]
@@ -309,11 +316,12 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
 
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -323,7 +331,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
             &app.state,
         )
         .expect("legacy schematic resolves");
-    let policy_before = app.state.schematic.document().document_policy;
+    let policy_before = app.state.model.schematic.document().document_policy;
     let format = SchematicSheetFormat::try_custom(
         "Custom",
         300_123,
@@ -344,11 +352,11 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
     commit_authenticated_page_setup(&mut app, resolved, pending).unwrap();
 
     assert_eq!(
-        app.state.schematic.document().document_policy,
+        app.state.model.schematic.document().document_policy,
         policy_before,
         "hardcopy output media must not mutate the authored schematic policy"
     );
-    assert_eq!(app.state.schematic.history().undo_description(), None);
+    assert_eq!(app.state.model.schematic.history().undo_description(), None);
 }
 
 #[test]
@@ -362,11 +370,12 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
 
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -405,6 +414,7 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
     );
     assert!(
         app.state
+            .model
             .workspace
             .content
             .hardcopy_setups
@@ -413,7 +423,12 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
             .is_none()
     );
     assert_eq!(
-        app.state.schematic.document().document_policy.page_size,
+        app.state
+            .model
+            .schematic
+            .document()
+            .document_policy
+            .page_size,
         SchematicPageSize::A4
     );
 }
@@ -423,9 +438,10 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
     use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
 
     let mut app = RSpiceApp::test_instance();
-    let key = app.state.workspace.content.active_key();
+    let key = app.state.model.workspace.content.active_key();
     let sheet_id = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -433,6 +449,7 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
         .unwrap();
     let catalog = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -449,6 +466,7 @@ fn governed_page_authority_rejects_catalog_or_active_sheet_drift() {
     };
     let catalog = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -485,11 +503,12 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
 
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -533,11 +552,12 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
 
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     app.state
         .workbench
         .documents
@@ -641,7 +661,13 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
     use rspice_hardcopy_contract::{PrintMappingSaveScope, PrintMappingTable};
 
     let mut app = RSpiceApp::test_instance();
-    let before = app.state.workspace.content.project_print_mappings.clone();
+    let before = app
+        .state
+        .model
+        .workspace
+        .content
+        .project_print_mappings
+        .clone();
     let mapping = PrintMappingTable::try_new(
         PrintMappingSaveScope::ProjectPrintSet("release-proof".to_owned()),
         Vec::new(),
@@ -649,16 +675,35 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
     .unwrap();
 
     let staged = stage_print_mapping_persistence(&app, &mapping).unwrap();
-    assert_eq!(app.state.workspace.content.project_print_mappings, before);
-    assert!(!app.state.workspace.content.project_print_mappings_dirty);
+    assert_eq!(
+        app.state.model.workspace.content.project_print_mappings,
+        before
+    );
+    assert!(
+        !app.state
+            .model
+            .workspace
+            .content
+            .project_print_mappings_dirty
+    );
     drop(staged);
-    assert_eq!(app.state.workspace.content.project_print_mappings, before);
-    assert!(!app.state.workspace.content.project_print_mappings_dirty);
+    assert_eq!(
+        app.state.model.workspace.content.project_print_mappings,
+        before
+    );
+    assert!(
+        !app.state
+            .model
+            .workspace
+            .content
+            .project_print_mappings_dirty
+    );
 
     let staged = stage_print_mapping_persistence(&app, &mapping).unwrap();
     commit_print_mapping_persistence(&mut app, staged).unwrap();
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .project_print_mappings
@@ -666,7 +711,13 @@ fn project_print_mapping_stage_is_transactional_until_publication_commit() {
             .unwrap(),
         &mapping
     );
-    assert!(app.state.workspace.content.project_print_mappings_dirty);
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .project_print_mappings_dirty
+    );
 }
 
 #[test]
@@ -718,11 +769,12 @@ fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
         .expect("a new top deck is offered");
     commit_netlist_lifecycle_action(&mut app.state).expect("the project owns a top deck");
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(71, Point::new(0, 0), Point::new(20, 0)));
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     app.state.workbench.activate(Workspace::Design);
     app.state
         .workbench
@@ -777,14 +829,14 @@ fn netlist_transactions_keep_an_export_in_flight() {
         PEER_DECK.to_owned()
     ));
     assert_eq!(
-        app.state.workspace.content.netlist_source.as_deref(),
+        app.state.model.workspace.content.netlist_source.as_deref(),
         Some(PEER_DECK)
     );
     assert_export_survived(&app, &plan, "a live-session update");
 
     assert!(replace_owned_source(&mut app.state, EDITED_DECK.to_owned()));
     assert_eq!(
-        app.state.workspace.content.netlist_source.as_deref(),
+        app.state.model.workspace.content.netlist_source.as_deref(),
         Some(EDITED_DECK)
     );
     assert_export_survived(&app, &plan, "a netlist editor edit");
@@ -805,6 +857,7 @@ fn reverting_a_document_keeps_an_export_in_flight() {
     let baseline = snapshot(&app.state).expect("the project snapshots");
     accept_loaded_project(&mut app.state, baseline, None);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -822,7 +875,7 @@ fn reverting_a_document_keeps_an_export_in_flight() {
         prepare_revert_active_document(&app.state).expect("the edited schematic can be reverted");
     confirm_revert_active_document(&mut app.state, &review).expect("the revert commits");
     assert_eq!(
-        app.state.schematic.document().wires.len(),
+        app.state.model.schematic.document().wires.len(),
         1,
         "the revert restored the accepted schematic"
     );
@@ -932,7 +985,7 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         receipt.outcome(),
         HardcopyOutcome::ArtifactExported { .. }
     ));
-    assert!(app.state.workspace.content.hardcopy_receipts_dirty);
+    assert!(app.state.model.workspace.content.hardcopy_receipts_dirty);
     let written = std::fs::read(&path).expect("the export wrote its file");
     std::fs::remove_file(&path).expect("remove the exported fixture");
     assert!(written.starts_with(b"%PDF"), "the export wrote a PDF");

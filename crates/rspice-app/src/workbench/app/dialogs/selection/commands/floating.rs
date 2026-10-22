@@ -87,10 +87,10 @@ impl AppState {
         if self.dialogs.array_selection.armed {
             crate::workbench::app::cancel_armed_array_selection(self);
         }
-        if self.schematic.session.editor.tool != Tool::Select {
-            self.schematic.cancel_tool();
+        if self.model.schematic.session.editor.tool != Tool::Select {
+            self.model.schematic.cancel_tool();
         }
-        let grid = self.schematic.document().grid_size;
+        let grid = self.model.schematic.document().grid_size;
         let count = objects.count();
         self.dialogs.floating_paste = Some(FloatingPaste {
             objects,
@@ -100,7 +100,7 @@ impl AppState {
                 .canvas_hover
                 .map(|_| on_grid(self.schematic_paste_anchor(), grid)),
             delta: Point::origin(),
-            view_path: self.workspace.content.active_view.display_path(),
+            view_path: self.model.workspace.content.active_view.display_path(),
             sheet: active_sheet(self),
             origin,
             preview: None,
@@ -248,7 +248,7 @@ fn floating_scope(state: &AppState, floating: &FloatingPaste) -> Result<(), Stri
     if state.schematic_edit_read_only() {
         return Err("the schematic is read-only".to_owned());
     }
-    if floating.view_path != state.workspace.content.active_view.display_path() {
+    if floating.view_path != state.model.workspace.content.active_view.display_path() {
         return Err("another cell view is open".to_owned());
     }
     if floating.sheet != active_sheet(state) {
@@ -258,8 +258,14 @@ fn floating_scope(state: &AppState, floating: &FloatingPaste) -> Result<(), Stri
 }
 
 fn active_sheet(state: &AppState) -> Option<crate::state::SheetId> {
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     state
+        .model
         .workspace
         .content
         .design_management

@@ -27,7 +27,7 @@ use rspice_results::histogram::HistogramDisplayMode;
 
 fn distribution() -> (AppState, String) {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::MonteCarlo, "MC").with_family_metadata(
             AnalysisResultFamilyMetadata::MonteCarlo {
@@ -66,7 +66,7 @@ fn distribution() -> (AppState, String) {
     run.finish_lifecycle(SimulationRunLifecycle::Completed)
         .unwrap();
     let dataset = run.dataset_id;
-    state.simulation.complete_run();
+    state.model.simulation.complete_run();
     state
         .workbench
         .documents
@@ -76,7 +76,7 @@ fn distribution() -> (AppState, String) {
     state.ui.results.session.viewer = ResultViewer::Hist;
     let key = format!(
         "project:{}:result-dataset:{}",
-        state.workspace.content.project.id().as_uuid(),
+        state.model.workspace.content.project.id().as_uuid(),
         dataset
     );
     (state, key)
@@ -193,7 +193,7 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
 fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_removal() {
     let (mut state, key) = distribution();
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {
@@ -212,7 +212,7 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
     assert_eq!(onscreen.name, "gain");
     assert_eq!(onscreen.data_max, 2.0);
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {

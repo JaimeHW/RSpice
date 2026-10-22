@@ -26,7 +26,7 @@ pub(super) fn handle_armed_stretch_selection(
     symbol_context: &SchematicSymbolContext,
 ) {
     if state.application_modal_open()
-        || state.schematic.session.editor.tool != Tool::StretchSelection
+        || state.model.schematic.session.editor.tool != Tool::StretchSelection
         || !state.dialogs.stretch_selection.armed
     {
         return;
@@ -42,10 +42,10 @@ pub(super) fn handle_armed_stretch_selection(
         viewport,
         StretchInputView {
             design: super::schematic_design_view(state),
-            selection: &state.schematic.session.editor.selection,
+            selection: &state.model.schematic.session.editor.selection,
             canvas: &state.dialogs.stretch_selection.canvas,
             policy: state.dialogs.stretch_selection.policy,
-            snap_engine: &state.schematic.session.editor.snap_engine,
+            snap_engine: &state.model.schematic.session.editor.snap_engine,
         },
     ) {
         let request = capture(state, transition);
@@ -59,7 +59,7 @@ fn capture(
 ) -> StretchInputRequest {
     StretchInputRequest {
         source: editor_request_source(state),
-        selection: state.schematic.session.editor.selection.clone(),
+        selection: state.model.schematic.session.editor.selection.clone(),
         generation: state.dialogs.stretch_selection.generation,
         policy: state.dialogs.stretch_selection.policy,
         transition,
@@ -69,11 +69,11 @@ fn capture(
 fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: StretchInputRequest) {
     let draft = &state.dialogs.stretch_selection;
     if request.source != editor_request_source(state)
-        || request.selection != state.schematic.session.editor.selection
+        || request.selection != state.model.schematic.session.editor.selection
         || request.generation != draft.generation
         || request.policy != draft.policy
         || request.transition.expected != draft.canvas
-        || state.schematic.session.editor.tool != Tool::StretchSelection
+        || state.model.schematic.session.editor.tool != Tool::StretchSelection
         || !draft.armed
         || state.application_modal_open()
         || armed_stretch_selection_authority(state).is_err()
@@ -122,7 +122,7 @@ pub(super) fn commit_armed_stretch_selection(
         return;
     }
 
-    state.schematic.begin_operation("stretch selection");
+    state.model.schematic.begin_operation("stretch selection");
     // Another sheet's wire or junction can share the stretched segment's
     // coordinates; it neither anchors the stretch nor moves with it.
     let stretched = with_active_wire_topology(state, |schematic, scope| {
@@ -137,7 +137,7 @@ pub(super) fn commit_armed_stretch_selection(
     });
     match stretched {
         Ok(true) => {
-            let recorded = state.schematic.end_operation();
+            let recorded = state.model.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
             state.prompt(if recorded {
                 format!(
@@ -152,12 +152,12 @@ pub(super) fn commit_armed_stretch_selection(
             cancel_armed_stretch_selection(state);
         }
         Ok(false) => {
-            state.schematic.cancel_operation();
+            state.model.schematic.cancel_operation();
             state.prompt("Nothing stretched.");
             cancel_armed_stretch_selection(state);
         }
         Err(error) => {
-            state.schematic.cancel_operation();
+            state.model.schematic.cancel_operation();
             let draft = &mut state.dialogs.stretch_selection;
             draft.canvas.gesture.preview_error = Some(error.to_string());
             draft.canvas.gesture.reset_candidate();
@@ -178,6 +178,7 @@ mod tests {
 
     fn selected_stretch_wire_in(mut state: AppState) -> AppState {
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -191,12 +192,13 @@ mod tests {
                 ],
             ));
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_wire_segment(7, 1);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         state
     }
 
@@ -267,19 +269,20 @@ mod tests {
         }
 
         assert_eq!(
-            state.schematic.document().wires[0].points[1],
+            state.model.schematic.document().wires[0].points[1],
             Point::new(0, 30)
         );
         assert_eq!(
-            state.schematic.document().wires[0].points[2],
+            state.model.schematic.document().wires[0].points[2],
             Point::new(20, 30)
         );
         assert_eq!(
-            state.schematic.undo_description(),
+            state.model.schematic.undo_description(),
             Some("stretch selection")
         );
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -287,12 +290,13 @@ mod tests {
                 .has_wire_segment(7, 1)
         );
         assert_eq!(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             crate::state::Tool::Select
         );
         assert!(!state.dialogs.stretch_selection.armed);
         assert_eq!(
             state
+                .model
                 .workspace
                 .active_schematic()
                 .expect("active workspace buffer")
@@ -301,13 +305,13 @@ mod tests {
                 .points[1],
             Point::new(0, 30)
         );
-        assert!(state.schematic.undo());
+        assert!(state.model.schematic.undo());
         assert_eq!(
-            state.schematic.document().wires[0].points[1],
+            state.model.schematic.document().wires[0].points[1],
             Point::new(0, 20)
         );
         assert!(
-            !state.schematic.can_undo(),
+            !state.model.schematic.can_undo(),
             "the gesture owns one undo record"
         );
     }
@@ -315,15 +319,16 @@ mod tests {
     #[test]
     fn cancel_preserves_geometry_selection_and_history() {
         let mut state = selected_stretch_wire();
-        let baseline = state.schematic.document().wires[0].clone();
+        let baseline = state.model.schematic.document().wires[0].clone();
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
 
         crate::workbench::app::cancel_armed_stretch_selection(&mut state);
 
-        assert_eq!(state.schematic.document().wires[0], baseline);
+        assert_eq!(state.model.schematic.document().wires[0], baseline);
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -331,10 +336,10 @@ mod tests {
                 .has_wire_segment(7, 1)
         );
         assert_eq!(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             crate::state::Tool::Select
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// A junction on Sheet 2 sits on the stretched segment's coordinates. It
@@ -346,6 +351,7 @@ mod tests {
         );
         let hidden = Junction::new(21, Point::new(10, 20));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .junctions
@@ -357,12 +363,12 @@ mod tests {
         commit_armed_stretch_selection(&mut state, &symbols);
 
         assert_eq!(
-            state.schematic.document().wires[0].points[1],
+            state.model.schematic.document().wires[0].points[1],
             Point::new(0, 30)
         );
-        assert_eq!(state.schematic.document().junctions, vec![hidden]);
+        assert_eq!(state.model.schematic.document().junctions, vec![hidden]);
         assert_eq!(
-            state.schematic.undo_description(),
+            state.model.schematic.undo_description(),
             Some("stretch selection")
         );
     }
@@ -374,18 +380,19 @@ mod tests {
     fn a_route_stretches_with_its_neighbour_and_leaves_another_sheets_wire() {
         let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[7, 8], &[21]);
         let hidden = Wire::segment(21, Point::new(20, 20), Point::new(20, 0));
-        state.schematic.document_mut_for_test().wires = vec![
+        state.model.schematic.document_mut_for_test().wires = vec![
             Wire::segment(8, Point::new(0, 0), Point::new(0, 20)),
             Wire::segment(7, Point::new(0, 20), Point::new(20, 20)),
             hidden.clone(),
         ];
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_wire_segment(7, 0);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
@@ -394,6 +401,7 @@ mod tests {
 
         let wire = |id: u64| {
             state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -421,6 +429,7 @@ mod tests {
         );
         let hidden = Junction::new(21, Point::new(10, 20));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .junctions
@@ -447,20 +456,22 @@ mod tests {
     fn rejected_commit_preserves_authority_selection_and_undo_history() {
         let mut state = selected_stretch_wire();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .junctions
             .push(Junction::new(1, Point::new(10, 20)));
-        let baseline = state.schematic.document().wires[0].clone();
+        let baseline = state.model.schematic.document().wires[0].clone();
         arm_test_stretch(&mut state);
         state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_stretch_selection(&mut state, &symbols);
 
-        assert_eq!(state.schematic.document().wires[0], baseline);
+        assert_eq!(state.model.schematic.document().wires[0], baseline);
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -468,7 +479,7 @@ mod tests {
                 .has_wire_segment(7, 1)
         );
         assert_eq!(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             crate::state::Tool::StretchSelection
         );
         assert!(state.dialogs.stretch_selection.armed);
@@ -481,7 +492,7 @@ mod tests {
                 .preview_error
                 .is_some()
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
     #[test]
     fn stretch_requests_recheck_source_target_and_policy_without_cancelling_a_replacement() {
@@ -511,8 +522,8 @@ mod tests {
                 },
             );
             match change {
-                "document" => state.active_schematic_epoch += 1,
-                "selection" => state.schematic.session.editor.selection.clear(),
+                "document" => state.model.active_schematic_epoch += 1,
+                "selection" => state.model.schematic.session.editor.selection.clear(),
                 "target" => state.dialogs.stretch_selection.canvas.target = None,
                 "policy" => {
                     state.dialogs.stretch_selection.policy =
@@ -522,8 +533,8 @@ mod tests {
                     state.dialogs.stretch_selection.canvas.gesture.anchor = Some(Point::new(10, 0))
                 }
                 "modal" => state.dialogs.preferences_open = true,
-                "read-only" => state.schematic.session.read_only = true,
-                "tool" => state.schematic.arm_tool(Tool::Select),
+                "read-only" => state.model.schematic.session.read_only = true,
+                "tool" => state.model.schematic.arm_tool(Tool::Select),
                 "replacement" => {
                     cancel_armed_stretch_selection(&mut state);
                     arm_test_stretch(&mut state);
@@ -545,20 +556,20 @@ mod tests {
             apply(&mut state, &symbols, request);
             if change == "none" {
                 assert_eq!(
-                    state.schematic.document().wires[0].points[1],
+                    state.model.schematic.document().wires[0].points[1],
                     Point::new(0, 30)
                 );
                 assert_eq!(
-                    state.schematic.undo_description(),
+                    state.model.schematic.undo_description(),
                     Some("stretch selection")
                 );
             } else {
                 assert_eq!(
-                    state.schematic.document().wires[0].points[1],
+                    state.model.schematic.document().wires[0].points[1],
                     Point::new(0, 20),
                     "{change}"
                 );
-                assert!(!state.schematic.can_undo(), "{change}");
+                assert!(!state.model.schematic.can_undo(), "{change}");
                 assert_eq!(state.dialogs.stretch_selection.canvas, canvas, "{change}");
                 assert!(state.dialogs.stretch_selection.armed, "{change}");
             }

@@ -65,16 +65,17 @@ fn copied(output: &egui::FullOutput) -> Option<String> {
 /// A session whose log holds one line of each kind a reader meets.
 fn session() -> AppState {
     let mut state = AppState::default();
-    state.log_buffer.clear();
+    state.model.log_buffer.clear();
     state
+        .model
         .log_buffer
         .log(LogSeverity::Info, LogSource::Studio, "Project opened");
-    state.log_buffer.log(
+    state.model.log_buffer.log(
         LogSeverity::Warning,
         LogSource::Netlist,
         "gmin stepping was needed",
     );
-    state.log_buffer.log(
+    state.model.log_buffer.log(
         LogSeverity::Error,
         LogSource::Studio,
         "Export failed: disk full",
@@ -94,9 +95,9 @@ fn focus_log(ctx: &egui::Context, state: &mut AppState) {
 #[test]
 fn a_ten_thousand_line_session_lays_out_only_the_rows_in_view() {
     let mut state = AppState::default();
-    state.log_buffer.clear();
+    state.model.log_buffer.clear();
     for index in 0..10_000 {
-        state.log_buffer.log(
+        state.model.log_buffer.log(
             LogSeverity::Info,
             LogSource::Studio,
             format!("Studio event {index}"),
@@ -145,12 +146,13 @@ fn wrapped_rows_never_overlap() {
     let mut state = session();
     // A 300-character path.
     let path = format!("C:/projects/{}/netlist.cir", "deep/".repeat(55));
-    state.log_buffer.log(
+    state.model.log_buffer.log(
         LogSeverity::Error,
         LogSource::Netlist,
         format!("Could not read {path}"),
     );
     state
+        .model
         .log_buffer
         .log(LogSeverity::Info, LogSource::Studio, "Project saved");
     let ctx = context();
@@ -227,8 +229,18 @@ fn shift_arrows_extend_the_selection_and_ctrl_c_copies_it() {
     let mut state = session();
     let ctx = context();
     let _ = frame(&ctx, &mut state, Vec::new());
-    let first = state.log_buffer.entries().next().map(|entry| entry.id);
-    let last = state.log_buffer.entries().last().map(|entry| entry.id);
+    let first = state
+        .model
+        .log_buffer
+        .entries()
+        .next()
+        .map(|entry| entry.id);
+    let last = state
+        .model
+        .log_buffer
+        .entries()
+        .last()
+        .map(|entry| entry.id);
     state.workbench.console_view.selection = first.map(ConsoleSelection::single);
     focus_log(&ctx, &mut state);
     let output = frame(
@@ -274,7 +286,12 @@ fn the_arrows_move_the_selection_and_escape_lets_go() {
     let mut state = session();
     let ctx = context();
     focus_log(&ctx, &mut state);
-    let keys: Vec<u64> = state.log_buffer.entries().map(|entry| entry.id).collect();
+    let keys: Vec<u64> = state
+        .model
+        .log_buffer
+        .entries()
+        .map(|entry| entry.id)
+        .collect();
 
     let _ = frame(&ctx, &mut state, vec![key(Key::ArrowUp, Modifiers::NONE)]);
     assert_eq!(
@@ -339,8 +356,13 @@ fn ctrl_f_finds_and_escape_returns_to_the_log() {
 #[test]
 fn enter_on_a_run_line_opens_its_log() {
     let mut state = session();
-    state.simulation.retained.runs.push(SimulationRun::new(5));
-    let line = state.log_buffer.log_anchored(
+    state
+        .model
+        .simulation
+        .retained
+        .runs
+        .push(SimulationRun::new(5));
+    let line = state.model.log_buffer.log_anchored(
         LogSeverity::Info,
         LogSource::Run,
         "Run 5 started: Transient",
@@ -374,7 +396,7 @@ fn a_run_channel_shows_the_runs_own_lines() {
         });
     }
     run.log = log;
-    state.simulation.retained.runs.push(run);
+    state.model.simulation.retained.runs.push(run);
     state.workbench.console_view.open(ConsoleChannel::Run(2));
     let ctx = context();
     let mut text = String::new();
@@ -390,7 +412,7 @@ fn a_run_channel_shows_the_runs_own_lines() {
     assert!(!text.contains("timestep"), "{text}");
 
     // A run the session drops takes its channel with it.
-    state.simulation.retained.runs.clear();
+    state.model.simulation.retained.runs.clear();
     let _ = frame(&ctx, &mut state, Vec::new());
     assert_eq!(
         state.workbench.console_view.channel,
@@ -404,14 +426,16 @@ fn a_run_channel_shows_the_runs_own_lines() {
 #[test]
 fn show_in_console_selects_the_line_the_notice_came_from() {
     let mut app = RSpiceApp::test_instance();
-    app.state.log_buffer.clear();
+    app.state.model.log_buffer.clear();
     app.state
+        .model
         .log_buffer
         .log(LogSeverity::Info, LogSource::Studio, "Project opened");
-    let failure = app
-        .state
-        .log_buffer
-        .log(LogSeverity::Error, LogSource::Studio, "Export failed");
+    let failure =
+        app.state
+            .model
+            .log_buffer
+            .log(LogSeverity::Error, LogSource::Studio, "Export failed");
     app.state.workbench.console_page = ConsolePage::Problems;
     app.state.workbench.console_view.find = "opened".to_owned();
     app.state

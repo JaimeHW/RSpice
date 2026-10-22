@@ -5,12 +5,12 @@ use super::*;
 
 fn transient(x: Vec<f64>, y: Vec<f64>) -> AppState {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient")
             .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
     );
-    state.simulation.complete_run();
+    state.model.simulation.complete_run();
     state
 }
 
@@ -18,7 +18,7 @@ fn transient(x: Vec<f64>, y: Vec<f64>) -> AppState {
 fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
     let mut state = transient(vec![0.0, 1.0], vec![0.0, 1.0]);
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
         &Tokens::default(),
@@ -68,7 +68,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
     let expression = calculator::parser::try_parse("rms(V(out))").unwrap();
     let calculator = calculator::evaluator::evaluate(
         &expression,
-        &calculator::SimulationContext::new(&state.simulation),
+        &calculator::SimulationContext::new(&state.model.simulation),
     )
     .unwrap();
     assert!(
@@ -111,7 +111,7 @@ fn measurement_readout_uses_interpolated_endpoints_and_matches_calculator() {
 fn measurement_readout_identifies_each_sweep_branch() {
     let mut state = branches::hysteresis_run();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
         &Tokens::default(),
@@ -147,7 +147,7 @@ fn measurement_readout_explains_missing_coverage_instead_of_hiding_it() {
         vec![1.0, 1.0, f64::NAN, 1.0, 1.0],
     );
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
         &Tokens::default(),
@@ -170,7 +170,7 @@ fn measurement_cursor_slope_accepts_resolvable_subpicosecond_intervals() {
     let mut state = transient(vec![0.0, 0.5e-12], vec![0.0, 0.1]);
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),

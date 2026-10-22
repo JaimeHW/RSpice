@@ -99,7 +99,7 @@ impl RSpiceApp {
     pub(in crate::workbench) fn render_report_problem_dialog(&mut self, ctx: &Context) {
         let mut include_session_log = self.state.dialogs.help_center.include_session_log;
         let mut reviewed = self.state.dialogs.help_center.disclosure_reviewed;
-        let entries = self.state.log_buffer.len();
+        let entries = self.state.model.log_buffer.len();
         let log_file = session_log_file();
         let mut open_folder = false;
 

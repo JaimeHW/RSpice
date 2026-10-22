@@ -111,14 +111,14 @@ impl AppState {
     /// content. File identity and dirty state are intentionally left to the
     /// caller because open/import/new workflows each own those semantics.
     pub(crate) fn clear_design_execution_context(&mut self) {
-        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.workspace.content.netlist_source = None;
-        self.workspace.content.netlist_document = None;
-        self.workspace.content.netlist_descriptor = None;
-        self.workspace.content.retained_netlist_decks.clear();
-        self.workspace.content.netlist_source_path = None;
-        self.workspace.content.netlist_source_dirty = false;
-        self.simulation = crate::state::SimulationState::default();
+        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
+        self.model.workspace.content.netlist_source = None;
+        self.model.workspace.content.netlist_document = None;
+        self.model.workspace.content.netlist_descriptor = None;
+        self.model.workspace.content.retained_netlist_decks.clear();
+        self.model.workspace.content.netlist_source_path = None;
+        self.model.workspace.content.netlist_source_dirty = false;
+        self.model.simulation = crate::state::SimulationState::default();
         // A notice's "Open in Results" names its run by number, and the new
         // history numbers its runs from one again: kept, the offer would
         // open this design's run of the same number. The notices stay, as
@@ -130,7 +130,7 @@ impl AppState {
             )
         });
         self.ui.netlist = Default::default();
-        *self.netlist_artifacts = Default::default();
+        *self.model.netlist_artifacts = Default::default();
         *self.manual_run = Default::default();
         self.ui.code_workspace = Default::default();
         self.workbench.netlist_open_documents.clear();
@@ -147,7 +147,7 @@ impl AppState {
         // containing two designs' findings. The Console is not cleared: it
         // is the session's chronological record, and keeps the history from
         // before the replacement.
-        self.diagnostics.clear();
+        self.model.diagnostics.clear();
         // The reading position goes with the findings it was read over: a
         // filter carried into another design hides conditions nobody there
         // chose to hide.
@@ -157,10 +157,10 @@ impl AppState {
 
     /// Clear user-visible simulation result history and derived result viewers.
     pub(crate) fn clear_simulation_results(&mut self) {
-        if self.simulation.execution.has_active_execution() {
+        if self.model.simulation.execution.has_active_execution() {
             return;
         }
-        self.simulation.clear_runs();
+        self.model.simulation.clear_runs();
         self.clear_specialized_viewer_data();
     }
 
@@ -193,8 +193,8 @@ impl AppState {
     pub(crate) fn active_specialized_viewer_cache_provenance(
         &self,
     ) -> Option<SpecializedViewerCacheProvenance> {
-        let run = self.simulation.active_run()?;
-        let analysis = self.simulation.active_analysis()?;
+        let run = self.model.simulation.active_run()?;
+        let analysis = self.model.simulation.active_analysis()?;
         Some(SpecializedViewerCacheProvenance::for_analysis(
             run.dataset_id,
             analysis,
@@ -433,16 +433,20 @@ impl AppState {
                 }
             }
             ActiveViewer::PoleZero => {
-                let retained = self.simulation.active_analysis().is_some_and(|analysis| {
-                    analysis.success
-                        && analysis.analysis_type == crate::state::AnalysisType::PoleZero
-                        && analysis.result_payload.as_ref().is_some_and(|payload| {
-                            matches!(
-                                payload,
-                                crate::state::AnalysisResultPayload::PoleZero { .. }
-                            ) && payload.validate_for(analysis.analysis_type).is_ok()
-                        })
-                });
+                let retained = self
+                    .model
+                    .simulation
+                    .active_analysis()
+                    .is_some_and(|analysis| {
+                        analysis.success
+                            && analysis.analysis_type == crate::state::AnalysisType::PoleZero
+                            && analysis.result_payload.as_ref().is_some_and(|payload| {
+                                matches!(
+                                    payload,
+                                    crate::state::AnalysisResultPayload::PoleZero { .. }
+                                ) && payload.validate_for(analysis.analysis_type).is_ok()
+                            })
+                    });
                 if retained {
                     ViewerCapability::available("Pole-zero result retained by the active analysis")
                 } else {
@@ -473,7 +477,7 @@ impl AppState {
     }
 
     fn active_time_domain_waveform_len(&self) -> Option<usize> {
-        let analysis = self.simulation.active_analysis()?;
+        let analysis = self.model.simulation.active_analysis()?;
         crate::simulation::SimulationController::analysis_supports_transient_derivation(
             analysis.analysis_type,
         )
@@ -528,8 +532,8 @@ mod tests {
     fn seed_result_viewers(state: &mut AppState) {
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(retained_analysis(1, crate::state::AnalysisType::Ac, 0x11));
-        state.simulation.retained.runs.push(run);
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs.push(run);
+        assert!(state.model.simulation.select_run(0));
 
         let mut bode = BodeData::new();
         bode.add_response();
@@ -596,6 +600,7 @@ mod tests {
             .publish_active_design_check_result(result)
             .expect("test DRC receipt must publish");
         state
+            .model
             .log_buffer
             .log(LogSeverity::Error, LogSource::Studio, "old DRC anchor");
     }
@@ -604,7 +609,7 @@ mod tests {
     fn clearing_simulation_results_clears_specialized_result_viewers() {
         let mut state = AppState::default();
         seed_result_viewers(&mut state);
-        assert!(state.simulation.retained.has_results());
+        assert!(state.model.simulation.retained.has_results());
         // Arbitrary cached bins on an AC analysis are not MC evidence.
         assert!(!state.viewer_is_available(ActiveViewer::Histogram));
         assert!(state.viewer_is_available(ActiveViewer::SmithChart));
@@ -612,7 +617,7 @@ mod tests {
 
         state.clear_simulation_results();
 
-        assert!(!state.simulation.retained.has_results());
+        assert!(!state.model.simulation.retained.has_results());
         for viewer in [
             ActiveViewer::SmithChart,
             ActiveViewer::EyeDiagram,
@@ -692,16 +697,16 @@ mod tests {
         let mut state = AppState::default();
         seed_result_viewers(&mut state);
 
-        state.simulation.retained.runs[0].add_analysis(retained_analysis(
+        state.model.simulation.retained.runs[0].add_analysis(retained_analysis(
             2,
             crate::state::AnalysisType::Ac,
             0x12,
         ));
         let mut second_run = crate::state::SimulationRun::new(2);
         second_run.add_analysis(retained_analysis(1, crate::state::AnalysisType::Ac, 0x21));
-        state.simulation.retained.runs.push(second_run);
+        state.model.simulation.retained.runs.push(second_run);
 
-        assert!(state.simulation.select_analysis(1));
+        assert!(state.model.simulation.select_analysis(1));
         for viewer in [
             ActiveViewer::BodePlot,
             ActiveViewer::Nyquist,
@@ -715,7 +720,7 @@ mod tests {
             );
         }
 
-        assert!(state.simulation.select_run(1));
+        assert!(state.model.simulation.select_run(1));
         for viewer in [
             ActiveViewer::BodePlot,
             ActiveViewer::Nyquist,
@@ -737,8 +742,8 @@ mod tests {
 
         let mut incompatible = crate::state::SimulationRun::new(2);
         incompatible.add_analysis(retained_analysis(1, crate::state::AnalysisType::DcOp, 0x31));
-        state.simulation.retained.runs.push(incompatible);
-        assert!(state.simulation.select_run(1));
+        state.model.simulation.retained.runs.push(incompatible);
+        assert!(state.model.simulation.select_run(1));
 
         for viewer in [
             ActiveViewer::BodePlot,
@@ -808,14 +813,14 @@ mod tests {
             crate::state::AnalysisType::PoleZero,
             "PZ without retained evidence",
         ));
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         assert!(
             !state.viewer_is_available(ActiveViewer::PoleZero),
             "an analysis without retained pole-zero evidence must not enable the viewer"
         );
 
-        state.simulation.retained.runs[0].analyses[0] = crate::state::AnalysisResult::new(
+        state.model.simulation.retained.runs[0].analyses[0] = crate::state::AnalysisResult::new(
             1,
             crate::state::AnalysisType::PoleZero,
             "Retained PZ",
@@ -842,15 +847,15 @@ mod tests {
         let mut state = AppState::default();
         seed_blocking_drc_result(&mut state);
         assert!(state.current_blocking_drc_result().is_some());
-        let logged = state.log_buffer.entries().count();
+        let logged = state.model.log_buffer.entries().count();
 
         state.clear_design_execution_context();
 
         assert!(state.dialogs.drc_results.is_none());
-        assert!(state.diagnostics.current_finding().is_none());
+        assert!(state.model.diagnostics.current_finding().is_none());
         assert!(state.current_blocking_drc_result().is_none());
         assert_eq!(
-            state.log_buffer.entries().count(),
+            state.model.log_buffer.entries().count(),
             logged,
             "the findings go; the Console's record of the check stays"
         );
@@ -878,6 +883,7 @@ mod tests {
             .unwrap(),
         );
         state
+            .model
             .log_buffer
             .warning(LogSource::Run, "old project warning");
         state.clear_design_execution_context();
@@ -890,6 +896,7 @@ mod tests {
         assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
         assert!(
             state
+                .model
                 .log_buffer
                 .entries()
                 .any(|entry| entry.message == "old project warning"),

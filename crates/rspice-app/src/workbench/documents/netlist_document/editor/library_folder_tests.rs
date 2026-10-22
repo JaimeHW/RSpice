@@ -37,9 +37,9 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
     std::fs::write(&path, source).expect("write deck");
 
     let mut state = AppState::default();
-    state.workspace.content.netlist_source_path = Some(path);
+    state.model.workspace.content.netlist_source_path = Some(path);
     state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.simulation.source.netlist_content = source.to_owned();
+    state.model.simulation.source.netlist_content = source.to_owned();
     let revision = state.ui.netlist.revision;
     validate_visible_source(&mut state, revision);
     assert!(

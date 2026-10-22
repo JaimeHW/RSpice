@@ -157,7 +157,7 @@ fn require_netlist_source_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
-    if !state.workspace.content.netlist_source_dirty {
+    if !state.model.workspace.content.netlist_source_dirty {
         return false;
     }
 
@@ -186,7 +186,7 @@ mod tests {
     #[test]
     fn netlist_import_only_prompts_for_source_bytes_it_will_replace() {
         let mut state = AppState::default();
-        state.schematic.session.is_dirty = true;
+        state.model.schematic.session.is_dirty = true;
 
         assert!(!require_netlist_source_save_confirmation_if_dirty(
             &mut state,
@@ -194,7 +194,7 @@ mod tests {
         ));
         assert!(!state.dialogs.confirmation_dialog.visible);
 
-        state.workspace.content.set_netlist_source_dirty(true);
+        state.model.workspace.content.set_netlist_source_dirty(true);
         assert!(require_netlist_source_save_confirmation_if_dirty(
             &mut state,
             ConfirmationAction::ImportNetlist,
@@ -256,14 +256,19 @@ mod tests {
     fn file_actions_resolve_the_draft_before_saving_or_asking_about_unsaved_changes() {
         use crate::workbench::state::{InlineEditField, InlineEditSession};
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.clear();
-        state.schematic.add_component(
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
+        state.model.schematic.add_component(
             crate::state::ComponentType::VoltageSource,
             crate::state::Point::origin(),
         );
-        state.schematic.clear_undo_history();
-        state.schematic.session.is_dirty = false;
-        let expected = state.schematic.document().components[0].clone();
+        state.model.schematic.clear_undo_history();
+        state.model.schematic.session.is_dirty = false;
+        let expected = state.model.schematic.document().components[0].clone();
         let mut candidate = expected.clone();
         candidate.name = "V9".to_owned();
         let authority = state.inline_edit_authority();
@@ -281,7 +286,7 @@ mod tests {
         // a failed assertion must never open a native project-save picker.
         state.close_project_session();
         dispatch_file_menu_action(&mut state, FileMenuAction::Save, &NoIo, &NoIo);
-        assert_eq!(state.schematic.document().components[0].name, "V1");
+        assert_eq!(state.model.schematic.document().components[0].name, "V1");
         assert!(
             state
                 .workbench
@@ -291,7 +296,7 @@ mod tests {
                 .error
                 .is_some()
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
         assert!(state.project_undo_sequence().is_none());
         state.open_project_session();
         state
@@ -299,7 +304,7 @@ mod tests {
             .inline_edit
             .set_draft("V9".to_owned(), Ok(candidate));
         dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo, &NoIo);
-        assert_eq!(state.schematic.document().components[0].name, "V9");
+        assert_eq!(state.model.schematic.document().components[0].name, "V9");
         assert!(state.workbench.inline_edit.session().is_none());
         assert_eq!(
             state.dialogs.confirmation_dialog.pending_action,

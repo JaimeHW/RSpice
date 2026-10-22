@@ -23,7 +23,12 @@ pub(super) fn find_matches_section(ui: &mut Ui, state: &mut AppState) {
     let Ok(found) = find_replace_matches(state) else {
         return;
     };
-    let active = state.workspace.content.active_schematic_reference().key();
+    let active = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let several = found.len() > 1;
     let total: usize = found.iter().map(|document| document.matches.len()).sum();
     let mut shown = 0;
@@ -63,7 +68,7 @@ pub(super) fn find_matches_section(ui: &mut Ui, state: &mut AppState) {
         }
     }
     if let Some(found) = picked {
-        let selection = &mut state.schematic.session.editor.selection;
+        let selection = &mut state.model.schematic.session.editor.selection;
         match found.field {
             FindField::NetLabel => selection.select_only_net_label(found.object_id),
             _ => selection.select_only_component(found.object_id),
@@ -92,7 +97,7 @@ mod tests {
             .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
         std::fs::create_dir_all(&directory).expect("raster output directory");
         let mut app = crate::workbench::RSpiceApp::test_instance();
-        let document = app.state.schematic.document_mut_for_test();
+        let document = app.state.model.schematic.document_mut_for_test();
         document.components = (1..=3)
             .map(|id| {
                 let mut part = Component::new(id, ComponentType::Resistor, Point::origin());

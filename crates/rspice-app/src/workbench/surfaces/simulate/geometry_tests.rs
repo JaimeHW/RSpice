@@ -217,7 +217,7 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    let plan = app.state.sim_setup.stable_analysis_plan_mut().ok()?;
+    let plan = app.state.model.sim_setup.stable_analysis_plan_mut().ok()?;
     let instance = match plan
         .instances()
         .iter()
@@ -356,7 +356,7 @@ fn analysis_catalogue_code_rows(viewport_width: f32) -> Vec<Vec<PaintedLine>> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.session.palette_open = true;
+    app.state.model.sim_setup.session.palette_open = true;
     let mut run = || {
         ctx.run_ui(
             egui::RawInput {
@@ -513,6 +513,7 @@ fn crowded_plan() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test plan resolves");
@@ -531,6 +532,7 @@ fn crowded_plan() -> RSpiceApp {
 
 fn select_transient(state: &mut crate::workbench::AppState) {
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test plan resolves");
@@ -623,6 +625,7 @@ fn the_stack_and_the_editor_scroll_on_their_own_under_a_title_that_stays() {
     let title = route
         .app
         .state
+        .model
         .sim_setup
         .active_plan_name()
         .as_str()
@@ -723,6 +726,7 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
         let plan = route
             .app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the test plan resolves");
@@ -773,6 +777,7 @@ fn render_the_split_analyses_route_for_review() {
     let mut crowded = crowded_plan();
     let lowest = crowded
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()

@@ -44,16 +44,18 @@ pub(super) const MODELS: usize = LIBRARIES * MODELS_PER_LIBRARY;
 /// An application holding a model corpus at production scale.
 pub(super) fn large_corpus_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.library_manager.clear();
-    app.state.model_library_manager.clear();
+    app.state.model.library_manager.clear();
+    app.state.model.model_library_manager.clear();
 
     for index in 0..PROJECT_LIBRARIES {
         app.state
+            .model
             .model_library_manager
             .add_library(project_owned_library(index));
     }
     for index in PROJECT_LIBRARIES..LIBRARIES {
         app.state
+            .model
             .model_library_manager
             .add_library(bound_pdk_library(index));
     }
@@ -61,10 +63,12 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
     // The Symbols page registers one row per symbol cellview, which is its own
     // corpus: a technology library ships a symbol for every device it offers.
     app.state
+        .model
         .library_manager
         .add_library(crate::state::Library::new("tech_symbols"));
     let symbol_library = app
         .state
+        .model
         .library_manager
         .get_library_mut("tech_symbols")
         .expect("symbol library was just added");
@@ -74,9 +78,10 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
         symbol_library.add_cell(cell);
     }
 
-    app.state.workspace.ensure_active_buffer();
+    app.state.model.workspace.ensure_active_buffer();
     let mut schematic = app
         .state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -99,7 +104,7 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
         };
         schematic.document_mut_for_test().components.push(component);
     }
-    app.state.workspace.save_active_schematic(&schematic);
+    app.state.model.workspace.save_active_schematic(&schematic);
     app
 }
 
@@ -388,7 +393,10 @@ const WIDGET_CEILING: usize = 500;
 #[test]
 fn every_page_builds_a_screenful_not_a_corpus() {
     let mut app = large_corpus_app();
-    assert_eq!(app.state.model_library_manager.total_model_count(), MODELS);
+    assert_eq!(
+        app.state.model.model_library_manager.total_model_count(),
+        MODELS
+    );
     for page in ModelsPage::ALL {
         let report = render_page(&mut app, page, egui::vec2(1600.0, 1000.0));
         assert!(

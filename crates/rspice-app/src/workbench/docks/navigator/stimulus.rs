@@ -78,7 +78,7 @@ struct Row<'a> {
 }
 
 pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
-    if state.workspace.content.stimulus_library.is_empty() {
+    if state.model.workspace.content.stimulus_library.is_empty() {
         show_empty(ui, state);
         return;
     }
@@ -88,7 +88,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     // is already holding.
     let mut browser = std::mem::take(&mut state.workbench.stimulus_browser);
     let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(state);
-    browser.minis(&state.workspace.content.stimulus_library, timing);
+    browser.minis(&state.model.workspace.content.stimulus_library, timing);
     let tally = stimulus_actions::design_adopter_tally(state);
     let counts = scope_counts(state, &tally);
     let mut scope = browser.scope;
@@ -185,14 +185,14 @@ struct ScopeCounts {
 
 fn scope_counts(state: &AppState, tally: &Tally) -> ScopeCounts {
     let mut counts = ScopeCounts {
-        all: state.workspace.content.stimulus_library.len(),
+        all: state.model.workspace.content.stimulus_library.len(),
         adopted: 0,
         unadopted: 0,
         total: AdopterTally::default(),
         errors: 0,
         advisories: 0,
     };
-    for definition in state.workspace.content.stimulus_library.definitions() {
+    for definition in state.model.workspace.content.stimulus_library.definitions() {
         let held = tally.get(definition.name());
         let adopters = held.map_or(0, |held| held.adopters);
         if adopters > 0 {
@@ -246,6 +246,7 @@ fn groups<'a>(
         .into_iter()
         .filter_map(|family| {
             let rows: Vec<Row<'a>> = state
+                .model
                 .workspace
                 .content
                 .stimulus_library

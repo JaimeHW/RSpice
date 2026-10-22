@@ -203,10 +203,16 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
     if !state.project_lifecycle.is_open() {
         return;
     }
-    if let Err(error) = state.schematic.document().validated_revisions.validate() {
+    if let Err(error) = state
+        .model
+        .schematic
+        .document()
+        .validated_revisions
+        .validate()
+    {
         state.dialogs.project_revision_history = ProjectRevisionHistoryDialogState {
             open: true,
-            expected_journal: state.schematic.document().validated_revisions.clone(),
+            expected_journal: state.model.schematic.document().validated_revisions.clone(),
             authority: Some(SchematicEditAuthority::capture(state)),
             error: Some(format!(
                 "The validated schematic revision journal failed integrity validation: {error}"
@@ -216,6 +222,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         return;
     }
     let selected = state
+        .model
         .schematic
         .document()
         .validated_revisions
@@ -227,7 +234,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         open: true,
         selected,
         authority: Some(SchematicEditAuthority::capture(state)),
-        expected_journal: state.schematic.document().validated_revisions.clone(),
+        expected_journal: state.model.schematic.document().validated_revisions.clone(),
         ..ProjectRevisionHistoryDialogState::default()
     };
 }
@@ -240,7 +247,7 @@ impl RSpiceApp {
         let rows = project_audit_rows(&self.state);
         retain_existing_revision_selection(&mut self.state.dialogs.project_revision_history, &rows);
         let stale = history_authority_error(&self.state);
-        let write_allowed = !self.state.schematic.session.read_only
+        let write_allowed = !self.state.model.schematic.session.read_only
             && !self.state.active_view_read_only()
             && !self.state.workbench.safe_mode.project_read_only();
         let mut body_scroll_offset = self
@@ -394,7 +401,7 @@ impl RSpiceApp {
         let result = (|| {
             history_authority_error(&self.state).map_or(Ok(()), Err)?;
             if self.state.workbench.safe_mode.project_read_only()
-                || self.state.schematic.session.read_only
+                || self.state.model.schematic.session.read_only
                 || self.state.active_view_read_only()
             {
                 return Err("The active schematic or project is read-only.".to_owned());
@@ -405,7 +412,8 @@ impl RSpiceApp {
                     "Select exactly one validated schematic revision to restore.".to_owned(),
                 );
             }
-            if dialog.expected_journal != self.state.schematic.document().validated_revisions {
+            if dialog.expected_journal != self.state.model.schematic.document().validated_revisions
+            {
                 return Err(
                     "The validated revision journal changed. Close and reopen revision history."
                         .to_owned(),
@@ -420,12 +428,16 @@ impl RSpiceApp {
                     .to_owned()
             })?;
             self.state
+                .model
                 .schematic
                 .restore_validated_revision(id)
                 .map_err(|error| error.to_string())?;
             self.state.sync_active_schematic_to_workspace();
             self.invalidate_simulation_preflight();
-            self.state.netlist_artifacts.current_generation_input_digest = None;
+            self.state
+                .model
+                .netlist_artifacts
+                .current_generation_input_digest = None;
             Ok::<(), String>(())
         })();
 
@@ -434,8 +446,13 @@ impl RSpiceApp {
                 let authority = SchematicEditAuthority::capture(&self.state);
                 let dialog = &mut self.state.dialogs.project_revision_history;
                 dialog.authority = Some(authority);
-                dialog.expected_journal =
-                    self.state.schematic.document().validated_revisions.clone();
+                dialog.expected_journal = self
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .validated_revisions
+                    .clone();
                 dialog.restore_confirmation = false;
                 // The restored design is on the canvas behind the dialog.
                 dialog.error = None;
@@ -654,11 +671,12 @@ fn project_audit_rows(state: &AppState) -> Vec<ProjectAuditRow> {
     let mut rows = Vec::new();
     append_schematic_rows(
         &mut rows,
-        &state.schematic.document().validated_revisions,
+        &state.model.schematic.document().validated_revisions,
         true,
     );
-    let active_key = state.workspace.content.active_view.key();
+    let active_key = state.model.workspace.content.active_view.key();
     let mut retained_schematics = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -680,6 +698,7 @@ fn find_project_schematic_revision(
     id: ValidatedSchematicRevisionId,
 ) -> Option<&ValidatedSchematicRevision> {
     state
+        .model
         .schematic
         .document()
         .validated_revisions
@@ -688,6 +707,7 @@ fn find_project_schematic_revision(
         .find(|record| record.id() == id)
         .or_else(|| {
             state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -731,17 +751,17 @@ fn append_schematic_rows(
 }
 
 fn append_simulation_plan_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) {
-    if let Some(plan) = state.sim_setup.analysis_plan.as_ref() {
+    if let Some(plan) = state.model.sim_setup.analysis_plan.as_ref() {
         rows.push(simulation_plan_row(
-            state.sim_setup.active_plan_name().as_str(),
+            state.model.sim_setup.active_plan_name().as_str(),
             plan.id().to_string(),
             plan.revision().get().to_string(),
             plan.instances().len(),
-            state.sim_setup.active_plan_lineage(),
+            state.model.sim_setup.active_plan_lineage(),
             true,
         ));
     }
-    for plan in state.sim_setup.inactive_plans().iter().rev() {
+    for plan in state.model.sim_setup.inactive_plans().iter().rev() {
         rows.push(simulation_plan_row(
             plan.name().as_str(),
             plan.id().to_string(),
@@ -785,13 +805,22 @@ fn simulation_plan_row(
 }
 
 fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) {
-    if let Some(binding) = state.workspace.content.project.technology_binding() {
+    if let Some(binding) = state.model.workspace.content.project.technology_binding() {
         let digest = binding
             .source_closure()
             .iter()
             .find(|source| source.path == binding.root_source())
             .map(|source| short_text(&source.digest.to_string()))
-            .unwrap_or_else(|| state.workspace.content.project.revision().get().to_string());
+            .unwrap_or_else(|| {
+                state
+                    .model
+                    .workspace
+                    .content
+                    .project
+                    .revision()
+                    .get()
+                    .to_string()
+            });
         rows.push(ProjectAuditRow {
             key: format!("technology-binding:{}:{}", binding.model_library(), digest),
             kind: ProjectAuditArtifactKind::ModelOrPdk,
@@ -811,7 +840,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) 
         });
     }
 
-    for library in state.model_library_manager.libraries_sorted() {
+    for library in state.model.model_library_manager.libraries_sorted() {
         let (revision, status, authority): (String, &str, String) = match library.source_authority {
             ModelSourceAuthority::ProjectOwned {
                 source_id,
@@ -892,7 +921,7 @@ fn append_model_and_pdk_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) 
 }
 
 fn append_governed_rows(rows: &mut Vec<ProjectAuditRow>, state: &AppState) {
-    let management = &state.workspace.content.design_management;
+    let management = &state.model.workspace.content.design_management;
     for entry in management.annotation().journal().iter().rev() {
         rows.push(ProjectAuditRow {
             key: format!("annotation-journal:{}", entry.id()),

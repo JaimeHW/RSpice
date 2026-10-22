@@ -18,7 +18,7 @@ fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
     app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
-    app.state.simulation.source.netlist_content = "deck\n.end\n".to_owned();
+    app.state.model.simulation.source.netlist_content = "deck\n.end\n".to_owned();
 
     assert!(Command::ValidateCodeDocument.is_enabled(&app));
 
@@ -90,8 +90,9 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     cell.add_view(view);
     let mut library = crate::state::Library::new("behavioral");
     library.add_cell(cell);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -122,7 +123,7 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         app.state.workbench.current_route().surface_id(),
         crate::workbench::SurfaceId::Design
     );
-    assert_eq!(app.state.workspace.content.active_view, reference);
+    assert_eq!(app.state.model.workspace.content.active_view, reference);
     assert_eq!(app.state.ui.code_workspace.page, page_before);
     let request = app
         .state

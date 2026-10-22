@@ -94,6 +94,7 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
         ));
         let descriptor = app
             .state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -118,7 +119,7 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
             ));
         }
         assert_eq!(
-            app.state.workspace.content.netlist_source.as_deref(),
+            app.state.model.workspace.content.netlist_source.as_deref(),
             Some(source.as_str())
         );
     }

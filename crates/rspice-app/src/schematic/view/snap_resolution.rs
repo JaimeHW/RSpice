@@ -12,8 +12,8 @@ pub(super) fn resolve_grid_pointer(
     position: Pos2,
 ) -> SnapResult {
     snap_resolution::resolve_grid_pointer(
-        &state.schematic.session.editor.snap_engine,
-        state.schematic.document().grid_size,
+        &state.model.schematic.session.editor.snap_engine,
+        state.model.schematic.document().grid_size,
         viewport,
         position,
     )

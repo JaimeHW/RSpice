@@ -176,6 +176,7 @@ pub(crate) fn open_language_tools(
 ) -> Result<(), String> {
     let bundle_id = app
         .state
+        .model
         .workspace
         .active_source_bundle(language)
         .map(ProjectSourceBundle::id)
@@ -197,6 +198,7 @@ pub(crate) fn open_language_tools_in_bundle(
     }
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -210,7 +212,8 @@ pub(crate) fn open_language_tools_in_bundle(
             )
         })?
         .to_owned();
-    let index = LanguageServiceIndex::build(app.state.workspace.content.project.id(), bundle)?;
+    let index =
+        LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
     let query = index
         .symbol_at(&active_path, caret_char_index)
         .unwrap_or_default()
@@ -248,6 +251,7 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
     let edit_count = state.index.references(&state.query).len();
     let changed_files = app
         .state
+        .model
         .workspace
         .content
         .replace_project_source_bundle_files_transactionally(state.index.bundle_id, replacements)
@@ -262,12 +266,14 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
     }
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
         .get_bundle(state.index.bundle_id)
         .ok_or_else(|| "The renamed source bundle could not be reloaded.".to_owned())?;
-    let index = LanguageServiceIndex::build(app.state.workspace.content.project.id(), bundle)?;
+    let index =
+        LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
     let message = format!(
         "Renamed '{}' to '{}' at {} indexed occurrence{} across {} project source file{}.",
         state.query,
@@ -363,6 +369,7 @@ fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsStat
     }
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -370,7 +377,7 @@ fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsStat
         .ok_or_else(|| "The indexed source bundle no longer exists.".to_owned())?;
     if !state
         .index
-        .is_current(app.state.workspace.content.project.id(), bundle)
+        .is_current(app.state.model.workspace.content.project.id(), bundle)
     {
         return Err(
             "The source bundle changed after the language transaction was opened. Reindex the current revision."
@@ -387,6 +394,7 @@ fn replace_one_language_document(
     replacement: String,
 ) -> Result<(), String> {
     app.state
+        .model
         .workspace
         .content
         .replace_project_source_bundle_file(state.index.bundle_id, logical_path, replacement)
@@ -401,12 +409,14 @@ fn replace_one_language_document(
     }
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
         .get_bundle(state.index.bundle_id)
         .ok_or_else(|| "The changed source bundle could not be reloaded.".to_owned())?;
-    let index = LanguageServiceIndex::build(app.state.workspace.content.project.id(), bundle)?;
+    let index =
+        LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
     if let Some(tools) = app.state.ui.code_workspace.language_tools.as_mut() {
         tools.index = index;
         tools.confirm_rename = false;
@@ -1684,15 +1694,21 @@ mod tests {
         let bundle_id = source_bundle.id();
 
         let mut app = crate::workbench::RSpiceApp::test_instance();
-        app.state.workspace.content.remove_project_source(language);
         app.state
+            .model
+            .workspace
+            .content
+            .remove_project_source(language);
+        app.state
+            .model
             .workspace
             .content
             .insert_project_source_bundle(source_bundle)
             .unwrap();
         let index = LanguageServiceIndex::build(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             app.state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1725,6 +1741,7 @@ mod tests {
         assert!(error.contains("No project source was changed"));
         let unchanged = app
             .state
+            .model
             .workspace
             .content
             .project_sources

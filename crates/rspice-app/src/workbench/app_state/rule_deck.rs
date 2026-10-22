@@ -43,6 +43,7 @@ impl AppState {
 /// saying so.
 pub(super) fn live_input_digest(state: &AppState) -> Result<ContentDigest, String> {
     let issues = state
+        .model
         .workspace
         .content
         .design_rules
@@ -51,7 +52,7 @@ pub(super) fn live_input_digest(state: &AppState) -> Result<ContentDigest, Strin
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     super::diagnostic_store::digest_of(&(
-        state.workspace.content.project.id(),
+        state.model.workspace.content.project.id(),
         project_file_label(state),
         issues,
     ))
@@ -59,7 +60,7 @@ pub(super) fn live_input_digest(state: &AppState) -> Result<ContentDigest, Strin
 
 /// The project file the deck is stored in, as a reader finds it on disk.
 pub(super) fn project_file_label(state: &AppState) -> String {
-    let project = &state.workspace.content.project;
+    let project = &state.model.workspace.content.project;
     project
         .path
         .as_deref()
@@ -71,9 +72,9 @@ pub(super) fn project_file_label(state: &AppState) -> String {
 }
 
 fn rule_deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
-    let issues = state.workspace.content.design_rules.issues();
-    let project = state.workspace.content.project.id();
-    let revision = state.workspace.content.project.revision().get();
+    let issues = state.model.workspace.content.design_rules.issues();
+    let project = state.model.workspace.content.project.id();
+    let revision = state.model.workspace.content.project.revision().get();
     let file = project_file_label(state);
     let document: Arc<str> = Arc::from(file.as_str());
     let keys = issues
@@ -158,6 +159,7 @@ mod tests {
 
     fn deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
         state
+            .model
             .diagnostics
             .batch(&DiagnosticInputs::RuleDeck)
             .map(|batch| batch.records.clone())
@@ -167,7 +169,7 @@ mod tests {
     #[test]
     fn a_deck_this_build_reads_in_full_publishes_nothing() {
         let mut state = AppState::default();
-        state.workspace.content.design_rules = serde_json::from_str(
+        state.model.workspace.content.design_rules = serde_json::from_str(
             r#"{"schema_version":1,"severities":{"DRC-DANGLING-WIRE":"Error"}}"#,
         )
         .expect("a stored deck always reads");
@@ -180,8 +182,8 @@ mod tests {
     #[test]
     fn an_unknown_rule_code_is_reported_with_the_project_file() {
         let mut state = AppState::default();
-        state.workspace.content.project.path = Some("designs/amp.rspice".into());
-        state.workspace.content.design_rules = serde_json::from_str(
+        state.model.workspace.content.project.path = Some("designs/amp.rspice".into());
+        state.model.workspace.content.design_rules = serde_json::from_str(
             r#"{"schema_version":1,"severities":{"DRC-FUTURE-RULE":"Error"}}"#,
         )
         .expect("a stored deck always reads");
@@ -212,8 +214,8 @@ mod tests {
     #[test]
     fn a_row_below_the_floor_is_reported_as_clamped() {
         let mut state = AppState::default();
-        state.workspace.content.project.path = Some("designs/amp.rspice".into());
-        state.workspace.content.design_rules = serde_json::from_str(
+        state.model.workspace.content.project.path = Some("designs/amp.rspice".into());
+        state.model.workspace.content.design_rules = serde_json::from_str(
             r#"{"schema_version":1,"severities":{"DRC-DUPLICATE-NAME":"Info"}}"#,
         )
         .expect("a stored deck always reads");
@@ -234,6 +236,7 @@ mod tests {
         );
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .design_rules
@@ -247,8 +250,8 @@ mod tests {
     #[test]
     fn a_row_above_the_ceiling_is_reported_as_clamped() {
         let mut state = AppState::default();
-        state.workspace.content.project.path = Some("designs/amp.rspice".into());
-        state.workspace.content.design_rules = serde_json::from_str(
+        state.model.workspace.content.project.path = Some("designs/amp.rspice".into());
+        state.model.workspace.content.design_rules = serde_json::from_str(
             r#"{"schema_version":1,"severities":{"DRC-UNUSED-CELLVIEW":"Error"}}"#,
         )
         .expect("a stored deck always reads");
@@ -266,6 +269,7 @@ mod tests {
         );
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .design_rules
@@ -279,7 +283,7 @@ mod tests {
     #[test]
     fn a_deck_from_a_newer_schema_is_one_record() {
         let mut state = AppState::default();
-        state.workspace.content.design_rules = serde_json::from_str(
+        state.model.workspace.content.design_rules = serde_json::from_str(
             r#"{"schema_version":3,"severities":{"DRC-DANGLING-WIRE":"Error","DRC-X":"Info"}}"#,
         )
         .expect("a stored deck always reads");
@@ -291,6 +295,7 @@ mod tests {
         assert!(records[0].message.contains("deck schema 3"));
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .design_rules

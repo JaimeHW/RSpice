@@ -25,9 +25,13 @@ pub(super) fn write_run_line(
     message: impl Into<String>,
 ) -> Option<usize> {
     let message = message.into();
-    match run_sequence
-        .and_then(|run_sequence| state.simulation.retained.run_by_sequence_mut(run_sequence))
-    {
+    match run_sequence.and_then(|run_sequence| {
+        state
+            .model
+            .simulation
+            .retained
+            .run_by_sequence_mut(run_sequence)
+    }) {
         Some(run) => {
             // The run's own lines are never withheld.
             let position = run.log.lines().len();
@@ -99,7 +103,12 @@ pub(super) fn announce_run_start(
     design: Option<&str>,
     analyses: &[&str],
 ) {
-    let Some(run) = state.simulation.retained.run_by_sequence(run_sequence) else {
+    let Some(run) = state
+        .model
+        .simulation
+        .retained
+        .run_by_sequence(run_sequence)
+    else {
         return;
     };
     // Watched from here, so a run that ends before a frame has seen it
@@ -138,7 +147,12 @@ pub(super) fn announce_run_start(
 /// time is sealed. The counts are the log's own Error and Warning lines,
 /// taken before the summary is added.
 pub(super) fn announce_run_end(state: &mut AppState, run_sequence: u64) {
-    let Some(run) = state.simulation.retained.run_by_sequence_mut(run_sequence) else {
+    let Some(run) = state
+        .model
+        .simulation
+        .retained
+        .run_by_sequence_mut(run_sequence)
+    else {
         return;
     };
     let unix_ms = now_ms();
@@ -315,8 +329,9 @@ mod tests {
     #[test]
     fn an_interrupted_run_failed_though_an_analysis_completed_first() {
         let mut state = AppState::default();
-        let run_sequence = state.simulation.start_run().id;
+        let run_sequence = state.model.simulation.start_run().id;
         let run = state
+            .model
             .simulation
             .retained
             .run_by_sequence_mut(run_sequence)
@@ -340,6 +355,7 @@ mod tests {
         announce_run_end(&mut state, run_sequence);
 
         let summary = state
+            .model
             .log_buffer
             .entries()
             .last()

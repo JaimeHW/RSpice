@@ -102,6 +102,7 @@ fn project_with_two_authoritative_layout_documents() -> (ProjectSnapshot, CellVi
     let child = CellViewRef::new("user", "child", "layout");
     {
         let library = state
+            .model
             .library_manager
             .get_library_mut("user")
             .expect("default project library");

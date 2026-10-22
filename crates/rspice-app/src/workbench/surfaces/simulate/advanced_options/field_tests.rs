@@ -45,7 +45,7 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
                 .any(|(offered, _)| *offered == option)
         );
     }
-    let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+    let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     let record = plan
         .instance(id)
         .unwrap()
@@ -81,7 +81,7 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
             .is_err()
     );
     assert_eq!(
-        serde_json::to_value(app.state.sim_setup.stable_analysis_plan().unwrap()).unwrap(),
+        serde_json::to_value(app.state.model.sim_setup.stable_analysis_plan().unwrap()).unwrap(),
         before
     );
     for option in [O::Itl4, O::MaximumTimestep, O::LteReltol] {
@@ -98,7 +98,12 @@ fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {
 #[test]
 fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
     let (mut app, id) = studio(AnalysisKind::MonteCarlo);
-    let plan = app.state.sim_setup.stable_analysis_plan_mut().unwrap();
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan_mut()
+        .unwrap();
     let ac = plan.insert(AnalysisKind::Ac).unwrap().0;
     let tran = plan.insert(AnalysisKind::Transient).unwrap().0;
     plan.edit(id, |draft| {
@@ -125,6 +130,7 @@ fn configured_study_form_writer_and_solver_ledger_share_base_ownership() {
     assert_eq!(row.origin, STUDY_DEFAULT_ORIGIN);
     assert_eq!(row.effective, "10u");
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .unwrap()
@@ -152,7 +158,12 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
         AnalysisKind::Optimization,
     ] {
         let (mut app, instance) = studio(kind);
-        let plan = app.state.sim_setup.stable_analysis_plan_mut().unwrap();
+        let plan = app
+            .state
+            .model
+            .sim_setup
+            .stable_analysis_plan_mut()
+            .unwrap();
         if kind == AnalysisKind::Optimization {
             let op = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
             let pss = plan.insert(AnalysisKind::Pss).unwrap().0;
@@ -180,7 +191,7 @@ fn time_stepped_forms_can_author_and_clear_their_step_ceiling() {
             authored(&app, instance, O::MaximumTimestep).as_deref(),
             Some("2n")
         );
-        let plan = app.state.sim_setup.stable_analysis_plan().unwrap();
+        let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
         let options = plan
             .instance(instance)
             .unwrap()
@@ -244,6 +255,7 @@ fn studio(kind: AnalysisKind) -> (RSpiceApp, AnalysisInstanceId) {
     let mut app = RSpiceApp::test_instance();
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test instance holds a stable plan");
@@ -266,6 +278,7 @@ fn studio(kind: AnalysisKind) -> (RSpiceApp, AnalysisInstanceId) {
 fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static str)> {
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance holds a stable plan");
@@ -276,7 +289,7 @@ fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static st
         target.kind(),
         target.draft(),
         target.numeric_override(),
-        &app.state.sim_setup.options,
+        &app.state.model.sim_setup.options,
         plan.solver_ownership(instance),
     )
     .into_iter()
@@ -289,6 +302,7 @@ fn offered(app: &RSpiceApp, instance: AnalysisInstanceId) -> Vec<(O, &'static st
 fn row_of(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> AdvancedOptionRow {
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance holds a stable plan");
@@ -299,7 +313,7 @@ fn row_of(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> AdvancedO
         target.kind(),
         target.draft(),
         target.numeric_override(),
-        &app.state.sim_setup.options,
+        &app.state.model.sim_setup.options,
         plan.solver_ownership(instance),
     )
     .into_iter()
@@ -311,6 +325,7 @@ fn row_of(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> AdvancedO
 /// The authored bound one analysis currently carries for one option.
 fn authored(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> Option<String> {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -322,6 +337,7 @@ fn authored(app: &RSpiceApp, instance: AnalysisInstanceId, option: O) -> Option<
 /// The revision the plan currently stands at.
 fn revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance holds a stable plan")
@@ -574,7 +590,7 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
     assert_eq!(inherited.origin, PLAN_ORIGIN);
     assert_eq!(
         inherited.effective,
-        super::super::page_solver::plan_preset_value(O::Trtol, &app.state.sim_setup.options),
+        super::super::page_solver::plan_preset_value(O::Trtol, &app.state.model.sim_setup.options),
         "and the field states the plan's own value once more"
     );
 
@@ -593,6 +609,7 @@ fn a_well_authors_what_it_holds_and_clears_when_it_is_emptied() {
 fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
     let plan_records = |app: &RSpiceApp| {
         app.state
+            .model
             .log_buffer
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
@@ -634,7 +651,7 @@ fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
     );
     assert_eq!(
         row_of(&app, transient, O::Trtol).effective,
-        super::super::page_solver::plan_preset_value(O::Trtol, &app.state.sim_setup.options),
+        super::super::page_solver::plan_preset_value(O::Trtol, &app.state.model.sim_setup.options),
         "the field states what the solve uses, which the refusal did not change"
     );
 }
@@ -704,6 +721,7 @@ fn a_legacy_override_of_a_global_option_stays_until_it_is_cleared() {
         )
         .expect("every kind carries an update bound");
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test instance holds a stable plan")

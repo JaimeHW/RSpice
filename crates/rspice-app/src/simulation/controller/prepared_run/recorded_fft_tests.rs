@@ -32,6 +32,7 @@ fn edit_transient(
 fn plan_with_bound_fft(with_fft: Option<Option<&str>>) -> AppState {
     let mut state = runnable_state();
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -66,8 +67,10 @@ fn plan_with_bound_fft(with_fft: Option<Option<&str>>) -> AppState {
 }
 
 fn compile(state: &AppState) -> Vec<crate::simulation::execution::PreparedTask> {
-    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
+    let frozen =
+        SimulationController::build_analysis_plan(&state.model.sim_setup).expect("plan freezes");
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .expect("model sources seal");
@@ -165,7 +168,12 @@ fn an_fft_card_reaches_only_the_transient_it_is_bound_to() {
     let mut state = plan_with_bound_fft(Some(Some("8m")));
     // A second, shorter transient the card must never reach: it stops before
     // the card's STOP, so a shared deck would fail it outright.
-    let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+    let plan = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan");
     let (short, _) = plan
         .insert(AnalysisKind::Transient)
         .expect("second transient inserts");
@@ -231,7 +239,12 @@ fn an_fft_instance_adds_no_second_transient_solve() {
 #[test]
 fn an_fft_window_past_the_bound_transient_stop_is_refused_before_the_run() {
     let mut state = plan_with_bound_fft(None);
-    let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+    let plan = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan");
     let transient = plan
         .instances()
         .iter()
@@ -262,11 +275,16 @@ fn an_fft_window_past_the_bound_transient_stop_is_refused_before_the_run() {
 #[test]
 fn an_fft_analysis_without_an_earlier_transient_is_refused_before_the_run() {
     let mut state = runnable_state();
-    let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+    let plan = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan");
     plan.insert(AnalysisKind::Fft).expect("FFT inserts");
     // An unbound FFT is a plan the studio will not freeze, so the refusal
     // arrives before a queue is ever compiled.
-    let errors = SimulationController::build_analysis_plan(&state.sim_setup)
+    let errors = SimulationController::build_analysis_plan(&state.model.sim_setup)
         .expect_err("an unbound FFT cannot freeze");
     assert!(
         errors
@@ -279,7 +297,12 @@ fn an_fft_analysis_without_an_earlier_transient_is_refused_before_the_run() {
 #[test]
 fn a_transient_with_a_fourier_and_an_fft_dependent_hands_both_one_artifact() {
     let mut state = plan_with_bound_fft(Some(Some("8m")));
-    let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+    let plan = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan");
     let transient = plan
         .instances()
         .iter()
@@ -343,8 +366,8 @@ fn a_hand_written_fft_deck_is_read_as_the_fft_analysis() {
     const DECK: &str = "recorded fft deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 8m\n\
          .fft V(out) NP=256 WINDOW=HANN\n.fft V(out) NP=512 WINDOW=RECT FORMAT=UNORM\n.end\n";
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(DECK.to_owned());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(DECK.to_owned());
     let tasks = dispatch_tasks(&mut state, SimulationRunIntent::ManualDeck);
     let transient = tasks
         .iter()
@@ -376,10 +399,10 @@ fn a_hand_written_fft_deck_is_read_as_the_fft_analysis() {
 #[test]
 fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     // Two transients, which the Studio refuses for `.FOUR` and the engine
     // accepts for `.FFT`: the card belongs to the first one.
-    state.workspace.content.netlist_source = Some(
+    state.model.workspace.content.netlist_source = Some(
         "two transients\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.tran 10u 8m\n.tran 5u 4m\n\
          .fft V(out) NP=256 WINDOW=RECT\n.end\n"
             .to_owned(),
@@ -400,8 +423,8 @@ fn a_hand_written_fft_binds_the_first_transient_as_the_engine_does() {
 #[test]
 fn a_hand_written_fft_without_a_transient_is_refused_in_the_engine_s_words() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(
         "fft with no transient\nV1 out 0 dc 0 ac 1\nR1 out 0 1k\n.ac dec 10 1 1k\n\
          .fft V(out) NP=256 WINDOW=RECT\n.end\n"
             .to_owned(),

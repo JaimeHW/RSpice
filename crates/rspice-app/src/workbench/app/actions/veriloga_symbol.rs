@@ -15,7 +15,7 @@ use crate::workbench::documents::code_workspace::{
 impl AppState {
     /// Update the open Verilog-A view's symbol, and say what happened.
     pub(crate) fn update_active_veriloga_symbol(&mut self) {
-        let reference = self.workspace.content.active_view.clone();
+        let reference = self.model.workspace.content.active_view.clone();
         match self.update_veriloga_symbol(&reference) {
             Ok(message) | Err(message) => self.prompt(message),
         }
@@ -28,12 +28,12 @@ impl AppState {
         &mut self,
         reference: &CellViewRef,
     ) -> Result<String, String> {
-        let drift = match symbol_standing(&self.library_manager, reference) {
+        let drift = match symbol_standing(&self.model.library_manager, reference) {
             Some(VerilogACellSymbol::Drifted(drift)) => drift,
             _ => return Err("The symbol already matches the module's ports.".to_owned()),
         };
-        let document = reconciled_symbol(&self.library_manager, reference)?;
-        let mut candidate = self.library_manager.clone();
+        let document = reconciled_symbol(&self.model.library_manager, reference)?;
+        let mut candidate = self.model.library_manager.clone();
         candidate
             .edit_library(&reference.library)
             .and_then(|mut library| {

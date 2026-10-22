@@ -14,7 +14,7 @@ pub(crate) use rspice_schematic_editor::view::selection_layout::{
 fn view<'a>(state: &'a AppState, symbols: &'a SchematicSymbolContext) -> SelectionLayoutView<'a> {
     SelectionLayoutView {
         design: super::schematic_design_view(state),
-        selection: &state.schematic.session.editor.selection,
+        selection: &state.model.schematic.session.editor.selection,
         symbols,
         can_edit: !state.schematic_edit_read_only(),
     }
@@ -47,7 +47,7 @@ fn apply_request(
         return Err(SelectionLayoutError::ReadOnly);
     }
     if request.source != editor_request_source(state)
-        || request.selection != state.schematic.session.editor.selection
+        || request.selection != state.model.schematic.session.editor.selection
     {
         return Err(SelectionLayoutError::StaleSelection);
     }
@@ -57,7 +57,7 @@ fn apply_request(
         return Ok(false);
     }
 
-    state.schematic.begin_operation(command.label());
+    state.model.schematic.begin_operation(command.label());
     // A wire end on another sheet can share a moved pin's coordinates; the
     // parts carry only their own sheet's wires.
     with_active_wire_topology(state, |schematic, scope| {
@@ -81,8 +81,8 @@ fn apply_request(
             }
         }
     });
-    state.schematic.session.is_dirty = true;
-    let recorded = state.schematic.end_operation();
+    state.model.schematic.session.is_dirty = true;
+    let recorded = state.model.schematic.end_operation();
     if recorded {
         state.sync_active_schematic_to_workspace();
     }
@@ -100,6 +100,7 @@ mod tests {
         let mut state = AppState::default();
         for &(id, x, y) in positions {
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .components
@@ -109,13 +110,14 @@ mod tests {
                     Point::new(x, y),
                 ));
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_component(id);
         }
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         state
     }
 
@@ -131,6 +133,7 @@ mod tests {
         ] {
             let mut state = selected_components(&[(3, 70, 90), (1, 10, 10), (2, 40, 50)]);
             let original: Vec<Point> = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -138,17 +141,20 @@ mod tests {
                 .map(|component| component.pos)
                 .collect();
             let context = schematic_symbol_context(&state);
-            let terminal = context.terminal_points(&state.schematic.document().components[0])[0];
+            let terminal =
+                context.terminal_points(&state.model.schematic.document().components[0])[0];
             let original_wire = crate::state::Wire::segment(90, terminal, Point::new(300, 300));
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .wires
                 .push(original_wire.clone());
-            state.schematic.init_undo_history();
+            state.model.schematic.init_undo_history();
 
             assert!(apply_selection_layout(&mut state, &context, command).unwrap());
             let aligned: Vec<_> = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -171,14 +177,18 @@ mod tests {
                 "{command:?}"
             );
             assert_eq!(
-                state.schematic.document().wires[0].points[0],
-                context.terminal_points(&state.schematic.document().components[0])[0]
+                state.model.schematic.document().wires[0].points[0],
+                context.terminal_points(&state.model.schematic.document().components[0])[0]
             );
-            assert_eq!(state.schematic.undo_description(), Some(command.label()));
-            assert!(state.schematic.undo());
-            assert_eq!(state.schematic.document().wires[0], original_wire);
+            assert_eq!(
+                state.model.schematic.undo_description(),
+                Some(command.label())
+            );
+            assert!(state.model.schematic.undo());
+            assert_eq!(state.model.schematic.document().wires[0], original_wire);
             assert_eq!(
                 state
+                    .model
                     .schematic
                     .document()
                     .components
@@ -188,7 +198,7 @@ mod tests {
                 original
             );
             assert!(
-                !state.schematic.can_undo(),
+                !state.model.schematic.can_undo(),
                 "layout command is one undo unit"
             );
         }
@@ -215,6 +225,7 @@ mod tests {
             );
             let context = schematic_symbol_context(&state);
             let mut bounds: Vec<_> = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -235,7 +246,7 @@ mod tests {
                 .collect();
             // Every move is a whole number of grid steps, so the gaps are
             // equal to within one step; part 15 starts off the grid.
-            let grid = state.schematic.document().grid_size;
+            let grid = state.model.schematic.document().grid_size;
             assert!(
                 gaps.windows(2)
                     .all(|pair| (pair[0] - pair[1]).abs() <= grid),
@@ -276,19 +287,21 @@ mod tests {
                     component.rotation = crate::state::Rotation::R90;
                 }
                 state
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .components
                     .push(component);
                 state
+                    .model
                     .schematic
                     .session
                     .editor
                     .selection
                     .select_component(id);
             }
-            state.schematic.init_undo_history();
-            let grid = state.schematic.document().grid_size;
+            state.model.schematic.init_undo_history();
+            let grid = state.model.schematic.document().grid_size;
             let context = schematic_symbol_context(&state);
 
             assert!(
@@ -296,7 +309,7 @@ mod tests {
                 "{command:?}"
             );
 
-            let components = &state.schematic.document().components;
+            let components = &state.model.schematic.document().components;
             for component in components {
                 let pins = context.terminal_points(component);
                 for point in std::iter::once(component.pos).chain(pins) {
@@ -351,12 +364,13 @@ mod tests {
         ] {
             let mut state = selected_components(&[(1, 0, 0), (2, 40, 30)]);
             let master = crate::state::CellViewRef::new("work", "layout_child", "schematic");
-            state.workspace.descend_into(
+            state.model.workspace.descend_into(
                 "X1".to_owned(),
                 master.clone(),
                 crate::state::ViewType::Schematic,
             );
             let first = state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -370,10 +384,10 @@ mod tests {
             )
             .unwrap();
             match change {
-                "document" => state.active_schematic_epoch += 1,
+                "document" => state.model.active_schematic_epoch += 1,
                 "occurrence" => {
-                    state.workspace.ascend_one().unwrap();
-                    state.workspace.descend_into(
+                    state.model.workspace.ascend_one().unwrap();
+                    state.model.workspace.descend_into(
                         "X2".to_owned(),
                         master.clone(),
                         crate::state::ViewType::Schematic,
@@ -381,6 +395,7 @@ mod tests {
                 }
                 "sheet" => {
                     let catalog = state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -399,23 +414,27 @@ mod tests {
                         .unwrap();
                     catalog.set_active(second).unwrap();
                 }
-                "selection" => state.schematic.session.editor.selection.clear(),
-                "content" => state.schematic.bump_topology_version(),
-                "read-only" => state.schematic.session.read_only = true,
+                "selection" => state.model.schematic.session.editor.selection.clear(),
+                "content" => state.model.schematic.bump_topology_version(),
+                "read-only" => state.model.schematic.session.read_only = true,
                 "none" => {}
                 _ => unreachable!(),
             }
-            let before = state.schematic.document().components.clone();
+            let before = state.model.schematic.document().components.clone();
             let outcome = apply_request(&mut state, &symbols, request);
             if change == "none" {
                 assert_eq!(outcome, Ok(true));
-                assert_eq!(state.schematic.document().components[1].pos.x, 0);
-                assert!(state.schematic.undo());
+                assert_eq!(state.model.schematic.document().components[1].pos.x, 0);
+                assert!(state.model.schematic.undo());
             } else {
                 assert!(outcome.is_err(), "{change}");
             }
-            assert_eq!(state.schematic.document().components, before, "{change}");
-            assert!(!state.schematic.can_undo(), "{change}");
+            assert_eq!(
+                state.model.schematic.document().components,
+                before,
+                "{change}"
+            );
+            assert!(!state.model.schematic.can_undo(), "{change}");
         }
     }
 
@@ -423,6 +442,7 @@ mod tests {
     fn incompatible_and_read_only_selections_fail_without_undo() {
         let mut state = selected_components(&[(1, 0, 0), (2, 40, 0)]);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -430,49 +450,67 @@ mod tests {
                 9,
                 vec![Point::origin(), Point::new(10, 0)],
             ));
-        state.schematic.session.editor.selection.select_wire(9);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(9);
         let context = schematic_symbol_context(&state);
         assert_eq!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::IncompatibleSelection)
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
 
-        state.schematic.session.editor.selection.wires.clear();
-        state.schematic.session.read_only = true;
+        state.model.schematic.session.editor.selection.wires.clear();
+        state.model.schematic.session.read_only = true;
         assert_eq!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::ReadOnly)
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     #[test]
     fn probe_layout_is_non_electrical_and_undoable() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().probes = vec![
+        state.model.schematic.document_mut_for_test().probes = vec![
             SchematicProbe::new(20, Point::new(10, 10), "V(out)", None).unwrap(),
             SchematicProbe::new(21, Point::new(40, 30), "V(out)", None).unwrap(),
         ];
-        state.schematic.session.editor.selection.select_probe(20);
-        state.schematic.session.editor.selection.select_probe(21);
-        state.schematic.init_undo_history();
-        let original = state.schematic.document().probes.clone();
-        let topology = state.schematic.topology_version();
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_probe(20);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_probe(21);
+        state.model.schematic.init_undo_history();
+        let original = state.model.schematic.document().probes.clone();
+        let topology = state.model.schematic.topology_version();
         let context = schematic_symbol_context(&state);
 
         assert!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
                 .unwrap()
         );
-        assert_eq!(state.schematic.document().probes[0].position.x, 10);
-        assert_eq!(state.schematic.document().probes[1].position.x, 10);
-        assert_eq!(state.schematic.topology_version(), topology);
+        assert_eq!(state.model.schematic.document().probes[0].position.x, 10);
+        assert_eq!(state.model.schematic.document().probes[1].position.x, 10);
+        assert_eq!(state.model.schematic.topology_version(), topology);
 
-        assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document().probes, original);
-        assert_eq!(state.schematic.topology_version(), topology);
-        assert!(!state.schematic.can_undo());
+        assert!(state.model.schematic.undo());
+        assert_eq!(state.model.schematic.document().probes, original);
+        assert_eq!(state.model.schematic.topology_version(), topology);
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// Sheet 2 shares Sheet 1's coordinates, not its conductors: aligning
@@ -483,11 +521,13 @@ mod tests {
         let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1, 2], &[90]);
         for (id, position) in [(1, Point::new(10, 10)), (2, Point::new(40, 50))] {
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .components
                 .push(Component::new(id, ComponentType::Resistor, position));
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -495,14 +535,15 @@ mod tests {
                 .select_component(id);
         }
         let context = schematic_symbol_context(&state);
-        let terminal = context.terminal_points(&state.schematic.document().components[1])[0];
+        let terminal = context.terminal_points(&state.model.schematic.document().components[1])[0];
         let hidden = crate::state::Wire::segment(90, terminal, Point::new(300, 300));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(hidden.clone());
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
 
         assert!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft)
@@ -510,24 +551,31 @@ mod tests {
         );
 
         assert_ne!(
-            context.terminal_points(&state.schematic.document().components[1])[0],
+            context.terminal_points(&state.model.schematic.document().components[1])[0],
             terminal,
             "the part moved"
         );
-        assert_eq!(state.schematic.document().wires, vec![hidden]);
+        assert_eq!(state.model.schematic.document().wires, vec![hidden]);
     }
 
     #[test]
     fn cross_sheet_selection_fails_closed_instead_of_moving_a_visible_subset() {
         let mut state = selected_components(&[(1, 0, 0), (2, 40, 0)]);
-        let key = state.workspace.content.active_schematic_reference().key();
+        let key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         let first = state
+            .model
             .workspace
             .content
             .design_management
             .bootstrap_for_cell_view(&key, "Sheet 1", [1, 2])
             .expect("first sheet");
         let catalog = state
+            .model
             .workspace
             .content
             .design_management
@@ -549,13 +597,13 @@ mod tests {
             .expect("hidden assignment");
         catalog.set_active(first).expect("active sheet");
         let context = schematic_symbol_context(&state);
-        let before = state.schematic.document().components.clone();
+        let before = state.model.schematic.document().components.clone();
 
         assert_eq!(
             apply_selection_layout(&mut state, &context, SelectionLayoutCommand::AlignLeft),
             Err(SelectionLayoutError::OffActiveSheet)
         );
-        assert_eq!(state.schematic.document().components, before);
-        assert!(!state.schematic.can_undo());
+        assert_eq!(state.model.schematic.document().components, before);
+        assert!(!state.model.schematic.can_undo());
     }
 }

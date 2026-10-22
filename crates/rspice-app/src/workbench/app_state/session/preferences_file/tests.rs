@@ -102,6 +102,7 @@ fn bound(store: &PreferencesStore) -> AppState {
 
 fn console(state: &AppState) -> Vec<(LogSeverity, String)> {
     state
+        .model
         .log_buffer
         .entries()
         .map(|entry| (entry.severity, entry.message.clone()))

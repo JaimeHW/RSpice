@@ -33,12 +33,12 @@ struct PublicationDraft {
 impl PublicationDraft {
     fn new(state: &AppState) -> Self {
         Self {
-            source_project_revision: state.workspace.content.project.revision().get(),
-            source_library_revision: state.library_manager.revision(),
+            source_project_revision: state.model.workspace.content.project.revision().get(),
+            source_library_revision: state.model.library_manager.revision(),
             label: format!(
                 "{}-library-r{}",
-                state.workspace.content.project.name(),
-                state.workspace.content.project.revision().get()
+                state.model.workspace.content.project.name(),
+                state.model.workspace.content.project.revision().get()
             ),
             actor_id: String::new(),
             authority_id: String::new(),
@@ -169,6 +169,7 @@ pub(super) fn open_publication(ctx: &Context, state: &AppState) {
 
 pub(super) fn open_rollback(ctx: &Context, state: &AppState) {
     let Some(receipt) = state
+        .model
         .workspace
         .content
         .project
@@ -217,8 +218,8 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
     let Some(mut draft) = ctx.data(|data| data.get_temp::<PublicationDraft>(id)) else {
         return;
     };
-    let live_project_revision = app.state.workspace.content.project.revision().get();
-    let live_library_revision = app.state.library_manager.revision();
+    let live_project_revision = app.state.model.workspace.content.project.revision().get();
+    let live_library_revision = app.state.model.library_manager.revision();
     let stale = live_project_revision != draft.source_project_revision
         || live_library_revision != draft.source_library_revision;
     let lifecycle_error = publication_lifecycle_error(&app.state, stale);
@@ -246,8 +247,8 @@ fn show_publication_dialog(ctx: &Context, app: &mut RSpiceApp) {
                 "Project",
                 &format!(
                     "{} \u{00b7} {}",
-                    app.state.workspace.content.project.display_name(),
-                    app.state.workspace.content.project.id()
+                    app.state.model.workspace.content.project.display_name(),
+                    app.state.model.workspace.content.project.id()
                 ),
             );
             property_row(
@@ -353,6 +354,7 @@ fn show_rollback_dialog(ctx: &Context, app: &mut RSpiceApp) {
     };
     let receipts = app
         .state
+        .model
         .workspace
         .content
         .project
@@ -650,7 +652,7 @@ fn publication_lifecycle_error(state: &AppState, stale: bool) -> Option<&'static
         Some("Open a project before publishing its library.")
     } else if state.workbench.safe_mode.project_read_only() {
         Some("Publication is unavailable while the project is open read-only.")
-    } else if state.simulation.execution.has_active_execution() {
+    } else if state.model.simulation.execution.has_active_execution() {
         Some("Publication is unavailable while a simulation is running.")
     } else if stale {
         Some("The publication review is stale.")
@@ -664,7 +666,7 @@ fn rollback_lifecycle_error(state: &AppState) -> Option<&'static str> {
         Some("Open the publication's project before rollback.")
     } else if state.workbench.safe_mode.project_read_only() {
         Some("Rollback is unavailable while the project is open read-only.")
-    } else if state.simulation.execution.has_active_execution() {
+    } else if state.model.simulation.execution.has_active_execution() {
         Some("Rollback is unavailable while a simulation is running.")
     } else {
         None
@@ -773,7 +775,7 @@ fn start_browser_publication(
     let target = BrowserWriteTarget {
         handle_id: None,
         intent: rspice_project::persistence::browser::BrowserWriteIntent::fresh(
-            app.state.workspace.content.project.id().to_string(),
+            app.state.model.workspace.content.project.id().to_string(),
             BrowserBindingBackend::ExternalFile,
         ),
     };
@@ -1008,6 +1010,7 @@ fn validate_rollback_artifact(
     use sha2::Digest as _;
 
     let receipt = state
+        .model
         .workspace
         .content
         .project
@@ -1035,7 +1038,7 @@ fn clear_rollback_artifact(draft: &mut RollbackDraft) {
 }
 
 fn publication_filename(state: &AppState, label: &str) -> String {
-    let project = safe_file_stem(state.workspace.content.project.name());
+    let project = safe_file_stem(state.model.workspace.content.project.name());
     let label = safe_file_stem(label);
     format!("{project}-{label}.{PROJECT_ARTIFACT_EXTENSION}")
 }
@@ -1164,7 +1167,14 @@ mod tests {
 
         let action = publish_native(&mut app, &draft).expect("publication succeeds");
         assert!(matches!(action, PublicationAction::Published(_)));
-        let [receipt] = app.state.workspace.content.project.library_publications() else {
+        let [receipt] = app
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .library_publications()
+        else {
             panic!("exactly one publication receipt must commit");
         };
         let writes = writes.borrow();
@@ -1199,6 +1209,7 @@ mod tests {
         assert!(writes.borrow().is_empty());
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .project

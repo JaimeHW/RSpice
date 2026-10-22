@@ -552,7 +552,7 @@ fn paint_title_context(
     }
     let t = Tokens::get(ui.ctx());
     let dirty = app.state.project_lifecycle.is_open()
-        && (app.state.schematic.session.is_dirty || app.state.workspace.any_dirty());
+        && (app.state.model.schematic.session.is_dirty || app.state.model.workspace.any_dirty());
     let cell = active_title_cell(app);
     let full = title_context_text(app, compact);
     let font = theme::sans(tokens::FS_1, FontWeight::Regular);
@@ -607,7 +607,7 @@ fn paint_title_context(
         if app.state.project_lifecycle.is_open() {
             node.set_label(format!(
                 "Active project: {}; {}; {}",
-                app.state.workspace.content.project.display_name(),
+                app.state.model.workspace.content.project.display_name(),
                 cell,
                 if dirty {
                     "unsaved changes"
@@ -647,6 +647,7 @@ fn title_context_text(app: &RSpiceApp, compact: bool) -> String {
         // title scoped to project identity so the shell does not repeat the
         // same context three times.
         app.state
+            .model
             .workspace
             .content
             .project
@@ -705,8 +706,8 @@ fn active_title_cell(app: &RSpiceApp) -> String {
         Workspace::Project => "Project overview".to_owned(),
         Workspace::Design => format!(
             "{} · {}",
-            app.state.workspace.content.active_view.cell,
-            app.state.workspace.content.active_view.view
+            app.state.model.workspace.content.active_view.cell,
+            app.state.model.workspace.content.active_view.view
         ),
         Workspace::Simulate => "Simulation plan".to_owned(),
         Workspace::Stimulus => "Stimulus Library".to_owned(),
@@ -714,7 +715,7 @@ fn active_title_cell(app: &RSpiceApp) -> String {
         Workspace::Verify => "Verification".to_owned(),
         Workspace::Models => "Models & PDKs".to_owned(),
         Workspace::Netlist => crate::workbench::documents::code_workspace::active_document_label(
-            &app.state.workspace,
+            &app.state.model.workspace,
             &app.state.ui.code_workspace,
             app.state.ui.messages(),
         ),

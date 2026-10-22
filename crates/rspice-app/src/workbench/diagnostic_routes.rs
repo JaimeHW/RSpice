@@ -36,7 +36,7 @@ use crate::workbench::state::{ProjectPage, SimulationPage, Workspace};
 pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
     app.state.withdraw_retired_run_diagnostics();
     app.state.reconcile_current_finding();
-    let Some(route) = app.state.diagnostics.take_pending_route() else {
+    let Some(route) = app.state.model.diagnostics.take_pending_route() else {
         return;
     };
     match route {
@@ -89,6 +89,7 @@ fn open_code_document(
 
     let owner = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -118,6 +119,7 @@ fn open_code_document(
     // reported the finding is the one in front of the reader.
     let active = app
         .state
+        .model
         .workspace
         .active_source_bundle(language)
         .map(crate::state::ProjectSourceBundle::id);
@@ -128,7 +130,7 @@ fn open_code_document(
         return;
     }
     if code_workspace::select_source_document(
-        &app.state.workspace,
+        &app.state.model.workspace,
         &mut app.state.ui.code_workspace,
         language,
         logical_path,
@@ -162,11 +164,16 @@ pub(in crate::workbench) fn apply_remediation(
         // the PVT & Monte Carlo page, which replaced the evidence the reader
         // was following and then left them somewhere it was not.
         PreflightRemediation::DesignChecks => {
-            let root = app.state.workspace.content.simulation_root_reference();
+            let root = app
+                .state
+                .model
+                .workspace
+                .content
+                .simulation_root_reference();
             app.state.open_workspace_view(root.clone());
             Command::OpenWorkspace(Workspace::Design).execute(app);
             if let Some(worst) = app.state.worst_design_rule_finding(&root) {
-                app.state.diagnostics.set_current_finding(Some(worst));
+                app.state.model.diagnostics.set_current_finding(Some(worst));
             }
             Command::OpenProblems.execute(app);
         }
@@ -179,6 +186,7 @@ pub(in crate::workbench) fn apply_remediation(
             if let Some(analysis) = analysis {
                 let held = app
                     .state
+                    .model
                     .sim_setup
                     .stable_analysis_plan()
                     .is_ok_and(|plan| plan.instance(analysis).is_some());
@@ -228,7 +236,13 @@ pub(in crate::workbench) fn apply_remediation(
             // active. Routing itself goes through the same resolution the
             // Problems rows use, so a netlist finding lands the same way
             // wherever it was reported from.
-            if app.state.netlist_artifacts.generated_document.is_some() {
+            if app
+                .state
+                .model
+                .netlist_artifacts
+                .generated_document
+                .is_some()
+            {
                 netlist_document::open_generated_primary(&mut app.state);
             } else {
                 app.state.prompt(

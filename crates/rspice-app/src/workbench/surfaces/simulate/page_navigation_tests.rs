@@ -103,6 +103,7 @@ fn retain_run_for_active_plan(state: &mut AppState, analysis: AnalysisResult) {
 fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<AnalysisResult>) {
     state.open_project_session();
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance owns a stable analysis plan");
@@ -112,7 +113,7 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
         .first()
         .expect("the default plan holds one instance")
         .id();
-    let project_revision = state.workspace.content.project.revision();
+    let project_revision = state.model.workspace.content.project.revision();
     let receipt = PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: AnalysisResultSourceDomain::SimulationPlan,
         simulation_plan_id: Some(plan_id),
@@ -150,12 +151,12 @@ fn start_prepared_run_for_active_plan(state: &mut AppState, analysis: Option<Ana
         )
     });
     let holds_analysis = analysis.is_some();
-    let run = state.simulation.start_prepared_run(receipt).unwrap();
+    let run = state.model.simulation.start_prepared_run(receipt).unwrap();
     if let Some(analysis) = analysis {
         run.add_analysis(analysis);
     }
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = holds_analysis.then_some(0);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = holds_analysis.then_some(0);
 }
 
 /// The plan heading is the plan's name; the two controls beside it say whether
@@ -197,11 +198,12 @@ fn the_plan_heading_offers_its_prior_dataset_and_the_split_stage() {
 fn the_selected_limit_offers_its_evidence_and_its_producer() {
     let without = render_with(SimulationPage::Specifications, 1400.0, |state| {
         let plan_id = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
             .id();
-        state.workspace.content.replace_active_specs(
+        state.model.workspace.content.replace_active_specs(
             plan_id,
             vec![SpecEntry {
                 measurement: "gain_dc".to_owned(),
@@ -230,6 +232,7 @@ fn the_selected_limit_offers_its_evidence_and_its_producer() {
 fn a_saved_output_offers_the_trace_it_stored() {
     let rendered = render_with(SimulationPage::Outputs, 1400.0, |state| {
         let plan_id = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -237,6 +240,7 @@ fn a_saved_output_offers_the_trace_it_stored() {
         let output = saved_output();
         let name = output.name.clone();
         state
+            .model
             .workspace
             .content
             .add_saved_output(plan_id, output)
@@ -358,7 +362,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         "Temperature".to_owned(),
         "-40".to_owned(),
     )];
-    let before = app.state.log_buffer.revision();
+    let before = app.state.model.log_buffer.revision();
     assert_eq!(
         super::page_runset::family_query_for_point(&mut app.state, 0, &absent),
         None
@@ -368,7 +372,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         Some("The retained family holds no member at temperature = -40, so nothing was opened.")
     );
     assert_eq!(
-        app.state.log_buffer.revision(),
+        app.state.model.log_buffer.revision(),
         before,
         "a refusal is a prompt, never a Console line"
     );
@@ -401,7 +405,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     );
 
     // A deferred contract is retained but unevaluated, and says so.
-    app.state.simulation.retained.runs[0].analyses[0]
+    app.state.model.simulation.retained.runs[0].analyses[0]
         .saved_output_receipts
         .push(SavedOutputReceipt {
             source_bindings: None,
@@ -427,7 +431,7 @@ fn a_saved_output_trace_is_resolved_from_the_receipt_not_the_waveform_names() {
     );
 
     // Materialized, and the waveform is there: the hop resolves to it.
-    app.state.simulation.retained.runs[0].analyses[0].saved_output_receipts[0].status =
+    app.state.model.simulation.retained.runs[0].analyses[0].saved_output_receipts[0].status =
         SavedOutputMaterializationStatus::Materialized {
             waveform_name: "V(out)".to_owned(),
             sample_count: 2,
@@ -504,6 +508,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
         });
     let analysis_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .unwrap()
@@ -527,7 +532,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
     });
     analysis.validate_retained_evidence().unwrap();
     retain_run_for_active_plan(&mut app.state, analysis);
-    let run = app.state.simulation.active_run().unwrap();
+    let run = app.state.model.simulation.active_run().unwrap();
     let analysis = &run.analyses[0];
     let digest = analysis.result_data_digest();
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
@@ -546,7 +551,7 @@ fn a_saved_output_dc_family_reveals_all_members_without_changing_retained_data()
             index < 2
         );
     }
-    let retained = &app.state.simulation.active_run().unwrap().analyses[0];
+    let retained = &app.state.model.simulation.active_run().unwrap().analyses[0];
     assert_eq!(retained.result_data_digest(), digest);
     assert!(retained.waveforms.iter().all(|waveform| !waveform.visible));
     assert_eq!(
@@ -577,6 +582,7 @@ fn the_heading_the_hop_and_the_contract_card_agree_about_the_prior_run() {
         // derivations, pinned here so it cannot quietly stop being one: a run
         // in history, sealed to this plan, holding nothing.
         let run = state
+            .model
             .simulation
             .retained
             .runs
@@ -628,9 +634,9 @@ fn a_run_still_executing_is_named_as_in_progress_rather_than_immutable() {
             state,
             AnalysisResult::new(1, AnalysisType::Transient, "live TRAN"),
         );
-        state.simulation.execution.is_running = true;
+        state.model.simulation.execution.is_running = true;
         assert!(
-            state.simulation.execution.has_active_execution(),
+            state.model.simulation.execution.has_active_execution(),
             "the fixture is a run an execution still owns"
         );
     });
@@ -660,6 +666,7 @@ fn the_empty_analysis_rail_offers_the_action_that_fills_it() {
 
     let empty = render_with(SimulationPage::Analyses, 1400.0, |state| {
         let ids = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the test instance owns a stable plan")
@@ -668,6 +675,7 @@ fn the_empty_analysis_rail_offers_the_action_that_fills_it() {
             .map(crate::simulation::plan::AnalysisInstance::id)
             .collect::<Vec<_>>();
         let plan = state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the plan is still there to empty");

@@ -408,7 +408,7 @@ impl RSpiceApp {
                 };
                 let validation = object_property_session_error(&self.state).map_or_else(
                     || {
-                        validate_draft(&self.state.schematic, draft, &|id| {
+                        validate_draft(&self.state.model.schematic, draft, &|id| {
                             object_is_on_active_sheet(&self.state, id)
                         })
                     },
@@ -419,7 +419,7 @@ impl RSpiceApp {
                 );
                 match validation {
                     DraftValidation::Valid(commit, _) => {
-                        let content = &self.state.workspace.content;
+                        let content = &self.state.model.workspace.content;
                         let catalog = content
                             .design_management
                             .sheet_catalog(&content.active_schematic_reference().key());
@@ -428,7 +428,7 @@ impl RSpiceApp {
                                 catalog, id,
                             )
                         };
-                        match apply_commit(&mut self.state.schematic, *commit, &on_sheet) {
+                        match apply_commit(&mut self.state.model.schematic, *commit, &on_sheet) {
                             // Closing is the report. A line saying the edit
                             // landed, next to the canvas that now shows it,
                             // is one more thing to read and nothing to act on.
@@ -468,7 +468,7 @@ fn resolve_draft_for_repaint(
         return (cached.validation, cached.bus_choices);
     }
 
-    let validation = validate_draft(&state.schematic, draft, &|id| {
+    let validation = validate_draft(&state.model.schematic, draft, &|id| {
         object_is_on_active_sheet(state, id)
     });
     let bus_choices = match draft {
@@ -478,7 +478,7 @@ fn resolve_draft_for_repaint(
         | ObjectPropertiesDraft::DesignNote(_)
         | ObjectPropertiesDraft::DocumentationShape(_) => Vec::new(),
         ObjectPropertiesDraft::BusTap(draft) => {
-            bus_choices(&state.schematic, draft.original.bus_point)
+            bus_choices(&state.model.schematic, draft.original.bus_point)
         }
     };
     ctx.data_mut(|data| {
@@ -501,6 +501,7 @@ fn draft_resolution_key(
     let (target_matches_baseline, draft_source) = match draft {
         ObjectPropertiesDraft::Bus(draft) => (
             state
+                .model
                 .schematic
                 .document()
                 .buses
@@ -514,6 +515,7 @@ fn draft_resolution_key(
         ),
         ObjectPropertiesDraft::BusTap(draft) => (
             state
+                .model
                 .schematic
                 .document()
                 .bus_taps
@@ -529,6 +531,7 @@ fn draft_resolution_key(
         ),
         ObjectPropertiesDraft::NetLabel(draft) => (
             state
+                .model
                 .schematic
                 .document()
                 .net_labels
@@ -544,7 +547,7 @@ fn draft_resolution_key(
         ),
         ObjectPropertiesDraft::NamedNet(draft) => (
             crate::workbench::app::validate_named_net_rename(
-                &state.schematic,
+                &state.model.schematic,
                 &draft.original,
                 &draft.original.name,
             )
@@ -559,6 +562,7 @@ fn draft_resolution_key(
         ),
         ObjectPropertiesDraft::DesignNote(draft) => (
             state
+                .model
                 .schematic
                 .document()
                 .design_notes
@@ -574,6 +578,7 @@ fn draft_resolution_key(
         ),
         ObjectPropertiesDraft::DocumentationShape(draft) => (
             state
+                .model
                 .schematic
                 .document()
                 .documentation_shapes
@@ -588,7 +593,7 @@ fn draft_resolution_key(
     };
     DraftResolutionKey {
         source: crate::workbench::app::schematic_editor_request_source(state),
-        view_path: state.workspace.content.active_view.display_path(),
+        view_path: state.model.workspace.content.active_view.display_path(),
         target_matches_baseline,
         draft_source,
     }
@@ -624,7 +629,7 @@ fn object_property_session_error(state: &crate::workbench::app_state::AppState) 
                 .to_owned(),
         );
     }
-    if dialog.view_path != state.workspace.content.active_view.display_path() {
+    if dialog.view_path != state.model.workspace.content.active_view.display_path() {
         return Some(
             "The active cell/view changed while properties were open. Close and reopen the current object."
                 .to_owned(),
@@ -1104,7 +1109,7 @@ mod tests {
         app.state.dialogs.object_properties.open_bus(
             bus,
             crate::workbench::app::schematic_editor_request_source(&app.state),
-            app.state.workspace.content.active_view.display_path(),
+            app.state.model.workspace.content.active_view.display_path(),
         );
     }
 
@@ -1150,6 +1155,7 @@ mod tests {
         let mut state = crate::workbench::app_state::AppState::default();
         let bus = declared_bus(1, 0, "DATA[7:0]");
         state
+            .model
             .schematic
             .document_mut_for_test()
             .buses
@@ -1168,11 +1174,11 @@ mod tests {
         if let ObjectPropertiesDraft::Bus(bus_draft) = &mut draft {
             bus_draft.declaration = "DATA[7:0]".to_owned();
         }
-        state.schematic.bump_topology_version();
+        state.model.schematic.bump_topology_version();
         let topology_changed = draft_resolution_key(&state, &draft);
         assert_ne!(topology_changed, initial);
 
-        state.schematic.document_mut_for_test().buses[0].declaration =
+        state.model.schematic.document_mut_for_test().buses[0].declaration =
             Some(BusDeclaration::parse("OTHER[7:0]").unwrap());
         let baseline_changed = draft_resolution_key(&state, &draft);
         assert!(!baseline_changed.target_matches_baseline);
@@ -1514,13 +1520,14 @@ mod tests {
             crate::ui::Theme::default().apply(&ctx);
             let mut app = RSpiceApp::test_instance();
             let master = crate::state::CellViewRef::new("work", "property_parent", "schematic");
-            app.state.workspace.descend_into(
+            app.state.model.workspace.descend_into(
                 "X1".to_owned(),
                 master.clone(),
                 crate::state::ViewType::Schematic,
             );
             let first = app
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -1535,16 +1542,18 @@ mod tests {
             )
             .unwrap();
             app.state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .buses
                 .push(bus.clone());
             app.state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .design_notes
                 .push(note.clone());
-            app.state.schematic.init_undo_history();
+            app.state.model.schematic.init_undo_history();
             open_bus_dialog(&mut app, &bus);
             assert!(object_property_session_error(&app.state).is_none());
             let Some(ObjectPropertiesDraft::Bus(draft)) =
@@ -1566,16 +1575,16 @@ mod tests {
                 .expect("valid initial draft warms the repaint cache");
             assert!(cached.validation.can_commit());
             match change {
-                "project" => app.state.workspace.content.project = Default::default(),
+                "project" => app.state.model.workspace.content.project = Default::default(),
                 "view" => {
-                    app.state.workspace.content.active_view =
+                    app.state.model.workspace.content.active_view =
                         crate::state::CellViewRef::new("work", "replacement", "schematic")
                 }
-                "design" => app.state.design_execution_epoch += 1,
-                "buffer" => app.state.active_schematic_epoch += 1,
+                "design" => app.state.model.design_execution_epoch += 1,
+                "buffer" => app.state.model.active_schematic_epoch += 1,
                 "occurrence" => {
-                    app.state.workspace.ascend_one().unwrap();
-                    app.state.workspace.descend_into(
+                    app.state.model.workspace.ascend_one().unwrap();
+                    app.state.model.workspace.descend_into(
                         "X2".to_owned(),
                         master.clone(),
                         crate::state::ViewType::Schematic,
@@ -1584,6 +1593,7 @@ mod tests {
                 "sheet" | "sheet-revision" => {
                     let catalog = app
                         .state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -1605,9 +1615,10 @@ mod tests {
                     }
                 }
                 "content" => {
-                    let topology = app.state.schematic.topology_version();
+                    let topology = app.state.model.schematic.topology_version();
                     assert!(
                         app.state
+                            .model
                             .schematic
                             .edit_design_note_properties(
                                 note,
@@ -1617,17 +1628,18 @@ mod tests {
                             )
                             .unwrap()
                     );
-                    assert_eq!(app.state.schematic.topology_version(), topology);
+                    assert_eq!(app.state.model.schematic.topology_version(), topology);
                 }
-                "topology" => app.state.schematic.bump_topology_version(),
+                "topology" => app.state.model.schematic.bump_topology_version(),
                 "symbol-context" => {
                     app.state
+                        .model
                         .workspace
                         .content
                         .schematic_buffers
                         .insert("work/other/schematic".to_owned(), Default::default());
                 }
-                "read-only" => app.state.schematic.session.read_only = true,
+                "read-only" => app.state.model.schematic.session.read_only = true,
                 "safe-mode" => app.state.workbench.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
@@ -1650,22 +1662,36 @@ mod tests {
                     "{change}"
                 );
             }
-            let before = crate::state::SchematicSnapshot::capture(app.state.schematic.document());
-            let content = app.state.schematic.content_version();
-            let topology = app.state.schematic.topology_version();
-            let undo = app.state.schematic.undo_description().map(str::to_owned);
+            let before =
+                crate::state::SchematicSnapshot::capture(app.state.model.schematic.document());
+            let content = app.state.model.schematic.content_version();
+            let topology = app.state.model.schematic.topology_version();
+            let undo = app
+                .state
+                .model
+                .schematic
+                .undo_description()
+                .map(str::to_owned);
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 app.render_object_properties_dialog(ctx)
             });
             assert!(app.state.dialogs.object_properties.open, "{change}");
             assert!(
-                before.is_equal_document(app.state.schematic.document()),
+                before.is_equal_document(app.state.model.schematic.document()),
                 "{change}"
             );
-            assert_eq!(app.state.schematic.content_version(), content, "{change}");
-            assert_eq!(app.state.schematic.topology_version(), topology, "{change}");
             assert_eq!(
-                app.state.schematic.undo_description(),
+                app.state.model.schematic.content_version(),
+                content,
+                "{change}"
+            );
+            assert_eq!(
+                app.state.model.schematic.topology_version(),
+                topology,
+                "{change}"
+            );
+            assert_eq!(
+                app.state.model.schematic.undo_description(),
                 undo.as_deref(),
                 "{change}"
             );
@@ -1679,11 +1705,12 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let bus = declared_bus(1, 0, "DATA[7:0]");
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .buses
             .push(bus.clone());
-        app.state.schematic.clear_undo_history();
+        app.state.model.schematic.clear_undo_history();
         open_bus_dialog(&mut app, &bus);
         let Some(ObjectPropertiesDraft::Bus(draft)) =
             app.state.dialogs.object_properties.draft.as_mut()
@@ -1703,11 +1730,11 @@ mod tests {
         assert!(!app.state.dialogs.object_properties.open);
         assert!(app.state.dialogs.object_properties.source.is_none());
         assert_eq!(
-            app.state.schematic.document().buses[0].declaration,
+            app.state.model.schematic.document().buses[0].declaration,
             Some(BusDeclaration::parse("ADDR<0:15>").unwrap())
         );
-        assert!(app.state.schematic.undo());
-        assert_eq!(app.state.schematic.document().buses[0], bus);
+        assert!(app.state.model.schematic.undo());
+        assert_eq!(app.state.model.schematic.document().buses[0], bus);
         open_bus_dialog(&mut app, &bus);
         assert!(object_property_session_error(&app.state).is_none());
     }
@@ -1721,6 +1748,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let bus = declared_bus(1, 0, "DATA[7:0]");
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .buses
@@ -1742,7 +1770,7 @@ mod tests {
         });
 
         assert!(!app.state.dialogs.object_properties.open);
-        assert_eq!(app.state.schematic.document().buses[0], bus);
+        assert_eq!(app.state.model.schematic.document().buses[0], bus);
     }
 
     /// The dialog is named for the object it was opened on, and says nothing
@@ -1753,6 +1781,7 @@ mod tests {
         let bus = declared_bus(1, 0, "DATA[7:0]");
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .buses
@@ -1776,6 +1805,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let bus = declared_bus(1, 0, "DATA[7:0]");
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .buses

@@ -34,11 +34,11 @@ pub(super) struct PreparedComponentRename {
 impl AppState {
     pub(crate) fn inline_edit_authority(&self) -> InlineEditAuthority {
         InlineEditAuthority {
-            project: self.workspace.content.project.id(),
-            document: self.workspace.content.active_schematic_reference(),
-            occurrence: self.workspace.content.active_occurrence().cloned(),
-            design_epoch: self.design_execution_epoch,
-            document_epoch: self.active_schematic_epoch,
+            project: self.model.workspace.content.project.id(),
+            document: self.model.workspace.content.active_schematic_reference(),
+            occurrence: self.model.workspace.content.active_occurrence().cloned(),
+            design_epoch: self.model.design_execution_epoch,
+            document_epoch: self.model.active_schematic_epoch,
         }
     }
 
@@ -98,9 +98,10 @@ impl AppState {
         candidate: Component,
         description: &str,
     ) -> Result<bool, String> {
-        let document = self.workspace.content.active_schematic_reference();
-        let writable = self.project_open.is_open() && !document_read_only(self, &document);
+        let document = self.model.workspace.content.active_schematic_reference();
+        let writable = self.model.project_open.is_open() && !document_read_only(self, &document);
         let prepared = self
+            .model
             .schematic
             .prepare_component_transaction(expected, candidate.clone())?;
         if !prepared.changes_document() {
@@ -119,13 +120,13 @@ impl AppState {
         }
         if candidate.name == expected.name || expected.kind.spice_prefix().is_empty() {
             prepared.commit_local(description);
-            self.schematic.session.is_dirty = true;
+            self.model.schematic.session.is_dirty = true;
             return Ok(true);
         }
         let after_design = prepared.into_reference_candidate();
-        let mut after_schematic = self.schematic.clone_with_design(after_design);
+        let mut after_schematic = self.model.schematic.clone_with_design(after_design);
         after_schematic.session.is_dirty = true;
-        let before = self.schematic.clone();
+        let before = self.model.schematic.clone();
         self.publish_component_renames(
             document,
             before,
@@ -189,7 +190,7 @@ impl AppState {
             BTreeMap::from([(document.key(), before)]),
             BTreeMap::from([(document.key(), after)]),
         )?;
-        let annotation_before = self.workspace.content.design_management.annotation();
+        let annotation_before = self.model.workspace.content.design_management.annotation();
         let mut annotation_after = annotation_before.clone();
         let mut annotated = false;
         for (id, old, new) in renames {
@@ -207,8 +208,9 @@ impl AppState {
             Some(AnnotationChange {
                 before: annotation_before.clone(),
                 after: annotation_after,
-                before_revision: self.workspace.content.project.revision(),
+                before_revision: self.model.workspace.content.project.revision(),
                 after_revision: self
+                    .model
                     .workspace
                     .content
                     .project
@@ -238,12 +240,18 @@ impl AppState {
             record,
         };
         let record = prepared.publish(self, true)?;
-        let active = self.workspace.content.active_schematic_reference().key();
+        let active = self
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         for key in record.after.keys() {
             if key.eq_ignore_ascii_case(&active) {
-                self.schematic.clear_schematic_redo();
+                self.model.schematic.clear_schematic_redo();
             } else {
-                self.workspace
+                self.model
+                    .workspace
                     .content
                     .schematic_buffers
                     .get_mut(key)
@@ -251,7 +259,9 @@ impl AppState {
                     .clear_redo();
             }
         }
-        self.workspace.save_active_schematic(&self.schematic);
+        self.model
+            .workspace
+            .save_active_schematic(&self.model.schematic);
         self.push_project_record(
             RecordHeader::committed(documents, Some(document.clone()), Some(document)),
             ProjectDesignBody::ComponentRename(Box::new(record)),
@@ -271,15 +281,17 @@ impl ComponentRenameRecord {
     fn matches(&self, state: &AppState, forward: bool) -> bool {
         let expected = if forward { &self.before } else { &self.after };
         schematic_map_matches(state, expected)
-            && self.references.matches(&state.workspace.content, forward)
+            && self
+                .references
+                .matches(&state.model.workspace.content, forward)
             && self.annotation.as_ref().is_none_or(|change| {
-                state.workspace.content.design_management.annotation()
+                state.model.workspace.content.design_management.annotation()
                     == if forward {
                         &change.before
                     } else {
                         &change.after
                     }
-                    && state.workspace.content.project.revision()
+                    && state.model.workspace.content.project.revision()
                         == if forward {
                             change.before_revision
                         } else {
@@ -295,7 +307,7 @@ impl ComponentRenameRecord {
         state: &AppState,
         forward: bool,
     ) -> Result<Option<DesignManagementCatalog>, String> {
-        if !state.project_open.is_open() || document_read_only(state, &self.document) {
+        if !state.model.project_open.is_open() || document_read_only(state, &self.document) {
             return Err(
                 "Component rename requires an open, writable project and document.".to_owned(),
             );
@@ -312,7 +324,8 @@ impl ComponentRenameRecord {
                 .ok_or_else(|| format!("Reference document '{key}' is unavailable."))?;
             validate_reference_document(state, key, source)?;
         }
-        self.references.prepare(&state.workspace.content, forward)?;
+        self.references
+            .prepare(&state.model.workspace.content, forward)?;
         self.prepare_annotation(state, forward)
     }
 
@@ -359,7 +372,8 @@ impl ComponentRenameRecord {
         self.annotation
             .as_ref()
             .map(|change| {
-                let current: &DesignManagementCatalog = &state.workspace.content.design_management;
+                let current: &DesignManagementCatalog =
+                    &state.model.workspace.content.design_management;
                 let mut candidate = current.clone();
                 *candidate.annotation_mut() = if forward {
                     &change.after
@@ -374,6 +388,7 @@ impl ComponentRenameRecord {
                     .publish_reviewed_candidate(current.revision(), candidate)
                     .map_err(|error| error.to_string())?;
                 state
+                    .model
                     .workspace
                     .content
                     .project
@@ -408,6 +423,7 @@ impl PreparedComponentRename {
     ) -> Result<ComponentRenameRecord, String> {
         if let Some(candidate) = self.annotation {
             state
+                .model
                 .workspace
                 .content
                 .replace_design_management(candidate)
@@ -423,16 +439,19 @@ impl PreparedComponentRename {
             },
             true,
         )?;
-        self.references.publish(&mut state.workspace.content);
-        state.design_execution_epoch = state.design_execution_epoch.wrapping_add(1);
-        state.netlist_artifacts.current_generation_input_digest = None;
+        self.references.publish(&mut state.model.workspace.content);
+        state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
+        state
+            .model
+            .netlist_artifacts
+            .current_generation_input_digest = None;
         if let Some(change) = &mut record.annotation {
             let restored = if forward {
                 &mut change.after_revision
             } else {
                 &mut change.before_revision
             };
-            let revision = state.workspace.content.project.revision();
+            let revision = state.model.workspace.content.project.revision();
             state.reanchor_annotation_history_revision(*restored, revision);
             *restored = revision;
         }

@@ -65,7 +65,7 @@ fn installed_hub(
 fn open_project() -> AppState {
     let mut state = AppState::default();
     state.open_project_session();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     state
 }
 
@@ -90,12 +90,12 @@ fn fetching_the_catalog_proves_it_and_changes_no_project_state() {
     let transport = StubTransport::with_snapshot(snapshot);
     let (mut hub, handle, _store) = fixture_hub(&key);
     let mut state = open_project();
-    let revision_before = state.workspace.content.project.revision().get();
+    let revision_before = state.model.workspace.content.project.revision().get();
 
     let request = ModelHubRequest::FetchSnapshot;
     let output = execute(
         &mut hub,
-        state.model_library_manager.clone(),
+        state.model.model_library_manager.clone(),
         &request,
         &transport,
     )
@@ -123,7 +123,7 @@ fn fetching_the_catalog_proves_it_and_changes_no_project_state() {
             .is_ok()
     );
     assert_eq!(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         revision_before,
         "proving a catalog is not a project edit"
     );
@@ -149,7 +149,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     // shelf's one gesture available on that build.
     let browser = execute(
         &mut hub,
-        state.model_library_manager.clone(),
+        state.model.model_library_manager.clone(),
         &request,
         &transport,
     )
@@ -162,6 +162,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     publish(&mut browser_state, memory_handle, hub, &request, browser);
     assert_eq!(
         browser_state
+            .model
             .model_library_manager
             .libraries_sorted()
             .into_iter()
@@ -171,7 +172,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
         rspice_pack::sha256_hex(&archive)
     );
     assert_eq!(
-        browser_state.schematic.session.editor.tool,
+        browser_state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance),
         "the browser arms the same placement the desktop does"
     );
@@ -193,7 +194,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     };
     let output = execute(
         &mut hub,
-        state.model_library_manager.clone(),
+        state.model.model_library_manager.clone(),
         &request,
         &transport,
     )
@@ -215,6 +216,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
 
     publish(&mut state, handle, hub, &request, output);
     let library = state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -227,11 +229,12 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     assert_eq!(pin.archive_sha256, rspice_pack::sha256_hex(&archive));
 
     assert_eq!(
-        state.schematic.session.editor.tool,
+        state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance),
         "the placement is armed on the cursor"
     );
     let armed = state
+        .model
         .schematic
         .session
         .editor
@@ -376,6 +379,7 @@ fn updating_installs_the_newer_release_and_removes_the_older() {
     );
     assert!(
         state
+            .model
             .schematic
             .session
             .editor
@@ -473,6 +477,7 @@ fn a_refused_update_never_removes_what_it_could_not_replace() {
     );
     assert!(
         state
+            .model
             .schematic
             .session
             .editor
@@ -536,7 +541,7 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
     let (mut hub, _handle, store) = fixture_hub(&key);
     hub.refresh_catalog(&transport).expect("catalog");
     let mut state = open_project();
-    let revision_before = state.workspace.content.project.revision().get();
+    let revision_before = state.model.workspace.content.project.revision().get();
 
     let request = ModelHubRequest::InstallPack {
         pack_id: PACK_ID.to_owned(),
@@ -545,7 +550,7 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
     };
     let failure = execute(
         &mut hub,
-        state.model_library_manager.clone(),
+        state.model.model_library_manager.clone(),
         &request,
         &transport,
     )
@@ -578,20 +583,30 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
             .is_err()
     );
     assert_eq!(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         revision_before
     );
     assert!(
         state
+            .model
             .schematic
             .session
             .editor
             .pending_library_cell
             .is_none()
     );
-    assert!(state.schematic.session.editor.pending_part_model.is_none());
     assert!(
         state
+            .model
+            .schematic
+            .session
+            .editor
+            .pending_part_model
+            .is_none()
+    );
+    assert!(
+        state
+            .model
             .model_library_manager
             .libraries_sorted()
             .iter()
@@ -690,7 +705,7 @@ fn acceptance_sequence(
     };
     let output = execute(
         &mut hub,
-        state.model_library_manager.clone(),
+        state.model.model_library_manager.clone(),
         &request,
         &transport,
     )
@@ -699,10 +714,11 @@ fn acceptance_sequence(
 
     // 3. Place what it armed.
     assert_eq!(
-        state.schematic.session.editor.tool,
+        state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance)
     );
     let binding = state
+        .model
         .schematic
         .session
         .editor
@@ -711,10 +727,12 @@ fn acceptance_sequence(
         .map(|pending| pending.binding.clone())
         .expect("an armed binding");
     let id = state
+        .model
         .schematic
         .add_library_cell_component(crate::state::Point::new(100, 100), binding);
     assert!(
         state
+            .model
             .schematic
             .document()
             .components
@@ -723,7 +741,7 @@ fn acceptance_sequence(
     );
 
     // 4. The netlist names the part as the instance master.
-    let deck = crate::simulation::netlist_gen::generate_netlist(&state.schematic).netlist;
+    let deck = crate::simulation::netlist_gen::generate_netlist(&state.model.schematic).netlist;
     assert!(
         deck.contains(PART),
         "the emitted deck instantiates the pack part:\n{deck}"
@@ -731,7 +749,7 @@ fn acceptance_sequence(
 
     // 5. The project round-trips with the pin intact.
     let serialized =
-        serde_json::to_string(&state.model_library_manager).expect("the catalog serializes");
+        serde_json::to_string(&state.model.model_library_manager).expect("the catalog serializes");
     let reloaded: ModelLibraryManager =
         serde_json::from_str(&serialized).expect("the catalog reloads");
     let pin = reloaded
@@ -782,11 +800,12 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     );
     assert_eq!(armed, "1N4728A");
     assert_eq!(
-        state.schematic.session.editor.tool,
+        state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::Diode)
     );
     assert!(
         state
+            .model
             .schematic
             .session
             .editor
@@ -795,9 +814,11 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     );
 
     let id = state
+        .model
         .schematic
         .add_component(ComponentType::Diode, crate::state::Point::new(100, 100));
     let placed = state
+        .model
         .schematic
         .document()
         .components
@@ -810,13 +831,24 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     // Arming any other device retires the card, so a resistor can never be
     // placed still carrying it.
     state
+        .model
         .schematic
         .arm_tool(Tool::Place(ComponentType::Resistor));
-    assert!(state.schematic.session.editor.pending_part_model.is_none());
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .pending_part_model
+            .is_none()
+    );
     let id = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, crate::state::Point::new(200, 200));
     let placed = state
+        .model
         .schematic
         .document()
         .components
@@ -880,17 +912,22 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
     // A project takes both parts at 1.0.0. They land as two libraries, so the
     // project holds two pins and can move one without the other.
     let mut state = open_project();
-    hub.add_part_to_project(&mut state.model_library_manager, PACK_ID, VERSION, PART)
-        .expect("the project retains the 1.0.0 divider");
     hub.add_part_to_project(
-        &mut state.model_library_manager,
+        &mut state.model.model_library_manager,
+        PACK_ID,
+        VERSION,
+        PART,
+    )
+    .expect("the project retains the 1.0.0 divider");
+    hub.add_part_to_project(
+        &mut state.model.model_library_manager,
         PACK_ID,
         VERSION,
         BIAS_PART_ID,
     )
     .expect("the project retains the 1.0.0 bias network");
     // A second project that adopts nothing, kept for the end.
-    let untouched = state.model_library_manager.clone();
+    let untouched = state.model.model_library_manager.clone();
 
     // A later generation publishes 1.1.0 beside 1.0.0.
     let offered_catalog = signed_snapshot_projecting(
@@ -945,7 +982,7 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
     };
     let output = execute(
         &mut hub,
-        state.model_library_manager.clone(),
+        state.model.model_library_manager.clone(),
         &request,
         &newer,
     )
@@ -982,6 +1019,7 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
     );
     assert!(
         state
+            .model
             .schematic
             .session
             .editor
@@ -990,7 +1028,7 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
         "adoption places nothing"
     );
     assert_eq!(
-        pinned_versions(&state.model_library_manager),
+        pinned_versions(&state.model.model_library_manager),
         vec![
             (BIAS_PART_ID.to_owned(), VERSION.to_owned()),
             (PART.to_owned(), NEXT_VERSION.to_owned()),
@@ -998,6 +1036,7 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
         "and the published project records the same two pins"
     );
     let moved = state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1013,7 +1052,7 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
     // The adopted project solves the 1.1.0 divider — the bytes moved, not only
     // the label — and the project that adopted nothing still solves the 1.0.0
     // one, with both releases installed the whole time.
-    let adopted = divider_output(&state.model_library_manager);
+    let adopted = divider_output(&state.model.model_library_manager);
     assert!(
         (adopted - 0.25).abs() < 1.0e-9,
         "the adopted project runs the 1.1.0 divider: V(OUT)={adopted}"
@@ -1289,11 +1328,12 @@ fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
         ModelHub::open(anchor_for(&key), Box::new(store), None).expect("the session hub opens"),
     );
     app.state = open_project();
-    app.state.model_library_manager = project.clone();
+    app.state.model.model_library_manager = project.clone();
 
     app.pump_model_catalog_operations(&ctx);
     let warnings = |app: &RSpiceApp| {
         app.state
+            .model
             .log_buffer
             .entries()
             .filter(|entry| entry.message.contains("which the publisher recalled"))
@@ -1302,6 +1342,7 @@ fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
     assert_eq!(warnings(&app), 1, "the reader is told once");
     assert!(
         app.state
+            .model
             .log_buffer
             .entries()
             .any(|entry| entry.message.contains(REASON)),
@@ -1316,11 +1357,15 @@ fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
     // Nothing was blocked. The retained bytes are the same bytes and solve to
     // the same answer they did before the recall.
     assert!(
-        (divider_output(&app.state.model_library_manager) - before).abs() < 1.0e-12,
+        (divider_output(&app.state.model.model_library_manager) - before).abs() < 1.0e-12,
         "a recall never touches what a project already retained"
     );
     assert_eq!(
-        app.state.model_library_manager.libraries_sorted().len(),
+        app.state
+            .model
+            .model_library_manager
+            .libraries_sorted()
+            .len(),
         project.libraries_sorted().len(),
         "and no library was removed"
     );

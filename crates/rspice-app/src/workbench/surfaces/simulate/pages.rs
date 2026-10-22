@@ -74,10 +74,10 @@ fn design_excitations(
     Vec<crate::simulation::placed_sources::PlacedRfPort>,
 ) {
     crate::simulation::placed_sources::whole_design_excitations(
-        &app.state.library_manager,
-        &app.state.workspace,
-        &app.state.schematic,
-        app.state.sim_setup.analysis_plan.as_ref(),
+        &app.state.model.library_manager,
+        &app.state.model.workspace,
+        &app.state.model.schematic,
+        app.state.model.sim_setup.analysis_plan.as_ref(),
     )
 }
 
@@ -234,7 +234,7 @@ fn preflight_currency(app: &RSpiceApp) -> PreflightCurrency {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     app.state.workbench.preflight.currency(
-        app.state.workspace.content.project.revision().get(),
+        app.state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -417,7 +417,7 @@ mod tests {
             state.configured_topology_revision();
         let plan = state.active_plan_revision();
         PreflightReport {
-            project_revision: state.workspace.content.project.revision().get(),
+            project_revision: state.model.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
             topology_closure,

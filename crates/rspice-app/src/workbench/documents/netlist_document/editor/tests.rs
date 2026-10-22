@@ -34,8 +34,8 @@ fn hover_rasters(
     Option<super::super::language::NetlistValueHover>,
 ) {
     let mut state = AppState::default();
-    state.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
-    state.simulation.source.netlist_content = HOVER_DECK.to_owned();
+    state.model.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
+    state.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
     state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
 
@@ -168,8 +168,8 @@ fn editor_diagnostic_pipeline_has_no_panic_shortcuts() {
 fn completion_reaches_a_document_that_has_content_in_it() {
     let mut state = AppState::default();
     let source = "test deck\n.tr";
-    state.workspace.content.netlist_source = Some(source.to_owned());
-    state.simulation.source.netlist_content = source.to_owned();
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.simulation.source.netlist_content = source.to_owned();
     state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     assert!(
@@ -542,9 +542,9 @@ fn parameter_override_state(base: &str, authored: &str) -> AppState {
         .replace_editable_source(owned.content_digest(), authored.as_bytes().to_vec())
         .unwrap();
     let mut state = AppState::default();
-    state.workspace.content.netlist_source = Some(authored.to_owned());
-    state.workspace.content.netlist_document = Some(owned.clone());
-    state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+    state.model.workspace.content.netlist_source = Some(authored.to_owned());
+    state.model.workspace.content.netlist_document = Some(owned.clone());
+    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
         artifact_name: "corner.cir".to_owned(),
         strategy: crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
@@ -560,7 +560,7 @@ fn parameter_override_state(base: &str, authored: &str) -> AppState {
     });
     state.ui.netlist.owned_document = Some(owned);
     state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.simulation.source.netlist_content = authored.to_owned();
+    state.model.simulation.source.netlist_content = authored.to_owned();
     state
 }
 
@@ -594,7 +594,7 @@ fn a_parameter_override_error_is_reported_on_its_own_line() {
 /// A deck in the editor, validated the way the editor validates it.
 fn validated(deck: &str) -> AppState {
     let mut state = AppState::default();
-    state.simulation.source.netlist_content = deck.to_owned();
+    state.model.simulation.source.netlist_content = deck.to_owned();
     let revision = state.ui.netlist.revision;
     validate_visible_source(&mut state, revision);
     state
@@ -739,7 +739,7 @@ fn value_hover_waits_for_the_parse_that_decides_the_branches() {
     let deck = "hover\n.param mode=1\n.if (mode==1)\n.param vth=0.5\n.else\n\
                 .param vth=0.4\n.endif\nV1 a 0 {vth}\n.end\n";
     let mut state = AppState::default();
-    state.simulation.source.netlist_content = deck.to_owned();
+    state.model.simulation.source.netlist_content = deck.to_owned();
 
     assert_eq!(hover_on(&mut state, deck, "{vth}", 1), None);
 
@@ -1180,7 +1180,7 @@ fn diagnostic_strip_text_omits_fix_and_truncates_for_phone_width() {
 #[test]
 fn editor_commit_rejects_generated_artifact_mutation() {
     let mut state = AppState::default();
-    state.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
+    state.model.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
     state.ui.netlist.revision = 4;
 
     assert!(!commit_owned_source_edit(
@@ -1189,12 +1189,12 @@ fn editor_commit_rejects_generated_artifact_mutation() {
         1,
         2.5,
     ));
-    assert!(state.workspace.content.netlist_source.is_none());
+    assert!(state.model.workspace.content.netlist_source.is_none());
     assert_eq!(
-        state.simulation.source.netlist_content,
+        state.model.simulation.source.netlist_content,
         "generated\n.op\n.end\n"
     );
-    assert!(!state.workspace.content.netlist_source_dirty);
+    assert!(!state.model.workspace.content.netlist_source_dirty);
     assert_eq!(state.ui.netlist.revision, 4);
     assert!(state.manual_run.edited_lines.is_empty());
 }
@@ -1202,11 +1202,11 @@ fn editor_commit_rejects_generated_artifact_mutation() {
 #[test]
 fn editor_commit_updates_only_an_existing_owned_source() {
     let mut state = AppState::default();
-    state.workspace.content.netlist_source = Some("owned\n.op\n.end\n".to_owned());
+    state.model.workspace.content.netlist_source = Some("owned\n.op\n.end\n".to_owned());
     state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.workspace.content.netlist_source_path =
+    state.model.workspace.content.netlist_source_path =
         Some(std::path::PathBuf::from("imported/owned.cir"));
-    state.simulation.source.netlist_content = "owned\n.op\n.end\n".to_owned();
+    state.model.simulation.source.netlist_content = "owned\n.op\n.end\n".to_owned();
     state.ui.netlist.revision = 9;
 
     assert!(commit_owned_source_edit(
@@ -1216,18 +1216,18 @@ fn editor_commit_updates_only_an_existing_owned_source() {
         7.25,
     ));
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some("owned\n.tran 1n 1u\n.end\n")
     );
     assert_eq!(
-        state.simulation.source.netlist_content,
+        state.model.simulation.source.netlist_content,
         "owned\n.tran 1n 1u\n.end\n"
     );
     assert_eq!(
-        state.workspace.content.netlist_source_path.as_deref(),
+        state.model.workspace.content.netlist_source_path.as_deref(),
         Some(std::path::Path::new("imported/owned.cir"))
     );
-    assert!(state.workspace.content.netlist_source_dirty);
+    assert!(state.model.workspace.content.netlist_source_dirty);
     assert_eq!(state.ui.netlist.revision, 10);
     assert_eq!(state.ui.netlist.last_edit_time, 7.25);
     assert!(state.manual_run.edited_lines.contains(&1));

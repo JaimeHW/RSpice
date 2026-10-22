@@ -25,7 +25,7 @@ impl Editor {
         cell.add_view(View::new("schematic", ViewType::Schematic));
         cell.add_view(View::new("symbol", ViewType::Symbol));
         library.add_cell(cell);
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
         state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
         let document = SymbolDocument {
             body: vec![
@@ -153,7 +153,7 @@ fn symbol_field_typing_survives_passive_window_projection() {
 
     let mut editor = Editor::new();
     let before = editor.state.load_active_symbol_document().unwrap();
-    let symbol = editor.state.workspace.content.active_view.clone();
+    let symbol = editor.state.model.workspace.content.active_view.clone();
     let schematic = CellViewRef::new("work", "amp", "schematic");
     let primary = editor.state.workbench.window_session.primary();
     let layout = editor.state.workbench.current_workspace_layout();
@@ -196,13 +196,14 @@ fn symbol_field_typing_survives_passive_window_projection() {
 #[test]
 fn symbol_field_focus_and_unfinished_text_do_not_leak_to_another_document() {
     let mut editor = Editor::new();
-    let symbol = editor.state.workspace.content.active_view.clone();
+    let symbol = editor.state.model.workspace.content.active_view.clone();
     let other = CellViewRef::new("work", "other", "symbol");
     let before = editor.state.load_active_symbol_document().unwrap();
     let mut cell = Cell::new("other");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     editor
         .state
+        .model
         .library_manager
         .get_library_mut("work")
         .unwrap()
@@ -238,7 +239,7 @@ fn symbol_coordinate_typing_is_one_undo_group_until_focus_changes() {
     editor.click("Center X");
     editor.replace("1");
     editor.replace("12");
-    let key = editor.state.workspace.content.active_key();
+    let key = editor.state.model.workspace.content.active_key();
     assert_eq!(editor.state.ui.symbol.history.undo_depth(&key), 1);
     let after = editor.state.load_active_symbol_document().unwrap();
     assert!(matches!(&after.body[0], SymbolShape::Circle { center, .. } if center.x == 12));
@@ -284,7 +285,7 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
             .ui
             .symbol
             .history
-            .undo_depth(&editor.state.workspace.content.active_key()),
+            .undo_depth(&editor.state.model.workspace.content.active_key()),
         1
     );
 
@@ -311,14 +312,15 @@ fn queued_symbol_inspector_edits_revalidate_source_selection_and_authority() {
         request.changed = true;
         match changed {
             0 => editor.state.ui.symbol.editor.select_shape(1),
-            1 => editor.state.active_schematic_epoch += 1,
+            1 => editor.state.model.active_schematic_epoch += 1,
             2 => {
                 editor
                     .state
+                    .model
                     .library_manager
                     .add_library(Library::new("other"));
             }
-            _ => editor.state.schematic.session.read_only = true,
+            _ => editor.state.model.schematic.session.read_only = true,
         }
         apply_request(&mut editor.state, request);
         assert_eq!(editor.state.load_active_symbol_document().unwrap(), before);

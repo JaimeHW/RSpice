@@ -60,10 +60,11 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     };
     let rules = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let coverage_issues = pair
@@ -71,13 +72,19 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
             regression_coverage_issues_for_policy(baseline, current, &rules, regression_policy)
         })
         .unwrap_or_default();
-    let active_contract = app.state.sim_setup.analysis_plan.as_ref().map(|plan| {
-        (
-            plan.id(),
-            plan.revision(),
-            regression_tolerance_digest(&rules),
-        )
-    });
+    let active_contract = app
+        .state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_ref()
+        .map(|plan| {
+            (
+                plan.id(),
+                plan.revision(),
+                regression_tolerance_digest(&rules),
+            )
+        });
     let receipt = pair.and_then(|(baseline, current)| {
         session
             .regression_comparison
@@ -276,7 +283,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.simulation, index);
+        select_verification_run(&mut app.state.model.simulation, index);
     }
     if !removed_orphans {
         app.state.workbench.verification.regression_selected_target =

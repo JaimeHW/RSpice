@@ -28,7 +28,7 @@ const PAGE_SIZE: [f32; 2] = [1_180.0, 900.0];
 /// assembled that binding itself would be testing the fixture.
 fn source_owned_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager = ModelLibraryManager::new();
+    app.state.model.model_library_manager = ModelLibraryManager::new();
     let definition = ProjectModelDefinition {
         name: "nch_owned".to_owned(),
         spice_type: "NMOS".to_owned(),
@@ -37,6 +37,7 @@ fn source_owned_app() -> RSpiceApp {
         string_parameters: BTreeMap::new(),
     };
     app.state
+        .model
         .model_library_manager
         .create_project_model("owned-models", &definition)
         .expect("create project model");
@@ -46,6 +47,7 @@ fn source_owned_app() -> RSpiceApp {
         .find(|summary| summary.model == "nch_owned")
         .expect("the project-owned family is summarized");
     app.state
+        .model
         .model_library_manager
         .select_library(&summary.library)
         .expect("the fixture library is loaded");

@@ -158,16 +158,16 @@ pub(crate) fn open_selected_object_rename(state: &mut AppState) -> bool {
     };
     state.dialogs.rename_selection.open(
         target,
-        state.design_execution_epoch,
-        state.active_schematic_epoch,
-        state.schematic.topology_version(),
-        state.workspace.content.active_view.display_path(),
+        state.model.design_execution_epoch,
+        state.model.active_schematic_epoch,
+        state.model.schematic.topology_version(),
+        state.model.workspace.content.active_view.display_path(),
     );
     true
 }
 
 fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
-    let schematic = &state.schematic;
+    let schematic = &state.model.schematic;
     if let Some(target) = crate::workbench::app::selected_named_net_target(state) {
         return Some(RenameSelectionTarget::NamedNet(target));
     }
@@ -218,7 +218,7 @@ impl RSpiceApp {
         let validation = authority_error.map_or_else(
             || {
                 validate_draft(
-                    &self.state.schematic,
+                    &self.state.model.schematic,
                     target,
                     &self.state.dialogs.rename_selection.draft,
                     &|id| object_is_on_active_sheet(&self.state, id),
@@ -228,7 +228,7 @@ impl RSpiceApp {
         );
         let object = object_context(target);
         let previous = target.current_name().to_owned();
-        let scope = rename_scope(&self.state.schematic, target);
+        let scope = rename_scope(&self.state.model.schematic, target);
         let validation_message = self
             .state
             .dialogs
@@ -276,7 +276,7 @@ impl RSpiceApp {
                 let validation = rename_session_error(&self.state).map_or_else(
                     || {
                         validate_draft(
-                            &self.state.schematic,
+                            &self.state.model.schematic,
                             &target,
                             &self.state.dialogs.rename_selection.draft,
                             &|id| object_is_on_active_sheet(&self.state, id),
@@ -385,25 +385,25 @@ fn rename_session_error(state: &AppState) -> Option<String> {
     if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no name can be changed.".to_owned());
     }
-    if dialog.design_execution_epoch != state.design_execution_epoch {
+    if dialog.design_execution_epoch != state.model.design_execution_epoch {
         return Some(
             "The design document changed while Rename was open. Cancel and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.active_schematic_epoch != state.active_schematic_epoch {
+    if dialog.active_schematic_epoch != state.model.active_schematic_epoch {
         return Some(
             "The active schematic buffer changed while Rename was open. Cancel and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.topology_version != state.schematic.topology_version() {
+    if dialog.topology_version != state.model.schematic.topology_version() {
         return Some(
             "Schematic connectivity changed while Rename was open. Cancel and reopen the current object."
                 .to_owned(),
         );
     }
-    (dialog.view_path != state.workspace.content.active_view.display_path()).then(|| {
+    (dialog.view_path != state.model.workspace.content.active_view.display_path()).then(|| {
         "The active cell/view changed while Rename was open. Cancel and reopen the current object."
             .to_owned()
     })
@@ -546,13 +546,13 @@ fn stale(message: &str) -> RenameValidation {
 }
 
 fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, String> {
-    let content = &state.workspace.content;
+    let content = &state.model.workspace.content;
     let catalog = content
         .design_management
         .sheet_catalog(&content.active_schematic_reference().key());
     let on_sheet =
         |id| rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id);
-    let schematic = &mut state.schematic;
+    let schematic = &mut state.model.schematic;
     match commit {
         RenameCommit::Component { expected, name } => {
             state.rename_component_transaction(&expected, name)
@@ -600,9 +600,11 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let id = app
             .state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -620,7 +622,7 @@ mod tests {
         let context = object_context(&target);
         assert_eq!(context, "R1 \u{00b7} Resistor");
         assert!(!context.contains("COMPONENT-"));
-        assert_eq!(rename_scope(&app.state.schematic, &target), None);
+        assert_eq!(rename_scope(&app.state.model.schematic, &target), None);
     }
 
     #[test]
@@ -629,6 +631,7 @@ mod tests {
         assert!(rename_selection_available(&app.state));
 
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -636,12 +639,13 @@ mod tests {
             .select_component(id + 999);
         assert!(!rename_selection_available(&app.state));
         app.state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(id);
-        app.state.schematic.session.read_only = true;
+        app.state.model.schematic.session.read_only = true;
         assert!(!rename_selection_available(&app.state));
     }
 
@@ -649,16 +653,19 @@ mod tests {
     fn named_wire_and_interface_port_open_the_net_scoped_rename_target() {
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::new(81, vec![Point::new(0, 0), Point::new(40, 0)]));
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(82, Point::new(20, 0), "sense"));
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -675,11 +682,13 @@ mod tests {
         let port = Component::new(83, ComponentType::Port, Point::new(0, 0))
             .with_name_value("P83", "sense");
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(port);
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -699,9 +708,11 @@ mod tests {
         let (mut app, id) = component_app();
         let other = app
             .state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 0));
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -711,6 +722,7 @@ mod tests {
             .name = "RLOAD".to_owned();
         let target = app
             .state
+            .model
             .schematic
             .document()
             .components
@@ -721,7 +733,7 @@ mod tests {
 
         assert!(matches!(
             validate_draft(
-                &app.state.schematic,
+                &app.state.model.schematic,
                 &RenameSelectionTarget::Component(Box::new(target.clone())),
                 "C7",
                 &|_| true,
@@ -730,7 +742,7 @@ mod tests {
         ));
         assert!(matches!(
             validate_draft(
-                &app.state.schematic,
+                &app.state.model.schematic,
                 &RenameSelectionTarget::Component(Box::new(target.clone())),
                 "rload",
                 &|_| true,
@@ -739,7 +751,7 @@ mod tests {
         ));
         assert!(matches!(
             validate_draft(
-                &app.state.schematic,
+                &app.state.model.schematic,
                 &RenameSelectionTarget::Component(Box::new(target)),
                 "R_GAIN_2",
                 &|_| true,
@@ -751,42 +763,52 @@ mod tests {
     #[test]
     fn successful_component_rename_retains_id_and_is_exactly_one_undo_step() {
         let (mut app, id) = component_app();
-        let original_name = app.state.schematic.document().components[0].name.clone();
+        let original_name = app.state.model.schematic.document().components[0]
+            .name
+            .clone();
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
-        let commit = match validate_draft(&app.state.schematic, &target, "R_GAIN", &|_| true) {
+        let commit = match validate_draft(&app.state.model.schematic, &target, "R_GAIN", &|_| true)
+        {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid rename, got {other:?}"),
         };
 
         assert!(apply_commit(&mut app.state, *commit).unwrap());
-        assert_eq!(app.state.schematic.document().components[0].id, id);
-        assert_eq!(app.state.schematic.document().components[0].name, "R_GAIN");
-        app.action_edit_undo();
-        assert_eq!(app.state.schematic.document().components[0].id, id);
+        assert_eq!(app.state.model.schematic.document().components[0].id, id);
         assert_eq!(
-            app.state.schematic.document().components[0].name,
+            app.state.model.schematic.document().components[0].name,
+            "R_GAIN"
+        );
+        app.action_edit_undo();
+        assert_eq!(app.state.model.schematic.document().components[0].id, id);
+        assert_eq!(
+            app.state.model.schematic.document().components[0].name,
             original_name
         );
         assert!(
-            app.state.project_undo_sequence().is_none() && !app.state.schematic.can_undo(),
+            app.state.project_undo_sequence().is_none() && !app.state.model.schematic.can_undo(),
             "rename created more than one undo step"
         );
         app.action_edit_redo();
-        assert_eq!(app.state.schematic.document().components[0].name, "R_GAIN");
+        assert_eq!(
+            app.state.model.schematic.document().components[0].name,
+            "R_GAIN"
+        );
     }
 
     #[test]
     fn stale_target_and_cancel_never_mutate() {
         let (mut app, id) = component_app();
-        let original = app.state.schematic.document().components[0].clone();
+        let original = app.state.model.schematic.document().components[0].clone();
         assert!(open_selected_object_rename(&mut app.state));
         app.state.dialogs.rename_selection.draft = "R_CANCELLED".to_owned();
         app.state.dialogs.rename_selection.close();
-        assert_eq!(app.state.schematic.document().components[0], original);
-        assert!(!app.state.schematic.can_undo());
+        assert_eq!(app.state.model.schematic.document().components[0], original);
+        assert!(!app.state.model.schematic.can_undo());
 
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -795,19 +817,19 @@ mod tests {
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
         let pending_commit =
-            match validate_draft(&app.state.schematic, &target, "R_STALE", &|_| true) {
+            match validate_draft(&app.state.model.schematic, &target, "R_STALE", &|_| true) {
                 RenameValidation::Valid(commit) => commit,
                 other => panic!("expected initially valid rename, got {other:?}"),
             };
-        app.state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
-        let before = app.state.schematic.document().components[0].clone();
+        app.state.model.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
+        let before = app.state.model.schematic.document().components[0].clone();
         assert!(matches!(
-            validate_draft(&app.state.schematic, &target, "R_STALE", &|_| true),
+            validate_draft(&app.state.model.schematic, &target, "R_STALE", &|_| true),
             RenameValidation::Invalid(_)
         ));
         assert!(apply_commit(&mut app.state, *pending_commit).is_err());
-        assert_eq!(app.state.schematic.document().components[0], before);
-        assert!(!app.state.schematic.can_undo());
+        assert_eq!(app.state.model.schematic.document().components[0], before);
+        assert!(!app.state.model.schematic.can_undo());
     }
 
     #[test]
@@ -833,9 +855,10 @@ mod tests {
         };
 
         let mut state = AppState::default();
-        state.schematic = schematic;
+        state.model.schematic = schematic;
         assert!(apply_commit(&mut state, *commit).unwrap());
         let renamed = state
+            .model
             .schematic
             .document()
             .net_labels
@@ -868,9 +891,9 @@ mod tests {
         };
 
         let mut state = AppState::default();
-        state.schematic = schematic;
+        state.model.schematic = schematic;
         assert!(apply_commit(&mut state, *commit).unwrap());
-        let schematic = &mut state.schematic;
+        let schematic = &mut state.model.schematic;
         assert_eq!(schematic.document().buses[0].id, 71);
         assert_eq!(
             schematic.document().buses[0]
@@ -906,10 +929,14 @@ mod tests {
             app.render_rename_selection_dialog(ctx)
         });
         assert!(!app.state.dialogs.rename_selection.open);
-        assert_eq!(app.state.schematic.document().components[0].id, id);
-        assert_eq!(app.state.schematic.document().components[0].name, "R_ENTER");
+        assert_eq!(app.state.model.schematic.document().components[0].id, id);
+        assert_eq!(
+            app.state.model.schematic.document().components[0].name,
+            "R_ENTER"
+        );
 
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -924,7 +951,10 @@ mod tests {
             app.render_rename_selection_dialog(ctx)
         });
         assert!(!app.state.dialogs.rename_selection.open);
-        assert_eq!(app.state.schematic.document().components[0].name, "R_ENTER");
+        assert_eq!(
+            app.state.model.schematic.document().components[0].name,
+            "R_ENTER"
+        );
     }
 
     fn saved_output(name: &str, expression: &str) -> crate::state::SavedOutput {
@@ -945,12 +975,13 @@ mod tests {
         let (mut app, id) = component_app();
         let configuration = app
             .state
+            .model
             .workspace
             .content
             .configuration_sets
             .create(crate::state::ConfigurationSetDefinition {
                 name: "Release".to_owned(),
-                root: app.state.workspace.content.active_view.clone(),
+                root: app.state.model.workspace.content.active_view.clone(),
                 dut_path: "/R1".to_owned(),
                 executable_view_policy: vec!["schematic".to_owned()],
                 stop_views: Vec::new(),
@@ -963,8 +994,12 @@ mod tests {
             })
             .expect("valid configuration root");
         let plan_id = crate::product::SimulationPlanId::new();
-        app.state.workspace.content.simulation_plan_payloads.push(
-            crate::state::SimulationPlanPayloadRecord {
+        app.state
+            .model
+            .workspace
+            .content
+            .simulation_plan_payloads
+            .push(crate::state::SimulationPlanPayloadRecord {
                 plan_id,
                 payload: crate::state::SimulationPlanPayload {
                     saved_outputs: vec![
@@ -974,10 +1009,10 @@ mod tests {
                     ],
                     ..Default::default()
                 },
-            },
-        );
-        app.state.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
+            });
+        app.state.model.schematic.document_mut_for_test().components[0].name = "R1".to_owned();
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -985,7 +1020,7 @@ mod tests {
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         let target = app.state.dialogs.rename_selection.target.clone().unwrap();
-        let commit = match validate_draft(&app.state.schematic, &target, "RLOAD", &|_| true) {
+        let commit = match validate_draft(&app.state.model.schematic, &target, "RLOAD", &|_| true) {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid rename, got {other:?}"),
         };
@@ -994,6 +1029,7 @@ mod tests {
 
         let expressions = app
             .state
+            .model
             .workspace
             .content
             .simulation_plan_payloads
@@ -1012,6 +1048,7 @@ mod tests {
         );
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .configuration_sets
@@ -1021,11 +1058,15 @@ mod tests {
             "/RLOAD",
             "the configuration DUT path follows the renamed instance"
         );
-        assert!(app.state.workspace.content.project_metadata_dirty);
+        assert!(app.state.model.workspace.content.project_metadata_dirty);
         app.action_edit_undo();
-        assert_eq!(app.state.schematic.document().components[0].name, "R1");
+        assert_eq!(
+            app.state.model.schematic.document().components[0].name,
+            "R1"
+        );
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .configuration_sets
@@ -1037,6 +1078,7 @@ mod tests {
         );
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .plan_data(plan_id)
@@ -1047,9 +1089,13 @@ mod tests {
             "Undo must restore the executable saved output"
         );
         app.action_edit_redo();
-        assert_eq!(app.state.schematic.document().components[0].name, "RLOAD");
+        assert_eq!(
+            app.state.model.schematic.document().components[0].name,
+            "RLOAD"
+        );
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .configuration_sets
@@ -1060,6 +1106,7 @@ mod tests {
         );
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .plan_data(plan_id)
@@ -1076,6 +1123,7 @@ mod tests {
 
     fn bus_by_id(state: &AppState, id: u64) -> Bus {
         state
+            .model
             .schematic
             .document()
             .buses
@@ -1094,7 +1142,7 @@ mod tests {
         use crate::state::{
             BusSlice, BusTapOrientation, SheetDefinition, SheetPortPolicy, SheetTemplate,
         };
-        let schematic = &mut state.schematic;
+        let schematic = &mut state.model.schematic;
         let source = schematic
             .add_bus(
                 vec![Point::new(0, 0), Point::new(100, 0)],
@@ -1126,15 +1174,20 @@ mod tests {
                 Some(declaration("DATA[3:0]")),
             )
             .unwrap();
-        let document = state.schematic.document();
+        let document = state.model.schematic.document();
         let ids: Vec<u64> = document
             .buses
             .iter()
             .map(|bus| bus.id)
             .chain(document.bus_taps.iter().map(|tap| tap.id))
             .collect();
-        let key = state.workspace.content.active_schematic_reference().key();
-        let management = &mut state.workspace.content.design_management;
+        let key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
+        let management = &mut state.model.workspace.content.design_management;
         let first = management
             .bootstrap_for_cell_view(&key, "Sheet 1", ids)
             .unwrap();

@@ -178,14 +178,14 @@ pub(super) fn commit_activate_plan(
     app: &mut RSpiceApp,
     id: SimulationPlanId,
 ) -> Result<String, String> {
-    if app.state.sim_setup.stable_analysis_plan()?.id() == id {
+    if app.state.model.sim_setup.stable_analysis_plan()?.id() == id {
         return Ok(format!(
             "'{}' remains the active editable plan.",
-            app.state.sim_setup.active_plan_name()
+            app.state.model.sim_setup.active_plan_name()
         ));
     }
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_id);
     workspace.content.migrate_inactive_plan_data(id);
@@ -201,8 +201,8 @@ pub(super) fn commit_activate_plan(
         .first()
         .map(|instance| instance.id());
     let name = setup.active_plan_name().to_string();
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.workspace = workspace;
     app.state.workbench.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     Ok(format!(
@@ -220,7 +220,7 @@ pub(super) fn commit_rename_plan(
     id: SimulationPlanId,
     name: &str,
 ) -> Result<String, String> {
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     setup
         .rename_plan(id, name)
         .map_err(|error| error.to_string())?;
@@ -236,7 +236,7 @@ pub(super) fn commit_rename_plan(
             )
         },
     );
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
     app.invalidate_simulation_preflight();
     Ok(message)
 }
@@ -349,24 +349,28 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let retained = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         let active = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
         app.state
+            .model
             .workspace
             .content
             .migrate_active_plan_data(retained);
         app.state
+            .model
             .workspace
             .content
             .migrate_inactive_plan_data(active);
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         app.state
+            .model
             .simulation
             .retained
             .runs
@@ -409,7 +413,7 @@ mod tests {
             "a result stopped resolving to the renamed plan"
         );
         assert_eq!(
-            app.state.simulation.retained.runs[0]
+            app.state.model.simulation.retained.runs[0]
                 .prepared_receipt()
                 .and_then(PreparedRunReceipt::simulation_plan_id),
             Some(retained),
@@ -425,7 +429,8 @@ mod tests {
         let before = record_for(&app, retained);
         assert!(!before.archived);
 
-        commit_archive_plan(&mut app.state.sim_setup, retained).expect("an inactive plan archives");
+        commit_archive_plan(&mut app.state.model.sim_setup, retained)
+            .expect("an inactive plan archives");
 
         let after = record_for(&app, retained);
         assert!(after.archived, "the plan is not archived");
@@ -455,14 +460,14 @@ mod tests {
         let (mut app, active, _) = app_with_a_referenced_plan();
 
         assert_eq!(
-            app.state.sim_setup.clone().archive_plan(active),
+            app.state.model.sim_setup.clone().archive_plan(active),
             Err(SimulationPlanCatalogError::ActivePlanCannotBeArchived(
                 active
             )),
             "the catalog does not refuse the active plan on its own account"
         );
 
-        let error = commit_archive_plan(&mut app.state.sim_setup, active)
+        let error = commit_archive_plan(&mut app.state.model.sim_setup, active)
             .expect_err("archiving the active plan is refused");
         assert!(
             error.to_ascii_lowercase().contains("active"),
@@ -482,8 +487,10 @@ mod tests {
         let (mut app, _, retained) = app_with_a_referenced_plan();
         let before = record_for(&app, retained);
 
-        commit_archive_plan(&mut app.state.sim_setup, retained).expect("an inactive plan archives");
-        commit_restore_plan(&mut app.state.sim_setup, retained).expect("an archived plan restores");
+        commit_archive_plan(&mut app.state.model.sim_setup, retained)
+            .expect("an inactive plan archives");
+        commit_restore_plan(&mut app.state.model.sim_setup, retained)
+            .expect("an archived plan restores");
 
         let after = record_for(&app, retained);
         assert!(!after.archived, "the restore left the plan archived");
@@ -495,7 +502,7 @@ mod tests {
         assert_eq!(after.model_bindings, before.model_bindings);
         assert_eq!(after.results, before.results);
         assert_eq!(
-            app.state.sim_setup.restore_plan(retained),
+            app.state.model.sim_setup.restore_plan(retained),
             Err(SimulationPlanCatalogError::PlanNotArchived(retained)),
             "a restored plan is no longer archived, so restoring it again is refused"
         );

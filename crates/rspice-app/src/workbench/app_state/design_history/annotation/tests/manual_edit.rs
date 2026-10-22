@@ -4,7 +4,7 @@ use super::*;
 
 fn executable_fixture() -> Fixture {
     let mut fixture = fixture(&["V42"]);
-    let catalog = &mut fixture.state.workspace.content.configuration_sets;
+    let catalog = &mut fixture.state.model.workspace.content.configuration_sets;
     let configuration = catalog.find(fixture.configuration).unwrap();
     let mut definition = configuration.definition().clone();
     // The voltage source is a primitive; the executable DUT is the root.
@@ -20,6 +20,7 @@ fn executable_fixture() -> Fixture {
 fn rename(fixture: &mut Fixture, name: &str) -> Result<bool, String> {
     let expected = fixture
         .state
+        .model
         .schematic
         .document()
         .components
@@ -36,11 +37,12 @@ fn assert_projection(fixture: &Fixture, name: &str) {
     assert_component_references(fixture, &[name]);
     let state = &fixture.state;
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_schematic_reference(),
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_schematic_reference(),
+            &state.model.schematic,
         )
         .unwrap();
     let projected = projection.root_schematic().unwrap();
@@ -71,6 +73,7 @@ fn manual_rename_after_annotation_survives_projection_and_history() {
     let mut fixture = executable_fixture();
     let retained = fixture
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -84,6 +87,7 @@ fn manual_rename_after_annotation_survives_projection_and_history() {
         assert_eq!(
             fixture
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -105,15 +109,15 @@ fn annotation_and_repeated_manual_edits_share_a_reversible_history_chain() {
     let mut fixture = executable_fixture();
     rename(&mut fixture, "V42").unwrap();
     rename(&mut fixture, "V8").unwrap();
-    let mut revision = fixture.state.workspace.content.project.revision();
+    let mut revision = fixture.state.model.workspace.content.project.revision();
     for name in ["V42", "V1", "V42"] {
         assert!(
             fixture.state.undo_project_design().unwrap().is_some(),
             "undo {name}"
         );
         assert_projection(&fixture, name);
-        assert!(fixture.state.workspace.content.project.revision() > revision);
-        revision = fixture.state.workspace.content.project.revision();
+        assert!(fixture.state.model.workspace.content.project.revision() > revision);
+        revision = fixture.state.model.workspace.content.project.revision();
     }
     for name in ["V1", "V42", "V8"] {
         assert!(
@@ -121,8 +125,8 @@ fn annotation_and_repeated_manual_edits_share_a_reversible_history_chain() {
             "redo {name}"
         );
         assert_projection(&fixture, name);
-        assert!(fixture.state.workspace.content.project.revision() > revision);
-        revision = fixture.state.workspace.content.project.revision();
+        assert!(fixture.state.model.workspace.content.project.revision() > revision);
+        revision = fixture.state.model.workspace.content.project.revision();
     }
 }
 
@@ -142,19 +146,22 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
             let state = &mut fixture.state;
             match failure {
                 "project revision" => {
-                    let mut wire = serde_json::to_value(&state.workspace.content.project).unwrap();
+                    let mut wire =
+                        serde_json::to_value(&state.model.workspace.content.project).unwrap();
                     wire["revision"] = serde_json::json!(u64::MAX);
-                    state.workspace.content.project = serde_json::from_value(wire).unwrap();
+                    state.model.workspace.content.project = serde_json::from_value(wire).unwrap();
                 }
                 "catalog revision" => {
                     let mut wire =
-                        serde_json::to_value(&state.workspace.content.design_management).unwrap();
+                        serde_json::to_value(&state.model.workspace.content.design_management)
+                            .unwrap();
                     wire["revision"] = serde_json::json!(u64::MAX);
-                    state.workspace.content.design_management =
+                    state.model.workspace.content.design_management =
                         serde_json::from_value(wire).unwrap();
                 }
                 "output revision" => {
                     state
+                        .model
                         .workspace
                         .content
                         .plan_data_mut(fixture.plan)
@@ -164,11 +171,17 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
                 }
                 "annotation authority" => {
                     let object = SchematicObjectKey::new(
-                        &state.workspace.content.active_schematic_reference().key(),
+                        &state
+                            .model
+                            .workspace
+                            .content
+                            .active_schematic_reference()
+                            .key(),
                         fixture.sources[0],
                     )
                     .unwrap();
                     state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -182,18 +195,19 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
                 }
                 _ => unreachable!(),
             }
-            let before = SchematicSnapshot::capture(state.schematic.document());
-            let catalog = state.workspace.content.design_management.clone();
-            let configurations = state.workspace.content.configuration_sets.clone();
+            let before = SchematicSnapshot::capture(state.model.schematic.document());
+            let catalog = state.model.workspace.content.design_management.clone();
+            let configurations = state.model.workspace.content.configuration_sets.clone();
             let outputs = state
+                .model
                 .workspace
                 .content
                 .plan_data(fixture.plan)
                 .unwrap()
                 .saved_outputs
                 .clone();
-            let revision = state.workspace.content.project.revision();
-            let undo_len = state.project_design_history.undo.len();
+            let revision = state.model.workspace.content.project.revision();
+            let undo_len = state.model.project_design_history.undo.len();
             if history {
                 assert!(!state.can_undo_project_design(), "{failure}");
                 assert!(
@@ -205,13 +219,17 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
             }
             let state = &fixture.state;
             assert!(
-                before.is_equal_document(state.schematic.document()),
+                before.is_equal_document(state.model.schematic.document()),
                 "{failure}"
             );
-            assert_eq!(state.workspace.content.design_management, catalog);
-            assert_eq!(state.workspace.content.configuration_sets, configurations);
+            assert_eq!(state.model.workspace.content.design_management, catalog);
+            assert_eq!(
+                state.model.workspace.content.configuration_sets,
+                configurations
+            );
             assert_eq!(
                 state
+                    .model
                     .workspace
                     .content
                     .plan_data(fixture.plan)
@@ -219,8 +237,8 @@ fn manual_annotation_refusal_is_atomic_at_commit_and_history_boundaries() {
                     .saved_outputs,
                 outputs
             );
-            assert_eq!(state.workspace.content.project.revision(), revision);
-            assert_eq!(state.project_design_history.undo.len(), undo_len);
+            assert_eq!(state.model.workspace.content.project.revision(), revision);
+            assert_eq!(state.model.project_design_history.undo.len(), undo_len);
         }
     }
 }
@@ -299,6 +317,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
             loaded.file.workspace.design_management.annotation(),
             fixture
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -323,7 +342,7 @@ fn manual_annotation_names_and_references_survive_native_save_and_reopen() {
 fn unrelated_descriptor_changes_cannot_reanchor_annotation_history() {
     let mut fixture = executable_fixture();
     rename(&mut fixture, "V42").unwrap();
-    let mut published = fixture.state.workspace.content.project.clone();
+    let mut published = fixture.state.model.workspace.content.project.clone();
     published.set_path(std::path::PathBuf::from("first-save.rspiceproj"));
     published
         .rename("Unrelated project edit".to_owned())
@@ -331,7 +350,7 @@ fn unrelated_descriptor_changes_cannot_reanchor_annotation_history() {
     fixture
         .state
         .retain_annotation_history_after_save_descriptor(&published);
-    fixture.state.workspace.content.project = published;
+    fixture.state.model.workspace.content.project = published;
     assert!(!fixture.state.can_undo_project_design());
     assert!(fixture.state.undo_project_design().unwrap().is_none());
     assert_projection(&fixture, "V42");

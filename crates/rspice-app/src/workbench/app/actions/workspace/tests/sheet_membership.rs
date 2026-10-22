@@ -27,27 +27,33 @@ struct GovernedCrossing {
 
 fn governed_crossing(state: &mut AppState) -> GovernedCrossing {
     state.open_project_session();
-    let owner = state.workspace.content.active_schematic_reference();
+    let owner = state.model.workspace.content.active_schematic_reference();
     let key = owner.key();
     let stationary = state
+        .model
         .schematic
         .add_component(ComponentType::Diode, Point::new(0, 0));
     let moved = state
+        .model
         .schematic
         .add_component(ComponentType::Diode, Point::new(200, 0));
     let spare = state
+        .model
         .schematic
         .add_component(ComponentType::Diode, Point::new(400, 0));
     let stationary_wire = state
+        .model
         .schematic
         .add_wire(vec![Point::new(20, 0), Point::new(60, 0)])
         .expect("a conductor reaching the stationary cathode");
     let moved_wire = state
+        .model
         .schematic
         .add_wire(vec![Point::new(140, 0), Point::new(180, 0)])
         .expect("a conductor reaching the moved anode");
 
     let main = state
+        .model
         .workspace
         .content
         .design_management
@@ -58,6 +64,7 @@ fn governed_crossing(state: &mut AppState) -> GovernedCrossing {
         )
         .expect("governed sheet catalog");
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -122,6 +129,7 @@ fn cross_sheet_port_definitions(
     owner: &CellViewRef,
 ) -> Vec<CrossSheetPortDefinition> {
     state
+        .model
         .workspace
         .content
         .design_management
@@ -135,6 +143,7 @@ fn cross_sheet_port_definitions(
 
 fn cross_sheet_port_count(state: &AppState, owner: &CellViewRef) -> usize {
     state
+        .model
         .workspace
         .content
         .design_management
@@ -146,6 +155,7 @@ fn cross_sheet_port_count(state: &AppState, owner: &CellViewRef) -> usize {
 
 fn sheet_of(state: &AppState, owner: &CellViewRef, object_id: u64) -> Option<SheetId> {
     state
+        .model
         .workspace
         .content
         .design_management
@@ -155,12 +165,17 @@ fn sheet_of(state: &AppState, owner: &CellViewRef, object_id: u64) -> Option<She
 }
 
 fn delete_component(state: &mut AppState, object_id: u64) {
-    assert!(state.schematic.with_undo("delete selection", |schematic| {
-        schematic
-            .document_mut_for_test()
-            .components
-            .retain(|component| component.id != object_id);
-    }));
+    assert!(
+        state
+            .model
+            .schematic
+            .with_undo("delete selection", |schematic| {
+                schematic
+                    .document_mut_for_test()
+                    .components
+                    .retain(|component| component.id != object_id);
+            })
+    );
     state.sync_active_schematic_to_workspace();
 }
 
@@ -220,6 +235,7 @@ fn deleting_a_port_anchor_then_undo_restores_the_connection() {
     );
     assert!(
         app.state
+            .model
             .schematic
             .document()
             .components

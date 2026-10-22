@@ -495,6 +495,7 @@ fn available_documents_for_workspace(
             dirty: false,
         }],
         Workspace::Design => state
+            .model
             .workspace
             .content
             .open_views
@@ -526,6 +527,7 @@ fn available_documents_for_workspace(
         // detach, close, or save.
         Workspace::Stimulus => Vec::new(),
         Workspace::Results => state
+            .model
             .simulation
             .retained
             .runs
@@ -560,7 +562,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
         return vec![code_workspace_document(state)];
     }
     let mut documents = Vec::new();
-    if let Some(generated) = state.netlist_artifacts.generated_document.as_ref() {
+    if let Some(generated) = state.model.netlist_artifacts.generated_document.as_ref() {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistGenerated(generated.id()),
             label: "Generated netlist".to_owned(),
@@ -587,6 +589,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
 
     if let Some(owned) = state.ui.netlist.owned_document.as_ref() {
         let owned_label = state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -598,7 +601,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
             id: WorkspaceDocumentId::NetlistOwned(owned.id()),
             label: owned_label,
             icon: WorkbenchIcon::Netlist,
-            dirty: state.workspace.content.netlist_source_dirty,
+            dirty: state.model.workspace.content.netlist_source_dirty,
         });
         documents.extend(owned.dependencies().iter().filter_map(|dependency| {
             dependency.source()?;
@@ -611,6 +614,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
                 return None;
             }
             let project_owned = state
+                .model
                 .workspace
                 .content
                 .netlist_descriptor
@@ -625,7 +629,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
                     format!("{} · external", dependency.locator().display_name())
                 },
                 icon: WorkbenchIcon::Code,
-                dirty: project_owned && state.workspace.content.netlist_source_dirty,
+                dirty: project_owned && state.model.workspace.content.netlist_source_dirty,
             })
         }));
     }
@@ -698,7 +702,7 @@ fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
     WorkspaceDocument {
         id: WorkspaceDocumentId::NetlistSource,
         label: crate::workbench::documents::code_workspace::active_document_label(
-            &state.workspace,
+            &state.model.workspace,
             &state.ui.code_workspace,
             state.ui.messages(),
         ),
@@ -706,7 +710,8 @@ fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
             CodeWorkspacePage::Netlist => WorkbenchIcon::Netlist,
             CodeWorkspacePage::Automation => WorkbenchIcon::Terminal,
         },
-        dirty: page == CodeWorkspacePage::Netlist && state.workspace.content.netlist_source_dirty,
+        dirty: page == CodeWorkspacePage::Netlist
+            && state.model.workspace.content.netlist_source_dirty,
     }
 }
 
@@ -734,9 +739,10 @@ fn authoritative_active_document(
     }
     let candidate = match state.workbench.workspace {
         Workspace::Design => Some(WorkspaceDocumentId::CellView(
-            state.workspace.content.active_view.clone(),
+            state.model.workspace.content.active_view.clone(),
         )),
         Workspace::Results => state
+            .model
             .simulation
             .active_run()
             .map(|run| WorkspaceDocumentId::ResultDataset(run.dataset_id)),
@@ -775,7 +781,9 @@ fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
         .active_dependency_root
         .unwrap_or(netlist.active_document);
     let document = match root {
-        ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_document.as_ref(),
+        ActiveNetlistDocument::Generated => {
+            state.model.netlist_artifacts.generated_document.as_ref()
+        }
         ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }?;
@@ -968,6 +976,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
     let activated = match document {
         WorkspaceDocumentId::CellView(reference) => {
             if state
+                .model
                 .workspace
                 .content
                 .open_views
@@ -975,7 +984,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
                 .any(|open| open.reference == *reference)
             {
                 state.open_workspace_view(reference.clone());
-                state.workspace.content.active_view == *reference
+                state.model.workspace.content.active_view == *reference
             } else {
                 false
             }
@@ -993,17 +1002,19 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         // readouts. This path runs on every frame the document bar draws, so
         // an unguarded re-selection made those states impossible to hold.
         WorkspaceDocumentId::ResultDataset(dataset_id) => state
+            .model
             .simulation
             .retained
             .runs
             .iter()
             .position(|run| run.dataset_id == *dataset_id)
             .is_some_and(|index| {
-                state.simulation.view.active_run_idx == Some(index)
-                    || state.simulation.select_run(index)
+                state.model.simulation.view.active_run_idx == Some(index)
+                    || state.model.simulation.select_run(index)
             }),
         WorkspaceDocumentId::NetlistGenerated(document_id) => {
             let available = state
+                .model
                 .netlist_artifacts
                 .generated_document
                 .as_ref()
@@ -1029,6 +1040,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
         } => {
             use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
             let root_kind = if state
+                .model
                 .netlist_artifacts
                 .generated_document
                 .as_ref()
@@ -1460,12 +1472,12 @@ mod tests {
         state.workbench.workspace = Workspace::Netlist;
         state.ui.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        state.netlist_artifacts.generated_source = ROOT.to_owned();
-        state.netlist_artifacts.generated_document = Some(generated);
+        state.model.netlist_artifacts.generated_source = ROOT.to_owned();
+        state.model.netlist_artifacts.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned.clone());
-        state.workspace.content.netlist_source = Some(ROOT.to_owned());
-        state.workspace.content.netlist_document = Some(owned);
-        state.simulation.source.netlist_content = ROOT.to_owned();
+        state.model.workspace.content.netlist_source = Some(ROOT.to_owned());
+        state.model.workspace.content.netlist_document = Some(owned);
+        state.model.simulation.source.netlist_content = ROOT.to_owned();
         state
     }
 
@@ -1607,14 +1619,14 @@ mod tests {
         state.workbench.workspace = Workspace::Results;
         let run = SimulationRun::new(7);
         let dataset = run.dataset_id;
-        state.simulation.retained.runs.push(run);
+        state.model.simulation.retained.runs.push(run);
 
         assert!(activate_document(
             &mut state,
             &WorkspaceDocumentId::ResultDataset(dataset)
         ));
         assert_eq!(state.workbench.workspace, Workspace::Results);
-        assert_eq!(state.simulation.view.active_run_idx, Some(0));
+        assert_eq!(state.model.simulation.view.active_run_idx, Some(0));
     }
 
     /// The document bar re-activates the open document every frame. Doing so
@@ -1638,10 +1650,10 @@ mod tests {
             "AC",
         ));
         let dataset = first.dataset_id;
-        state.simulation.retained.runs = vec![first].into();
-        assert!(state.simulation.select_run(0));
-        assert!(state.simulation.select_analysis(1));
-        let version = state.simulation.view.data_version;
+        state.model.simulation.retained.runs = vec![first].into();
+        assert!(state.model.simulation.select_run(0));
+        assert!(state.model.simulation.select_analysis(1));
+        let version = state.model.simulation.view.data_version;
 
         for _ in 0..3 {
             assert!(activate_document_by_id(
@@ -1651,11 +1663,11 @@ mod tests {
         }
 
         assert_eq!(
-            state.simulation.view.data_version, version,
+            state.model.simulation.view.data_version, version,
             "re-activating the active dataset must not advance the data version"
         );
         assert_eq!(
-            state.simulation.view.active_analysis_idx,
+            state.model.simulation.view.active_analysis_idx,
             Some(1),
             "re-activation must not snap the analysis selection back to the first"
         );
@@ -1669,8 +1681,8 @@ mod tests {
         let first_dataset = first.dataset_id;
         let second = SimulationRun::new(2);
         let second_dataset = second.dataset_id;
-        state.simulation.retained.runs = vec![first, second].into();
-        assert!(state.simulation.select_run(1));
+        state.model.simulation.retained.runs = vec![first, second].into();
+        assert!(state.model.simulation.select_run(1));
         let documents = visible_documents(&state);
 
         assert!(close_document(
@@ -1679,13 +1691,13 @@ mod tests {
             &documents
         ));
         assert_eq!(
-            state.simulation.retained.runs.len(),
+            state.model.simulation.retained.runs.len(),
             2,
             "closing never deletes result data"
         );
-        assert_eq!(state.simulation.view.active_run_idx, Some(0));
+        assert_eq!(state.model.simulation.view.active_run_idx, Some(0));
         assert_eq!(
-            state.simulation.active_run().unwrap().dataset_id,
+            state.model.simulation.active_run().unwrap().dataset_id,
             first_dataset
         );
         assert!(
@@ -1707,12 +1719,16 @@ mod tests {
         let second_dataset = second.dataset_id;
         let third = SimulationRun::new(3);
         let third_dataset = third.dataset_id;
-        state.simulation.retained.runs = vec![first, second, third].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![first, second, third].into();
+        assert!(state.model.simulation.select_run(0));
 
         assert!(cycle_document(&mut state, false));
         assert_eq!(
-            state.simulation.active_run().map(|run| run.dataset_id),
+            state
+                .model
+                .simulation
+                .active_run()
+                .map(|run| run.dataset_id),
             Some(second_dataset)
         );
         assert_eq!(close_other_documents(&mut state), 1);
@@ -1722,11 +1738,15 @@ mod tests {
                 .documents
                 .is_closed(&WorkspaceDocumentId::ResultDataset(third_dataset))
         );
-        assert_eq!(state.simulation.retained.runs.len(), 3);
+        assert_eq!(state.model.simulation.retained.runs.len(), 3);
 
         assert_eq!(close_all_documents(&mut state), 1);
         assert_eq!(
-            state.simulation.active_run().map(|run| run.dataset_id),
+            state
+                .model
+                .simulation
+                .active_run()
+                .map(|run| run.dataset_id),
             Some(first_dataset)
         );
         assert!(
@@ -1735,7 +1755,7 @@ mod tests {
                 .documents
                 .is_closed(&WorkspaceDocumentId::ResultDataset(second_dataset))
         );
-        assert_eq!(state.simulation.retained.runs.len(), 3);
+        assert_eq!(state.model.simulation.retained.runs.len(), 3);
     }
 
     #[test]
@@ -1799,6 +1819,7 @@ mod tests {
         let mut state = AppState::default();
         state.workbench.workspace = Workspace::Simulate;
         let plan = state
+            .model
             .sim_setup
             .analysis_plan
             .as_mut()
@@ -1837,14 +1858,21 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
-        let library = app.state.workspace.content.project.root_library.clone();
+        let library = app
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .root_library
+            .clone();
         for index in 0..extra {
-            app.state.workspace.open_view(
+            app.state.model.workspace.open_view(
                 CellViewRef::new(&library, format!("stage_{index}"), "schematic"),
                 ViewType::Schematic,
             );
         }
-        app.state.workspace.open_view(
+        app.state.model.workspace.open_view(
             CellViewRef::new(&library, "testdev", "veriloga"),
             ViewType::VerilogA,
         );
@@ -1881,8 +1909,10 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = design_session(0);
-        let top = app.state.workspace.content.open_views[0].reference.clone();
-        assert_ne!(app.state.workspace.content.active_view, top);
+        let top = app.state.model.workspace.content.open_views[0]
+            .reference
+            .clone();
+        assert_ne!(app.state.model.workspace.content.active_view, top);
         strip_frame(&ctx, &mut app, Vec::new());
 
         // The top schematic is the first tab, at the strip's left edge.
@@ -1912,7 +1942,7 @@ mod tests {
         );
         strip_frame(&ctx, &mut app, Vec::new());
 
-        assert_eq!(app.state.workspace.content.active_view, top);
+        assert_eq!(app.state.model.workspace.content.active_view, top);
         assert_eq!(ctx.memory(|memory| memory.focused()), None);
     }
 
@@ -2120,7 +2150,9 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = design_session(14);
-        let top = app.state.workspace.content.open_views[0].reference.clone();
+        let top = app.state.model.workspace.content.open_views[0]
+            .reference
+            .clone();
 
         let nodes = settled_strip(&ctx, &mut app);
         let button = hidden_button(&nodes).expect("sixteen tabs overflow 1440 pt");
@@ -2186,7 +2218,7 @@ mod tests {
             ((bounds.y0 + bounds.y1) * 0.5) as f32,
         );
         press(&ctx, &mut app, at);
-        assert_eq!(app.state.workspace.content.active_view, top);
+        assert_eq!(app.state.model.workspace.content.active_view, top);
 
         let nodes = settled_strip(&ctx, &mut app);
         let first = tab_nodes(&nodes)

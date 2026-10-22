@@ -319,7 +319,7 @@ fn render_presence_popover(
                     app.state.workbench.live_write_locks.netlist.clone(),
                 )
             } else {
-                let key = app.state.workspace.content.active_key();
+                let key = app.state.model.workspace.content.active_key();
                 (
                     format!("schematic/{key}"),
                     app.state

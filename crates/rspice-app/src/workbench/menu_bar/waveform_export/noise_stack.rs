@@ -50,8 +50,8 @@ mod tests {
         use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
         let qpnoise = crate::simulation::results::qpnoise_retained_test_fixture();
         let mut state = crate::workbench::AppState::default();
-        state.simulation.start_run().add_analysis(qpnoise);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.start_run().add_analysis(qpnoise);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         let mut ordinary = AnalysisResult::new(2, AnalysisType::Noise, "Ordinary noise");
         ordinary.success = true;
         ordinary.waveforms.push(
@@ -59,11 +59,12 @@ mod tests {
                 .with_unit("V²/Hz"),
         );
         state
+            .model
             .simulation
             .active_run_mut()
             .unwrap()
             .add_analysis(ordinary);
-        let dataset = state.simulation.active_run().unwrap().dataset_id;
+        let dataset = state.model.simulation.active_run().unwrap().dataset_id;
         state.workbench.documents.activate(
             crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset),
         );

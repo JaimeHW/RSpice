@@ -92,7 +92,7 @@ impl AppState {
     /// top of every frame, so a changed Preferences row applies to the open
     /// schematic before its next edit.
     pub(crate) fn apply_schematic_editing_preferences(&mut self) {
-        let editor = &mut self.schematic.session.editor;
+        let editor = &mut self.model.schematic.session.editor;
         editor.automatic_junctions = self.ui.preferences.automatic_junction_dots();
         editor.selection_crossing = self.ui.preferences.selection_crossing();
     }
@@ -116,12 +116,13 @@ mod tests {
                 .expect("a stored junction choice");
             state.apply_schematic_editing_preferences();
             state
+                .model
                 .schematic
                 .add_wire(vec![Point::new(0, 0), Point::new(40, 0)]);
-            state.schematic.start_wire(Point::new(20, 40));
-            state.schematic.extend_wire(Point::new(20, 0));
-            state.schematic.finish_wire(|_| false);
-            assert_eq!(state.schematic.document().junctions.len(), dots);
+            state.model.schematic.start_wire(Point::new(20, 40));
+            state.model.schematic.extend_wire(Point::new(20, 0));
+            state.model.schematic.finish_wire(|_| false);
+            assert_eq!(state.model.schematic.document().junctions.len(), dots);
         }
     }
 
@@ -196,7 +197,10 @@ mod tests {
                 .set_choice(ChoicePreference::SelectionCrossingPolicy, stored)
                 .expect("a stored selection choice");
             state.apply_schematic_editing_preferences();
-            assert_eq!(state.schematic.session.editor.selection_crossing, policy);
+            assert_eq!(
+                state.model.schematic.session.editor.selection_crossing,
+                policy
+            );
         }
     }
 }

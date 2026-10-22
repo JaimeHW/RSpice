@@ -46,7 +46,12 @@ pub(in crate::workbench::docks) fn toolbar(ui: &mut Ui, state: &mut AppState) {
             view.toggle(severity);
         }
     }
-    channel(ui, &state.simulation.retained.runs, &mut view, advance);
+    channel(
+        ui,
+        &state.model.simulation.retained.runs,
+        &mut view,
+        advance,
+    );
     find(ui, &mut view, advance);
     state.workbench.console_view = view;
 }

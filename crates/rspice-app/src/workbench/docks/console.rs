@@ -269,8 +269,8 @@ fn console_tabs(ui: &mut Ui, app: &mut RSpiceApp, problems: ProblemCount, height
         for (index, page) in ConsolePage::ALL.into_iter().enumerate() {
             let count = match page {
                 ConsolePage::Problems => problems.total(),
-                ConsolePage::Measurements => active_measurement_count(&app.state.simulation),
-                ConsolePage::TaskLog => app.state.simulation.retained.runs.len(),
+                ConsolePage::Measurements => active_measurement_count(&app.state.model.simulation),
+                ConsolePage::TaskLog => app.state.model.simulation.retained.runs.len(),
                 ConsolePage::Console => 0,
             };
             // The badge has room for one number. Which severities that number
@@ -536,6 +536,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
     let rows = active_measurement_rows(app, &specifications);
     let run_label = app
         .state
+        .model
         .simulation
         .active_run()
         .map(|run| run.label.clone());
@@ -555,7 +556,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
             // where that page's does.
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 crate::ui::widgets::Button::new("+ Add measurement…")
-                    .enabled(app.state.simulation.active_analysis().is_some())
+                    .enabled(app.state.model.simulation.active_analysis().is_some())
                     .show(ui)
                     .on_disabled_hover_text(
                         "Select a retained result analysis before creating a measurement",
@@ -570,7 +571,7 @@ fn measurements(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.add_space(CONSOLE_BODY_PADDING_TOP);
         if prose_fits(ui) {
             padded(ui, |ui| {
-                if app.state.simulation.active_run().is_some() {
+                if app.state.model.simulation.active_run().is_some() {
                     muted(ui, "This dataset has no computed measurements.");
                 } else {
                     muted(
@@ -601,7 +602,7 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
         // the bottom edge of a dock dragged shorter than that.
         .min_scrolled_height(0.0)
         .show(ui, |ui| {
-            if app.state.simulation.retained.runs.is_empty() {
+            if app.state.model.simulation.retained.runs.is_empty() {
                 padded(ui, |ui| {
                     muted(
                         ui,
@@ -617,22 +618,22 @@ fn task_log(ui: &mut Ui, app: &mut RSpiceApp) {
                 status: widest_status_width(ui),
                 label: app
                     .state
-                    .simulation
+                    .model.simulation
                     .retained
                     .runs
                     .iter()
                     .map(|run| task_text_width(ui, &run.label, FontWeight::Medium))
                     .fold(0.0, f32::max),
             };
-            for run in &app.state.simulation.retained.runs {
-                let active = app.state.simulation.execution.active_execution
+            for run in &app.state.model.simulation.retained.runs {
+                let active = app.state.model.simulation.execution.active_execution
                     == run.execution_identity()
                     && !run.lifecycle.is_terminal();
                 let (status, problem) = run_lifecycle_presentation(run.lifecycle);
                 let progress = if active {
                     format!(
                         " · {}%",
-                        simulation_progress_percent(app.state.simulation.execution.progress)
+                        simulation_progress_percent(app.state.model.simulation.execution.progress)
                     )
                 } else {
                     String::new()
@@ -688,6 +689,7 @@ struct MeasurementTableRow {
 fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
     if let Some(receipt) = app
         .state
+        .model
         .simulation
         .active_run()
         .and_then(crate::state::SimulationRun::prepared_receipt)
@@ -700,12 +702,13 @@ fn active_specifications(app: &RSpiceApp) -> Vec<crate::state::SpecEntry> {
     }
     let active = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.specs.as_slice())
-        .unwrap_or(app.state.workspace.content.specs.as_slice());
+        .unwrap_or(app.state.model.workspace.content.specs.as_slice());
     active.to_vec()
 }
 
@@ -713,7 +716,7 @@ fn active_measurement_rows(
     app: &RSpiceApp,
     specifications: &[crate::state::SpecEntry],
 ) -> Vec<MeasurementTableRow> {
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = app.state.model.simulation.active_run() else {
         return Vec::new();
     };
     let mut rows: Vec<MeasurementTableRow> = run
@@ -739,7 +742,7 @@ fn active_measurement_rows(
     // the sheet, because a specification binds to these rows.
     if let Some(summary) = crate::state::ac_bode_summary_for_selection(
         run,
-        app.state.simulation.view.active_analysis_idx,
+        app.state.model.simulation.view.active_analysis_idx,
     ) && let Some(analysis) = run.analyses.get(summary.analysis_index)
         && analysis.success
     {

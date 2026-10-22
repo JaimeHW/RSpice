@@ -26,17 +26,19 @@ struct Fixture {
 fn fixture(names: &[&str]) -> Fixture {
     let mut state = AppState::default();
     state.open_project_session();
-    let owner = state.workspace.content.active_schematic_reference();
-    let plan = state.sim_setup.stable_analysis_plan().unwrap().id();
+    let owner = state.model.workspace.content.active_schematic_reference();
+    let plan = state.model.sim_setup.stable_analysis_plan().unwrap().id();
     let mut sources = Vec::new();
     let mut dependents = Vec::new();
     let mut objects = Vec::new();
     for (index, name) in names.iter().enumerate() {
         let x = (names.len() - index) as i32 * 100;
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::VoltageSource, Point::new(x, 0));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -46,9 +48,11 @@ fn fixture(names: &[&str]) -> Fixture {
             .name = (*name).to_owned();
         sources.push(id);
         let dependent = state
+            .model
             .schematic
             .add_component(ComponentType::Cccs, Point::new(x, 100));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -75,8 +79,14 @@ fn fixture(names: &[&str]) -> Fixture {
         )
         .unwrap();
         probe.bind_saved_output(plan, output.id);
-        state.schematic.document_mut_for_test().probes.push(probe);
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .probes
+            .push(probe);
+        state
+            .model
             .workspace
             .content
             .add_saved_output(plan, output)
@@ -95,6 +105,7 @@ fn fixture(names: &[&str]) -> Fixture {
         });
     }
     let configuration = state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -111,8 +122,8 @@ fn fixture(names: &[&str]) -> Fixture {
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
         })
         .unwrap();
-    state.schematic.clear_undo_history();
-    state.schematic.session.is_dirty = false;
+    state.model.schematic.clear_undo_history();
+    state.model.schematic.session.is_dirty = false;
     state.sync_active_schematic_to_workspace();
     let candidate = annotation_candidate(&state, objects);
     Fixture {
@@ -136,7 +147,7 @@ fn annotation_candidate(
         protected_reviewed: false,
         objects,
     };
-    let mut candidate = (*state.workspace.content.design_management).clone();
+    let mut candidate = (*state.model.workspace.content.design_management).clone();
     let preview = candidate
         .annotation()
         .preview_renumbering(&request)
@@ -150,11 +161,12 @@ fn annotation_candidate(
 
 fn publish(fixture: &mut Fixture) {
     let state = &mut fixture.state;
-    let before = (*state.workspace.content.design_management).clone();
+    let before = (*state.model.workspace.content.design_management).clone();
     let transaction = state
         .prepare_design_management_schematic_transaction(&fixture.candidate)
         .unwrap();
     let committed_revision = state
+        .model
         .workspace
         .content
         .replace_design_management(fixture.candidate.clone())
@@ -162,9 +174,9 @@ fn publish(fixture: &mut Fixture) {
     state.apply_design_management_schematic_transaction(&transaction);
     state.record_design_management_transaction(DesignManagementHistoryEntry {
         description: "renumber schematic references".to_owned(),
-        owner: state.workspace.content.active_schematic_reference(),
+        owner: state.model.workspace.content.active_schematic_reference(),
         before,
-        after: (*state.workspace.content.design_management).clone(),
+        after: (*state.model.workspace.content.design_management).clone(),
         before_schematics: transaction.before,
         after_schematics: transaction.after,
         references: transaction.references,
@@ -177,6 +189,7 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
     for (index, name) in names.iter().enumerate() {
         assert_eq!(
             state
+                .model
                 .schematic
                 .document()
                 .components
@@ -188,6 +201,7 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
         );
         assert_eq!(
             state
+                .model
                 .schematic
                 .document()
                 .components
@@ -198,12 +212,13 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
             format!("vref={name}")
         );
         assert_eq!(
-            state.schematic.document().probes[index]
+            state.model.schematic.document().probes[index]
                 .source_expression
                 .as_deref(),
             Some(format!("I({name})").as_str())
         );
         let output = &state
+            .model
             .workspace
             .content
             .plan_data(fixture.plan)
@@ -211,7 +226,7 @@ fn assert_component_references(fixture: &Fixture, names: &[&str]) {
             .saved_outputs[index];
         assert_eq!(output.source_expression, format!("I({name})"));
         assert_eq!(
-            state.schematic.document().probes[index].saved_output_id,
+            state.model.schematic.document().probes[index].saved_output_id,
             Some(output.id)
         );
     }
@@ -222,6 +237,7 @@ fn assert_references(fixture: &Fixture, names: &[&str]) {
     let state = &fixture.state;
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -244,6 +260,7 @@ fn annotation_publish_and_history_update_the_scoped_schematic_atomically() {
     assert_eq!(
         fixture
             .state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -255,6 +272,7 @@ fn annotation_publish_and_history_update_the_scoped_schematic_atomically() {
     assert_eq!(
         fixture
             .state
+            .model
             .workspace
             .content
             .plan_data(fixture.plan)
@@ -263,7 +281,7 @@ fn annotation_publish_and_history_update_the_scoped_schematic_atomically() {
             .revision,
         ObjectRevision::new(4).unwrap()
     );
-    assert!(!fixture.state.schematic.can_undo());
+    assert!(!fixture.state.model.schematic.can_undo());
 }
 
 #[test]
@@ -285,6 +303,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
             "malformed reference" => {
                 fixture
                     .state
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .components
@@ -296,6 +315,7 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
             "output revision" => {
                 fixture
                     .state
+                    .model
                     .workspace
                     .content
                     .plan_data_mut(fixture.plan)
@@ -303,20 +323,29 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
                     .saved_outputs[0]
                     .revision = ObjectRevision::new(u64::MAX).unwrap()
             }
-            "read only" => fixture.state.workspace.content.open_views[0].read_only_reference = true,
+            "read only" => {
+                fixture.state.model.workspace.content.open_views[0].read_only_reference = true
+            }
             _ => unreachable!(),
         }
-        let before = SchematicSnapshot::capture(fixture.state.schematic.document());
-        let configurations = fixture.state.workspace.content.configuration_sets.clone();
+        let before = SchematicSnapshot::capture(fixture.state.model.schematic.document());
+        let configurations = fixture
+            .state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .clone();
         let outputs = fixture
             .state
+            .model
             .workspace
             .content
             .plan_data(fixture.plan)
             .unwrap()
             .saved_outputs
             .clone();
-        let revision = fixture.state.workspace.content.project.revision();
+        let revision = fixture.state.model.workspace.content.project.revision();
         assert!(
             fixture
                 .state
@@ -324,14 +353,15 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
                 .is_err(),
             "{failure}"
         );
-        assert!(before.is_equal_document(fixture.state.schematic.document()));
+        assert!(before.is_equal_document(fixture.state.model.schematic.document()));
         assert_eq!(
-            fixture.state.workspace.content.configuration_sets,
+            fixture.state.model.workspace.content.configuration_sets,
             configurations
         );
         assert_eq!(
             fixture
                 .state
+                .model
                 .workspace
                 .content
                 .plan_data(fixture.plan)
@@ -339,7 +369,10 @@ fn annotation_preparation_refuses_before_any_owner_or_history_changes() {
                 .saved_outputs,
             outputs
         );
-        assert_eq!(fixture.state.workspace.content.project.revision(), revision);
+        assert_eq!(
+            fixture.state.model.workspace.content.project.revision(),
+            revision
+        );
         assert!(fixture.state.project_undo_sequence().is_none());
     }
 }
@@ -350,18 +383,31 @@ fn annotation_history_refusal_does_not_partly_restore_names_or_catalogs() {
     publish(&mut fixture);
     fixture
         .state
+        .model
         .workspace
         .content
         .plan_data_mut(fixture.plan)
         .unwrap()
         .saved_outputs[0]
         .revision = ObjectRevision::new(u64::MAX).unwrap();
-    let catalog = fixture.state.workspace.content.design_management.clone();
-    let revision = fixture.state.workspace.content.project.revision();
+    let catalog = fixture
+        .state
+        .model
+        .workspace
+        .content
+        .design_management
+        .clone();
+    let revision = fixture.state.model.workspace.content.project.revision();
     assert!(fixture.state.undo_project_design().is_err());
     assert_references(&fixture, &["V1"]);
-    assert_eq!(fixture.state.workspace.content.design_management, catalog);
-    assert_eq!(fixture.state.workspace.content.project.revision(), revision);
+    assert_eq!(
+        fixture.state.model.workspace.content.design_management,
+        catalog
+    );
+    assert_eq!(
+        fixture.state.model.workspace.content.project.revision(),
+        revision
+    );
     assert!(fixture.state.project_undo_sequence().is_some());
 }
 
@@ -379,25 +425,29 @@ fn reused_master_fixture(
     let mut fixture = fixture(&["V42"]);
     let state = &mut fixture.state;
     state
+        .model
         .workspace
-        .ensure_library_model(&mut state.library_manager);
-    let root = state.workspace.content.active_schematic_reference();
+        .ensure_library_model(&mut state.model.library_manager);
+    let root = state.model.workspace.content.active_schematic_reference();
     let child_ref = CellViewRef::new(&root.library, "child", "schematic");
     let other_ref = CellViewRef::new(&root.library, "other", "schematic");
     for reference in [&child_ref, &other_ref] {
         state
+            .model
             .library_manager
             .get_library_mut(&reference.library)
             .unwrap()
             .get_or_create_cell(&reference.cell)
             .add_view(View::new("schematic", ViewType::Schematic));
         state
+            .model
             .workspace
             .content
             .open_views
             .push(OpenCellView::new(reference.clone(), ViewType::Schematic));
     }
     let open = state
+        .model
         .workspace
         .content
         .open_views
@@ -407,7 +457,7 @@ fn reused_master_fixture(
     open.occurrence = crate::state::workspace::DocumentOccurrence::rooted(root.clone());
     open.occurrence
         .descend(original_names[0].to_owned(), child_ref.clone());
-    let mut child = std::mem::take(&mut state.schematic);
+    let mut child = std::mem::take(&mut state.model.schematic);
     child.document_mut_for_test().probes = vec![
         SchematicProbe::new(
             1000,
@@ -418,14 +468,16 @@ fn reused_master_fixture(
         .unwrap(),
     ];
     state
+        .model
         .workspace
         .insert_schematic_editor(child_ref.key(), child);
     for (index, name) in original_names.iter().enumerate() {
-        let id = state.schematic.add_library_cell_component(
+        let id = state.model.schematic.add_library_cell_component(
             Point::new((2 - index as i32) * 100, 0),
             LibraryCellInstance::new(&root.library, "child", "schematic"),
         );
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -433,7 +485,7 @@ fn reused_master_fixture(
             .find(|c| c.id == id)
             .unwrap()
             .name = (*name).to_owned();
-        state.schematic.document_mut_for_test().probes.push(
+        state.model.schematic.document_mut_for_test().probes.push(
             SchematicProbe::new(
                 2000 + index as u64,
                 Point::origin(),
@@ -465,9 +517,11 @@ fn reused_master_fixture(
         .unwrap(),
     );
     state
+        .model
         .workspace
         .insert_schematic_editor(other_ref.key(), other);
     state
+        .model
         .workspace
         .content
         .plan_data_mut(fixture.plan)
@@ -475,6 +529,7 @@ fn reused_master_fixture(
         .saved_outputs[0]
         .source_expression = format!("I(/{}/V42)", original_names[1]);
     let configuration = state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -484,12 +539,13 @@ fn reused_master_fixture(
     definition.dut_path = format!("/{}", original_names[0]);
     let revision = configuration.revision();
     state
+        .model
         .workspace
         .content
         .configuration_sets
         .update(fixture.configuration, revision, definition)
         .unwrap();
-    state.schematic.clear_undo_history();
+    state.model.schematic.clear_undo_history();
     state.sync_active_schematic_to_workspace();
     (fixture, root, child_ref, other_ref)
 }
@@ -511,6 +567,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
     }];
     objects.extend(
         state
+            .model
             .schematic
             .document()
             .components
@@ -533,6 +590,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
     );
     fixture.candidate = annotation_candidate(state, objects);
     let active_configuration = state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -545,7 +603,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         } else {
             original_names
         };
-        let child = &state.workspace.content.schematic_buffers[&child_ref.key()];
+        let child = &state.model.workspace.content.schematic_buffers[&child_ref.key()];
         assert_eq!(
             child
                 .document()
@@ -572,14 +630,14 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         );
         for (index, parent) in parents.iter().enumerate() {
             assert_eq!(
-                state.schematic.document().probes[index]
+                state.model.schematic.document().probes[index]
                     .source_expression
                     .as_deref(),
                 Some(format!("I(/{parent}/{name})").as_str())
             );
         }
         assert_eq!(
-            state.workspace.content.schematic_buffers[&other_ref.key()]
+            state.model.workspace.content.schematic_buffers[&other_ref.key()]
                 .document()
                 .probes[0]
                 .source_expression
@@ -588,6 +646,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         );
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .plan_data(fixture.plan)
@@ -598,6 +657,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         );
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .configuration_sets
@@ -607,6 +667,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
             format!("/{}", parents[0])
         );
         let occurrence = &state
+            .model
             .workspace
             .content
             .open_views
@@ -618,6 +679,7 @@ fn verify_reused_master_annotation(original_names: [&str; 2]) {
         assert_eq!(occurrence.terminal_master(), &child_ref);
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .configuration_sets

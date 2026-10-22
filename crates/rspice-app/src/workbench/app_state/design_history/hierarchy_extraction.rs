@@ -17,8 +17,9 @@ pub(crate) fn validate_hierarchy_target_unreferenced(
     let references_target = |schematic: &rspice_design::schematic::document::SchematicDocument| {
         schematic_references_master(schematic, &target.library, &target.cell)
     };
-    if references_target(state.schematic.document())
+    if references_target(state.model.schematic.document())
         || state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -49,11 +50,13 @@ impl HierarchyExtractionRecord {
     pub(super) fn before_design_matches(&self, state: &AppState) -> bool {
         schematic_matches(state, &self.parent_ref, &self.before_parent)
             && state
+                .model
                 .library_manager
                 .get_library(&self.target_schematic_ref.library)
                 .and_then(|library| library.get_cell(&self.target_schematic_ref.cell))
                 .is_none()
             && !state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -73,6 +76,7 @@ impl HierarchyExtractionRecord {
         }
         for library_name in [&self.parent_ref.library, &self.target_schematic_ref.library] {
             let library = state
+                .model
                 .library_manager
                 .get_library(library_name)
                 .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
@@ -107,13 +111,15 @@ impl HierarchyExtractionRecord {
         self.child_template = schematic_clone(state, &self.target_schematic_ref)
             .ok_or_else(|| "The generated child schematic is no longer open.".to_owned())?;
         self.target_cell = state
+            .model
             .library_manager
             .get_library(&self.target_schematic_ref.library)
             .and_then(|library| library.get_cell(&self.target_schematic_ref.cell))
             .cloned()
             .ok_or_else(|| "The generated hierarchy cell no longer exists.".to_owned())?;
-        let current_open_views = state.workspace.content.open_views.clone();
+        let current_open_views = state.model.workspace.content.open_views.clone();
         let mut library = state
+            .model
             .library_manager
             .edit_library(&self.target_schematic_ref.library)
             .ok_or_else(|| "The target library no longer exists.".to_owned())?;
@@ -121,20 +127,23 @@ impl HierarchyExtractionRecord {
             return Err("The generated hierarchy cell no longer exists.".to_owned());
         }
         state
+            .model
             .workspace
             .remove_schematic_editor(&self.target_schematic_ref.key());
         apply_design_snapshot(state, &self.parent_ref, &self.before_parent)?;
-        state.workspace.content.open_views = restored_open_views(
+        state.model.workspace.content.open_views = restored_open_views(
             &self.open_views_before,
             &current_open_views,
             [(&self.parent_ref, true)],
         );
         state
+            .model
             .workspace
             .content
             .hierarchy_stack
             .clone_from(&self.hierarchy_stack_before);
         state
+            .model
             .workspace
             .content
             .hierarchy_instances
@@ -143,7 +152,7 @@ impl HierarchyExtractionRecord {
         // step re-activates is already at the occurrence it was edited at. The
         // snapshot breadcrumb must not re-derive that: it describes where the
         // session was, not which document the record owns.
-        state.workspace.content.active_view = self.parent_ref.clone();
+        state.model.workspace.content.active_view = self.parent_ref.clone();
         state.restore_active_schematic_from_workspace();
         Ok(())
     }
@@ -156,32 +165,36 @@ impl HierarchyExtractionRecord {
             );
         }
         self.validate_mutation(state, "redone")?;
-        let current_open_views = state.workspace.content.open_views.clone();
+        let current_open_views = state.model.workspace.content.open_views.clone();
         let mut library = state
+            .model
             .library_manager
             .edit_library(&self.target_schematic_ref.library)
             .ok_or_else(|| "The target library no longer exists.".to_owned())?;
         library.add_cell(self.target_cell.clone());
         apply_design_snapshot(state, &self.parent_ref, &self.after_parent)?;
         state
+            .model
             .workspace
             .insert_schematic_editor(self.target_schematic_ref.key(), self.child_template.clone());
-        state.workspace.content.open_views = restored_open_views(
+        state.model.workspace.content.open_views = restored_open_views(
             &self.open_views_after,
             &current_open_views,
             [(&self.parent_ref, true), (&self.target_open_ref, true)],
         );
         state
+            .model
             .workspace
             .content
             .hierarchy_stack
             .clone_from(&self.hierarchy_stack_after);
         state
+            .model
             .workspace
             .content
             .hierarchy_instances
             .clone_from(&self.hierarchy_instances_after);
-        state.workspace.content.active_view = self.target_open_ref.clone();
+        state.model.workspace.content.active_view = self.target_open_ref.clone();
         state.restore_active_schematic_from_workspace();
         Ok(())
     }
@@ -192,10 +205,11 @@ fn schematic_matches(
     reference: &CellViewRef,
     expected: &SchematicSnapshot,
 ) -> bool {
-    if state.workspace.content.active_schematic_reference() == *reference {
-        expected.is_equal_document(state.schematic.document())
+    if state.model.workspace.content.active_schematic_reference() == *reference {
+        expected.is_equal_document(state.model.schematic.document())
     } else {
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -209,14 +223,16 @@ fn apply_design_snapshot(
     reference: &CellViewRef,
     snapshot: &SchematicSnapshot,
 ) -> Result<(), String> {
-    if state.workspace.content.active_schematic_reference() == *reference {
-        state.schematic.apply_snapshot(snapshot);
+    if state.model.workspace.content.active_schematic_reference() == *reference {
+        state.model.schematic.apply_snapshot(snapshot);
         state
+            .model
             .workspace
-            .insert_schematic_editor(reference.key(), state.schematic.clone());
+            .insert_schematic_editor(reference.key(), state.model.schematic.clone());
         return Ok(());
     }
     let mut schematic = state
+        .model
         .workspace
         .schematic_editor_mut(&reference.key())
         .ok_or_else(|| {
@@ -230,10 +246,13 @@ fn apply_design_snapshot(
 }
 
 fn schematic_clone(state: &AppState, reference: &CellViewRef) -> Option<SchematicState> {
-    if state.workspace.content.active_schematic_reference() == *reference {
-        Some(state.schematic.clone())
+    if state.model.workspace.content.active_schematic_reference() == *reference {
+        Some(state.model.schematic.clone())
     } else {
-        state.workspace.clone_schematic_editor(&reference.key())
+        state
+            .model
+            .workspace
+            .clone_schematic_editor(&reference.key())
     }
 }
 
@@ -271,8 +290,9 @@ fn restored_open_views<const N: usize>(
 /// brings the tab it restores forward before restoring anything. The step
 /// still puts the breadcrumb back; it just does not refuse over it.
 fn open_documents_match(state: &AppState, expected_views: &[OpenCellView]) -> bool {
-    state.workspace.content.open_views.len() == expected_views.len()
+    state.model.workspace.content.open_views.len() == expected_views.len()
         && state
+            .model
             .workspace
             .content
             .open_views
@@ -293,13 +313,20 @@ fn has_external_master_reference(state: &AppState, record: &HierarchyExtractionR
     };
 
     state
+        .model
         .workspace
         .content
         .schematic_buffers
         .iter()
         .any(|(key, schematic)| is_external(key) && references_target(schematic.document()))
-        || (is_external(&state.workspace.content.active_schematic_reference().key())
-            && references_target(state.schematic.document()))
+        || (is_external(
+            &state
+                .model
+                .workspace
+                .content
+                .active_schematic_reference()
+                .key(),
+        ) && references_target(state.model.schematic.document()))
 }
 
 fn schematic_references_master(
@@ -317,6 +344,7 @@ fn schematic_references_master(
 
 fn target_cell_matches(state: &AppState, reference: &CellViewRef, expected: &Cell) -> bool {
     let Some(actual) = state
+        .model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))

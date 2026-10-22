@@ -37,15 +37,15 @@ pub(in crate::workbench) fn validate_hierarchy_reference_impact(
     }
 
     let mut findings = Vec::new();
-    if let Some(plan) = state.sim_setup.analysis_plan.as_ref() {
+    if let Some(plan) = state.model.sim_setup.analysis_plan.as_ref() {
         scan_plan(
-            state.sim_setup.active_plan_name().as_str(),
+            state.model.sim_setup.active_plan_name().as_str(),
             plan,
             &affected,
             &mut findings,
         );
     }
-    for stored in state.sim_setup.inactive_plans() {
+    for stored in state.model.sim_setup.inactive_plans() {
         scan_plan(
             stored.name().as_str(),
             stored.analysis_plan(),
@@ -53,7 +53,7 @@ pub(in crate::workbench) fn validate_hierarchy_reference_impact(
             &mut findings,
         );
     }
-    for record in &state.workspace.content.simulation_plan_payloads {
+    for record in &state.model.workspace.content.simulation_plan_payloads {
         let label = plan_label(state, record.plan_id);
         for (index, output) in record.payload.saved_outputs.iter().enumerate() {
             if let Some(symbol) = affected_reference(&output.source_expression, &affected) {
@@ -224,12 +224,14 @@ const fn identifier_byte(byte: u8) -> bool {
 
 fn simulation_plan(state: &AppState, id: SimulationPlanId) -> Option<&SimulationPlan> {
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .filter(|plan| plan.id() == id)
         .or_else(|| {
             state
+                .model
                 .sim_setup
                 .inactive_plans()
                 .iter()
@@ -320,14 +322,19 @@ const fn saved_output_kind_supports_analysis(
 
 fn plan_label(state: &AppState, id: SimulationPlanId) -> String {
     if state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .is_some_and(|plan| plan.id() == id)
     {
-        return format!("plan '{}'", state.sim_setup.active_plan_name().as_str());
+        return format!(
+            "plan '{}'",
+            state.model.sim_setup.active_plan_name().as_str()
+        );
     }
     state
+        .model
         .sim_setup
         .inactive_plans()
         .iter()

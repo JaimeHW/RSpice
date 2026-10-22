@@ -91,6 +91,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceAp
 /// The active plan's identity, for tests that seed plan-owned records.
 fn plan_id(app: &RSpiceApp) -> crate::product::SimulationPlanId {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance has a stable plan")
@@ -159,6 +160,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
         )
         .expect("valid saved output");
         app.state
+            .model
             .workspace
             .content
             .add_saved_output(id, output)
@@ -193,6 +195,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
         )
         .expect("valid design variable");
         app.state
+            .model
             .workspace
             .content
             .add_design_variable(id, variable)
@@ -303,13 +306,13 @@ fn the_solver_page_carries_the_options_that_had_no_other_editor() {
 #[test]
 fn the_model_reference_temperature_commits_without_moving_the_run_temperature() {
     let mut app = RSpiceApp::test_instance();
-    let run_temperature = app.state.sim_setup.options.temp;
+    let run_temperature = app.state.model.sim_setup.options.temp;
 
-    app.state.sim_setup.session.options_draft.tnom = "40.0".to_owned();
+    app.state.model.sim_setup.session.options_draft.tnom = "40.0".to_owned();
     super::page_solver::commit_draft(&mut app);
 
-    assert_eq!(app.state.sim_setup.options.tnom, 40.0);
-    assert_eq!(app.state.sim_setup.options.temp, run_temperature);
+    assert_eq!(app.state.model.sim_setup.options.tnom, 40.0);
+    assert_eq!(app.state.model.sim_setup.options.temp, run_temperature);
     assert!(
         !app.state.workbench.analysis_lifecycle_status.is_refusal(),
         "{}",
@@ -323,15 +326,25 @@ fn the_model_reference_temperature_commits_without_moving_the_run_temperature() 
 fn the_bypass_voltage_floor_commits_through_the_pages_own_channel() {
     let mut app = RSpiceApp::test_instance();
 
-    app.state.sim_setup.session.options_draft.bypass_enabled = true;
-    app.state.sim_setup.session.options_draft.bypass_abstol = "4e-9".to_owned();
+    app.state
+        .model
+        .sim_setup
+        .session
+        .options_draft
+        .bypass_enabled = true;
+    app.state
+        .model
+        .sim_setup
+        .session
+        .options_draft
+        .bypass_abstol = "4e-9".to_owned();
     super::page_solver::commit_draft(&mut app);
 
-    assert!(app.state.sim_setup.options.bypass_enabled);
-    assert_eq!(app.state.sim_setup.options.bypass_abstol, 4e-9);
+    assert!(app.state.model.sim_setup.options.bypass_enabled);
+    assert_eq!(app.state.model.sim_setup.options.bypass_abstol, 4e-9);
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "bypass options\nV1 1 0 1\nR1 1 0 1k\n.op\n.end\n",
-        &app.state.sim_setup.options,
+        &app.state.model.sim_setup.options,
     );
     let parsed = rspice_core::netlist::parse_netlist(&deck).expect("the committed options parse");
     assert_eq!(parsed.options.bypass_abstol, Some(4e-9));
@@ -389,7 +402,7 @@ fn the_resolved_policy_ledger_only_claims_analyses_the_plan_holds() {
 
     // With every analysis disabled there is no time-stepped solve to describe.
     let no_time_stepping = render_with(SimulationPage::Solver, 1200.0, |app| {
-        let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+        let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan_mut() else {
             return;
         };
         let ids: Vec<_> = plan.instances().iter().map(|i| i.id()).collect();
@@ -428,7 +441,7 @@ fn an_analysis_that_leaves_the_plan_policy_is_named_in_the_ledger() {
     );
 
     let overridden = render_with(SimulationPage::Solver, 1200.0, |app| {
-        let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+        let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan_mut() else {
             return;
         };
         let Some(id) = plan
@@ -522,6 +535,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("test instance has a stable plan")
@@ -538,12 +552,14 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     .expect("valid saved output");
     let output_id = output.id;
     app.state
+        .model
         .workspace
         .content
         .add_saved_output(plan_id, output)
         .expect("the plan accepts a valid output");
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -555,6 +571,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
 
     let removed = app
         .state
+        .model
         .workspace
         .content
         .remove_saved_output(plan_id, output_id)
@@ -562,6 +579,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     assert_eq!(removed.name, "vout");
     assert!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -573,6 +591,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     // Removing the same identity twice must fail rather than silently succeed.
     assert!(
         app.state
+            .model
             .workspace
             .content
             .remove_saved_output(plan_id, output_id)
@@ -580,6 +599,7 @@ fn a_saved_output_can_be_removed_and_the_removal_is_validated() {
     );
     assert!(
         app.state
+            .model
             .workspace
             .content
             .remove_saved_output(plan_id, SavedOutputId::new())
@@ -616,6 +636,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     let output_id = output.id;
     let source = output.clone();
     app.state
+        .model
         .workspace
         .content
         .add_saved_output(plan_id, output)
@@ -623,6 +644,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
 
     let copy_id = app
         .state
+        .model
         .workspace
         .content
         .duplicate_saved_output(plan_id, output_id, "vout_copy")
@@ -631,6 +653,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
 
     let payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -658,6 +681,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     // cased collision has to be refused too — and refused atomically.
     assert!(
         app.state
+            .model
             .workspace
             .content
             .duplicate_saved_output(plan_id, output_id, "VOUT")
@@ -665,6 +689,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     );
     assert!(
         app.state
+            .model
             .workspace
             .content
             .duplicate_saved_output(plan_id, SavedOutputId::new(), "orphan")
@@ -672,6 +697,7 @@ fn a_duplicated_saved_output_inherits_everything_but_its_identity_and_name() {
     );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -735,6 +761,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
         let id = plan_id(app);
         app.state.workbench.selected_specification = Some("bandwidth".to_owned());
         app.state
+            .model
             .workspace
             .content
             .replace_active_specs(id, vec![spec("bandwidth")]);
@@ -750,6 +777,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
         let id = plan_id(app);
         app.state.workbench.selected_specification = Some("gain".to_owned());
         app.state
+            .model
             .workspace
             .content
             .replace_active_specs(id, vec![spec("bandwidth")]);
@@ -778,6 +806,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("test instance has a stable plan")
@@ -795,6 +824,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     let output_id = output.id;
     let original_revision = output.revision;
     app.state
+        .model
         .workspace
         .content
         .add_saved_output(plan_id, output.clone())
@@ -806,6 +836,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     replacement.streaming = SavedOutputStreaming::LivePlotAdaptiveDisplayDecimation;
     let revision = app
         .state
+        .model
         .workspace
         .content
         .replace_saved_output(plan_id, output_id, replacement)
@@ -816,6 +847,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     );
     let stored = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -846,6 +878,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     // revision, or every repaint that re-selects the same option would.
     let unchanged = app
         .state
+        .model
         .workspace
         .content
         .replace_saved_output(plan_id, output_id, stored.clone())
@@ -867,6 +900,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     )
     .expect("valid saved output");
     app.state
+        .model
         .workspace
         .content
         .add_saved_output(plan_id, other)
@@ -875,6 +909,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     collision.name = "VIN".to_owned();
     assert!(
         app.state
+            .model
             .workspace
             .content
             .replace_saved_output(plan_id, output_id, collision)
@@ -883,6 +918,7 @@ fn a_saved_output_capture_policy_can_be_changed_after_it_is_authored() {
     );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -920,6 +956,7 @@ fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
     .expect("valid saved output");
     let output_id = output.id;
     app.state
+        .model
         .workspace
         .content
         .add_saved_output(plan_id, output.clone())
@@ -929,6 +966,7 @@ fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
     corrected.name = "v_out".to_owned();
     corrected.source_expression = "V(out)".to_owned();
     app.state
+        .model
         .workspace
         .content
         .replace_saved_output(plan_id, output_id, corrected)
@@ -936,6 +974,7 @@ fn a_saved_output_can_be_renamed_and_its_expression_rewritten() {
 
     let stored = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -963,13 +1002,14 @@ fn a_run_space_change_moves_the_plan_revision() {
     let mut app = RSpiceApp::test_instance();
     let before = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
-    let id = app.state.sim_setup.run_set.dimensions[2].id.clone();
+    let id = app.state.model.sim_setup.run_set.dimensions[2].id.clone();
     let transaction = rspice_simulation_contract::run_set::dispatch(
-        &mut app.state.sim_setup.run_set,
+        &mut app.state.model.sim_setup.run_set,
         rspice_simulation_contract::run_set::RunSetAction::SetValues {
             id,
             text: "-40\n0\n25\n85\n125".to_owned(),
@@ -978,11 +1018,13 @@ fn a_run_space_change_moves_the_plan_revision() {
     );
     assert!(transaction.was_adopted(), "{:?}", transaction.receipt);
     app.state
+        .model
         .sim_setup
         .commit_active_plan_configuration_change("Run set · set-dimension-values".to_owned())
         .expect("a run-space change commits as a configuration change");
     let after = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
@@ -1004,6 +1046,7 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
@@ -1022,6 +1065,7 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     let variable_id = variable.id;
     let original_revision = variable.revision;
     app.state
+        .model
         .workspace
         .content
         .add_design_variable(plan_id, variable)
@@ -1029,6 +1073,7 @@ fn a_design_variable_expression_can_be_edited_in_place() {
 
     let revision = app
         .state
+        .model
         .workspace
         .content
         .update_design_variable_expression(plan_id, variable_id, "2kohm")
@@ -1039,6 +1084,7 @@ fn a_design_variable_expression_can_be_edited_in_place() {
     );
     let stored = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1068,6 +1114,7 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
@@ -1085,6 +1132,7 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     .expect("valid design variable");
     let variable_id = variable.id;
     app.state
+        .model
         .workspace
         .content
         .add_design_variable(plan_id, variable.clone())
@@ -1103,6 +1151,7 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
         maximum: "2kohm".to_owned(),
     });
     app.state
+        .model
         .workspace
         .content
         .replace_design_variable(plan_id, variable_id, replacement)
@@ -1110,6 +1159,7 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
 
     let stored = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1146,12 +1196,14 @@ fn a_design_variable_contract_can_be_retyped_and_bounded_after_it_is_authored() 
     let mut unbounded = stored;
     unbounded.allowed_range = None;
     app.state
+        .model
         .workspace
         .content
         .replace_design_variable(plan_id, variable_id, unbounded)
         .expect("removing the bound is accepted");
     assert!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1201,8 +1253,8 @@ fn the_ledger_reports_the_effective_value_of_an_authored_override() {
     };
 
     let rendered = render_with(SimulationPage::Solver, 1400.0, |app| {
-        app.state.sim_setup.options.itl4 = 6;
-        let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+        app.state.model.sim_setup.options.itl4 = 6;
+        let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan_mut() else {
             return;
         };
         let Some(id) = plan
@@ -1260,6 +1312,7 @@ fn an_override_the_analysis_cannot_use_is_refused_and_leaves_the_plan_unchanged(
     let mut app = RSpiceApp::test_instance();
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test instance has a stable plan");
@@ -1375,9 +1428,10 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
 
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.sim_setup.run_set = six_point_run_set();
+        app.state.model.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
         app.state
+            .model
             .workspace
             .content
             .replace_active_specs(id, vec![spec(SpecPointScope::AllPoints)]);
@@ -1395,9 +1449,9 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     // every frame, so it belongs in the registry's own status line.
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.sim_setup.run_set = six_point_run_set();
+        app.state.model.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
-        app.state.workspace.content.replace_active_specs(
+        app.state.model.workspace.content.replace_active_specs(
             id,
             vec![spec(SpecPointScope::SelectedCorners {
                 corners: vec!["FF".to_owned()],
@@ -1417,9 +1471,9 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     // more than a limit still awaiting evidence.
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.sim_setup.run_set = six_point_run_set();
+        app.state.model.sim_setup.run_set = six_point_run_set();
         app.state.workbench.selected_specification = Some("gain".to_owned());
-        app.state.workspace.content.replace_active_specs(
+        app.state.model.workspace.content.replace_active_specs(
             id,
             vec![spec(SpecPointScope::SelectedCorners {
                 corners: vec!["SS".to_owned()],
@@ -1446,7 +1500,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
 
     let mut app = RSpiceApp::test_instance();
     let id = plan_id(&app);
-    app.state.workspace.content.replace_active_specs(
+    app.state.model.workspace.content.replace_active_specs(
         id,
         vec![SpecEntry {
             measurement: "gain".to_owned(),
@@ -1459,6 +1513,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
     );
     let revision = |app: &RSpiceApp| {
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -1469,7 +1524,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
     // Matched case-insensitively, exactly as the selection resolves it.
     super::page_specs::commit_scope(&mut app, "GAIN", SpecPointScope::Nominal);
     assert_eq!(
-        app.state.workspace.content.active_specs(id)[0].scope,
+        app.state.model.workspace.content.active_specs(id)[0].scope,
         SpecPointScope::Nominal
     );
     assert_ne!(
@@ -1491,7 +1546,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
         },
     );
     assert_eq!(
-        app.state.workspace.content.active_specs(id)[0].scope,
+        app.state.model.workspace.content.active_specs(id)[0].scope,
         SpecPointScope::Nominal,
         "a rejected scope leaves the stored requirement untouched"
     );
@@ -1513,6 +1568,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
     let id = plan_id(&app);
     let revision = |app: &RSpiceApp| {
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("stable plan")
@@ -1530,6 +1586,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
 
     let stored = &app
         .state
+        .model
         .workspace
         .content
         .plan_data(id)
@@ -1552,6 +1609,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
     );
     let stored = &app
         .state
+        .model
         .workspace
         .content
         .plan_data(id)
@@ -1574,6 +1632,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
 fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     let plan_records = |app: &RSpiceApp| {
         app.state
+            .model
             .log_buffer
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
@@ -1581,7 +1640,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     };
     let mut app = RSpiceApp::test_instance();
     let committed = plan_records(&app);
-    app.state.sim_setup.session.options_draft.reltol = "not a number".to_owned();
+    app.state.model.sim_setup.session.options_draft.reltol = "not a number".to_owned();
 
     super::page_solver::commit_draft(&mut app);
 
@@ -1597,17 +1656,17 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
         outcome.message()
     );
     assert_eq!(
-        app.state.sim_setup.options.reltol,
+        app.state.model.sim_setup.options.reltol,
         SimulationOptions::default().reltol,
         "a refused value must leave the effective options alone"
     );
 
     // Repairing the value applies it, and the channel carries the receipt.
-    app.state.sim_setup.session.options_draft.reltol = "2e-3".to_owned();
+    app.state.model.sim_setup.session.options_draft.reltol = "2e-3".to_owned();
     super::page_solver::commit_draft(&mut app);
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(!outcome.is_refusal(), "{}", outcome.message());
-    assert_eq!(app.state.sim_setup.options.reltol, 2e-3);
+    assert_eq!(app.state.model.sim_setup.options.reltol, 2e-3);
 }
 
 /// The operating point's Newton budget is not the plan's ITL1.
@@ -1624,7 +1683,7 @@ fn the_operating_points_newton_budget_is_reported_as_its_accuracy_tiers() {
     use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.options.itl1 = 50;
+    app.state.model.sim_setup.options.itl1 = 50;
     super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::OperatingPoint)
         .expect("an operating point inserts into the test instance plan");
 
@@ -1682,7 +1741,7 @@ fn the_transfer_functions_newton_budget_is_never_claimed_for_the_plan() {
     use crate::simulation::plan::{AnalysisKind, NumericOverrideOption};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.options.itl1 = 50;
+    app.state.model.sim_setup.options.itl1 = 50;
     super::lifecycle::insert_analysis_instance(&mut app, AnalysisKind::TransferFunction)
         .expect("a transfer function inserts into the test instance plan");
 
@@ -1736,6 +1795,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
     fn author_ceiling(app: &mut RSpiceApp, authored: &str) {
         let plan = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the test instance has a stable plan");
@@ -1755,7 +1815,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
     let mut app = RSpiceApp::test_instance();
     // The plan's own ceiling, so the two bounds can be compared against a
     // stated value rather than against whatever the default happens to be.
-    app.state.sim_setup.options.max_timestep = 1.0e-6;
+    app.state.model.sim_setup.options.max_timestep = 1.0e-6;
 
     author_ceiling(&mut app, "5n");
     let (preset, effective, origin) = ceiling_row(&app);
@@ -1795,6 +1855,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
     // the same owner rather than a second account of it.
     let draft = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance has a stable plan")
@@ -1808,7 +1869,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
             crate::simulation::plan::NumericOverrideOption::MaximumTimestep,
             &draft,
             crate::simulation::plan::SolverOwnership::NONE,
-            &app.state.sim_setup.options,
+            &app.state.model.sim_setup.options,
         ),
         effective,
         "the Solver ledger and the advanced-options panel state one ceiling"
@@ -1818,6 +1879,7 @@ fn a_step_ceiling_looser_than_the_plans_reports_the_bound_the_run_honours() {
 /// The active plan's identity, for seeds that hold only the session state.
 fn seeded_plan_id(state: &AppState) -> crate::product::SimulationPlanId {
     state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance has a stable plan")
@@ -1853,6 +1915,7 @@ fn seed_three_outputs(state: &mut AppState) {
         )
         .expect("valid saved output");
         state
+            .model
             .workspace
             .content
             .add_saved_output(id, output)
@@ -1904,10 +1967,10 @@ fn the_output_filter_narrows_the_rendered_rows_and_not_the_plan() {
     let mut app = RSpiceApp::test_instance();
     seed_three_outputs(&mut app.state);
     let id = plan_id(&app);
-    let before = app.state.workspace.content.plan_data(id).cloned();
+    let before = app.state.model.workspace.content.plan_data(id).cloned();
     app.state.workbench.saved_output_filter = "db20".to_owned();
     assert_eq!(
-        app.state.workspace.content.plan_data(id).cloned(),
+        app.state.model.workspace.content.plan_data(id).cloned(),
         before,
         "a filter is a view: it must not move one byte of plan-owned data"
     );
@@ -1962,7 +2025,7 @@ fn seed_two_specifications(state: &mut AppState) {
     };
 
     let id = seeded_plan_id(state);
-    state.workspace.content.replace_active_specs(
+    state.model.workspace.content.replace_active_specs(
         id,
         vec![
             SpecEntry {
@@ -1998,8 +2061,8 @@ fn seed_two_specifications(state: &mut AppState) {
                 .expect("valid test provenance"),
             ),
     );
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
 }
 
 /// The text filter matches over the cells the table paints, so a surviving row
@@ -2134,7 +2197,7 @@ fn a_dataset_backed_handoff_states_its_condition_before_a_run_exists() {
     let rendered = render_with(SimulationPage::Outputs, 1200.0, |app| {
         seed_three_outputs(&mut app.state);
         app.state.workbench.selected_saved_output = Some("vout".to_owned());
-        assert!(!app.state.simulation.retained.has_results());
+        assert!(!app.state.model.simulation.retained.has_results());
     });
 
     for action in EditorHandoff::ALL {
@@ -2188,6 +2251,7 @@ fn the_variables_page_states_the_rules_it_enforces_instead_of_offering_them() {
         )
         .expect("valid design variable");
         app.state
+            .model
             .workspace
             .content
             .add_design_variable(id, variable)
@@ -2272,6 +2336,7 @@ fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
     let id = plan_id(&app);
     assert!(
         app.state
+            .model
             .workspace
             .content
             .validate_simulation_configuration()
@@ -2279,12 +2344,14 @@ fn a_bounded_variable_is_refused_on_every_path_a_test_can_reach() {
         "the seeded workspace is valid before the tampered record is planted"
     );
     app.state
+        .model
         .workspace
         .content
         .ensure_active_plan_data(id)
         .design_variables = vec![variable];
     assert!(
         app.state
+            .model
             .workspace
             .content
             .validate_simulation_configuration()

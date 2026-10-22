@@ -249,9 +249,10 @@ fn symbol_refusal(name: &str, messages: &MessageCatalog) -> Option<String> {
 /// with its source.
 pub(crate) fn veriloga_build_settings_available(app: &RSpiceApp) -> bool {
     app.state.project_lifecycle.is_open()
-        && app.state.workspace.content.active_view_type() == ViewType::VerilogA
+        && app.state.model.workspace.content.active_view_type() == ViewType::VerilogA
         && app
             .state
+            .model
             .workspace
             .active_source_bundle(ProjectSourceLanguage::VerilogA)
             .is_some()
@@ -331,6 +332,7 @@ pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, 
     code_workspace::write_veriloga_build_profile(app, &draft.source, &profile)?;
     let after_revision = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -371,6 +373,7 @@ fn module_rebind(
     };
     let library = app
         .state
+        .model
         .library_manager
         .get_library(&reference.library)
         .ok_or_else(|| format!("Library '{}' no longer exists.", reference.library))?;
@@ -393,6 +396,7 @@ impl ModuleRebind {
     fn apply(self, app: &mut RSpiceApp) -> Option<VerilogAModuleBinding> {
         let mut metadata = app
             .state
+            .model
             .library_manager
             .get_library(&self.reference.library)
             .and_then(|library| library.get_cell(&self.reference.cell))
@@ -402,12 +406,13 @@ impl ModuleRebind {
         {
             let mut edit = app
                 .state
+                .model
                 .library_manager
                 .edit_library(&self.reference.library)?;
             edit.replace_view_metadata(&self.reference.cell, &self.reference.view, metadata);
             edit.mark_view_modified(&self.reference.cell, &self.reference.view);
         }
-        app.state.workspace.content.project_metadata_dirty = true;
+        app.state.model.workspace.content.project_metadata_dirty = true;
         if self.reference.library == VERILOGA_LIBRARY_NAME {
             app.persist_global_veriloga_library_with_feedback();
         }
@@ -458,6 +463,7 @@ impl RSpiceApp {
         // form: there is nothing left for it to save to.
         if self
             .state
+            .model
             .workspace
             .content
             .project_sources

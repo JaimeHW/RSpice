@@ -51,23 +51,24 @@ fn solver_options_iteration_edit_preserves_precise_temperatures() {
     let options = SimulationOptions {
         temp: 27.123_456_789,
         tnom: -40.123_456_789,
-        ..app.state.sim_setup.options.clone()
+        ..app.state.model.sim_setup.options.clone()
     };
     page_solver::commit_options_transaction(&mut app, &options)
         .expect("valid temperatures commit through the plan transaction");
-    app.state.sim_setup.session.options_draft.itl1 = "73".to_owned();
+    app.state.model.sim_setup.session.options_draft.itl1 = "73".to_owned();
     page_solver::commit_draft(&mut app);
 
     let mut expected = options;
     expected.itl1 = 73;
     assert_eq!(
-        serde_json::to_value(&app.state.sim_setup.options).unwrap(),
+        serde_json::to_value(&app.state.model.sim_setup.options).unwrap(),
         serde_json::to_value(&expected).unwrap(),
         "editing the iteration budget changed an unrelated authored option"
     );
     assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
     assert_eq!(
         app.state
+            .model
             .sim_setup
             .op
             .temperature
@@ -122,8 +123,8 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
     for (name, edit, values) in fields {
         for value in values {
             let mut app = RSpiceApp::test_instance();
-            let before = serde_json::to_value(&app.state.sim_setup.options).unwrap();
-            edit(&mut app.state.sim_setup.session.options_draft, value);
+            let before = serde_json::to_value(&app.state.model.sim_setup.options).unwrap();
+            edit(&mut app.state.model.sim_setup.session.options_draft, value);
             page_solver::commit_draft(&mut app);
             assert!(
                 app.state.workbench.analysis_lifecycle_status.is_refusal(),
@@ -138,7 +139,7 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
                 "the refusal must identify {name}"
             );
             assert_eq!(
-                serde_json::to_value(&app.state.sim_setup.options).unwrap(),
+                serde_json::to_value(&app.state.model.sim_setup.options).unwrap(),
                 before,
                 "invalid {name} changed effective options"
             );
@@ -149,10 +150,10 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
 #[test]
 fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
     let mut app = RSpiceApp::test_instance();
-    let before = serde_json::to_value(&app.state.sim_setup.options).unwrap();
+    let before = serde_json::to_value(&app.state.model.sim_setup.options).unwrap();
     let invalid = SimulationOptions {
         tnom: f64::NAN,
-        ..app.state.sim_setup.options.clone()
+        ..app.state.model.sim_setup.options.clone()
     };
     let error = page_solver::commit_options_transaction(&mut app, &invalid)
         .expect_err("the effective-options transaction must validate its own input");
@@ -161,7 +162,7 @@ fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
         "the refusal must identify the invalid field: {error}"
     );
     assert_eq!(
-        serde_json::to_value(&app.state.sim_setup.options).unwrap(),
+        serde_json::to_value(&app.state.model.sim_setup.options).unwrap(),
         before
     );
 }
@@ -170,27 +171,32 @@ fn solver_options_transaction_rejects_invalid_policy_before_mutation() {
 fn simulation_compatibility_commits_through_the_solver_transaction() {
     use crate::simulation::dialog::SimulationCompatibility;
     let mut app = RSpiceApp::test_instance();
-    app.state.sim_setup.session.options_draft.compatibility = SimulationCompatibility::Xyce;
+    app.state
+        .model
+        .sim_setup
+        .session
+        .options_draft
+        .compatibility = SimulationCompatibility::Xyce;
     page_solver::commit_draft(&mut app);
     assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
     assert_eq!(
-        app.state.sim_setup.options.compatibility,
+        app.state.model.sim_setup.options.compatibility,
         SimulationCompatibility::Xyce
     );
     let deck = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
         "solver choice\nV1 in 0 1\nR1 in 0 1k\n.end\n",
-        &app.state.sim_setup.options,
+        &app.state.model.sim_setup.options,
     );
     let parsed = rspice_core::Netlist::parse(&deck).unwrap();
     assert_eq!(
         rspice_simulation::netlist_preparation::build_engine_config(&parsed, None).spice_dialect,
         rspice_core::SpiceDialect::Xyce
     );
-    app.state.sim_setup.session.options_draft.itl1 = "81".into();
+    app.state.model.sim_setup.session.options_draft.itl1 = "81".into();
     page_solver::commit_draft(&mut app);
     assert_eq!(
-        app.state.sim_setup.options.compatibility,
+        app.state.model.sim_setup.options.compatibility,
         SimulationCompatibility::Xyce
     );
-    assert_eq!(app.state.sim_setup.options.itl1, 81);
+    assert_eq!(app.state.model.sim_setup.options.itl1, 81);
 }

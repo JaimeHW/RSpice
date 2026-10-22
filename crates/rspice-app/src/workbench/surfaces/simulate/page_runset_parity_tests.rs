@@ -20,16 +20,17 @@ use super::page_runset::{exact_plan_task_count, worst_point_task_cost};
 /// plan holds exactly the requested analyses.
 pub(super) fn app_with(kinds: &[AnalysisKind]) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;
     app.state.dialogs.drc_results = Some(drc);
-    app.state.dialogs.drc_checked_version = app.state.schematic.topology_version();
+    app.state.dialogs.drc_checked_version = app.state.model.schematic.topology_version();
     app.state.provision_test_project_technology_contract();
     app.state.sync_active_schematic_to_workspace();
 
     let plan = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -67,6 +68,7 @@ pub(super) fn instance_of(
     kind: AnalysisKind,
 ) -> crate::product::AnalysisInstanceId {
     state
+        .model
         .sim_setup
         .enabled_analysis_instances()
         .find(|instance| instance.kind() == kind)
@@ -79,6 +81,7 @@ pub(super) fn instance_of(
 /// is what earns the run its companion spectrum task.
 pub(super) fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
     let supply = state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -90,6 +93,7 @@ pub(super) fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
 
     let pss = instance_of(state, AnalysisKind::Pss);
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -112,7 +116,7 @@ pub(super) fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
 /// It is the plan's axis, not the corner instance's: the corner analysis reads
 /// the one declaration rather than carrying a space of its own.
 fn authorize_the_corner_supply_axis(state: &mut AppState) {
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind == RunSetDimensionKind::Supply {
             dimension.source = format!("{NETLIST_SUPPLY_SOURCE_PREFIX}VCC");
         }
@@ -122,10 +126,11 @@ fn authorize_the_corner_supply_axis(state: &mut AppState) {
 /// Enable exactly one global axis, so the run multiplies over a declared space
 /// the page and the snapshot must count identically.
 pub(super) fn enable_only_the_temperature_axis(state: &mut AppState) -> usize {
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
     }
     state
+        .model
         .sim_setup
         .run_set
         .enabled_dimension_of(RunSetDimensionKind::Temperature)
@@ -262,7 +267,7 @@ fn the_save_page_engine_ceiling_counts_the_queue_preparation_mints() {
     );
     assert_ne!(
         workload.engine_task_points(),
-        u64::try_from(app.state.sim_setup.enabled_analysis_instance_count() * points)
+        u64::try_from(app.state.model.sim_setup.enabled_analysis_instance_count() * points)
             .expect("fits"),
         "counting instances rather than tasks is exactly the disagreement this closes"
     );
@@ -281,7 +286,7 @@ fn the_page_forecast_equals_the_prepared_task_count_with_no_global_axes() {
     ]);
     drive_pss_from_the_fixture_supply(&mut app.state);
     authorize_the_corner_supply_axis(&mut app.state);
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+    for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
         dimension.enabled = false;
     }
 
@@ -319,12 +324,13 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
 
     let kinds = app
         .state
+        .model
         .sim_setup
         .enabled_analysis_instances()
         .map(AnalysisInstance::kind)
         .collect::<Vec<_>>();
     let validation = rspice_simulation_contract::run_set::validate_for_plan(
-        &app.state.sim_setup.run_set,
+        &app.state.model.sim_setup.run_set,
         &kinds,
         exact_plan_task_count(&app).expect("the page can still forecast"),
     );
@@ -353,6 +359,7 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
     // form that no longer has one.
     let offender = app
         .state
+        .model
         .sim_setup
         .enabled_analysis_instances()
         .find(|instance| instance.kind() == AnalysisKind::Temperature)
@@ -375,6 +382,7 @@ fn a_nested_point_declaration_under_global_axes_is_refused_by_both_derivations()
 /// from a space that has one.
 fn put_the_reference_on_a_declared_temperature(state: &mut AppState) {
     state
+        .model
         .sim_setup
         .set_reference_pvt(crate::product::ProcessCorner::TT, 25.0)
         .expect("25 °C is a valid reference temperature");
@@ -384,6 +392,7 @@ fn put_the_reference_on_a_declared_temperature(state: &mut AppState) {
 fn scope_to_the_nominal_point(state: &mut AppState, kind: AnalysisKind) {
     let id = instance_of(state, kind);
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -399,7 +408,7 @@ pub(super) fn scope_to_points(
     positions: &[usize],
 ) -> Vec<String> {
     let keys: Vec<String> = {
-        let points = rspice_simulation_contract::run_set::resolve(&state.sim_setup.run_set)
+        let points = rspice_simulation_contract::run_set::resolve(&state.model.sim_setup.run_set)
             .expect("the fixture space expands exactly");
         positions
             .iter()
@@ -408,6 +417,7 @@ pub(super) fn scope_to_points(
     };
     let id = instance_of(state, kind);
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -482,6 +492,7 @@ fn a_selection_that_names_no_declared_point_is_refused_rather_than_run() {
     enable_only_the_temperature_axis(&mut app.state);
     let id = instance_of(&app.state, AnalysisKind::OperatingPoint);
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -584,7 +595,7 @@ fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
         .expect("the declared space expands to at least one point");
 
     let mut rate_sum = 0usize;
-    for instance in app.state.sim_setup.enabled_analysis_instances() {
+    for instance in app.state.model.sim_setup.enabled_analysis_instances() {
         rate_sum += super::workload::instance_task_rate(&app, instance.draft())
             .expect("every enabled instance has a rate");
     }

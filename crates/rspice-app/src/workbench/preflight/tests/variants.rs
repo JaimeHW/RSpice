@@ -14,14 +14,15 @@ fn omitted_instances_do_not_reappear_as_preflight_hierarchy_blockers() {
             .all(|issue| issue.check != "Hierarchy binding")
     );
     omit_missing_instance(&mut state);
-    let authored = serde_json::to_value(&state.schematic).unwrap();
+    let authored = serde_json::to_value(&state.model.schematic).unwrap();
     assert!(
         state
+            .model
             .workspace
             .configuration_execution_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .is_ok()
     );
@@ -40,14 +41,18 @@ fn omitted_instances_do_not_reappear_as_preflight_hierarchy_blockers() {
             .iter()
             .all(|issue| !format!("{issue:?}").contains("omitted_master"))
     );
-    assert_eq!(serde_json::to_value(&state.schematic).unwrap(), authored);
+    assert_eq!(
+        serde_json::to_value(&state.model.schematic).unwrap(),
+        authored
+    );
     assert!(
         state
+            .model
             .workspace
             .resolve_hierarchy_with_active(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .bindings
             .iter()

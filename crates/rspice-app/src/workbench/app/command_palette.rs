@@ -485,6 +485,7 @@ impl PaletteEntry {
             Self::CellView(entry) => {
                 let exists = app
                     .state
+                    .model
                     .library_manager
                     .get_library(&entry.reference.library)
                     .and_then(|library| library.get_cell(&entry.reference.cell))
@@ -505,6 +506,7 @@ impl PaletteEntry {
             Self::Model(entry) => {
                 let exists = app
                     .state
+                    .model
                     .model_library_manager
                     .get_library(&entry.library)
                     .is_some_and(|library| library.get_model(&entry.model).is_some());
@@ -515,8 +517,8 @@ impl PaletteEntry {
                     ));
                 }
                 app.state.select_model_library(&entry.library);
-                app.state.model_library_manager.filter_text = entry.model.clone();
-                app.state.model_library_manager.filter_type = None;
+                app.state.model.model_library_manager.filter_text = entry.model.clone();
+                app.state.model.model_library_manager.filter_type = None;
                 app.state.workbench.selected_model = Some(entry.model);
                 app.state.workbench.models_page = crate::state::ModelsPage::Models;
                 app.state
@@ -527,6 +529,7 @@ impl PaletteEntry {
             Self::Signal(entry) => {
                 let run_index = app
                     .state
+                    .model
                     .simulation
                     .retained
                     .runs
@@ -538,14 +541,14 @@ impl PaletteEntry {
                             entry.name
                         )
                     })?;
-                let analysis_index = app.state.simulation.retained.runs[run_index]
+                let analysis_index = app.state.model.simulation.retained.runs[run_index]
                     .analyses
                     .iter()
                     .position(|analysis| analysis.id == entry.analysis_id)
                     .ok_or_else(|| {
                         format!("Analysis for signal '{}' is no longer loaded", entry.name)
                     })?;
-                let waveform_matches = app.state.simulation.retained.runs[run_index].analyses
+                let waveform_matches = app.state.model.simulation.retained.runs[run_index].analyses
                     [analysis_index]
                     .waveforms
                     .get(entry.waveform_index)
@@ -557,13 +560,14 @@ impl PaletteEntry {
                     ));
                 }
 
-                app.state.simulation.select_run(run_index);
-                app.state.simulation.select_analysis(analysis_index);
-                app.state.simulation.retained.runs[run_index].analyses[analysis_index].waveforms
-                    [entry.waveform_index]
+                app.state.model.simulation.select_run(run_index);
+                app.state.model.simulation.select_analysis(analysis_index);
+                app.state.model.simulation.retained.runs[run_index].analyses[analysis_index]
+                    .waveforms[entry.waveform_index]
                     .visible = true;
                 if let Some(waveform) = app
                     .state
+                    .model
                     .simulation
                     .view
                     .waveforms
@@ -571,13 +575,13 @@ impl PaletteEntry {
                 {
                     waveform.visible = true;
                 }
-                app.state.simulation.view.data_version =
-                    app.state.simulation.view.data_version.wrapping_add(1);
+                app.state.model.simulation.view.data_version =
+                    app.state.model.simulation.view.data_version.wrapping_add(1);
                 app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
                 app.state
                     .ui
                     .results
-                    .restore_analysis_strip(&app.state.simulation, analysis_index);
+                    .restore_analysis_strip(&app.state.model.simulation, analysis_index);
                 app.state.ui.results.session.maximized_strip = None;
                 app.state
                     .workbench
@@ -716,6 +720,7 @@ impl RSpiceApp {
 
         let mut design_libraries = self
             .state
+            .model
             .library_manager
             .libraries_by_key()
             .map(|(_, library)| library)
@@ -737,7 +742,7 @@ impl RSpiceApp {
             }
         }
 
-        for library in self.state.model_library_manager.libraries_sorted() {
+        for library in self.state.model.model_library_manager.libraries_sorted() {
             let mut models = library.models.values().collect::<Vec<_>>();
             models.sort_by(|left, right| left.name.cmp(&right.name));
             for model in models {
@@ -751,7 +756,7 @@ impl RSpiceApp {
             }
         }
 
-        if let Some(run) = self.state.simulation.active_run() {
+        if let Some(run) = self.state.model.simulation.active_run() {
             for analysis in &run.analyses {
                 for (waveform_index, waveform) in analysis.waveforms.iter().enumerate() {
                     entries.push(PaletteEntry::Signal(SignalEntry {

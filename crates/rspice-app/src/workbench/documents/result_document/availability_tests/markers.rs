@@ -5,24 +5,32 @@ use crate::io::ProjectSnapshot;
 
 fn marker_project(state: &AppState) -> ProjectSnapshot {
     ProjectSnapshot::new_with_execution_context(
-        state.workspace.clone(),
-        state.library_manager.clone(),
-        crate::io::capture_simulation_results(&state.simulation),
-        crate::io::capture_execution_context(&state.sim_setup, &state.model_library_manager)
-            .unwrap(),
+        state.model.workspace.clone(),
+        state.model.library_manager.clone(),
+        crate::io::capture_simulation_results(&state.model.simulation),
+        crate::io::capture_execution_context(
+            &state.model.sim_setup,
+            &state.model.model_library_manager,
+        )
+        .unwrap(),
     )
-    .with_result_presentation(state.ui.results.project_presentation(&state.simulation))
+    .with_result_presentation(
+        state
+            .ui
+            .results
+            .project_presentation(&state.model.simulation),
+    )
 }
 
 fn marker_state(id: u32) -> (AppState, AnalysisPresentationKey) {
     let mut state = transient_state();
-    let run = &mut state.simulation.retained.runs[0];
+    let run = &mut state.model.simulation.retained.runs[0];
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
-    assert!(state.simulation.select_run(0));
+    assert!(state.model.simulation.select_run(0));
     let analysis = active_analysis_key(&state);
     state.ui.results.session.adopt_markers(
         vec![ResultMarker {
@@ -111,7 +119,7 @@ fn marker_anchor_must_name_the_same_analysis_as_the_marker() {
     let mut project = marker_project(&state);
     project.file.result_presentation.markers[0].anchor.analysis = AnalysisPresentationKey::new(
         crate::product::DatasetId::new(),
-        &state.simulation.retained.runs[0].analyses[0],
+        &state.model.simulation.retained.runs[0].analyses[0],
     );
     assert!(
         project.file.validate().is_err(),
@@ -193,7 +201,7 @@ fn invalid_marker_placement_does_not_consume_an_identity_or_mutate_annotations()
     }
     let foreign = AnalysisPresentationKey::new(
         crate::product::DatasetId::new(),
-        &state.simulation.retained.runs[0].analyses[0],
+        &state.model.simulation.retained.runs[0].analyses[0],
     );
     assert!(
         state

@@ -22,22 +22,28 @@ pub(crate) fn resolve_retained_hardcopy_source(
     if !descriptor.supports_scope(&scope) {
         return Err(HardcopySourceError::UnsupportedScope(scope));
     }
-    if let Some(source_set) = state.workspace.content.hardcopy_source_set(source_key) {
+    if let Some(source_set) = state
+        .model
+        .workspace
+        .content
+        .hardcopy_source_set(source_key)
+    {
         return resolve_retained_hardcopy_source_set(state, source_set);
     }
 
-    let project_id = state.workspace.content.project.id();
+    let project_id = state.model.workspace.content.project.id();
     let design_key = format!(
         "project:{}:cell-view:{}",
         project_id.as_uuid(),
-        state.workspace.content.active_key()
+        state.model.workspace.content.active_key()
     );
     if matches!(
-        state.workspace.content.active_view_type(),
+        state.model.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
-        let active_key = state.workspace.content.active_key();
+        let active_key = state.model.workspace.content.active_key();
         if let Some(catalog) = state
+            .model
             .workspace
             .content
             .design_management
@@ -49,23 +55,24 @@ pub(crate) fn resolve_retained_hardcopy_source(
         {
             let base_identity = active_cell_view_identity(state)?;
             let resolver = SymbolResolver::new(
-                state.library_manager.catalog(),
-                &state.workspace.content.schematic_buffers,
+                state.model.library_manager.catalog(),
+                &state.model.workspace.content.schematic_buffers,
             );
             let identity = schematic_sheet_identity(&base_identity, sheet)?;
             return resolve_schematic_source(SchematicHardcopySource {
                 identity,
-                schematic: state.schematic.editor_ref().design,
+                schematic: state.model.schematic.editor_ref().design,
                 selection: SchematicHardcopySelection::capture(
-                    &state.schematic.session.editor.selection,
+                    &state.model.schematic.session.editor.selection,
                     &scope,
                 ),
-                expected_topology_version: state.schematic.topology_version(),
+                expected_topology_version: state.model.schematic.topology_version(),
                 symbol_resolver: Some(&resolver),
                 sheet_catalog: Some(catalog),
                 sheet_id: Some(sheet.id()),
                 project_default_drawing_sheet: Some(
                     &state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -74,6 +81,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 ),
                 project_title_block_field_values: Some(
                     &state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -86,15 +94,16 @@ pub(crate) fn resolve_retained_hardcopy_source(
     }
     if source_key == design_key {
         let identity = active_cell_view_identity(state)?;
-        return match state.workspace.content.active_view_type() {
+        return match state.model.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench => {
                 let resolver = SymbolResolver::new(
-                    state.library_manager.catalog(),
-                    &state.workspace.content.schematic_buffers,
+                    state.model.library_manager.catalog(),
+                    &state.model.workspace.content.schematic_buffers,
                 );
                 if matches!(scope, HardcopyScope::AllSheetsOrPanes) {
-                    let active_key = state.workspace.content.active_key();
+                    let active_key = state.model.workspace.content.active_key();
                     let sheet_catalog = state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -106,17 +115,19 @@ pub(crate) fn resolve_retained_hardcopy_source(
                         })?;
                     return resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
                         identity,
-                        schematic: state.schematic.editor_ref().design,
-                        expected_topology_version: state.schematic.topology_version(),
+                        schematic: state.model.schematic.editor_ref().design,
+                        expected_topology_version: state.model.schematic.topology_version(),
                         symbol_resolver: Some(&resolver),
                         sheet_catalog,
                         project_default_drawing_sheet: &state
+                            .model
                             .workspace
                             .content
                             .design_management
                             .drawing_sheet_settings()
                             .default_format,
                         project_title_block_field_values: &state
+                            .model
                             .workspace
                             .content
                             .design_management
@@ -124,8 +135,9 @@ pub(crate) fn resolve_retained_hardcopy_source(
                             .title_block_field_values,
                     });
                 }
-                let active_key = state.workspace.content.active_key();
+                let active_key = state.model.workspace.content.active_key();
                 let catalog = state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -151,12 +163,12 @@ pub(crate) fn resolve_retained_hardcopy_source(
                 };
                 resolve_schematic_source(SchematicHardcopySource {
                     identity,
-                    schematic: state.schematic.editor_ref().design,
+                    schematic: state.model.schematic.editor_ref().design,
                     selection: SchematicHardcopySelection::capture(
-                        &state.schematic.session.editor.selection,
+                        &state.model.schematic.session.editor.selection,
                         &scope,
                     ),
-                    expected_topology_version: state.schematic.topology_version(),
+                    expected_topology_version: state.model.schematic.topology_version(),
                     symbol_resolver: Some(&resolver),
                     sheet_catalog,
                     sheet_id,
@@ -166,6 +178,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     )
                     .then_some(
                         &state
+                            .model
                             .workspace
                             .content
                             .design_management
@@ -174,6 +187,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
                     ),
                     project_title_block_field_values: Some(
                         &state
+                            .model
                             .workspace
                             .content
                             .design_management
@@ -217,7 +231,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
         );
     }
 
-    if let Some(run) = state.simulation.active_run() {
+    if let Some(run) = state.model.simulation.active_run() {
         let results_key = format!(
             "project:{}:result-dataset:{}",
             project_id.as_uuid(),
@@ -238,6 +252,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
         let report_key = format!("project:{}:report:{}", project_id.as_uuid(), document_id);
         if source_key == report_key {
             let document = state
+                .model
                 .workspace
                 .content
                 .report_documents

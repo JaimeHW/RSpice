@@ -89,9 +89,9 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
     }
 
     let selection = SelectionObservation {
-        active_view_key: state.workspace.content.active_view.key(),
-        topology_version: state.schematic.topology_version(),
-        selection: state.schematic.session.editor.selection.clone(),
+        active_view_key: state.model.workspace.content.active_view.key(),
+        topology_version: state.model.schematic.topology_version(),
+        selection: state.model.schematic.session.editor.selection.clone(),
     };
     let target = if state.ui.schematic_cross_probe.selection.as_ref() == Some(&selection) {
         state.ui.schematic_cross_probe.target.clone()
@@ -103,14 +103,18 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
     let generated_input_digest =
         current_generated_artifact(state).map(|artifact| artifact.provenance().input().digest());
     let key = SynchronizationKey {
-        active_view_key: state.workspace.content.active_view.key(),
-        occurrence: state.workspace.content.occurrence_path(),
-        topology_version: state.schematic.topology_version(),
+        active_view_key: state.model.workspace.content.active_view.key(),
+        occurrence: state.model.workspace.content.occurrence_path(),
+        topology_version: state.model.schematic.topology_version(),
         target: target.clone(),
-        cross_probe_version: state.simulation.source.cross_probe.version,
-        result_data_version: state.simulation.view.data_version,
-        active_dataset: state.simulation.active_run().map(|run| run.dataset_id),
-        active_analysis_index: state.simulation.view.active_analysis_idx,
+        cross_probe_version: state.model.simulation.source.cross_probe.version,
+        result_data_version: state.model.simulation.view.data_version,
+        active_dataset: state
+            .model
+            .simulation
+            .active_run()
+            .map(|run| run.dataset_id),
+        active_analysis_index: state.model.simulation.view.active_analysis_idx,
         active_netlist_document: state.ui.netlist.active_document,
         generated_input_digest,
     };
@@ -170,8 +174,9 @@ fn clear_synchronized_source_line(state: &mut AppState) {
 }
 
 fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     if state
+        .model
         .schematic
         .session
         .editor
@@ -186,6 +191,7 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
     }
     if let Some(component_id) = selection.single_component() {
         let component = state
+            .model
             .schematic
             .document()
             .components
@@ -210,6 +216,7 @@ fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
 
 fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
     let name = state
+        .model
         .schematic
         .session
         .editor
@@ -220,6 +227,7 @@ fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<St
         .iter()
         .find(|net| net.name.eq_ignore_ascii_case(name))?;
     if state
+        .model
         .schematic
         .session
         .editor
@@ -229,7 +237,7 @@ fn semantic_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<St
     {
         return None;
     }
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let no_other_classes = selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && selection.junctions.is_empty()
@@ -275,15 +283,15 @@ fn conductor_selection(selection: &crate::state::Selection) -> bool {
 /// therefore synchronizes nothing rather than matching against editor-buffer
 /// names the generator would never produce.
 fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
-    match state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    match state.model.workspace.design_projection(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     ) {
         Ok(projection) => projection_nets(
-            state.library_manager.catalog(),
+            state.model.library_manager.catalog(),
             &projection,
-            &state.workspace.content.active_view.key(),
+            &state.model.workspace.content.active_view.key(),
         ),
         Err(error) => {
             log::warn!("Schematic cross-probe has no design projection: {error}");
@@ -293,7 +301,7 @@ fn active_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
 }
 
 fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     if !conductor_selection(selection) {
         return None;
     }
@@ -308,7 +316,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
             }
         }
     };
-    for label in &state.schematic.document().net_labels {
+    for label in &state.model.schematic.document().net_labels {
         if selection.net_labels.contains(&label.id) && !accept(&label.name) {
             return None;
         }
@@ -332,6 +340,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
     }
     for junction in &selection.junctions {
         let mut names = state
+            .model
             .schematic
             .document()
             .wires
@@ -355,22 +364,22 @@ fn compatible_result_trace(
     state: &AppState,
     target: &SchematicCrossProbeTarget,
 ) -> Option<SelectedResultTrace> {
-    if !state.simulation.source.cross_probe.is_current_for(
-        &state.workspace.content.active_view,
-        state.schematic.topology_version(),
+    if !state.model.simulation.source.cross_probe.is_current_for(
+        &state.model.workspace.content.active_view,
+        state.model.schematic.topology_version(),
     ) {
         return None;
     }
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     let receipt = run.prepared_receipt()?;
-    if receipt.project_revision() != state.workspace.content.project.revision() {
+    if receipt.project_revision() != state.model.workspace.content.project.revision() {
         return None;
     }
 
     // A trace is named by the node the engine solved, which below the design
     // root is the occurrence's flattened name rather than the local one the
     // drawing shows.
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     let signal = match target {
         SchematicCrossProbeTarget::Component { engine_element, .. } => {
             crate::state::OccurrenceProbeSpelling::for_leaf(&occurrence, 'I', engine_element)?
@@ -380,7 +389,7 @@ fn compatible_result_trace(
         SchematicCrossProbeTarget::Net { name } => {
             let index = crate::state::CrossProbeIndex::from_receipt(
                 receipt,
-                &state.simulation.source.cross_probe,
+                &state.model.simulation.source.cross_probe,
             );
             let engine = index
                 .for_occurrence(&occurrence)
@@ -390,7 +399,7 @@ fn compatible_result_trace(
         }
     };
 
-    let preferred = state.simulation.view.active_analysis_idx;
+    let preferred = state.model.simulation.view.active_analysis_idx;
     let find_in_analysis = |analysis_index: usize| {
         let analysis = run.analyses.get(analysis_index)?;
         let (waveform_index, _) = analysis
@@ -407,15 +416,20 @@ fn compatible_result_trace(
 
 fn current_generated_artifact(state: &AppState) -> Option<&GeneratedArtifact> {
     let artifact = state
+        .model
         .netlist_artifacts
         .generated_document
         .as_ref()?
         .generated_artifact()?;
     let input = artifact.provenance().input();
-    let retained = state.netlist_artifacts.generated_input_digest?;
-    if state.netlist_artifacts.current_generation_input_digest != Some(retained)
+    let retained = state.model.netlist_artifacts.generated_input_digest?;
+    if state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest
+        != Some(retained)
         || input.digest() != retained
-        || input.revision() != state.workspace.content.project.revision()
+        || input.revision() != state.model.workspace.content.project.revision()
     {
         return None;
     }
@@ -427,7 +441,7 @@ fn compatible_generated_source_line(
     target: &SchematicCrossProbeTarget,
 ) -> Option<usize> {
     let artifact = current_generated_artifact(state)?;
-    source_line_for_target(artifact, &state.workspace.content.active_view, target)
+    source_line_for_target(artifact, &state.model.workspace.content.active_view, target)
 }
 
 fn source_line_for_target(
@@ -646,12 +660,12 @@ mod tests {
 
     fn install_current_map(state: &mut AppState, net: &str) {
         let point = crate::state::Point::new(0, 0);
-        state.simulation.source.cross_probe.update(
-            state.workspace.content.active_view.clone(),
+        state.model.simulation.source.cross_probe.update(
+            state.model.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(point, net.to_owned())]),
             std::collections::HashMap::from([(net.to_owned(), vec![point])]),
             std::collections::HashMap::new(),
-            state.schematic.topology_version(),
+            state.model.schematic.topology_version(),
         );
     }
 
@@ -659,12 +673,14 @@ mod tests {
     fn wireless_semantic_net_beats_its_incident_component_projection() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(17);
         state
+            .model
             .schematic
             .session
             .editor
@@ -687,7 +703,7 @@ mod tests {
             semantic_selected_net_name(&state, &nets).as_deref(),
             Some("PORT_OUT")
         );
-        state.schematic.session.editor.net_highlight.clear();
+        state.model.schematic.session.editor.net_highlight.clear();
         assert!(semantic_selected_net_name(&state, &nets).is_none());
     }
 
@@ -695,6 +711,7 @@ mod tests {
     fn selected_net_highlights_only_a_current_exact_retained_trace() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
@@ -703,16 +720,23 @@ mod tests {
                 crate::state::Point::new(0, 0),
                 "OUT",
             ));
-        state.schematic.session.editor.selection.select_net_label(7);
-        install_current_map(&mut state, "OUT");
-        let revision = state.workspace.content.project.revision();
         state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_net_label(7);
+        install_current_map(&mut state, "OUT");
+        let revision = state.model.workspace.content.project.revision();
+        state
+            .model
             .simulation
             .retained
             .runs
             .push(prepared_run(revision, "V(OUT)"));
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 
@@ -727,7 +751,7 @@ mod tests {
             Some("V(OUT)")
         );
 
-        state.schematic.bump_topology_version();
+        state.model.schematic.bump_topology_version();
         synchronize_schematic_cross_probe(&mut state);
         assert!(state.ui.results.session.selected_trace.is_none());
     }
@@ -736,12 +760,13 @@ mod tests {
     fn a_descended_tab_selects_the_trace_named_for_its_occurrence() {
         let mut state = AppState::default();
         let child = crate::state::CellViewRef::new("user", "amp", "schematic");
-        state.workspace.descend_into(
+        state.model.workspace.descend_into(
             "X1".to_owned(),
             child.clone(),
             crate::state::ViewType::Schematic,
         );
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
@@ -750,10 +775,16 @@ mod tests {
                 crate::state::Point::new(0, 0),
                 "n1",
             ));
-        state.schematic.session.editor.selection.select_net_label(7);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_net_label(7);
         install_current_map(&mut state, "n1");
-        let revision = state.workspace.content.project.revision();
-        state.simulation.retained.runs.push(prepared_run_in(
+        let revision = state.model.workspace.content.project.revision();
+        state.model.simulation.retained.runs.push(prepared_run_in(
             revision,
             "V(x1.n1)",
             vec![
@@ -761,8 +792,8 @@ mod tests {
                     .expect("one occurrence row"),
             ],
         ));
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 
@@ -787,6 +818,7 @@ mod tests {
             .preferences
             .set_toggle(TogglePreference::CrossProbeBehavior, false);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
@@ -795,15 +827,22 @@ mod tests {
                 crate::state::Point::new(0, 0),
                 "OUT",
             ));
-        state.schematic.session.editor.selection.select_net_label(7);
-        install_current_map(&mut state, "OUT");
-        let revision = state.workspace.content.project.revision();
         state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_net_label(7);
+        install_current_map(&mut state, "OUT");
+        let revision = state.model.workspace.content.project.revision();
+        state
+            .model
             .simulation
             .retained
             .runs
             .push(prepared_run(revision, "V(OUT)"));
-        state.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_run_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 
@@ -814,11 +853,12 @@ mod tests {
     #[test]
     fn selected_component_uses_its_emitted_device_identity() {
         let mut state = AppState::default();
-        let component_id = state.schematic.add_component(
+        let component_id = state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::new(20, 20),
         );
         let emitted = state
+            .model
             .schematic
             .document()
             .components
@@ -827,20 +867,22 @@ mod tests {
             .map(crate::state::Component::written_element_name)
             .expect("component exists");
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(component_id);
         install_current_map(&mut state, "OUT");
-        let revision = state.workspace.content.project.revision();
+        let revision = state.model.workspace.content.project.revision();
         let signal = format!("I({emitted})");
         state
+            .model
             .simulation
             .retained
             .runs
             .push(prepared_run(revision, &signal));
-        state.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_run_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 
@@ -861,11 +903,12 @@ mod tests {
     #[test]
     fn a_selected_memristor_selects_the_trace_the_engine_names_it_by() {
         let mut state = AppState::default();
-        let component_id = state.schematic.add_component(
+        let component_id = state.model.schematic.add_component(
             crate::state::ComponentType::Memristor,
             crate::state::Point::new(20, 20),
         );
         let written = state
+            .model
             .schematic
             .document()
             .components
@@ -874,20 +917,22 @@ mod tests {
             .map(crate::state::Component::written_element_name)
             .expect("component exists");
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(component_id);
         install_current_map(&mut state, "OUT");
-        let revision = state.workspace.content.project.revision();
+        let revision = state.model.workspace.content.project.revision();
         let signal = format!("I(YMEMRISTOR!{written})");
         state
+            .model
             .simulation
             .retained
             .runs
             .push(prepared_run(revision, &signal));
-        state.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_run_idx = Some(0);
 
         synchronize_schematic_cross_probe(&mut state);
 

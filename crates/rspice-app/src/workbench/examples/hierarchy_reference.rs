@@ -156,14 +156,14 @@ pub(crate) fn build() -> HierarchyReference {
 /// from the active circuit. Workflow tests share this same variant boundary.
 #[cfg(test)]
 pub(crate) fn omit_missing_instance(state: &mut AppState) -> u64 {
-    let component = state.schematic.add_library_cell_component(
+    let component = state.model.schematic.add_library_cell_component(
         Point::new(1200, 600),
         LibraryCellInstance::new("missing_library", "omitted_master", "schematic"),
     );
     activate_variant_override(
         state,
         crate::state::SchematicObjectKey::new(
-            &state.workspace.content.active_view.key(),
+            &state.model.workspace.content.active_view.key(),
             component,
         )
         .unwrap(),
@@ -183,6 +183,7 @@ pub(crate) fn activate_variant_override(
     use crate::state::{AssemblyVariantDraft, VariantInheritance, VariantQualificationPlan};
 
     let variant = state
+        .model
         .workspace
         .content
         .design_management
@@ -196,6 +197,7 @@ pub(crate) fn activate_variant_override(
         })
         .unwrap();
     state
+        .model
         .workspace
         .content
         .design_management
@@ -222,6 +224,7 @@ fn provision_libraries(state: &mut AppState) {
     user_filter.add_view(View::new(SCHEMATIC_VIEW, ViewType::Schematic));
 
     let mut user = state
+        .model
         .library_manager
         .edit_library(USER_LIBRARY)
         .expect("the bootstrapped workspace owns the project library");
@@ -236,7 +239,7 @@ fn provision_libraries(state: &mut AppState) {
         .metadata
         .insert("role".to_owned(), "vendor".to_owned());
     vendor.add_cell(vendor_filter);
-    state.library_manager.add_library(vendor);
+    state.model.library_manager.add_library(vendor);
 }
 
 /// The object identities `amp`'s cross-sheet contract is anchored to, and the
@@ -257,7 +260,7 @@ struct AmpBoundary {
 /// below can happen after the drawing is complete.
 fn author_amp(state: &mut AppState, reference: &CellViewRef) -> AmpBoundary {
     state.open_workspace_view(reference.clone());
-    let schematic = &mut state.schematic;
+    let schematic = &mut state.model.schematic;
 
     place_port(
         schematic,
@@ -315,6 +318,7 @@ fn split_amp_across_sheets(
     let key = reference.key();
     let objects = live_object_ids(
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -322,7 +326,7 @@ fn split_amp_across_sheets(
             .expect("the amp schematic was saved to the workspace"),
     );
 
-    let mut candidate = (*state.workspace.content.design_management).clone();
+    let mut candidate = (*state.model.workspace.content.design_management).clone();
     let first = candidate
         .bootstrap_for_cell_view(&key, AMP_SHEET_NAMES[0], objects)
         .expect("a fresh cell view accepts its first governed sheet");
@@ -370,6 +374,7 @@ fn split_amp_across_sheets(
         })
         .expect("the reviewed boundary contract moves the output half");
     state
+        .model
         .workspace
         .content
         .replace_design_management(candidate)
@@ -382,6 +387,7 @@ fn split_amp_across_sheets(
 /// schematic synchronization would otherwise maintain.
 fn author_amp_symbol(state: &mut AppState, schematic: &CellViewRef, symbol: &CellViewRef) {
     let ports = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -413,7 +419,7 @@ fn author_filter(
     capacitance: &str,
 ) {
     state.open_workspace_view(reference.clone());
-    let schematic = &mut state.schematic;
+    let schematic = &mut state.model.schematic;
 
     place_port(
         schematic,
@@ -448,7 +454,7 @@ fn author_top(state: &mut AppState, reference: &CellViewRef) {
     let amp_ports = interface_of(state, USER_LIBRARY, AMP_CELL);
     let user_filter_ports = interface_of(state, USER_LIBRARY, FILTER_CELL);
     let vendor_filter_ports = interface_of(state, VENDOR_LIBRARY, FILTER_CELL);
-    let schematic = &mut state.schematic;
+    let schematic = &mut state.model.schematic;
 
     let source = schematic.add_component(ComponentType::VoltageSource, Point::new(100, 200));
     set_value(schematic, source, "1");
@@ -576,7 +582,7 @@ fn stub_with_label(schematic: &mut SchematicState, origin: Point, terminal: Poin
 /// The active configuration: `top`'s schematic as the executable root, `X1` as
 /// the device under test, and one path-scoped override on `X2`.
 fn install_configuration(state: &mut AppState, top: &CellViewRef) -> ConfigurationSetId {
-    let mut candidate = (*state.workspace.content.configuration_sets).clone();
+    let mut candidate = (*state.model.workspace.content.configuration_sets).clone();
     let configuration = candidate
         .create(ConfigurationSetDefinition {
             name: "Reference hierarchy".to_owned(),
@@ -601,6 +607,7 @@ fn install_configuration(state: &mut AppState, top: &CellViewRef) -> Configurati
         })
         .expect("the reference configuration is well formed");
     state
+        .model
         .workspace
         .content
         .replace_configuration_sets(candidate)
@@ -611,6 +618,7 @@ fn install_configuration(state: &mut AppState, top: &CellViewRef) -> Configurati
 /// One plan-owned saved output on the testbench's labelled output net.
 fn install_saved_output(state: &mut AppState) -> SimulationPlanId {
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the bootstrapped session owns a stable plan")
@@ -626,6 +634,7 @@ fn install_saved_output(state: &mut AppState) -> SimulationPlanId {
     )
     .expect("a raw node probe is a valid saved output");
     state
+        .model
         .workspace
         .content
         .add_saved_output(plan, output)
@@ -670,6 +679,7 @@ fn set_value(schematic: &mut SchematicState, component: u64, value: &str) {
 fn interface_of(state: &AppState, library: &str, cell: &str) -> Vec<PortSpec> {
     let reference = CellViewRef::new(library, cell, SCHEMATIC_VIEW);
     state
+        .model
         .workspace
         .content
         .schematic_buffers

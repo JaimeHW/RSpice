@@ -68,8 +68,8 @@ fn retained(name: &str, pinned: &[u8], held: &[u8]) -> ModelLibrary {
 #[test]
 fn source_verification_retains_findings_without_inventing_a_scan_date() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
-    state.model_library_manager.add_library(retained(
+    state.model.model_library_manager.clear();
+    state.model.model_library_manager.add_library(retained(
         "moved",
         b".model a nmos\n",
         b".model a pmos\n",
@@ -109,13 +109,13 @@ fn source_verification_retains_findings_without_inventing_a_scan_date() {
 #[test]
 fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
-    state.model_library_manager.add_library(retained(
+    state.model.model_library_manager.clear();
+    state.model.model_library_manager.add_library(retained(
         "clean",
         b".model a nmos\n",
         b".model a nmos\n",
     ));
-    state.model_library_manager.add_library(retained(
+    state.model.model_library_manager.add_library(retained(
         "moved",
         b".model a nmos\n",
         b".model a pmos\n",
@@ -178,8 +178,8 @@ fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
 #[test]
 fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drift_verdict() {
     let mut open = AppState::default();
-    open.model_library_manager.clear();
-    open.model_library_manager.add_library(retained(
+    open.model.model_library_manager.clear();
+    open.model.model_library_manager.add_library(retained(
         "alpha",
         b".model a nmos\n",
         b".model a pmos\n",
@@ -196,22 +196,22 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
     // revision. Asserted rather than assumed, so the collision this guards is
     // real and stays real if the default revision ever changes.
     let mut opened = AppState::default();
-    opened.model_library_manager.clear();
-    opened.model_library_manager.add_library(retained(
+    opened.model.model_library_manager.clear();
+    opened.model.model_library_manager.add_library(retained(
         "beta",
         b".model b pmos\n",
         b".model b pmos\n",
     ));
     assert_eq!(
-        open.workspace.content.project.revision().get(),
-        opened.workspace.content.project.revision().get(),
+        open.model.workspace.content.project.revision().get(),
+        opened.model.workspace.content.project.revision().get(),
         "the two projects collide on revision, which is what makes this a test"
     );
 
     // Exactly what opening a project does: both members replaced, no view
     // state touched.
-    open.workspace = opened.workspace;
-    open.model_library_manager = opened.model_library_manager;
+    open.model.workspace = opened.model.workspace;
+    open.model.model_library_manager = opened.model.model_library_manager;
 
     assert!(
         findings_for(&open, "alpha").len() == 1,
@@ -235,14 +235,14 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
 #[test]
 fn a_built_in_catalog_has_no_pin_to_fail() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("builtin");
     library.source_authority = ModelSourceAuthority::BuiltIn;
     library.source_closure = vec![ModelSourcePin {
         path: PathBuf::from("/builtin/models.lib"),
         digest: digest(b"whatever"),
     }];
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
     scan(&mut state);
     assert!(findings_for(&state, "builtin").is_empty());
 }
@@ -276,8 +276,8 @@ fn an_external_source_edited_on_disk_reports_how_much_of_it_moved() {
     }];
 
     let mut state = AppState::default();
-    state.model_library_manager.clear();
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.clear();
+    state.model.model_library_manager.add_library(library);
     scan(&mut state);
     assert!(
         findings_for(&state, "external").is_empty(),
@@ -308,13 +308,14 @@ fn an_external_source_edited_on_disk_reports_how_much_of_it_moved() {
 #[test]
 fn the_drifted_library_reaches_the_reader_as_a_banner_with_both_digests() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
-    state.model_library_manager.add_library(retained(
+    state.model.model_library_manager.clear();
+    state.model.model_library_manager.add_library(retained(
         "moved",
         b".model a nmos\n",
         b".model a pmos\n",
     ));
     state
+        .model
         .model_library_manager
         .select_library("moved")
         .expect("the fixture library is loaded");
@@ -405,8 +406,8 @@ fn a_banner_over_several_findings_says_how_many_it_does_not_name() {
         });
     }
     let mut state = AppState::default();
-    state.model_library_manager.clear();
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.clear();
+    state.model.model_library_manager.add_library(library);
     scan(&mut state);
     assert_eq!(findings_for(&state, "foundry").len(), 3);
 
@@ -427,8 +428,8 @@ fn a_banner_over_several_findings_says_how_many_it_does_not_name() {
 #[test]
 fn a_library_whose_sources_all_match_paints_no_banner() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
-    state.model_library_manager.add_library(retained(
+    state.model.model_library_manager.clear();
+    state.model.model_library_manager.add_library(retained(
         "clean",
         b".model a nmos\n",
         b".model a nmos\n",

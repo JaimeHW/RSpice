@@ -93,7 +93,7 @@ fn show_unit_pane_header(
     input: pane_header::PaneHeader,
 ) -> pane_header::UnitPaneHeaderResponse {
     // Design notation changes labels only; retained source names remain identities.
-    let notations = bus_notations(&state.workspace, &state.schematic);
+    let notations = bus_notations(&state.model.workspace, &state.model.schematic);
     let pane_key = WavePanePresentationKey {
         analysis: model.analysis_key,
         unit: pane.unit.to_owned(),
@@ -108,7 +108,7 @@ fn show_unit_pane_header(
             self.state
                 .ui
                 .results
-                .valid_selected_trace(&self.state.simulation)
+                .valid_selected_trace(&self.state.model.simulation)
                 .is_some_and(|selected| {
                     selected.analysis_key() == self.model.analysis_key
                         && selected.source_name() == trace.source_waveform_name

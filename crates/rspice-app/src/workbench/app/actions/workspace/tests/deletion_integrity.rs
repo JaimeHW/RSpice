@@ -11,7 +11,7 @@ use crate::state::ValidatedRevisionJournal;
 /// A placement that carries a copy of its master's netlist identity, which is
 /// what makes a dangling instance look resolved when it is not.
 fn amp_placement_with_netlist_identity(state: &mut AppState) {
-    let binding = state.schematic.document_mut_for_test().components[0]
+    let binding = state.model.schematic.document_mut_for_test().components[0]
         .library_cell
         .as_mut()
         .expect("the fixture places amp");
@@ -23,11 +23,13 @@ fn amp_placement_with_netlist_identity(state: &mut AppState) {
 fn copy_cell_resets_the_validated_revision_journal() {
     let mut state = state_with_work_cell("amp");
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(10, 10));
-    let project_id = state.workspace.content.project.id().to_string();
-    let accepted = state.schematic.clone();
+    let project_id = state.model.workspace.content.project.id().to_string();
+    let accepted = state.model.schematic.clone();
     state
+        .model
         .schematic
         .seed_accepted_revision_baseline(&accepted, &project_id, 1, "work/amp/schematic")
         .expect("the source cell has been reviewed once");
@@ -37,6 +39,7 @@ fn copy_cell_resets_the_validated_revision_journal() {
         .expect("a reviewed cell can be copied");
 
     let source = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -48,6 +51,7 @@ fn copy_cell_resets_the_validated_revision_journal() {
         "copying must not disturb the original's review history"
     );
     let copy = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -68,7 +72,7 @@ fn copy_cell_resets_the_validated_revision_journal() {
 #[test]
 fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
     let mut state = state_with_work_cell("amp");
-    if let Some(library) = state.library_manager.get_library_mut("work") {
+    if let Some(library) = state.model.library_manager.get_library_mut("work") {
         let cell = library.get_cell_mut("amp").expect("fixture amp cell");
         cell.add_view(View::new("layout", ViewType::Layout));
         cell.add_view(View::new("layout_alt", ViewType::Layout));
@@ -85,6 +89,7 @@ fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
     }
 
     state
+        .model
         .library_manager
         .get_library_mut("work")
         .expect("work library")
@@ -94,6 +99,7 @@ fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
     for owner in &owned {
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .physical_layout_document(owner)
@@ -110,30 +116,32 @@ fn deleting_a_cell_removes_the_physical_layout_of_every_view_it_owned() {
 fn undo_revalidates_instance_bindings() {
     let mut state = state_with_populated_user_library();
     amp_placement_with_netlist_identity(&mut state);
-    let placement = state.schematic.document().components[0].id;
+    let placement = state.model.schematic.document().components[0].id;
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_component(placement);
     assert!(
-        state.schematic.delete_selection(),
+        state.model.schematic.delete_selection(),
         "the reader takes the placement out of the drawing"
     );
 
     // The master is deleted while its only placement is out of the drawing,
     // so nothing warns the reader at deletion time.
     state
+        .model
         .library_manager
         .get_library_mut("user")
         .expect("user library")
         .remove_cell("amp");
 
-    assert!(state.schematic.undo(), "undo puts the placement back");
+    assert!(state.model.schematic.undo(), "undo puts the placement back");
     state.sync_active_schematic_to_workspace();
 
-    let binding = state.schematic.document().components[0]
+    let binding = state.model.schematic.document().components[0]
         .library_cell
         .as_ref()
         .expect("the restored placement keeps its binding");
@@ -145,7 +153,10 @@ fn undo_revalidates_instance_bindings() {
         binding.module_name.is_none() && binding.source_path.is_none(),
         "an undo may not resurrect a netlist identity whose master is gone"
     );
-    let resolution = state.workspace.resolve_hierarchy(&state.library_manager);
+    let resolution = state
+        .model
+        .workspace
+        .resolve_hierarchy(&state.model.library_manager);
     let placement = resolution
         .bindings
         .iter()

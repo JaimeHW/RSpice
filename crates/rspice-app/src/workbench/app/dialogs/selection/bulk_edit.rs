@@ -112,8 +112,14 @@ pub(crate) struct SelectionBulkEditAuthority {
 
 impl SelectionBulkEditAuthority {
     fn capture(state: &AppState) -> Self {
-        let active_key = state.workspace.content.active_schematic_reference().key();
+        let active_key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         let mut project_buffers = state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -130,7 +136,7 @@ impl SelectionBulkEditAuthority {
         Self {
             active: SchematicEditAuthority::capture(state),
             active_key,
-            design_management_revision: state.workspace.content.design_management.revision(),
+            design_management_revision: state.model.workspace.content.design_management.revision(),
             project_buffers,
         }
     }
@@ -148,30 +154,39 @@ impl SelectionBulkEditAuthority {
             || !self
                 .active
                 .snapshot
-                .is_equal_document(state.schematic.document())
+                .is_equal_document(state.model.schematic.document())
         {
             return Some(reopen("The active schematic changed"));
         }
-        if self.active.view_path != state.workspace.content.active_view.display_path()
-            || self.active_key != state.workspace.content.active_schematic_reference().key()
+        if self.active.view_path != state.model.workspace.content.active_view.display_path()
+            || self.active_key
+                != state
+                    .model
+                    .workspace
+                    .content
+                    .active_schematic_reference()
+                    .key()
         {
             return Some(reopen("The active cell/view changed"));
         }
         if !self.active.matches_source(&current) {
             return Some(reopen("The schematic source or editing scope changed"));
         }
-        if self.active.grid_size != state.schematic.document().grid_size
-            || self.active.document_policy != state.schematic.document().document_policy
+        if self.active.grid_size != state.model.schematic.document().grid_size
+            || self.active.document_policy != state.model.schematic.document().document_policy
         {
             return Some(reopen("The schematic grid or editing policy changed"));
         }
-        if self.active.selection != state.schematic.session.editor.selection {
+        if self.active.selection != state.model.schematic.session.editor.selection {
             return Some(reopen("The selected-object set changed"));
         }
-        if self.design_management_revision != state.workspace.content.design_management.revision() {
+        if self.design_management_revision
+            != state.model.workspace.content.design_management.revision()
+        {
             return Some(reopen("The sheet ownership catalog changed"));
         }
         let live_external = state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -182,7 +197,7 @@ impl SelectionBulkEditAuthority {
             return Some(reopen("The project schematic set changed"));
         }
         for (key, expected) in &self.project_buffers {
-            let Some(live) = state.workspace.content.schematic_buffers.get(key) else {
+            let Some(live) = state.model.workspace.content.schematic_buffers.get(key) else {
                 return Some(reopen("A project schematic was closed"));
             };
             if !expected.is_equal_document(live.document()) {
@@ -297,7 +312,7 @@ impl RSpiceApp {
         let property = self.state.dialogs.selection_bulk_edit.property;
         let rows = build_rows(&self.state, &filter, property);
         let impact = preview_impact(
-            &self.state.schematic,
+            &self.state.model.schematic,
             &rows,
             &self.state.dialogs.selection_bulk_edit.selected,
             property,
@@ -373,7 +388,7 @@ impl RSpiceApp {
             .iter()
             .map(|entry| entry.name.clone())
             .collect::<Vec<_>>();
-        let analyses = self.state.sim_setup.enabled_analysis_instance_count();
+        let analyses = self.state.model.sim_setup.enabled_analysis_instance_count();
         let hierarchy_path = active_hierarchy_path(&self.state);
         let mut action = SelectionBulkBodyAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
@@ -509,7 +524,7 @@ impl RSpiceApp {
             })
             .collect::<BTreeSet<_>>();
         let receipt = apply_bulk_edit(
-            &mut self.state.schematic,
+            &mut self.state.model.schematic,
             &selected_active_ids,
             dialog.property,
             &dialog.new_value,
@@ -520,7 +535,7 @@ impl RSpiceApp {
             return Err("The selected objects already satisfy the requested value.".to_owned());
         }
         self.state.sync_active_schematic_to_workspace();
-        let analyses = self.state.sim_setup.enabled_analysis_instance_count();
+        let analyses = self.state.model.sim_setup.enabled_analysis_instance_count();
         self.state.prompt(format!(
             "Bulk edit changed {} object{} as one undo step; {} enabled analys{} affected.",
             receipt.changed,
@@ -1210,6 +1225,7 @@ fn bound_library_sections(state: &AppState, rows: &[SelectionBulkRow]) -> Vec<St
         .map(|row| row.key.object_id)
         .collect::<BTreeSet<_>>();
     let libraries = state
+        .model
         .schematic
         .document()
         .components
@@ -1220,7 +1236,7 @@ fn bound_library_sections(state: &AppState, rows: &[SelectionBulkRow]) -> Vec<St
         .collect::<BTreeSet<_>>();
     let mut sections = Vec::new();
     for name in libraries {
-        let Some(library) = state.model_library_manager.get_library(name) else {
+        let Some(library) = state.model.model_library_manager.get_library(name) else {
             continue;
         };
         sections.extend(
@@ -1248,7 +1264,7 @@ fn bound_library_sections(state: &AppState, rows: &[SelectionBulkRow]) -> Vec<St
 /// the display path of every row it owns. The design root is implicit, so the
 /// top sheet is `/` rather than the name of the cell that happens to be top.
 fn active_hierarchy_path(state: &AppState) -> String {
-    state.workspace.content.occurrence_path().to_string()
+    state.model.workspace.content.occurrence_path().to_string()
 }
 
 /// The library cell a buffer outside the active occurrence belongs to.
@@ -1269,24 +1285,30 @@ fn build_rows(
     filter: &SelectionBulkFilter,
     property: SelectionBulkProperty,
 ) -> Vec<SelectionBulkRow> {
-    let active_key = state.workspace.content.active_schematic_reference().key();
+    let active_key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let mut buffers = Vec::new();
     buffers.push((
         active_key.clone(),
         active_hierarchy_path(state),
-        state.schematic.document(),
+        state.model.schematic.document(),
         true,
     ));
     match filter.hierarchy_scope {
         SelectionBulkHierarchyScope::ActiveHierarchyPath => {
             let hierarchy_keys = state
+                .model
                 .workspace
                 .content
                 .hierarchy_stack
                 .iter()
                 .map(|reference| reference.key())
                 .collect::<HashSet<_>>();
-            for (key, schematic) in &state.workspace.content.schematic_buffers {
+            for (key, schematic) in &state.model.workspace.content.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) && hierarchy_keys.contains(key) {
                     buffers.push((
                         key.clone(),
@@ -1299,7 +1321,7 @@ fn build_rows(
         }
         SelectionBulkHierarchyScope::CurrentSheet => {}
         SelectionBulkHierarchyScope::CompleteProject => {
-            for (key, schematic) in &state.workspace.content.schematic_buffers {
+            for (key, schematic) in &state.model.workspace.content.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) {
                     buffers.push((
                         key.clone(),
@@ -1313,6 +1335,7 @@ fn build_rows(
     }
     buffers.sort_by(|(left, _, _, _), (right, _, _, _)| left.cmp(right));
     let active_sheet = state
+        .model
         .workspace
         .content
         .design_management
@@ -1333,7 +1356,7 @@ fn build_rows(
             } else {
                 None
             },
-            &state.workspace.content.design_management,
+            &state.model.workspace.content.design_management,
         );
     }
     rows.retain(|row| row_matches_query(row, filter));
@@ -1765,14 +1788,14 @@ mod tests {
         let mut state = AppState::default();
         assert_eq!(active_hierarchy_path(&state), "/");
 
-        state.workspace.descend_into(
+        state.model.workspace.descend_into(
             "XAFE".to_owned(),
             crate::state::CellViewRef::new("user", "afe_core", "schematic"),
             crate::state::ViewType::Schematic,
         );
         assert_eq!(active_hierarchy_path(&state), "/XAFE");
 
-        state.workspace.descend_into(
+        state.model.workspace.descend_into(
             "XBIAS".to_owned(),
             crate::state::CellViewRef::new("user", "bias", "schematic"),
             crate::state::ViewType::Schematic,
@@ -1799,7 +1822,7 @@ mod tests {
         let mut state = AppState::default();
         let mut instance = component(1, "U1", Some("tt"));
         instance.params = "gain=100".to_owned();
-        state.schematic.document_mut_for_test().components = vec![instance];
+        state.model.schematic.document_mut_for_test().components = vec![instance];
 
         let mut filter = SelectionBulkFilter {
             query: "gain=100".to_owned(),
@@ -1820,7 +1843,7 @@ mod tests {
     #[test]
     fn exact_mockup_default_section_filter_matches_an_inherited_binding() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = vec![component(1, "U1", None)];
+        state.model.schematic.document_mut_for_test().components = vec![component(1, "U1", None)];
         let filter = SelectionBulkFilter {
             model_cell: "OPA189*".to_owned(),
             current_property: "section = default".to_owned(),
@@ -1838,7 +1861,7 @@ mod tests {
     #[test]
     fn bulk_edit_opens_with_no_value_and_apply_waits_for_one() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
+        state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
 
         open_selection_bulk_edit_dialog(&mut state);
 
@@ -1853,7 +1876,7 @@ mod tests {
     #[test]
     fn bulk_edit_offers_the_bound_librarys_sections() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
+        state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
 
         open_selection_bulk_edit_dialog(&mut state);
         assert!(state.dialogs.selection_bulk_edit.bound_sections.is_empty());
@@ -1873,7 +1896,7 @@ mod tests {
                 ),
             );
         }
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
 
         open_selection_bulk_edit_dialog(&mut state);
         let dialog = &state.dialogs.selection_bulk_edit;
@@ -2064,7 +2087,7 @@ mod tests {
     #[test]
     fn impact_preview_is_exact_without_cloning_an_undo_transaction() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = vec![
+        state.model.schematic.document_mut_for_test().components = vec![
             component(1, "X1", Some("tt")),
             component(2, "X2", Some("tt")),
         ];
@@ -2076,7 +2099,7 @@ mod tests {
         let selected = rows.iter().map(|row| row.key.clone()).collect();
 
         let impact = preview_impact(
-            &state.schematic,
+            &state.model.schematic,
             &rows,
             &selected,
             SelectionBulkProperty::ModelSection,
@@ -2087,9 +2110,10 @@ mod tests {
         assert_eq!(impact.changed, 2);
         assert_eq!(impact.locked_or_excluded, 0);
         assert!(impact.error.is_none());
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
         assert!(
             state
+                .model
                 .schematic
                 .document()
                 .components
@@ -2107,18 +2131,33 @@ mod tests {
     #[test]
     fn authority_rejects_active_selection_and_external_buffer_drift() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = vec![component(1, "X1", Some("tt"))];
-        state.schematic.session.editor.selection.select_component(1);
+        state.model.schematic.document_mut_for_test().components =
+            vec![component(1, "X1", Some("tt"))];
         state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
+        state
+            .model
             .workspace
             .insert_schematic_editor("user/child/schematic".to_owned(), SchematicState::default());
         let authority = SelectionBulkEditAuthority::capture(&state);
         assert!(authority.stale_reason(&state).is_none());
 
-        state.schematic.session.editor.selection.clear();
+        state.model.schematic.session.editor.selection.clear();
         assert!(authority.stale_reason(&state).is_some());
-        state.schematic.session.editor.selection.select_component(1);
         state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
+        state
+            .model
             .workspace
             .schematic_editor_mut("user/child/schematic")
             .expect("external buffer")
@@ -2132,10 +2171,12 @@ mod tests {
     #[test]
     fn complete_project_rows_are_visible_but_other_owners_are_locked() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = vec![component(1, "X1", Some("tt"))];
+        state.model.schematic.document_mut_for_test().components =
+            vec![component(1, "X1", Some("tt"))];
         let mut external = SchematicState::default();
         external.document_mut_for_test().components = vec![component(2, "X2", Some("ff"))];
         state
+            .model
             .workspace
             .insert_schematic_editor("user/child/schematic".to_owned(), external);
         let filter = SelectionBulkFilter {
@@ -2155,7 +2196,7 @@ mod tests {
     #[test]
     fn port_rows_only_accept_the_display_property() {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = vec![
+        state.model.schematic.document_mut_for_test().components = vec![
             Component::new(1, ComponentType::Port, Point::new(0, 0)).with_name_value("VIN", ""),
         ];
         let filter = SelectionBulkFilter {
@@ -2175,7 +2216,7 @@ mod tests {
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.schematic.document_mut_for_test().components =
+        app.state.model.schematic.document_mut_for_test().components =
             vec![component(1, "X1", Some("tt"))];
         open_selection_bulk_edit_dialog(&mut app.state);
 
@@ -2222,7 +2263,7 @@ mod tests {
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.schematic.document_mut_for_test().components =
+        app.state.model.schematic.document_mut_for_test().components =
             vec![component(1, "X1", Some("tt"))];
         open_selection_bulk_edit_dialog(&mut app.state);
         assert!(

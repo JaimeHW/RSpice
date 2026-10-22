@@ -146,7 +146,7 @@ impl RSpiceApp {
             ctx,
             candidate,
             BrowserPdkPublicationIntent::Settings(Box::new(BrowserPdkSettingsIntent {
-                previous: self.state.pdk_config.clone(),
+                previous: self.state.model.pdk_config.clone(),
                 model_libraries,
                 loaded,
             })),
@@ -264,12 +264,14 @@ impl RSpiceApp {
                     .config
                     .technology_registry
                     .revalidate_installed(&trust_store);
-                let mut model_library = self.state.model_library_manager.clone();
-                let model_load = model_library
-                    .replace_from_pdk_config(Some(&self.state.pdk_config), &mut restored.config);
-                self.state.pdk_config = restored.config;
+                let mut model_library = self.state.model.model_library_manager.clone();
+                let model_load = model_library.replace_from_pdk_config(
+                    Some(&self.state.model.pdk_config),
+                    &mut restored.config,
+                );
+                self.state.model.pdk_config = restored.config;
                 if model_load.is_ok() {
-                    self.state.model_library_manager = model_library;
+                    self.state.model.model_library_manager = model_library;
                 }
                 self.invalidate_simulation_preflight();
                 BROWSER_PDK_OWNER.with(|owner| {
@@ -357,7 +359,7 @@ impl RSpiceApp {
                         after_commit,
                     } => {
                         accept_browser_pdk_receipt(receipt);
-                        self.state.pdk_config = candidate;
+                        self.state.model.pdk_config = candidate;
                         emit_browser_pdk_storage_warning(self, ctx, storage_status);
                         if let Some(after_commit) = after_commit {
                             after_commit(ctx);
@@ -379,7 +381,7 @@ impl RSpiceApp {
                             )
                             .map(|_| ())
                         } else {
-                            self.state.model_library_manager = model_libraries;
+                            self.state.model.model_library_manager = model_libraries;
                             Ok(())
                         };
                         if let Err(error) = publication {
@@ -406,7 +408,7 @@ impl RSpiceApp {
                             return;
                         }
                         accept_browser_pdk_receipt(receipt);
-                        self.state.pdk_config = candidate;
+                        self.state.model.pdk_config = candidate;
                         self.invalidate_simulation_preflight();
                         emit_browser_pdk_storage_warning(self, ctx, storage_status);
                         self.state.record(

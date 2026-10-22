@@ -30,7 +30,7 @@ use crate::workbench::{MessageCatalog, MessageId};
 /// The rail of a Verilog-A cell view's bundle, with its file operations.
 pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
     let language = ProjectSourceLanguage::VerilogA;
-    let reference = app.state.workspace.content.active_view.clone();
+    let reference = app.state.model.workspace.content.active_view.clone();
     let actions = active_bundle(&app.state, language).map(|bundle| FileActions {
         bundle_id: bundle.id(),
         root: bundle.root().logical_path().to_owned(),
@@ -285,16 +285,16 @@ fn active_bundle(
     state: &AppState,
     language: ProjectSourceLanguage,
 ) -> Option<&crate::state::ProjectSourceBundle> {
-    state.workspace.active_source_bundle(language)
+    state.model.workspace.active_source_bundle(language)
 }
 
 fn active_path(state: &AppState, language: ProjectSourceLanguage) -> Option<String> {
-    code_workspace::active_bundle_path(&state.workspace, &state.ui.code_workspace, language)
+    code_workspace::active_bundle_path(&state.model.workspace, &state.ui.code_workspace, language)
 }
 
 fn select(state: &mut AppState, language: ProjectSourceLanguage, logical_path: &str) {
     code_workspace::select_source_document(
-        &state.workspace,
+        &state.model.workspace,
         &mut state.ui.code_workspace,
         language,
         logical_path,
@@ -318,11 +318,11 @@ enum RailRequest {
 fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
     let messages = app.state.ui.messages();
     let language = rail.language;
-    let bundle = app.state.workspace.active_source_bundle(language);
+    let bundle = app.state.model.workspace.active_source_bundle(language);
     let bundle_id = bundle.map(crate::state::ProjectSourceBundle::id);
     let navigation = match (rail.active.as_deref(), bundle) {
         (Some(path), Some(bundle)) => document_navigation(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             bundle,
             &mut app.state.ui.code_workspace.source_index_cache,
             path,
@@ -682,13 +682,14 @@ fn used_in_section(
 fn open_instance(state: &mut AppState, usage: &CellInstanceUse) {
     state.open_workspace_view(usage.schematic.clone());
     let position = state
+        .model
         .schematic
         .document()
         .components
         .iter()
         .find(|component| component.id == usage.component_id)
         .map(|component| component.pos);
-    let editor = &mut state.schematic.session.editor;
+    let editor = &mut state.model.schematic.session.editor;
     editor.selection.select_only_component(usage.component_id);
     editor.net_highlight.clear();
     editor.center_request = position;

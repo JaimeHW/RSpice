@@ -99,7 +99,7 @@ pub(crate) fn open_find_replace(state: &mut AppState) {
 pub(crate) fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatches>, String> {
     let form = &state.dialogs.find_replace;
     let query = FindQuery::new(&form.find, &form.replace, form.options, form.targets)?;
-    let active = state.workspace.content.active_schematic_reference();
+    let active = state.model.workspace.content.active_schematic_reference();
     let scope = form.scope();
     let mut found = Vec::new();
     for reference in documents_in_scope(state, scope) {
@@ -125,7 +125,7 @@ pub(crate) fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatch
 /// The cell views `scope` reaches: the one on the canvas, then, for the
 /// hierarchy, every editable schematic placed below it, each once.
 fn documents_in_scope(state: &AppState, scope: FindScope) -> Vec<CellViewRef> {
-    let active = state.workspace.content.active_schematic_reference();
+    let active = state.model.workspace.content.active_schematic_reference();
     let mut order = vec![active.clone()];
     if scope != FindScope::Hierarchy {
         return order;
@@ -144,6 +144,7 @@ fn documents_in_scope(state: &AppState, scope: FindScope) -> Vec<CellViewRef> {
         {
             let child = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
             if state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -159,10 +160,11 @@ fn documents_in_scope(state: &AppState, scope: FindScope) -> Vec<CellViewRef> {
 }
 
 fn document_for<'a>(state: &'a AppState, reference: &CellViewRef) -> Option<&'a SchematicDocument> {
-    if *reference == state.workspace.content.active_schematic_reference() {
-        Some(state.schematic.document())
+    if *reference == state.model.workspace.content.active_schematic_reference() {
+        Some(state.model.schematic.document())
     } else {
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -174,6 +176,7 @@ fn document_for<'a>(state: &'a AppState, reference: &CellViewRef) -> Option<&'a 
 fn read_only(state: &AppState, reference: &CellViewRef) -> bool {
     state.workbench.safe_mode.project_read_only()
         || state
+            .model
             .library_manager
             .get_library(&reference.library)
             .is_some_and(|library| library.read_only)
@@ -206,7 +209,12 @@ pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String
             });
         }
     }
-    let active = state.workspace.content.active_schematic_reference().key();
+    let active = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let mut changed = 0;
     for document in &found {
         let renames = document
@@ -218,8 +226,8 @@ pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String
             // renames it, references and all.
             state.replace_text_carrying_references(&document.reference, &document.matches)?
         } else if document.key == active {
-            state.schematic.replace_text(&document.matches)?
-        } else if let Some(mut buffer) = state.workspace.schematic_editor_mut(&document.key) {
+            state.model.schematic.replace_text(&document.matches)?
+        } else if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&document.key) {
             buffer.editor.replace_text(&document.matches)?
         } else {
             0
@@ -252,7 +260,13 @@ impl RSpiceApp {
             Ok(None) => Ok(None),
             Err(reason) => Err(reason.as_str()),
         };
-        let view_path = self.state.workspace.content.active_view.display_path();
+        let view_path = self
+            .state
+            .model
+            .workspace
+            .content
+            .active_view
+            .display_path();
         let form = &mut self.state.dialogs.find_replace;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .context(Some(view_path.as_str()))
@@ -342,7 +356,7 @@ mod tests {
             ] {
                 for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
                     let mut app = RSpiceApp::test_instance();
-                    let document = app.state.schematic.document_mut_for_test();
+                    let document = app.state.model.schematic.document_mut_for_test();
                     document.components = vec![part(1, "R1", "10k"), part(2, "R2", "10k")];
                     open_find_replace(&mut app.state);
                     app.state.dialogs.find_replace.options.regex = regex;
@@ -372,6 +386,7 @@ mod tests {
 
     fn values(state: &AppState) -> Vec<String> {
         state
+            .model
             .schematic
             .document()
             .components
@@ -385,10 +400,10 @@ mod tests {
     #[test]
     fn replace_all_in_the_cell_view_is_one_undo_step() {
         let mut state = AppState::default();
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components = vec![part(1, "R1", "10k"), part(2, "R2", "10k")];
         document.wires.clear();
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         ask(&mut state, "10k", "22k", FindScope::CellView);
 
         assert_eq!(
@@ -401,9 +416,9 @@ mod tests {
         );
         assert_eq!(replace_all(&mut state), Ok((2, 1)));
         assert_eq!(values(&state), ["22k", "22k"]);
-        assert!(state.schematic.undo());
+        assert!(state.model.schematic.undo());
         assert_eq!(values(&state), ["10k", "10k"]);
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// An instance renamed by Replace all ends as the Rename form leaves
@@ -413,7 +428,7 @@ mod tests {
     fn replace_all_renames_an_instance_as_the_rename_form_does() {
         fn fixture() -> (RSpiceApp, crate::product::SimulationPlanId) {
             let mut app = RSpiceApp::test_instance();
-            let document = app.state.schematic.document_mut_for_test();
+            let document = app.state.model.schematic.document_mut_for_test();
             document.components = vec![part(1, "R1", "1k"), part(2, "R2", "1k")];
             document.wires.clear();
             document.probes = vec![
@@ -425,10 +440,14 @@ mod tests {
                 )
                 .expect("a current probe"),
             ];
-            app.state.schematic.init_undo_history();
+            app.state.model.schematic.init_undo_history();
             let plan_id = crate::product::SimulationPlanId::new();
-            app.state.workspace.content.simulation_plan_payloads.push(
-                crate::state::SimulationPlanPayloadRecord {
+            app.state
+                .model
+                .workspace
+                .content
+                .simulation_plan_payloads
+                .push(crate::state::SimulationPlanPayloadRecord {
                     plan_id,
                     payload: crate::state::SimulationPlanPayload {
                         saved_outputs: vec![
@@ -445,15 +464,14 @@ mod tests {
                         ],
                         ..Default::default()
                     },
-                },
-            );
+                });
             (app, plan_id)
         }
         fn outcome(
             app: &RSpiceApp,
             plan_id: crate::product::SimulationPlanId,
         ) -> (Vec<String>, Vec<Option<String>>, String) {
-            let document = app.state.schematic.document();
+            let document = app.state.model.schematic.document();
             (
                 document
                     .components
@@ -466,6 +484,7 @@ mod tests {
                     .map(|probe| probe.source_expression.clone())
                     .collect(),
                 app.state
+                    .model
                     .workspace
                     .content
                     .plan_data(plan_id)
@@ -477,7 +496,7 @@ mod tests {
         }
 
         let (mut by_form, form_plan) = fixture();
-        let expected = by_form.state.schematic.document().components[0].clone();
+        let expected = by_form.state.model.schematic.document().components[0].clone();
         assert_eq!(
             by_form
                 .state
@@ -511,10 +530,10 @@ mod tests {
     #[test]
     fn the_sheet_scope_leaves_the_other_sheets_alone() {
         let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components = vec![part(1, "R1", "1k"), part(2, "R2", "1k")];
         document.wires.clear();
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         ask(&mut state, "1k", "2k", FindScope::Sheet);
         assert_eq!(replace_all(&mut state), Ok((1, 1)));
         assert_eq!(values(&state), ["2k", "1k"]);
@@ -527,9 +546,9 @@ mod tests {
     #[test]
     fn a_clash_anywhere_refuses_the_whole_replacement() {
         let mut state = AppState::default();
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components = vec![part(1, "R1", "1k"), part(2, "R2", "1k")];
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         let options = &mut state.dialogs.find_replace.options;
         options.regex = true;
         ask(&mut state, r"R\d", "RA", FindScope::CellView);
@@ -537,8 +556,8 @@ mod tests {
             replace_all(&mut state),
             Err("Two instances would both be named RA.".to_owned())
         );
-        assert_eq!(state.schematic.document().components[0].name, "R1");
-        assert!(!state.schematic.can_undo());
+        assert_eq!(state.model.schematic.document().components[0].name, "R1");
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// Hierarchy below reaches the master an instance places, and the
@@ -546,21 +565,29 @@ mod tests {
     #[test]
     fn the_hierarchy_scope_reaches_the_cell_views_placed_below() {
         let mut state = AppState::default();
-        let top = state.workspace.content.active_schematic_reference();
+        let top = state.model.workspace.content.active_schematic_reference();
         let child = CellViewRef::new(&top.library, "amp", "schematic");
         let mut master = SchematicState::default();
         master.document_mut_for_test().net_labels = vec![NetLabel::new(5, Point::origin(), "vin")];
         master.init_undo_history();
-        state.workspace.insert_schematic_editor(child.key(), master);
-        state.schematic.document_mut_for_test().components.clear();
-        state.schematic.document_mut_for_test().wires.clear();
-        state.schematic.add_library_cell_component(
+        state
+            .model
+            .workspace
+            .insert_schematic_editor(child.key(), master);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
+        state.model.schematic.document_mut_for_test().wires.clear();
+        state.model.schematic.add_library_cell_component(
             Point::origin(),
             LibraryCellInstance::new(&top.library, "amp", "schematic"),
         );
-        state.schematic.document_mut_for_test().net_labels =
+        state.model.schematic.document_mut_for_test().net_labels =
             vec![NetLabel::new(9, Point::new(0, 50), "vin")];
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
 
         ask(&mut state, "vin", "vin_a", FindScope::CellView);
         assert_eq!(find_replace_matches(&state).expect("query").len(), 1);
@@ -576,6 +603,7 @@ mod tests {
         assert_eq!(replace_all(&mut state), Ok((2, 2)));
 
         let mut stored = state
+            .model
             .workspace
             .schematic_editor_mut(&child.key())
             .expect("child");
@@ -583,6 +611,6 @@ mod tests {
         assert!(stored.editor.undo(), "the master's change is its own step");
         assert_eq!(stored.editor.document().net_labels[0].name, "vin");
         drop(stored);
-        assert_eq!(state.schematic.document().net_labels[0].name, "vin_a");
+        assert_eq!(state.model.schematic.document().net_labels[0].name, "vin_a");
     }
 }

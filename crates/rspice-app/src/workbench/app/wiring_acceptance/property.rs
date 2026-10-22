@@ -252,7 +252,7 @@ struct ActiveSheet {
 impl ActiveSheet {
     fn read(bench: &Bench) -> Self {
         let active = bench.active_sheet();
-        let document = bench.state().schematic.document();
+        let document = bench.state().model.schematic.document();
         let on_sheet = |id: u64| bench.sheet_of(id) == active;
         Self {
             parts: document
@@ -573,7 +573,7 @@ fn generate(bench: &Bench, rng: &mut Rng) -> Step {
 
 /// Whether the object `id` is on the active sheet now.
 fn on_active_sheet(bench: &Bench, id: u64) -> bool {
-    let document = bench.state().schematic.document();
+    let document = bench.state().model.schematic.document();
     let exists = document.components.iter().any(|part| part.id == id)
         || document.wires.iter().any(|wire| wire.id == id)
         || document.buses.iter().any(|bus| bus.id == id)
@@ -584,7 +584,7 @@ fn on_active_sheet(bench: &Bench, id: u64) -> bool {
 
 /// Where the active sheet's dot `id` stands, while it is there.
 fn dot_on_active_sheet(bench: &Bench, id: u64) -> Option<Point> {
-    let document = bench.state().schematic.document();
+    let document = bench.state().model.schematic.document();
     document
         .junctions
         .iter()
@@ -660,6 +660,7 @@ fn apply(bench: &mut Bench, step: &Step) {
             let present = on_active_sheet(bench, *wire)
                 && bench
                     .state()
+                    .model
                     .schematic
                     .document()
                     .wires
@@ -713,6 +714,7 @@ fn apply(bench: &mut Bench, step: &Step) {
             }
             let base = bench
                 .state()
+                .model
                 .schematic
                 .document()
                 .buses
@@ -861,7 +863,7 @@ struct World {
 
 impl World {
     fn read(bench: &Bench, projected: &SchematicDocument) -> Self {
-        let document = bench.state().schematic.document();
+        let document = bench.state().model.schematic.document();
         let [first, second] = sheet_nets(bench, projected);
         let sheet =
             |index: usize, nets| Sheet::read(document, |id| bench.sheet_of(id) == index, nets);
@@ -874,7 +876,7 @@ impl World {
 
 /// The invariants that hold of any one drawing, whatever led to it.
 fn check_drawing(bench: &Bench, projected: &SchematicDocument) -> Result<(), String> {
-    for wire in &bench.state().schematic.document().wires {
+    for wire in &bench.state().model.schematic.document().wires {
         if wire.points.len() < 2 {
             return Err(format!(
                 "doubled-back: wire {} has {:?}",
@@ -1062,7 +1064,7 @@ struct History {
 
 /// The open sheet's wires and dots, with the other sheet's left out.
 fn open_sheet_conductors(bench: &Bench) -> SchematicDocument {
-    let document = bench.state().schematic.document();
+    let document = bench.state().model.schematic.document();
     let active = bench.active_sheet();
     SchematicDocument {
         wires: document

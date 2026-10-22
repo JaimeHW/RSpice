@@ -92,7 +92,7 @@ fn narrowing_one_analysis_shrinks_its_row_and_the_plan_duration() {
     // 27 °C, so nothing sits on the reference and a nominal participation
     // would refuse. Move the reference onto a declared value: this test is
     // about narrowing, and the refusal is pinned separately below.
-    app.state.sim_setup.reference_pvt.temperature_celsius = 25.0;
+    app.state.model.sim_setup.reference_pvt.temperature_celsius = 25.0;
 
     let before = PlanWorkload::resolve(&app).expect("the fixture workload prices");
     let before_tasks = before
@@ -105,6 +105,7 @@ fn narrowing_one_analysis_shrinks_its_row_and_the_plan_duration() {
     // every analysis at the full matrix would not move at all here.
     let op = instance_of(&app.state, AnalysisKind::OperatingPoint);
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -154,6 +155,7 @@ fn a_participation_that_refuses_is_priced_at_the_whole_matrix() {
     // so a nominal-only instance names a point the space does not contain.
     let op = instance_of(&app.state, AnalysisKind::OperatingPoint);
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -292,6 +294,7 @@ fn an_invalid_workload_refuses_rather_than_pricing_the_plan_short() {
     // budget an operator would approve by mistake.
     let temperature = instance_of(&app.state, AnalysisKind::Temperature);
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -357,6 +360,7 @@ fn a_retracing_dc_sweep_is_still_one_task_per_point() {
     );
 
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -410,6 +414,7 @@ fn a_refused_instance_is_stated_as_refused_rather_than_counted_two_ways() {
 
     let op = instance_of(&app.state, AnalysisKind::OperatingPoint);
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()

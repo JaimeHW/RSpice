@@ -16,7 +16,7 @@ pub(super) fn handle_armed_array_selection(
     symbol_context: &SchematicSymbolContext,
 ) {
     if state.application_modal_open()
-        || state.schematic.session.editor.tool != Tool::ArraySelection
+        || state.model.schematic.session.editor.tool != Tool::ArraySelection
         || !state.dialogs.array_selection.armed
     {
         return;
@@ -34,7 +34,7 @@ pub(super) fn handle_armed_array_selection(
             canvas: &state.dialogs.array_selection.canvas,
             kind: state.dialogs.array_selection.kind,
             grid_size,
-            snap_engine: &state.schematic.session.editor.snap_engine,
+            snap_engine: &state.model.schematic.session.editor.snap_engine,
         },
     ) {
         let request = capture(state, transition);
@@ -46,7 +46,7 @@ fn capture(state: &AppState, transition: TransformInputTransition) -> ArrayInput
     let draft = &state.dialogs.array_selection;
     ArrayInputRequest {
         source: editor_request_source(state),
-        selection: state.schematic.session.editor.selection.clone(),
+        selection: state.model.schematic.session.editor.selection.clone(),
         generation: draft.generation,
         kind: draft.kind,
         count: draft.count.clone(),
@@ -58,13 +58,13 @@ fn capture(state: &AppState, transition: TransformInputTransition) -> ArrayInput
 fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: ArrayInputRequest) {
     let draft = &state.dialogs.array_selection;
     if request.source != editor_request_source(state)
-        || request.selection != state.schematic.session.editor.selection
+        || request.selection != state.model.schematic.session.editor.selection
         || request.generation != draft.generation
         || request.kind != draft.kind
         || request.count != draft.count
         || request.naming != draft.naming
         || request.transition.expected != draft.canvas
-        || state.schematic.session.editor.tool != Tool::ArraySelection
+        || state.model.schematic.session.editor.tool != Tool::ArraySelection
         || !draft.armed
         || state.application_modal_open()
         || armed_array_selection_authority(state).is_err()
@@ -102,11 +102,18 @@ fn commit_armed_array_selection(state: &mut AppState, symbol_context: &Schematic
         }
     };
 
-    let sheets = &state.workspace.content.design_management;
-    let catalog = sheets.sheet_catalog(&state.workspace.content.active_schematic_reference().key());
+    let sheets = &state.model.workspace.content.design_management;
+    let catalog = sheets.sheet_catalog(
+        &state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key(),
+    );
     let on_sheet =
         |id| rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id);
-    match state.schematic.array_selection_resolved(
+    match state.model.schematic.array_selection_resolved(
         &plan,
         &on_sheet,
         |component| symbol_context.named_terminal_points(component),
@@ -135,27 +142,29 @@ mod tests {
     fn armed_array_commit_creates_one_transaction_and_returns_to_select() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(1);
-        state.schematic.recalculate_runtime_state();
-        state.schematic.clear_undo_history();
+        state.model.schematic.recalculate_runtime_state();
+        state.model.schematic.clear_undo_history();
         crate::workbench::app::open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.canvas.preview_delta = Point::new(100, 0);
-        state.schematic.arm_tool(Tool::ArraySelection);
+        state.model.schematic.arm_tool(Tool::ArraySelection);
         let symbols = schematic_symbol_context(&state);
 
         let ctx = egui::Context::default();
         state.dialogs.array_selection.canvas.preview_delta.x -=
-            state.schematic.document().grid_size;
+            state.model.schematic.document().grid_size;
         for commit in [false, true] {
             let events = if commit {
                 [egui::Key::ArrowRight, egui::Key::Enter]
@@ -197,7 +206,7 @@ mod tests {
                             zoom: 1.0,
                             bounds,
                         };
-                        let grid_size = state.schematic.document().grid_size;
+                        let grid_size = state.model.schematic.document().grid_size;
                         handle_armed_array_selection(
                             ui, &response, &mut state, &viewport, grid_size, &symbols,
                         );
@@ -206,19 +215,22 @@ mod tests {
             );
         }
 
-        assert_eq!(state.schematic.document().components.len(), 8);
-        assert_eq!(state.schematic.undo_description(), Some("create array"));
-        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+        assert_eq!(state.model.schematic.document().components.len(), 8);
+        assert_eq!(
+            state.model.schematic.undo_description(),
+            Some("create array")
+        );
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
         assert!(!state.dialogs.array_selection.armed);
-        assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document().components.len(), 1);
-        assert!(!state.schematic.can_undo());
+        assert!(state.model.schematic.undo());
+        assert_eq!(state.model.schematic.document().components.len(), 1);
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// Arm Create array on the selected parts and wires with `pitch`, and
     /// commit it.
     fn commit_array_of(state: &mut AppState, components: &[u64], wires: &[u64], pitch: Point) {
-        let selection = &mut state.schematic.session.editor.selection;
+        let selection = &mut state.model.schematic.session.editor.selection;
         selection.clear();
         for id in components {
             selection.select_component(*id);
@@ -226,12 +238,12 @@ mod tests {
         for id in wires {
             selection.select_wire(*id);
         }
-        state.schematic.recalculate_runtime_state();
-        state.schematic.clear_undo_history();
+        state.model.schematic.recalculate_runtime_state();
+        state.model.schematic.clear_undo_history();
         crate::workbench::app::open_array_selection_dialog(state);
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.canvas.preview_delta = pitch;
-        state.schematic.arm_tool(Tool::ArraySelection);
+        state.model.schematic.arm_tool(Tool::ArraySelection);
         let symbols = schematic_symbol_context(state);
         commit_armed_array_selection(state, &symbols);
     }
@@ -242,7 +254,7 @@ mod tests {
         // R1 on the active sheet; on Sheet 2, a wire right where the
         // first replica will stand.
         let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[2]);
-        let drawing = state.schematic.document_mut_for_test();
+        let drawing = state.model.schematic.document_mut_for_test();
         drawing
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
@@ -258,7 +270,7 @@ mod tests {
             state.dialogs.array_selection.canvas.preview_error, None,
             "a wire the active sheet does not show refused the array"
         );
-        assert_eq!(state.schematic.document().components.len(), 8);
+        assert_eq!(state.model.schematic.document().components.len(), 8);
     }
 
     #[test]
@@ -273,7 +285,7 @@ mod tests {
         let r4 = Component::new(3, ComponentType::Resistor, Point::new(100, 0));
         let r3_right = r3.terminal_positions()[1].1;
         let r4_left = r4.terminal_positions()[0].1;
-        let drawing = state.schematic.document_mut_for_test();
+        let drawing = state.model.schematic.document_mut_for_test();
         drawing.components.extend([r3, r4]);
         drawing.wires.push(Wire::segment(2, r3_right, r4_left));
         drawing
@@ -286,7 +298,7 @@ mod tests {
         commit_array_of(&mut state, &[1, 3], &[5], Point::new(0, 200));
 
         assert_eq!(state.dialogs.array_selection.canvas.preview_error, None);
-        let document = state.schematic.document();
+        let document = state.model.schematic.document();
         assert_eq!(document.components.len(), 16);
         assert!(
             document
@@ -308,31 +320,36 @@ mod tests {
     fn rejected_array_candidate_stays_armed_without_mutating_the_document() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(1);
-        state.schematic.recalculate_runtime_state();
-        state.schematic.clear_undo_history();
+        state.model.schematic.recalculate_runtime_state();
+        state.model.schematic.clear_undo_history();
         crate::workbench::app::open_array_selection_dialog(&mut state);
         state.dialogs.array_selection.arm();
         state.dialogs.array_selection.canvas.preview_delta = Point::new(1, 0);
-        state.schematic.arm_tool(Tool::ArraySelection);
+        state.model.schematic.arm_tool(Tool::ArraySelection);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_array_selection(&mut state, &symbols);
 
-        assert_eq!(state.schematic.document().components.len(), 1);
+        assert_eq!(state.model.schematic.document().components.len(), 1);
         assert!(state.dialogs.array_selection.armed);
-        assert_eq!(state.schematic.session.editor.tool, Tool::ArraySelection);
+        assert_eq!(
+            state.model.schematic.session.editor.tool,
+            Tool::ArraySelection
+        );
         assert!(state.dialogs.array_selection.canvas.preview_error.is_some());
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
     }
 
     /// A replica whose wire end or pin would land inside a wire already on
@@ -348,7 +365,7 @@ mod tests {
         let stub_end = Point::new(pin.x + 20, pin.y);
         for (case, stub, touch) in [("stub end", true, stub_end), ("pin", false, pin)] {
             let mut state = AppState::default();
-            let drawing = state.schematic.document_mut_for_test();
+            let drawing = state.model.schematic.document_mut_for_test();
             drawing.components.push(part.clone());
             if stub {
                 drawing.wires.push(Wire::segment(2, pin, stub_end));
@@ -359,7 +376,7 @@ mod tests {
                 Point::new(touch.x, touch.y + 150),
             ));
             let wire_points = |state: &AppState| -> Vec<Vec<Point>> {
-                let document = state.schematic.document();
+                let document = state.model.schematic.document();
                 document
                     .wires
                     .iter()
@@ -379,11 +396,11 @@ mod tests {
                 .clone()
                 .unwrap_or_default();
             assert!(refusal.contains("object 3 at"), "{case}: {refusal:?}");
-            let document = state.schematic.document();
+            let document = state.model.schematic.document();
             assert_eq!(document.components.len(), 1, "{case}");
             assert!(document.junctions.is_empty(), "{case}");
             assert_eq!(wire_points(&state), before, "{case}");
-            assert!(!state.schematic.can_undo(), "{case}");
+            assert!(!state.model.schematic.can_undo(), "{case}");
         }
     }
 
@@ -404,18 +421,20 @@ mod tests {
         ] {
             let mut state = AppState::default();
             let id = state
+                .model
                 .schematic
                 .add_component(ComponentType::Resistor, Point::origin());
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_only_component(id);
-            state.schematic.clear_undo_history();
+            state.model.schematic.clear_undo_history();
             crate::workbench::app::open_array_selection_dialog(&mut state);
             state.dialogs.array_selection.arm();
-            state.schematic.arm_tool(Tool::ArraySelection);
+            state.model.schematic.arm_tool(Tool::ArraySelection);
             let expected = state.dialogs.array_selection.canvas.clone();
             let mut next = expected.clone();
             next.preview_delta = Point::new(100, 0);
@@ -428,8 +447,8 @@ mod tests {
                 },
             );
             match change {
-                "document" => state.active_schematic_epoch += 1,
-                "selection" => state.schematic.session.editor.selection.clear(),
+                "document" => state.model.active_schematic_epoch += 1,
+                "selection" => state.model.schematic.session.editor.selection.clear(),
                 "kind" => {
                     state.dialogs.array_selection.kind =
                         crate::state::SchematicArrayKind::Rectangular
@@ -438,13 +457,13 @@ mod tests {
                 "naming" => state.dialogs.array_selection.naming = "R20…R27".to_owned(),
                 "draft" => state.dialogs.array_selection.canvas.anchor = Some(Point::new(10, 0)),
                 "modal" => state.dialogs.preferences_open = true,
-                "read-only" => state.schematic.session.read_only = true,
-                "tool" => state.schematic.arm_tool(Tool::Select),
+                "read-only" => state.model.schematic.session.read_only = true,
+                "tool" => state.model.schematic.arm_tool(Tool::Select),
                 "replacement" => {
                     crate::workbench::app::cancel_armed_array_selection(&mut state);
                     crate::workbench::app::open_array_selection_dialog(&mut state);
                     state.dialogs.array_selection.arm();
-                    state.schematic.arm_tool(Tool::ArraySelection);
+                    state.model.schematic.arm_tool(Tool::ArraySelection);
                     assert_eq!(
                         request.transition.expected,
                         state.dialogs.array_selection.canvas
@@ -459,11 +478,18 @@ mod tests {
             let symbols = schematic_symbol_context(&state);
             apply(&mut state, &symbols, request);
             if change == "none" {
-                assert_eq!(state.schematic.document().components.len(), 8);
-                assert_eq!(state.schematic.undo_description(), Some("create array"));
+                assert_eq!(state.model.schematic.document().components.len(), 8);
+                assert_eq!(
+                    state.model.schematic.undo_description(),
+                    Some("create array")
+                );
             } else {
-                assert_eq!(state.schematic.document().components.len(), 1, "{change}");
-                assert!(!state.schematic.can_undo(), "{change}");
+                assert_eq!(
+                    state.model.schematic.document().components.len(),
+                    1,
+                    "{change}"
+                );
+                assert!(!state.model.schematic.can_undo(), "{change}");
                 assert_eq!(state.dialogs.array_selection.canvas, canvas, "{change}");
                 assert!(state.dialogs.array_selection.armed, "{change}");
             }

@@ -77,20 +77,21 @@ impl Fixture {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
-        app.state.schematic = SchematicState::default();
-        let parent = app.state.workspace.content.active_view.clone();
+        app.state.model.schematic = SchematicState::default();
+        let parent = app.state.model.workspace.content.active_view.clone();
         let symbol = CellViewRef::new(&parent.library, "amp", "symbol");
         let mut cell = Cell::new(&symbol.cell);
         cell.add_view(View::new("schematic", ViewType::Schematic));
         cell.add_view(View::new(&symbol.view, ViewType::Symbol));
         app.state
+            .model
             .library_manager
             .get_library_mut(&symbol.library)
             .unwrap()
             .add_cell(cell);
         let schematic = amp_schematic();
         let ports = schematic.document().interface_ports();
-        app.state.workspace.insert_schematic_editor(
+        app.state.model.workspace.insert_schematic_editor(
             CellViewRef::new(&symbol.library, &symbol.cell, "schematic").key(),
             schematic,
         );
@@ -103,17 +104,18 @@ impl Fixture {
             )
             .unwrap();
         app.state.open_workspace_view(parent.clone());
-        app.state.workspace.content.close_view(&symbol);
-        assert_eq!(app.state.workspace.content.active_view, parent);
+        app.state.model.workspace.content.close_view(&symbol);
+        assert_eq!(app.state.model.workspace.content.active_view, parent);
 
         let mut instances = Vec::new();
         for &(position, rotation, mirror_h) in placements {
-            let id = app.state.schematic.add_library_cell_component(
+            let id = app.state.model.schematic.add_library_cell_component(
                 position,
                 LibraryCellInstance::new(&symbol.library, &symbol.cell, &symbol.view),
             );
             let component = app
                 .state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .components
@@ -124,10 +126,10 @@ impl Fixture {
             component.mirror_h = mirror_h;
             instances.push(id);
         }
-        app.state.schematic.recalculate_runtime_state();
-        app.state.schematic.clear_undo_history();
-        app.state.schematic.session.is_dirty = false;
-        let editor = &mut app.state.schematic.session.editor;
+        app.state.model.schematic.recalculate_runtime_state();
+        app.state.model.schematic.clear_undo_history();
+        app.state.model.schematic.session.is_dirty = false;
+        let editor = &mut app.state.model.schematic.session.editor;
         editor.needs_fit = false;
         editor.needs_drawing_sheet_fit = false;
         editor.pan = PAN;
@@ -167,7 +169,7 @@ impl Fixture {
                 app.state.reconcile_schematic_drag(ui.ctx(), false);
                 app.handle_shortcuts(ui.ctx());
                 *canvas = ui.available_rect_before_wrap();
-                if app.state.workspace.content.active_view_type() == ViewType::Symbol {
+                if app.state.model.workspace.content.active_view_type() == ViewType::Symbol {
                     crate::schematic::symbol_editor::show(ui, &mut app.state, None);
                 } else {
                     crate::schematic::view::render_schematic_view(ui, &mut app.state, None);
@@ -180,10 +182,13 @@ impl Fixture {
     /// Select `instance` on the parent and edit its symbol in place.
     fn enter(&mut self, instance: usize) {
         let id = self.instances[instance];
-        let editor = &mut self.app.state.schematic.session.editor;
+        let editor = &mut self.app.state.model.schematic.session.editor;
         editor.selection.select_only_component(id);
         Command::EditSymbolInPlace.execute(&mut self.app);
-        assert_eq!(self.app.state.workspace.content.active_view, self.symbol);
+        assert_eq!(
+            self.app.state.model.workspace.content.active_view,
+            self.symbol
+        );
         assert!(self.app.state.symbol_in_place().is_some());
         self.frame(vec![]);
     }
@@ -193,6 +198,7 @@ impl Fixture {
         let id = self.instances[instance];
         let state = &self.app.state;
         let component = state
+            .model
             .schematic
             .document()
             .components
@@ -249,7 +255,7 @@ impl Fixture {
     }
 
     fn on_parent(&self) -> bool {
-        self.app.state.workspace.content.active_view == self.parent
+        self.app.state.model.workspace.content.active_view == self.parent
             && self.app.state.symbol_in_place().is_none()
     }
 }
@@ -334,11 +340,21 @@ fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
         .find(|(name, _)| name == "A")
         .unwrap()
         .1;
-    fixture.app.state.schematic.document_mut_for_test().wires =
-        vec![Wire::new(1, vec![start, start + Point::new(0, 60)])];
-    fixture.app.state.schematic.recalculate_runtime_state();
+    fixture
+        .app
+        .state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .wires = vec![Wire::new(1, vec![start, start + Point::new(0, 60)])];
+    fixture
+        .app
+        .state
+        .model
+        .schematic
+        .recalculate_runtime_state();
     fixture.app.state.sync_active_schematic_to_workspace();
-    let document = fixture.app.state.schematic.document();
+    let document = fixture.app.state.model.schematic.document();
     let wires = document.wires.clone();
     let instance = document
         .components
@@ -356,6 +372,7 @@ fn a_pin_dragged_in_place_lands_under_the_pointer_in_symbol_coordinates() {
     let parent = fixture
         .app
         .state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -427,6 +444,7 @@ fn leaving_in_place_asks_only_when_the_symbol_has_unsaved_edits() {
         fixture
             .app
             .state
+            .model
             .schematic
             .session
             .editor
@@ -439,6 +457,7 @@ fn leaving_in_place_asks_only_when_the_symbol_has_unsaved_edits() {
         !fixture
             .app
             .state
+            .model
             .workspace
             .content
             .open_views

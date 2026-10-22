@@ -15,11 +15,11 @@ impl AppState {
         let Some(path) = &published.path else {
             return;
         };
-        let before = self.workspace.content.project.revision();
+        let before = self.model.workspace.content.project.revision();
         if before == published.revision() {
             return;
         }
-        let mut expected = self.workspace.content.project.clone();
+        let mut expected = self.model.workspace.content.project.clone();
         expected.set_path(path.clone());
         // A first save can name an untitled project. Only that exact descriptor
         // transition may carry the guards forward; delayed saves or unrelated
@@ -45,10 +45,11 @@ impl AppState {
             return;
         }
         for record in self
+            .model
             .project_design_history
             .undo
             .iter_mut()
-            .chain(&mut self.project_design_history.redo)
+            .chain(&mut self.model.project_design_history.redo)
         {
             match &mut record.body {
                 ProjectDesignBody::DesignManagement(record) => {
@@ -79,6 +80,7 @@ impl AppState {
         candidate.validate().map_err(|error| error.to_string())?;
         let projected = self.schematic_reference_sources();
         let existing = self
+            .model
             .workspace
             .content
             .design_management
@@ -142,14 +144,21 @@ impl AppState {
         transaction
             .prepared_references
             .clone()
-            .publish(&mut self.workspace.content);
-        let active_key = self.workspace.content.active_schematic_reference().key();
+            .publish(&mut self.model.workspace.content);
+        let active_key = self
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         for (key, schematic) in &transaction.after {
             if key.eq_ignore_ascii_case(&active_key) {
-                self.schematic = schematic.clone();
-                self.workspace
+                self.model.schematic = schematic.clone();
+                self.model
+                    .workspace
                     .insert_schematic_editor(active_key.clone(), schematic.clone());
             } else if let Some(existing_key) = self
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -157,10 +166,12 @@ impl AppState {
                 .find(|candidate| candidate.eq_ignore_ascii_case(key))
                 .cloned()
             {
-                self.workspace
+                self.model
+                    .workspace
                     .insert_schematic_editor(existing_key, schematic.clone());
             }
             if let Some(open) = self
+                .model
                 .workspace
                 .content
                 .open_views

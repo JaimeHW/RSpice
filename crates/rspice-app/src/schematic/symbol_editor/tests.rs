@@ -32,7 +32,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
             cell.add_view(View::new("schematic", ViewType::Schematic));
             cell.add_view(View::new("symbol", ViewType::Symbol));
             library.add_cell(cell);
-            state.library_manager.add_library(library);
+            state.model.library_manager.add_library(library);
             state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
             let before = state.load_active_symbol_document().unwrap();
             let request = SymbolSurfaceRequest {
@@ -43,7 +43,11 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 state.open_workspace_view(CellViewRef::new("work", "amp", "schematic"));
                 state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
             } else {
-                state.workspace.content.set_active_read_only_reference(true);
+                state
+                    .model
+                    .workspace
+                    .content
+                    .set_active_read_only_reference(true);
             }
             assert!(
                 !apply_surface_request(&mut state, request),
@@ -54,6 +58,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
             assert!(!state.can_undo_active_symbol_document());
 
             state
+                .model
                 .workspace
                 .content
                 .set_active_read_only_reference(false);

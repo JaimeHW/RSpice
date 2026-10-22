@@ -40,7 +40,7 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
     draft: &AnalysisDraft,
     instance: AnalysisInstanceId,
 ) -> Vec<OptionEdit> {
-    let plan = app.state.sim_setup.stable_analysis_plan().ok();
+    let plan = app.state.model.sim_setup.stable_analysis_plan().ok();
     let record = plan
         .and_then(|plan| plan.instance(instance))
         .and_then(|target| target.numeric_override());
@@ -53,11 +53,16 @@ pub(in crate::workbench::surfaces::simulate) fn fields(
             draft.kind(),
             draft,
             record,
-            &app.state.sim_setup.options,
+            &app.state.model.sim_setup.options,
             ownership,
         )
     } else {
-        advanced_options::form_rows(draft.kind(), draft, record, &app.state.sim_setup.options)
+        advanced_options::form_rows(
+            draft.kind(),
+            draft,
+            record,
+            &app.state.model.sim_setup.options,
+        )
     };
     if ownership.study_inherited_options.is_some() {
         super::field_note(

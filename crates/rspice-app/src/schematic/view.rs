@@ -91,11 +91,17 @@ pub(crate) fn shelf_drag_over_schematic_canvas(ctx: &egui::Context) -> bool {
 pub(super) fn schematic_design_view(
     state: &AppState,
 ) -> rspice_schematic_editor::view::design_view::DesignView<'_> {
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     rspice_schematic_editor::view::design_view::DesignView {
-        document: state.schematic.document(),
-        canvas_cache: state.schematic.canvas_cache(),
+        document: state.model.schematic.document(),
+        canvas_cache: state.model.schematic.canvas_cache(),
         sheet_catalog: state
+            .model
             .workspace
             .content
             .design_management
@@ -107,12 +113,13 @@ pub(super) fn schematic_design_view(
 /// Compose the editor's resolved symbols from the current app-owned sources.
 pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolContext {
     let resolver = rspice_design::symbol_resolver::SymbolResolver::new(
-        state.library_manager.catalog(),
-        &state.workspace.content.schematic_buffers,
+        state.model.library_manager.catalog(),
+        &state.model.workspace.content.schematic_buffers,
     );
     SchematicSymbolContext::new(
-        state.schematic.document(),
+        state.model.schematic.document(),
         state
+            .model
             .schematic
             .session
             .editor
@@ -133,19 +140,20 @@ pub(crate) fn schematic_symbol_context(state: &AppState) -> SchematicSymbolConte
 /// steady frame resolves nothing.
 pub(crate) fn frame_symbol_context(state: &mut AppState) -> Arc<SchematicSymbolContext> {
     let revision = symbol_context_revision(state);
-    let topology_version = state.schematic.topology_version();
+    let topology_version = state.model.schematic.topology_version();
     let pending = state
+        .model
         .schematic
         .session
         .editor
         .pending_library_cell
         .as_ref()
         .map(|pending| &pending.binding);
-    if let Some(context) = state.schematic.session.symbol_context.current(
+    if let Some(context) = state.model.schematic.session.symbol_context.current(
         revision,
         topology_version,
         pending,
-        state.schematic.document(),
+        state.model.schematic.document(),
     ) {
         return context;
     }
@@ -153,10 +161,11 @@ pub(crate) fn frame_symbol_context(state: &mut AppState) -> Arc<SchematicSymbolC
         revision,
         topology_version,
         pending,
-        state.schematic.document(),
+        state.model.schematic.document(),
     );
     let context = Arc::new(schematic_symbol_context(state));
     state
+        .model
         .schematic
         .session
         .symbol_context
@@ -179,7 +188,7 @@ fn refresh_symbol_context_after_interactions(
 fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityView<'_> {
     canvas::CanvasAccessibilityView {
         design: schematic_design_view(state),
-        editor: &state.schematic.session.editor,
+        editor: &state.model.schematic.session.editor,
         keyboard_focus: state.dialogs.interaction.schematic_keyboard_focus,
         filter: state.ui.schematic_selection_filter,
         traversal_enabled: state
@@ -224,13 +233,19 @@ pub(crate) fn select_signal_conductor(
     signal: &str,
 ) -> Result<String, LocateSignalError> {
     let current = result_mapping_is_current(state);
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     let sheet = sheet_visibility::active_sheet_id(state);
-    let key = state.workspace.content.active_schematic_reference().key();
-    let (document, editor) = state.schematic.document_and_editor();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let (document, editor) = state.model.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
         sheet_catalog: state
+            .model
             .workspace
             .content
             .design_management
@@ -238,6 +253,7 @@ pub(crate) fn select_signal_conductor(
         occurrence: &occurrence,
         net_to_points: current.then_some(
             &state
+                .model
                 .simulation
                 .source
                 .cross_probe
@@ -254,9 +270,9 @@ pub(crate) fn drawn_failure_site_count(
     nets: &[String],
     devices: &[String],
 ) -> Result<usize, LocateSignalError> {
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     let view = cross_probe::CrossProbeView {
-        document: state.schematic.document(),
+        document: state.model.schematic.document(),
         sheet_catalog: sheet_visibility::active_sheet_catalog(state),
         occurrence: &occurrence,
         net_to_points: result_mapping_is_current(state)
@@ -268,9 +284,9 @@ pub(crate) fn drawn_failure_site_count(
 /// Whether the retained cross-probe map belongs to the open cell as it is
 /// drawn right now.
 fn result_mapping_is_current(state: &AppState) -> bool {
-    state.simulation.source.cross_probe.is_current_for(
-        &state.workspace.content.active_view,
-        state.schematic.topology_version(),
+    state.model.simulation.source.cross_probe.is_current_for(
+        &state.model.workspace.content.active_view,
+        state.model.schematic.topology_version(),
     )
 }
 
@@ -281,13 +297,19 @@ pub(crate) fn select_failure_sites(
     devices: &[String],
 ) -> Result<FailureSiteSelection, LocateSignalError> {
     let current = result_mapping_is_current(state);
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     let sheet = sheet_visibility::active_sheet_id(state);
-    let key = state.workspace.content.active_schematic_reference().key();
-    let (document, editor) = state.schematic.document_and_editor();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let (document, editor) = state.model.schematic.document_and_editor();
     let view = cross_probe::CrossProbeView {
         document,
         sheet_catalog: state
+            .model
             .workspace
             .content
             .design_management
@@ -295,6 +317,7 @@ pub(crate) fn select_failure_sites(
         occurrence: &occurrence,
         net_to_points: current.then_some(
             &state
+                .model
                 .simulation
                 .source
                 .cross_probe
@@ -318,7 +341,7 @@ fn set_canvas_cursor(
     if !(response.hovered() || response.dragged() || shelf_drop.is_some()) {
         return;
     }
-    let editor = &state.schematic.session.editor;
+    let editor = &state.model.schematic.session.editor;
     let any_down = ui.input(|input| input.pointer.any_down());
     let pan_modifier = navigation::primary_pan_modifier_down(ui);
     let button_pan = state
@@ -364,7 +387,7 @@ fn full_crosshair_at(
     let pointer = response.hover_pos()?;
     ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     Some(
-        if state.schematic.session.editor.tool.cursor() == egui::CursorIcon::Crosshair {
+        if state.model.schematic.session.editor.tool.cursor() == egui::CursorIcon::Crosshair {
             let snapped = snap_resolution::resolve_grid_pointer(state, viewport, pointer);
             viewport.schematic_to_screen(snapped.snapped_position)
         } else {
@@ -389,30 +412,32 @@ pub fn render_schematic_view(
         drawing_sheet::FIT_SCREEN_INSET,
     );
 
-    if state.schematic.session.editor.needs_drawing_sheet_fit {
-        state.schematic.session.editor.needs_drawing_sheet_fit = false;
-        state.schematic.session.editor.needs_fit = false;
-        state.schematic.zoom_to_fit_world_rect(
+    if state.model.schematic.session.editor.needs_drawing_sheet_fit {
+        state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
+        state.model.schematic.session.editor.needs_fit = false;
+        state.model.schematic.zoom_to_fit_world_rect(
             drawing_sheet.geometry.paper.as_tuple(),
             canvas_width,
             canvas_height,
             drawing_sheet::FIT_SCREEN_INSET,
             min_zoom,
         );
-    } else if state.schematic.session.editor.needs_fit {
-        state.schematic.session.editor.needs_fit = false;
-        let bounds = symbol_context.content_bounds(state.schematic.document());
+    } else if state.model.schematic.session.editor.needs_fit {
+        state.model.schematic.session.editor.needs_fit = false;
+        let bounds = symbol_context.content_bounds(state.model.schematic.document());
         state
+            .model
             .schematic
             .zoom_to_fit_bounds(bounds, canvas_width, canvas_height, min_zoom);
     }
-    if let Some(target) = state.schematic.session.editor.center_request.take() {
+    if let Some(target) = state.model.schematic.session.editor.center_request.take() {
         state
+            .model
             .schematic
             .center_view_on(target, canvas_width, canvas_height);
     }
-    if let Some(request) = state.schematic.session.editor.zoom_request.take() {
-        state.schematic.apply_zoom_request(
+    if let Some(request) = state.model.schematic.session.editor.zoom_request.take() {
+        state.model.schematic.apply_zoom_request(
             request,
             canvas_width,
             canvas_height,
@@ -439,15 +464,15 @@ pub fn render_schematic_view(
         ui,
         &response,
         available,
-        &mut state.schematic.session.editor.zoom,
-        &mut state.schematic.session.editor.pan,
+        &mut state.model.schematic.session.editor.zoom,
+        &mut state.model.schematic.session.editor.pan,
         min_zoom,
         canvas_navigation,
     );
     edge_pan::edge_pan(ui, &response, available, state);
     let viewport = viewport_from_camera(
-        state.schematic.session.editor.pan,
-        state.schematic.session.editor.zoom,
+        state.model.schematic.session.editor.pan,
+        state.model.schematic.session.editor.zoom,
         available,
         ui.ctx().pixels_per_point(),
     );
@@ -464,9 +489,10 @@ pub fn render_schematic_view(
     // Keep the pre-interaction route state available to the context-menu
     // layer for diagnostics. Secondary click is exclusively a context-menu
     // gesture; routes commit with Enter or primary double-click.
-    let routing_was_active = state.schematic.session.editor.wire_drawing.active
-        || state.schematic.session.editor.bus_drawing.active
+    let routing_was_active = state.model.schematic.session.editor.wire_drawing.active
+        || state.model.schematic.session.editor.bus_drawing.active
         || !state
+            .model
             .schematic
             .session
             .editor
@@ -490,7 +516,7 @@ pub fn render_schematic_view(
         // A long click over overlapping objects opens the chooser. The
         // chooser takes its keys before the tools see them, and the click
         // that opens or closes it selects nothing on the canvas.
-        if state.schematic.session.editor.tool == crate::state::Tool::Select
+        if state.model.schematic.session.editor.tool == crate::state::Tool::Select
             && let Some(position) = pick_chooser::observe_long_click(&response)
         {
             pick_chooser::open_chooser_at(ui.ctx(), state, position, &symbol_context, &viewport);
@@ -513,7 +539,7 @@ pub fn render_schematic_view(
 
     // Refresh the frame-coherent canvas cache (culling bounds + hover
     // hit-test index) after interactions may have edited topology.
-    state.schematic.ensure_canvas_cache();
+    state.model.schematic.ensure_canvas_cache();
     // Badges are placed against the wires the canvas cache indexes, so they
     // are refreshed after it.
     scene::refresh_voltage_badges(state);
@@ -560,12 +586,12 @@ pub fn render_schematic_view(
     }
     // Report the cursor position in grid units; the workbench status bar shows it.
     let to_grid_units = |pos: egui::Pos2, state: &AppState| {
-        let grid = f64::from(state.schematic.document().grid_size.max(1));
-        let x = ((f64::from(pos.x - available.min.x)) - state.schematic.session.editor.pan.0)
-            / state.schematic.session.editor.zoom
+        let grid = f64::from(state.model.schematic.document().grid_size.max(1));
+        let x = ((f64::from(pos.x - available.min.x)) - state.model.schematic.session.editor.pan.0)
+            / state.model.schematic.session.editor.zoom
             / grid;
-        let y = ((f64::from(pos.y - available.min.y)) - state.schematic.session.editor.pan.1)
-            / state.schematic.session.editor.zoom
+        let y = ((f64::from(pos.y - available.min.y)) - state.model.schematic.session.editor.pan.1)
+            / state.model.schematic.session.editor.zoom
             / grid;
         (x, y)
     };
@@ -586,7 +612,7 @@ pub fn render_schematic_view(
     );
     crate::workbench::app_state::report_engineering_canvas_focus(
         &response,
-        state.workspace.content.active_view_type(),
+        state.model.workspace.content.active_view_type(),
     );
 }
 
@@ -610,16 +636,17 @@ mod tests {
         let a = Point::new(0, 0);
         let b = Point::new(40, 0);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
-        state.simulation.source.cross_probe.update(
-            state.workspace.content.active_view.clone(),
+        state.model.simulation.source.cross_probe.update(
+            state.model.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
             std::collections::HashMap::new(),
-            state.schematic.topology_version(),
+            state.model.schematic.topology_version(),
         );
         state
     }
@@ -628,19 +655,19 @@ mod tests {
     fn a_result_from_a_different_drawing_never_selects_stale_geometry() {
         let mut state = state_with_probed_wire();
         // Any structural edit invalidates the retained point map.
-        state.schematic.bump_topology_version();
+        state.model.schematic.bump_topology_version();
 
         let error = select_signal_conductor(&mut state, "V(out)")
             .expect_err("the map is no longer current");
 
         assert_eq!(error, LocateSignalError::NoCurrentMap);
-        assert!(state.schematic.session.editor.selection.is_empty());
+        assert!(state.model.schematic.session.editor.selection.is_empty());
     }
 
     #[test]
     fn a_scoped_trace_name_locates_the_conductor_by_its_leaf() {
         let mut state = AppState::default();
-        state.workspace.descend_into(
+        state.model.workspace.descend_into(
             "X1".to_owned(),
             crate::state::CellViewRef::new("user", "amp", "schematic"),
             ViewType::Schematic,
@@ -648,23 +675,33 @@ mod tests {
         let a = Point::new(0, 0);
         let b = Point::new(40, 0);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(crate::state::Wire::new(1, vec![a, b]));
-        state.simulation.source.cross_probe.update(
-            state.workspace.content.active_view.clone(),
+        state.model.simulation.source.cross_probe.update(
+            state.model.workspace.content.active_view.clone(),
             std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
             std::collections::HashMap::new(),
-            state.schematic.topology_version(),
+            state.model.schematic.topology_version(),
         );
 
         let net =
             select_signal_conductor(&mut state, "V(x1.out)").expect("the leaf is on this sheet");
 
         assert_eq!(net, "OUT");
-        assert!(state.schematic.session.editor.selection.wires.contains(&1));
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .wires
+                .contains(&1)
+        );
     }
 
     #[test]
@@ -676,7 +713,7 @@ mod tests {
 
         assert_eq!(error, LocateSignalError::OtherOccurrence("/x1".to_owned()));
         assert!(error.message("V(x1.out)").contains("/x1"));
-        assert!(state.schematic.session.editor.selection.is_empty());
+        assert!(state.model.schematic.session.editor.selection.is_empty());
     }
 
     /// Locate on a later sheet selects the conductor that sheet draws and
@@ -688,7 +725,7 @@ mod tests {
 
         let net = select_signal_conductor(&mut state, "V(bias)").expect("Sheet 2 draws BIAS");
         assert_eq!(net, "BIAS");
-        let editor = &state.schematic.session.editor;
+        let editor = &state.model.schematic.session.editor;
         assert_eq!(
             editor.selection.wires.iter().copied().collect::<Vec<_>>(),
             vec![2]
@@ -699,7 +736,14 @@ mod tests {
             .expect_err("VOUT is drawn only on the hidden Sheet 1");
         assert_eq!(error, LocateSignalError::UnknownNet("vout".to_owned()));
         assert!(
-            !state.schematic.session.editor.selection.wires.contains(&1),
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .wires
+                .contains(&1),
             "a wire on the hidden sheet is never selected"
         );
     }
@@ -723,7 +767,7 @@ mod tests {
         .expect("symbol stores");
         cell.add_view(symbol_view);
         library.add_cell(cell);
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
 
         let mut context = frame_symbol_context(&mut state);
         assert!(!refresh_symbol_context_after_interactions(
@@ -737,11 +781,13 @@ mod tests {
         let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&[port("OUT", PortDirection::Out)]);
         let id = state
+            .model
             .schematic
             .add_library_cell_component(Point::new(100, 50), binding);
 
         let refreshed = refresh_symbol_context_after_interactions(&mut state, &mut context);
         let component = state
+            .model
             .schematic
             .document()
             .components
@@ -781,10 +827,11 @@ mod tests {
             cell.add_view(symbol_view);
             library.add_cell(cell);
         }
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
         let mut binding = LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&[port("OUT", PortDirection::Out)]);
         let id = state
+            .model
             .schematic
             .add_library_cell_component(Point::new(100, 50), binding);
         (state, id)
@@ -812,21 +859,24 @@ mod tests {
         };
 
         assert!(refreshed(&mut state, &|state| {
-            state.library_manager.add_library(Library::new("other"));
+            state
+                .model
+                .library_manager
+                .add_library(Library::new("other"));
         }));
         assert!(refreshed(&mut state, &|state| {
-            state.workspace.insert_schematic_editor(
+            state.model.workspace.insert_schematic_editor(
                 "work/amp/schematic".to_owned(),
                 SchematicState::default(),
             );
         }));
         assert!(refreshed(&mut state, &|state| {
-            state.schematic.bump_topology_version();
+            state.model.schematic.bump_topology_version();
         }));
         assert!(refreshed(&mut state, &|state| {
             let mut binding = LibraryCellInstance::new("work", "buf", "schematic");
             binding.bind_interface(&[port("OUT", PortDirection::Out)]);
-            state.schematic.session.editor.pending_library_cell = Some(
+            state.model.schematic.session.editor.pending_library_cell = Some(
                 rspice_schematic_editor::session::placement::PendingLibraryCellPlacement::new(
                     binding,
                     crate::workbench::app::schematic_editor_request_source(state),
@@ -837,6 +887,7 @@ mod tests {
         let terminals = |state: &mut AppState| {
             let context = frame_symbol_context(state);
             let component = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -846,9 +897,10 @@ mod tests {
             context.terminal_points(component)
         };
         let amp = terminals(&mut state);
-        let topology = state.schematic.topology_version();
+        let topology = state.model.schematic.topology_version();
         assert!(refreshed(&mut state, &|state| {
             let component = state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .components
@@ -857,7 +909,7 @@ mod tests {
                 .expect("instance placed");
             component.library_cell.as_mut().expect("bound").cell = "buf".to_owned();
         }));
-        assert_eq!(state.schematic.topology_version(), topology);
+        assert_eq!(state.model.schematic.topology_version(), topology);
         assert_ne!(
             terminals(&mut state),
             amp,
@@ -874,11 +926,13 @@ mod tests {
             port("OUT", PortDirection::Out),
         ]);
         let id = state
+            .model
             .schematic
             .add_library_cell_component(Point::origin(), binding);
 
         let context = schematic_symbol_context(&state);
         let component = state
+            .model
             .schematic
             .document()
             .components
@@ -894,14 +948,19 @@ mod tests {
         let mut state = AppState::default();
         let baseline = symbol_context_revision(&state);
 
-        state.library_manager.add_library(Library::new("work"));
+        state
+            .model
+            .library_manager
+            .add_library(Library::new("work"));
         let library_changed = symbol_context_revision(&state);
         assert_ne!(library_changed, baseline);
 
         state
+            .model
             .workspace
             .insert_schematic_editor("work/amp/schematic".to_owned(), SchematicState::default());
         state
+            .model
             .workspace
             .schematic_editor_mut("work/amp/schematic")
             .unwrap()
@@ -916,36 +975,51 @@ mod tests {
 
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::new(0, 0)));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::new(2, vec![Point::new(0, 0), Point::new(10, 0)]));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .junctions
             .push(Junction::new(3, Point::new(10, 0)));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(NetLabel::new(4, Point::new(10, 0), "OUT"));
-        state.schematic.document_mut_for_test().design_notes.push(
-            crate::state::DesignNote::new(
-                5,
-                Point::new(20, 10),
-                crate::state::DesignNoteKind::PlainText,
-                "Bias network",
-            )
-            .unwrap(),
-        );
-        state.schematic.session.editor.selection.select_component(1);
-        state.schematic.session.editor.tool = crate::state::Tool::Wire;
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(
+                crate::state::DesignNote::new(
+                    5,
+                    Point::new(20, 10),
+                    crate::state::DesignNoteKind::PlainText,
+                    "Bias network",
+                )
+                .unwrap(),
+            );
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
+        state.model.schematic.session.editor.tool = crate::state::Tool::Wire;
 
         let description = canvas::accessibility_description(
             &canvas_accessibility_view(&state),
@@ -972,7 +1046,7 @@ mod tests {
             canvas::selection_accessibility_status(&canvas_accessibility_view(&state)),
             "Selected instance unnamed, Resistor."
         );
-        state.schematic.session.editor.selection.clear();
+        state.model.schematic.session.editor.selection.clear();
         assert_eq!(
             canvas::accessibility_description(
                 &canvas_accessibility_view(&state),
@@ -1001,11 +1075,13 @@ mod tests {
         component.name = "RGAIN".to_owned();
         component.value = "499 ohm".to_owned();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(component);
         state
+            .model
             .schematic
             .session
             .editor
@@ -1115,10 +1191,10 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut state = AppState::default();
         state.ui.grid = crate::state::GridStyle::Off;
-        let editor = &mut state.schematic.session.editor;
+        let editor = &mut state.model.schematic.session.editor;
         (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
         (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);
-        state.schematic.document_mut_for_test().grid_size = 10;
+        state.model.schematic.document_mut_for_test().grid_size = 10;
         let at = egui::pos2(203.3, 151.7);
 
         let (cursor, rows, columns) = rest_mouse(&ctx, &mut state, at, &[]);
@@ -1134,7 +1210,7 @@ mod tests {
             "through the pointer"
         );
 
-        state.schematic.arm_tool(crate::state::Tool::Wire);
+        state.model.schematic.arm_tool(crate::state::Tool::Wire);
         let (cursor, rows, columns) = rest_mouse(&ctx, &mut state, at, &[]);
         assert_eq!(cursor, egui::CursorIcon::None);
         assert_eq!(
@@ -1157,7 +1233,7 @@ mod tests {
     fn right_drag(state: &mut AppState, from: egui::Pos2, to: egui::Pos2) {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let editor = &mut state.schematic.session.editor;
+        let editor = &mut state.model.schematic.session.editor;
         (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
         (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);
         let button = |pos, pressed| egui::Event::PointerButton {
@@ -1195,16 +1271,16 @@ mod tests {
 
         let mut shipped = AppState::default();
         right_drag(&mut shipped, from, to);
-        assert_eq!(shipped.schematic.session.editor.pan, (0.0, 0.0));
+        assert_eq!(shipped.model.schematic.session.editor.pan, (0.0, 0.0));
 
         let mut right = AppState::default();
         right.ui.preferences.choose_right_button_pan();
         right_drag(&mut right, from, to);
-        assert_eq!(right.schematic.session.editor.pan, (40.0, 0.0));
+        assert_eq!(right.model.schematic.session.editor.pan, (40.0, 0.0));
         assert!(right.dialogs.interaction.context_target.is_none());
 
         right_drag(&mut right, from, from);
-        assert_eq!(right.schematic.session.editor.pan, (0.0, 0.0));
+        assert_eq!(right.model.schematic.session.editor.pan, (0.0, 0.0));
         assert!(
             right.dialogs.interaction.context_target.is_some(),
             "a right click that stays put opens the context menu"

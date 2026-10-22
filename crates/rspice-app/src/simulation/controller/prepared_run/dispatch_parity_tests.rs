@@ -20,6 +20,7 @@ use super::tests::runnable_state as preflight_ready_state;
 
 fn plan_mut(state: &mut AppState) -> &mut SimulationPlan {
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -38,7 +39,7 @@ fn independent_ac_data_instances_keep_their_own_parameter_tables() {
             AnalysisKind::AcData,
         ],
     );
-    for component in &mut state.schematic.document_mut_for_test().components {
+    for component in &mut state.model.schematic.document_mut_for_test().components {
         match component.name.as_str() {
             "VCC" => {
                 component.kind = crate::state::ComponentType::VoltageSourceAc;
@@ -191,6 +192,7 @@ fn name_the_fixture_tone_source(plan: &mut SimulationPlan, pss: AnalysisInstance
 /// settle on. The tone that names it is authored when the PSS is inserted.
 fn drive_pss_from_the_fixture_supply(state: &mut AppState) {
     let supply = state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -216,10 +218,11 @@ fn queued_tags(state: &AppState) -> Result<Vec<u8>, Vec<String>> {
 fn compiled_queue(
     state: &AppState,
 ) -> Result<Vec<crate::simulation::execution::PreparedTask>, Vec<String>> {
-    let plan = SimulationController::build_analysis_plan(&state.sim_setup)?;
+    let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)?;
     let sealed = state
+        .model
         .model_library_manager
-        .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+        .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
         .map_err(|error| vec![error])?;
     SimulationController::build_queue_from_plan(state, &plan, &sealed)
 }

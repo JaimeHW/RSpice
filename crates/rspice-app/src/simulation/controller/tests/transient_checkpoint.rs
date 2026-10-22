@@ -20,7 +20,7 @@ fn transient_checkpoint_authored_plan_prepares_captures_and_resumes_native_run()
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
     use rspice_simulation_contract::tran_checkpoint::TranCheckpointDraft;
     let mut state = super::super::test_execution::monte_carlo::checkpoint_state();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let ids: Vec<_> = plan
         .instances()
         .iter()
@@ -71,12 +71,14 @@ fn transient_checkpoint_authored_plan_prepares_captures_and_resumes_native_run()
     runner.poll_result().unwrap().unwrap();
     assert_eq!(image.accepted_time(), 20e-9);
     state
+        .model
         .simulation
         .retained
         .imported_transient_checkpoints
         .insert("accepted".into(), image.clone())
         .unwrap();
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -174,7 +176,7 @@ fn fixture() -> (SimulationController, AppState) {
     })
     .unwrap();
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .unwrap();
     run.mark_running().unwrap();
@@ -210,7 +212,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
         controller
             .retain_transient_checkpoint(&mut state, bytes[0].clone())
             .unwrap();
-        let before = state.simulation.view.data_version;
+        let before = state.model.simulation.view.data_version;
         let partial = AnalysisResult::live_transient_partial(1, AnalysisType::Transient, "TRAN")
             .with_provenance(controller.current_provenance.clone().unwrap())
             .with_waveforms(vec![RetainedTrace::new(
@@ -222,8 +224,8 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
         controller
             .retain_live_transient_analysis(&mut state, controller.current_run_id.unwrap(), partial)
             .unwrap();
-        assert_ne!(before, state.simulation.view.data_version);
-        let retained = state.simulation.active_analysis().unwrap();
+        assert_ne!(before, state.model.simulation.view.data_version);
+        let retained = state.model.simulation.active_analysis().unwrap();
         assert_eq!(
             retained.transient_checkpoint.as_ref().unwrap().bytes(),
             &*bytes[0]
@@ -241,7 +243,13 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
             .retain_transient_checkpoint(&mut state, bytes[1].clone())
             .unwrap();
         assert_eq!(
-            state.simulation.active_analysis().unwrap().waveforms.len(),
+            state
+                .model
+                .simulation
+                .active_analysis()
+                .unwrap()
+                .waveforms
+                .len(),
             1
         );
         assert!(
@@ -249,7 +257,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
                 .retain_transient_checkpoint(&mut state, bytes[0].clone())
                 .is_err()
         );
-        let persisted = crate::io::capture_simulation_results(&state.simulation);
+        let persisted = crate::io::capture_simulation_results(&state.model.simulation);
         persisted.validate().unwrap();
         let loaded: ProjectSimulationResults =
             serde_json::from_str(&serde_json::to_string(&persisted).unwrap()).unwrap();
@@ -291,6 +299,7 @@ fn transient_checkpoint_survives_live_updates_project_recovery_and_terminal_resu
         }
         .with_provenance(controller.current_provenance.clone().unwrap());
         let run = state
+            .model
             .simulation
             .retained
             .run_by_sequence_mut(controller.current_run_id.unwrap())
@@ -345,12 +354,21 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
             .retain_transient_checkpoint(&mut state, bytes[0].clone())
             .is_err()
     );
-    assert!(state.simulation.active_run().unwrap().analyses.is_empty());
+    assert!(
+        state
+            .model
+            .simulation
+            .active_run()
+            .unwrap()
+            .analyses
+            .is_empty()
+    );
     controller.current_save_policy =
         crate::simulation::execution::SavePolicy::RetainEngineProducedResults;
     let terminal = AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
         .with_provenance(controller.current_provenance.clone().unwrap());
     let run = state
+        .model
         .simulation
         .retained
         .run_by_sequence_mut(controller.current_run_id.unwrap())
@@ -387,7 +405,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
     controller
         .retain_transient_checkpoint(&mut state, bytes[0].clone())
         .unwrap();
-    let retained = state.simulation.active_analysis().unwrap();
+    let retained = state.model.simulation.active_analysis().unwrap();
     for case in 0..3 {
         let mut invalid = retained.clone();
         match case {
@@ -410,7 +428,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
         Some(SimulationRunLifecycle::Aborted),
     );
     assert!(errors.is_empty(), "{errors:?}");
-    let retained = state.simulation.active_analysis().unwrap();
+    let retained = state.model.simulation.active_analysis().unwrap();
     assert!(!retained.is_live_partial());
     assert!(retained.transient_checkpoint.is_some());
 
@@ -425,7 +443,7 @@ fn transient_checkpoint_retention_rejects_unrequested_overbudget_and_incompatibl
         .unwrap();
     controller.accept_transient_checkpoint(&mut state, Arc::from(&b"corrupt"[..]));
     controller.poll_completion(&mut state, &MockExportWorkflowIo::default());
-    let run = state.simulation.active_run().unwrap();
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(run.lifecycle, SimulationRunLifecycle::Failed);
     assert!(!run.success);
     assert_eq!(
@@ -453,6 +471,7 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
         .retain_transient_checkpoint(&mut state, bytes[0].clone())
         .unwrap();
     let evidence = state
+        .model
         .simulation
         .active_analysis()
         .unwrap()
@@ -472,7 +491,7 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
             .is_err()
     );
 
-    let original = crate::io::capture_simulation_results(&state.simulation);
+    let original = crate::io::capture_simulation_results(&state.model.simulation);
     for version in [1, 15, 27, 40, 43] {
         let mut legacy = original.clone();
         legacy.schema_version = version;
@@ -491,8 +510,8 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
             .unwrap_err()
             .contains("null transient checkpoint")
     );
-    state.simulation.active_run_mut().unwrap().analyses[0].transient_checkpoint = None;
-    let mut legacy = crate::io::capture_simulation_results(&state.simulation);
+    state.model.simulation.active_run_mut().unwrap().analyses[0].transient_checkpoint = None;
+    let mut legacy = crate::io::capture_simulation_results(&state.model.simulation);
     let digest = legacy.runs[0].dataset_content_digest.clone();
     legacy.schema_version = 43;
     legacy.migrate_to_current(ProjectId::new()).unwrap();
@@ -518,8 +537,12 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
     assert!(!library.shares_content_with(&before));
     // Imported images survive clearing native history and restoring a project.
     let mut state = AppState::default();
-    state.simulation.retained.imported_transient_checkpoints = before;
-    let persisted = crate::io::capture_simulation_results(&state.simulation);
+    state
+        .model
+        .simulation
+        .retained
+        .imported_transient_checkpoints = before;
+    let persisted = crate::io::capture_simulation_results(&state.model.simulation);
     assert!(!persisted.is_empty());
     let decoded: ProjectSimulationResults =
         serde_json::from_str(&serde_json::to_string(&persisted).unwrap()).unwrap();

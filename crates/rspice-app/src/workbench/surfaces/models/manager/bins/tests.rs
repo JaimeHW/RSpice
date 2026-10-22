@@ -68,7 +68,7 @@ fn placed(
 #[test]
 fn a_family_is_one_library_s_cards_sharing_a_base_name() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("foundry");
     for name in ["nch.1", "nch.2", "pch.1"] {
         library.add_model(DeviceModel::new(
@@ -76,7 +76,7 @@ fn a_family_is_one_library_s_cards_sharing_a_base_name() {
             crate::state::model_library::ModelType::Nmos,
         ));
     }
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
     let geometry = geometry((1.0e-7, 2.0e-7), (1.0e-7, 2.0e-7), (1.0, 2.0));
     let inspection = rspice_core::engine::ModelBinInspection {
         cards: [("nch.1", "nch"), ("nch.2", "nch"), ("pch.1", "pch")]
@@ -407,7 +407,7 @@ fn render_a_populated_bins_page() {
     };
 
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut pending = Vec::new();
     let canvas = crate::ui::raster::render(egui::vec2(1180.0, 900.0), |ui, background| {
         egui::CentralPanel::default()
@@ -428,7 +428,7 @@ fn render_a_populated_bins_page() {
 #[ignore = "writes a PNG for a human to look at; run with --ignored"]
 fn render_the_blocked_bins_page() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut pending = Vec::new();
     let canvas = crate::ui::raster::render(egui::vec2(1180.0, 620.0), |ui, background| {
         egui::CentralPanel::default()

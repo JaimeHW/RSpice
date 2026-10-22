@@ -28,7 +28,7 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
     let mut top = Cell::new("top");
     top.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(top);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let ports = vec![
         PortSpec {
@@ -54,6 +54,7 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
         Point::new(0, 50),
     ));
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
@@ -69,6 +70,7 @@ fn storing_symbol_document_remaps_open_instance_wires_by_pin_name() {
         .expect("updated symbol stores");
 
     let parent = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -102,6 +104,7 @@ fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
         Point::new(0, 50),
     ));
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
@@ -118,6 +121,7 @@ fn storing_symbol_document_remaps_instance_wires_when_origin_moves() {
         .expect("updated symbol stores");
 
     let parent = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -150,6 +154,7 @@ fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
         Point::new(90, 120),
     ));
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
@@ -161,6 +166,7 @@ fn storing_symbol_document_remaps_rotated_and_mirrored_instance_wires() {
         .expect("updated symbol stores");
 
     let parent = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -189,6 +195,7 @@ fn storing_symbol_document_applies_wire_remaps_once() {
         Point::new(100, 0),
     ));
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), parent);
 
@@ -200,6 +207,7 @@ fn storing_symbol_document_applies_wire_remaps_once() {
         .expect("updated symbol stores");
 
     let parent = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -240,6 +248,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
         Point::new(160, -50),
     ));
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "top", "schematic").key(), top);
 
@@ -254,6 +263,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
         Point::new(-90, 20),
     ));
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "tb", "schematic").key(), tb);
 
@@ -265,6 +275,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
         .expect("updated symbol stores");
 
     let top = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -274,6 +285,7 @@ fn storing_symbol_document_remaps_all_open_parent_buffers() {
     assert_eq!(top.document().wires[1].points[0], Point::new(180, 10));
 
     let tb = state
+        .model
         .workspace
         .content
         .schematic_buffers

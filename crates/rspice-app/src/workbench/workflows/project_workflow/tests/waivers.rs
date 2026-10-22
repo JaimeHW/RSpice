@@ -18,8 +18,9 @@ fn collision(state: &mut AppState) -> DiagnosticRecord {
     state
         .run_active_design_checks()
         .expect("the checks run on the drawing");
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     state
+        .model
         .diagnostics
         .batch(&DiagnosticInputs::DesignCheck { subject })
         .expect("the checks published their findings")
@@ -35,6 +36,7 @@ fn a_waiver_survives_save_and_reopen() {
     let mut state = AppState::default();
     state.open_project_session();
     state
+        .model
         .schematic
         .with_undo("Label the collision", |schematic| {
             schematic.add_net_label(Point::new(600, 600), "sense".to_owned());
@@ -48,7 +50,7 @@ fn a_waiver_survives_save_and_reopen() {
     state
         .waive_finding(&target, REASON)
         .expect("a case collision may be waived");
-    let stored = state.schematic.document().waivers.clone();
+    let stored = state.model.schematic.document().waivers.clone();
 
     let path =
         std::env::temp_dir().join(format!("rspice-waiver-{}.rspiceproj", uuid::Uuid::new_v4()));
@@ -68,7 +70,7 @@ fn a_waiver_survives_save_and_reopen() {
     let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
     assert!(opened, "the saved project reopens");
 
-    assert_eq!(reopened.schematic.document().waivers, stored);
+    assert_eq!(reopened.model.schematic.document().waivers, stored);
     let finding = collision(&mut reopened);
     let waiver = finding
         .canonical

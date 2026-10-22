@@ -16,6 +16,7 @@ pub(super) fn component_panel(
 ) {
     let Some(component) = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -49,7 +50,7 @@ pub(super) fn component_panel(
 /// enclosing instances and stops there — and the design root is implicit, so an
 /// inspected component on the top sheet reports `/`.
 pub(super) fn containing_occurrence_path(state: &AppState) -> String {
-    state.workspace.content.occurrence_path().to_string()
+    state.model.workspace.content.occurrence_path().to_string()
 }
 
 /// What a component is, for its title: a built-in's catalog name, a generated
@@ -137,6 +138,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
         })
         .filter(|reference| {
             app.state
+                .model
                 .library_manager
                 .get_library(&reference.library)
                 .and_then(|library| library.get_cell(&reference.cell))
@@ -145,6 +147,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
         });
     let symbol_writable = symbol_view.as_ref().is_some_and(|reference| {
         app.state
+            .model
             .library_manager
             .get_library(&reference.library)
             .is_some_and(|library| !library.read_only)
@@ -232,6 +235,7 @@ pub(super) fn component_model_source_target(
             binding.view.clone(),
         );
         let is_veriloga = state
+            .model
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -250,7 +254,10 @@ pub(super) fn catalog_model_location(
     component: &Component,
 ) -> Option<(String, String)> {
     if let Some(binding) = component.library_cell.as_ref()
-        && let Some(library) = state.model_library_manager.get_library(&binding.library)
+        && let Some(library) = state
+            .model
+            .model_library_manager
+            .get_library(&binding.library)
     {
         let candidates = [
             binding.module_name.as_deref(),
@@ -273,6 +280,7 @@ pub(super) fn catalog_model_location(
     // an engineer most needs to see which copy wins.
     let model_name = crate::state::explicit_component_model(component)?;
     let provider = state
+        .model
         .model_library_manager
         .effective_definition_provider(
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
@@ -280,7 +288,10 @@ pub(super) fn catalog_model_location(
         )
         .ok()
         .flatten()?;
-    let library = state.model_library_manager.get_library(&provider.library)?;
+    let library = state
+        .model
+        .model_library_manager
+        .get_library(&provider.library)?;
     // A binned family opens at its first bin; which bin runs is the
     // simulator's choice from the instance's geometry.
     let model = library
@@ -309,6 +320,7 @@ fn bound_model_spice_level(state: &AppState, component: &Component) -> Option<u3
     let (library, model) = catalog_model_location(state, component)
         .or_else(|| foundation_default_model_location(state, component))?;
     let model = state
+        .model
         .model_library_manager
         .get_library(&library)?
         .models
@@ -332,6 +344,7 @@ fn foundation_default_model_location(
         _ => return None,
     };
     let provider = state
+        .model
         .model_library_manager
         .effective_definition_provider(
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
@@ -371,7 +384,11 @@ pub(super) fn bound_model_choices(
     else {
         return Vec::new();
     };
-    let Some(library) = state.model_library_manager.get_library(&binding.library) else {
+    let Some(library) = state
+        .model
+        .model_library_manager
+        .get_library(&binding.library)
+    else {
         return Vec::new();
     };
     let Some(current_model) = library.executable_cards(current).into_iter().next() else {
@@ -430,7 +447,11 @@ pub(super) fn bound_model_section_choices(
     let Some(binding) = component.library_cell.as_ref() else {
         return Vec::new();
     };
-    let Some(library) = state.model_library_manager.get_library(&binding.library) else {
+    let Some(library) = state
+        .model
+        .model_library_manager
+        .get_library(&binding.library)
+    else {
         return Vec::new();
     };
     let mut sections = library
@@ -473,6 +494,7 @@ pub(crate) fn apply_bound_model_choice(
     app.state.commit_inline_component_edit()?;
     let component = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -495,6 +517,7 @@ pub(crate) fn apply_bound_model_choice(
 
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library(&library_name)
         .ok_or_else(|| format!("Model library '{library_name}' is no longer loaded."))?;
@@ -511,10 +534,11 @@ pub(crate) fn apply_bound_model_choice(
         .then(|| cards[0].file_path.clone())
         .flatten()
         .or_else(|| library.root_path.clone());
-    let changed =
-        app.state
-            .schematic
-            .select_instance_model(component_id, candidate_name, candidate_source);
+    let changed = app.state.model.schematic.select_instance_model(
+        component_id,
+        candidate_name,
+        candidate_source,
+    );
     if changed {
         app.invalidate_simulation_preflight();
     }
@@ -531,6 +555,7 @@ pub(super) fn apply_bound_model_section(
     }
     let Some(component) = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -555,6 +580,7 @@ pub(super) fn apply_bound_model_section(
     let selected = (!selected_section.trim().is_empty()).then(|| selected_section.to_owned());
     if app
         .state
+        .model
         .schematic
         .select_instance_model_section(component_id, selected)
     {
@@ -644,7 +670,7 @@ pub(super) fn parameters_section(
     let declared = crate::state::parse_params_string(&component.params);
     let inherited = format!(
         "inherit · {} °C",
-        app.state.sim_setup.reference_pvt.temperature_celsius
+        app.state.model.sim_setup.reference_pvt.temperature_celsius
     );
     let mut rejection = supports_instance_temperature(&app.state, component)
         .then(|| {
@@ -1177,6 +1203,7 @@ pub(super) fn operating_point_rows(
 /// would read the operating point of a different instance of the same master.
 pub(super) fn device_engine_name(state: &AppState, component: &Component) -> Option<String> {
     state
+        .model
         .workspace
         .content
         .occurrence_path()
@@ -1190,7 +1217,7 @@ pub(super) fn operating_point(ui: &mut Ui, app: &RSpiceApp, component: &Componen
     let Some(engine_name) = device_engine_name(&app.state, component) else {
         return;
     };
-    let Some(run) = app.state.simulation.active_run() else {
+    let Some(run) = app.state.model.simulation.active_run() else {
         return;
     };
     let Some(entry) = run
@@ -1294,9 +1321,9 @@ pub(super) fn retained_component_soa(
     state: &AppState,
     component_name: &str,
 ) -> Option<ComponentSoaDisplay> {
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     let receipt = run.prepared_receipt()?;
-    if receipt.project_revision() != state.workspace.content.project.revision() {
+    if receipt.project_revision() != state.model.workspace.content.project.revision() {
         return None;
     }
 

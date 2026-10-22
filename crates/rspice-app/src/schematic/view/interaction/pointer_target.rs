@@ -47,6 +47,6 @@ pub(super) fn pointer_target_with_filter(
         symbol_context,
         ctx,
         viewport,
-        || state.workspace.content.active_view.display_path(),
+        || state.model.workspace.content.active_view.display_path(),
     )
 }

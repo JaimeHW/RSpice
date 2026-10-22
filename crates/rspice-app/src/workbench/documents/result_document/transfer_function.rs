@@ -13,8 +13,8 @@ use rspice_results_ui::transfer_function::gain_unit;
 use rspice_results_ui::transfer_function::{self as view, TransferFunctionView};
 
 fn active_transfer_function(state: &AppState) -> Option<TransferFunctionView<'_>> {
-    let run = state.simulation.active_run()?;
-    let analysis = state.simulation.active_analysis()?;
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
     let payload = analysis.result_payload.as_ref()?;
     let AnalysisResultPayload::TransferFunction {
         input_source,
@@ -134,8 +134,8 @@ mod tests {
         for analysis in analyses {
             run.add_analysis(analysis);
         }
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         state
     }
 
@@ -156,7 +156,7 @@ mod tests {
 
         assert!(active_transfer_function(&state).is_none());
         assert!(!active_payload_is_valid(&state));
-        assert!(state.simulation.select_analysis(1));
+        assert!(state.model.simulation.select_analysis(1));
 
         let view = active_transfer_function(&state).expect("selected TF payload is active");
         assert_eq!(view.analysis_label, "XF active");
@@ -202,12 +202,12 @@ mod tests {
         assert_eq!(first.analysis_label, "A per V");
         assert_eq!(gain_unit(&first), "A/V");
 
-        assert!(state.simulation.select_analysis(1));
+        assert!(state.model.simulation.select_analysis(1));
         let second = active_transfer_function(&state).expect("second TF");
         assert_eq!(second.analysis_label, "V per A");
         assert_eq!(gain_unit(&second), "V/A");
 
-        assert!(state.simulation.select_analysis(2));
+        assert!(state.model.simulation.select_analysis(2));
         let relative = active_transfer_function(&state).expect("relative TF");
         assert_eq!(relative.analysis_label, "Relative");
         assert_eq!(gain_unit(&relative), "1");
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(view.dataset_authority, "prepared receipt unavailable");
         assert_eq!(
             view.dataset_id,
-            state.simulation.active_run().unwrap().dataset_id
+            state.model.simulation.active_run().unwrap().dataset_id
         );
     }
 }

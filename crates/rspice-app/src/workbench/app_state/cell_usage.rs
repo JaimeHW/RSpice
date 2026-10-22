@@ -35,7 +35,7 @@ impl AppState {
         cell: &str,
         view: Option<&str>,
     ) -> Vec<CellInstanceUse> {
-        let content = &self.workspace.content;
+        let content = &self.model.workspace.content;
         let live = matches!(
             content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
@@ -44,7 +44,7 @@ impl AppState {
         let mut uses = Vec::new();
         if let Some(reference) = &live {
             collect(
-                self.schematic.as_ref(),
+                self.model.schematic.as_ref(),
                 reference,
                 (library, cell, view),
                 &mut uses,
@@ -126,19 +126,22 @@ mod tests {
     #[test]
     fn instances_come_from_the_open_editor_and_every_other_buffer_once() {
         let mut state = AppState::default();
-        let active = state.workspace.content.active_view.clone();
+        let active = state.model.workspace.content.active_view.clone();
         let symbol = LibraryCellInstance::new("behavioral", "gain", "symbol");
         let veriloga = LibraryCellInstance::new("behavioral", "gain", "veriloga");
         state
+            .model
             .schematic
             .add_library_cell_component(Point::origin(), symbol.clone());
         // A stale copy of the open schematic must not be counted beside it.
         state
+            .model
             .workspace
             .insert_schematic_editor(active.key(), SchematicState::default());
         let mut bench = SchematicState::default();
         bench.add_library_cell_component(Point::origin(), veriloga);
         state
+            .model
             .workspace
             .insert_schematic_editor("work/bench/schematic".to_owned(), bench);
 

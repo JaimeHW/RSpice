@@ -238,6 +238,7 @@ fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
 
     let mut state = engine_facing_state(&draft);
     let axis = state
+        .model
         .sim_setup
         .run_set
         .dimensions
@@ -247,7 +248,7 @@ fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
         .id
         .clone();
     let transaction = dispatch(
-        &mut state.sim_setup.run_set,
+        &mut state.model.sim_setup.run_set,
         RunSetAction::SetValues {
             id: axis,
             // One value per line: the axis is authored the way the run-set
@@ -263,9 +264,10 @@ fn an_inherited_temperature_axis_round_trips_as_the_axis_the_plan_declared() {
     );
     assert_eq!(
         state
+            .model
             .sim_setup
             .run_set
-            .declared_temperatures_celsius(state.sim_setup.reference_pvt),
+            .declared_temperatures_celsius(state.model.sim_setup.reference_pvt),
         Some(DECLARED.to_vec()),
         "the premise of this test is the declaration it inherits"
     );
@@ -357,7 +359,7 @@ fn the_periodic_small_signal_options_round_trip_through_the_deck_reader() {
     rspice_core::netlist::parse_netlist(&deck)
         .unwrap_or_else(|error| panic!("the engine must read the deck back: {error}\n{deck}"));
     let queue = super::manual_deck::build_manual_deck_queue(
-        pac_state.sim_setup.reference_pvt.temperature_celsius,
+        pac_state.model.sim_setup.reference_pvt.temperature_celsius,
         &deck,
     )
     .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
@@ -517,7 +519,7 @@ fn the_periodic_transfer_and_stability_controls_reach_the_engines_own_card() {
     // The same deck through the Studio's own reader, which is the route a
     // hand-written deck takes and the one that builds the typed run.
     let queue = super::manual_deck::build_manual_deck_queue(
-        pxf_state.sim_setup.reference_pvt.temperature_celsius,
+        pxf_state.model.sim_setup.reference_pvt.temperature_celsius,
         &deck,
     )
     .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
@@ -624,7 +626,7 @@ fn a_periodic_small_signal_card_names_the_carrier_it_linearizes_around() {
     // The same deck through the Studio's own reader: a named `.PSS` carrier is
     // the binding this pipeline already makes, so the deck queues.
     let queue = super::manual_deck::build_manual_deck_queue(
-        pac_state.sim_setup.reference_pvt.temperature_celsius,
+        pac_state.model.sim_setup.reference_pvt.temperature_celsius,
         &deck,
     )
     .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
@@ -773,7 +775,7 @@ fn an_autonomous_pss_round_trips_through_the_deck_reader_as_autonomous() {
 
         let deck = format!("{FIXTURE_DECK}{directive}\n.end\n");
         let queue = super::manual_deck::build_manual_deck_queue(
-            state.sim_setup.reference_pvt.temperature_celsius,
+            state.model.sim_setup.reference_pvt.temperature_celsius,
             &deck,
         )
         .unwrap_or_else(|errors| panic!("the deck reader refused: {}", errors.join("; ")));
@@ -992,7 +994,7 @@ fn qpss_card_studio_and_manual_deck_resolve_the_same_complete_configuration() {
         "QPSS integration\nVDRIVE in 0 AC .1\nR1 in out 1k\nR2 out 0 1k\nIDRIVE 0 out AC 1u\n{directive}\n.end\n"
     );
     let queue = super::manual_deck::build_manual_deck_queue(
-        state.sim_setup.reference_pvt.temperature_celsius,
+        state.model.sim_setup.reference_pvt.temperature_celsius,
         &deck,
     )
     .unwrap();

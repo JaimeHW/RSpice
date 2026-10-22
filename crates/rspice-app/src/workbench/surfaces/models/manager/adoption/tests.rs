@@ -43,11 +43,16 @@ fn session(catalog: Vec<u8>, archive: &[u8]) -> (ModelHub, Store, AppState) {
     hub.install(&transport, PACK_ID, VERSION).expect("install");
 
     let mut state = AppState::default();
-    state.model_library_manager.clear();
-    hub.add_part_to_project(&mut state.model_library_manager, PACK_ID, VERSION, PART_ID)
-        .expect("the project retains the divider");
+    state.model.model_library_manager.clear();
     hub.add_part_to_project(
-        &mut state.model_library_manager,
+        &mut state.model.model_library_manager,
+        PACK_ID,
+        VERSION,
+        PART_ID,
+    )
+    .expect("the project retains the divider");
+    hub.add_part_to_project(
+        &mut state.model.model_library_manager,
         PACK_ID,
         VERSION,
         BIAS_PART_ID,
@@ -231,7 +236,7 @@ fn a_pack_this_project_pinned_nothing_from_offers_no_adoption() {
         &[(VERSION, &archive), (NEXT_VERSION, &next)],
     );
     let service = service_of(&store, hub);
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
 
     let catalog = hub::hub_catalog(&service, &state);
     let row = hub::selected_row(&catalog, &state).expect("the pack is listed");

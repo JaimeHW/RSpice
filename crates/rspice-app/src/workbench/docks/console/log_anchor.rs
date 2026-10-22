@@ -182,18 +182,19 @@ mod tests {
         let a = Point::new(0, 0);
         let b = Point::new(40, 0);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::new(91, vec![a, b]));
-        state.simulation.source.cross_probe.update(
-            state.workspace.content.active_view.clone(),
+        state.model.simulation.source.cross_probe.update(
+            state.model.workspace.content.active_view.clone(),
             HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
             HashMap::from([("OUT".to_owned(), vec![a, b])]),
             HashMap::new(),
-            state.schematic.topology_version(),
+            state.model.schematic.topology_version(),
         );
-        state.log_buffer.clear();
+        state.model.log_buffer.clear();
         state
     }
 
@@ -205,7 +206,7 @@ mod tests {
         state
             .workbench
             .activate(crate::workbench::state::Workspace::Results);
-        state.log_buffer.log_anchored(
+        state.model.log_buffer.log_anchored(
             crate::diagnostics::LogSeverity::Error,
             LogSource::Run,
             "Analysis failed: no DC path at OUT",
@@ -218,7 +219,14 @@ mod tests {
         double_click_console_row(&mut state, "no DC path at OUT");
 
         assert!(
-            state.schematic.session.editor.selection.wires.contains(&91),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .wires
+                .contains(&91),
             "the row's anchor must mark the conductor the run named"
         );
         assert_eq!(
@@ -240,7 +248,7 @@ mod tests {
             nets: vec!["DELETED".to_owned()],
             devices: Vec::new(),
         };
-        state.log_buffer.log_anchored(
+        state.model.log_buffer.log_anchored(
             crate::diagnostics::LogSeverity::Error,
             LogSource::Run,
             "Analysis failed: no DC path at DELETED",
@@ -258,7 +266,14 @@ mod tests {
         double_click_console_row(&mut state, "no DC path at DELETED");
 
         assert!(
-            state.schematic.session.editor.selection.wires.is_empty(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .wires
+                .is_empty(),
             "an inert row must mark nothing"
         );
         assert_eq!(
@@ -268,6 +283,7 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .log_buffer
                 .entries()
                 .all(|entry| !entry.message.contains("Marked")),
@@ -280,13 +296,14 @@ mod tests {
     #[test]
     fn a_run_line_opens_its_log_and_refuses_once_the_run_is_gone() {
         let mut app = RSpiceApp::test_instance();
-        app.state.log_buffer.clear();
+        app.state.model.log_buffer.clear();
         app.state
+            .model
             .simulation
             .retained
             .runs
             .push(SimulationRun::new(7));
-        app.state.log_buffer.log_anchored(
+        app.state.model.log_buffer.log_anchored(
             crate::diagnostics::LogSeverity::Info,
             LogSource::Run,
             "Run 7 started: Transient",
@@ -309,7 +326,7 @@ mod tests {
             .workbench
             .console_view
             .open(ConsoleChannel::Session);
-        app.state.simulation.retained.runs.clear();
+        app.state.model.simulation.retained.runs.clear();
         let anchor = LogAnchor::ResultRun { run_sequence: 7 };
         let refusal = app
             .state

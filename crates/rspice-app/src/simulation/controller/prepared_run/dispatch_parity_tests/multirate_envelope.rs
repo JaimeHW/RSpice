@@ -20,7 +20,7 @@ fn multirate_envelope_saved_plan_retains_its_solver_through_authorized_dispatch(
         })
         .unwrap();
     let saved = serde_json::to_vec(plan_mut(&mut state)).unwrap();
-    state.sim_setup.analysis_plan = Some(serde_json::from_slice(&saved).unwrap());
+    state.model.sim_setup.analysis_plan = Some(serde_json::from_slice(&saved).unwrap());
     plan_mut(&mut state).prepare_after_restore();
     let mut controller = SimulationController::new();
     let snapshot =

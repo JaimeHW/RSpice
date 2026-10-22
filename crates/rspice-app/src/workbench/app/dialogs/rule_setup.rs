@@ -45,7 +45,7 @@ pub(crate) fn open_rule_setup(state: &mut AppState) {
     }
     state.dialogs.rule_setup = RuleSetupDialogState {
         open: true,
-        draft: (*state.workspace.content.design_rules).clone(),
+        draft: (*state.model.workspace.content.design_rules).clone(),
         refusal: None,
     };
 }
@@ -69,7 +69,7 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
     let read_only = state.workbench.safe_mode.project_read_only();
     let unread = unread_issue(&state.dialogs.rule_setup.draft);
     let editable = !read_only && unread.is_none();
-    let changed = state.dialogs.rule_setup.draft != *state.workspace.content.design_rules;
+    let changed = state.dialogs.rule_setup.draft != *state.model.workspace.content.design_rules;
     let mut dialog = Dialog::new(TITLE, PRIMARY)
         .description(DESCRIPTION)
         .size(DialogSize::Manager)
@@ -110,8 +110,8 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
 /// because what blocks a run has changed.
 fn apply_rule_setup(state: &mut AppState) {
     let draft = state.dialogs.rule_setup.draft.clone();
-    *state.workspace.content.design_rules = draft;
-    state.workspace.content.project_metadata_dirty = true;
+    *state.model.workspace.content.design_rules = draft;
+    state.model.workspace.content.project_metadata_dirty = true;
     state.workbench.preflight.invalidate();
     state.publish_rule_deck_issues();
     state.dialogs.rule_setup = RuleSetupDialogState::default();
@@ -256,6 +256,7 @@ mod tests {
     fn the_dialog_opens_on_the_projects_deck_and_applies_its_draft() {
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .workspace
             .content
             .design_rules
@@ -265,7 +266,7 @@ mod tests {
         assert!(app.state.dialogs.rule_setup.open);
         assert_eq!(
             app.state.dialogs.rule_setup.draft,
-            *app.state.workspace.content.design_rules
+            *app.state.model.workspace.content.design_rules
         );
 
         app.state
@@ -274,12 +275,13 @@ mod tests {
             .draft
             .set_severity(DrcViolationType::FloatingNode, DrcSeverity::Info)
             .expect("a floating node may be demoted");
-        app.state.workspace.content.project_metadata_dirty = false;
+        app.state.model.workspace.content.project_metadata_dirty = false;
         apply_rule_setup(&mut app.state);
         assert!(!app.state.dialogs.rule_setup.open);
-        assert!(app.state.workspace.content.project_metadata_dirty);
+        assert!(app.state.model.workspace.content.project_metadata_dirty);
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .design_rules
@@ -321,7 +323,7 @@ mod tests {
     #[test]
     fn a_deck_this_build_cannot_read_opens_for_inspection_only() {
         let mut app = RSpiceApp::test_instance();
-        app.state.workspace.content.design_rules =
+        app.state.model.workspace.content.design_rules =
             serde_json::from_str(r#"{"schema_version":9}"#).expect("a stored deck always reads");
         open_rule_setup(&mut app.state);
         assert!(matches!(

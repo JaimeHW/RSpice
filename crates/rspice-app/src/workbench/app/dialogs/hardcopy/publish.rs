@@ -60,6 +60,7 @@ use rspice_hardcopy_contract::{
 
 fn retain_hardcopy_receipt(app: &mut RSpiceApp, receipt: HardcopyReceipt) -> Result<(), String> {
     app.state
+        .model
         .workspace
         .content
         .record_hardcopy_receipt(receipt.clone())
@@ -646,6 +647,7 @@ fn apply_open_resolved(
 ) -> Result<(), String> {
     let saved = app
         .state
+        .model
         .workspace
         .content
         .hardcopy_setups
@@ -701,6 +703,7 @@ fn apply_selected_resolved(
     };
     let saved = app
         .state
+        .model
         .workspace
         .content
         .hardcopy_setups
@@ -742,7 +745,7 @@ fn active_schematic_page_authority(
 
     if app.state.workbench.current_route().surface_id() != SurfaceId::Design
         || !matches!(
-            app.state.workspace.content.active_view_type(),
+            app.state.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
         || !matches!(
@@ -753,13 +756,14 @@ fn active_schematic_page_authority(
         return None;
     }
 
-    let cell_view_key = app.state.workspace.content.active_key();
+    let cell_view_key = app.state.model.workspace.content.active_key();
     let base_source_key = format!(
         "project:{}:cell-view:{cell_view_key}",
-        app.state.workspace.content.project.id().as_uuid()
+        app.state.model.workspace.content.project.id().as_uuid()
     );
     let governed_sheet = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -800,10 +804,11 @@ fn validate_schematic_page_authority(
 ) -> Result<(), String> {
     let Some(governed) = &authority.governed_sheet else {
         let active_governed_sheet = state
+            .model
             .workspace
             .content
             .design_management
-            .sheet_catalog(&state.workspace.content.active_key())
+            .sheet_catalog(&state.model.workspace.content.active_key())
             .and_then(|catalog| catalog.active_sheet_id());
         return if active_governed_sheet.is_none() {
             authority.edit.validate(state, "Page Setup")
@@ -814,10 +819,11 @@ fn validate_schematic_page_authority(
             )
         };
     };
-    if state.workspace.content.active_key() != governed.cell_view_key {
+    if state.model.workspace.content.active_key() != governed.cell_view_key {
         return Err("The active cell/view changed. Close and reopen Page Setup.".to_owned());
     }
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -843,6 +849,7 @@ fn authored_sheet_format(
     validate_schematic_page_authority(state, authority)?;
     if let Some(governed) = &authority.governed_sheet {
         return state
+            .model
             .workspace
             .content
             .design_management
@@ -851,7 +858,7 @@ fn authored_sheet_format(
             .map(|sheet| sheet.page_format().clone())
             .ok_or_else(|| "The governed active sheet is unavailable.".to_owned());
     }
-    let policy = state.schematic.document().document_policy;
+    let policy = state.model.schematic.document().document_policy;
     if let Some(custom) = policy.custom_page_size {
         return crate::state::SchematicSheetFormat::try_custom(
             "Custom",
@@ -969,10 +976,11 @@ fn active_retained_source_selection(
         SurfaceId::Design => {
             let active_sheet_suffix = app
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
-                .sheet_catalog(&app.state.workspace.content.active_key())
+                .sheet_catalog(&app.state.model.workspace.content.active_key())
                 .and_then(|catalog| catalog.active_sheet_id())
                 .map(|sheet_id| format!(":sheet:{sheet_id}"));
             active_sheet_suffix
@@ -1052,8 +1060,9 @@ fn metadata_for(
         crate::time_compat::unix_epoch().as_secs(),
     )?);
     let (header, provenance) = identity_lines(
-        app.state.workspace.content.project.display_name(),
+        app.state.model.workspace.content.project.display_name(),
         &app.state
+            .model
             .workspace
             .content
             .project
@@ -1440,7 +1449,13 @@ fn stage_print_mapping_persistence(
             Ok(StagedPrintMappingPersistence::Document)
         }
         rspice_hardcopy_contract::PrintMappingSaveScope::ProjectPrintSet(_) => {
-            let mut catalog = app.state.workspace.content.project_print_mappings.clone();
+            let mut catalog = app
+                .state
+                .model
+                .workspace
+                .content
+                .project_print_mappings
+                .clone();
             let receipt = catalog
                 .save(mapping.clone())
                 .map_err(|error| error.to_string())?;
@@ -1475,8 +1490,12 @@ fn commit_print_mapping_persistence(
     match staged {
         StagedPrintMappingPersistence::Document => Ok(()),
         StagedPrintMappingPersistence::Project { catalog, changed } => {
-            app.state.workspace.content.project_print_mappings = catalog;
-            app.state.workspace.content.project_print_mappings_dirty |= changed;
+            app.state.model.workspace.content.project_print_mappings = catalog;
+            app.state
+                .model
+                .workspace
+                .content
+                .project_print_mappings_dirty |= changed;
             Ok(())
         }
         StagedPrintMappingPersistence::Personal(catalog) => app
@@ -1754,15 +1773,15 @@ fn commit_authenticated_page_setup(
         validate_schematic_page_authority(&app.state, authority)?;
     }
 
-    let mut staged_setups = app.state.workspace.content.hardcopy_setups.clone();
+    let mut staged_setups = app.state.model.workspace.content.hardcopy_setups.clone();
     let outcome = staged_setups
         .save(source.authority(), pending.setup)
         .map_err(|error| error.to_string())?;
 
     commit_print_mapping_persistence(app, pending.staged_mapping)?;
-    app.state.workspace.content.hardcopy_setups = staged_setups;
+    app.state.model.workspace.content.hardcopy_setups = staged_setups;
     if outcome.disposition() != rspice_hardcopy_contract::SetupSaveDisposition::Unchanged {
-        app.state.workspace.content.hardcopy_setups_dirty = true;
+        app.state.model.workspace.content.hardcopy_setups_dirty = true;
     }
     Ok(format!(
         "Page setup {} for {}.",

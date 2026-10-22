@@ -432,8 +432,8 @@ pub(super) fn commit_create_plan(
     name: &str,
     new_plan: &NewSimulationPlanDraft,
 ) -> Result<(SimulationPlanId, String), String> {
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_id);
     // Read before the transaction, because `create_plan` retires the active plan
@@ -463,8 +463,8 @@ pub(super) fn commit_create_plan(
         .first()
         .map(|instance| instance.id());
     let name = setup.active_plan_name().to_string();
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.workspace = workspace;
     app.state.workbench.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     Ok((
@@ -554,7 +554,7 @@ mod tests {
     /// from the defaults `create_plan` mints, so inheriting one is observable.
     fn app_with_a_distinctive_active_plan() -> RSpiceApp {
         let mut app = RSpiceApp::test_instance();
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         setup
             .set_reference_pvt(ProcessCorner::FF, 85.0)
             .expect("a physical reference corner");
@@ -565,15 +565,15 @@ mod tests {
             source_digest: ContentDigest::from_bytes([3; 32]),
             selected_corner: Some("TT".to_owned()),
         });
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         assert_ne!(
-            app.state.sim_setup.options.reltol,
+            app.state.model.sim_setup.options.reltol,
             SimulationOptions::default().reltol,
             "the fixture's options must differ from the default, or inheriting \
              them proves nothing"
         );
         assert_ne!(
-            app.state.sim_setup.save_policy.retained_dataset_limit,
+            app.state.model.sim_setup.save_policy.retained_dataset_limit,
             SimulationSavePolicy::default().retained_dataset_limit,
             "the fixture's policy must differ from the default"
         );
@@ -648,6 +648,7 @@ mod tests {
         let mut app = app_with_a_distinctive_active_plan();
         let retired = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
@@ -704,9 +705,9 @@ mod tests {
     #[test]
     fn each_of_the_four_inputs_reaches_the_stored_plan() {
         let mut app = app_with_a_distinctive_active_plan();
-        let inherited_options = app.state.sim_setup.options.clone();
-        let inherited_policy = app.state.sim_setup.save_policy;
-        let inherited_bindings = app.state.sim_setup.model_bindings.clone();
+        let inherited_options = app.state.model.sim_setup.options.clone();
+        let inherited_policy = app.state.model.sim_setup.save_policy;
+        let inherited_bindings = app.state.model.sim_setup.model_bindings.clone();
 
         let (created, _) = commit_create_plan(
             &mut app,
@@ -723,6 +724,7 @@ mod tests {
 
         let stored = app
             .state
+            .model
             .sim_setup
             .export_plan(created)
             .expect("the retired plan is in the catalog");
@@ -768,14 +770,14 @@ mod tests {
             (false, false, true),
         ] {
             let mut app = app_with_a_distinctive_active_plan();
-            let source = app.state.sim_setup.clone();
+            let source = app.state.model.sim_setup.clone();
             commit_create_plan(
                 &mut app,
                 "Selective plan",
                 &draft_with(model, options, policy),
             )
             .expect("the create transaction commits");
-            let setup = &app.state.sim_setup;
+            let setup = &app.state.model.sim_setup;
 
             if model {
                 assert_eq!(
@@ -830,7 +832,7 @@ mod tests {
             .expect("accurate is a solver preset");
         commit_create_plan(&mut app, "Accurate plan", &draft_with(false, false, false))
             .expect("the create transaction commits");
-        let setup = &app.state.sim_setup;
+        let setup = &app.state.model.sim_setup;
         assert_eq!(setup.options.reltol, SimulationOptions::accurate().reltol);
         assert_ne!(setup.options.reltol, SimulationOptions::default().reltol);
         assert_eq!(setup.options.temp, CHOSEN_POINT.temperature_celsius);
@@ -846,17 +848,20 @@ mod tests {
         let mut app = app_with_a_distinctive_active_plan();
         let retired = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
         app.state
+            .model
             .workspace
             .content
             .ensure_active_plan_data(retired)
             .saved_outputs
             .push(retained_output());
         app.state
+            .model
             .simulation
             .retained
             .runs
@@ -970,7 +975,7 @@ mod tests {
     /// The temperature control cannot produce a value the transaction refuses.
     #[test]
     fn the_coldest_offered_temperature_is_one_the_catalog_accepts() {
-        let mut setup = RSpiceApp::test_instance().state.sim_setup.clone();
+        let mut setup = RSpiceApp::test_instance().state.model.sim_setup.clone();
         assert!(
             setup
                 .set_reference_pvt(ProcessCorner::TT, COLDEST_REFERENCE_CELSIUS)
@@ -1019,11 +1024,12 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let active = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let name = app.state.sim_setup.active_plan_name().to_string();
+        let name = app.state.model.sim_setup.active_plan_name().to_string();
         let mut draft = SimulationPlanManagerDraft::new(active, name);
         draft.mode = SimulationPlanManagerMode::Create;
         draft.name = "New simulation plan".to_owned();

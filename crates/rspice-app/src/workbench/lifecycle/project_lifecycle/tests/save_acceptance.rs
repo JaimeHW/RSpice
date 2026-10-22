@@ -12,9 +12,12 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
             state
                 .workbench
                 .activate(crate::workbench::state::Workspace::Design);
-            state.schematic.with_undo("Place resistor", |schematic| {
-                schematic.add_component(ComponentType::Resistor, Point::new(100, 100));
-            });
+            state
+                .model
+                .schematic
+                .with_undo("Place resistor", |schematic| {
+                    schematic.add_component(ComponentType::Resistor, Point::new(100, 100));
+                });
             save_native(
                 &mut state,
                 SaveScope::AllDocuments,
@@ -22,25 +25,29 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 DestinationAuthority::UserSelected,
             )
             .unwrap();
-            state.schematic.with_undo("Update resistor", |schematic| {
-                schematic.document_mut_for_test().components[0].value = "2k".to_owned();
-            });
+            state
+                .model
+                .schematic
+                .with_undo("Update resistor", |schematic| {
+                    schematic.document_mut_for_test().components[0].value = "2k".to_owned();
+                });
             let candidate = snapshot(&state).unwrap();
             let (bytes, _) =
                 rspice_project::persistence::serialized_project(&candidate.file).unwrap();
             let accepted_digest = state.project_lifecycle.binding().unwrap().accepted_digest;
             if later_change == 1 {
                 state
+                    .model
                     .schematic
                     .with_undo("Newer resistor edit", |schematic| {
                         schematic.document_mut_for_test().components[0].value = "3k".to_owned();
                     });
             } else if later_change == 2 {
-                state.sim_setup.options.reltol = -1.0;
+                state.model.sim_setup.options.reltol = -1.0;
             }
-            state.schematic.begin_operation("move preview");
-            state.schematic.document_mut_for_test().components[0].pos = Point::new(150, 100);
-            let operation = state.schematic.pending_operation_id();
+            state.model.schematic.begin_operation("move preview");
+            state.model.schematic.document_mut_for_test().components[0].pos = Point::new(150, 100);
+            let operation = state.model.schematic.pending_operation_id();
             state.sync_active_schematic_to_workspace();
             let digest = persistence::NativeStorage
                 .publish(
@@ -58,25 +65,25 @@ fn acknowledged_save_rebases_pending_cancellation_against_exact_saved_content() 
                 },
                 scope,
             );
-            assert_eq!(state.schematic.pending_operation_id(), operation);
+            assert_eq!(state.model.schematic.pending_operation_id(), operation);
             assert_eq!(
-                state.schematic.document().components[0].pos,
+                state.model.schematic.document().components[0].pos,
                 Point::new(150, 100)
             );
-            let key = state.workspace.content.active_key();
-            let mut inactive_copy = state.workspace.clone_schematic_editor(&key).unwrap();
+            let key = state.model.workspace.content.active_key();
+            let mut inactive_copy = state.model.workspace.clone_schematic_editor(&key).unwrap();
             assert!(inactive_copy.cancel_operation());
             assert_eq!(inactive_copy.session.is_dirty, later_change != 0);
-            assert!(state.schematic.cancel_operation());
+            assert!(state.model.schematic.cancel_operation());
             assert_eq!(
-                state.schematic.document().components[0].value,
+                state.model.schematic.document().components[0].value,
                 if later_change == 1 { "3k" } else { "2k" }
             );
             assert_eq!(
-                state.schematic.document().components[0].pos,
+                state.model.schematic.document().components[0].pos,
                 Point::new(100, 100)
             );
-            assert_eq!(state.schematic.session.is_dirty, later_change != 0);
+            assert_eq!(state.model.schematic.session.is_dirty, later_change != 0);
             assert_eq!(has_unsaved_changes(&state), later_change != 0);
             remove_project_artifacts(&path);
         }
@@ -101,9 +108,12 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         let saved_document = active_document(&state);
         let previous_generation = accepted_generation(&state);
         let previous_digest = state.project_lifecycle.binding().unwrap().accepted_digest;
-        state.schematic.with_undo("Place resistor", |schematic| {
-            schematic.add_component(ComponentType::Resistor, Point::new(1, 1));
-        });
+        state
+            .model
+            .schematic
+            .with_undo("Place resistor", |schematic| {
+                schematic.add_component(ComponentType::Resistor, Point::new(1, 1));
+            });
         let candidate = snapshot(&state).unwrap();
         let candidate_content = registry::content_digest(&candidate.file).unwrap();
         let (bytes, staged_digest) =
@@ -112,11 +122,14 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
         // Freeze bytes before the write. Inject a validation failure and a
         // newer authored edit while that write is pending. The browser's
         // post-publication adoption path must not depend on this newer draft.
-        let valid_reltol = state.sim_setup.options.reltol;
-        state.sim_setup.options.reltol = -1.0;
-        state.schematic.with_undo("Place capacitor", |schematic| {
-            schematic.add_component(ComponentType::Capacitor, Point::new(4, 1));
-        });
+        let valid_reltol = state.model.sim_setup.options.reltol;
+        state.model.sim_setup.options.reltol = -1.0;
+        state
+            .model
+            .schematic
+            .with_undo("Place capacitor", |schematic| {
+                schematic.add_component(ComponentType::Capacitor, Point::new(4, 1));
+            });
         assert!(snapshot(&state).is_err());
         let digest = persistence::NativeStorage
             .publish(
@@ -151,17 +164,17 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
             candidate_content
         );
         assert_eq!(
-            state.schematic.document().components.len(),
+            state.model.schematic.document().components.len(),
             2,
             "later edits survive adoption"
         );
-        assert_eq!(state.sim_setup.options.reltol, -1.0);
-        assert!(state.log_buffer.entries().any(|entry| {
+        assert_eq!(state.model.sim_setup.options.reltol, -1.0);
+        assert!(state.model.log_buffer.entries().any(|entry| {
             entry.severity == LogSeverity::Warning && entry.message.contains("current draft")
         }));
         assert!(has_unsaved_changes(&state));
         assert!(active_document_is_dirty(&state));
-        assert!(state.schematic.session.is_dirty);
+        assert!(state.model.schematic.session.is_dirty);
         assert!(
             state
                 .project_lifecycle
@@ -179,7 +192,7 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
 
         // Repairing the draft restores an exact comparison with the newly
         // written baseline. Undo removes only the edit made after staging.
-        state.sim_setup.options.reltol = valid_reltol;
+        state.model.sim_setup.options.reltol = valid_reltol;
         refresh_registry(&mut state).unwrap();
         assert!(
             !state
@@ -189,10 +202,10 @@ fn acknowledged_save_adopts_published_content_despite_invalid_newer_draft() {
                 .is_dirty(&ProjectDocumentId::SimulationPlan)
         );
         assert!(active_document_is_dirty(&state));
-        assert!(state.schematic.undo());
+        assert!(state.model.schematic.undo());
         refresh_registry(&mut state).unwrap();
         assert!(!has_unsaved_changes(&state));
-        assert!(!state.schematic.session.is_dirty);
+        assert!(!state.model.schematic.session.is_dirty);
         assert!(saved_snapshot_authorizes_continuation(
             &state,
             scope,
@@ -209,13 +222,14 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
         .project_lifecycle
         .accept_project(snapshot(&state).unwrap(), None);
     refresh_registry(&mut state).unwrap();
-    let library_revision = state.library_manager.revision();
-    let valid_reltol = state.sim_setup.options.reltol;
-    state.sim_setup.options.reltol = -1.0;
+    let library_revision = state.model.library_manager.revision();
+    let valid_reltol = state.model.sim_setup.options.reltol;
+    state.model.sim_setup.options.reltol = -1.0;
     assert!(refresh_registry(&mut state).is_err());
-    assert!(state.schematic.session.is_dirty);
+    assert!(state.model.schematic.session.is_dirty);
     assert!(
         state
+            .model
             .workspace
             .content
             .open_views
@@ -224,15 +238,21 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .schematic_buffers
             .keys()
-            .all(|key| state.workspace.schematic_editor(key).unwrap().is_dirty())
+            .all(|key| state
+                .model
+                .workspace
+                .schematic_editor(key)
+                .unwrap()
+                .is_dirty())
     );
-    assert!(state.workspace.content.project_metadata_dirty);
-    assert!(state.workspace.content.netlist_source_dirty);
-    assert!(state.workspace.content.project_sources_dirty);
+    assert!(state.model.workspace.content.project_metadata_dirty);
+    assert!(state.model.workspace.content.netlist_source_dirty);
+    assert!(state.model.workspace.content.project_sources_dirty);
     assert!(
         state
             .project_lifecycle
@@ -255,6 +275,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     );
     assert!(
         state
+            .model
             .library_manager
             .libraries_by_key()
             .all(|(_, library)| {
@@ -264,23 +285,24 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
                     .all(|cell| cell.views.values().all(|view| view.modified))
             })
     );
-    assert_eq!(state.library_manager.revision(), library_revision);
+    assert_eq!(state.model.library_manager.revision(), library_revision);
 
-    state.sim_setup.options.reltol = valid_reltol;
+    state.model.sim_setup.options.reltol = valid_reltol;
     refresh_registry(&mut state).unwrap();
     assert!(!has_unsaved_changes(&state));
-    assert!(!state.schematic.session.is_dirty);
+    assert!(!state.model.schematic.session.is_dirty);
     assert!(
         state
+            .model
             .workspace
             .content
             .open_views
             .iter()
             .all(|view| !view.dirty)
     );
-    assert!(!state.workspace.content.project_metadata_dirty);
-    assert!(!state.workspace.content.netlist_source_dirty);
-    assert!(!state.workspace.content.project_sources_dirty);
+    assert!(!state.model.workspace.content.project_metadata_dirty);
+    assert!(!state.model.workspace.content.netlist_source_dirty);
+    assert!(!state.model.workspace.content.project_sources_dirty);
     assert!(
         state
             .project_lifecycle
@@ -292,6 +314,7 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
     );
     assert!(
         state
+            .model
             .library_manager
             .libraries_by_key()
             .all(|(_, library)| {
@@ -301,5 +324,5 @@ fn failed_registry_refresh_cannot_leave_clean_document_indicators() {
                     .all(|cell| cell.views.values().all(|view| !view.modified))
             })
     );
-    assert_eq!(state.library_manager.revision(), library_revision);
+    assert_eq!(state.model.library_manager.revision(), library_revision);
 }

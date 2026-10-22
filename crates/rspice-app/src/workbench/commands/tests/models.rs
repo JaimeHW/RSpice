@@ -34,7 +34,7 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.model_library_manager.selected_library = None;
+    app.state.model.model_library_manager.selected_library = None;
     app.state.workbench.selected_model = None;
     assert_eq!(
         Command::ModelEditor.availability(&app),
@@ -43,8 +43,9 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
 
     let mut built_in = ModelLibrary::new("command-editor-built-in");
     built_in.add_model(DeviceModel::new("readonly_nch", ModelType::Nmos));
-    app.state.model_library_manager.add_library(built_in);
+    app.state.model.model_library_manager.add_library(built_in);
     app.state
+        .model
         .model_library_manager
         .select_library("command-editor-built-in")
         .expect("the fixture library is loaded");
@@ -82,7 +83,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    let initial_project_revision = app.state.workspace.content.project.revision();
+    let initial_project_revision = app.state.model.workspace.content.project.revision();
     let mut built_in = ModelLibrary::new("command copy built-in");
     built_in.pdk_name = "Example PDK".to_owned();
     built_in.technology_node = "45nm".to_owned();
@@ -92,8 +93,9 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     model.description = "Built-in command copy".to_owned();
     model.parameters.insert("vth0".to_owned(), 0.46);
     built_in.add_model(model);
-    app.state.model_library_manager.add_library(built_in);
+    app.state.model.model_library_manager.add_library(built_in);
     app.state
+        .model
         .model_library_manager
         .select_library("command copy built-in")
         .expect("the fixture library is loaded");
@@ -107,12 +109,16 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     Command::ModelCreateProjectCopy.execute(&mut app);
 
     assert!(
-        app.state.workspace.content.project.revision() > initial_project_revision,
+        app.state.model.workspace.content.project.revision() > initial_project_revision,
         "copy publication advances the guarded project revision"
     );
-    assert!(app.state.workspace.content.project_metadata_dirty);
+    assert!(app.state.model.workspace.content.project_metadata_dirty);
     assert_eq!(
-        app.state.model_library_manager.selected_library.as_deref(),
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
         Some("copy_nch project")
     );
     assert_eq!(
@@ -121,6 +127,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     );
     let project_copy = app
         .state
+        .model
         .model_library_manager
         .get_library("copy_nch project")
         .expect("command publishes the copy");
@@ -145,7 +152,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     assert_eq!(draft.model_name, "copy_nch");
     assert_eq!(
         draft.base_project_revision,
-        app.state.workspace.content.project.revision()
+        app.state.model.workspace.content.project.revision()
     );
     assert!(Command::ModelEditor.is_enabled(&app));
 
@@ -158,6 +165,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     assert!(undo_description.starts_with("create editable project model "));
     assert!(
         app.state
+            .model
             .model_library_manager
             .get_library("copy_nch project")
             .is_none(),
@@ -170,6 +178,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
         .expect("copy redo has one history item");
     assert!(
         app.state
+            .model
             .model_library_manager
             .get_library("copy_nch project")
             .is_some(),
@@ -190,8 +199,9 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
     let mut external = ModelLibrary::new("external command source");
     external.source_authority = ModelSourceAuthority::External;
     external.add_model(DeviceModel::new("external_nch", ModelType::Nmos));
-    app.state.model_library_manager.add_library(external);
+    app.state.model.model_library_manager.add_library(external);
     app.state
+        .model
         .model_library_manager
         .select_library("external command source")
         .expect("the fixture library is loaded");
@@ -202,6 +212,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
     );
 
     app.state
+        .model
         .model_library_manager
         .create_project_model(
             "already owned",
@@ -215,6 +226,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         )
         .expect("owned fixture");
     app.state
+        .model
         .model_library_manager
         .select_library("already owned")
         .expect("the fixture library is loaded");
@@ -225,6 +237,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
     );
 
     app.state
+        .model
         .model_library_manager
         .select_library("external command source")
         .expect("the fixture library is loaded");
@@ -252,6 +265,7 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
     app.state.open_project_session();
     let commit = app
         .state
+        .model
         .model_library_manager
         .create_project_model(
             "command-editor-owned",
@@ -268,6 +282,7 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
         )
         .expect("create coherent project-owned model");
     app.state
+        .model
         .model_library_manager
         .select_library(&commit.library_name)
         .expect("the fixture library is loaded");
@@ -322,6 +337,7 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
     let mut app = RSpiceApp::test_instance();
     let commit = app
         .state
+        .model
         .model_library_manager
         .create_project_model(
             "command-editor-closed-project",
@@ -335,6 +351,7 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
         )
         .expect("create retained project-owned model");
     app.state
+        .model
         .model_library_manager
         .select_library(&commit.library_name)
         .expect("the fixture library is loaded");
@@ -361,6 +378,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .model_library_manager
         .create_project_model(
             "command-qualification-owned",
@@ -373,12 +391,12 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
             },
         )
         .expect("create project model");
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "command-qualification-owned",
             "qualification_nch",
             project_revision,
@@ -407,7 +425,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
         app.state
             .workbench
             .model_editor
-            .validate_candidate(&app.state.model_library_manager, project_revision)
+            .validate_candidate(&app.state.model.model_library_manager, project_revision)
     );
     assert!(Command::ModelRunQualificationTests.is_enabled(&app));
 
@@ -449,8 +467,9 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     app.state
+        .model
         .pdk_config
         .add_library_path(root.to_string_lossy().into_owned());
 
@@ -461,9 +480,10 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     Command::RescanModelLibraries.execute(&mut app);
     app.state.drain_notices(&ctx);
 
-    assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
+    assert_eq!(app.state.model.pdk_config.discovered_files.len(), 1);
     let success = app
         .state
+        .model
         .log_buffer
         .entries()
         .last()
@@ -480,14 +500,16 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     // A library it could not read is worth interrupting for, with the way
     // to the Console line that lists every path.
     app.state
+        .model
         .pdk_config
         .add_library_path(root.join("missing").to_string_lossy().into_owned());
     Command::RescanModelLibraries.execute(&mut app);
     app.state.drain_notices(&ctx);
 
-    assert_eq!(app.state.pdk_config.discovered_files.len(), 1);
+    assert_eq!(app.state.model.pdk_config.discovered_files.len(), 1);
     let warning = app
         .state
+        .model
         .log_buffer
         .entries()
         .last()

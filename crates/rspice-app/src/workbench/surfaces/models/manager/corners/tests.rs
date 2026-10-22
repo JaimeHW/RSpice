@@ -255,6 +255,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
     let mut state = AppState::default();
     state.open_project_session();
     let library = state
+        .model
         .model_library_manager
         .load_library_bytes(
             "corner-lifecycle.lib",
@@ -262,7 +263,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
             None,
         )
         .expect("sectioned source imports");
-    let initial_revision = state.workspace.content.project.revision();
+    let initial_revision = state.model.workspace.content.project.revision();
     let mut pending = Vec::new();
     let mut app = ManagerRenderContext {
         state: &mut state,
@@ -272,6 +273,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
     add_corner(&mut app, &library, "hot", "125", "0.9");
     let draft = app
         .state
+        .model
         .model_library_manager
         .get_library(&library)
         .and_then(|library| library.corners.get("hot"))
@@ -289,6 +291,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
         "TT",
     );
     app.state
+        .model
         .model_library_manager
         .get_library(&library)
         .and_then(|library| library.corners.get("hot"))
@@ -299,6 +302,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
     unbind_corner_section(&mut app, &library, "hot", CornerSectionDomain::Composite);
     let unbound = app
         .state
+        .model
         .model_library_manager
         .get_library(&library)
         .and_then(|library| library.corners.get("hot"))
@@ -310,13 +314,14 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
     delete_corner(&mut app, &library, "hot");
     let retained = app
         .state
+        .model
         .model_library_manager
         .get_library(&library)
         .expect("library remains attached");
     assert!(!retained.corners.contains_key("hot"));
     assert!(retained.corners.values().any(|corner| corner.is_default));
-    assert!(app.state.workspace.content.project.revision() > initial_revision);
-    assert!(app.state.workspace.content.project_metadata_dirty);
+    assert!(app.state.model.workspace.content.project.revision() > initial_revision);
+    assert!(app.state.model.workspace.content.project_metadata_dirty);
 }
 
 #[test]
@@ -324,6 +329,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     let mut state = AppState::default();
     state.open_project_session();
     let library = state
+        .model
         .model_library_manager
         .load_library_bytes(
             "corner-authority.lib",
@@ -332,10 +338,12 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         )
         .expect("executable section imports");
     state
+        .model
         .model_library_manager
         .select_library(&library)
         .expect("the fixture library is loaded");
     let root_path = state
+        .model
         .model_library_manager
         .get_library(&library)
         .and_then(|library| library.root_path.clone())
@@ -348,14 +356,16 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         "TT",
     )];
     state
+        .model
         .model_library_manager
         .get_library_mut(&library)
         .expect("imported library remains present")
         .corners
         .insert(inspection_target.name.clone(), inspection_target);
-    let initial_revision = state.workspace.content.project.revision();
-    let initial_epoch = state.design_execution_epoch;
+    let initial_revision = state.model.workspace.content.project.revision();
+    let initial_epoch = state.model.design_execution_epoch;
     let initial_active = state
+        .model
         .model_library_manager
         .get_library(&library)
         .and_then(|library| library.selected_corner.clone());
@@ -384,6 +394,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     );
     assert_eq!(
         app.state
+            .model
             .model_library_manager
             .get_library(&library)
             .and_then(|library| library.selected_corner.as_deref()),
@@ -391,23 +402,24 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         "inspection must not change the executable section"
     );
     assert_eq!(
-        app.state.workspace.content.project.revision(),
+        app.state.model.workspace.content.project.revision(),
         initial_revision
     );
-    assert_eq!(app.state.design_execution_epoch, initial_epoch);
+    assert_eq!(app.state.model.design_execution_epoch, initial_epoch);
 
     activate_corner(&mut app, &library, &inspected.corner.name);
 
     assert_eq!(
         app.state
+            .model
             .model_library_manager
             .get_library(&library)
             .and_then(|library| library.selected_corner.as_deref()),
         Some(inspected.corner.name.as_str())
     );
-    assert!(app.state.workspace.content.project.revision() > initial_revision);
+    assert!(app.state.model.workspace.content.project.revision() > initial_revision);
     assert_eq!(
-        app.state.design_execution_epoch,
+        app.state.model.design_execution_epoch,
         initial_epoch.wrapping_add(1)
     );
 
@@ -426,6 +438,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     set_default_corner(&mut app, &library, &default_target);
     assert_eq!(
         app.state
+            .model
             .model_library_manager
             .get_library(&library)
             .and_then(|library| library.selected_corner.as_deref()),
@@ -501,7 +514,7 @@ fn a_matrix_cell_names_the_section_this_corner_binds_or_stays_blank() {
 #[test]
 fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("pdk");
     library.root_path = Some(PathBuf::from("pdk.lib"));
     library.corners.clear();
@@ -514,12 +527,13 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
     hot.maximum_temperature_c = Some(125.0);
     library.corners.insert("hot".to_owned(), hot);
     library.selected_corner = Some("hot".to_owned());
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
     state
+        .model
         .model_library_manager
         .select_library("pdk")
         .expect("the fixture library is loaded");
-    state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+    state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
 
     let rendered = |state: &mut AppState| {
         let ctx = egui::Context::default();
@@ -570,7 +584,7 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
     );
 
     // Inside the range — including exactly at the endpoint — is silent.
-    state.sim_setup.reference_pvt.temperature_celsius = 125.0;
+    state.model.sim_setup.reference_pvt.temperature_celsius = 125.0;
     assert!(
         rendered(&mut state)
             .iter()
@@ -659,7 +673,7 @@ fn a_long_section_is_capped_and_says_how_much_it_left() {
 /// `tt`, and one draft corner with a required domain left unbound.
 fn corner_page_state() -> AppState {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = library_with_sections(&["tt", "mc_g"], RETAINED_CORNER_FILE);
     library.corners.clear();
     let mut typical = corner_bound_to("tt", "tt");
@@ -676,8 +690,9 @@ fn corner_page_state() -> AppState {
     library.corners.insert("hot_5v5".to_owned(), draft);
     library.selected_corner = Some("tt".to_owned());
 
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
     state
+        .model
         .model_library_manager
         .select_library("pdk")
         .expect("the fixture library is loaded");
@@ -769,6 +784,7 @@ fn a_section_the_retained_file_does_not_carry_is_stated_rather_than_left_blank()
     // failed rather than as a binding that cannot resolve.
     let mut state = corner_page_state();
     let library = state
+        .model
         .model_library_manager
         .get_library_mut("pdk")
         .expect("the fixture library");
@@ -882,7 +898,7 @@ fn a_corner_the_bind_dialog_cannot_help_is_offered_no_row_control() {
     // source at all, and one whose own contract is malformed. Offering a
     // control that cannot change the verdict is worse than offering none.
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = library_with_sections(&["tt"], RETAINED_CORNER_FILE);
     library.corners.clear();
     library.root_path = None;
@@ -894,8 +910,9 @@ fn a_corner_the_bind_dialog_cannot_help_is_offered_no_row_control() {
     let mut malformed = corner_bound_to("bad", "tt");
     malformed.vdd_factor = 0.0;
     library.corners.insert("bad".to_owned(), malformed);
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
     state
+        .model
         .model_library_manager
         .select_library("pdk")
         .expect("the fixture library is loaded");
@@ -1025,6 +1042,7 @@ fn the_statistical_card_counts_only_what_the_bound_section_declares() {
 fn a_corner_binding_no_statistics_says_so_instead_of_inventing_a_sampling_plan() {
     let mut state = corner_page_state();
     let library = state
+        .model
         .model_library_manager
         .get_library_mut("pdk")
         .expect("the fixture library");
@@ -1088,6 +1106,7 @@ fn render_corner_page_states() {
     let mut narrow = corner_page_state();
     {
         let library = narrow
+            .model
             .model_library_manager
             .get_library_mut("pdk")
             .expect("the fixture library");
@@ -1095,7 +1114,7 @@ fn render_corner_page_states() {
         typical.minimum_temperature_c = Some(-40.0);
         typical.maximum_temperature_c = Some(125.0);
     }
-    narrow.sim_setup.reference_pvt.temperature_celsius = 150.0;
+    narrow.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
 
     for (name, state) in [
         ("corners-bound", &mut bound),

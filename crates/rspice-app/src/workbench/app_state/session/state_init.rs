@@ -171,33 +171,35 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         };
 
     let mut state = AppState {
-        schematic,
-        simulation: crate::state::SimulationState::default(),
-        design_execution_epoch: 0,
-        active_schematic_epoch: 0,
-        project_design_history: Default::default(),
-        design_checks: Default::default(),
-        diagnostics: Default::default(),
+        model: crate::workbench::app_state::Model {
+            schematic,
+            simulation: crate::state::SimulationState::default(),
+            design_execution_epoch: 0,
+            active_schematic_epoch: 0,
+            project_design_history: Default::default(),
+            design_checks: Default::default(),
+            diagnostics: Default::default(),
+            sim_setup,
+            log_buffer: crate::diagnostics::LogBuffer::default(),
+            notices: Default::default(),
+            netlist_artifacts: Box::default(),
+            library_manager,
+            library_edit_locks: crate::state::ProjectLibraryLockAuthority::default(),
+            workspace,
+            project_open: Default::default(),
+            pdk_config,
+            model_library_manager,
+        },
         problems_view: crate::workbench::app_state::problems_view::ProblemsView::default(),
         dialogs: Box::new(DialogState::default()),
-        sim_setup,
-        log_buffer: crate::diagnostics::LogBuffer::default(),
-        notices: Default::default(),
-        netlist_artifacts: Box::default(),
         manual_run: Box::default(),
-        library_manager,
-        library_edit_locks: crate::state::ProjectLibraryLockAuthority::default(),
-        workspace,
         project_lifecycle: Box::default(),
-        project_open: Default::default(),
         pending_delete_cell: None,
         pending_delete_view: None,
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
         property_registry: crate::properties::PropertyEditorSchema::new(),
         calculator_panel: super::calculator::CalculatorPanel::new(),
         pdk_settings_dialog: super::pdk_settings::PdkSettingsDialogState::new(),
-        pdk_config,
-        model_library_manager,
         model_browser_state: crate::properties::model_browser::ModelBrowserState::default(),
         exit_requested: false,
         recent_files: Vec::new(),
@@ -251,6 +253,7 @@ mod tests {
     fn bootstrapped_code_sources_prepare_an_exact_snapshot_without_execution_authority() {
         let state = super::default_app_state();
         let automation = state
+            .model
             .workspace
             .content
             .project_sources
@@ -268,7 +271,7 @@ mod tests {
 
         assert_eq!(
             snapshot.project_id,
-            state.workspace.content.project.id().as_uuid()
+            state.model.workspace.content.project.id().as_uuid()
         );
         assert_eq!(snapshot.workspace_revision, automation.revision().get());
         assert_eq!(

@@ -24,20 +24,22 @@ use rspice_design::resolved_symbol::ResolvedSymbolSource;
 #[test]
 fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
     let mut state = AppState::default();
-    let empty_revision = state.library_manager.revision();
+    let empty_revision = state.model.library_manager.revision();
 
     state.sync_active_schematic_to_workspace();
 
     assert_eq!(
-        state.library_manager.revision(),
+        state.model.library_manager.revision(),
         empty_revision,
         "an empty generated-symbol synchronization must be revision-stable"
     );
 
     let port_id = state
+        .model
         .schematic
         .add_component(ComponentType::Port, Point::origin());
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -47,7 +49,7 @@ fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
         .value = "IN".to_owned();
 
     state.sync_active_schematic_to_workspace();
-    let generated_revision = state.library_manager.revision();
+    let generated_revision = state.model.library_manager.revision();
     assert!(
         generated_revision > empty_revision,
         "creating a generated symbol must advance the catalog revision"
@@ -55,7 +57,7 @@ fn generated_symbol_sync_advances_the_catalog_only_for_real_changes() {
 
     state.sync_active_schematic_to_workspace();
     assert_eq!(
-        state.library_manager.revision(),
+        state.model.library_manager.revision(),
         generated_revision,
         "repeating an identical generated-symbol synchronization must be a no-op"
     );
@@ -80,18 +82,19 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
     let mut cell = Cell::new("preserved");
     cell.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     let mut existing = SchematicState::default();
     existing.document_mut_for_test().document_policy.net_naming =
         crate::state::NetNamingPolicy::StrictCaseSensitive;
     state
+        .model
         .workspace
         .insert_schematic_editor(reference.key(), existing);
 
     state.open_workspace_view(reference);
 
     assert_eq!(
-        state.schematic.document().document_policy.net_naming,
+        state.model.schematic.document().document_policy.net_naming,
         crate::state::NetNamingPolicy::StrictCaseSensitive
     );
 }
@@ -190,7 +193,7 @@ fn state_with_amp_symbol(document: SymbolDocument) -> AppState {
         .expect("initial symbol stores");
     amp.add_view(symbol_view);
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     state
@@ -202,7 +205,7 @@ fn state_with_work_cell(cell_name: &str) -> AppState {
     let mut cell = Cell::new(cell_name);
     cell.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state.open_workspace_view(CellViewRef::new("work", cell_name, "schematic"));
     state
 }
@@ -213,7 +216,7 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
         ("IN", PortDirection::In, Point::new(-50, 0)),
         ("OUT", PortDirection::Out, Point::new(50, 0)),
     ]));
-    state.schematic = SchematicState::default();
+    state.model.schematic = SchematicState::default();
     let left = Component::new(1, ComponentType::CellInstance, Point::new(0, 0)).with_library_cell(
         amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
     );
@@ -221,14 +224,27 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
         Component::new(2, ComponentType::CellInstance, Point::new(200, 0)).with_library_cell(
             amp_binding(&[("IN", PortDirection::In), ("OUT", PortDirection::Out)]),
         );
-    state.schematic.document_mut_for_test().components = vec![left, right];
+    state.model.schematic.document_mut_for_test().components = vec![left, right];
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(3, Point::new(50, 0), Point::new(150, 0)));
-    state.schematic.session.editor.selection.select_component(1);
-    state.schematic.session.editor.selection.select_component(2);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(1);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(2);
 
     assert!(state.copy_active_schematic_selection());
     assert_eq!(state.ui.schematic_clipboard.components.len(), 2);
@@ -241,6 +257,7 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
 
 fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::ProjectSourceId {
     state
+        .model
         .library_manager
         .get_library_mut("work")
         .and_then(|library| library.get_cell_mut(cell))
@@ -257,6 +274,7 @@ fn add_cell_veriloga_source(state: &mut AppState, cell: &str) -> crate::state::P
     .expect("valid source bundle");
     let id = bundle.id();
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -273,7 +291,7 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
@@ -284,7 +302,7 @@ fn state_with_amp_symbol_pin(pin_name: &str, position: Option<Point>) -> AppStat
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = pin_name.to_owned();
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -313,24 +331,30 @@ fn legacy_primitives_content_migrates_to_user_library() {
     let mut cell = Cell::new("ISource AC");
     cell.add_view(View::new("schematic", ViewType::Schematic));
     legacy.add_cell(cell);
-    state.library_manager.add_library(legacy);
+    state.model.library_manager.add_library(legacy);
 
     let mut drawn = crate::state::SchematicState::default();
     drawn.add_component(ComponentType::Njfet, Point::new(0, 0));
     state
+        .model
         .workspace
         .insert_schematic_editor("primitives/ISource AC/schematic".to_owned(), drawn);
-    state.workspace.content.active_view =
+    state.model.workspace.content.active_view =
         crate::state::CellViewRef::new("primitives", "ISource AC", "schematic");
 
     state.migrate_legacy_primitives();
 
     assert!(
-        state.library_manager.get_library("primitives").is_none(),
+        state
+            .model
+            .library_manager
+            .get_library("primitives")
+            .is_none(),
         "legacy library must be gone"
     );
-    assert_eq!(state.workspace.content.active_view.library, "user");
+    assert_eq!(state.model.workspace.content.active_view.library, "user");
     let migrated = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -343,6 +367,7 @@ fn legacy_primitives_content_migrates_to_user_library() {
     );
     assert!(
         state
+            .model
             .library_manager
             .get_library("user")
             .and_then(|lib| lib.get_cell("ISource AC"))
@@ -363,7 +388,7 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
     let mut top = Cell::new("top2");
     top.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(top);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let amp_schematic = CellViewRef::new("work", "amp", "schematic");
     let amp_symbol = CellViewRef::new("work", "amp", "symbol");
@@ -372,22 +397,27 @@ fn leaving_symbol_view_does_not_save_stale_schematic_under_symbol_key() {
     let mut amp_buffer = SchematicState::default();
     amp_buffer.add_component(ComponentType::Port, Point::new(0, 0));
     state
+        .model
         .workspace
         .insert_schematic_editor(amp_schematic.key(), amp_buffer.clone());
-    state.schematic = amp_buffer;
-    state.workspace.content.active_view = amp_schematic.clone();
-    state.workspace.content.open_views = vec![crate::state::OpenCellView::new(
+    state.model.schematic = amp_buffer;
+    state.model.workspace.content.active_view = amp_schematic.clone();
+    state.model.workspace.content.open_views = vec![crate::state::OpenCellView::new(
         amp_schematic.clone(),
         ViewType::Schematic,
     )];
 
     state.open_workspace_view(amp_symbol.clone());
-    assert_eq!(state.workspace.content.active_view_type(), ViewType::Symbol);
+    assert_eq!(
+        state.model.workspace.content.active_view_type(),
+        ViewType::Symbol
+    );
 
     state.open_workspace_view(top_schematic);
 
     assert!(
         !state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -405,7 +435,7 @@ fn active_symbol_ports_read_the_paired_schematic_contract() {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
@@ -416,7 +446,7 @@ fn active_symbol_ports_read_the_paired_schematic_contract() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "OUT".to_owned();
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -437,7 +467,7 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
@@ -448,7 +478,7 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -459,6 +489,7 @@ fn generating_active_symbol_document_writes_symbol_view_metadata() {
         .expect("symbol document generated");
 
     let view = state
+        .model
         .library_manager
         .get_library("work")
         .and_then(|library| library.get_cell("amp"))
@@ -489,7 +520,7 @@ fn generate_symbol_document_is_one_undoable_transaction() {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
@@ -500,7 +531,7 @@ fn generate_symbol_document_is_one_undoable_transaction() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -552,7 +583,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
@@ -563,7 +594,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -571,6 +602,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
 
     assert!(
         !state
+            .model
             .library_manager
             .get_library("work")
             .and_then(|library| library.get_cell("amp"))
@@ -586,6 +618,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
         .expect("symbol document generated");
     assert!(
         state
+            .model
             .library_manager
             .get_library("work")
             .and_then(|library| library.get_cell("amp"))
@@ -604,6 +637,7 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
     );
 
     let view = state
+        .model
         .library_manager
         .get_library("work")
         .and_then(|library| library.get_cell("amp"))
@@ -614,8 +648,8 @@ fn undo_generate_symbol_restores_generated_fallback_metadata_state() {
         "undo must restore the missing authored metadata state"
     );
     let resolver = SymbolResolver::new(
-        &state.library_manager,
-        &state.workspace.content.schematic_buffers,
+        &state.model.library_manager,
+        &state.model.workspace.content.schematic_buffers,
     );
     let resolved = resolver
         .resolve_reference(&CellViewRef::new("work", "amp", "symbol"))
@@ -632,7 +666,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut schematic = SchematicState::default();
     let port_id = schematic.add_component(ComponentType::Port, Point::new(0, 0));
@@ -643,7 +677,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
         .find(|component| component.id == port_id)
         .expect("port exists")
         .value = "IN".to_owned();
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -654,6 +688,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
         .expect("pre-edit fallback document loads");
     assert!(
         !state
+            .model
             .library_manager
             .get_library("work")
             .and_then(|library| library.get_cell("amp"))
@@ -680,6 +715,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
             .expect("undo first manual edit")
     );
     let view = state
+        .model
         .library_manager
         .get_library("work")
         .and_then(|library| library.get_cell("amp"))
@@ -690,8 +726,8 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
         "undo must restore the missing authored metadata state"
     );
     let resolver = SymbolResolver::new(
-        &state.library_manager,
-        &state.workspace.content.schematic_buffers,
+        &state.model.library_manager,
+        &state.model.workspace.content.schematic_buffers,
     );
     let resolved = resolver
         .resolve_reference(&CellViewRef::new("work", "amp", "symbol"))
@@ -715,6 +751,7 @@ fn symbol_pin_checks_publish_records_routed_to_the_failing_pin() {
 
     let subject = CellViewRef::new("work", "amp", "symbol");
     let batch = state
+        .model
         .diagnostics
         .batches()
         .find(|batch| {
@@ -756,18 +793,21 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
     let mut state = state_with_work_cell("amp");
     let active_key = CellViewRef::new("work", "amp", "schematic").key();
     state
+        .model
         .workspace
         .insert_schematic_editor(active_key, SchematicState::default());
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
-    let project_revision_before = state.workspace.content.project.revision().get();
+    let project_revision_before = state.model.workspace.content.project.revision().get();
 
     let copied = state
         .copy_cell("work", "amp", "work", "amp_copy")
         .expect("copy succeeds");
 
     let copy = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -777,10 +817,10 @@ fn copy_cell_flushes_live_active_schematic_before_copying_buffers() {
     assert_eq!(copy.document().components.len(), 1);
     assert_eq!(copy.document().components[0].kind, ComponentType::Resistor);
     assert_eq!(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         project_revision_before + 1
     );
-    assert!(state.workspace.content.project_metadata_dirty);
+    assert!(state.model.workspace.content.project_metadata_dirty);
 }
 
 #[test]
@@ -788,6 +828,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
     let mut state = state_with_work_cell("amp");
     let original_id = add_cell_veriloga_source(&mut state, "amp");
     let configuration_id = state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -806,17 +847,18 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
         })
         .expect("configuration root");
     let inactive_configuration_id = state
+        .model
         .workspace
         .content
         .configuration_sets
         .clone_configuration(configuration_id, 1, "Characterization")
         .expect("inactive configuration root");
-    let project_revision_before_copy = state.workspace.content.project.revision().get();
+    let project_revision_before_copy = state.model.workspace.content.project.revision().get();
 
     state
         .copy_cell("work", "amp", "work", "amp_copy")
         .expect("copy succeeds");
-    let project = &state.workspace.content;
+    let project = &state.model.workspace.content;
     assert_eq!(
         project.project.revision().get(),
         project_revision_before_copy + 1
@@ -863,7 +905,7 @@ fn copy_and_rename_cell_keep_veriloga_source_ownership_exact() {
     state
         .rename_cell("work", "amp", "amp_renamed")
         .expect("rename succeeds");
-    let project = &state.workspace.content;
+    let project = &state.model.workspace.content;
     assert_eq!(
         project.project.revision().get(),
         project_revision_before_rename + 1
@@ -917,17 +959,22 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
     let original_id = add_cell_veriloga_source(&mut state, "\u{c9}tage");
     let persisted_key = CellViewRef::new("work", "\u{c9}tage", "schematic").key();
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
-    let before_sources = state.workspace.content.project_sources.clone();
+    let before_sources = state.model.workspace.content.project_sources.clone();
 
     let copy_error = state
         .copy_cell("work", "\u{c9}tage", "work", "\u{e9}TAGE")
         .expect_err("accented case aliases cannot create a second cell identity");
     assert!(copy_error.contains("conflicts with an existing cell"));
-    assert_eq!(state.workspace.content.project_sources, before_sources);
+    assert_eq!(
+        state.model.workspace.content.project_sources,
+        before_sources
+    );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -941,6 +988,7 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
     );
     assert_eq!(
         state
+            .model
             .library_manager
             .get_library("work")
             .expect("work library")
@@ -949,12 +997,14 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
     );
 
     state
+        .model
         .library_manager
         .get_library_mut("work")
         .expect("work library")
         .add_cell(Cell::new("Cible"));
-    let before_sources = state.workspace.content.project_sources.clone();
+    let before_sources = state.model.workspace.content.project_sources.clone();
     let before_revision = state
+        .model
         .workspace
         .content
         .project_sources
@@ -965,9 +1015,13 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
         .rename_cell("work", "\u{c9}tage", "cIBLE")
         .expect_err("rename cannot alias an existing canonical identity");
     assert!(rename_error.contains("conflicts with an existing cell"));
-    assert_eq!(state.workspace.content.project_sources, before_sources);
+    assert_eq!(
+        state.model.workspace.content.project_sources,
+        before_sources
+    );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .project_sources
@@ -977,6 +1031,7 @@ fn canonical_cell_collisions_reject_copy_and_rename_without_partial_mutation() {
         before_revision
     );
     let library = state
+        .model
         .library_manager
         .get_library("work")
         .expect("work library");
@@ -996,7 +1051,7 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
         point: Some(Point::new(-30, 0)),
     });
 
-    assert_eq!(state.workspace.content.active_view, reference);
+    assert_eq!(state.model.workspace.content.active_view, reference);
     assert_eq!(state.ui.symbol.editor.selected_pin.as_deref(), Some("IN"));
     assert_eq!(state.workbench.workspace, Workspace::Design);
 }
@@ -1010,7 +1065,7 @@ fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
     crate::schematic::view::violations::cycle_violation(&mut state, 1);
 
     assert_eq!(
-        state.workspace.content.active_view,
+        state.model.workspace.content.active_view,
         CellViewRef::new("work", "amp", "symbol")
     );
     assert_eq!(state.ui.symbol.editor.selected_pin.as_deref(), Some("IN"));
@@ -1027,7 +1082,7 @@ fn symbol_undo_history_is_scoped_to_active_view() {
         cell.add_view(View::new("symbol", ViewType::Symbol));
         library.add_cell(cell);
     }
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     state.open_workspace_view(CellViewRef::new("work", "amp_a", "symbol"));
     let before_a = SymbolDocument {
@@ -1089,7 +1144,7 @@ fn symbol_undo_and_redo_restore_editor_sidecar_atomically() {
     let mut cell = Cell::new("amp");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
     let document = SymbolDocument::default();
@@ -1140,7 +1195,7 @@ fn symbol_store_refuses_read_only_libraries() {
     let mut cell = Cell::new("amp");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state.open_workspace_view(CellViewRef::new("readonly", "amp", "symbol"));
 
     let error = state
@@ -1159,7 +1214,7 @@ fn read_only_symbol_edit_paths_use_consistent_refusal_text() {
     let mut cell = Cell::new("amp");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state.open_workspace_view(CellViewRef::new("readonly", "amp", "symbol"));
 
     let expected = "Read-only - 'readonly' masters cannot be edited";
@@ -1202,7 +1257,7 @@ fn opening_symbol_view_loads_the_paired_schematic_context() {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut paired = SchematicState::default();
     let port_id = paired.add_component(ComponentType::Port, Point::new(0, 0));
@@ -1214,12 +1269,13 @@ fn opening_symbol_view_loads_the_paired_schematic_context() {
         .expect("port exists")
         .value = "PAIR".to_owned();
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "amp", "schematic").key(), paired);
 
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
-    let ports = state.schematic.interface_ports();
+    let ports = state.model.schematic.interface_ports();
     assert_eq!(ports.len(), 1);
     assert_eq!(ports[0].name, "PAIR");
 }
@@ -1228,16 +1284,20 @@ fn opening_symbol_view_loads_the_paired_schematic_context() {
 fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_variants() {
     let mut state = state_with_work_cell("amp");
     let main_component = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(0, 0));
     let boundary_component = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 0));
     let moved_component = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(80, 0));
     let owner = CellViewRef::new("work", "amp", "schematic").key();
     let main_sheet = state
+        .model
         .workspace
         .content
         .design_management
@@ -1248,6 +1308,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         )
         .expect("source sheet catalog");
     let source_catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -1294,6 +1355,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         })
         .expect("reviewed cross-sheet move");
     let variant_id = state
+        .model
         .workspace
         .content
         .design_management
@@ -1314,6 +1376,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .expect("source variant");
 
     let source_sheet_ids = state
+        .model
         .workspace
         .content
         .design_management
@@ -1324,6 +1387,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
         .map(crate::state::DesignSheet::id)
         .collect::<std::collections::BTreeSet<_>>();
     let source_port_ids = state
+        .model
         .workspace
         .content
         .design_management
@@ -1340,6 +1404,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
 
     let copied_owner = CellViewRef::new("work", "amp_copy", "schematic").key();
     let copied_catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -1361,6 +1426,7 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
     assert!(copied_port_ids.is_disjoint(&source_port_ids));
 
     let resolved = state
+        .model
         .workspace
         .content
         .design_management
@@ -1386,10 +1452,12 @@ fn copy_cell_regenerates_design_management_sheet_and_port_ids_without_cloning_va
 fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership() {
     let mut state = state_with_work_cell("amp");
     let object_id = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
     let old_owner = CellViewRef::new("work", "amp", "schematic").key();
     let sheet_id = state
+        .model
         .workspace
         .content
         .design_management
@@ -1398,6 +1466,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     let old_object =
         crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
     let variant_id = state
+        .model
         .workspace
         .content
         .design_management
@@ -1434,6 +1503,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
         }],
     };
     let preview = state
+        .model
         .workspace
         .content
         .design_management
@@ -1441,6 +1511,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
         .preview_renumbering(&renumber_request)
         .expect("renumber preview");
     state
+        .model
         .workspace
         .content
         .design_management
@@ -1455,6 +1526,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     let new_owner = CellViewRef::new("work", "amp_rev_b", "schematic").key();
     assert!(
         state
+            .model
             .workspace
             .content
             .design_management
@@ -1463,6 +1535,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .design_management
@@ -1473,6 +1546,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
         "renaming ownership must preserve stable sheet identity"
     );
     let resolved = state
+        .model
         .workspace
         .content
         .design_management
@@ -1493,6 +1567,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .design_management
@@ -1503,6 +1578,7 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .design_management
@@ -1517,12 +1593,13 @@ fn rename_cell_remaps_design_management_scoped_variant_and_annotation_ownership(
 fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog() {
     let mut state = state_with_work_cell("amp");
     let object_id = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(20, 20));
     let old_owner = CellViewRef::new("work", "amp", "schematic").key();
     let old_object =
         crate::state::SchematicObjectKey::new(&old_owner, object_id).expect("source scoped object");
-    let designs = &mut state.workspace.content.design_management;
+    let designs = &mut state.model.workspace.content.design_management;
     let variant_id = designs
         .variants_mut()
         .create(crate::state::AssemblyVariantDraft {
@@ -1571,6 +1648,7 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
 
     let new_owner = CellViewRef::new("work", "amp_rev_c", "schematic").key();
     let resolved = state
+        .model
         .workspace
         .content
         .design_management
@@ -1591,6 +1669,7 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .design_management
@@ -1605,14 +1684,14 @@ fn rename_cell_publishes_scoped_design_management_remaps_without_a_sheet_catalog
 fn rename_top_cell_then_serialize_succeeds() {
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
-    assert_eq!(state.workspace.content.project.root_library, "user");
-    assert_eq!(state.workspace.content.project.top_cell, "top");
+    assert_eq!(state.model.workspace.content.project.root_library, "user");
+    assert_eq!(state.model.workspace.content.project.top_cell, "top");
 
     state
         .rename_cell("user", "top", "system")
         .expect("the project root cell is writable");
 
-    assert_eq!(state.workspace.content.project.top_cell, "system");
+    assert_eq!(state.model.workspace.content.project.top_cell, "system");
     crate::workbench::lifecycle::project_lifecycle::snapshot(&state)
         .expect("a renamed project root cell must still serialize and validate");
 }
@@ -1620,15 +1699,15 @@ fn rename_top_cell_then_serialize_succeeds() {
 #[test]
 fn create_library_rejects_a_canonical_identity_collision() {
     let mut state = AppState::default();
-    let before = state.library_manager.library_count();
+    let before = state.model.library_manager.library_count();
 
     state
         .create_library("vendor")
         .expect("a fresh library name is accepted");
-    assert_eq!(state.library_manager.library_count(), before + 1);
+    assert_eq!(state.model.library_manager.library_count(), before + 1);
     assert!(matches!(
         state
-            .workspace
+            .model.workspace
             .content.project
             .library_mutation_audit()
             .last()
@@ -1640,7 +1719,7 @@ fn create_library_rejects_a_canonical_identity_collision() {
         .create_library("VENDOR")
         .expect_err("a case-folded duplicate is the same library identity");
     assert!(error.contains("vendor"), "{error}");
-    assert_eq!(state.library_manager.library_count(), before + 1);
+    assert_eq!(state.model.library_manager.library_count(), before + 1);
 }
 
 /// The default project owns `user/top/schematic`; this adds the second cell,
@@ -1650,7 +1729,7 @@ fn state_with_populated_user_library() -> AppState {
     let mut state = AppState::default();
     let top = CellViewRef::new("user", "top", "schematic");
     let amp = CellViewRef::new("user", "amp", "schematic");
-    if let Some(library) = state.library_manager.get_library_mut("user") {
+    if let Some(library) = state.model.library_manager.get_library_mut("user") {
         let mut cell = Cell::new("amp");
         cell.add_view(View::new("schematic", ViewType::Schematic));
         cell.add_view(View::new("behavior", ViewType::VerilogA));
@@ -1662,17 +1741,19 @@ fn state_with_populated_user_library() -> AppState {
         LibraryCellInstance::new("user", "amp", "schematic"),
     );
     state
+        .model
         .workspace
         .insert_schematic_editor(top.key(), top_schematic.clone());
     state
+        .model
         .workspace
         .insert_schematic_editor(amp.key(), SchematicState::default());
-    state.workspace.content.open_views = vec![crate::state::OpenCellView::new(
+    state.model.workspace.content.open_views = vec![crate::state::OpenCellView::new(
         top.clone(),
         ViewType::Schematic,
     )];
-    state.workspace.open_as_root(top, ViewType::Schematic);
-    state.schematic = top_schematic;
+    state.model.workspace.open_as_root(top, ViewType::Schematic);
+    state.model.schematic = top_schematic;
 
     let bundle = crate::state::ProjectSourceBundle::try_new(
         crate::state::ProjectSourceOwner::cell_view(CellViewRef::new("user", "amp", "behavior")),
@@ -1684,18 +1765,21 @@ fn state_with_populated_user_library() -> AppState {
     )
     .expect("valid source bundle");
     state
+        .model
         .workspace
         .content
         .project_sources
         .insert_bundle(bundle)
         .expect("unique source owner");
     state
+        .model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&amp.key(), "Main", [])
         .expect("owned sheet catalog");
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -1725,14 +1809,14 @@ fn renaming_a_cell_rewrites_the_masters_inside_every_occurrence() {
     let mut state = state_with_populated_user_library();
     let amp = CellViewRef::new("user", "amp", "schematic");
     state.descend_into_instance(Some("XAMP".to_owned()), amp.clone());
-    let path = state.workspace.content.occurrence_path();
+    let path = state.model.workspace.content.occurrence_path();
     assert_eq!(path.to_string(), "/XAMP");
 
     state
         .rename_cell("user", "top", "tb")
         .expect("a writable cell renames");
 
-    let workspace = &state.workspace.content;
+    let workspace = &state.model.workspace.content;
     let occurrence = workspace
         .active_occurrence()
         .expect("the descended document is still open");
@@ -1748,7 +1832,7 @@ fn renaming_a_cell_rewrites_the_masters_inside_every_occurrence() {
 #[test]
 fn rename_library_propagation_matrix() {
     let mut state = state_with_populated_user_library();
-    let project = &state.workspace.content;
+    let project = &state.model.workspace.content;
     let source_id = project
         .project_sources
         .iter_bundles()
@@ -1765,10 +1849,16 @@ fn rename_library_propagation_matrix() {
         .rename_library("user", "project_lib")
         .expect("a writable library renames");
 
-    let project = &state.workspace.content;
+    let project = &state.model.workspace.content;
     assert_eq!(remapped, 1, "the bound instance follows the library");
-    assert!(state.library_manager.get_library("user").is_none());
-    assert!(state.library_manager.get_library("project_lib").is_some());
+    assert!(state.model.library_manager.get_library("user").is_none());
+    assert!(
+        state
+            .model
+            .library_manager
+            .get_library("project_lib")
+            .is_some()
+    );
     assert!(
         project
             .schematic_buffers
@@ -1790,7 +1880,7 @@ fn rename_library_propagation_matrix() {
             .all(|reference| reference.library == "project_lib")
     );
     assert_eq!(
-        state.schematic.document().components[0]
+        state.model.schematic.document().components[0]
             .library_cell
             .as_ref()
             .expect("instance binding")
@@ -1847,10 +1937,10 @@ fn rename_library_is_blocked_by_a_lease_on_either_name() {
     for locked in ["user", "project_lib"] {
         let mut state = state_with_populated_user_library();
         let snapshot = crate::state::library_browser::ProjectLibraryLockSnapshot::try_new(
-            state.workspace.content.project.id(),
+            state.model.workspace.content.project.id(),
             1,
-            state.workspace.content.project.revision(),
-            state.library_manager.revision(),
+            state.model.workspace.content.project.revision(),
+            state.model.library_manager.revision(),
             "org-lock-service",
             vec![crate::state::library_browser::ProjectLibraryEditLock::new(
                 uuid::Uuid::new_v4(),
@@ -1865,6 +1955,7 @@ fn rename_library_is_blocked_by_a_lease_on_either_name() {
         )
         .expect("valid lock snapshot");
         state
+            .model
             .library_edit_locks
             .install_authoritative(snapshot)
             .expect("authority installs");
@@ -1874,7 +1965,7 @@ fn rename_library_is_blocked_by_a_lease_on_either_name() {
             .expect_err("a lease on either name blocks the rename");
 
         assert!(error.contains("is locked by"), "{error}");
-        assert!(state.library_manager.get_library("user").is_some());
+        assert!(state.model.library_manager.get_library("user").is_some());
     }
 }
 
@@ -1890,18 +1981,18 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         "{root_error}"
     );
 
-    state.workspace.content.project.root_library = "spare".to_owned();
+    state.model.workspace.content.project.root_library = "spare".to_owned();
     let mut spare = Library::new("spare");
     let mut consumer = Cell::new("consumer");
     consumer.add_view(View::new("schematic", ViewType::Schematic));
     spare.add_cell(consumer);
-    state.library_manager.add_library(spare);
+    state.model.library_manager.add_library(spare);
     let mut consumer_schematic = SchematicState::default();
     consumer_schematic.add_library_cell_component(
         Point::new(20, 20),
         LibraryCellInstance::new("user", "amp", "schematic"),
     );
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("spare", "consumer", "schematic").key(),
         consumer_schematic,
     );
@@ -1914,7 +2005,7 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         "{configuration_error}"
     );
 
-    state.workspace.content.configuration_sets = Default::default();
+    state.model.workspace.content.configuration_sets = Default::default();
     let reference_error = state
         .delete_library("user")
         .expect_err("a loaded instance master cannot be deleted out from under it");
@@ -1922,24 +2013,26 @@ fn delete_library_is_blocked_by_root_config_root_and_referenced_master() {
         reference_error.contains("outside library 'user' still reference a master in it"),
         "{reference_error}"
     );
-    assert!(state.library_manager.get_library("user").is_some());
+    assert!(state.model.library_manager.get_library("user").is_some());
 }
 
 #[test]
 fn delete_library_removes_its_cells_and_restores_valid_focus() {
     let mut state = state_with_populated_user_library();
-    state.workspace.content.project.root_library = "spare".to_owned();
-    state.workspace.content.project.top_cell = "keep".to_owned();
+    state.model.workspace.content.project.root_library = "spare".to_owned();
+    state.model.workspace.content.project.top_cell = "keep".to_owned();
     let mut spare = Library::new("spare");
     let mut keep = Cell::new("keep");
     keep.add_view(View::new("schematic", ViewType::Schematic));
     spare.add_cell(keep);
-    state.library_manager.add_library(spare);
+    state.model.library_manager.add_library(spare);
     let survivor = CellViewRef::new("spare", "keep", "schematic");
     state
+        .model
         .workspace
         .insert_schematic_editor(survivor.key(), SchematicState::default());
     state
+        .model
         .workspace
         .content
         .open_views
@@ -1947,9 +2040,9 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
             survivor.clone(),
             ViewType::Schematic,
         ));
-    state.workspace.content.project_sources = Default::default();
-    state.workspace.content.configuration_sets = Default::default();
-    if let Some(library) = state.library_manager.get_library_mut("user") {
+    state.model.workspace.content.project_sources = Default::default();
+    state.model.workspace.content.configuration_sets = Default::default();
+    if let Some(library) = state.model.library_manager.get_library_mut("user") {
         library
             .get_cell_mut("amp")
             .expect("fixture amp cell")
@@ -1960,9 +2053,9 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
         .delete_library("user")
         .expect("an unreferenced library is deletable");
 
-    let project = &state.workspace.content;
+    let project = &state.model.workspace.content;
     assert_eq!(cells, 2);
-    assert!(state.library_manager.get_library("user").is_none());
+    assert!(state.model.library_manager.get_library("user").is_none());
     assert!(
         project
             .schematic_buffers
@@ -1976,7 +2069,7 @@ fn delete_library_removes_its_cells_and_restores_valid_focus() {
             .all(|open| open.reference.library != "user")
     );
     assert_eq!(project.active_view, survivor);
-    assert!(state.workspace.active_context_schematic().is_some());
+    assert!(state.model.workspace.active_context_schematic().is_some());
     assert!(matches!(
         project.project
             .library_mutation_audit()
@@ -1995,7 +2088,12 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
         .expect("the configuration root view renames");
     assert_eq!(remapped, 0, "no instance binds the renamed root view");
     assert_eq!(
-        state.workspace.content.configuration_sets.configurations()[0]
+        state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .configurations()[0]
             .root()
             .view,
         "netlist_view",
@@ -2006,13 +2104,14 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
         .rename_view("user", "amp", "schematic", "netlist_view")
         .expect("a writable view renames");
 
-    let project = &state.workspace.content;
+    let project = &state.model.workspace.content;
     assert_eq!(
         remapped, 1,
         "only the instances bound to that exact view move"
     );
     assert!(
         state
+            .model
             .library_manager
             .get_library("user")
             .and_then(|library| library.get_cell("amp"))
@@ -2030,7 +2129,7 @@ fn rename_view_moves_the_buffer_source_and_view_exact_bindings() {
             .contains_key(&CellViewRef::new("user", "amp", "schematic").key())
     );
     assert_eq!(
-        state.schematic.document().components[0]
+        state.model.schematic.document().components[0]
             .library_cell
             .as_ref()
             .expect("instance binding")
@@ -2077,11 +2176,11 @@ fn state_with_probed_conductors() -> AppState {
     let out_b = Point::new(40, 0);
     let mid_a = Point::new(0, 40);
     let mid_b = Point::new(40, 40);
-    let wires = &mut state.schematic.document_mut_for_test().wires;
+    let wires = &mut state.model.schematic.document_mut_for_test().wires;
     wires.push(Wire::new(91, vec![out_a, out_b]));
     wires.push(Wire::new(92, vec![mid_a, mid_b]));
-    state.simulation.source.cross_probe.update(
-        state.workspace.content.active_view.clone(),
+    state.model.simulation.source.cross_probe.update(
+        state.model.workspace.content.active_view.clone(),
         HashMap::from([
             (out_a, "OUT".to_owned()),
             (out_b, "OUT".to_owned()),
@@ -2093,7 +2192,7 @@ fn state_with_probed_conductors() -> AppState {
             ("MID".to_owned(), vec![mid_a, mid_b]),
         ]),
         HashMap::new(),
-        state.schematic.topology_version(),
+        state.model.schematic.topology_version(),
     );
     state
 }
@@ -2112,14 +2211,40 @@ fn a_simulation_anchor_marks_every_node_the_run_named() {
     });
 
     assert_eq!(
-        state.schematic.session.editor.selection.wires.len(),
+        state.model.schematic.session.editor.selection.wires.len(),
         2,
         "a failure that named two nodes must mark both, not the first"
     );
-    assert!(state.schematic.session.editor.selection.wires.contains(&91));
-    assert!(state.schematic.session.editor.selection.wires.contains(&92));
-    assert!(state.schematic.session.editor.net_highlight.active);
-    assert!(state.schematic.session.editor.center_request.is_some());
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .wires
+            .contains(&91)
+    );
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .wires
+            .contains(&92)
+    );
+    assert!(state.model.schematic.session.editor.net_highlight.active);
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .center_request
+            .is_some()
+    );
     assert_eq!(state.workbench.workspace, Workspace::Design);
 }
 
@@ -2129,6 +2254,7 @@ fn a_simulation_anchor_refuses_a_schematic_that_moved() {
     state.workbench.activate(Workspace::Results);
     // Drawing anything advances the topology the map was captured against.
     state
+        .model
         .schematic
         .add_wire(vec![Point::new(80, 0), Point::new(120, 0)]);
 
@@ -2138,7 +2264,14 @@ fn a_simulation_anchor_refuses_a_schematic_that_moved() {
     });
 
     assert!(
-        state.schematic.session.editor.selection.wires.is_empty(),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .wires
+            .is_empty(),
         "a map that no longer describes this drawing must mark nothing"
     );
     assert_eq!(
@@ -2163,7 +2296,7 @@ fn a_simulation_anchor_says_which_named_objects_this_sheet_does_not_draw() {
     });
 
     assert_eq!(
-        state.schematic.session.editor.selection.wires,
+        state.model.schematic.session.editor.selection.wires,
         [91].into_iter().collect()
     );
     let prompt = prompt_text(&state);
@@ -2185,5 +2318,14 @@ fn a_run_that_named_nothing_offers_no_highlight() {
         !state.highlight_active_failure_sites(),
         "and nothing to mark"
     );
-    assert!(state.schematic.session.editor.selection.wires.is_empty());
+    assert!(
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .wires
+            .is_empty()
+    );
 }

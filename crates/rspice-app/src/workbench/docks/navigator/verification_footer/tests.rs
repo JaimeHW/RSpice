@@ -99,11 +99,12 @@ fn run_set_card_rows_keep_their_value_off_their_label() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Simulate);
     // Only an axis the run sweeps has a row.
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+    for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
         dimension.enabled = true;
     }
     let names = app
         .state
+        .model
         .sim_setup
         .run_set
         .dimensions
@@ -168,6 +169,7 @@ fn run_set_card_states_the_unit_of_a_quantity_axis() {
     // to attach to. Enable the one this asks about.
     let temperature = app
         .state
+        .model
         .sim_setup
         .run_set
         .dimensions
@@ -215,7 +217,7 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
         "globally available libraries are not owned by the active simulation plan",
     );
 
-    app.state.sim_setup.model_bindings.push(
+    app.state.model.sim_setup.model_bindings.push(
         crate::state::model_library::SimulationPlanModelBinding {
             library_name: "project-process-models".to_owned(),
             source_digest: ContentDigest::from_bytes([0x6d; 32]),
@@ -250,6 +252,7 @@ fn hierarchical_design() -> RSpiceApp {
 
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -259,6 +262,7 @@ fn hierarchical_design() -> RSpiceApp {
             .with_library_cell(LibraryCellInstance::new("work", "afe", "schematic"));
         instance.name = name.to_owned();
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -274,11 +278,21 @@ fn hierarchical_design() -> RSpiceApp {
         "freq=1k",
     ));
 
-    if app.state.library_manager.get_library("work").is_none() {
-        app.state.library_manager.add_library(Library::new("work"));
+    if app
+        .state
+        .model
+        .library_manager
+        .get_library("work")
+        .is_none()
+    {
+        app.state
+            .model
+            .library_manager
+            .add_library(Library::new("work"));
     }
     let owner = app
         .state
+        .model
         .library_manager
         .get_library_mut("work")
         .expect("the fixture library exists");
@@ -287,6 +301,7 @@ fn hierarchical_design() -> RSpiceApp {
         target.add_view(View::new("schematic", ViewType::Schematic));
     }
     app.state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", "afe", "schematic").key(), child);
     app
@@ -310,15 +325,15 @@ fn the_excitations_rail_counts_the_design_that_the_page_it_opens_lists() {
     app.state.workbench.activate(Workspace::Simulate);
 
     assert_eq!(
-        crate::simulation::placed_sources::placed_source_count(&app.state.schematic),
+        crate::simulation::placed_sources::placed_source_count(&app.state.model.schematic),
         1,
         "the sheet in front of the reader places one supply and two instances"
     );
     let listed = crate::simulation::placed_sources::whole_design_excitations(
-        &app.state.library_manager,
-        &app.state.workspace,
-        &app.state.schematic,
-        app.state.sim_setup.analysis_plan.as_ref(),
+        &app.state.model.library_manager,
+        &app.state.model.workspace,
+        &app.state.model.schematic,
+        app.state.model.sim_setup.analysis_plan.as_ref(),
     )
     .0
     .len();
@@ -556,6 +571,7 @@ fn verification_navigation_exposes_the_operational_tuning_route() {
 fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .workspace
         .content
         .specs
@@ -567,7 +583,7 @@ fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
             unit: "V/V".to_owned(),
             scope: crate::state::SpecPointScope::AllPoints,
         });
-    app.state.simulation.view.active_run_idx = None;
+    app.state.model.simulation.view.active_run_idx = None;
 
     let coverage = verification_coverage(&app);
 
@@ -589,6 +605,7 @@ fn empty_specification_set_is_neutral_not_healthy() {
 fn finite_goal_miss_counts_as_executed_but_not_passed() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .workspace
         .content
         .specs
@@ -616,8 +633,8 @@ fn finite_goal_miss_counts_as_executed_but_not_passed() {
         );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
 
     let coverage = verification_coverage(&app);
     // Measured, so nothing is missing; missed its goal, so it does not pass.
@@ -662,8 +679,8 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
         );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
 
     let flow = super::verification_flow_presentation(&app, VerificationPage::DeviceSafety);
     assert_eq!(flow.status, "9.1% margin");
@@ -755,9 +772,9 @@ fn result_navigator_app() -> RSpiceApp {
     let mut run = SimulationRun::new(1);
     run.add_analysis(transient);
     run.add_analysis(ac);
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = None;
-    app.state.simulation.view.active_analysis_idx = None;
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = None;
+    app.state.model.simulation.view.active_analysis_idx = None;
     app
 }
 
@@ -799,23 +816,23 @@ fn the_data_browser_counts_only_what_a_filter_holds_back() {
 #[test]
 fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     let mut app = result_navigator_app();
-    let dataset_id = app.state.simulation.retained.runs[0].dataset_id;
+    let dataset_id = app.state.model.simulation.retained.runs[0].dataset_id;
 
     assert!(select_result_dataset(&mut app, 0));
-    assert_eq!(app.state.simulation.view.active_run_idx, Some(0));
-    assert_eq!(app.state.simulation.view.active_analysis_idx, Some(0));
+    assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
+    assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(0));
     assert_eq!(
         app.state.workbench.documents.active(Workspace::Results),
         Some(&crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id))
     );
 
-    let was_visible = app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
+    let was_visible = app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
     assert!(select_result_signal(&mut app, 0, 0, 0));
     let selected = app
         .state
         .ui
         .results
-        .valid_selected_trace(&app.state.simulation)
+        .valid_selected_trace(&app.state.model.simulation)
         .expect("signal selection resolves against the active dataset");
     assert_eq!(selected.source_name(), "V(out)");
     crate::workbench::documents::result_document::prepare_viewer_state(&mut app);
@@ -823,24 +840,24 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
         app.state
             .ui
             .results
-            .valid_selected_trace(&app.state.simulation)
+            .valid_selected_trace(&app.state.model.simulation)
             .map(|selected| selected.source_name()),
         Some("V(out)"),
         "the first Results render after activation must retain the navigator selection"
     );
     assert_eq!(
-        app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
+        app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
         was_visible
     );
 
     assert!(select_result_analysis(&mut app, 0, 1));
-    assert_eq!(app.state.simulation.view.active_run_idx, Some(0));
-    assert_eq!(app.state.simulation.view.active_analysis_idx, Some(1));
+    assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
+    assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(1));
     assert!(
         app.state
             .ui
             .results
-            .valid_selected_trace(&app.state.simulation)
+            .valid_selected_trace(&app.state.model.simulation)
             .is_none(),
         "changing analysis clears the now-invalid signal selection"
     );
@@ -883,6 +900,7 @@ fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
     let ctx = egui::Context::default();
     let run = result_navigator_app()
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -908,7 +926,7 @@ fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
 fn batch_plot_action_moves_only_the_checked_quantities() {
     let mut app = result_navigator_app();
     assert!(select_result_dataset(&mut app, 0));
-    let run = &app.state.simulation.retained.runs[0];
+    let run = &app.state.model.simulation.retained.runs[0];
     let checked_key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
@@ -942,7 +960,8 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         "an unchecked quantity in another analysis is not disturbed"
     );
     assert_eq!(
-        app.state.simulation.retained.runs[0].analyses[0].waveforms[0].visible, source_default,
+        app.state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
+        source_default,
         "browser presentation never mutates immutable retained evidence"
     );
 
@@ -1017,12 +1036,12 @@ fn browser_facets_stay_paired_across_the_whole_dock_range() {
 #[test]
 fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
     let app = result_navigator_app();
-    let run = &app.state.simulation.retained.runs[0];
+    let run = &app.state.model.simulation.retained.runs[0];
     let key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let tsv = super::exact_result_signal_tsv(&key, &app.state.simulation.retained.runs)
+    let tsv = super::exact_result_signal_tsv(&key, &app.state.model.simulation.retained.runs)
         .expect("exact source waveform resolves");
     assert!(tsv.contains(&format!("# dataset\t{}", run.dataset_id)));
     assert!(tsv.contains("# analysis\tTRAN"));
@@ -1038,8 +1057,12 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
             copied_value_format,
             ..QuantityPresentationPolicy::default()
         };
-        super::exact_result_signal_last_sample(&key, &app.state.simulation.retained.runs, policy)
-            .expect("last retained sample exists")
+        super::exact_result_signal_last_sample(
+            &key,
+            &app.state.model.simulation.retained.runs,
+            policy,
+        )
+        .expect("last retained sample exists")
     };
     assert_eq!(
         last(CopiedValueFormat::EngineeringNotationWithUnit),
@@ -1054,13 +1077,13 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
 #[test]
 fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
     let mut app = result_navigator_app();
-    let run = &mut app.state.simulation.retained.runs[0];
+    let run = &mut app.state.model.simulation.retained.runs[0];
     run.analyses[0].waveforms[0].y = std::sync::Arc::new(vec![0.0]);
     let key = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let error = super::exact_result_signal_tsv(&key, &app.state.simulation.retained.runs)
+    let error = super::exact_result_signal_tsv(&key, &app.state.model.simulation.retained.runs)
         .expect_err("mismatched exact vectors must not be truncated");
     assert!(
         error.contains("retained waveform 'V(out)' has 2 coordinates but 1 values"),
@@ -1071,7 +1094,7 @@ fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
 #[test]
 fn browser_range_selection_uses_stable_filtered_order() {
     let mut app = result_navigator_app();
-    let run = &app.state.simulation.retained.runs[0];
+    let run = &app.state.model.simulation.retained.runs[0];
     let first = SourceWaveformPresentationKey::new(
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
@@ -1320,9 +1343,9 @@ fn a_quantitys_run_log_is_the_log_of_the_run_that_produced_it() {
     app.state.workbench.console_page = ConsolePage::Problems;
     let run = SimulationRun::new(7);
     let dataset = run.dataset_id;
-    app.state.simulation.retained.runs.push(run);
+    app.state.model.simulation.retained.runs.push(run);
 
-    let producer = producing_run(&app.state.simulation.retained.runs, dataset)
+    let producer = producing_run(&app.state.model.simulation.retained.runs, dataset)
         .expect("the session holds the producing run");
     open_run_log(&mut app.state, producer);
     assert!(app.state.workbench.console_visible);
@@ -1332,9 +1355,9 @@ fn a_quantitys_run_log_is_the_log_of_the_run_that_produced_it() {
         ConsoleChannel::Run(7)
     );
 
-    app.state.simulation.retained.runs.clear();
+    app.state.model.simulation.retained.runs.clear();
     assert_eq!(
-        producing_run(&app.state.simulation.retained.runs, dataset),
+        producing_run(&app.state.model.simulation.retained.runs, dataset),
         None
     );
 }
@@ -1355,7 +1378,7 @@ fn the_simulation_rail_derives_what_it_states_once_a_frame() {
     use crate::simulation::cost_probe::{Derivation, count, reset};
 
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.sync_active_schematic_to_workspace();
     app.state.workbench.activate(Workspace::Simulate);
 
@@ -1396,7 +1419,7 @@ fn the_simulate_rail_filter_reaches_past_its_page_rows() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Simulate);
         // Only an axis the run sweeps has a row.
-        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
             dimension.enabled = true;
         }
         app.state.workbench.set_navigator_filter(query);
@@ -1488,7 +1511,7 @@ fn the_artifact_menu_opens_from_the_keyboard_on_the_focused_row() {
     let mut app = result_navigator_app();
     let mut values = std::collections::BTreeMap::new();
     values.insert("settling_time".to_owned(), 0.5);
-    app.state.simulation.retained.runs[0].analyses[0].result_payload =
+    app.state.model.simulation.retained.runs[0].analyses[0].result_payload =
         Some(AnalysisResultPayload::ScalarMeasurements { values });
     assert!(select_result_dataset(&mut app, 0));
 

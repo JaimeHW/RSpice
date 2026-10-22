@@ -32,7 +32,7 @@ impl AppState {
     }
 
     fn store_session_checked(&mut self, storage: &mut dyn eframe::Storage, read_back: bool) {
-        let history = self.simulation.retained.runs.revision();
+        let history = self.model.simulation.retained.runs.revision();
         if self.ui.session_kept != SessionKept::WithoutRuns(history.clone()) {
             match offer(storage, ron::ser::to_string(&*self), read_back) {
                 Offer::Kept => {
@@ -162,8 +162,8 @@ mod tests {
         );
         run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
             .expect("legacy fixture provenance seals");
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.retained.next_run_id = 7;
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.retained.next_run_id = 7;
         state
     }
 
@@ -182,6 +182,7 @@ mod tests {
 
     fn console(state: &AppState) -> Vec<(LogSeverity, String)> {
         state
+            .model
             .log_buffer
             .entries()
             .map(|entry| (entry.severity, entry.message.clone()))
@@ -196,9 +197,9 @@ mod tests {
         state.store_session_checked(&mut storage, true);
 
         let restored = AppState::restore_eframe_session(&storage).expect("a stored session");
-        assert!(restored.simulation.retained.runs.is_empty());
+        assert!(restored.model.simulation.retained.runs.is_empty());
         assert_eq!(
-            restored.simulation.retained.next_run_id, 7,
+            restored.model.simulation.retained.next_run_id, 7,
             "the next run is not numbered as the one left out"
         );
         assert!(matches!(state.ui.session_kept, SessionKept::WithoutRuns(_)));
@@ -223,7 +224,7 @@ mod tests {
         let mut storage = storage_between(&state);
         state.store_session_checked(&mut storage, true);
 
-        state.simulation.clear_runs();
+        state.model.simulation.clear_runs();
         state.store_session_checked(&mut storage, true);
 
         assert_eq!(state.ui.session_kept, SessionKept::Whole);
@@ -260,7 +261,7 @@ mod tests {
         assert_eq!(storage.writes, 1);
         let restored = AppState::restore_eframe_session(&storage).expect("a stored session");
         assert_eq!(
-            restored.simulation.retained.run_count(),
+            restored.model.simulation.retained.run_count(),
             1,
             "{:?}",
             console(&restored)

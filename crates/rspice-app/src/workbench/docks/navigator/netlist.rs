@@ -215,7 +215,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
                     // in Design, the one place a module is edited.
                     if let Some(reference) =
                         crate::workbench::documents::code_workspace::veriloga_dependency_view(
-                            &app.state.workspace,
+                            &app.state.model.workspace,
                             &row.label,
                         )
                     {
@@ -617,6 +617,7 @@ pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -
     match state.ui.netlist.active_document {
         ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
         ActiveNetlistDocument::OwnedSource => state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -624,6 +625,7 @@ pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -
             .map(|descriptor| descriptor.artifact_name.clone())
             .or_else(|| {
                 state
+                    .model
                     .workspace
                     .content
                     .netlist_source_path
@@ -645,7 +647,9 @@ pub(super) fn active_canonical_netlist_document(
     state: &crate::workbench::AppState,
 ) -> Option<&crate::state::NetlistDocument> {
     match state.ui.netlist.active_document {
-        ActiveNetlistDocument::Generated => state.netlist_artifacts.generated_document.as_ref(),
+        ActiveNetlistDocument::Generated => {
+            state.model.netlist_artifacts.generated_document.as_ref()
+        }
         ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
@@ -861,7 +865,13 @@ pub(super) fn retained_include_facts(
     state: &crate::workbench::AppState,
     messages: MessageCatalog,
 ) -> Vec<IncludeRowFacts> {
-    let project_paths = state.workspace.content.project.include_search_paths().len();
+    let project_paths = state
+        .model
+        .workspace
+        .content
+        .project
+        .include_search_paths()
+        .len();
     active_canonical_netlist_document(state).map_or_else(Vec::new, |document| {
         document
             .dependencies()
@@ -2131,6 +2141,7 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
     let t = Tokens::get(ui.ctx());
     let mapping = app
         .state
+        .model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -2186,8 +2197,9 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                     .button(messages.text(MessageId::NetlistNavigatorCrossProbe))
                     .clicked()
             {
-                app.state.schematic.session.editor.selection.clear();
+                app.state.model.schematic.session.editor.selection.clear();
                 app.state
+                    .model
                     .schematic
                     .session
                     .editor

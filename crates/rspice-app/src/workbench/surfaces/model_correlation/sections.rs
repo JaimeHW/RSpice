@@ -1138,6 +1138,7 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
 pub(super) fn open_affected_vectors(app: &mut RSpiceApp) -> Result<(), String> {
     let library = app
         .state
+        .model
         .model_library_manager
         .selected_library
         .clone()

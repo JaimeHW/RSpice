@@ -10,22 +10,24 @@ use crate::state::ComponentType;
 fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("models");
     library.add_model(DeviceModel::new("junction", ModelType::Diode));
-    app.state.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.add_library(library);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .clear();
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Diode, crate::state::Point::origin());
-    app.state.schematic.document_mut_for_test().components[0].params = params.to_owned();
-    app.state.schematic.clear_undo_history();
-    app.state.schematic.session.is_dirty = false;
+    app.state.model.schematic.document_mut_for_test().components[0].params = params.to_owned();
+    app.state.model.schematic.clear_undo_history();
+    app.state.model.schematic.session.is_dirty = false;
     (app, id)
 }
 
@@ -35,25 +37,28 @@ fn catalog_test_diode(params: &str) -> (RSpiceApp, u64) {
 fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     let mut kit = ModelLibrary::new("kit");
     for bin in ["nch.1", "nch.2"] {
         let mut card = DeviceModel::new(bin, ModelType::Nmos);
         card.spice_type = Some("NMOS".to_owned());
         kit.add_model(card);
     }
-    app.state.model_library_manager.add_library(kit);
+    app.state.model.model_library_manager.add_library(kit);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .clear();
     let nmos = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Nmos, crate::state::Point::origin());
     let pmos = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Pmos, crate::state::Point::new(200, 0));
 
@@ -63,6 +68,7 @@ fn catalog_binding_binds_a_binned_family_whose_every_bin_suits_the_instance() {
     bind_component_model_from_catalog(&mut app, nmos, "kit", "nch").expect("bind the family");
     let params = &app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -79,33 +85,33 @@ fn catalog_binding_preserves_raw_parameters_and_refuses_malformed_text_atomicall
     let (mut app, id) = catalog_test_diode(original);
     bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
     assert_eq!(
-        app.state.schematic.document().components[0].params,
+        app.state.model.schematic.document().components[0].params,
         format!("{original} model=junction model_library=models")
     );
-    assert!(app.state.schematic.undo());
+    assert!(app.state.model.schematic.undo());
     assert_eq!(
-        app.state.schematic.document().components[0].params,
+        app.state.model.schematic.document().components[0].params,
         original
     );
-    assert!(!app.state.schematic.can_undo());
+    assert!(!app.state.model.schematic.can_undo());
 
     let (mut app, id) = catalog_test_diode("note='unterminated");
-    let before = app.state.schematic.document().components[0].clone();
+    let before = app.state.model.schematic.document().components[0].clone();
     assert!(
         bind_component_model_from_catalog(&mut app, id, "models", "junction")
             .unwrap_err()
             .contains("unterminated")
     );
-    assert_eq!(app.state.schematic.document().components[0], before);
-    assert!(!app.state.schematic.session.is_dirty);
-    assert!(!app.state.schematic.can_undo());
+    assert_eq!(app.state.model.schematic.document().components[0], before);
+    assert!(!app.state.model.schematic.session.is_dirty);
+    assert!(!app.state.model.schematic.can_undo());
 }
 
 #[test]
 fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication() {
     use crate::workbench::state::{InlineEditField, InlineEditSession};
     let (mut app, id) = catalog_test_diode(r#"note="a  b""#);
-    let expected = app.state.schematic.document().components[0].clone();
+    let expected = app.state.model.schematic.document().components[0].clone();
     let mut candidate = expected.clone();
     candidate.name = "D42".to_owned();
     let authority = app.state.inline_edit_authority();
@@ -120,15 +126,18 @@ fn catalog_binding_resolves_the_pending_inspector_draft_before_model_publication
         widget: None,
     });
     assert!(bind_component_model_from_catalog(&mut app, id, "models", "junction").is_err());
-    assert_eq!(app.state.schematic.document().components[0], expected);
+    assert_eq!(app.state.model.schematic.document().components[0], expected);
     app.state
         .workbench
         .inline_edit
         .set_draft("D42".to_owned(), Ok(candidate));
     bind_component_model_from_catalog(&mut app, id, "models", "junction").unwrap();
-    assert_eq!(app.state.schematic.document().components[0].name, "D42");
+    assert_eq!(
+        app.state.model.schematic.document().components[0].name,
+        "D42"
+    );
     assert!(
-        app.state.schematic.document().components[0]
+        app.state.model.schematic.document().components[0]
             .params
             .starts_with(r#"note="a  b" "#)
     );
@@ -140,13 +149,14 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
     use crate::state::model_library::{DeviceModel, ModelConsumerScope, ModelLibrary, ModelType};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     for library_name in ["alpha", "beta"] {
         let mut library = ModelLibrary::new(library_name);
         library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
-        app.state.model_library_manager.add_library(library);
+        app.state.model.model_library_manager.add_library(library);
     }
     app.state
+        .model
         .model_library_manager
         .resolve_definition_provider(
             ModelConsumerScope::PrimitiveModel,
@@ -156,19 +166,25 @@ fn catalog_binding_uses_the_resolved_project_global_provider() {
         )
         .expect("provider decision");
     let component_id = 9_001;
-    app.state.schematic.document_mut_for_test().components.push(
-        Component::new(
-            component_id,
-            ComponentType::Diode,
-            crate::state::Point::origin(),
-        )
-        .with_name_value("D9001", ""),
-    );
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(
+            Component::new(
+                component_id,
+                ComponentType::Diode,
+                crate::state::Point::origin(),
+            )
+            .with_name_value("D9001", ""),
+        );
 
     bind_component_model_from_catalog(&mut app, component_id, "beta", "shared_diode")
         .expect("resolved provider binds");
     let params = crate::state::parse_params_string(
         &app.state
+            .model
             .schematic
             .document()
             .components
@@ -196,22 +212,28 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("models");
     library.add_model(DeviceModel::new("junction", ModelType::Diode));
-    app.state.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.add_library(library);
     let component_id = 9_002;
-    app.state.schematic.document_mut_for_test().components.push(
-        Component::new(
-            component_id,
-            ComponentType::Resistor,
-            crate::state::Point::origin(),
-        )
-        .with_name_value("R9002", "1k"),
-    );
-    let topology_before = app.state.schematic.topology_version();
+    app.state
+        .model
+        .schematic
+        .document_mut_for_test()
+        .components
+        .push(
+            Component::new(
+                component_id,
+                ComponentType::Resistor,
+                crate::state::Point::origin(),
+            )
+            .with_name_value("R9002", "1k"),
+        );
+    let topology_before = app.state.model.schematic.topology_version();
     let params_before = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -225,9 +247,13 @@ fn catalog_binding_rejects_an_incompatible_primitive_without_mutation() {
         .expect_err("a diode model cannot bind to a resistor");
 
     assert!(error.contains("incompatible with the selected Resistor instance"));
-    assert_eq!(app.state.schematic.topology_version(), topology_before);
+    assert_eq!(
+        app.state.model.schematic.topology_version(),
+        topology_before
+    );
     assert_eq!(
         app.state
+            .model
             .schematic
             .document()
             .components
@@ -343,7 +369,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     app.state.open_project_session();
     app.state.workbench.split_with_results = split;
     app.state.workbench.activate(Workspace::Results);
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     let analysis_id = crate::product::AnalysisInstanceId::new();
     let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
@@ -370,6 +396,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     })
     .expect("valid prepared run receipt");
     app.state
+        .model
         .simulation
         .start_prepared_run(receipt)
         .unwrap()
@@ -398,7 +425,11 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
         );
     app.state.ui.results.session.selected_trace = Some(
         rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
-            app.state.simulation.active_run().expect("retained run"),
+            app.state
+                .model
+                .simulation
+                .active_run()
+                .expect("retained run"),
             0,
             0,
         )
@@ -407,16 +438,17 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
     let a = crate::state::Point::new(0, 0);
     let b = crate::state::Point::new(40, 0);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(crate::state::Wire::new(91, vec![a, b]));
-    app.state.simulation.source.cross_probe.update(
-        app.state.workspace.content.active_view.clone(),
+    app.state.model.simulation.source.cross_probe.update(
+        app.state.model.workspace.content.active_view.clone(),
         std::collections::HashMap::from([(a, "OUT".to_owned()), (b, "OUT".to_owned())]),
         std::collections::HashMap::from([("OUT".to_owned(), vec![a, b])]),
         std::collections::HashMap::new(),
-        app.state.schematic.topology_version(),
+        app.state.model.schematic.topology_version(),
     );
     app
 }
@@ -438,9 +470,11 @@ fn schematic_subjects_do_not_share_inspector_scroll_state() {
     let sheet = inspector_scroll_identity(&app);
     let component_id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, crate::state::Point::new(10, 10));
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -449,7 +483,7 @@ fn schematic_subjects_do_not_share_inspector_scroll_state() {
     let component = inspector_scroll_identity(&app);
 
     assert_ne!(sheet, component);
-    app.state.schematic.session.editor.selection.clear();
+    app.state.model.schematic.session.editor.selection.clear();
     assert_eq!(sheet, inspector_scroll_identity(&app));
 }
 
@@ -496,6 +530,7 @@ fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
     assert!(!app.state.workbench.split_with_results);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -505,6 +540,7 @@ fn full_results_cross_probe_navigates_to_design_after_exact_resolution() {
     );
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -523,16 +559,22 @@ fn split_cross_probe_keeps_the_canonical_result_document_beside_design() {
     );
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
-    assert!(app.state.workbench.results_split_visible(
-        app.state.project_lifecycle.is_open(),
-        app.state.simulation.retained.has_retained_result_dataset(),
-    ));
+    assert!(
+        app.state.workbench.results_split_visible(
+            app.state.project_lifecycle.is_open(),
+            app.state
+                .model
+                .simulation
+                .retained
+                .has_retained_result_dataset(),
+        )
+    );
 }
 
 #[test]
 fn stale_cross_probe_map_fails_without_leaving_results() {
     let mut app = result_app_with_current_out_map(true);
-    app.state.schematic.add_wire(vec![
+    app.state.model.schematic.add_wire(vec![
         crate::state::Point::new(80, 0),
         crate::state::Point::new(120, 0),
     ]);
@@ -544,6 +586,7 @@ fn stale_cross_probe_map_fails_without_leaving_results() {
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -558,6 +601,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
     let mut app = result_app_with_current_out_map(false);
     let stale_revision = app
         .state
+        .model
         .workspace
         .content
         .project
@@ -566,6 +610,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
         .expect("next project revision");
     let run = app
         .state
+        .model
         .simulation
         .active_run()
         .expect("prepared retained run");
@@ -621,10 +666,10 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
             "#ffbd2e",
         )]),
     );
-    app.state.simulation.retained.runs[0] = stale_run;
+    app.state.model.simulation.retained.runs[0] = stale_run;
     app.state.ui.results.session.selected_trace = Some(
         rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
-            &app.state.simulation.retained.runs[0],
+            &app.state.model.simulation.retained.runs[0],
             0,
             0,
         )
@@ -638,6 +683,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -650,9 +696,12 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
 #[test]
 fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     let mut app = result_app_with_current_out_map(false);
-    let view = app.state.workspace.content.active_view.clone();
-    let view_type = app.state.workspace.content.active_view_type();
-    app.state.workspace.open_as_root(view.clone(), view_type);
+    let view = app.state.model.workspace.content.active_view.clone();
+    let view_type = app.state.model.workspace.content.active_view_type();
+    app.state
+        .model
+        .workspace
+        .open_as_root(view.clone(), view_type);
 
     let error = cross_probe_trace_to_design(&mut app, "V(x1.out)")
         .expect_err("a trace read inside X1 has no conductor on the root sheet");
@@ -660,6 +709,7 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -671,8 +721,9 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     // One level down, the root-scoped trace is the one out of scope — even
     // though the open sheet happens to carry a conductor of that name.
     let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
-    app.state.workspace.open_as_root(parent, view_type);
+    app.state.model.workspace.open_as_root(parent, view_type);
     app.state
+        .model
         .workspace
         .descend_into("X1".to_owned(), view, view_type);
 
@@ -682,6 +733,7 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
     assert_eq!(app.state.workbench.workspace, Workspace::Results);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -697,11 +749,12 @@ fn cross_probe_names_the_descend_target_for_out_of_scope_traces() {
 #[test]
 fn cross_probe_finds_a_trace_scoped_by_the_written_instance_name() {
     let mut app = result_app_with_current_out_map(false);
-    let view = app.state.workspace.content.active_view.clone();
-    let view_type = app.state.workspace.content.active_view_type();
+    let view = app.state.model.workspace.content.active_view.clone();
+    let view_type = app.state.model.workspace.content.active_view_type();
     let parent = crate::state::CellViewRef::new(&view.library, "tb", &view.view);
-    app.state.workspace.open_as_root(parent, view_type);
+    app.state.model.workspace.open_as_root(parent, view_type);
     app.state
+        .model
         .workspace
         .descend_into("amp".to_owned(), view, view_type);
 
@@ -771,20 +824,26 @@ fn netlist_diagnostic_locations_are_one_based_and_exact() {
 #[test]
 fn generated_provenance_speaks_only_when_the_deck_is_not_the_schematic() {
     let mut state = AppState::default();
-    state.netlist_artifacts.generated_source = "generated\n.end\n".to_owned();
+    state.model.netlist_artifacts.generated_source = "generated\n.end\n".to_owned();
     let input = crate::product::ContentDigest::from_bytes([0x31; 32]);
-    state.netlist_artifacts.generated_input_digest = Some(input);
-    state.netlist_artifacts.current_generation_input_digest = Some(input);
+    state.model.netlist_artifacts.generated_input_digest = Some(input);
+    state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = Some(input);
     assert_eq!(generated_state(&state), None);
 
-    state.netlist_artifacts.current_generation_input_digest =
+    state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest =
         Some(crate::product::ContentDigest::from_bytes([0x32; 32]));
     assert_eq!(
         generated_state(&state),
         Some(("Older than the schematic", Problem::Warning))
     );
 
-    state.netlist_artifacts.generated_source.clear();
+    state.model.netlist_artifacts.generated_source.clear();
     assert_eq!(
         generated_state(&state),
         Some(("Not generated yet", Problem::Warning))
@@ -794,11 +853,11 @@ fn generated_provenance_speaks_only_when_the_deck_is_not_the_schematic() {
 #[test]
 fn owned_provenance_requires_exact_saved_and_validated_bytes() {
     let mut state = AppState::default();
-    state.simulation.source.netlist_content = "owned\n.end\n".to_owned();
-    let project_revision = state.workspace.content.project.revision().get();
-    let digest = crate::state::content_digest(&state.simulation.source.netlist_content);
+    state.model.simulation.source.netlist_content = "owned\n.end\n".to_owned();
+    let project_revision = state.model.workspace.content.project.revision().get();
+    let digest = crate::state::content_digest(&state.model.simulation.source.netlist_content);
     state.ui.netlist.externally_saved_content_digest = Some(digest);
-    state.netlist_artifacts.validation = Some(crate::state::NetlistValidationReceipt {
+    state.model.netlist_artifacts.validation = Some(crate::state::NetlistValidationReceipt {
         visible_content_digest: digest,
         executable_source_digest: digest,
         prepared_snapshot_digest: digest,
@@ -810,13 +869,18 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
     // Saved and validated is the ordinary state, and so is a dirty project —
     // the document tab's marker owns that one.
     assert_eq!(owned_source_state(&state, digest), None);
-    state.workspace.content.netlist_source_dirty = true;
+    state.model.workspace.content.netlist_source_dirty = true;
     assert_eq!(owned_source_state(&state, digest), None);
 
     // Edited since the validation receipt was taken: the receipt no longer
     // describes these bytes, and the panel says so.
-    state.simulation.source.netlist_content.push_str("* edit\n");
-    let edited = crate::state::content_digest(&state.simulation.source.netlist_content);
+    state
+        .model
+        .simulation
+        .source
+        .netlist_content
+        .push_str("* edit\n");
+    let edited = crate::state::content_digest(&state.model.simulation.source.netlist_content);
     assert_eq!(owned_source_state(&state, edited), Some("Not checked yet"));
 }
 
@@ -863,7 +927,7 @@ fn a_model_resolves_only_from_a_file_its_library_records() {
     );
     model.file_path = Some(path);
     library.add_model(model);
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
     let component = Component::new(3, ComponentType::NpnBjt, crate::state::Point::origin())
         .with_name_value("Q1", "vendor_npn");
 
@@ -873,6 +937,7 @@ fn a_model_resolves_only_from_a_file_its_library_records() {
     assert_eq!(evidence.problem, None, "a recorded file says nothing more");
 
     let library = state
+        .model
         .model_library_manager
         .get_library_mut("vendor")
         .expect("the fixture library");
@@ -897,7 +962,7 @@ fn bound_model_evidence_uses_the_instance_model_and_section_overrides() {
         "OPA189_B",
         crate::state::model_library::ModelType::Other,
     ));
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
 
     let mut binding = crate::state::LibraryCellInstance::new("vendor_analog", "OPA189", "spice");
     binding.module_name = Some("OPA189_B".to_owned());
@@ -1035,9 +1100,18 @@ fn waves_details_app() -> RSpiceApp {
         TransientConvergenceEvidence::capture(quality, &time, &rspice_core::abort_signal::NoAbort)
             .expect("convergence evidence"),
     ));
-    app.state.simulation.start_run().add_analysis(analysis);
-    app.state.simulation.view.active_analysis_idx = Some(0);
-    let run = app.state.simulation.active_run().expect("retained run");
+    app.state
+        .model
+        .simulation
+        .start_run()
+        .add_analysis(analysis);
+    app.state.model.simulation.view.active_analysis_idx = Some(0);
+    let run = app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("retained run");
     let analysis_key = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
         run.dataset_id,
         &run.analyses[0],
@@ -1233,7 +1307,13 @@ fn run_provenance_lives_in_run_details_not_on_the_panel() {
         assert!(!labelled(&nodes, gone), "{gone} is still on the panel");
     }
 
-    let run_id = app.state.simulation.active_run().expect("retained run").id;
+    let run_id = app
+        .state
+        .model
+        .simulation
+        .active_run()
+        .expect("retained run")
+        .id;
     run_details::open(&mut app.state, run_id);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -1305,6 +1385,7 @@ fn design_component_app() -> RSpiceApp {
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -1334,7 +1415,7 @@ fn veriloga_inspector_app() -> RSpiceApp {
     cell.add_view(view);
     let mut library = Library::new("behavioral");
     library.add_cell(cell);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     let source = "// Behavioral conductance.\nmodule gain_cell(p, n);\n  inout p, n;\n  \
                   electrical p, n;\n  parameter real g = 1m;\n  analog I(p, n) <+ gain * V(p, n) \
                   + offset;\nendmodule\n";
@@ -1348,6 +1429,7 @@ fn veriloga_inspector_app() -> RSpiceApp {
     )
     .expect("a valid cell-view bundle");
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -1355,7 +1437,7 @@ fn veriloga_inspector_app() -> RSpiceApp {
         .expect("one bundle per cell view");
     app.state.open_workspace_view(reference);
     app.state.workbench.activate(Workspace::Design);
-    let project = app.state.workspace.content.project.id();
+    let project = app.state.model.workspace.content.project.id();
     let Err(diagnostics) =
         code_workspace::compile_project_bundle_receipt(project, &bundle, Some("gain_cell"))
     else {
@@ -1381,8 +1463,8 @@ fn veriloga_inspector_app() -> RSpiceApp {
 fn cmos_inverter_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
-    app.state.schematic.clear_undo_history();
+    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.model.schematic);
+    app.state.model.schematic.clear_undo_history();
     app.state.sync_active_schematic_to_workspace();
     app.state.workbench.activate(Workspace::Design);
     app
@@ -1391,6 +1473,7 @@ fn cmos_inverter_app() -> RSpiceApp {
 /// The ID of the inverter's component named `name`.
 fn inverter_component(app: &RSpiceApp, name: &str) -> u64 {
     app.state
+        .model
         .schematic
         .document()
         .components
@@ -1404,12 +1487,13 @@ fn inverter_component(app: &RSpiceApp, name: &str) -> u64 {
 /// output wire leaves it.
 fn design_net_app() -> RSpiceApp {
     let mut app = cmos_inverter_app();
-    let out = rspice_design::connectivity::summary::design_nets(&app.state.schematic)
+    let out = rspice_design::connectivity::summary::design_nets(&app.state.model.schematic)
         .into_iter()
         .find(|net| net.name.eq_ignore_ascii_case("out"))
         .expect("the inverter's output is labelled out");
     for wire in out.wire_ids {
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -1426,11 +1510,12 @@ fn design_multi_app() -> RSpiceApp {
         inverter_component(&app, "MP"),
         inverter_component(&app, "MN"),
     );
-    let selection = &mut app.state.schematic.session.editor.selection;
+    let selection = &mut app.state.model.schematic.session.editor.selection;
     selection.select_component(mp);
     selection.select_component(mn);
     let stub = app
         .state
+        .model
         .schematic
         .document()
         .wires
@@ -1438,6 +1523,7 @@ fn design_multi_app() -> RSpiceApp {
         .map(|wire| wire.id)
         .expect("the inverter is wired");
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -1494,7 +1580,7 @@ MN out in 0 0 RSPICE_NMOS W=1u L=0.18u
 
     let mut app = cmos_inverter_app();
     let mn = inverter_component(&app, "MN");
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     let analysis_id = crate::product::AnalysisInstanceId::new();
     let receipt = crate::state::PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
         source_domain: crate::state::AnalysisResultSourceDomain::SimulationPlan,
@@ -1521,6 +1607,7 @@ MN out in 0 0 RSPICE_NMOS W=1u L=0.18u
     })
     .expect("valid prepared run receipt");
     app.state
+        .model
         .simulation
         .start_prepared_run(receipt)
         .expect("the run starts")
@@ -1547,20 +1634,21 @@ MN out in 0 0 RSPICE_NMOS W=1u L=0.18u
             })
             .with_device_op(report),
         );
-    let generated = crate::simulation::netlist_gen::generate_netlist(&app.state.schematic);
+    let generated = crate::simulation::netlist_gen::generate_netlist(&app.state.model.schematic);
     let point_to_net = generated
         .nets
         .iter()
         .flat_map(|(net, points)| points.iter().map(move |point| (*point, net.clone())))
         .collect();
-    app.state.simulation.source.cross_probe.update(
-        app.state.workspace.content.active_view.clone(),
+    app.state.model.simulation.source.cross_probe.update(
+        app.state.model.workspace.content.active_view.clone(),
         point_to_net,
         generated.nets,
         std::collections::HashMap::new(),
-        app.state.schematic.topology_version(),
+        app.state.model.schematic.topology_version(),
     );
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -1599,10 +1687,11 @@ fn stimulus_adopters_app() -> RSpiceApp {
     const DEFINITION: &str = "bridge_cal_step";
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.content.stimulus_library = fixtures::library();
+    app.state.model.workspace.content.stimulus_library = fixtures::library();
     app.state.workbench.workspace = crate::workbench::state::Workspace::Stimulus;
     app.state.workbench.selected_stimulus_definition = Some(DEFINITION.to_owned());
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1610,6 +1699,7 @@ fn stimulus_adopters_app() -> RSpiceApp {
     let adopt = |app: &mut RSpiceApp, id: u64, instance: &str| {
         let definition: StimulusDefinition = app
             .state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -1620,6 +1710,7 @@ fn stimulus_adopters_app() -> RSpiceApp {
         component.name = instance.to_owned();
         definition.adopt_onto(&mut component).expect("adopt");
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .components

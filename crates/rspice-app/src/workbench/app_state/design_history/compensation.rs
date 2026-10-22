@@ -37,6 +37,7 @@ impl DocumentCompensation {
     /// to put them back on the sheets they were recorded on.
     pub(super) fn with_recorded_sheets(state: &AppState, reference: CellViewRef) -> Self {
         let before_sheet_assignments = state
+            .model
             .workspace
             .content
             .design_management
@@ -75,6 +76,7 @@ impl DocumentCompensation {
         }
         let key = self.reference.key();
         if state
+            .model
             .workspace
             .content
             .design_management
@@ -88,7 +90,7 @@ impl DocumentCompensation {
         else {
             return Ok(());
         };
-        let mut candidate = (*state.workspace.content.design_management).clone();
+        let mut candidate = (*state.model.workspace.content.design_management).clone();
         let catalog = candidate
             .sheet_catalog_mut(&key)
             .expect("the cloned catalog retains the key just found on the live one");
@@ -113,6 +115,7 @@ impl DocumentCompensation {
             return Ok(());
         }
         state
+            .model
             .workspace
             .content
             .replace_design_management(candidate)

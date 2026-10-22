@@ -83,6 +83,7 @@ fn run_choice(
     toolbar::RunChoice {
         candidates: app
             .state
+            .model
             .simulation
             .retained
             .runs
@@ -146,6 +147,7 @@ fn action_problem_line(ui: &mut Ui, app: &RSpiceApp) {
 /// same run.
 fn verification_evidence_domain(app: &RSpiceApp) -> crate::state::EvidenceDomain {
     app.state
+        .model
         .simulation
         .evidence_domain(verification_plan_id(app))
 }
@@ -163,8 +165,15 @@ fn verification_specs(app: &RSpiceApp) -> Vec<SpecEntry> {
         return Vec::new();
     }
     verification_plan_id(app).map_or_else(
-        || app.state.workspace.content.specs.clone(),
-        |plan_id| app.state.workspace.content.active_specs(plan_id).to_vec(),
+        || app.state.model.workspace.content.specs.clone(),
+        |plan_id| {
+            app.state
+                .model
+                .workspace
+                .content
+                .active_specs(plan_id)
+                .to_vec()
+        },
     )
 }
 
@@ -178,10 +187,11 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
-    let active_run = app.state.simulation.active_run();
+    let active_run = app.state.model.simulation.active_run();
     let active_run_id = active_run.map(|run| run.run_id);
     let mut candidates = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -305,20 +315,23 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
 
 fn verification_run_index(app: &RSpiceApp) -> Option<usize> {
     app.state
+        .model
         .simulation
         .view
         .active_run_idx
-        .filter(|index| *index < app.state.simulation.retained.runs.len())
+        .filter(|index| *index < app.state.model.simulation.retained.runs.len())
 }
 
 fn verification_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
-    verification_run_index(app).and_then(|index| app.state.simulation.retained.runs.get(index))
+    verification_run_index(app)
+        .and_then(|index| app.state.model.simulation.retained.runs.get(index))
 }
 
 fn verification_yield_results(app: &RSpiceApp) -> &[rspice_results::yield_analysis::YieldResult] {
     verification_run(app)
         .and_then(|run| {
             app.state
+                .model
                 .simulation
                 .retained
                 .yield_results_for_dataset(run.dataset_id)
@@ -329,6 +342,7 @@ fn verification_yield_results(app: &RSpiceApp) -> &[rspice_results::yield_analys
 /// The plan whose limits this surface reads, when the plan is stable.
 fn verification_plan_id(app: &RSpiceApp) -> Option<crate::product::SimulationPlanId> {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -473,7 +487,7 @@ fn latest_analysis(
     app: &RSpiceApp,
     analysis_type: crate::state::AnalysisType,
 ) -> Option<&crate::state::AnalysisResult> {
-    app.state.simulation.active_run().and_then(|run| {
+    app.state.model.simulation.active_run().and_then(|run| {
         run.analyses
             .iter()
             .rev()
@@ -497,7 +511,7 @@ fn latest_validated_analysis(
     app: &RSpiceApp,
     analysis_type: crate::state::AnalysisType,
 ) -> Option<&crate::state::AnalysisResult> {
-    let dataset_id = app.state.simulation.active_run()?.dataset_id;
+    let dataset_id = app.state.model.simulation.active_run()?.dataset_id;
     latest_analysis(app, analysis_type).filter(|analysis| {
         crate::workbench::documents::result_document::analysis_evidence_is_valid(
             &app.state, dataset_id, analysis,
@@ -511,7 +525,7 @@ fn request_analysis_run(
 ) -> Result<(), String> {
     let mut selected = None;
     let mut plan_changed = false;
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     {
         let plan = setup.stable_analysis_plan_mut()?;
         for kind in kinds {
@@ -536,7 +550,7 @@ fn request_analysis_run(
     }
     setup.refresh_legacy_analysis_projections();
     if plan_changed {
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         invalidate_plan_bound_preflight(app);
     }
     if let Some((kind, id)) = selected {
@@ -546,7 +560,7 @@ fn request_analysis_run(
     crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
     // A run that waits on the engine's check of its decks is queued when the
     // check authorizes it.
-    if app.state.simulation.execution.trigger_simulation
+    if app.state.model.simulation.execution.trigger_simulation
         || app.state.workbench.preflight.run_awaits_check()
     {
         Ok(())
@@ -562,7 +576,7 @@ fn open_analysis_configuration(
     app: &mut RSpiceApp,
     kind: crate::simulation::plan::AnalysisKind,
 ) -> Result<(), String> {
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     let (id, plan_changed) = {
         let plan = setup.stable_analysis_plan_mut()?;
         if let Some(instance) = plan
@@ -580,7 +594,7 @@ fn open_analysis_configuration(
     };
     setup.refresh_legacy_analysis_projections();
     if plan_changed {
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         invalidate_plan_bound_preflight(app);
     }
     app.state.workbench.active_analysis = kind.legacy_index();

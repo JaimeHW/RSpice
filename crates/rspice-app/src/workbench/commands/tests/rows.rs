@@ -204,7 +204,7 @@ fn project_open_app() -> RSpiceApp {
 fn results_retained_app() -> RSpiceApp {
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     app.state.workbench.activate(Workspace::Results);
-    assert!(app.state.simulation.retained.has_results());
+    assert!(app.state.model.simulation.retained.has_results());
     app
 }
 

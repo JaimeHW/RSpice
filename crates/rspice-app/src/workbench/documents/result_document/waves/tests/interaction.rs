@@ -13,7 +13,7 @@ use super::*;
 /// the two-pane strip every shared-abscissa question needs.
 fn bode_strip() -> AppState {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
             RetainedTrace::new(
                 "|V(out)|",
@@ -36,7 +36,7 @@ fn bode_strip() -> AppState {
 fn strip_key(state: &mut AppState) -> AnalysisPresentationKey {
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -47,7 +47,7 @@ fn strip_key(state: &mut AppState) -> AnalysisPresentationKey {
 fn pane_units(state: &mut AppState) -> Vec<String> {
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -112,7 +112,7 @@ fn zoom_from_a_companion_pane_moves_the_strips_shared_abscissa() {
 #[test]
 fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new(
                 "V(out)",
@@ -130,7 +130,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     });
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -230,7 +230,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
 #[test]
 fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![1.0, 1.0], "#fff"),
             RetainedTrace::new("V(b)", vec![0.0, 1.0], vec![100.0, 100.0], "#0af"),
@@ -238,7 +238,7 @@ fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
     );
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -289,7 +289,7 @@ fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
 #[test]
 fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new(
                 "V(out)",
@@ -302,7 +302,7 @@ fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),

@@ -26,7 +26,7 @@ fn noise_quick_view_exports_retained_psd_as_amplitude_density_without_summary() 
         ),
     ]);
     let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
-    let run = state.simulation.active_run().unwrap();
+    let run = state.model.simulation.active_run().unwrap();
 
     assert_eq!(
         quick_result_availability(&state, run),
@@ -141,7 +141,7 @@ fn noise_quick_view_rejects_contributor_only_evidence() {
         ),
     ]);
     let state = quick_view_state(analysis, ResultViewer::NoiseContrib);
-    let run = state.simulation.active_run().unwrap();
+    let run = state.model.simulation.active_run().unwrap();
 
     assert!(!quick_result_availability(&state, run).is_available());
     assert!(matches!(
@@ -183,12 +183,18 @@ fn noise_quick_view_falls_back_to_the_first_renderable_noise_analysis() {
         ]),
         ResultViewer::NoiseContrib,
     );
-    state.simulation.active_run_mut().unwrap().analyses.push(
-        AnalysisResult::new(13, AnalysisType::Noise, "Noise").with_waveforms(vec![
-            RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff"),
-        ]),
-    );
-    let run = state.simulation.active_run().unwrap();
+    state
+        .model
+        .simulation
+        .active_run_mut()
+        .unwrap()
+        .analyses
+        .push(
+            AnalysisResult::new(13, AnalysisType::Noise, "Noise").with_waveforms(vec![
+                RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#ff00ff"),
+            ]),
+        );
+    let run = state.model.simulation.active_run().unwrap();
 
     assert_eq!(
         quick_result_availability(&state, run),
@@ -223,7 +229,7 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
         20_000.0,
         rspice_results_ui::fft::data::SpectrumNormalization::Peak,
     ));
-    state.simulation.view.data_version = 9;
+    state.model.simulation.view.data_version = 9;
 
     let first = resolve_quick_view(&state).unwrap();
     let HardcopySemanticDocument::Plot(plot) = first.semantic_document() else {
@@ -237,7 +243,7 @@ fn fft_quick_view_ignores_stale_cache_and_global_data_version() {
             .all(|(x, y)| *x != 9_999.0f64.to_bits() && *y != 8_888.0f64.to_bits())
     );
 
-    state.simulation.view.data_version = 10_000;
+    state.model.simulation.view.data_version = 10_000;
     state.analysis.fft_state.data = Some(rspice_results_ui::fft::spectrum_fixture(
         "different stale cache",
         &[123_456.0],
@@ -387,7 +393,7 @@ fn histogram_quick_view_derives_only_from_active_monte_carlo_metadata() {
     // A point population keeps its exact coordinate/count and a visible bar
     // with presentation width, even though its exact bin has zero width.
     let Some(AnalysisResultFamilyMetadata::MonteCarlo { variables, .. }) =
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .family_metadata
             .as_mut()
     else {
@@ -466,7 +472,7 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
         ]);
     let mut state = quick_view_state(analysis, ResultViewer::Waves);
     let analysis_key = {
-        let run = state.simulation.active_run().expect("active run");
+        let run = state.model.simulation.active_run().expect("active run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     };
     let marker_id = state
@@ -733,7 +739,7 @@ fn a_failed_noise_solve_is_neither_offered_nor_printed() {
     analysis.error_message = Some("noise analysis did not converge".to_owned());
 
     let mut state = quick_view_state(analysis, ResultViewer::NoiseContrib);
-    let run = state.simulation.active_run().unwrap();
+    let run = state.model.simulation.active_run().unwrap();
 
     assert!(!quick_result_availability(&state, run).is_available());
     assert!(resolve_quick_view(&state).is_err());
@@ -742,16 +748,16 @@ fn a_failed_noise_solve_is_neither_offered_nor_printed() {
     // scanned for the first analysis the ungated predicate accepted, so a run
     // that solved noise twice — once badly, once well — bound the page to the
     // failed attempt and then refused the whole page for being unsuccessful.
-    state.simulation.retained.runs[0].analyses.push(
+    state.model.simulation.retained.runs[0].analyses.push(
         AnalysisResult::new(10, AnalysisType::Noise, "Noise").with_waveforms(vec![
             RetainedTrace::new("onoise", vec![1.0, 10.0], vec![1.0e-18, 4.0e-18], "#0ff"),
         ]),
     );
-    state.simulation.retained.runs[0]
+    state.model.simulation.retained.runs[0]
         .analyses
         .push(AnalysisResult::new(11, AnalysisType::Transient, "TRAN"));
-    state.simulation.view.active_analysis_idx = Some(2);
-    let run = state.simulation.active_run().unwrap();
+    state.model.simulation.view.active_analysis_idx = Some(2);
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
         Some(1)
@@ -786,13 +792,17 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
     let transient = AnalysisResult::new(3, AnalysisType::Transient, "TRAN");
 
     let mut state = quick_view_state(phase, ResultViewer::NoiseContrib);
-    state.simulation.retained.runs[0].analyses.push(ordinary);
-    state.simulation.retained.runs[0].analyses.push(transient);
+    state.model.simulation.retained.runs[0]
+        .analyses
+        .push(ordinary);
+    state.model.simulation.retained.runs[0]
+        .analyses
+        .push(transient);
 
     // The selection is a noise-family analysis with no ordinary spectrum:
     // nothing is offered rather than the neighbouring NOISE result.
-    state.simulation.view.active_analysis_idx = Some(0);
-    let run = state.simulation.active_run().unwrap();
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
         None
@@ -800,8 +810,8 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
     assert!(!quick_result_availability(&state, run).is_available());
 
     // The selection is the ordinary-noise result itself.
-    state.simulation.view.active_analysis_idx = Some(1);
-    let run = state.simulation.active_run().unwrap();
+    state.model.simulation.view.active_analysis_idx = Some(1);
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
         Some(1)
@@ -809,8 +819,8 @@ fn a_selected_noise_analysis_is_never_substituted_on_the_printed_page() {
 
     // A transient selection expresses no noise intent, so the run-wide
     // fallback still finds the one printable spectrum.
-    state.simulation.view.active_analysis_idx = Some(2);
-    let run = state.simulation.active_run().unwrap();
+    state.model.simulation.view.active_analysis_idx = Some(2);
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_analysis_index(&state, run, ResultViewer::NoiseContrib),
         Some(1)
@@ -886,9 +896,9 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
 
     fn specs_state(run: SimulationRun) -> AppState {
         let mut state = AppState::default();
-        state.simulation.retained.runs.push(run);
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs.push(run);
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         state.ui.results.session.viewer = ResultViewer::Specs;
         state
     }
@@ -904,8 +914,8 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
 
     // Frozen requirements, no live workspace contract: the page is offered.
     let state = specs_state(receipt_run(1));
-    assert!(state.workspace.content.specs.is_empty());
-    let run = state.simulation.active_run().unwrap();
+    assert!(state.model.workspace.content.specs.is_empty());
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_availability(&state, run),
         RetainedHardcopySourceAvailability::Available
@@ -915,8 +925,13 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
     // a page, because the capture resolves the frozen set and would write an
     // empty table.
     let mut state = specs_state(receipt_run(0));
-    state.workspace.content.specs.push(workspace_only.clone());
-    let run = state.simulation.active_run().unwrap();
+    state
+        .model
+        .workspace
+        .content
+        .specs
+        .push(workspace_only.clone());
+    let run = state.model.simulation.active_run().unwrap();
     assert!(!quick_result_availability(&state, run).is_available());
 
     // A legacy dataset with no receipt still reads the workspace contract.
@@ -926,8 +941,8 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
         .analyses
         .push(AnalysisResult::new(1, AnalysisType::Ac, "AC"));
     let mut state = specs_state(legacy);
-    state.workspace.content.specs.push(workspace_only);
-    let run = state.simulation.active_run().unwrap();
+    state.model.workspace.content.specs.push(workspace_only);
+    let run = state.model.simulation.active_run().unwrap();
     assert_eq!(
         quick_result_availability(&state, run),
         RetainedHardcopySourceAvailability::Available
@@ -990,7 +1005,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
         .reset_plot_view(ResultViewer::Waves, 0);
     assert_eq!(point_count(&state), 5, "the global pin is cleared");
     let analysis_key = {
-        let run = state.simulation.active_run().expect("active run");
+        let run = state.model.simulation.active_run().expect("active run");
         crate::workbench::documents::result_document::AnalysisPresentationKey::new(
             run.dataset_id,
             &run.analyses[0],
@@ -1041,7 +1056,7 @@ fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
     ]);
     let mut state = quick_view_state(analysis, ResultViewer::Waves);
     let analysis_key = {
-        let run = state.simulation.active_run().expect("active run");
+        let run = state.model.simulation.active_run().expect("active run");
         crate::workbench::documents::result_document::AnalysisPresentationKey::new(
             run.dataset_id,
             &run.analyses[0],

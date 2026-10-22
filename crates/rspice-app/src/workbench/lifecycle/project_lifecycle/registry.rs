@@ -44,28 +44,33 @@ mod tests {
     fn presentation_and_interaction_state_never_marks_engineering_documents_dirty() {
         let mut state = AppState::default();
         let component = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(4, 6));
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
-        let active = state.workspace.content.active_view.clone();
+        let active = state.model.workspace.content.active_view.clone();
 
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_component(component);
         assert!(state.copy_active_schematic_selection());
-        state.schematic.session.editor.pan = (125.0, -40.0);
-        state.schematic.session.editor.zoom = 2.25;
-        state.schematic.session.current_file = Some(std::path::PathBuf::from("presentation.rsch"));
-        state.workspace.content.open_views[0].dirty = true;
-        state.library_manager.filter_text = "presentation filter".to_owned();
-        state.library_manager.show_read_only = !state.library_manager.show_read_only;
+        state.model.schematic.session.editor.pan = (125.0, -40.0);
+        state.model.schematic.session.editor.zoom = 2.25;
+        state.model.schematic.session.current_file =
+            Some(std::path::PathBuf::from("presentation.rsch"));
+        state.model.workspace.content.open_views[0].dirty = true;
+        state.model.library_manager.filter_text = "presentation filter".to_owned();
+        state.model.library_manager.show_read_only = !state.model.library_manager.show_read_only;
         state
+            .model
             .library_manager
             .select_view(&active.library, &active.cell, &active.view);
         let view = state
+            .model
             .library_manager
             .get_library_mut(&active.library)
             .and_then(|library| library.get_cell_mut(&active.cell))
@@ -88,6 +93,7 @@ mod tests {
         );
 
         state
+            .model
             .schematic
             .add_component(ComponentType::Capacitor, Point::new(12, 9));
         let edited = super::super::snapshot(&state).expect("edited snapshot");
@@ -102,10 +108,11 @@ mod tests {
     #[test]
     fn typed_bus_and_tap_edits_mark_the_schematic_document_dirty() {
         let mut state = AppState::default();
-        let active = state.workspace.content.active_view.clone();
+        let active = state.model.workspace.content.active_view.clone();
         let empty = super::super::snapshot(&state).expect("empty baseline");
         let declaration = BusDeclaration::parse("DATA[15:0]").expect("valid declaration");
         let bus_id = state
+            .model
             .schematic
             .add_bus(vec![Point::new(0, 0), Point::new(10, 0)], Some(declaration))
             .expect("add bus");
@@ -119,6 +126,7 @@ mod tests {
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         state
+            .model
             .schematic
             .place_bus_tap(
                 bus_id,
@@ -139,17 +147,22 @@ mod tests {
     #[test]
     fn design_note_edits_participate_in_the_schematic_document_digest() {
         let mut state = AppState::default();
-        let active = state.workspace.content.active_view.clone();
+        let active = state.model.workspace.content.active_view.clone();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
-        state.schematic.document_mut_for_test().design_notes.push(
-            DesignNote::new(
-                71,
-                Point::new(4, 6),
-                DesignNoteKind::PlainText,
-                "Bias network",
-            )
-            .unwrap(),
-        );
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(
+                DesignNote::new(
+                    71,
+                    Point::new(4, 6),
+                    DesignNoteKind::PlainText,
+                    "Bias network",
+                )
+                .unwrap(),
+            );
 
         let current = super::super::snapshot(&state).expect("design-note snapshot");
         let mut registry = DocumentRegistry::default();
@@ -160,7 +173,11 @@ mod tests {
         assert!(registry.is_dirty(&ProjectDocumentId::CellView(active.clone())));
 
         let mut edited_state = state;
-        edited_state.schematic.document_mut_for_test().design_notes[0]
+        edited_state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .design_notes[0]
             .update(DesignNoteKind::PlainText, "Updated bias network")
             .unwrap();
         let edited = super::super::snapshot(&edited_state).expect("edited snapshot");
@@ -174,8 +191,9 @@ mod tests {
     #[test]
     fn documentation_shape_edits_participate_in_the_schematic_document_digest() {
         let mut state = AppState::default();
-        let active = state.workspace.content.active_view.clone();
+        let active = state.model.workspace.content.active_view.clone();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .documentation_shapes
@@ -191,7 +209,11 @@ mod tests {
             );
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
 
-        state.schematic.document_mut_for_test().documentation_shapes[0]
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .documentation_shapes[0]
             .translate(Point::new(3, -2));
         let edited = super::super::snapshot(&state).expect("edited shape snapshot");
         let baseline_digest = document_digests(&baseline.file)
@@ -340,10 +362,11 @@ mod tests {
     fn design_variable_edit_marks_the_simulation_plan_document_dirty() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(4, 6));
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
-        let plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
+        let plan_id = state.model.sim_setup.stable_analysis_plan().unwrap().id();
         let variable = DesignVariable::new(
             "RLOAD",
             "10 kohm",
@@ -356,6 +379,7 @@ mod tests {
         )
         .unwrap();
         state
+            .model
             .workspace
             .content
             .ensure_active_plan_data(plan_id)
@@ -377,6 +401,7 @@ mod tests {
         let mut state = AppState::default();
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -387,6 +412,7 @@ mod tests {
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
 
         state
+            .model
             .workspace
             .content
             .replace_project_source(
@@ -410,11 +436,12 @@ mod tests {
         let mut state = AppState::default();
         let baseline = super::super::snapshot(&state).expect("baseline snapshot");
         let reference = CellViewRef::new(
-            state.workspace.content.active_view.library.clone(),
-            state.workspace.content.active_view.cell.clone(),
+            state.model.workspace.content.active_view.library.clone(),
+            state.model.workspace.content.active_view.cell.clone(),
             "behavior",
         );
         state
+            .model
             .library_manager
             .get_library_mut(&reference.library)
             .and_then(|library| library.get_cell_mut(&reference.cell))
@@ -424,6 +451,7 @@ mod tests {
                 crate::state::ViewType::VerilogA,
             ));
         state
+            .model
             .workspace
             .content
             .project_sources

@@ -15,20 +15,24 @@ fn two_plan_campaign_state() -> (
     crate::product::SimulationPlanId,
 ) {
     let mut state = runnable_state();
-    let first_plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
+    let first_plan_id = state.model.sim_setup.stable_analysis_plan().unwrap().id();
     state
+        .model
         .workspace
         .content
         .migrate_active_plan_data(first_plan_id);
     let second_plan_id = state
+        .model
         .sim_setup
         .create_plan("Second campaign plan")
         .expect("create campaign plan");
     state
+        .model
         .workspace
         .content
         .migrate_inactive_plan_data(second_plan_id);
     state
+        .model
         .workspace
         .content
         .sync_legacy_specs_projection(second_plan_id);
@@ -38,7 +42,7 @@ fn two_plan_campaign_state() -> (
 #[test]
 fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
     let (mut state, first_plan_id, second_plan_id) = two_plan_campaign_state();
-    let live_plan_before_dispatch = state.sim_setup.stable_analysis_plan().unwrap().id();
+    let live_plan_before_dispatch = state.model.sim_setup.stable_analysis_plan().unwrap().id();
     let mut controller = SimulationController::new();
 
     let receipt = controller
@@ -51,10 +55,11 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
 
     assert_eq!(receipt.member_count, 2);
     assert_eq!(
-        state.sim_setup.stable_analysis_plan().unwrap().id(),
+        state.model.sim_setup.stable_analysis_plan().unwrap().id(),
         live_plan_before_dispatch
     );
     let run = state
+        .model
         .simulation
         .active_run()
         .expect("first member dispatched");
@@ -101,8 +106,8 @@ fn campaign_freezes_distinct_plan_members_without_switching_the_live_editor() {
 #[test]
 fn a_campaign_member_that_cannot_start_is_filed_until_a_rerun_supersedes_it() {
     let (mut state, first_plan_id, second_plan_id) = two_plan_campaign_state();
-    let next_run_id = state.simulation.retained.next_run_id;
-    state.simulation.retained.next_run_id = u64::MAX;
+    let next_run_id = state.model.simulation.retained.next_run_id;
+    state.model.simulation.retained.next_run_id = u64::MAX;
     let mut controller = SimulationController::new();
 
     controller
@@ -113,8 +118,8 @@ fn a_campaign_member_that_cannot_start_is_filed_until_a_rerun_supersedes_it() {
         )
         .expect("the campaign freezes; its members are refused one by one");
 
-    assert!(state.simulation.active_run().is_none());
-    let refused = state.diagnostics.published_member_refusals();
+    assert!(state.model.simulation.active_run().is_none());
+    let refused = state.model.diagnostics.published_member_refusals();
     assert_eq!(refused.len(), 2, "{refused:?}");
     for (index, (scope, subject, message)) in refused.iter().enumerate() {
         let member = index + 1;
@@ -135,7 +140,7 @@ fn a_campaign_member_that_cannot_start_is_filed_until_a_rerun_supersedes_it() {
         refused[1].1
     );
 
-    state.simulation.retained.next_run_id = next_run_id;
+    state.model.simulation.retained.next_run_id = next_run_id;
     controller
         .prepare_and_start_campaign(
             &mut state,
@@ -144,9 +149,13 @@ fn a_campaign_member_that_cannot_start_is_filed_until_a_rerun_supersedes_it() {
         )
         .expect("the campaign runs again");
 
-    assert!(state.simulation.active_run().is_some());
+    assert!(state.model.simulation.active_run().is_some());
     assert!(
-        state.diagnostics.published_member_refusals().is_empty(),
+        state
+            .model
+            .diagnostics
+            .published_member_refusals()
+            .is_empty(),
         "the campaign run again is a new measurement"
     );
 
@@ -161,6 +170,7 @@ fn a_campaign_member_that_cannot_start_is_filed_until_a_rerun_supersedes_it() {
 fn a_campaign_reports_its_refused_members_and_its_end_to_the_shell() {
     let (mut state, first_plan_id, second_plan_id) = two_plan_campaign_state();
     let first_plan = state
+        .model
         .sim_setup
         .inactive_plans()
         .iter()
@@ -168,7 +178,7 @@ fn a_campaign_reports_its_refused_members_and_its_end_to_the_shell() {
         .expect("the first plan is stored")
         .name()
         .to_string();
-    state.simulation.retained.next_run_id = u64::MAX;
+    state.model.simulation.retained.next_run_id = u64::MAX;
     let mut controller = SimulationController::new();
 
     controller
@@ -183,6 +193,7 @@ fn a_campaign_reports_its_refused_members_and_its_end_to_the_shell() {
     assert_eq!(outcomes.len(), 3, "{outcomes:?}");
     let console_line = |log_id: u64| {
         state
+            .model
             .log_buffer
             .entries()
             .find(|entry| entry.id == log_id)
@@ -261,7 +272,7 @@ fn a_cancelled_campaign_reports_nothing_to_the_shell() {
     controller.complete_campaign_member(&mut state, false);
 
     assert!(
-        state.log_buffer.entries().any(|entry| entry.message
+        state.model.log_buffer.entries().any(|entry| entry.message
             == "Campaign 'Nightly characterization' cancelled: 0 completed, 1 failed"),
         "the Console still sums it up"
     );

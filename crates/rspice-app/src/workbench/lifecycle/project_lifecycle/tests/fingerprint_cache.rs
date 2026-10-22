@@ -6,14 +6,14 @@ use super::*;
 fn accepted_content_is_fingerprinted_only_once_across_dirty_queries() {
     for samples in [2, 100_000] {
         let (mut state, _) = super::durable_content::retained_results();
-        state.simulation.retained.runs[0].analyses[0].waveforms =
+        state.model.simulation.retained.runs[0].analyses[0].waveforms =
             vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 (0..samples).map(|index| index as f64).collect::<Vec<_>>(),
                 vec![1.0; samples],
                 "#ffffff",
             )];
-        assert!(state.simulation.select_run(0));
+        assert!(state.model.simulation.select_run(0));
         let baseline = snapshot(&state).unwrap();
         registry::FINGERPRINT_PASSES.with(|passes| passes.set(0));
         state.project_lifecycle.accept_project(baseline, None);
@@ -56,9 +56,14 @@ fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerpr
     ));
     assert_eq!(registry::FINGERPRINT_PASSES.with(std::cell::Cell::get), 0);
 
-    assert!(state.schematic.with_undo("Place resistor", |schematic| {
-        schematic.add_component(ComponentType::Resistor, Point::new(10, 20));
-    }));
+    assert!(
+        state
+            .model
+            .schematic
+            .with_undo("Place resistor", |schematic| {
+                schematic.add_component(ComponentType::Resistor, Point::new(10, 20));
+            })
+    );
     assert!(has_unsaved_changes(&state));
     assert!(active_document_is_dirty(&state));
     assert_eq!(dirty_document_count(&state), 1);
@@ -71,9 +76,9 @@ fn accepted_snapshot_clones_share_content_and_edits_cannot_change_their_fingerpr
             .content_digest(),
         original_digest
     );
-    assert!(state.schematic.undo());
+    assert!(state.model.schematic.undo());
     assert!(!has_unsaved_changes(&state));
-    assert!(state.schematic.redo());
+    assert!(state.model.schematic.redo());
     assert!(has_unsaved_changes(&state));
 
     let replacement = snapshot(&state).unwrap();

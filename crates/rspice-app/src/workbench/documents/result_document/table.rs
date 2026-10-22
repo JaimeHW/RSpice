@@ -28,8 +28,8 @@ fn artifact_text(
     key: &super::ResultArtifactPresentationKey,
 ) -> Option<std::sync::Arc<ArtifactTextPlan>> {
     let source = (
-        state.simulation.retained.runs.revision(),
-        state.simulation.view.data_version,
+        state.model.simulation.retained.runs.revision(),
+        state.model.simulation.view.data_version,
     );
     if let Some(plan) = state.ui.results.plans.artifact.as_ref()
         && plan.source == source
@@ -37,7 +37,7 @@ fn artifact_text(
     {
         return Some(std::sync::Arc::clone(plan));
     }
-    let text = exact_result_artifact_text(key, &state.simulation.retained.runs);
+    let text = exact_result_artifact_text(key, &state.model.simulation.retained.runs);
     let lines = text.as_ref().map_or_else(
         |_| Vec::new(),
         |text| {
@@ -62,7 +62,7 @@ fn artifact_text(
 }
 
 fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
-    let Some(analysis) = state.simulation.active_analysis() else {
+    let Some(analysis) = state.model.simulation.active_analysis() else {
         return false;
     };
     if analysis.analysis_type != AnalysisType::DcOp {
@@ -118,7 +118,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &t,
@@ -159,7 +159,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         view,
         |name| {
             notations
-                .get_or_init(|| bus_notations(&state.workspace, &state.schematic))
+                .get_or_init(|| bus_notations(&state.model.workspace, &state.model.schematic))
                 .display(name)
         },
         || frame_work::note(DatasetWalk::TableCursorScan),
@@ -175,16 +175,21 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
 pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
     let t = Tokens::get(ui.ctx());
-    if state.simulation.active_analysis().is_some_and(|analysis| {
-        analysis.analysis_type == AnalysisType::DcOp
-            && viewer::operating_point_row_count(&analysis.data) > 0
-    }) {
+    if state
+        .model
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| {
+            analysis.analysis_type == AnalysisType::DcOp
+                && viewer::operating_point_row_count(&analysis.data) > 0
+        })
+    {
         viewer::operating_point_controls(ui);
         return;
     }
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &t,
@@ -201,7 +206,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         &mut state.ui.results.session.table,
         |name| {
             notations
-                .get_or_init(|| bus_notations(&state.workspace, &state.schematic))
+                .get_or_init(|| bus_notations(&state.model.workspace, &state.model.schematic))
                 .display(name)
         },
     );
@@ -219,7 +224,7 @@ mod tests {
         use crate::state::{SimulationRunLifecycle, SimulationRunProvenance};
 
         let mut state = AppState::default();
-        let run = state.simulation.start_run();
+        let run = state.model.simulation.start_run();
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_result_payload(
                 AnalysisResultPayload::ScalarMeasurements {
@@ -239,7 +244,7 @@ mod tests {
         run.mark_running().unwrap();
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .unwrap();
-        state.simulation.complete_run();
+        state.model.simulation.complete_run();
         let original = artifact_text(&mut state, &key).unwrap();
         assert!(
             original
@@ -248,8 +253,8 @@ mod tests {
                 .unwrap()
                 .contains("0.3333333333333333")
         );
-        let version = state.simulation.view.data_version;
-        let mut replacement = state.simulation.clone();
+        let version = state.model.simulation.view.data_version;
+        let mut replacement = state.model.simulation.clone();
         replacement.retained.runs[0].analyses[0].result_payload =
             Some(AnalysisResultPayload::ScalarMeasurements {
                 values: std::collections::BTreeMap::from([
@@ -257,14 +262,14 @@ mod tests {
                     ("peak".to_owned(), 42.0),
                 ]),
             });
-        state.simulation = crate::io::simulation_state_from_results(
+        state.model.simulation = crate::io::simulation_state_from_results(
             crate::io::capture_simulation_results(&replacement),
         )
         .unwrap();
         let restored = artifact_text(&mut state, &key).unwrap();
         assert_eq!(
             restored.text,
-            exact_result_artifact_text(&key, &state.simulation.retained.runs)
+            exact_result_artifact_text(&key, &state.model.simulation.retained.runs)
         );
         assert_ne!(restored.text, original.text);
         let text = restored.text.as_ref().unwrap();
@@ -277,20 +282,20 @@ mod tests {
                 .collect::<Vec<_>>(),
             text.lines().collect::<Vec<_>>()
         );
-        let payload = state.simulation.retained.runs[0].analyses[0]
+        let payload = state.model.simulation.retained.runs[0].analyses[0]
             .result_payload
             .take();
         let missing = artifact_text(&mut state, &key).unwrap();
         assert!(missing.text.is_err());
         assert!(missing.lines.is_empty());
-        state.simulation.retained.runs[0].analyses[0].result_payload = payload;
+        state.model.simulation.retained.runs[0].analyses[0].result_payload = payload;
         let repaired = artifact_text(&mut state, &key).unwrap();
         assert_eq!(repaired.text, restored.text);
         assert!(std::sync::Arc::ptr_eq(
             &repaired,
             &artifact_text(&mut state, &key).unwrap()
         ));
-        assert_eq!(state.simulation.view.data_version, version);
+        assert_eq!(state.model.simulation.view.data_version, version);
     }
 
     #[test]

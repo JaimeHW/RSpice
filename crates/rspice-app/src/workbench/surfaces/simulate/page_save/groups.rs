@@ -54,8 +54,8 @@ pub(super) fn capture_groups(
     automatic_fallback: bool,
     selection_error: Option<&str>,
 ) -> Option<GroupCommand> {
-    let selection_mode = state.sim_setup.save_policy.output_selection_mode;
-    let budget = state.sim_setup.save_policy.maximum_storage_bytes;
+    let selection_mode = state.model.sim_setup.save_policy.output_selection_mode;
+    let budget = state.model.sim_setup.save_policy.maximum_storage_bytes;
     let total = ledger.total_bytes();
     let indeterminate = ledger.indeterminate_count();
     let over_budget = total > budget;
@@ -232,7 +232,7 @@ pub(super) fn capture_groups(
             );
         },
     );
-    let mut policy = state.sim_setup.save_policy;
+    let mut policy = state.model.sim_setup.save_policy;
     if let Some(index) = picked_mode
         && let Some(mode) = OutputSelectionMode::ALL.get(index).copied()
     {
@@ -243,7 +243,7 @@ pub(super) fn capture_groups(
     {
         policy.maximum_storage_bytes = bytes;
     }
-    if policy != state.sim_setup.save_policy {
+    if policy != state.model.sim_setup.save_policy {
         commit_save_policy(state, policy, "Save policy · output selection and storage");
     }
     // A group that holds outputs is not removed on one click. What falls back
@@ -280,6 +280,7 @@ pub(super) fn capture_groups(
 /// The plan a capture-group edit belongs to.
 fn plan_id(state: &AppState) -> Option<crate::product::SimulationPlanId> {
     state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -485,11 +486,12 @@ fn group_commands(
 /// The plan's authored capture groups, in resolution order.
 fn plan_capture_groups(state: &AppState) -> Vec<CaptureGroup> {
     state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| state.workspace.content.plan_data(plan_id))
+        .and_then(|plan_id| state.model.workspace.content.plan_data(plan_id))
         .map(|payload| payload.capture_groups.clone())
         .unwrap_or_default()
 }
@@ -532,6 +534,7 @@ pub(super) fn apply_group_command(
         GroupCommand::Remove(id) => {
             let Ok(plan_id) = app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .map(|plan| plan.id())
@@ -557,6 +560,7 @@ pub(super) fn apply_group_command(
         GroupCommand::Raise(id) | GroupCommand::Lower(id) => {
             let Ok(plan_id) = app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .map(|plan| plan.id())

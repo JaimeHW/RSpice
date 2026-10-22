@@ -169,6 +169,7 @@ fn complex_waveform(
 
 fn last_log_message(state: &AppState) -> String {
     state
+        .model
         .log_buffer
         .entries()
         .last()
@@ -202,15 +203,16 @@ fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, viewer);
     state
 }
 
 fn activate_result_document(state: &mut AppState, viewer: crate::workbench::ResultViewer) {
     let dataset_id = state
+        .model
         .simulation
         .active_run()
         .expect("test retains an active result run")
@@ -224,10 +226,12 @@ fn activate_result_document(state: &mut AppState, viewer: crate::workbench::Resu
 fn bind_active_fft_authority(state: &mut AppState) {
     let authority = {
         let run = state
+            .model
             .simulation
             .active_run()
             .expect("test retains an active result run");
         let analysis = state
+            .model
             .simulation
             .active_analysis()
             .expect("test retains an active result analysis");
@@ -272,6 +276,7 @@ fn report_and_table_sheets_export_the_evidence_they_render() {
             .with_measurements(vec![rspice_core::MeasureResult::success("gain", 1.5)]),
     );
     specs_state
+        .model
         .workspace
         .content
         .specs
@@ -381,15 +386,15 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
             }),
     );
     state.analysis.histogram_state.bin_count = 1;
-    let run = &mut state.simulation.retained.runs[0];
+    let run = &mut state.model.simulation.retained.runs[0];
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
         .unwrap();
     run.mark_running().unwrap();
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
-    state.simulation.complete_run();
-    state.simulation = crate::io::simulation_state_from_results(
-        crate::io::capture_simulation_results(&state.simulation),
+    state.model.simulation.complete_run();
+    state.model.simulation = crate::io::simulation_state_from_results(
+        crate::io::capture_simulation_results(&state.model.simulation),
     )
     .unwrap();
     state.ui.results.session.viewer = crate::workbench::ResultViewer::Hist;
@@ -478,7 +483,7 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
                 SpectrumNormalization::Peak,
             ));
         if stale {
-            let dataset_id = state.simulation.active_run().unwrap().dataset_id;
+            let dataset_id = state.model.simulation.active_run().unwrap().dataset_id;
             let foreign = AnalysisResult::new(999, AnalysisType::Transient, "FOREIGN");
             let authority =
                 crate::state::SpecializedViewerCacheProvenance::for_analysis(dataset_id, &foreign);
@@ -1024,7 +1029,7 @@ fn typed_csv_rejects_payloads_that_contradict_their_retained_axis() {
         });
     let state = state_with_typed_result(analysis);
 
-    assert!(prepare_typed_result_csv(state.simulation.active_analysis().unwrap()).is_none());
+    assert!(prepare_typed_result_csv(state.model.simulation.active_analysis().unwrap()).is_none());
 }
 
 #[test]
@@ -1085,13 +1090,14 @@ fn bode_export_uses_the_displayed_frequency_analysis_not_the_global_selector() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
     // Deliberately leave the simulation selector on TRAN while the Results
     // document displays Bode. Export authority is the document, not this
     // unrelated ordinal.
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state
+        .model
         .simulation
         .view
         .replace_waveforms(transient.waveforms.clone());
@@ -1133,9 +1139,9 @@ fn waves_export_preserves_every_displayed_analysis_and_independent_axes() {
     run.add_analysis(tran_a);
     run.add_analysis(tran_b);
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     let io = MockExportWorkflowIo::default();
 
@@ -1159,10 +1165,11 @@ fn csv_export_preserves_single_analysis_axis_shape() {
     run.add_analysis(transient.clone());
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state
+        .model
         .simulation
         .view
         .replace_waveforms(transient.waveforms.clone());
@@ -1213,9 +1220,10 @@ fn csv_export_uses_the_displayed_analysis_without_a_global_analysis_selector() {
     run.add_analysis(transient.clone());
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
     state
+        .model
         .simulation
         .view
         .replace_waveforms(transient.waveforms.clone());
@@ -1234,9 +1242,9 @@ fn csv_export_fails_closed_when_the_active_analysis_has_no_samples() {
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "Transient"));
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
     let io = MockExportWorkflowIo::default();
@@ -1259,9 +1267,9 @@ fn csv_export_rejects_single_analysis_divergent_x_axes() {
     run.add_analysis(transient);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
 
     let io = MockExportWorkflowIo::default();
@@ -1290,9 +1298,9 @@ fn csv_export_ignores_divergent_axes_owned_by_an_inactive_analysis() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(1);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(1);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
     let io = MockExportWorkflowIo::default();
@@ -1336,9 +1344,9 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
     let io = MockExportWorkflowIo::default();
@@ -1501,9 +1509,9 @@ fn engineering_export_preference_dispatches_compatible_touchstone() {
     run.add_analysis(ac);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Smith);
     state
         .ui
@@ -1577,9 +1585,9 @@ fn incompatible_touchstone_result_is_rejected_before_save_picker() {
     run.add_analysis(transient);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     state
         .ui
@@ -1604,9 +1612,9 @@ fn displayed_digits_never_reduce_csv_source_precision() {
     run.add_analysis(transient);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     state
         .ui
@@ -1632,10 +1640,11 @@ fn csv_export_reports_browser_download_start_without_claiming_file_written() {
     run.add_analysis(transient.clone());
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state
+        .model
         .simulation
         .view
         .replace_waveforms(transient.waveforms.clone());
@@ -1671,13 +1680,13 @@ fn hidden_trace_state(analyses: usize) -> AppState {
         );
     }
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
-    let waveforms = state.simulation.retained.runs[0].analyses[0]
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    let waveforms = state.model.simulation.retained.runs[0].analyses[0]
         .waveforms
         .clone();
-    state.simulation.view.replace_waveforms(waveforms);
+    state.model.simulation.view.replace_waveforms(waveforms);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     // Hide the second trace of every displayed analysis, exactly as a legend
     // chip or a navigator check-mark does.
@@ -1738,9 +1747,9 @@ fn stacked_export_state(preference: usize) -> AppState {
         run.add_analysis(analysis);
     }
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Waves);
     state
         .ui
@@ -1768,7 +1777,7 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
             message.contains("one") && message.contains("CSV/TSV"),
             "{message}"
         );
-        let run = state.simulation.active_run().unwrap();
+        let run = state.model.simulation.active_run().unwrap();
         state.ui.results.session.maximized_strip = Some(
             crate::workbench::documents::result_document::AnalysisPresentationKey::new(
                 run.dataset_id,
@@ -1861,9 +1870,9 @@ fn an_operating_point_export_that_cannot_be_produced_states_why() {
         let mut run = SimulationRun::new(7);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         activate_result_document(&mut state, crate::workbench::ResultViewer::Op);
         state
     }
@@ -1932,9 +1941,9 @@ fn a_display_label_change_does_not_move_an_exported_coordinate_id() {
     run.add_analysis(pxf);
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     activate_result_document(&mut state, crate::workbench::ResultViewer::Bode);
 
     let io = MockExportWorkflowIo::default();

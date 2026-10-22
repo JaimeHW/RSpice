@@ -35,7 +35,7 @@ fn open_symbol() -> RSpiceApp {
     .unwrap();
     cell.add_view(view);
     library.add_cell(cell);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     app.state
@@ -46,6 +46,7 @@ fn open_symbol() -> RSpiceApp {
 
 fn metadata_encoding(state: &AppState) -> Option<String> {
     state
+        .model
         .library_manager
         .get_library("work")
         .unwrap()
@@ -167,7 +168,7 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
             .ui
             .symbol
             .history
-            .undo_depth(&app.state.workspace.content.active_key()),
+            .undo_depth(&app.state.model.workspace.content.active_key()),
         1
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
@@ -232,10 +233,11 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
             "clipboard" => app.state.ui.symbol.editor.clipboard.shapes.clear(),
             "reference" => app
                 .state
+                .model
                 .workspace
                 .content
                 .set_active_read_only_reference(true),
-            "session" => app.state.schematic.session.read_only = true,
+            "session" => app.state.model.schematic.session.read_only = true,
             "modal" => app.state.dialogs.preferences_open = true,
             _ => unreachable!(),
         }

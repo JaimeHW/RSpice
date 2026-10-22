@@ -416,6 +416,7 @@ fn mark_collisions(
 ) {
     let owned = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -502,7 +503,7 @@ pub(super) fn design_variable_import_dialog(
     app: &mut RSpiceApp,
     mut draft: DesignVariableImportDraft,
 ) {
-    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+    let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
         app.state.workbench.simulation_workflow = None;
         return;
     };
@@ -876,6 +877,7 @@ fn commit_selected_rows(
     }
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map_err(|error| error.to_string())?
@@ -1086,6 +1088,7 @@ mod tests {
 
     fn plan(app: &RSpiceApp) -> SimulationPlanId {
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the test instance owns a stable plan")
@@ -1109,6 +1112,7 @@ mod tests {
 
     fn registry(app: &RSpiceApp, plan_id: SimulationPlanId) -> Vec<String> {
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1124,6 +1128,7 @@ mod tests {
 
     fn revision(app: &RSpiceApp) -> u64 {
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the test instance owns a stable plan")
@@ -1171,6 +1176,7 @@ mod tests {
         assert_eq!(revision(&app), before + 1);
         let imported = &app
             .state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1193,6 +1199,7 @@ mod tests {
         // The unbounded row is a real choice, not a missing value.
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .plan_data(plan_id)
@@ -1293,10 +1300,11 @@ mod tests {
         let refusal = import_refusal(&draft).expect("a ticked refused row blocks the import");
         assert!(refusal.contains("VARIMP-DIMENSION"), "{refusal}");
 
-        let before = serde_json::to_value(&app.state.workspace).expect("workspace serializes");
+        let before =
+            serde_json::to_value(&app.state.model.workspace).expect("workspace serializes");
         assert!(commit_selected_rows(&mut app, &draft).is_err());
         assert_eq!(
-            serde_json::to_value(&app.state.workspace).expect("workspace still serializes"),
+            serde_json::to_value(&app.state.model.workspace).expect("workspace still serializes"),
             before,
             "a refused import must not move the workspace"
         );
@@ -1426,6 +1434,7 @@ mod tests {
         commit_selected_rows(&mut app, &draft).expect("the sheet adopts at the chosen scope");
         assert!(
             app.state
+                .model
                 .workspace
                 .content
                 .plan_data(plan_id)
@@ -1521,7 +1530,7 @@ mod tests {
             DesignVariableScope::Testbench,
             DesignVariableScope::Project,
             DesignVariableScope::SelectedCell {
-                cell: app.state.workspace.content.active_view.clone(),
+                cell: app.state.model.workspace.content.active_view.clone(),
             },
             DesignVariableScope::SelectedAnalysis {
                 analysis_id: crate::product::AnalysisInstanceId::new(),

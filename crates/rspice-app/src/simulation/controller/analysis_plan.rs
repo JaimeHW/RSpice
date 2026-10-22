@@ -34,7 +34,7 @@ impl SimulationController {
         if outputs.is_empty() {
             return Vec::new();
         }
-        let plan = match Self::build_analysis_plan(&state.sim_setup) {
+        let plan = match Self::build_analysis_plan(&state.model.sim_setup) {
             Ok(plan) => plan,
             Err(errors) => {
                 return invalid_saved_output_reports(outputs.len(), errors.join("; "));
@@ -46,8 +46,9 @@ impl SimulationController {
             state.seal_project_execution_model_sources()
         } else {
             state
+                .model
                 .model_library_manager
-                .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+                .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
         };
         let sealed_models = match sealed_sources {
             Ok(sealed) => sealed,
@@ -90,9 +91,17 @@ impl SimulationController {
             analysis_inputs(state),
             plan,
             sealed_model_sources,
-            &state.simulation.retained.imported_monte_carlo_checkpoints,
-            &state.simulation.retained.imported_transient_checkpoints,
-            state.schematic.session.current_file.as_deref(),
+            &state
+                .model
+                .simulation
+                .retained
+                .imported_monte_carlo_checkpoints,
+            &state
+                .model
+                .simulation
+                .retained
+                .imported_transient_checkpoints,
+            state.model.schematic.session.current_file.as_deref(),
         )
     }
 }

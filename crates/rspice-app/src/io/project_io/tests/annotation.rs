@@ -450,17 +450,16 @@ fn annotation_session(project: &ProjectSnapshot) -> AppState {
         project.file.workspace.clone(),
         project.workspace_session.clone(),
     );
-    AppState {
-        schematic: workspace
-            .active_context_schematic()
-            .map(|source| source.clone_editor())
-            .unwrap_or_default(),
-        workspace,
-        library_manager: project.file.libraries.clone(),
-        sim_setup,
-        model_library_manager,
-        ..Default::default()
-    }
+    let mut state = AppState::default();
+    state.model.schematic = workspace
+        .active_context_schematic()
+        .map(|source| source.clone_editor())
+        .unwrap_or_default();
+    state.model.workspace = workspace;
+    state.model.library_manager = project.file.libraries.clone();
+    state.model.sim_setup = sim_setup;
+    state.model.model_library_manager = model_library_manager;
+    state
 }
 
 fn restore_annotation_session(state: &AppState, ron: bool) -> AppState {
@@ -475,7 +474,7 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
     let expected =
         load_project_text(&serialize_project_file(&fixture.project).unwrap(), None).unwrap();
     for reference in [&fixture.root, &fixture.child] {
-        let restored = &state.workspace.content.schematic_buffers[&reference.key()];
+        let restored = &state.model.workspace.content.schematic_buffers[&reference.key()];
         let canonical = &expected.file.workspace.schematic_buffers[&reference.key()];
         assert_eq!(
             restored.document().components,
@@ -484,38 +483,40 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
         assert_eq!(restored.document().probes, canonical.document().probes);
     }
     assert_eq!(
-        state.workspace.content.configuration_sets,
+        state.model.workspace.content.configuration_sets,
         expected.file.workspace.configuration_sets
     );
     assert_eq!(
-        state.workspace.content.simulation_plan_payloads,
+        state.model.workspace.content.simulation_plan_payloads,
         expected.file.workspace.simulation_plan_payloads
     );
     assert_eq!(
-        state.workspace.content.active_view,
+        state.model.workspace.content.active_view,
         expected.file.workspace.active_view
     );
     assert_eq!(
-        serde_json::to_value(&state.workspace.content.open_views).unwrap(),
+        serde_json::to_value(&state.model.workspace.content.open_views).unwrap(),
         serde_json::to_value(&expected.file.workspace.open_views).unwrap()
     );
-    if let Some(active) = state.workspace.active_context_schematic() {
+    if let Some(active) = state.model.workspace.active_context_schematic() {
         assert_eq!(
-            state.schematic.document().components,
+            state.model.schematic.document().components,
             active.document().components
         );
     }
     assert_eq!(
-        state.workspace.content.design_management,
+        state.model.workspace.content.design_management,
         fixture.project.file.workspace.design_management
     );
     assert!(
         state
+            .model
             .workspace
             .design_projection(
-                &state.library_manager,
+                &state.model.library_manager,
                 &fixture.child,
                 &state
+                    .model
                     .workspace
                     .schematic_editor(&fixture.child.key())
                     .unwrap(),
@@ -551,18 +552,21 @@ fn session_restores_pending_annotation_and_every_reference_once() {
                 ) = workspace.into_parts();
             }
             let state = annotation_session(&fixture.project);
-            let original = serde_json::to_value(&state.workspace).unwrap();
+            let original = serde_json::to_value(&state.model.workspace).unwrap();
             let restored = restore_annotation_session(&state, ron);
             assert_restored_annotation(&restored, &fixture);
-            assert_eq!(serde_json::to_value(&state.workspace).unwrap(), original);
-            assert!(restored.log_buffer.entries().any(|entry| {
+            assert_eq!(
+                serde_json::to_value(&state.model.workspace).unwrap(),
+                original
+            );
+            assert!(restored.model.log_buffer.entries().any(|entry| {
                 entry
                     .message
                     .contains("Applied approved reference annotation")
             }));
             let repeated = restore_annotation_session(&restored, ron);
             assert_restored_annotation(&repeated, &fixture);
-            assert!(!repeated.log_buffer.entries().any(|entry| {
+            assert!(!repeated.model.log_buffer.entries().any(|entry| {
                 entry
                     .message
                     .contains("Applied approved reference annotation")
@@ -581,6 +585,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
         for reference in [&fixture.root, &fixture.child] {
             assert!(
                 restored
+                    .model
                     .workspace
                     .schematic_editor(&reference.key())
                     .unwrap()
@@ -588,6 +593,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
             );
             assert!(
                 restored
+                    .model
                     .workspace
                     .content
                     .open_views
@@ -595,20 +601,23 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
                     .any(|open| open.reference == *reference && open.dirty)
             );
         }
-        assert!(restored.schematic.session.is_dirty);
+        assert!(restored.model.schematic.session.is_dirty);
         restored
+            .model
             .workspace
             .activate_view(fixture.root.clone(), ViewType::Schematic);
-        restored.schematic = restored
+        restored.model.schematic = restored
+            .model
             .workspace
             .active_context_schematic()
             .unwrap()
             .clone_editor();
         restored.sync_active_schematic_to_workspace();
         let repeated = restore_annotation_session(&restored, ron);
-        assert!(repeated.schematic.session.is_dirty);
+        assert!(repeated.model.schematic.session.is_dirty);
         assert!(
             repeated
+                .model
                 .workspace
                 .content
                 .open_views
@@ -638,43 +647,44 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 let mut restored = restore_annotation_session(&source, ron);
                 for reference in [&fixture.root, &fixture.child] {
                     assert_eq!(
-                        restored.workspace.content.schematic_buffers[&reference.key()]
+                        restored.model.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .components,
-                        source.workspace.content.schematic_buffers[&reference.key()]
+                        source.model.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .components
                     );
                     assert_eq!(
-                        restored.workspace.content.schematic_buffers[&reference.key()]
+                        restored.model.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .probes,
-                        source.workspace.content.schematic_buffers[&reference.key()]
+                        source.model.workspace.content.schematic_buffers[&reference.key()]
                             .document()
                             .probes
                     );
                 }
                 assert_eq!(
-                    restored.workspace.content.configuration_sets,
-                    source.workspace.content.configuration_sets
+                    restored.model.workspace.content.configuration_sets,
+                    source.model.workspace.content.configuration_sets
                 );
                 assert_eq!(
-                    restored.workspace.content.simulation_plan_payloads,
-                    source.workspace.content.simulation_plan_payloads
+                    restored.model.workspace.content.simulation_plan_payloads,
+                    source.model.workspace.content.simulation_plan_payloads
                 );
                 assert!(
-                    serde_json::to_value(&restored.workspace)
+                    serde_json::to_value(&restored.model.workspace)
                         .unwrap()
                         .get("annotation_restoration_error")
                         .is_none()
                 );
                 for blocked in [&restored, &restore_annotation_session(&restored, ron)] {
                     let error = blocked
+                        .model
                         .workspace
                         .design_projection(
-                            &blocked.library_manager,
+                            &blocked.model.library_manager,
                             &fixture.child,
-                            &blocked.schematic,
+                            &blocked.model.schematic,
                         )
                         .unwrap_err();
                     assert!(
@@ -683,16 +693,18 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                     );
                     assert!(
                         blocked
+                            .model
                             .workspace
                             .design_projection_key(
-                                &blocked.library_manager,
+                                &blocked.model.library_manager,
                                 &fixture.child,
-                                &blocked.schematic,
+                                &blocked.model.schematic,
                             )
                             .is_none()
                     );
                     assert!(
                         blocked
+                            .model
                             .log_buffer
                             .entries()
                             .any(|entry| entry.message.contains("reference annotation"))
@@ -700,8 +712,12 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 }
                 // Repair the invalid owner, but keep active and inactive edit
                 // transactions pending: neither may be overwritten by recovery.
-                restored.schematic.begin_operation("Repair reference owner");
                 restored
+                    .model
+                    .schematic
+                    .begin_operation("Repair reference owner");
+                restored
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .components
@@ -711,6 +727,7 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                             .components,
                     );
                 restored
+                    .model
                     .workspace
                     .content
                     .plan_data_mut(fixture.outputs[0].0)
@@ -725,17 +742,31 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                     .saved_outputs[0]
                     .revision;
                 restored.sync_active_schematic_to_workspace();
-                assert!(restored.workspace.annotation_restoration_error().is_some());
-                restored.schematic.end_operation();
+                assert!(
+                    restored
+                        .model
+                        .workspace
+                        .annotation_restoration_error()
+                        .is_some()
+                );
+                restored.model.schematic.end_operation();
                 restored
+                    .model
                     .workspace
                     .schematic_editor_mut(&fixture.root.key())
                     .unwrap()
                     .editor
                     .begin_operation("Other unfinished edit");
                 restored.sync_active_schematic_to_workspace();
-                assert!(restored.workspace.annotation_restoration_error().is_some());
+                assert!(
+                    restored
+                        .model
+                        .workspace
+                        .annotation_restoration_error()
+                        .is_some()
+                );
                 restored
+                    .model
                     .workspace
                     .schematic_editor_mut(&fixture.root.key())
                     .unwrap()
@@ -745,7 +776,11 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 // DRC findings are independent of the restored reference closure.
                 let _ = restored.run_active_design_checks();
                 assert!(
-                    restored.workspace.annotation_restoration_error().is_none(),
+                    restored
+                        .model
+                        .workspace
+                        .annotation_restoration_error()
+                        .is_none(),
                     "{failure}"
                 );
                 assert_restored_annotation(&restored, &fixture);

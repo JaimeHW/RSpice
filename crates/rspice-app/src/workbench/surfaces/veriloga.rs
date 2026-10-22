@@ -201,7 +201,7 @@ fn source_editor(
     // compile leaves the corner empty and gives the whole row to the path.
     let status_left = crate::workbench::documents::code_workspace::veriloga_compile_status(
         &app.state.ui.code_workspace.veriloga,
-        app.state.workspace.content.project.id(),
+        app.state.model.workspace.content.project.id(),
         selected,
         messages,
     )
@@ -398,7 +398,11 @@ fn interface_strip(
     let t = Tokens::get(ui.ctx());
     let messages = state.ui.messages();
     let veriloga = &state.ui.code_workspace.veriloga;
-    let receipt = veriloga_receipt(veriloga, state.workspace.content.project.id(), selected);
+    let receipt = veriloga_receipt(
+        veriloga,
+        state.model.workspace.content.project.id(),
+        selected,
+    );
     let (text, tone, detail, action) = match interface_finding(veriloga, receipt, reference) {
         Some(VerilogAInterfaceFinding::SchematicMismatch { schematic, module }) => (
             messages.text(MessageId::VerilogAInterfaceMismatchStrip),
@@ -543,7 +547,7 @@ fn current_diagnostics(
 ) -> std::sync::Arc<CodeDiagnosticCollection> {
     crate::workbench::documents::code_workspace::veriloga_diagnostics(
         &app.state.ui.code_workspace.veriloga,
-        app.state.workspace.content.project.id(),
+        app.state.model.workspace.content.project.id(),
         selected,
     )
 }

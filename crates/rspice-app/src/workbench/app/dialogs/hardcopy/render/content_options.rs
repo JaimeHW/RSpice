@@ -1116,7 +1116,7 @@ mod tests {
             let exports = Arc::new(AtomicUsize::new(0));
             let mut app = RSpiceApp::test_instance();
             app.export_workflow_io = Box::new(RefusedDestination(exports.clone()));
-            let reference = app.state.workspace.content.active_view.clone();
+            let reference = app.state.model.workspace.content.active_view.clone();
             app.state.workbench.documents.activate(
                 crate::workbench::state::WorkspaceDocumentId::CellView(reference),
             );

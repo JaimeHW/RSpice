@@ -253,6 +253,7 @@ fn size_rows(
 /// parses preferences, which a closed menu has no use for every frame.
 fn saved_sizes(ui: &Ui, state: &AppState) -> Vec<DrawingSheetPreset> {
     let mut saved = state
+        .model
         .workspace
         .content
         .design_management

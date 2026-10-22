@@ -54,7 +54,7 @@ pub(super) fn phase_noise_is_renderable(analysis: &AnalysisResult) -> bool {
 }
 
 fn selected_phase_noise_analysis_index(state: &AppState) -> Option<usize> {
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     // Through the workspace memo: the predicate walks every retained offset
     // and level, and this resolves on every frame the sheet is open.
     let renderable = |analysis: &AnalysisResult| {
@@ -66,6 +66,7 @@ fn selected_phase_noise_analysis_index(state: &AppState) -> Option<usize> {
         )
     };
     state
+        .model
         .simulation
         .view
         .active_analysis_idx
@@ -100,16 +101,16 @@ fn model_from_analysis(
 }
 
 fn build_model(state: &AppState) -> Option<PhaseNoiseModel> {
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     let analysis_index = selected_phase_noise_analysis_index(state)?;
     model_from_analysis(analysis_index, run.analyses.get(analysis_index)?)
 }
 
 fn active_periodic_noise_without_phase_trace(state: &AppState) -> bool {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
-    let Some(index) = state.simulation.view.active_analysis_idx else {
+    let Some(index) = state.model.simulation.view.active_analysis_idx else {
         return false;
     };
     let Some(analysis) = run.analyses.get(index) else {
@@ -180,7 +181,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let model = build_model(state);
     let input = model.as_ref().map(|model| view::PhaseNoiseInspector {
         trace: model.trace(),
-        analysis: &state.simulation.active_run().unwrap().analyses[model.analysis_index].data,
+        analysis: &state.model.simulation.active_run().unwrap().analyses[model.analysis_index].data,
     });
     view::right_panel(ui, input, &quantities, digits);
 }

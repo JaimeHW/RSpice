@@ -9,7 +9,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        let catalog = app.state.workspace.content.design_management.clone();
+        let catalog = app.state.model.workspace.content.design_management.clone();
         open_design_management_dialog(&mut app.state);
         assert!(app.state.dialogs.design_management.open);
         app.state.dialogs.design_management.reset_inputs_for_page(
@@ -62,7 +62,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
             DesignManagementPage::Manager
         );
         assert!(!app.state.dialogs.design_management.discard_confirmation);
-        assert_eq!(app.state.workspace.content.design_management, catalog);
+        assert_eq!(app.state.model.workspace.content.design_management, catalog);
     }
 }
 
@@ -93,15 +93,17 @@ fn manager_and_subflow_splits_match_the_mockup_contract() {
 #[test]
 fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
     let mut state = AppState::default();
-    let component = state.schematic.add_component(
+    let component = state.model.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::origin(),
     );
-    let owner = state.workspace.content.active_view.key();
+    let owner = state.model.workspace.content.active_view.key();
     state
+        .model
         .workspace
-        .insert_schematic_editor(owner.clone(), state.schematic.clone());
+        .insert_schematic_editor(owner.clone(), state.model.schematic.clone());
     let reference = state
+        .model
         .workspace
         .content
         .design_management
@@ -116,6 +118,7 @@ fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
         .expect("reference variant");
     let object = SchematicObjectKey::new(&owner, component).expect("scoped component");
     let comparison = state
+        .model
         .workspace
         .content
         .design_management

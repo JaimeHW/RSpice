@@ -34,7 +34,7 @@ pub fn render_property_dialog(
         &mut state.tabbed_property_dialog,
         &editor_context,
         &state.property_registry,
-        &state.model_library_manager,
+        &state.model.model_library_manager,
         quantity_policy,
         number_locale,
     );
@@ -59,6 +59,7 @@ pub fn render_property_dialog(
         let mut values = state.tabbed_property_dialog.draft.original_values.clone();
         values.extend(committed);
         let Some(component) = state
+            .model
             .schematic
             .document()
             .components
@@ -117,6 +118,7 @@ pub fn render_property_dialog(
         }
         if candidate.kind == crate::state::ComponentType::Port
             && let Err(error) = state
+                .model
                 .schematic
                 .validate_edited_port_contract(comp_id, &candidate)
         {
@@ -145,6 +147,7 @@ pub fn render_property_dialog(
             state.tabbed_property_dialog.close();
         } else if state.tabbed_property_dialog.open {
             let component = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -264,6 +267,7 @@ fn validate_model_binding_authority(
         .filter(|library| !library.is_empty());
 
     let provider_libraries = state
+        .model
         .model_library_manager
         .definition_providers(ModelConsumerScope::PrimitiveModel, &declared)
         .into_iter()
@@ -282,6 +286,7 @@ fn validate_model_binding_authority(
     }
 
     let effective = state
+        .model
         .model_library_manager
         .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &declared)?
         .expect("a non-empty provider set has one effective provider");
@@ -306,6 +311,7 @@ fn validate_component_identity(
             .validate_reference_designator(candidate.name.trim())
             .map_err(|error| format!("The instance reference was not changed: {error}"))?;
         if state
+            .model
             .schematic
             .document()
             .components
@@ -416,6 +422,7 @@ fn refresh_source_contract_advisories(state: &mut AppState) {
         .component_id
         .and_then(|component_id| {
             state
+                .model
                 .schematic
                 .document()
                 .components
@@ -455,6 +462,7 @@ fn component_editor_context(state: &AppState) -> ComponentPropertyContext {
         return ComponentPropertyContext::default();
     };
     let Some(component) = state
+        .model
         .schematic
         .document()
         .components
@@ -508,7 +516,7 @@ fn component_stimulus_context(
     if !crate::simulation::stimulus_realize::is_independent_source(component.kind) {
         return (None, None);
     }
-    let library = &state.workspace.content.stimulus_library;
+    let library = &state.model.workspace.content.stimulus_library;
     let definition = component
         .stimulus_provenance
         .as_ref()
@@ -565,19 +573,19 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
                 .to_owned(),
         );
     };
-    if source.design_epoch != state.design_execution_epoch {
+    if source.design_epoch != state.model.design_execution_epoch {
         return Some(
             "The design document changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    if source.document_epoch != state.active_schematic_epoch {
+    if source.document_epoch != state.model.active_schematic_epoch {
         return Some(
             "The active schematic buffer changed while properties were open. Close and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.view_path != state.workspace.content.active_view.display_path() {
+    if dialog.view_path != state.model.workspace.content.active_view.display_path() {
         return Some(
             "The active cell/view changed while properties were open. Close and reopen the current object."
                 .to_owned(),
@@ -590,6 +598,7 @@ fn component_property_session_error(state: &AppState) -> Option<String> {
         );
     };
     let Some(current) = state
+        .model
         .schematic
         .document()
         .components
@@ -649,21 +658,27 @@ mod tests {
 
     fn state_with_resistor() -> AppState {
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components.clear();
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
         let mut component = Component::new(44, ComponentType::Resistor, Point::new(4, 8));
         component.name = "R1".to_owned();
         component.value = "1k".to_owned();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(component);
-        state.schematic.clear_undo_history();
+        state.model.schematic.clear_undo_history();
         state
     }
 
     fn add_current_output(state: &mut AppState) -> crate::product::SimulationPlanId {
-        let plan = state.sim_setup.stable_analysis_plan().unwrap().id();
+        let plan = state.model.sim_setup.stable_analysis_plan().unwrap().id();
         let output = crate::state::SavedOutput::new(
             crate::state::SavedOutputKind::RawVoltageOrCurrent,
             "resistor current",
@@ -675,6 +690,7 @@ mod tests {
         )
         .unwrap();
         state
+            .model
             .workspace
             .content
             .add_saved_output(plan, output)
@@ -719,13 +735,14 @@ mod tests {
         };
 
         let mut state = AppState::default();
-        state.model_library_manager.clear();
+        state.model.model_library_manager.clear();
         for library_name in ["alpha", "beta"] {
             let mut library = ModelLibrary::new(library_name);
             library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
-            state.model_library_manager.add_library(library);
+            state.model.model_library_manager.add_library(library);
         }
         state
+            .model
             .model_library_manager
             .resolve_definition_provider(
                 ModelConsumerScope::PrimitiveModel,
@@ -768,7 +785,7 @@ mod tests {
         use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 
         let mut state = AppState::default();
-        state.model_library_manager.clear();
+        state.model.model_library_manager.clear();
         let mut kit = ModelLibrary::new("kit");
         for (bin, (l_min, l_max)) in [(1, (0.1e-6, 1e-6)), (2, (1e-6, 10e-6))] {
             kit.add_model(
@@ -776,7 +793,7 @@ mod tests {
                     .with_geometry(l_min, l_max, 0.1e-6, 100e-6),
             );
         }
-        state.model_library_manager.add_library(kit);
+        state.model.model_library_manager.add_library(kit);
         let mut component =
             Component::new(1, ComponentType::Nmos, Point::origin()).with_name_value("M1", "nch");
         component.params = "model_library=kit".to_owned();
@@ -827,12 +844,13 @@ mod tests {
             crate::ui::Theme::default().apply(&ctx);
             let mut state = state_with_resistor();
             let master = CellViewRef::new("work", "property_parent", "schematic");
-            state.workspace.descend_into(
+            state.model.workspace.descend_into(
                 "X1".to_owned(),
                 master.clone(),
                 crate::state::ViewType::Schematic,
             );
             let first = state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -846,11 +864,12 @@ mod tests {
             )
             .unwrap();
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .design_notes
                 .push(note.clone());
-            state.schematic.init_undo_history();
+            state.model.schematic.init_undo_history();
             open_property_editor(&mut state, 44);
             assert_eq!(
                 state.tabbed_property_dialog.source,
@@ -868,20 +887,20 @@ mod tests {
             });
             assert!(state.tabbed_property_dialog.session_error.is_none());
             match change {
-                "project" => state.workspace.content.project = Default::default(),
+                "project" => state.model.workspace.content.project = Default::default(),
                 "view" => {
-                    state.workspace.content.active_view =
+                    state.model.workspace.content.active_view =
                         CellViewRef::new("work", "replacement", "schematic")
                 }
                 "symbol-tab" => {
-                    state.workspace.content.active_view =
+                    state.model.workspace.content.active_view =
                         CellViewRef::new("work", "property_parent", "symbol")
                 }
-                "design" => state.design_execution_epoch += 1,
-                "buffer" => state.active_schematic_epoch += 1,
+                "design" => state.model.design_execution_epoch += 1,
+                "buffer" => state.model.active_schematic_epoch += 1,
                 "occurrence" => {
-                    state.workspace.ascend_one().unwrap();
-                    state.workspace.descend_into(
+                    state.model.workspace.ascend_one().unwrap();
+                    state.model.workspace.descend_into(
                         "X2".to_owned(),
                         master.clone(),
                         crate::state::ViewType::Schematic,
@@ -889,6 +908,7 @@ mod tests {
                 }
                 "sheet" | "sheet-revision" => {
                     let catalog = state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -910,9 +930,10 @@ mod tests {
                     }
                 }
                 "content" => {
-                    let topology = state.schematic.topology_version();
+                    let topology = state.model.schematic.topology_version();
                     assert!(
                         state
+                            .model
                             .schematic
                             .edit_design_note_properties(
                                 note,
@@ -922,17 +943,18 @@ mod tests {
                             )
                             .unwrap()
                     );
-                    assert_eq!(state.schematic.topology_version(), topology);
+                    assert_eq!(state.model.schematic.topology_version(), topology);
                 }
-                "topology" => state.schematic.bump_topology_version(),
+                "topology" => state.model.schematic.bump_topology_version(),
                 "symbol-context" => {
                     state
+                        .model
                         .workspace
                         .content
                         .schematic_buffers
                         .insert("work/other/schematic".to_owned(), Default::default());
                 }
-                "read-only" => state.schematic.session.read_only = true,
+                "read-only" => state.model.schematic.session.read_only = true,
                 "safe-mode" => state.workbench.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
@@ -942,7 +964,8 @@ mod tests {
                 ),
                 "missing" => state.tabbed_property_dialog.source = None,
                 "object" => {
-                    state.schematic.document_mut_for_test().components[0].name = "R2".to_owned()
+                    state.model.schematic.document_mut_for_test().components[0].name =
+                        "R2".to_owned()
                 }
                 _ => unreachable!(),
             }
@@ -951,12 +974,12 @@ mod tests {
                 "{change}"
             );
             let source = state.tabbed_property_dialog.source.clone();
-            let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
+            let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
             let versions = (
-                state.schematic.content_version(),
-                state.schematic.topology_version(),
+                state.model.schematic.content_version(),
+                state.model.schematic.topology_version(),
             );
-            let undo = state.schematic.undo_description().map(str::to_owned);
+            let undo = state.model.schematic.undo_description().map(str::to_owned);
             let project_undo = state.project_undo_sequence();
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 render_property_dialog(ctx, &mut state);
@@ -977,19 +1000,19 @@ mod tests {
                 "{change}"
             );
             assert!(
-                before.is_equal_document(state.schematic.document()),
+                before.is_equal_document(state.model.schematic.document()),
                 "{change}"
             );
             assert_eq!(
                 (
-                    state.schematic.content_version(),
-                    state.schematic.topology_version()
+                    state.model.schematic.content_version(),
+                    state.model.schematic.topology_version()
                 ),
                 versions,
                 "{change}"
             );
             assert_eq!(
-                state.schematic.undo_description(),
+                state.model.schematic.undo_description(),
                 undo.as_deref(),
                 "{change}"
             );
@@ -1022,10 +1045,11 @@ mod tests {
 
         assert!(!state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.source.is_none());
-        assert_eq!(state.schematic.document().components[0].name, "R99");
-        assert_eq!(state.schematic.document().components[0].value, "2k");
+        assert_eq!(state.model.schematic.document().components[0].name, "R99");
+        assert_eq!(state.model.schematic.document().components[0].value, "2k");
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .plan_data(plan)
@@ -1034,15 +1058,16 @@ mod tests {
                 .source_expression,
             "I(R99)"
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
         assert_eq!(
             state.undo_project_design().unwrap(),
             Some("edit properties".to_owned())
         );
-        assert_eq!(state.schematic.document().components[0].name, "R1");
-        assert_eq!(state.schematic.document().components[0].value, "1k");
+        assert_eq!(state.model.schematic.document().components[0].name, "R1");
+        assert_eq!(state.model.schematic.document().components[0].value, "1k");
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .plan_data(plan)
@@ -1053,10 +1078,11 @@ mod tests {
         );
         assert!(state.project_undo_sequence().is_none());
         assert!(state.redo_project_design().unwrap().is_some());
-        assert_eq!(state.schematic.document().components[0].name, "R99");
-        assert_eq!(state.schematic.document().components[0].value, "2k");
+        assert_eq!(state.model.schematic.document().components[0].name, "R99");
+        assert_eq!(state.model.schematic.document().components[0].value, "2k");
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .plan_data(plan)
@@ -1074,14 +1100,20 @@ mod tests {
         let mut state = state_with_resistor();
         let plan = add_current_output(&mut state);
         state
+            .model
             .workspace
             .content
             .plan_data_mut(plan)
             .unwrap()
             .saved_outputs[0]
             .revision = crate::product::ObjectRevision::new(u64::MAX).unwrap();
-        let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
-        let payloads = state.workspace.content.simulation_plan_payloads.clone();
+        let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
+        let payloads = state
+            .model
+            .workspace
+            .content
+            .simulation_plan_payloads
+            .clone();
         open_property_editor(&mut state, 44);
         let opened_source = state.tabbed_property_dialog.source.clone();
         state
@@ -1098,8 +1130,11 @@ mod tests {
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             render_property_dialog(ctx, &mut state);
         });
-        assert!(before.is_equal_document(state.schematic.document()));
-        assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
+        assert!(before.is_equal_document(state.model.schematic.document()));
+        assert_eq!(
+            state.model.workspace.content.simulation_plan_payloads,
+            payloads
+        );
         assert!(state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.draft.commit_error.is_some());
         assert_eq!(state.tabbed_property_dialog.source, opened_source);
@@ -1109,7 +1144,7 @@ mod tests {
             state.tabbed_property_dialog.draft.values["name"],
             PropertyValue::String("R99".to_owned())
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
         assert!(state.project_undo_sequence().is_none());
     }
 
@@ -1119,10 +1154,15 @@ mod tests {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
             let mut state = state_with_resistor();
-            state.schematic.document_mut_for_test().components[0].params = source.to_owned();
+            state.model.schematic.document_mut_for_test().components[0].params = source.to_owned();
             add_current_output(&mut state);
-            let before = crate::state::SchematicSnapshot::capture(state.schematic.document());
-            let payloads = state.workspace.content.simulation_plan_payloads.clone();
+            let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
+            let payloads = state
+                .model
+                .workspace
+                .content
+                .simulation_plan_payloads
+                .clone();
             open_property_editor(&mut state, 44);
             state
                 .tabbed_property_dialog
@@ -1138,8 +1178,11 @@ mod tests {
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 render_property_dialog(ctx, &mut state);
             });
-            assert!(before.is_equal_document(state.schematic.document()));
-            assert_eq!(state.workspace.content.simulation_plan_payloads, payloads);
+            assert!(before.is_equal_document(state.model.schematic.document()));
+            assert_eq!(
+                state.model.workspace.content.simulation_plan_payloads,
+                payloads
+            );
             assert!(state.tabbed_property_dialog.open);
             assert!(
                 state
@@ -1153,7 +1196,7 @@ mod tests {
             );
             assert!(state.tabbed_property_dialog.draft.is_modified("name"));
             assert!(state.tabbed_property_dialog.draft.is_modified("r"));
-            assert!(!state.schematic.can_undo());
+            assert!(!state.model.schematic.can_undo());
             assert!(state.project_undo_sequence().is_none());
         }
     }
@@ -1177,7 +1220,7 @@ mod tests {
         });
         assert!(!state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.source.is_none());
-        assert_eq!(state.schematic.document().components[0].name, "R1");
+        assert_eq!(state.model.schematic.document().components[0].name, "R1");
     }
 
     #[test]
@@ -1190,13 +1233,13 @@ mod tests {
             .as_ref()
             .unwrap()
             .document_epoch;
-        let original_view = state.workspace.content.active_view.clone();
+        let original_view = state.model.workspace.content.active_view.clone();
 
         state.open_workspace_view(CellViewRef::new("work", "detour", "schematic"));
         state.open_workspace_view(original_view.clone());
 
-        assert_eq!(state.workspace.content.active_view, original_view);
-        assert_ne!(state.active_schematic_epoch, captured_epoch);
+        assert_eq!(state.model.workspace.content.active_view, original_view);
+        assert_ne!(state.model.active_schematic_epoch, captured_epoch);
         assert!(component_property_session_error(&state).is_some());
     }
 
@@ -1221,7 +1264,7 @@ mod tests {
 
         assert!(!state.tabbed_property_dialog.model_browser.open);
         assert!(state.tabbed_property_dialog.open);
-        assert_eq!(state.schematic.document().components[0].name, "R1");
+        assert_eq!(state.model.schematic.document().components[0].name, "R1");
     }
 
     #[test]
@@ -1285,6 +1328,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut state = state_with_resistor();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .document_policy
@@ -1313,9 +1357,9 @@ mod tests {
 
         // The valid name is held back with the invalid multiplier.
         assert!(state.tabbed_property_dialog.open);
-        assert_eq!(state.schematic.document().components[0].name, "R1");
-        assert_eq!(state.schematic.document().components[0].params, "");
-        assert_eq!(state.schematic.history().undo_count(), 0);
+        assert_eq!(state.model.schematic.document().components[0].name, "R1");
+        assert_eq!(state.model.schematic.document().components[0].params, "");
+        assert_eq!(state.model.schematic.history().undo_count(), 0);
         assert_eq!(state.tabbed_property_dialog.source, opened_source);
         assert_eq!(
             state.tabbed_property_dialog.draft.numeric_text_draft("m"),
@@ -1341,7 +1385,7 @@ mod tests {
 
         assert!(!state.tabbed_property_dialog.open);
         assert!(state.tabbed_property_dialog.source.is_none());
-        assert_eq!(state.schematic.document().components[0].name, "R99");
-        assert_eq!(state.schematic.document().components[0].params, "m=2");
+        assert_eq!(state.model.schematic.document().components[0].name, "R99");
+        assert_eq!(state.model.schematic.document().components[0].params, "m=2");
     }
 }

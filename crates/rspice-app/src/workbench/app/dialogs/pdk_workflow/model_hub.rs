@@ -699,7 +699,7 @@ pub(super) fn publish_model_hub_output(
             return;
         }
     } else {
-        state.model_library_manager = *candidate;
+        state.model.model_library_manager = *candidate;
     }
     // A part that arrived to be placed is armed and the canvas takes focus; a
     // part that only moved onto a newer release did neither, and pulling the

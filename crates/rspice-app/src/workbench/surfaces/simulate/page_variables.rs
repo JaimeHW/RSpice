@@ -53,8 +53,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn plan_payload(app: &RSpiceApp) -> Option<(SimulationPlanId, SimulationPlanPayload)> {
-    let plan_id = app.state.sim_setup.stable_analysis_plan().ok()?.id();
-    let payload = app.state.workspace.content.plan_data(plan_id)?.clone();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan().ok()?.id();
+    let payload = app
+        .state
+        .model
+        .workspace
+        .content
+        .plan_data(plan_id)?
+        .clone();
     Some((plan_id, payload))
 }
 
@@ -618,7 +624,7 @@ fn scope_options(
             DesignVariableScope::SelectedCell { cell: cell.clone() },
         ));
     }
-    if let Ok(plan) = app.state.sim_setup.stable_analysis_plan() {
+    if let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() {
         options.extend(
             plan.instances()
                 .iter()
@@ -665,24 +671,26 @@ fn replace_variable(
 ) -> bool {
     let Ok(plan_id) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
     else {
         return false;
     };
-    let Some(mut replacement) =
-        app.state
-            .workspace
-            .content
-            .plan_data(plan_id)
-            .and_then(|payload| {
-                payload
-                    .design_variables
-                    .iter()
-                    .find(|variable| variable.id == variable_id)
-                    .cloned()
-            })
+    let Some(mut replacement) = app
+        .state
+        .model
+        .workspace
+        .content
+        .plan_data(plan_id)
+        .and_then(|payload| {
+            payload
+                .design_variables
+                .iter()
+                .find(|variable| variable.id == variable_id)
+                .cloned()
+        })
     else {
         return false;
     };
@@ -751,6 +759,7 @@ fn commit_expression(
 ) -> bool {
     let Ok(plan_id) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
@@ -801,18 +810,19 @@ fn change_impact(ui: &mut Ui, app: &RSpiceApp, payload: &SimulationPlanPayload) 
     // analyses resolve these values" over a plan that would resolve them for
     // four -- the same over-count the placed-source list stopped making when
     // it started asking whether a consumer reads.
-    let (analyses, disabled) = app
-        .state
-        .sim_setup
-        .stable_analysis_plan()
-        .map_or((0, 0), |plan| {
-            let enabled = plan
-                .instances()
-                .iter()
-                .filter(|instance| instance.enabled())
-                .count();
-            (enabled, plan.instances().len() - enabled)
-        });
+    let (analyses, disabled) =
+        app.state
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .map_or((0, 0), |plan| {
+                let enabled = plan
+                    .instances()
+                    .iter()
+                    .filter(|instance| instance.enabled())
+                    .count();
+                (enabled, plan.instances().len() - enabled)
+            });
     let referenced: Vec<&crate::state::DesignVariable> = variables
         .iter()
         .filter(|variable| {

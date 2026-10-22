@@ -10,11 +10,21 @@ use super::{RSpiceApp, SimulationPage, render_with};
 fn add_master(app: &mut RSpiceApp, cell: &str, schematic: crate::state::SchematicState) {
     use crate::state::{CellViewRef, Library, View, ViewType};
 
-    if app.state.library_manager.get_library("work").is_none() {
-        app.state.library_manager.add_library(Library::new("work"));
+    if app
+        .state
+        .model
+        .library_manager
+        .get_library("work")
+        .is_none()
+    {
+        app.state
+            .model
+            .library_manager
+            .add_library(Library::new("work"));
     }
     let owner = app
         .state
+        .model
         .library_manager
         .get_library_mut("work")
         .expect("the fixture library exists");
@@ -23,6 +33,7 @@ fn add_master(app: &mut RSpiceApp, cell: &str, schematic: crate::state::Schemati
         target.add_view(View::new("schematic", ViewType::Schematic));
     }
     app.state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("work", cell, "schematic").key(), schematic);
 }
@@ -46,6 +57,7 @@ fn hierarchical_excitations(app: &mut RSpiceApp) {
     use crate::state::{ComponentType, LibraryCellInstance, Point};
 
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -56,6 +68,7 @@ fn hierarchical_excitations(app: &mut RSpiceApp) {
                 .with_library_cell(LibraryCellInstance::new("work", "afe", "schematic"));
         instance.name = name.to_owned();
         app.state
+            .model
             .schematic
             .document_mut_for_test()
             .components

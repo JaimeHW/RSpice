@@ -290,17 +290,21 @@ fn dialog_visible_text(
 ) -> (Vec<String>, Vec<String>) {
     let (mut app, active, available, _) = app_with_every_lifecycle_state();
     if extra_plans > 0 {
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         for index in 0..extra_plans {
             let id = setup
                 .create_plan(format!("Spare plan {index}"))
                 .expect("a fresh root plan is created");
-            app.state.workspace.content.migrate_inactive_plan_data(id);
+            app.state
+                .model
+                .workspace
+                .content
+                .migrate_inactive_plan_data(id);
         }
         setup
             .activate_plan(active)
             .expect("the fixture's active plan reactivates");
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
     }
     let draft = route_draft(&app, mode, active, available);
     let ctx = egui::Context::default();
@@ -357,11 +361,12 @@ pub(super) fn app_with_every_lifecycle_state() -> (
     let mut app = RSpiceApp::test_instance();
     let available = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the fixture has a stable plan")
         .id();
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     let retired = setup
         .create_plan("Retired sweep")
         .expect("a fresh root plan is created");
@@ -372,18 +377,21 @@ pub(super) fn app_with_every_lifecycle_state() -> (
         .archive_plan(retired)
         .expect("an inactive plan archives");
     app.state
+        .model
         .workspace
         .content
         .migrate_active_plan_data(available);
     app.state
+        .model
         .workspace
         .content
         .migrate_inactive_plan_data(retired);
     app.state
+        .model
         .workspace
         .content
         .migrate_inactive_plan_data(active);
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
     (app, active, available, retired)
 }
 
@@ -982,6 +990,7 @@ fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
     // Renaming keeps the identity and the revision.
     let before = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
@@ -990,6 +999,7 @@ fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
         .expect("the active plan renames");
     let after = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan");
@@ -998,14 +1008,14 @@ fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
 
     // Archiving is refused on the active plan by the catalog itself, not
     // merely by a disabled button.
-    let error = lifecycle::commit_archive_plan(&mut app.state.sim_setup, active)
+    let error = lifecycle::commit_archive_plan(&mut app.state.model.sim_setup, active)
         .expect_err("archiving the active plan is refused");
     assert!(
         error.to_ascii_lowercase().contains("active"),
         "the refusal does not say the plan is active: {error}"
     );
     // And an archive is reversible.
-    lifecycle::commit_restore_plan(&mut app.state.sim_setup, retired)
+    lifecycle::commit_restore_plan(&mut app.state.model.sim_setup, retired)
         .expect("an archived plan restores");
     assert!(
         plan_catalog_records(&app)
@@ -1161,19 +1171,21 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
     app.state
+        .model
         .workspace
         .content
         .migrate_active_plan_data(plan_id);
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     setup
         .set_reference_pvt(ProcessCorner::FF, -40.0)
         .expect("a physical reference corner");
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
 
     let RenderedAside {
         record,
@@ -1218,12 +1230,13 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
 
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan");
     assert_eq!(
         aside_value(&rows, "Name"),
-        app.state.sim_setup.active_plan_name().as_str()
+        app.state.model.sim_setup.active_plan_name().as_str()
     );
     assert_eq!(
         aside_value(&rows, "Revision"),
@@ -1274,6 +1287,7 @@ fn the_browse_aside_states_every_fact_the_catalog_owns_about_the_selected_plan()
     // to change what the row says.
     let run = crate::product::RunId::new();
     app.state
+        .model
         .workspace
         .content
         .ensure_active_plan_data(plan_id)
@@ -1294,17 +1308,18 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     // Nested composition with a zero maximum depth is a declared run-space
     // error, so there is no workload to forecast.
     setup.run_set.composition.mode =
         rspice_simulation_contract::run_set::RunSetCompositionMode::Nested;
     setup.run_set.composition.maximum_depth = 0;
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
 
     let RenderedAside { record, rows, .. } = rendered_aside(&app, plan_id);
 
@@ -1336,7 +1351,7 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
     assert_eq!(
         aside_value(&rows, "Reference PVT corner"),
         reference_pvt_label(
-            app.state.sim_setup.reference_pvt,
+            app.state.model.sim_setup.reference_pvt,
             QuantityPresentationPolicy::default()
         )
     );
@@ -1364,13 +1379,14 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
     let mut app = RSpiceApp::test_instance();
     let source = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan");
     let source_id = source.id();
     let source_revision = source.revision();
-    let source_corner = app.state.sim_setup.reference_pvt;
-    let mut setup = app.state.sim_setup.clone();
+    let source_corner = app.state.model.sim_setup.reference_pvt;
+    let mut setup = app.state.model.sim_setup.clone();
     let outcome = setup
         .clone_active_plan(
             "Cloned characterization",
@@ -1380,7 +1396,7 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
     setup
         .set_reference_pvt(ProcessCorner::SS, 125.0)
         .expect("a physical reference corner");
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
 
     let clone_rows = rendered_aside(&app, outcome.cloned_plan_id).rows;
     assert_eq!(
@@ -1417,7 +1433,7 @@ fn a_clone_names_its_source_and_the_source_keeps_its_own_reference_corner() {
 #[test]
 fn a_created_plan_inherits_exactly_what_its_route_committed() {
     let mut app = RSpiceApp::test_instance();
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     setup
         .set_reference_pvt(ProcessCorner::FF, 85.0)
         .expect("a physical reference corner");
@@ -1430,7 +1446,7 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
             source_digest: crate::product::ContentDigest::from_bytes([3; 32]),
             selected_corner: Some("TT".to_owned()),
         });
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
 
     create::commit_create_plan(
         &mut app,
@@ -1447,7 +1463,7 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
     )
     .expect("the create transaction commits");
 
-    let setup = &app.state.sim_setup;
+    let setup = &app.state.model.sim_setup;
     assert_eq!(setup.active_plan_name().as_str(), "Inheriting plan");
     assert_eq!(setup.reference_pvt.process, ProcessCorner::SS);
     assert_eq!(setup.reference_pvt.temperature_celsius, -40.0);
@@ -1507,7 +1523,7 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
 #[test]
 fn a_created_plan_that_inherits_nothing_keeps_the_catalog_defaults() {
     let mut app = RSpiceApp::test_instance();
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     setup.options.reltol = 3.5e-6;
     setup.save_policy.retained_dataset_limit = 42;
     setup
@@ -1517,7 +1533,7 @@ fn a_created_plan_that_inherits_nothing_keeps_the_catalog_defaults() {
             source_digest: crate::product::ContentDigest::from_bytes([3; 32]),
             selected_corner: Some("TT".to_owned()),
         });
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
 
     create::commit_create_plan(
         &mut app,
@@ -1526,7 +1542,7 @@ fn a_created_plan_that_inherits_nothing_keeps_the_catalog_defaults() {
     )
     .expect("the create transaction commits");
 
-    let setup = &app.state.sim_setup;
+    let setup = &app.state.model.sim_setup;
     let defaults = rspice_simulation_contract::run_set::ReferencePoint::default();
     assert_eq!(setup.reference_pvt.process, defaults.process);
     assert_eq!(
@@ -1567,18 +1583,19 @@ fn a_comparison_diffs_the_two_plans_its_route_picked() {
     let mut app = RSpiceApp::test_instance();
     let first = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     let second = setup
         .create_plan("Retired sweep")
         .expect("a fresh root plan is created");
     let active = setup
         .create_plan("Corner characterization")
         .expect("a second fresh root plan is created");
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
     let records = plan_catalog_records(&app);
 
     let mut draft = SimulationPlanManagerDraft::new(first, "Lab characterization");

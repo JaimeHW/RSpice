@@ -442,19 +442,24 @@ fn open_design_management_dialog_state(state: &mut AppState) {
         return;
     }
     if !matches!(
-        state.workspace.content.active_view_type(),
+        state.model.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
         state.prompt("Design Management needs a schematic or testbench view.");
         return;
     }
     crate::schematic::view::retain_selection_on_active_sheet(state);
-    let owner_key = state.workspace.content.active_schematic_reference().key();
-    let selection_object_ids = selected_stable_object_ids(&state.schematic);
-    let all_object_ids = all_stable_object_ids(&state.schematic);
-    let selection_summary = selected_object_summary(&state.schematic, &selection_object_ids);
-    let default_sheet_name = state.workspace.content.active_view.cell.clone();
-    let catalog = (*state.workspace.content.design_management).clone();
+    let owner_key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let selection_object_ids = selected_stable_object_ids(&state.model.schematic);
+    let all_object_ids = all_stable_object_ids(&state.model.schematic);
+    let selection_summary = selected_object_summary(&state.model.schematic, &selection_object_ids);
+    let default_sheet_name = state.model.workspace.content.active_view.cell.clone();
+    let catalog = (*state.model.workspace.content.design_management).clone();
     if let Err(error) = state.dialogs.design_management.open(
         &catalog,
         owner_key.clone(),

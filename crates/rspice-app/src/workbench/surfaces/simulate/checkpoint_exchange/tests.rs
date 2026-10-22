@@ -22,10 +22,11 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
 
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
     begin_import(&ctx, &mut app.state);
-    app.state.design_execution_epoch += 1;
+    app.state.model.design_execution_epoch += 1;
     poll(&ctx, &mut app);
     assert!(
         app.state
+            .model
             .simulation
             .retained
             .imported_monte_carlo_checkpoints
@@ -74,6 +75,7 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     let restored: AppState = serde_json::from_str(&session).unwrap();
     assert_eq!(
         restored
+            .model
             .simulation
             .retained
             .imported_monte_carlo_checkpoints

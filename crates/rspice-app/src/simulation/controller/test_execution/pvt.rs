@@ -18,9 +18,11 @@ pub(crate) fn divider() -> AppState {
     .enumerate()
     {
         let id = state
+            .model
             .schematic
             .add_component(kind, Point::new(100 + index as i32 * 200, 100));
         let component = state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -39,13 +41,13 @@ pub(crate) fn divider() -> AppState {
                 terminal.x,
                 terminal.y + if terminal.y < 100 { -20 } else { 20 },
             );
-            state.schematic.add_wire(vec![terminal, end]).unwrap();
-            state.schematic.add_net_label(end, node.into());
+            state.model.schematic.add_wire(vec![terminal, end]).unwrap();
+            state.model.schematic.add_net_label(end, node.into());
         }
     }
-    state.sim_setup.run_set = RunSetState::reference_only();
-    state.sim_setup.reference_pvt.temperature_celsius = 27.0;
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    state.model.sim_setup.run_set = RunSetState::reference_only();
+    state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     for id in plan
         .instances()
         .iter()
@@ -66,7 +68,7 @@ pub(crate) fn run_set_divider(draft: AnalysisDraft, temperatures: &[&str]) -> Ap
         1,
     );
     supply.source = "netlist-source:VDD".into();
-    state.sim_setup.run_set.dimensions = vec![
+    state.model.sim_setup.run_set.dimensions = vec![
         supply,
         RunSetDimension::new(
             "fixture-temperature",
@@ -75,7 +77,7 @@ pub(crate) fn run_set_divider(draft: AnalysisDraft, temperatures: &[&str]) -> Ap
             1,
         ),
     ];
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (analysis, _) = plan.insert(draft.kind()).unwrap();
     plan.edit(analysis, |target| *target = draft).unwrap();
     state

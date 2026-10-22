@@ -15,12 +15,14 @@ const REASON: &str = "sense is tied to SENSE on purpose";
 fn colliding_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     disable_global_process_axis(&mut app.state);
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.provision_test_project_technology_contract();
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 600), "sense".to_owned());
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 700), "SENSE".to_owned());
     app.state.sync_active_schematic_to_workspace();
@@ -33,8 +35,9 @@ fn collision(state: &mut AppState) -> (Option<WaiverTarget>, bool) {
     state
         .run_active_design_checks()
         .expect("the checks run on the drawing");
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     let batch = state
+        .model
         .diagnostics
         .batch(&DiagnosticInputs::DesignCheck { subject })
         .expect("the checks published their findings");
@@ -72,7 +75,7 @@ fn a_waived_error_is_run_and_an_unwaived_one_is_refused() {
     start(&mut app.state, &mut app.simulation_controller, true);
     assert!(blocked(&app), "the error blocks preflight");
     assert!(
-        !app.state.simulation.execution.trigger_simulation,
+        !app.state.model.simulation.execution.trigger_simulation,
         "and the run is not queued"
     );
 
@@ -92,7 +95,7 @@ fn a_waived_error_is_run_and_an_unwaived_one_is_refused() {
     app.settle_preflight();
     assert!(!blocked(&app), "{:?}", app.state.workbench.preflight.report);
     assert!(
-        app.state.simulation.execution.trigger_simulation,
+        app.state.model.simulation.execution.trigger_simulation,
         "the waived error is run"
     );
     assert!(

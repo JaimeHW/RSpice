@@ -9,16 +9,17 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
 
     let mut state = AppState::default();
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
 
-    let mut mc = state.sim_setup.mc.clone();
+    let mut mc = state.model.sim_setup.mc.clone();
     mc.ensure_initialized();
     mc.histogram_bins = "31".into();
     mc.num_runs = "17".into();
-    state.sim_setup.mc.histogram_bins = "99".into();
-    state.sim_setup.mc.num_runs = "99".into();
+    state.model.sim_setup.mc.histogram_bins = "99".into();
+    state.model.sim_setup.mc.num_runs = "99".into();
     let draft = AnalysisDraft::MonteCarlo(mc);
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
         &analysis_inputs(&state),
@@ -35,7 +36,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .starts_with(".mc 17 ")
     );
     let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
-        &state.sim_setup,
+        &state.model.sim_setup,
         &draft,
         None,
         &spec,
@@ -44,10 +45,10 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     .unwrap();
     assert_eq!(options.mc_histogram_bins, Some(31));
 
-    let mut temp = state.sim_setup.temp.clone();
+    let mut temp = state.model.sim_setup.temp.clone();
     temp.ensure_initialized();
     temp.specific_temps = "11, 22".into();
-    state.sim_setup.temp.specific_temps = "not a temperature".into();
+    state.model.sim_setup.temp.specific_temps = "not a temperature".into();
     let draft = AnalysisDraft::Temperature(temp);
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
         &analysis_inputs(&state),
@@ -64,7 +65,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         ".step temp list 11 22"
     );
     let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
-        &state.sim_setup,
+        &state.model.sim_setup,
         &draft,
         None,
         &spec,
@@ -73,10 +74,10 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     .unwrap();
     assert_eq!(options.temp.unwrap().temperatures_c, vec![11.0, 22.0]);
 
-    let mut corner = state.sim_setup.corner.clone();
+    let mut corner = state.model.sim_setup.corner.clone();
     corner.ensure_initialized();
     corner.base_analysis_idx = 3;
-    state.sim_setup.corner.base_analysis_idx = 0;
+    state.model.sim_setup.corner.base_analysis_idx = 0;
     let draft = AnalysisDraft::Corner(corner);
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
         &analysis_inputs(&state),
@@ -84,7 +85,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     )
     .unwrap();
     let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
-        &state.sim_setup,
+        &state.model.sim_setup,
         &draft,
         None,
         &spec,
@@ -96,15 +97,15 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         CornerBaseMode::Op
     ));
 
-    state.sim_setup.pss.ensure_initialized();
-    state.sim_setup.pss.tone_sources = "VIN".into();
-    let mut pac = state.sim_setup.pac.clone();
+    state.model.sim_setup.pss.ensure_initialized();
+    state.model.sim_setup.pss.tone_sources = "VIN".into();
+    let mut pac = state.model.sim_setup.pac.clone();
     pac.ensure_initialized();
     pac.pac_magnitude = "2.5".into();
-    state.sim_setup.pac.pac_magnitude = "9".into();
+    state.model.sim_setup.pac.pac_magnitude = "9".into();
     let draft = AnalysisDraft::Pac(pac);
     let options = rspice_simulation::analysis_preparation::analysis_spec_execution_options(
-        &state.sim_setup,
+        &state.model.sim_setup,
         &draft,
         None,
         &AnalysisSpec::Pac,
@@ -112,7 +113,7 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
     )
     .unwrap();
     assert_eq!(options.pac.unwrap().pac_magnitude, 2.5);
-    state.sim_setup.pac.pac_magnitude = "unfinished(".into();
+    state.model.sim_setup.pac.pac_magnitude = "unfinished(".into();
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
         &analysis_inputs(&state),
         &draft,
@@ -129,12 +130,12 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .contains("pacmag=2.5")
     );
 
-    let mut pss = state.sim_setup.pss.clone();
+    let mut pss = state.model.sim_setup.pss.clone();
     pss.ensure_initialized();
     pss.tone_sources = "VIN".into();
     pss.fund_freq = "1k".into();
-    state.sim_setup.pss = pss.clone();
-    state.sim_setup.pss.fund_freq = "2k".into();
+    state.model.sim_setup.pss = pss.clone();
+    state.model.sim_setup.pss.fund_freq = "2k".into();
     let draft = AnalysisDraft::Pss(pss);
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
         &analysis_inputs(&state),
@@ -154,11 +155,11 @@ fn study_options_and_commands_read_the_exact_authored_draft() {
         .starts_with(".pss fund=1k ")
     );
 
-    let mut hb = state.sim_setup.hb.clone();
+    let mut hb = state.model.sim_setup.hb.clone();
     hb.ensure_initialized();
     hb.fundamental = "1meg".into();
-    state.sim_setup.hb = hb.clone();
-    state.sim_setup.hb.fundamental = "2meg".into();
+    state.model.sim_setup.hb = hb.clone();
+    state.model.sim_setup.hb.fundamental = "2meg".into();
     let draft = AnalysisDraft::HarmonicBalance(hb);
     let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
         &analysis_inputs(&state),
@@ -194,8 +195,8 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
             AnalysisKind::DcSweep,
         ] {
             let mut state = AppState::default();
-            state.sim_setup.analysis_plan = Some(SimulationPlan::empty());
-            let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+            state.model.sim_setup.analysis_plan = Some(SimulationPlan::empty());
+            let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
             let op = plan.insert(AnalysisKind::OperatingPoint).unwrap().0;
             let base = plan.insert(kind).unwrap().0;
             let other = plan.insert(kind).unwrap().0;
@@ -277,13 +278,14 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
             );
             let frozen = restored.freeze().unwrap();
             // Shared setup and later live base edits must not replace frozen values.
-            state.sim_setup.tran.stop = "invalid".into();
-            state.sim_setup.ac.fstop = "invalid".into();
-            state.sim_setup.dc.source = "Vwrong".into();
+            state.model.sim_setup.tran.stop = "invalid".into();
+            state.model.sim_setup.ac.fstop = "invalid".into();
+            state.model.sim_setup.dc.source = "Vwrong".into();
             if kind == AnalysisKind::OperatingPoint {
-                state.sim_setup.op.initial_guess_idx = usize::MAX;
+                state.model.sim_setup.op.initial_guess_idx = usize::MAX;
             }
             state
+                .model
                 .sim_setup
                 .analysis_plan
                 .as_mut()
@@ -293,6 +295,7 @@ fn pvt_selected_bases_persist_clone_and_freeze_exact_settings() {
                 })
                 .unwrap();
             let sealed = state
+                .model
                 .model_library_manager
                 .seal_execution_sources()
                 .unwrap();
@@ -408,7 +411,7 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
         AnalysisKind::Qpnoise,
     ] {
         let mut state = AppState::default();
-        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
         let (producer, _) = plan.insert(AnalysisKind::Qpss).unwrap();
         plan.bind_dependency(producer, AnalysisKind::OperatingPoint, op)
@@ -497,6 +500,7 @@ fn qp_study_freezes_the_exact_producer_and_complete_consumer_controls() {
         })
         .unwrap();
         let sealed = state
+            .model
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
@@ -621,7 +625,7 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
         AnalysisKind::Psp,
     ] {
         let mut state = AppState::default();
-        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
         let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
         plan.bind_dependency(pss, AnalysisKind::OperatingPoint, op)
@@ -689,6 +693,7 @@ fn periodic_rf_study_freezes_all_consumer_options_and_exact_pss_op_chain() {
         plan.edit(consumer, |draft| *draft = AnalysisDraft::for_kind(kind))
             .unwrap();
         let sealed = state
+            .model
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
@@ -796,7 +801,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
     use rspice_simulation::study::StudyPeriodicOptions;
 
     let mut state = AppState::default();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (first, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
     let (second, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
@@ -833,6 +838,7 @@ fn preceding_pac_basis_uses_its_exact_frozen_hb_producer() {
     .unwrap();
 
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
@@ -867,7 +873,7 @@ fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration()
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     use rspice_simulation::study::StudyAnalysis;
     let mut state = AppState::default();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (first, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (second, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (pss, _) = plan.insert(AnalysisKind::Pss).unwrap();
@@ -911,6 +917,7 @@ fn pss_study_freezes_its_exact_op_producer_and_complete_shooting_configuration()
     })
     .unwrap();
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
@@ -959,7 +966,7 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
     use rspice_simulation::study::StudyAnalysis;
     use rspice_simulation_contract::hb_draft::{HbConfig, HbSolverType, HbToneConfig};
     let mut state = AppState::default();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (hb, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
     plan.bind_dependency(hb, AnalysisKind::OperatingPoint, op)
@@ -1009,6 +1016,7 @@ fn hb_study_freezes_the_selected_instance_and_authenticates_its_native_settings(
     })
     .unwrap();
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
@@ -1053,7 +1061,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
     use rspice_simulation::study::StudyAnalysis;
     for kind in [AnalysisKind::Hbsp, AnalysisKind::Hbnoise] {
         let mut state = AppState::default();
-        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
         let (first, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
         let (second, _) = plan.insert(AnalysisKind::HarmonicBalance).unwrap();
@@ -1135,6 +1143,7 @@ fn hb_rf_study_freezes_exact_producer_consumer_and_noise_references() {
         })
         .unwrap();
         let sealed = state
+            .model
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
@@ -1247,7 +1256,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     for kind in [AnalysisKind::Fourier, AnalysisKind::Fft] {
         let mut state = AppState::default();
-        let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+        let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
         let (first, _) = plan.insert(AnalysisKind::Transient).unwrap();
         let (second, _) = plan.insert(AnalysisKind::Transient).unwrap();
         for (id, stop) in [(first, "1m"), (second, "2m")] {
@@ -1317,6 +1326,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
         })
         .unwrap();
         let sealed = state
+            .model
             .model_library_manager
             .seal_execution_sources()
             .unwrap();
@@ -1367,7 +1377,7 @@ fn spectral_study_freezes_the_bound_transient_and_all_postprocess_settings() {
 fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
     use crate::simulation::dialog::{McDialogState, mc::McConfig};
     let mut state = AppState::default();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
     let (other, _) = plan.insert(AnalysisKind::Ac).unwrap();
@@ -1455,6 +1465,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
     })
     .unwrap();
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
@@ -1520,7 +1531,7 @@ fn configured_study_freezes_exact_base_and_survives_persistence_and_identity() {
         }
         assert_ne!(task.config_digest(), queued_digest(&queued));
     }
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     plan.set_enabled(ac, false).unwrap();
     let frozen = plan.freeze().unwrap();
     let errors = SimulationController::build_queue_from_plan(&state, &frozen, &sealed).unwrap_err();
@@ -1545,7 +1556,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
         weight: 3.0,
     }];
     let mut state = AppState::default();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (op, _) = plan.insert(AnalysisKind::OperatingPoint).unwrap();
     let (ac, _) = plan.insert(AnalysisKind::Ac).unwrap();
     plan.bind_dependency(ac, AnalysisKind::OperatingPoint, op)
@@ -1600,6 +1611,7 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
     })
     .unwrap();
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .unwrap();
@@ -1663,10 +1675,15 @@ fn configured_optimization_base_persists_and_freezes_before_live_edits() {
 #[test]
 fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
     let mut state = AppState::default();
-    state.sim_setup.reference_pvt.temperature_celsius = -40.0;
-    state.sim_setup.noise.output = "singleton_must_not_leak".to_owned();
-    state.sim_setup.ac.points = "777".to_owned();
-    let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+    state.model.sim_setup.reference_pvt.temperature_celsius = -40.0;
+    state.model.sim_setup.noise.output = "singleton_must_not_leak".to_owned();
+    state.model.sim_setup.ac.points = "777".to_owned();
+    let plan = state
+        .model
+        .sim_setup
+        .analysis_plan
+        .as_mut()
+        .expect("stable plan");
     let (op, _) = plan
         .insert(AnalysisKind::OperatingPoint)
         .expect("OP inserts");
@@ -1686,8 +1703,10 @@ fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
     plan.bind_dependency(noise, AnalysisKind::OperatingPoint, op)
         .expect("noise binds OP");
 
-    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
+    let frozen =
+        SimulationController::build_analysis_plan(&state.model.sim_setup).expect("plan freezes");
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .expect("model sources seal");
@@ -1727,6 +1746,7 @@ fn frozen_noise_task_keeps_exact_draft_and_reference_pvt() {
 fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks() {
     let mut state = AppState::default();
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -1762,8 +1782,10 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
         .expect("PAC binds exact first PSS");
     let expected_revision = plan.revision();
 
-    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
+    let frozen =
+        SimulationController::build_analysis_plan(&state.model.sim_setup).expect("plan freezes");
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .expect("default model sources seal");
@@ -1789,8 +1811,9 @@ fn frozen_plan_ids_revisions_and_exact_dependency_bindings_reach_prepared_tasks(
 #[test]
 fn same_kind_sparameter_instances_freeze_independent_export_policies() {
     let mut state = AppState::default();
-    state.schematic.session.current_file = Some(std::path::PathBuf::from("rf/duplexer.rsch"));
+    state.model.schematic.session.current_file = Some(std::path::PathBuf::from("rf/duplexer.rsch"));
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -1825,8 +1848,10 @@ fn same_kind_sparameter_instances_freeze_independent_export_policies() {
     })
     .expect("second policy edits");
 
-    let frozen = SimulationController::build_analysis_plan(&state.sim_setup).expect("plan freezes");
+    let frozen =
+        SimulationController::build_analysis_plan(&state.model.sim_setup).expect("plan freezes");
     let sealed = state
+        .model
         .model_library_manager
         .seal_execution_sources()
         .expect("default model sources seal");

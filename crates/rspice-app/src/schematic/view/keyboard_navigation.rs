@@ -19,13 +19,13 @@ pub(super) fn handle_keyboard_object_navigation(
         response,
         &KeyboardNavigationView {
             design: super::schematic_design_view(state),
-            editor: &state.schematic.session.editor,
+            editor: &state.model.schematic.session.editor,
             keyboard_focus: state.dialogs.interaction.schematic_keyboard_focus,
             filter: state.ui.schematic_selection_filter,
         },
         KeyboardCapabilities {
             modal_open: state.application_modal_open(),
-            can_edit: !state.schematic.session.read_only && !state.active_view_read_only(),
+            can_edit: !state.model.schematic.session.read_only && !state.active_view_read_only(),
             traversal_enabled: state
                 .ui
                 .preferences
@@ -67,11 +67,12 @@ mod tests {
         let ctx = Context::default();
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::new(0, 0)));
-        state.schematic.document_mut_for_test().probes.push(
+        state.model.schematic.document_mut_for_test().probes.push(
             crate::state::SchematicProbe::new(
                 2,
                 Point::new(30, 0),
@@ -80,16 +81,22 @@ mod tests {
             )
             .unwrap(),
         );
-        state.schematic.document_mut_for_test().design_notes.push(
-            crate::state::DesignNote::new(
-                3,
-                Point::new(60, 0),
-                crate::state::DesignNoteKind::PlainText,
-                "N",
-            )
-            .unwrap(),
-        );
         state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .design_notes
+            .push(
+                crate::state::DesignNote::new(
+                    3,
+                    Point::new(60, 0),
+                    crate::state::DesignNoteKind::PlainText,
+                    "N",
+                )
+                .unwrap(),
+            );
+        state
+            .model
             .schematic
             .session
             .editor
@@ -100,7 +107,7 @@ mod tests {
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
         assert!(handled);
         assert!(!available);
-        assert!(state.schematic.session.editor.selection.is_empty());
+        assert!(state.model.schematic.session.editor.selection.is_empty());
         assert_eq!(
             state.dialogs.interaction.schematic_keyboard_focus,
             Some(SchematicKeyboardFocus::Probe(2))
@@ -112,6 +119,7 @@ mod tests {
         assert!(!available);
         assert_eq!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -135,8 +143,9 @@ mod tests {
         ] {
             let ctx = Context::default();
             let mut state = AppState::default();
-            state.schematic.document_mut_for_test().components = components();
+            state.model.schematic.document_mut_for_test().components = components();
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -147,7 +156,13 @@ mod tests {
 
             assert!(handled, "{key:?} should traverse the focused canvas");
             assert_eq!(
-                state.schematic.session.editor.selection.single_component(),
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .single_component(),
                 Some(expected)
             );
         }
@@ -203,23 +218,25 @@ mod tests {
     fn focused_canvas_consumes_arrow_and_changes_only_selection() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = components();
+        state.model.schematic.document_mut_for_test().components = components();
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(11);
-        state.schematic.session.editor.net_highlight.active = true;
+        state.model.schematic.session.editor.net_highlight.active = true;
         state
+            .model
             .schematic
             .session
             .editor
             .net_highlight
             .highlighted_wires
             .insert(777);
-        let topology = state.schematic.topology_version();
-        let could_undo = state.schematic.can_undo();
+        let topology = state.model.schematic.topology_version();
+        let could_undo = state.model.schematic.can_undo();
 
         let (handled, key_still_available) =
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
@@ -227,16 +244,23 @@ mod tests {
         assert!(handled);
         assert!(!key_still_available);
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(22)
         );
-        assert_eq!(state.schematic.session.editor.center_request, None);
-        assert_eq!(state.schematic.topology_version(), topology);
-        assert_eq!(state.schematic.can_undo(), could_undo);
-        assert!(!state.schematic.session.is_dirty);
-        assert!(!state.schematic.session.editor.net_highlight.active);
+        assert_eq!(state.model.schematic.session.editor.center_request, None);
+        assert_eq!(state.model.schematic.topology_version(), topology);
+        assert_eq!(state.model.schematic.can_undo(), could_undo);
+        assert!(!state.model.schematic.session.is_dirty);
+        assert!(!state.model.schematic.session.editor.net_highlight.active);
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -250,8 +274,9 @@ mod tests {
     fn unfocused_canvas_and_modified_arrow_do_not_navigate_or_consume() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = components();
+        state.model.schematic.document_mut_for_test().components = components();
         state
+            .model
             .schematic
             .session
             .editor
@@ -263,7 +288,13 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(11)
         );
 
@@ -279,7 +310,13 @@ mod tests {
         );
         assert!(!handled);
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(11)
         );
     }
@@ -294,8 +331,9 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
 
-        state.schematic.document_mut_for_test().components = components();
+        state.model.schematic.document_mut_for_test().components = components();
         state
+            .model
             .schematic
             .session
             .editor
@@ -310,7 +348,13 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(11)
         );
     }
@@ -319,8 +363,9 @@ mod tests {
     fn modal_and_context_popup_owners_block_navigation() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = components();
+        state.model.schematic.document_mut_for_test().components = components();
         state
+            .model
             .schematic
             .session
             .editor
@@ -333,7 +378,13 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(11)
         );
 
@@ -344,7 +395,13 @@ mod tests {
         assert!(!handled);
         assert!(key_still_available);
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(11)
         );
         Popup::close_all(&ctx);
@@ -354,70 +411,77 @@ mod tests {
     fn focused_select_canvas_backspace_deletes_immediately_in_one_undo_entry() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = components();
+        state.model.schematic.document_mut_for_test().components = components();
         state.sync_active_schematic_to_workspace();
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(22);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
 
         let (handled, key_still_available) =
             run_navigation_frame(&ctx, Key::Backspace, Modifiers::NONE, &mut state, true);
 
         assert!(handled);
         assert!(!key_still_available);
-        assert_eq!(state.schematic.document().components.len(), 2);
+        assert_eq!(state.model.schematic.document().components.len(), 2);
         assert!(!state.dialogs.application_modal_open());
-        assert_eq!(state.schematic.undo_description(), Some("delete selection"));
-        assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document().components.len(), 3);
-        assert!(!state.schematic.can_undo());
+        assert_eq!(
+            state.model.schematic.undo_description(),
+            Some("delete selection")
+        );
+        assert!(state.model.schematic.undo());
+        assert_eq!(state.model.schematic.document().components.len(), 3);
+        assert!(!state.model.schematic.can_undo());
     }
 
     #[test]
     fn focused_select_canvas_consumes_backspace_but_never_edits_read_only_content() {
         let ctx = Context::default();
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = components();
+        state.model.schematic.document_mut_for_test().components = components();
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(22);
-        state.schematic.session.read_only = true;
+        state.model.schematic.session.read_only = true;
 
         let (handled, key_still_available) =
             run_navigation_frame(&ctx, Key::Backspace, Modifiers::NONE, &mut state, true);
 
         assert!(handled);
         assert!(!key_still_available);
-        assert_eq!(state.schematic.document().components.len(), 3);
-        assert!(!state.schematic.can_undo());
+        assert_eq!(state.model.schematic.document().components.len(), 3);
+        assert!(!state.model.schematic.can_undo());
     }
 
     #[test]
     fn queued_keyboard_requests_cannot_follow_reused_occurrences_or_new_selections() {
         use crate::state::{CellViewRef, ViewType};
         let mut state = AppState::default();
-        state.schematic.document_mut_for_test().components = components();
+        state.model.schematic.document_mut_for_test().components = components();
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(22);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         let master = CellViewRef::new("user", "amp", "schematic");
         state
+            .model
             .workspace
             .descend_into("X1".into(), master.clone(), ViewType::Schematic);
         let capture = |state: &AppState, action| EditorRequest {
             source: editor_request_source(state),
-            selection: state.schematic.session.editor.selection.clone(),
+            selection: state.model.schematic.session.editor.selection.clone(),
             action,
         };
         let delete = capture(&state, EditorAction::DeleteSelection);
@@ -435,8 +499,13 @@ mod tests {
                 alt_held: false,
             },
         );
-        state.workspace.ascend_one().expect("return to parent");
         state
+            .model
+            .workspace
+            .ascend_one()
+            .expect("return to parent");
+        state
+            .model
             .workspace
             .descend_into("X2".into(), master, ViewType::Schematic);
         let current = editor_request_source(&state);
@@ -447,39 +516,55 @@ mod tests {
         apply_editor_request(&mut state, delete);
         apply_editor_request(&mut state, focus);
         apply_editor_request(&mut state, pointer);
-        assert_eq!(state.schematic.document().components, components());
+        assert_eq!(state.model.schematic.document().components, components());
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(22)
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
 
         let delete = capture(&state, EditorAction::DeleteSelection);
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(33);
         apply_editor_request(&mut state, delete);
-        assert_eq!(state.schematic.document().components, components());
+        assert_eq!(state.model.schematic.document().components, components());
         assert_eq!(
-            state.schematic.session.editor.selection.single_component(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .single_component(),
             Some(33)
         );
-        assert!(!state.schematic.can_undo());
+        assert!(!state.model.schematic.can_undo());
 
         let delete = capture(&state, EditorAction::DeleteSelection);
-        state.schematic.session.read_only = true;
+        state.model.schematic.session.read_only = true;
         apply_editor_request(&mut state, delete);
-        assert_eq!(state.schematic.document().components, components());
-        assert!(!state.schematic.can_undo());
-        state.schematic.session.read_only = false;
+        assert_eq!(state.model.schematic.document().components, components());
+        assert!(!state.model.schematic.can_undo());
+        state.model.schematic.session.read_only = false;
         let delete = capture(&state, EditorAction::DeleteSelection);
         apply_editor_request(&mut state, delete);
-        assert_eq!(state.schematic.document().components.len(), 2);
-        assert_eq!(state.schematic.undo_description(), Some("delete selection"));
-        assert!(state.schematic.undo());
-        assert_eq!(state.schematic.document().components, components());
+        assert_eq!(state.model.schematic.document().components.len(), 2);
+        assert_eq!(
+            state.model.schematic.undo_description(),
+            Some("delete selection")
+        );
+        assert!(state.model.schematic.undo());
+        assert_eq!(state.model.schematic.document().components, components());
     }
 }

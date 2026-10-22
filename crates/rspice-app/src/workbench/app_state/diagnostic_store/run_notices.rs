@@ -239,11 +239,13 @@ impl AppState {
         if raised.is_empty() {
             return;
         }
-        let retained = &self.simulation.retained.runs;
-        self.diagnostics
+        let retained = &self.model.simulation.retained.runs;
+        self.model
+            .diagnostics
             .run_notices
             .retain(|run, _| *run == run_sequence || retained.iter().any(|kept| kept.id == *run));
-        self.diagnostics
+        self.model
+            .diagnostics
             .run_notices
             .entry(run_sequence)
             .or_default()
@@ -256,7 +258,7 @@ impl AppState {
     }
 
     fn republish_run_notices(&mut self, run_sequence: u64) {
-        let Some(facts) = self.diagnostics.run_notices.get(&run_sequence) else {
+        let Some(facts) = self.model.diagnostics.run_notices.get(&run_sequence) else {
             return;
         };
         let scope = super::producers::run_scope(self, run_sequence);
@@ -268,6 +270,7 @@ impl AppState {
         let canonicals =
             mint_canonical(&keys, run_sequence, &format!("run:{run_sequence}:notices"));
         let manual_deck = self
+            .model
             .simulation
             .retained
             .run_by_sequence(run_sequence)
@@ -276,7 +279,7 @@ impl AppState {
                 receipt.source_domain()
                     == rspice_results::provenance::AnalysisResultSourceDomain::ManualDeck
             });
-        let project = self.workspace.content.project.id();
+        let project = self.model.workspace.content.project.id();
         let notice_records: Vec<DiagnosticRecord> = gathered
             .iter()
             .zip(canonicals)
@@ -291,10 +294,14 @@ impl AppState {
             .collect();
 
         let inputs = DiagnosticInputs::Run { run_sequence };
-        let opened = self.diagnostics.batch(&inputs);
-        let dispatched = opened
-            .map(|batch| batch.input_digest)
-            .or_else(|| self.diagnostics.run_baselines.get(&run_sequence).copied());
+        let opened = self.model.diagnostics.batch(&inputs);
+        let dispatched = opened.map(|batch| batch.input_digest).or_else(|| {
+            self.model
+                .diagnostics
+                .run_baselines
+                .get(&run_sequence)
+                .copied()
+        });
         // The run's failures stand as they were reported; only the notices
         // are rebuilt.
         let mut records: Vec<DiagnosticRecord> = opened
@@ -309,7 +316,7 @@ impl AppState {
             .unwrap_or_default();
         records.extend(notice_records);
         let published = match dispatched {
-            Some(digest) => self.diagnostics.insert(digest, inputs, records, None),
+            Some(digest) => self.model.diagnostics.insert(digest, inputs, records, None),
             None => self.publish_diagnostics(inputs, records),
         };
         if let Err(error) = published {
@@ -479,11 +486,12 @@ impl AppState {
         let scope = rspice_vocabulary::hierarchy_path::ProbeTarget::parse(element)
             .map_or_else(|_| InstancePath::root(), |target| target.scope);
         let projection = self
+            .model
             .workspace
             .design_projection(
-                &self.library_manager,
-                &self.workspace.content.active_view,
-                &self.schematic,
+                &self.model.library_manager,
+                &self.model.workspace.content.active_view,
+                &self.model.schematic,
             )
             .ok()?;
         let plan = projection.plan();
@@ -746,7 +754,7 @@ mod tests {
     fn open_state(runs: &[u64]) -> AppState {
         let mut state = AppState::default();
         state.open_project_session();
-        state.simulation.retained.runs = runs
+        state.model.simulation.retained.runs = runs
             .iter()
             .map(|run| crate::state::SimulationRun::new(*run))
             .collect::<Vec<_>>()
@@ -793,6 +801,7 @@ mod tests {
     /// The notice records the run's batch holds, as (code, subject, details).
     fn notices(state: &AppState) -> Vec<(String, String, String)> {
         state
+            .model
             .diagnostics
             .batches()
             .flat_map(|batch| batch.records.iter())
@@ -852,6 +861,7 @@ mod tests {
             1,
         );
         let batch = state
+            .model
             .diagnostics
             .batch(&DiagnosticInputs::Run { run_sequence: 1 })
             .expect("the run's batch")
@@ -859,6 +869,7 @@ mod tests {
         assert!(state.diagnostic_batch_standing(&batch).is_current());
 
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));
 
@@ -1097,6 +1108,7 @@ mod tests {
         );
 
         let records: Vec<&DiagnosticRecord> = state
+            .model
             .diagnostics
             .batches()
             .flat_map(|batch| batch.records.iter())
@@ -1139,17 +1151,23 @@ mod tests {
         let mut cell = Cell::new("amp");
         cell.add_view(View::new("schematic", ViewType::Schematic));
         work.add_cell(cell);
-        state.library_manager.add_library(work);
+        state.model.library_manager.add_library(work);
         state
+            .model
             .workspace
             .insert_schematic_editor(CellViewRef::new("work", "amp", "schematic").key(), amp);
-        let active = state.workspace.content.active_view.clone();
-        if state.library_manager.get_library(&active.library).is_none() {
+        let active = state.model.workspace.content.active_view.clone();
+        if state
+            .model
+            .library_manager
+            .get_library(&active.library)
+            .is_none()
+        {
             let mut top = Library::new(&active.library);
             let mut top_cell = Cell::new(&active.cell);
             top_cell.add_view(View::new(&active.view, ViewType::Schematic));
             top.add_cell(top_cell);
-            state.library_manager.add_library(top);
+            state.model.library_manager.add_library(top);
         }
         let placed = |id: u64, name: &str, x: i32| {
             let mut instance = Component::new(id, ComponentType::CellInstance, Point::new(x, 0))
@@ -1157,12 +1175,17 @@ mod tests {
             instance.name = name.to_owned();
             instance
         };
-        state.schematic.document_mut_for_test().components.extend([
-            placed(1, "amp", 0),
-            placed(3, "amp2", 400),
-            Component::new(2, ComponentType::Memristor, Point::new(200, 60))
-                .with_name_value("MR1", "1"),
-        ]);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .extend([
+                placed(1, "amp", 0),
+                placed(3, "amp2", 400),
+                Component::new(2, ComponentType::Memristor, Point::new(200, 60))
+                    .with_name_value("MR1", "1"),
+            ]);
         state.sync_active_schematic_to_workspace();
         state
     }
@@ -1204,6 +1227,7 @@ mod tests {
             1,
         );
         let records: Vec<&DiagnosticRecord> = state
+            .model
             .diagnostics
             .batches()
             .flat_map(|batch| batch.records.iter())

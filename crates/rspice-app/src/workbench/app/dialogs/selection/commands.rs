@@ -38,10 +38,12 @@ impl AppState {
         if refuse_read_only(state) {
             return false;
         }
-        let mut target =
-            selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection);
-        promote_wire_handles_to_complete_wires(&state.schematic, &mut target);
-        let count = complete_selection_count(&state.schematic, &target);
+        let mut target = selection_filtered_to_active_sheet(
+            state,
+            &state.model.schematic.session.editor.selection,
+        );
+        promote_wire_handles_to_complete_wires(&state.model.schematic, &mut target);
+        let count = complete_selection_count(&state.model.schematic, &target);
         if count == 0 {
             refuse_empty(state);
             return false;
@@ -49,9 +51,9 @@ impl AppState {
 
         let impact = delete_dependency_impact(state, &target);
         let previous_selection =
-            std::mem::replace(&mut state.schematic.session.editor.selection, target);
+            std::mem::replace(&mut state.model.schematic.session.editor.selection, target);
         if !delete_on_active_sheet(state) {
-            state.schematic.session.editor.selection = previous_selection;
+            state.model.schematic.session.editor.selection = previous_selection;
             state.prompt("Nothing was deleted.");
             return false;
         }
@@ -71,9 +73,11 @@ impl AppState {
         if refuse_read_only(state) {
             return false;
         }
-        let target =
-            selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection);
-        let count = complete_selection_count(&state.schematic, &target);
+        let target = selection_filtered_to_active_sheet(
+            state,
+            &state.model.schematic.session.editor.selection,
+        );
+        let count = complete_selection_count(&state.model.schematic, &target);
         if count == 0 {
             refuse_empty(state);
             return false;
@@ -81,17 +85,17 @@ impl AppState {
 
         let open_nets = cut_open_net_count(state, &target);
         let previous_selection =
-            std::mem::replace(&mut state.schematic.session.editor.selection, target);
+            std::mem::replace(&mut state.model.schematic.session.editor.selection, target);
         let Some(copy) = state
             .capture_active_schematic_selection()
             .filter(|copy| !copy.is_empty())
         else {
-            state.schematic.session.editor.selection = previous_selection;
+            state.model.schematic.session.editor.selection = previous_selection;
             refuse_empty(state);
             return false;
         };
         if !delete_on_active_sheet(state) {
-            state.schematic.session.editor.selection = previous_selection;
+            state.model.schematic.session.editor.selection = previous_selection;
             state.prompt("Nothing was cut.");
             return false;
         }
@@ -118,7 +122,7 @@ impl AppState {
     /// point it was asked for, so it is seen beside its source and stays on
     /// the grid.
     pub(crate) fn schematic_grid_step(&self) -> Point {
-        let grid = self.schematic.document().grid_size.max(1);
+        let grid = self.model.schematic.document().grid_size.max(1);
         Point::new(grid, grid)
     }
 
@@ -132,21 +136,23 @@ impl AppState {
         if refuse_read_only(state) {
             return false;
         }
-        let target =
-            selection_filtered_to_active_sheet(state, &state.schematic.session.editor.selection);
-        let count = complete_selection_count(&state.schematic, &target);
+        let target = selection_filtered_to_active_sheet(
+            state,
+            &state.model.schematic.session.editor.selection,
+        );
+        let count = complete_selection_count(&state.model.schematic, &target);
         if count == 0 {
             refuse_empty(state);
             return false;
         }
 
         let previous_selection =
-            std::mem::replace(&mut state.schematic.session.editor.selection, target);
+            std::mem::replace(&mut state.model.schematic.session.editor.selection, target);
         let Some(mut copy) = state
             .capture_active_schematic_selection()
             .filter(|copy| !copy.is_empty())
         else {
-            state.schematic.session.editor.selection = previous_selection;
+            state.model.schematic.session.editor.selection = previous_selection;
             refuse_empty(state);
             return false;
         };
@@ -176,7 +182,7 @@ impl AppState {
             unresolved_nets,
         };
         if let Err(reason) = state.float_schematic_objects(&copy, anchor, origin) {
-            state.schematic.session.editor.selection = previous_selection;
+            state.model.schematic.session.editor.selection = previous_selection;
             state.prompt(reason);
             return false;
         }
@@ -211,10 +217,12 @@ impl AppState {
         // sheets, which share these coordinates, step out of reach only while
         // the pasted wires and pins are joined to this one. The paste itself
         // names its parts against every sheet and places its dots on this one.
-        self.schematic.begin_operation("paste");
-        let pasted =
-            self.schematic
-                .paste_at_checked(&objects, anchor, off_active_sheet(&self.workspace));
+        self.model.schematic.begin_operation("paste");
+        let pasted = self.model.schematic.paste_at_checked(
+            &objects,
+            anchor,
+            off_active_sheet(&self.model.workspace),
+        );
         if matches!(pasted, Ok(true)) {
             with_active_wire_topology(self, |schematic, scope| {
                 schematic.connect_pasted_selection(
@@ -223,7 +231,7 @@ impl AppState {
                 );
             });
         }
-        self.schematic.end_operation();
+        self.model.schematic.end_operation();
         if matches!(pasted, Ok(true)) {
             self.sync_active_schematic_to_workspace();
         }
@@ -239,14 +247,19 @@ impl AppState {
             state.prompt("Nothing matches the selection filter.");
             return false;
         }
-        state.schematic.session.editor.selection = selection;
+        state.model.schematic.session.editor.selection = selection;
         // Selecting changes no document, so the buffer's selection is written on
         // its own rather than through the whole save-and-revalidate path an edit
         // takes.
-        let active_key = state.workspace.content.active_schematic_reference().key();
-        if let Some(mut buffer) = state.workspace.schematic_editor_mut(&active_key) {
+        let active_key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
+        if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&active_key) {
             buffer.editor.session.editor.selection =
-                state.schematic.session.editor.selection.clone();
+                state.model.schematic.session.editor.selection.clone();
         }
         state.prompt(format!("Selected {}.", object_count(count)));
         true
@@ -260,17 +273,17 @@ impl AppState {
         if refuse_read_only(self) {
             return false;
         }
-        let automatic_junctions = self.schematic.session.editor.automatic_junctions;
+        let automatic_junctions = self.model.schematic.session.editor.automatic_junctions;
         // The undo step opens with every sheet present; the cell view's
         // other sheets, which share these coordinates, step out of reach
         // only while this one's wires are joined.
-        self.schematic.begin_operation("join collinear wires");
+        self.model.schematic.begin_operation("join collinear wires");
         with_active_wire_topology(self, |schematic, scope| {
             if schematic.join_collinear_wires(scope) {
                 schematic.cleanup_wire_topology_with_junction_policy(automatic_junctions, scope);
             }
         });
-        let joined = self.schematic.end_operation();
+        let joined = self.model.schematic.end_operation();
         if joined {
             self.sync_active_schematic_to_workspace();
         }
@@ -304,16 +317,16 @@ fn refuse_empty(state: &mut AppState) {
 /// else crossing there. Under automatic junctions those dots are placed in
 /// the same step.
 fn delete_on_active_sheet(state: &mut AppState) -> bool {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let removes_conductors = !selection.wires.is_empty() || !selection.components.is_empty();
-    state.schematic.begin_operation("delete selection");
+    state.model.schematic.begin_operation("delete selection");
     with_active_wire_topology(state, |schematic, scope| {
         schematic.delete_selection();
         if removes_conductors && schematic.session.editor.automatic_junctions {
             schematic.update_wire_junctions(scope);
         }
     });
-    state.schematic.end_operation()
+    state.model.schematic.end_operation()
 }
 
 /// `objects` as the active cell view may receive them. A copy can come from
@@ -325,14 +338,19 @@ fn bound_to_active_cell<'a>(
     state: &AppState,
     objects: &'a ClipboardData,
 ) -> Result<Cow<'a, ClipboardData>, String> {
-    let active = &state.workspace.content.active_view;
+    let active = &state.model.workspace.content.active_view;
     let mut bound = Cow::Borrowed(objects);
     for (index, component) in objects.components.iter().enumerate() {
         let Some(binding) = component.library_cell.as_ref() else {
             continue;
         };
         let master = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
-        let buffer = state.workspace.content.schematic_buffers.get(&master.key());
+        let buffer = state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&master.key());
         if binding.library == active.library
             && binding.cell == active.cell
             && (binding.view == active.view || buffer.is_some())
@@ -552,17 +570,18 @@ fn clause_list(clauses: &[String]) -> String {
 /// Nets of the open view as the configured design resolves it.
 fn design_nets(state: &AppState) -> Result<std::sync::Arc<Vec<DesignNet>>, String> {
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     Ok(projection_nets(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
-        &state.workspace.content.active_view.key(),
+        &state.model.workspace.content.active_view.key(),
     ))
 }
 
@@ -581,6 +600,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .map(|junction| junction.pos)
         .collect::<HashSet<_>>();
     let selected_component_names = state
+        .model
         .schematic
         .document()
         .components
@@ -589,6 +609,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .map(|component| component.name.clone())
         .collect::<BTreeSet<_>>();
     let selected_label_names = state
+        .model
         .schematic
         .document()
         .net_labels
@@ -608,7 +629,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
                     .wire_ids
                     .iter()
                     .any(|wire_id| selection.wires.contains(wire_id))
-                || state.schematic.document().wires.iter().any(|wire| {
+                || state.model.schematic.document().wires.iter().any(|wire| {
                     net.wire_ids.contains(&wire.id)
                         && selected_junctions
                             .iter()
@@ -627,6 +648,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
     affected_nets.dedup_by(|left, right| left.name.eq_ignore_ascii_case(&right.name));
 
     let selected_bus_names = state
+        .model
         .schematic
         .document()
         .buses
@@ -635,6 +657,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .filter_map(|bus| bus.declaration.as_ref().map(ToString::to_string))
         .collect::<Vec<_>>();
     let selected_tap_names = state
+        .model
         .schematic
         .document()
         .bus_taps
@@ -657,12 +680,12 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         .flat_map(|net| net.wire_ids.iter().copied())
         .collect::<HashSet<_>>();
     let mut affected_probes = BTreeSet::new();
-    for probe in &state.schematic.document().probes {
+    for probe in &state.model.schematic.document().probes {
         let references_symbol = probe
             .source_expression
             .as_deref()
             .is_some_and(|expression| references_any_symbol(expression, &affected_symbols));
-        let lies_on_affected_wire = state.schematic.document().wires.iter().any(|wire| {
+        let lies_on_affected_wire = state.model.schematic.document().wires.iter().any(|wire| {
             affected_wire_ids.contains(&wire.id) && wire.contains_point(probe.position)
         });
         if references_symbol || lies_on_affected_wire {
@@ -671,7 +694,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
     }
 
     let mut affected_output_names = BTreeSet::new();
-    for record in &state.workspace.content.simulation_plan_payloads {
+    for record in &state.model.workspace.content.simulation_plan_payloads {
         for output in &record.payload.saved_outputs {
             if references_any_symbol(&output.source_expression, &affected_symbols) {
                 affected_output_names.insert(output.name.clone());
@@ -679,7 +702,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
         }
     }
     let mut affected_specifications = BTreeSet::new();
-    for spec in &state.workspace.content.specs {
+    for spec in &state.model.workspace.content.specs {
         if affected_output_names
             .iter()
             .any(|name| name.eq_ignore_ascii_case(&spec.measurement))
@@ -687,7 +710,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
             affected_specifications.insert(spec.measurement.clone());
         }
     }
-    for record in &state.workspace.content.simulation_plan_payloads {
+    for record in &state.model.workspace.content.simulation_plan_payloads {
         for spec in &record.payload.specs {
             if affected_output_names
                 .iter()
@@ -700,6 +723,7 @@ fn delete_dependency_impact(state: &AppState, selection: &Selection) -> DeleteDe
 
     let mut affected_comments = BTreeSet::new();
     for note in state
+        .model
         .schematic
         .document()
         .design_notes
@@ -776,23 +800,24 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, 
         .map(|junction| junction.pos)
         .collect::<HashSet<_>>();
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let before = projection_nets(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
-        &state.workspace.content.active_view.key(),
+        &state.model.workspace.content.active_view.key(),
     );
-    let mut after_schematic = state.schematic.clone();
+    let mut after_schematic = state.model.schematic.clone();
     after_schematic.session.editor.selection = selection.clone();
     let _ = after_schematic.delete_selection();
     let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
     let after = design_nets_with_hierarchy(&after_schematic, &hierarchy);
 
     Ok(before
@@ -806,7 +831,7 @@ fn cut_open_net_count(state: &AppState, selection: &Selection) -> Result<usize, 
                     .wire_ids
                     .iter()
                     .any(|wire_id| selected_wires.contains(wire_id))
-                || state.schematic.document().wires.iter().any(|wire| {
+                || state.model.schematic.document().wires.iter().any(|wire| {
                     net.wire_ids.contains(&wire.id)
                         && selected_junctions
                             .iter()
@@ -858,7 +883,7 @@ fn named_external_attachments(
     state: &AppState,
     copy: &ClipboardData,
 ) -> Result<Vec<(Point, String)>, String> {
-    let selected_components = &state.schematic.session.editor.selection.components;
+    let selected_components = &state.model.schematic.session.editor.selection.components;
     let captured_wires = copy
         .wires
         .iter()
@@ -871,6 +896,7 @@ fn named_external_attachments(
         .collect::<HashSet<_>>();
     let symbols = schematic_symbol_context(state);
     let terminal_points = state
+        .model
         .schematic
         .document()
         .components
@@ -890,7 +916,7 @@ fn named_external_attachments(
         if !net.authored_name
             || crate::state::NetLabel::validate_name(
                 &net.name,
-                state.schematic.document().document_policy.net_naming,
+                state.model.schematic.document().document_policy.net_naming,
             )
             .is_err()
         {

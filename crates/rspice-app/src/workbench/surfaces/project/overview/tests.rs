@@ -172,11 +172,11 @@ fn overview_new_cell_action_opens_the_real_creation_workflow() {
 fn overview_history_action_preserves_project_context() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
-    let active = app.state.workspace.content.active_view.clone();
+    let active = app.state.model.workspace.content.active_view.clone();
     OverviewIntent::Command(Command::RevisionHistory).execute(&mut app);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
-    assert_eq!(app.state.workspace.content.active_view, active);
+    assert_eq!(app.state.model.workspace.content.active_view, active);
     assert!(app.state.dialogs.project_revision_history.open);
 }
 
@@ -231,7 +231,7 @@ fn run_destination_only_leaves_simulate_for_schematic_projects() {
 #[test]
 fn overview_run_without_a_dataset_returns_to_analyses() {
     let mut app = RSpiceApp::test_instance();
-    app.state.simulation.start_run();
+    app.state.model.simulation.start_run();
 
     OverviewIntent::OpenRun(0).execute(&mut app);
 
@@ -241,13 +241,16 @@ fn overview_run_without_a_dataset_returns_to_analyses() {
 #[test]
 fn overview_run_action_opens_the_plan_without_starting_execution() {
     let mut app = RSpiceApp::test_instance();
-    let retained_runs = app.state.simulation.retained.runs.len();
+    let retained_runs = app.state.model.simulation.retained.runs.len();
 
     run_plan_intent().execute(&mut app);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
-    assert_eq!(app.state.simulation.retained.runs.len(), retained_runs);
-    assert!(!app.state.simulation.execution.is_running);
+    assert_eq!(
+        app.state.model.simulation.retained.runs.len(),
+        retained_runs
+    );
+    assert!(!app.state.model.simulation.execution.is_running);
 }
 
 #[test]
@@ -317,9 +320,9 @@ fn overview_model_closure_always_opens_the_project_catalog_scope() {
 #[test]
 fn current_checks_without_a_retained_result_are_never_green() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.content.active_view = CellViewRef::new(
-        &app.state.workspace.content.project.root_library,
-        &app.state.workspace.content.project.top_cell,
+    app.state.model.workspace.content.active_view = CellViewRef::new(
+        &app.state.model.workspace.content.project.root_library,
+        &app.state.model.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let problem = problem_snapshot(&app).expect("checks that have not run are a finding");
@@ -334,9 +337,9 @@ fn a_clean_project_root_states_no_problem() {
     use rspice_design::drc::DrcResult;
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.content.active_view = CellViewRef::new(
-        &app.state.workspace.content.project.root_library,
-        &app.state.workspace.content.project.top_cell,
+    app.state.model.workspace.content.active_view = CellViewRef::new(
+        &app.state.model.workspace.content.project.root_library,
+        &app.state.model.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let mut result = DrcResult::default();
@@ -353,9 +356,9 @@ fn project_problem_selects_the_highest_severity_finding() {
     use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workspace.content.active_view = CellViewRef::new(
-        &app.state.workspace.content.project.root_library,
-        &app.state.workspace.content.project.top_cell,
+    app.state.model.workspace.content.active_view = CellViewRef::new(
+        &app.state.model.workspace.content.project.root_library,
+        &app.state.model.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
     let mut result = DrcResult::new();

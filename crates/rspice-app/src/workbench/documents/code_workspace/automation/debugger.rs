@@ -279,6 +279,7 @@ pub(super) fn send_debug_control(
 pub(super) fn active_automation_python_document(app: &RSpiceApp) -> Option<(uuid::Uuid, String)> {
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources

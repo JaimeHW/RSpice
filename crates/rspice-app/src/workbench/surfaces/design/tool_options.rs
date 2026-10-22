@@ -32,7 +32,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
 fn hold_drawing_still(ui: &Ui, state: &mut AppState, height: f32) {
     let id = egui::Id::new((
         "tool-options-strip-height",
-        state.workspace.content.active_key(),
+        state.model.workspace.content.active_key(),
     ));
     let last = ui.data_mut(|data| {
         let last = data.get_temp::<f32>(id);
@@ -42,12 +42,12 @@ fn hold_drawing_still(ui: &Ui, state: &mut AppState, height: f32) {
     if let Some(last) = last
         && last != height
     {
-        state.schematic.session.editor.pan.1 -= f64::from(height - last);
+        state.model.schematic.session.editor.pan.1 -= f64::from(height - last);
     }
 }
 
 fn options(ui: &mut Ui, state: &mut AppState) {
-    match state.schematic.session.editor.tool {
+    match state.model.schematic.session.editor.tool {
         Tool::MoveSelection if state.dialogs.move_selection.armed => {
             strip(ui, "Move", |ui| {
                 let mode = &mut state.dialogs.move_selection.mode;
@@ -113,9 +113,11 @@ mod tests {
     fn armed_move() -> AppState {
         let mut state = AppState::default();
         let id = state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         state
+            .model
             .schematic
             .session
             .editor
@@ -128,11 +130,18 @@ mod tests {
     fn armed_stretch() -> AppState {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::new(7, vec![Point::new(0, 0), Point::new(20, 0)]));
-        state.schematic.session.editor.selection.select_wire(7);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(7);
         crate::workbench::app::arm_stretch_selection(&mut state);
         state
     }
@@ -178,7 +187,7 @@ mod tests {
                 let canvas_top = f64::from(ui.cursor().top());
                 measured = (
                     canvas_top,
-                    canvas_top + state.schematic.session.editor.pan.1,
+                    canvas_top + state.model.schematic.session.editor.pan.1,
                 );
             });
             measured

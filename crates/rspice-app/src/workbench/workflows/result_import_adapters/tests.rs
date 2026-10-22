@@ -519,11 +519,17 @@ fn event_source_fst_import_keeps_detected_format_through_project_reload() {
     );
     assert_eq!(
         analysis.result_payload,
-        state.simulation.active_analysis().unwrap().result_payload
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .unwrap()
+            .result_payload
     );
     assert_eq!(
         analysis.result_data_digest(),
         state
+            .model
             .simulation
             .active_analysis()
             .unwrap()

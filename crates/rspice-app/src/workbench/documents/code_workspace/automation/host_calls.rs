@@ -49,6 +49,7 @@ pub(super) fn handle_runtime_host_call(
     pending.last_call_id = call.call_id;
     let exact_bundle_is_current = app
         .state
+        .model
         .workspace
         .content
         .project_sources

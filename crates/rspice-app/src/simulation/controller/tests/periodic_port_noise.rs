@@ -14,7 +14,8 @@ use rspice_simulation_contract::pss_draft::{PssConfig, PssDialogState};
 
 fn network(hb: bool) -> AppState {
     let mut state = AppState::default();
-    state.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::reference_only();
+    state.model.sim_setup.run_set =
+        rspice_simulation_contract::run_set::RunSetState::reference_only();
     for (index, (kind, name, value, params, nodes)) in [
         (
             ComponentType::RfPort,
@@ -38,9 +39,11 @@ fn network(hb: bool) -> AppState {
     .enumerate()
     {
         let id = state
+            .model
             .schematic
             .add_component(kind, Point::new(100 + index as i32 * 200, 100));
         let component = state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -57,11 +60,11 @@ fn network(hb: bool) -> AppState {
                 terminal.x,
                 terminal.y + if terminal.y < 100 { -20 } else { 20 },
             );
-            state.schematic.add_wire(vec![terminal, end]).unwrap();
-            state.schematic.add_net_label(end, node.into());
+            state.model.schematic.add_wire(vec![terminal, end]).unwrap();
+            state.model.schematic.add_net_label(end, node.into());
         }
     }
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     for id in plan
         .instances()
         .iter()

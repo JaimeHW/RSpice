@@ -630,23 +630,26 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let retained = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         let active = setup
             .create_plan("Corner characterization")
             .expect("a fresh root plan is created");
         app.state
+            .model
             .workspace
             .content
             .migrate_active_plan_data(retained);
         app.state
+            .model
             .workspace
             .content
             .migrate_inactive_plan_data(active);
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
 
         let records = plan_catalog_records(&app);
         let (base, target) = (record_of(&records, retained), record_of(&records, active));
@@ -683,7 +686,7 @@ mod tests {
     /// through each domain's own owner. Returns the axis whose declaration was
     /// changed, whose name is the run set's own rather than one chosen here.
     fn diverge_the_active_plan(app: &mut RSpiceApp, active: SimulationPlanId) -> String {
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         {
             let plan = setup
                 .stable_analysis_plan_mut()
@@ -721,9 +724,10 @@ mod tests {
             !setup.run_set.dimensions[temperature].enabled;
         let changed_axis = setup.run_set.dimensions[temperature].name.clone();
         setup.run_set.budgets.maximum_tasks = 4_096;
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
 
         app.state
+            .model
             .workspace
             .content
             .add_design_variable(
@@ -741,7 +745,12 @@ mod tests {
                 .expect("a valid project variable"),
             )
             .expect("the active plan takes a variable");
-        let payload = app.state.workspace.content.ensure_active_plan_data(active);
+        let payload = app
+            .state
+            .model
+            .workspace
+            .content
+            .ensure_active_plan_data(active);
         payload.specs.push(crate::state::SpecEntry {
             measurement: ADDED_REQUIREMENT.to_owned(),
             expression: "trig v(in) val=0.9 targ v(out) val=1.8".to_owned(),
@@ -861,6 +870,7 @@ mod tests {
     fn a_moved_baseline_alone_is_named_and_verdicted_as_the_baseline() {
         let (mut app, active, retained) = app_with_two_identical_plans();
         app.state
+            .model
             .workspace
             .content
             .ensure_active_plan_data(active)
@@ -1015,13 +1025,13 @@ mod tests {
     #[test]
     fn a_run_set_that_does_not_validate_has_no_workload_to_compare() {
         let (mut app, active, retained) = app_with_two_identical_plans();
-        let mut setup = app.state.sim_setup.clone();
+        let mut setup = app.state.model.sim_setup.clone();
         // A nested composition with a zero maximum depth is a declared
         // run-space error, so the active plan predicts nothing.
         setup.run_set.composition.mode =
             rspice_simulation_contract::run_set::RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
-        app.state.sim_setup = setup;
+        app.state.model.sim_setup = setup;
         let records = plan_catalog_records(&app);
         let domains = compared_domains(record_of(&records, retained), record_of(&records, active));
         let run_set = domain(&domains, "Run set and budgets");

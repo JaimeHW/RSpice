@@ -249,12 +249,14 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
 /// selected.
 fn clicked_source(state: &AppState) -> Option<&crate::state::Component> {
     let id = state
+        .model
         .schematic
         .session
         .editor
         .selection
         .single_component()?;
     state
+        .model
         .schematic
         .document()
         .components
@@ -512,7 +514,7 @@ fn capture_pointer_target(
     symbol_context: &SchematicSymbolContext,
 ) -> Option<egui::Pos2> {
     let pos = response.interact_pointer_pos()?;
-    let grid_pos = screen_to_grid(viewport, state.schematic.document().grid_size, pos);
+    let grid_pos = screen_to_grid(viewport, state.model.schematic.document().grid_size, pos);
     let hit_pos = screen_to_schematic(viewport, pos);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
     let target = if response.long_touched() {
@@ -548,7 +550,7 @@ fn touch_target(
 ) -> Option<PointerTarget> {
     let query = ToolPointerView {
         design: super::schematic_design_view(state),
-        snap_engine: &state.schematic.session.editor.snap_engine,
+        snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: !state.schematic_edit_read_only(),
     }
     .selection_query(viewport, position);
@@ -560,7 +562,7 @@ fn touch_target(
         Vec::new()
     };
     ctx.data_mut(|data| data.insert_temp(choices_id(), choices));
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     candidates
         .iter()
         .copied()
@@ -583,7 +585,7 @@ fn choose_target(
     }
     let request = rspice_schematic_editor::requests::EditorRequest {
         source: super::requests::editor_request_source(state),
-        selection: state.schematic.session.editor.selection.clone(),
+        selection: state.model.schematic.session.editor.selection.clone(),
         action: rspice_schematic_editor::requests::EditorAction::SelectPointer {
             target: Some(target),
             additive: false,
@@ -622,12 +624,20 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
         return ContextTarget::Canvas;
     };
     if !super::requests::picks_instance_to_descend(state, Some(target)) {
-        state.schematic.session.editor.net_highlight.clear();
+        state.model.schematic.session.editor.net_highlight.clear();
     }
     match target {
         PointerTarget::Component(id) => {
-            if !state.schematic.session.editor.selection.has_component(id) {
+            if !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(id)
+            {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -637,8 +647,16 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
             ContextTarget::Component(id)
         }
         PointerTarget::DesignNote(id) => {
-            if !state.schematic.session.editor.selection.has_design_note(id) {
+            if !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_design_note(id)
+            {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -650,8 +668,9 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
         // A probe selects like any other annotation. `ContextTarget` has no
         // probe case, so the menu opens against the canvas.
         PointerTarget::Probe(id) => {
-            if !state.schematic.session.editor.selection.has_probe(id) {
+            if !state.model.schematic.session.editor.selection.has_probe(id) {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -662,6 +681,7 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
         }
         PointerTarget::DocumentationShape(id) => {
             if !state
+                .model
                 .schematic
                 .session
                 .editor
@@ -669,6 +689,7 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
                 .has_documentation_shape(id)
             {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -678,8 +699,16 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
             ContextTarget::Canvas
         }
         PointerTarget::NetLabel(id) => {
-            if !state.schematic.session.editor.selection.has_net_label(id) {
+            if !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_net_label(id)
+            {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -691,8 +720,16 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
             ContextTarget::Canvas
         }
         PointerTarget::BusTap(id) => {
-            if !state.schematic.session.editor.selection.has_bus_tap(id) {
+            if !state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_bus_tap(id)
+            {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -703,6 +740,7 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
         }
         PointerTarget::Junction(position) => {
             if !state
+                .model
                 .schematic
                 .session
                 .editor
@@ -710,6 +748,7 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
                 .has_junction(position)
             {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -719,14 +758,21 @@ fn select_context_target(state: &mut AppState, target: Option<PointerTarget>) ->
             ContextTarget::Canvas
         }
         PointerTarget::Bus(id) => {
-            if !state.schematic.session.editor.selection.has_bus(id) {
-                state.schematic.session.editor.selection.select_only_bus(id);
+            if !state.model.schematic.session.editor.selection.has_bus(id) {
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .select_only_bus(id);
             }
             ContextTarget::Canvas
         }
         PointerTarget::Wire(id) => {
-            if !state.schematic.session.editor.selection.has_wire(id) {
+            if !state.model.schematic.session.editor.selection.has_wire(id) {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -750,8 +796,15 @@ fn keyboard_target(
     viewport: &Viewport,
     fallback_screen_pos: egui::Pos2,
 ) -> (ContextTarget, Point) {
-    if let Some(id) = state.schematic.session.editor.selection.single_bus_tap()
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_bus_tap()
         && let Some(tap) = state
+            .model
             .schematic
             .document()
             .bus_taps
@@ -760,8 +813,15 @@ fn keyboard_target(
     {
         return (ContextTarget::Canvas, tap.connection_point);
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_net_label()
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_net_label()
         && let Some(label) = state
+            .model
             .schematic
             .document()
             .net_labels
@@ -770,8 +830,9 @@ fn keyboard_target(
     {
         return (ContextTarget::Canvas, label.pos);
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_bus()
+    if let Some(id) = state.model.schematic.session.editor.selection.single_bus()
         && let Some(bus) = state
+            .model
             .schematic
             .document()
             .buses
@@ -781,8 +842,15 @@ fn keyboard_target(
     {
         return (ContextTarget::Canvas, point_midpoint(*first, *last));
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_component()
+    if let Some(id) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
         && let Some(component) = state
+            .model
             .schematic
             .document()
             .components
@@ -791,8 +859,9 @@ fn keyboard_target(
     {
         return (ContextTarget::Component(id), component.pos);
     }
-    if let Some(id) = state.schematic.session.editor.selection.single_wire()
+    if let Some(id) = state.model.schematic.session.editor.selection.single_wire()
         && let Some(wire) = state
+            .model
             .schematic
             .document()
             .wires
@@ -802,10 +871,18 @@ fn keyboard_target(
     {
         return (ContextTarget::Wire(id), point_midpoint(*first, *last));
     }
-    if let Some(point) = state.schematic.session.editor.selection.single_junction() {
+    if let Some(point) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_junction()
+    {
         return (ContextTarget::Canvas, point);
     }
     if let Some(id) = state
+        .model
         .schematic
         .session
         .editor
@@ -815,6 +892,7 @@ fn keyboard_target(
         .copied()
         .min()
         && let Some(component) = state
+            .model
             .schematic
             .document()
             .components
@@ -830,14 +908,14 @@ fn keyboard_target(
         ContextTarget::Canvas,
         screen_to_grid(
             viewport,
-            state.schematic.document().grid_size,
+            state.model.schematic.document().grid_size,
             fallback_screen_pos,
         ),
     )
 }
 
 fn selection_summary(state: &AppState, target: ContextTarget) -> String {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let count = selection.components.len()
         + selection.wires.len()
         + selection.wire_segments.len()
@@ -849,12 +927,16 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         + selection.probes.len()
         + selection.design_notes.len()
         + selection.documentation_shapes.len();
-    let path = format!("/{}", state.workspace.content.active_view.display_path());
+    let path = format!(
+        "/{}",
+        state.model.workspace.content.active_view.display_path()
+    );
     if count > 1 {
         return format!("{count} selected objects · {path}");
     }
     if let Some(id) = selection.single_bus_tap()
         && let Some(tap) = state
+            .model
             .schematic
             .document()
             .bus_taps
@@ -865,6 +947,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     }
     if let Some(id) = selection.single_bus()
         && let Some(bus) = state
+            .model
             .schematic
             .document()
             .buses
@@ -880,6 +963,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     }
     if let Some(id) = selection.single_net_label()
         && let Some(label) = state
+            .model
             .schematic
             .document()
             .net_labels
@@ -897,6 +981,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     }
     if let Some(id) = selection.single_probe()
         && let Some(probe) = state
+            .model
             .schematic
             .document()
             .probes
@@ -907,6 +992,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     }
     if let Some(id) = selection.single_design_note()
         && let Some(note) = state
+            .model
             .schematic
             .document()
             .design_notes
@@ -917,6 +1003,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
     }
     if let Some(id) = selection.single_documentation_shape()
         && let Some(shape) = state
+            .model
             .schematic
             .document()
             .documentation_shapes
@@ -935,6 +1022,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
         .unwrap_or(target);
     match target {
         ContextTarget::Component(id) => state
+            .model
             .schematic
             .document()
             .components
@@ -959,6 +1047,7 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
             .unwrap_or_else(|| format!("Schematic object · {path}")),
         ContextTarget::Wire(id) => {
             let net = state
+                .model
                 .schematic
                 .document()
                 .wires
@@ -966,9 +1055,9 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
                 .find(|wire| wire.id == id)
                 .and_then(|wire| {
                     wire.points.iter().find_map(|point| {
-                        state.simulation.source.cross_probe.net_at_in(
-                            &state.workspace.content.active_view,
-                            state.schematic.topology_version(),
+                        state.model.simulation.source.cross_probe.net_at_in(
+                            &state.model.workspace.content.active_view,
+                            state.model.schematic.topology_version(),
                             super::sheet_visibility::active_sheet_id(state),
                             *point,
                         )
@@ -983,58 +1072,67 @@ fn selection_summary(state: &AppState, target: ContextTarget) -> String {
 }
 
 fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     // Components, complete wires, and explicit junctions are clipboard and
     // deletion objects. Wire segments and vertices remain edit handles.
     let has_live_component = state
+        .model
         .schematic
         .document()
         .components
         .iter()
         .any(|component| selection.has_component(component.id));
     let has_live_wire = state
+        .model
         .schematic
         .document()
         .wires
         .iter()
         .any(|wire| selection.has_wire(wire.id));
     let has_live_junction = state
+        .model
         .schematic
         .document()
         .junctions
         .iter()
         .any(|junction| selection.has_junction(junction.pos));
     let has_live_bus = state
+        .model
         .schematic
         .document()
         .buses
         .iter()
         .any(|bus| selection.has_bus(bus.id));
     let has_live_bus_tap = state
+        .model
         .schematic
         .document()
         .bus_taps
         .iter()
         .any(|tap| selection.has_bus_tap(tap.id));
     let has_live_net_label = state
+        .model
         .schematic
         .document()
         .net_labels
         .iter()
         .any(|label| selection.has_net_label(label.id));
     let has_live_probe = state
+        .model
         .schematic
         .document()
         .probes
         .iter()
         .any(|probe| selection.has_probe(probe.id));
     let has_live_design_note = state
+        .model
         .schematic
         .document()
         .design_notes
         .iter()
         .any(|note| selection.has_design_note(note.id));
     let has_live_documentation_shape = state
+        .model
         .schematic
         .document()
         .documentation_shapes
@@ -1051,6 +1149,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         || has_live_documentation_shape;
     let all_whole_object_ids_are_live = selection.components.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .components
@@ -1058,6 +1157,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .any(|component| component.id == *id)
     }) && selection.wires.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .wires
@@ -1065,6 +1165,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .any(|wire| wire.id == *id)
     }) && selection.buses.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .buses
@@ -1072,6 +1173,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .any(|bus| bus.id == *id)
     }) && selection.bus_taps.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .bus_taps
@@ -1079,6 +1181,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .any(|tap| tap.id == *id)
     }) && selection.net_labels.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .net_labels
@@ -1086,6 +1189,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .any(|label| label.id == *id)
     }) && selection.probes.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .probes
@@ -1093,6 +1197,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .any(|probe| probe.id == *id)
     }) && selection.design_notes.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .design_notes
@@ -1100,6 +1205,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             .any(|note| note.id == *id)
     }) && selection.documentation_shapes.iter().all(|id| {
         state
+            .model
             .schematic
             .document()
             .documentation_shapes
@@ -1108,6 +1214,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
     });
     let all_junctions_are_live = selection.junctions.iter().all(|selected| {
         state
+            .model
             .schematic
             .document()
             .junctions
@@ -1137,7 +1244,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         && all_whole_object_ids_are_live
         && all_junctions_are_live
         && !has_wire_sub_object;
-    let writable = !state.schematic.session.read_only && !state.active_view_read_only();
+    let writable = !state.model.schematic.session.read_only && !state.active_view_read_only();
     match action {
         ContextAction::Properties => (
             crate::workbench::app::selected_object_properties_available(state),
@@ -1159,7 +1266,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         // The Design menu's availability for the same command.
         ContextAction::ArrangeCommand(ArrangeAction::SnapToGrid) => (
             !state.schematic_edit_read_only()
-                && !state.schematic.session.editor.selection.is_empty(),
+                && !state.model.schematic.session.editor.selection.is_empty(),
             "Select at least one editable object",
         ),
         ContextAction::ArrangeCommand(arrangement) => match arrange_layout(arrangement) {
@@ -1177,7 +1284,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         },
         ContextAction::ZoomBox => (
             matches!(
-                state.workspace.content.active_view_type(),
+                state.model.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench
             ),
             "The zoom box frames a schematic or testbench canvas",
@@ -1224,9 +1331,9 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::UpdateInstanceInterface => (
             writable
-                && state.schematic.selected_instance_interface_is_stale(
-                    &state.library_manager,
-                    &state.workspace.content.schematic_buffers,
+                && state.model.schematic.selected_instance_interface_is_stale(
+                    &state.model.library_manager,
+                    &state.model.workspace.content.schematic_buffers,
                 ),
             "Select one instance whose master interface changed after it was placed",
         ),
@@ -1244,8 +1351,9 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ),
         ContextAction::CreateSymbolFromPorts => (
             writable
-                && !state.schematic.interface_ports().is_empty()
+                && !state.model.schematic.interface_ports().is_empty()
                 && state
+                    .model
                     .library_manager
                     .libraries_sorted()
                     .iter()
@@ -1255,14 +1363,14 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
         ContextAction::SheetProperties => (
             writable
                 && matches!(
-                    state.workspace.content.active_view_type(),
+                    state.model.workspace.content.active_view_type(),
                     ViewType::Schematic | ViewType::Testbench
                 ),
             "Sheet properties require a writable schematic or testbench",
         ),
         ContextAction::FitContent => (
             matches!(
-                state.workspace.content.active_view_type(),
+                state.model.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench
             ),
             "Fit is available on a schematic or testbench canvas",
@@ -1328,7 +1436,7 @@ fn execute_context_action(
             None => turn(state, symbol_context, arrangement),
         },
         ContextAction::ZoomBox => {
-            state.schematic.session.editor.zoom_box.arm();
+            state.model.schematic.session.editor.zoom_box.arm();
             state.prompt("Drag a box to zoom to it.");
         }
         ContextAction::AdoptStimulus
@@ -1368,9 +1476,9 @@ fn execute_context_action(
             open_new_veriloga_device_form(state);
         }
         ContextAction::UpdateInstanceInterface => {
-            let outcome = state.schematic.update_selected_instance_interface(
-                &state.library_manager,
-                &state.workspace.content.schematic_buffers,
+            let outcome = state.model.schematic.update_selected_instance_interface(
+                &state.model.library_manager,
+                &state.model.workspace.content.schematic_buffers,
             );
             state.prompt(match outcome {
                 Ok(summary) => summary,
@@ -1386,11 +1494,11 @@ fn execute_context_action(
         }
         ContextAction::SheetProperties => crate::workbench::app::reveal_sheet_properties(state),
         ContextAction::FitContent => {
-            state.schematic.session.editor.needs_fit = true;
-            state.schematic.session.editor.needs_drawing_sheet_fit = false;
+            state.model.schematic.session.editor.needs_fit = true;
+            state.model.schematic.session.editor.needs_drawing_sheet_fit = false;
         }
         ContextAction::ShowInNetlist => state.show_selected_instance_in_netlist(),
-        ContextAction::Probe => state.schematic.arm_tool(Tool::Probe),
+        ContextAction::Probe => state.model.schematic.arm_tool(Tool::Probe),
         ContextAction::OperatingPoint => open_operating_point(state),
         ContextAction::Choose(_) => {}
     }
@@ -1405,7 +1513,7 @@ fn open_operating_point(state: &mut AppState) {
     let clicked = clicked_instance_name(state);
     let target = operating_point_analysis_index(state, clicked.as_deref());
     if let Some(index) = target {
-        state.simulation.select_analysis(index);
+        state.model.simulation.select_analysis(index);
     }
     // The device under the pointer is what this hop is about. The Op inspector
     // reads one device-name selection — its docbar filter — so the hop writes
@@ -1432,19 +1540,21 @@ fn open_operating_point(state: &mut AppState) {
 /// the other way, so the two directions agree on what "this device" means.
 fn clicked_instance_name(state: &AppState) -> Option<String> {
     let id = state
+        .model
         .schematic
         .session
         .editor
         .selection
         .single_component()?;
     let element = state
+        .model
         .schematic
         .document()
         .components
         .iter()
         .find(|component| component.id == id)?
         .engine_element_name();
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     if occurrence.is_root() {
         return Some(element);
     }
@@ -1458,7 +1568,7 @@ fn clicked_instance_name(state: &AppState) -> Option<String> {
 /// working for a device no report names — the inspector then opens unfiltered,
 /// which is a whole report rather than an empty one.
 fn operating_point_analysis_index(state: &AppState, device: Option<&str>) -> Option<usize> {
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     let is_operating_point = |analysis: &crate::state::AnalysisResult| {
         analysis.analysis_type == crate::state::AnalysisType::DcOp
     };
@@ -1480,7 +1590,7 @@ fn operating_point_analysis_index(state: &AppState, device: Option<&str>) -> Opt
 
 /// Whether one analysis of the active run reports `name`.
 fn analysis_reports_device(state: &AppState, index: usize, name: &str) -> bool {
-    state.simulation.active_run().is_some_and(|run| {
+    state.model.simulation.active_run().is_some_and(|run| {
         run.analyses.get(index).is_some_and(|analysis| {
             analysis.device_op.as_ref().is_some_and(|report| {
                 report
@@ -1493,7 +1603,7 @@ fn analysis_reports_device(state: &AppState, index: usize, name: &str) -> bool {
 }
 
 fn operating_point_available(state: &AppState) -> bool {
-    state.simulation.active_run().is_some_and(|run| {
+    state.model.simulation.active_run().is_some_and(|run| {
         run.analyses.iter().any(|analysis| {
             analysis
                 .device_op
@@ -1507,8 +1617,8 @@ fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
     let (target, (x, y)) = state.dialogs.interaction.context_target?;
     Some(ContextMenuBinding {
         source: super::requests::editor_request_source(state),
-        selection: state.schematic.session.editor.selection.clone(),
-        tool: state.schematic.session.editor.tool,
+        selection: state.model.schematic.session.editor.selection.clone(),
+        tool: state.model.schematic.session.editor.tool,
         target,
         click_pos: Point::new(x, y),
     })

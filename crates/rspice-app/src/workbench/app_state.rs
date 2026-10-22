@@ -21,6 +21,7 @@ mod full_screen;
 pub(in crate::workbench) mod interaction_state;
 #[cfg(test)]
 mod modal_gate_tests;
+mod model;
 pub(in crate::workbench) mod problems_view;
 mod rule_deck;
 pub(in crate::workbench) mod run_identity;
@@ -37,8 +38,7 @@ pub(in crate::workbench) mod viewer_capabilities;
 pub(in crate::workbench) mod waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
-use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
-use crate::state::{SchematicState, SimulationState};
+use crate::state::notices::{Notice, NoticeKind};
 use crate::workbench::app::DialogState;
 
 pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
@@ -50,6 +50,7 @@ pub(crate) use design_history::{
 pub(crate) use diagnostic_store::DiagnosticStore;
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
+pub(crate) use model::Model;
 pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
@@ -67,63 +68,26 @@ pub use sim_setup::{
 /// Main application state container
 #[derive(Clone)]
 pub struct AppState {
-    /// Circuit schematic state (components, wires, topology)
-    pub(crate) schematic: SchematicState,
-    /// Simulation results and waveforms
-    pub(crate) simulation: SimulationState,
-    /// Monotonic token that invalidates in-flight controller work whenever an
-    /// unrelated design document replaces the active project/schematic.
-    pub(crate) design_execution_epoch: u64,
-    /// Monotonic identity for the active schematic buffer. Unlike the
-    /// execution epoch, this advances on ordinary cell/view navigation so an
-    /// A→B→A round trip cannot revive a stale editor transaction.
-    pub(crate) active_schematic_epoch: u64,
-    /// Runtime-only cross-document design transactions. Schematic-local undo
-    /// cannot own operations that also create cells, views, or buffers.
-    pub(crate) project_design_history: design_history::ProjectDesignHistory,
-    /// Per-cell-view interactive check receipts, bound to exact live inputs.
-    pub(crate) design_checks: DesignCheckRuntime,
-    /// The conditions that stand against the design, from every producer, in
-    /// the one shape the Problems page, the tab badge and the status bar read.
-    pub(crate) diagnostics: DiagnosticStore,
-    /// Where the reader is standing in those conditions: the Problems grid's
-    /// order, filters and groups. A reading position over the evidence, never
+    /// The shared project model: the design, its simulation and checks, the
+    /// libraries, and the evidence two or more features read. Inline, so the
+    /// state moves at the size it had before these fields were gathered.
+    pub(crate) model: Model,
+    /// Where the reader is standing in the model's diagnostics: the Problems
+    /// grid's order, filters and groups. A reading position over the evidence, never
     /// evidence itself, and never persisted.
     pub(crate) problems_view: problems_view::ProblemsView,
     /// Dialog visibility. Boxed: this is the largest sub-state, and an inline
     /// copy would ride along in every stack frame that moves an [`AppState`].
     pub(crate) dialogs: Box<DialogState>,
-    /// Typed analysis configuration behind the Simulate view.
-    pub(crate) sim_setup: SimSetupState,
-    /// Structured log history buffer (ring-buffer, filterable).
-    pub(crate) log_buffer: crate::diagnostics::LogBuffer,
-    /// Failures and warnings reported and not yet toasted. Each one's line is
-    /// already in [`Self::log_buffer`]; the shell raises the toasts. Runtime
-    /// only: never persisted, and a clone starts empty.
-    pub(crate) notices: NoticeQueue,
-    /// The generated deck and its validation evidence. Runtime only. Boxed,
-    /// as it was inside [`Self::ui`], so a moved state stays the same size.
-    pub(crate) netlist_artifacts: Box<crate::state::NetlistArtifacts>,
     /// The deck a manual-deck run started from and the baseline the last one
-    /// left. Runtime only, and boxed for the same reason.
+    /// left. Runtime only, and boxed so a moved state stays the same size.
     pub(crate) manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
-    /// Library/Cell/View manager for design hierarchy
-    pub(crate) library_manager: crate::state::LibraryManager,
-    /// Runtime collaboration-lock authority for governed project library
-    /// mutations. Local projects remain explicitly unmanaged; connected
-    /// sessions install revision-bound authoritative snapshots.
-    pub(crate) library_edit_locks: crate::state::ProjectLibraryLockAuthority,
-    /// Project/workspace model for active design context and open LCV views.
-    pub(crate) workspace: crate::state::ProjectWorkspace,
     /// Transactional document registry, accepted project baseline, and
     /// canonical persistence identity. Runtime-only apart from whether a
     /// project is open; session recovery keeps the working set separately and
     /// reconstructs this boundary at startup.
     pub(crate) project_lifecycle:
         Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>,
-    /// Whether a project is open, as model code reads it. Only the lifecycle
-    /// writes it, in the call that opens or closes the project.
-    pub(crate) project_open: crate::state::ProjectOpenFact,
     /// Pending cell deletion (library, cell_name)
     pub(crate) pending_delete_cell: Option<(String, String)>,
     /// Pending view deletion (library, cell, view_name)
@@ -136,11 +100,6 @@ pub struct AppState {
     pub(crate) calculator_panel: session::calculator::CalculatorPanel,
     /// PDK Settings dialog state
     pub(crate) pdk_settings_dialog: session::pdk_settings::PdkSettingsDialogState,
-    /// PDK model paths plus signed technology packages, trust roots, exact
-    /// active binding, and administrative receipts.
-    pub(crate) pdk_config: crate::state::pdk_config::PdkConfig,
-    /// Model library manager (PDK models, device libraries)
-    pub(crate) model_library_manager: crate::state::model_library::ModelLibraryManager,
     /// Standalone model browser state (for Tools menu access)
     pub(crate) model_browser_state: crate::properties::model_browser::ModelBrowserState,
     /// Flag to signal that application exit has been requested (after confirmation)
@@ -200,7 +159,7 @@ impl AppState {
     /// anything else, and tests check it after each lifecycle transition.
     pub(crate) fn assert_project_open_fact(&self) {
         debug_assert_eq!(
-            self.project_open.is_open(),
+            self.model.project_open.is_open(),
             self.project_lifecycle.is_open(),
             "the model's project-open fact disagrees with the project lifecycle"
         );
@@ -218,18 +177,20 @@ impl AppState {
                 "{operation} is unavailable because the project is open read-only."
             ));
         }
-        self.library_edit_locks
+        self.model
+            .library_edit_locks
             .require_mutation_authority(
-                self.workspace.content.project.id(),
-                self.workspace.content.project.revision(),
-                self.library_manager.revision(),
+                self.model.workspace.content.project.id(),
+                self.model.workspace.content.project.revision(),
+                self.model.library_manager.revision(),
                 &mutation,
             )
             .map_err(|error| format!("Could not reserve {operation}: {error}"))?;
-        self.workspace
+        self.model
+            .workspace
             .content
             .project
-            .prepare_library_mutation(mutation, self.library_manager.revision())
+            .prepare_library_mutation(mutation, self.model.library_manager.revision())
             .map_err(|error| format!("Could not reserve {operation}: {error}"))
     }
 
@@ -239,19 +200,20 @@ impl AppState {
         &mut self,
         prepared: crate::state::PreparedProjectLibraryMutation,
     ) {
-        let observed_library_revision = self.library_manager.revision();
+        let observed_library_revision = self.model.library_manager.revision();
         assert!(
             observed_library_revision >= prepared.minimum_library_revision(),
             "library mutation did not advance the library revision"
         );
-        self.workspace
+        self.model
+            .workspace
             .content
             .project
             .publish_library_mutation(prepared, observed_library_revision)
             .expect("the library mutation receipt was fully preflighted");
-        self.workspace.content.project_metadata_dirty = true;
-        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.netlist_artifacts.current_generation_input_digest = None;
+        self.model.workspace.content.project_metadata_dirty = true;
+        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
+        self.model.netlist_artifacts.current_generation_input_digest = None;
         self.clear_project_design_history();
     }
 
@@ -259,12 +221,12 @@ impl AppState {
         &self,
     ) -> rspice_simulation::project_technology::ProjectTechnologyInputs<'_> {
         rspice_simulation::project_technology::ProjectTechnologyInputs {
-            project: &self.workspace.content.project,
-            sim_setup: &self.sim_setup,
-            models: self.model_library_manager.catalog(),
-            resolutions: self.model_library_manager.resolution_records(),
-            registry: &self.pdk_config.technology_registry,
-            layouts: self.workspace.content.physical_layout_documents(),
+            project: &self.model.workspace.content.project,
+            sim_setup: &self.model.sim_setup,
+            models: self.model.model_library_manager.catalog(),
+            resolutions: self.model.model_library_manager.resolution_records(),
+            registry: &self.model.pdk_config.technology_registry,
+            layouts: self.model.workspace.content.physical_layout_documents(),
         }
     }
 
@@ -274,7 +236,7 @@ impl AppState {
         &self,
     ) -> rspice_simulation::netlist_preparation::IncludeSearchChain {
         rspice_simulation::netlist_preparation::IncludeSearchChain::for_project(
-            &self.workspace.content.project,
+            &self.model.workspace.content.project,
             self.library_folders(),
         )
     }
@@ -299,9 +261,12 @@ impl AppState {
     pub(crate) fn project_signed_technology_package(
         &self,
     ) -> Result<Option<&crate::state::pdk_config::ValidatedPdkTechnologyPackage>, String> {
-        self.pdk_config
+        self.model
+            .pdk_config
             .technology_registry
-            .project_signed_technology_package(self.workspace.content.project.technology_binding())
+            .project_signed_technology_package(
+                self.model.workspace.content.project.technology_binding(),
+            )
     }
 
     /// Whether an attached project technology is in effect: bound, and bound
@@ -357,13 +322,15 @@ impl AppState {
     ) -> Result<&crate::state::pdk_config::ValidatedPdkTechnologyPackage, String> {
         self.validate_project_technology_contract()?;
         let signed_pin = self
+            .model
             .workspace
             .content
             .project
             .technology_binding()
             .and_then(crate::state::ProjectTechnologyBinding::signed_package)
             .expect("validated project technology has an exact signed package");
-        self.pdk_config
+        self.model
+            .pdk_config
             .technology_registry
             .validated_packages()
             .iter()
@@ -398,6 +365,7 @@ impl AppState {
             .validate_name_segments()
             .map_err(|error| format!("Layout owner is invalid: {error}"))?;
         let library = self
+            .model
             .library_manager
             .get_library(&owner.library)
             .ok_or_else(|| format!("Layout owner library '{}' does not exist", owner.library))?;
@@ -419,6 +387,7 @@ impl AppState {
             ));
         }
         if self
+            .model
             .workspace
             .content
             .physical_layout_document(&owner)
@@ -433,14 +402,16 @@ impl AppState {
         let document = crate::state::PhysicalLayoutDocument::try_new(owner.clone(), technology)
             .map_err(|error| format!("Physical layout could not be initialized: {error}"))?;
         let revision = document.revision();
-        self.workspace
+        self.model
+            .workspace
             .content
             .commit_physical_layout_document(document)
             .map_err(|error| format!("Physical layout was not committed: {error}"))?;
-        if let Some(mut library) = self.library_manager.edit_library(&owner.library) {
+        if let Some(mut library) = self.model.library_manager.edit_library(&owner.library) {
             library.mark_view_modified(&owner.cell, &owner.view);
         }
         if let Some(open) = self
+            .model
             .workspace
             .content
             .open_views
@@ -449,7 +420,7 @@ impl AppState {
         {
             open.dirty = true;
         }
-        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
         self.clear_project_design_history();
         Ok(revision)
     }
@@ -468,6 +439,7 @@ impl AppState {
             );
         }
         let library = self
+            .model
             .library_manager
             .get_library(&owner.library)
             .ok_or_else(|| format!("Layout owner library '{}' does not exist", owner.library))?;
@@ -504,6 +476,7 @@ impl AppState {
             })
             .collect::<std::collections::BTreeSet<_>>();
         let mut document = self
+            .model
             .workspace
             .content
             .physical_layout_document(owner)
@@ -551,14 +524,16 @@ impl AppState {
                 ));
             }
         }
-        self.workspace
+        self.model
+            .workspace
             .content
             .commit_physical_layout_document(document)
             .map_err(|error| format!("Physical-layout transaction was not committed: {error}"))?;
-        if let Some(mut library) = self.library_manager.edit_library(&owner.library) {
+        if let Some(mut library) = self.model.library_manager.edit_library(&owner.library) {
             library.mark_view_modified(&owner.cell, &owner.view);
         }
         if let Some(open) = self
+            .model
             .workspace
             .content
             .open_views
@@ -567,7 +542,7 @@ impl AppState {
         {
             open.dirty = true;
         }
-        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
+        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
         self.clear_project_design_history();
         Ok(revision)
     }
@@ -615,6 +590,7 @@ impl AppState {
         self.validate_project_technology_contract()?;
 
         let project_binding = self
+            .model
             .workspace
             .content
             .project
@@ -628,13 +604,19 @@ impl AppState {
             revision: signed_pin.revision().to_owned(),
             manifest_digest: signed_pin.manifest_digest(),
         };
-        let plan = self.sim_setup.stable_analysis_plan().map_err(|error| {
-            format!("Project callback requires an authoritative active simulation plan: {error}")
-        })?;
+        let plan = self
+            .model
+            .sim_setup
+            .stable_analysis_plan()
+            .map_err(|error| {
+                format!(
+                    "Project callback requires an authoritative active simulation plan: {error}"
+                )
+            })?;
         let plan_id = plan.id();
         let plan_revision = plan.revision();
         let mut project_parameters = std::collections::BTreeMap::new();
-        if let Some(payload) = self.workspace.content.plan_data(plan_id) {
+        if let Some(payload) = self.model.workspace.content.plan_data(plan_id) {
             for (index, variable) in payload.design_variables.iter().enumerate() {
                 variable.validate().map_err(|error| {
                     format!("Active-plan design variable[{index}] is invalid: {error}")
@@ -658,6 +640,7 @@ impl AppState {
         }
         let input = crate::state::pdk_config::PdkCallbackExecutionInput { project_parameters };
         let execution = self
+            .model
             .pdk_config
             .technology_registry
             .execute_callback_for_binding(
@@ -668,6 +651,7 @@ impl AppState {
             )
             .map_err(|error| format!("Signed PDK callback execution was rejected: {error}"))?;
         let receipt = self
+            .model
             .workspace
             .content
             .commit_pdk_callback_execution(
@@ -680,9 +664,9 @@ impl AppState {
             )
             .map_err(|error| format!("Signed PDK callback result was not recorded: {error}"))?;
 
-        self.workspace.content.project_metadata_dirty = true;
-        self.design_execution_epoch = self.design_execution_epoch.wrapping_add(1);
-        self.netlist_artifacts.current_generation_input_digest = None;
+        self.model.workspace.content.project_metadata_dirty = true;
+        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
+        self.model.netlist_artifacts.current_generation_input_digest = None;
         self.clear_project_design_history();
         Ok(receipt)
     }
@@ -732,8 +716,9 @@ impl AppState {
             crate::state::pdk_config::PdkAdministrativeAuthority,
         ),
     ) {
-        self.pdk_config.publisher_trust_store = trust.clone();
-        self.pdk_config
+        self.model.pdk_config.publisher_trust_store = trust.clone();
+        self.model
+            .pdk_config
             .technology_registry
             .install_archive_bytes(
                 &archive,
@@ -742,9 +727,15 @@ impl AppState {
                 "Install deterministic test technology",
             )
             .expect("signed test technology installs");
-        let package = self.pdk_config.technology_registry.validated_packages()[0].clone();
+        let package = self
+            .model
+            .pdk_config
+            .technology_registry
+            .validated_packages()[0]
+            .clone();
 
         let library_name = self
+            .model
             .model_library_manager
             .load_library_bytes(
                 "demo180-test.lib",
@@ -753,6 +744,7 @@ impl AppState {
             )
             .expect("authenticated retained test model imports");
         let library = self
+            .model
             .model_library_manager
             .get_library(&library_name)
             .expect("imported test model remains in the catalog");
@@ -768,13 +760,14 @@ impl AppState {
         let context = crate::state::ProjectTechnologyChangeContext::new(
             authority,
             uuid::Uuid::new_v4(),
-            self.workspace.content.project.revision(),
+            self.model.workspace.content.project.revision(),
             1,
             crate::product::ContentDigest::from_bytes([0x7a; 32]),
             1,
         )
         .expect("test checkpoint evidence is valid");
-        self.workspace
+        self.model
+            .workspace
             .content
             .project
             .attach_technology_audited(binding, context)
@@ -797,7 +790,7 @@ impl AppState {
             || self.dialogs.application_modal_open()
             || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
                 && self.ui.netlist.application_modal_open())
-            || self.sim_setup.session.palette_open
+            || self.model.sim_setup.session.palette_open
             || self.tabbed_property_dialog.open
             || self.pdk_settings_dialog.open
             || self.model_browser_state.open
@@ -817,10 +810,10 @@ impl AppState {
         // drawer. Close that transient layer first, so the modal is never
         // obscured by its own invoker.
         self.workbench.close_drawer();
-        self.sim_setup.session.palette_open = true;
-        self.sim_setup.session.palette_query.clear();
-        self.sim_setup.session.palette_active = 0;
-        self.sim_setup.session.palette_scroll_to_active = true;
+        self.model.sim_setup.session.palette_open = true;
+        self.model.sim_setup.session.palette_query.clear();
+        self.model.sim_setup.session.palette_active = 0;
+        self.model.sim_setup.session.palette_scroll_to_active = true;
     }
 
     /// Whether static authored state permits a run. Interactive Run commands
@@ -832,7 +825,7 @@ impl AppState {
 
     /// User-facing reason the Run command is currently blocked.
     pub fn simulation_run_block_reason(&self) -> Option<String> {
-        if self.simulation.execution.has_active_execution() {
+        if self.model.simulation.execution.has_active_execution() {
             return Some("A simulation execution is already active".to_string());
         }
         self.simulation_run_preflight_block_reason()
@@ -842,10 +835,10 @@ impl AppState {
     /// transient "already running" state so queued re-runs can share it.
     pub fn simulation_run_preflight_block_reason(&self) -> Option<String> {
         run_preflight::run_preflight_block_reason(
-            &self.sim_setup,
-            &self.workspace,
-            &self.schematic,
-            &self.model_library_manager,
+            &self.model.sim_setup,
+            &self.model.workspace,
+            &self.model.schematic,
+            &self.model.model_library_manager,
             self.current_blocking_drc_result(),
         )
         .or_else(|| self.technology_gate_block_reason().err())
@@ -853,7 +846,7 @@ impl AppState {
 
     /// User-facing reason the Netlist workspace cannot run the current deck.
     pub fn manual_deck_run_block_reason(&self) -> Option<String> {
-        if self.simulation.execution.has_active_execution() {
+        if self.model.simulation.execution.has_active_execution() {
             return Some("A simulation execution is already active".to_string());
         }
         let active_document =
@@ -885,12 +878,13 @@ impl AppState {
         let current_digest = crate::state::content_digest(source);
         if active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-            && (self.netlist_artifacts.generation_error.is_some()
-                || self.netlist_artifacts.generated_input_digest
-                    != self.netlist_artifacts.current_generation_input_digest)
+            && (self.model.netlist_artifacts.generation_error.is_some()
+                || self.model.netlist_artifacts.generated_input_digest
+                    != self.model.netlist_artifacts.current_generation_input_digest)
         {
             return Some(
-                self.netlist_artifacts
+                self.model
+                    .netlist_artifacts
                     .generation_error
                     .clone()
                     .unwrap_or_else(|| "Regenerate the stale netlist before running".to_owned()),
@@ -912,11 +906,11 @@ impl AppState {
 
     /// Request a Netlist workspace run, queuing one re-run if the engine is busy.
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
-        self.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
-        if self.simulation.execution.has_active_execution() {
+        self.model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
+        if self.model.simulation.execution.has_active_execution() {
             self.ui.netlist.rerun_queued = true;
         } else {
-            self.simulation.execution.request_manual_deck_run();
+            self.model.simulation.execution.request_manual_deck_run();
         }
     }
 
@@ -944,17 +938,21 @@ impl AppState {
     /// advertised or checked as one.
     pub(crate) fn is_netlist_first_without_schematic(&self) -> bool {
         let netlist_first_deck_owns_the_project = self
+            .model
             .workspace
             .content
             .netlist_document
             .as_ref()
             .is_some_and(|document| document.generated_artifact().is_none());
-        if !netlist_first_deck_owns_the_project || schematic_has_authored_content(&self.schematic) {
+        if !netlist_first_deck_owns_the_project
+            || schematic_has_authored_content(&self.model.schematic)
+        {
             return false;
         }
 
-        self.workspace.content.schematic_buffers.len() <= 1
+        self.model.workspace.content.schematic_buffers.len() <= 1
             && self
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -965,7 +963,7 @@ impl AppState {
     /// Request a run from the Simulate workspace run set.
     pub fn request_run_set_simulation(&mut self) {
         self.ui.netlist.rerun_queued = false;
-        self.simulation.execution.request_simulate_run_set();
+        self.model.simulation.execution.request_simulate_run_set();
     }
 
     /// Answer the gesture just made, on the status bar.
@@ -1002,7 +1000,7 @@ impl AppState {
         source: crate::diagnostics::LogSource,
         text: impl Into<String>,
     ) -> u64 {
-        self.log_buffer.log(severity, source, text)
+        self.model.log_buffer.log(severity, source, text)
     }
 
     /// [`Self::record`], with a place the Console row jumps to.
@@ -1013,7 +1011,8 @@ impl AppState {
         text: impl Into<String>,
         anchor: crate::diagnostics::LogAnchor,
     ) -> u64 {
-        self.log_buffer
+        self.model
+            .log_buffer
             .log_anchored(severity, source, text, Some(anchor))
     }
 
@@ -1040,7 +1039,7 @@ impl AppState {
             NoticeKind::Warning => LogSeverity::Warning,
         };
         let log_id = self.record(severity, LogSource::Studio, format!("{title}: {detail}"));
-        self.notices.push(Notice {
+        self.model.notices.push(Notice {
             kind,
             title,
             detail,
@@ -1059,7 +1058,7 @@ impl AppState {
     pub(crate) fn drain_notices(&mut self, ctx: &egui::Context) {
         use crate::ui::widgets::{NotificationAction, NotificationCategory, ToastKind};
 
-        let notices = self.notices.take();
+        let notices = self.model.notices.take();
         if !notices.is_empty() {
             ctx.request_repaint();
         }
@@ -1107,7 +1106,7 @@ impl AppState {
             .analysis_lifecycle_status
             .record_receipt(message.as_str())
         {
-            self.log_buffer.log(
+            self.model.log_buffer.log(
                 crate::diagnostics::LogSeverity::Info,
                 crate::diagnostics::LogSource::Plan,
                 message,
@@ -1131,7 +1130,7 @@ impl AppState {
             .record_refusal(message.as_str())
         {
             self.prompt(message.clone());
-            self.log_buffer.log(
+            self.model.log_buffer.log(
                 crate::diagnostics::LogSeverity::Warning,
                 crate::diagnostics::LogSource::Plan,
                 message,
@@ -1145,7 +1144,7 @@ impl AppState {
     /// itself. Returns whether the selection took, so a caller that was about
     /// to write a selection *inside* that library can decline to.
     pub(crate) fn select_model_library(&mut self, name: &str) -> bool {
-        match self.model_library_manager.select_library(name) {
+        match self.model.model_library_manager.select_library(name) {
             Ok(()) => true,
             Err(refusal) => {
                 self.prompt(refusal);
@@ -1155,7 +1154,7 @@ impl AppState {
     }
 
     pub fn clear_primary_log(&mut self) {
-        self.log_buffer.clear();
+        self.model.log_buffer.clear();
     }
 
     /// Record a file in the recent-files list (most recent first, deduped,
@@ -1222,7 +1221,7 @@ impl AppState {
     /// cursor when it hovers the canvas, otherwise the center of the visible
     /// canvas (menu-driven paste), otherwise a sane fixed spot.
     pub(crate) fn schematic_paste_anchor(&self) -> crate::state::Point {
-        let grid = self.schematic.document().grid_size.max(1);
+        let grid = self.model.schematic.document().grid_size.max(1);
         let (x, y) = self
             .ui
             .canvas_hover
@@ -1235,7 +1234,7 @@ impl AppState {
     /// while a drag is held, or a copy floating under the pointer. History
     /// waits for either to land or be cancelled.
     pub(crate) fn schematic_edit_in_progress(&self) -> bool {
-        self.schematic.has_pending_operation() || self.dialogs.floating_paste.is_some()
+        self.model.schematic.has_pending_operation() || self.dialogs.floating_paste.is_some()
     }
 }
 
@@ -1335,11 +1334,13 @@ mod tests {
         let mut state = AppState::default();
         state.provision_test_project_technology_contract();
         let plan_id = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("active plan")
             .id();
         state
+            .model
             .workspace
             .content
             .add_design_variable(
@@ -1363,7 +1364,7 @@ mod tests {
             &mut state, baseline, None,
         );
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
-        let from_revision = state.workspace.content.project.revision();
+        let from_revision = state.model.workspace.content.project.revision();
         let authority = crate::state::pdk_config::PdkAdministrativeAuthority {
             actor_id: "callback-operator@rspice.invalid".to_owned(),
             authority_id: "test:project-callback".to_owned(),
@@ -1381,7 +1382,7 @@ mod tests {
         assert_eq!(receipt.from_project_revision, from_revision);
         assert_eq!(
             receipt.to_project_revision,
-            state.workspace.content.project.revision()
+            state.model.workspace.content.project.revision()
         );
         assert_eq!(receipt.execution.callback_id, "derive-device");
         assert!(receipt.execution.derived_metadata.is_empty());
@@ -1404,17 +1405,19 @@ mod tests {
         assert_eq!(second.from_project_revision, receipt.to_project_revision);
         assert_eq!(second.previous_receipt_digest, Some(receipt.receipt_digest));
         assert_eq!(
-            state.workspace.content.pdk_callback_receipts(),
+            state.model.workspace.content.pdk_callback_receipts(),
             [receipt.clone(), second.clone()]
         );
         state
+            .model
             .workspace
             .content
             .validate_pdk_callback_receipts()
             .expect("project callback ledger validates");
-        assert!(state.workspace.content.project_metadata_dirty);
+        assert!(state.model.workspace.content.project_metadata_dirty);
 
-        let encoded = serde_json::to_vec(&state.workspace).expect("serialize callback evidence");
+        let encoded =
+            serde_json::to_vec(&state.model.workspace).expect("serialize callback evidence");
         let restored: crate::state::ProjectWorkspace =
             serde_json::from_slice(&encoded).expect("restore callback evidence");
         assert_eq!(
@@ -1438,7 +1441,7 @@ mod tests {
     #[test]
     fn project_callback_failure_is_transactional_without_an_exact_project_pin() {
         let mut state = AppState::default();
-        let revision = state.workspace.content.project.revision();
+        let revision = state.model.workspace.content.project.revision();
         let authority = crate::state::pdk_config::PdkAdministrativeAuthority {
             actor_id: "callback-operator@rspice.invalid".to_owned(),
             authority_id: "test:project-callback".to_owned(),
@@ -1453,9 +1456,16 @@ mod tests {
             .expect_err("missing exact project pin must fail closed");
 
         assert!(error.contains("no exact authenticated"), "{error}");
-        assert_eq!(state.workspace.content.project.revision(), revision);
-        assert!(state.workspace.content.pdk_callback_receipts().is_empty());
-        assert!(!state.workspace.content.project_metadata_dirty);
+        assert_eq!(state.model.workspace.content.project.revision(), revision);
+        assert!(
+            state
+                .model
+                .workspace
+                .content
+                .pdk_callback_receipts()
+                .is_empty()
+        );
+        assert!(!state.model.workspace.content.project_metadata_dirty);
     }
 
     #[test]
@@ -1464,6 +1474,7 @@ mod tests {
         state.provision_test_project_technology_contract();
         let owner = crate::state::CellViewRef::new("user", "top", "layout");
         state
+            .model
             .library_manager
             .get_library_mut("user")
             .expect("default project library")
@@ -1477,6 +1488,7 @@ mod tests {
             .initialize_physical_layout_document(owner.clone())
             .expect("initialize exact signed-PDK physical layout");
         let document = state
+            .model
             .workspace
             .content
             .physical_layout_document(&owner)
@@ -1510,6 +1522,7 @@ mod tests {
         state.provision_test_project_technology_contract();
         let owner = crate::state::CellViewRef::new("user", "top", "layout");
         state
+            .model
             .library_manager
             .get_library_mut("user")
             .expect("default project library")
@@ -1519,12 +1532,14 @@ mod tests {
                 crate::state::ViewType::Layout,
             ));
         state
+            .model
             .workspace
             .open_view(owner.clone(), crate::state::ViewType::Layout);
         let start = state
             .initialize_physical_layout_document(owner.clone())
             .expect("initialize exact signed-PDK physical layout");
         state
+            .model
             .library_manager
             .get_library_mut("user")
             .unwrap()
@@ -1534,6 +1549,7 @@ mod tests {
             .unwrap()
             .modified = false;
         state
+            .model
             .workspace
             .content
             .open_views
@@ -1567,6 +1583,7 @@ mod tests {
         assert_eq!(committed, start.next().unwrap());
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .physical_layout_document(&owner)
@@ -1576,6 +1593,7 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .library_manager
                 .get_library("user")
                 .unwrap()
@@ -1587,6 +1605,7 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .open_views
@@ -1623,6 +1642,7 @@ mod tests {
             "{error}"
         );
         let unchanged = state
+            .model
             .workspace
             .content
             .physical_layout_document(&owner)
@@ -1653,6 +1673,7 @@ mod tests {
             )
             .expect("layout-domain import accepts syntactically valid package-foreign layer");
         state
+            .model
             .workspace
             .content
             .commit_physical_layout_document(imported)

@@ -22,6 +22,7 @@ impl AppState {
         view: &str,
     ) -> Result<(), String> {
         let target = self
+            .model
             .library_manager
             .get_library(library)
             .ok_or_else(|| format!("Library '{library}' no longer exists."))?;
@@ -43,13 +44,13 @@ impl AppState {
         self.dialogs.rename_view_current = view.to_owned();
         self.dialogs.rename_view_name = view.to_owned();
         self.dialogs.rename_view_error = None;
-        self.dialogs.rename_view_library_revision = self.library_manager.revision();
+        self.dialogs.rename_view_library_revision = self.model.library_manager.revision();
         self.dialogs.rename_view_dialog = true;
         Ok(())
     }
 
     fn commit_rename_view_dialog(&mut self) -> Result<Option<usize>, String> {
-        if self.library_manager.revision() != self.dialogs.rename_view_library_revision {
+        if self.model.library_manager.revision() != self.dialogs.rename_view_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
         let name = self.dialogs.rename_view_name.trim().to_owned();
@@ -75,7 +76,7 @@ impl RSpiceApp {
         let mut should_close = false;
         let mut should_rename = false;
 
-        let catalog_current = self.state.library_manager.revision()
+        let catalog_current = self.state.model.library_manager.revision()
             == self.state.dialogs.rename_view_library_revision;
         if !catalog_current {
             self.state.dialogs.rename_view_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());

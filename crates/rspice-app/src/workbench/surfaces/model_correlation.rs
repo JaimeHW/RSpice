@@ -296,9 +296,14 @@ fn correlation_projection_cache_id() -> egui::Id {
 impl CorrelationProjection {
     fn from_app(ctx: &egui::Context, app: &RSpiceApp) -> Arc<Self> {
         let key = CorrelationProjectionCacheKey {
-            project_id: app.state.workspace.content.project.id(),
-            project_revision: app.state.workspace.content.project.revision(),
-            library: app.state.model_library_manager.selected_library.clone(),
+            project_id: app.state.model.workspace.content.project.id(),
+            project_revision: app.state.model.workspace.content.project.revision(),
+            library: app
+                .state
+                .model
+                .model_library_manager
+                .selected_library
+                .clone(),
             model: app.state.workbench.selected_model.clone(),
             selected_suite_id: app
                 .state
@@ -327,12 +332,19 @@ impl CorrelationProjection {
     }
 
     fn build(app: &RSpiceApp) -> Self {
-        let library = app.state.model_library_manager.selected_library.clone();
+        let library = app
+            .state
+            .model
+            .model_library_manager
+            .selected_library
+            .clone();
         let model = app.state.workbench.selected_model.clone();
         let resolved = match (library.as_deref(), model.as_deref()) {
-            (Some(library), Some(model)) => {
-                resolve_project_model_for_editor(&app.state.model_library_manager, library, model)
-            }
+            (Some(library), Some(model)) => resolve_project_model_for_editor(
+                &app.state.model.model_library_manager,
+                library,
+                model,
+            ),
             (None, _) => Err("Select a project-owned model library first".to_owned()),
             (_, None) => Err("Select a project-owned model family first".to_owned()),
         };
@@ -341,6 +353,7 @@ impl CorrelationProjection {
         let correlation = match (library.as_deref(), model.as_deref()) {
             (Some(library_name), Some(model_name)) => app
                 .state
+                .model
                 .model_library_manager
                 .get_library(library_name)
                 .and_then(|library| library.model_correlation.get(model_name))

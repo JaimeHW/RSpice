@@ -219,7 +219,7 @@ pub(crate) fn analysis_currentness(
         AnalysisResultSourceDomain::SimulationPlan => {}
     }
 
-    let Ok(plan) = state.sim_setup.stable_analysis_plan() else {
+    let Ok(plan) = state.model.sim_setup.stable_analysis_plan() else {
         return ResultCurrentness::Unresolved;
     };
     if run
@@ -274,8 +274,9 @@ pub(crate) fn run_currentness(
             .as_ref()
             .is_some_and(|condition| {
                 condition.kind == ResultRuntimeConditionKind::Recovered
-                    && condition.data_version == state.simulation.view.data_version
+                    && condition.data_version == state.model.simulation.view.data_version
                     && state
+                        .model
                         .simulation
                         .active_run()
                         .is_some_and(|active| active.dataset_id == run.dataset_id)
@@ -352,12 +353,13 @@ pub(crate) fn classify_viewer(
     // Specifications owns an authoring route before any result exists.
     let authoring_without_dataset = viewer == ResultViewer::Specs
         && (state.ui.results.session.spec_drafts.is_some()
-            || !state.workspace.content.specs.is_empty());
+            || !state.model.workspace.content.specs.is_empty());
     let Some(run_index) = state
+        .model
         .simulation
         .view
         .active_run_idx
-        .filter(|index| state.simulation.retained.runs.get(*index).is_some())
+        .filter(|index| state.model.simulation.retained.runs.get(*index).is_some())
     else {
         return if authoring_without_dataset {
             ResultOperationalStatus::canonical(ResultOperationalState::Complete, false)
@@ -367,7 +369,7 @@ pub(crate) fn classify_viewer(
     };
 
     let (run_has_data, analysis_keys) = {
-        let run = &state.simulation.retained.runs[run_index];
+        let run = &state.model.simulation.retained.runs[run_index];
         (
             !run.analyses.is_empty(),
             run.analyses
@@ -383,10 +385,10 @@ pub(crate) fn classify_viewer(
         return ResultOperationalStatus::canonical(ResultOperationalState::Corrupted, true);
     }
 
-    let run = &state.simulation.retained.runs[run_index];
+    let run = &state.model.simulation.retained.runs[run_index];
 
     if let Some(condition) = state.ui.results.operational_condition.clone()
-        && condition.data_version == state.simulation.view.data_version
+        && condition.data_version == state.model.simulation.view.data_version
     {
         let operational_state = condition.kind.operational_state();
         return ResultOperationalStatus {
@@ -570,6 +572,7 @@ mod tests {
     fn source_currentness_uses_plan_identity_and_revision_not_selection() {
         let state = AppState::default();
         let plan = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("default plan");
@@ -607,6 +610,7 @@ mod tests {
         );
         let mut revised = state;
         revised
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("mutable plan")
@@ -692,8 +696,8 @@ fn failure_site_offer(state: &AppState) -> Option<FailureSiteOffer> {
     if !state.active_failure_names_objects() {
         return None;
     }
-    let run_sequence = state.simulation.active_run()?.id;
-    let analysis = state.simulation.active_analysis()?;
+    let run_sequence = state.model.simulation.active_run()?.id;
+    let analysis = state.model.simulation.active_analysis()?;
     let attribution = analysis.failure_attribution.as_ref()?;
     let error = analysis.error_message.as_deref()?;
     if !attribution.describes(error) {
@@ -742,8 +746,8 @@ mod failure_site_control_tests {
         let mut analysis =
             AnalysisResult::failed(1, AnalysisType::Transient, "tran", rendered_error);
         analysis.failure_attribution = attribution;
-        state.simulation.start_run().add_analysis(analysis);
-        state.simulation.select_run(0);
+        state.model.simulation.start_run().add_analysis(analysis);
+        state.model.simulation.select_run(0);
         state
     }
 
@@ -802,21 +806,43 @@ mod failure_site_control_tests {
     #[test]
     fn clearing_removes_the_marking_without_moving_the_view() {
         let mut state = state_showing_failure(Some(attribution(FAILURE, 0)), FAILURE);
-        state.schematic.session.editor.selection.select_wire(91);
         state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_wire(91);
+        state
+            .model
             .schematic
             .session
             .editor
             .net_highlight
             .highlight_wires(std::iter::once(91).collect());
-        state.schematic.session.editor.center_request = None;
+        state.model.schematic.session.editor.center_request = None;
 
         state.clear_failure_site_marking();
 
-        assert!(state.schematic.session.editor.selection.wires.is_empty());
-        assert!(!state.schematic.session.editor.net_highlight.active);
         assert!(
-            state.schematic.session.editor.center_request.is_none(),
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .wires
+                .is_empty()
+        );
+        assert!(!state.model.schematic.session.editor.net_highlight.active);
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .center_request
+                .is_none(),
             "clearing a marking must not scroll the drawing"
         );
     }

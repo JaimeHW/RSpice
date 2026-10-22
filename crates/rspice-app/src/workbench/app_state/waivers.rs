@@ -155,8 +155,8 @@ pub(in crate::workbench) fn stored_waiver_records(
     stored: &DrcWaivers,
     result: &DrcResult,
 ) -> Vec<DiagnosticRecord> {
-    let project = state.workspace.content.project.id();
-    let revision = state.workspace.content.project.revision().get();
+    let project = state.model.workspace.content.project.id();
+    let revision = state.model.workspace.content.project.revision().get();
     let document: Arc<str> = Arc::from(subject.key().as_str());
     let applied = CheckWaivers::for_subject(stored);
     let unmatched = applied.unmatched_in(result);
@@ -277,10 +277,10 @@ impl AppState {
     /// The view in front of the reader, where it is a schematic.
     fn active_schematic_view(&self) -> Option<CellViewRef> {
         matches!(
-            self.workspace.content.active_view_type(),
+            self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
-        .then(|| self.workspace.content.active_view.clone())
+        .then(|| self.model.workspace.content.active_view.clone())
     }
 
     /// Every schematic document the workspace holds, by cellview, the view in
@@ -289,9 +289,9 @@ impl AppState {
         let active = self.active_schematic_view();
         let mut documents = Vec::new();
         if let Some(active) = &active {
-            documents.push((active.clone(), self.schematic.document()));
+            documents.push((active.clone(), self.model.schematic.document()));
         }
-        for (key, design) in &self.workspace.content.schematic_buffers {
+        for (key, design) in &self.model.workspace.content.schematic_buffers {
             if active
                 .as_ref()
                 .is_some_and(|active| active.key().eq_ignore_ascii_case(key))
@@ -351,7 +351,7 @@ impl AppState {
                 .into_iter()
                 .map(|(cell_view, document)| (cell_view.key(), document.waivers.clone()))
                 .collect(),
-            symbol: (self.workspace.content.active_view_type() == ViewType::Symbol)
+            symbol: (self.model.workspace.content.active_view_type() == ViewType::Symbol)
                 .then(|| self.load_active_symbol_document().ok())
                 .flatten()
                 .map(|document| document.waivers),
@@ -428,26 +428,29 @@ impl AppState {
         if self.workbench.safe_mode.project_read_only() {
             return Some("The project is read-only".to_owned());
         }
-        let borrowed = self
-            .library_manager
-            .catalog()
-            .libraries_by_key()
-            .any(|(_, library)| {
-                library.read_only && library.name.eq_ignore_ascii_case(&cell_view.library)
-            });
+        let borrowed =
+            self.model
+                .library_manager
+                .catalog()
+                .libraries_by_key()
+                .any(|(_, library)| {
+                    library.read_only && library.name.eq_ignore_ascii_case(&cell_view.library)
+                });
         if borrowed {
             return Some(format!("{} is read-only", cell_view.library));
         }
         let key = cell_view.key();
         let active = self
+            .model
             .workspace
             .content
             .active_view
             .key()
             .eq_ignore_ascii_case(&key);
-        let editable = match self.workspace.content.active_view_type() {
+        let editable = match self.model.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench | ViewType::Symbol if active => true,
             _ => self
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -467,14 +470,15 @@ impl AppState {
         }
         let key = cell_view.key();
         let active = self
+            .model
             .workspace
             .content
             .active_view
             .key()
             .eq_ignore_ascii_case(&key);
-        match self.workspace.content.active_view_type() {
+        match self.model.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench if active => {
-                edit.apply_to_schematic(&mut self.schematic)?;
+                edit.apply_to_schematic(&mut self.model.schematic)?;
             }
             ViewType::Symbol if active => {
                 self.edit_active_symbol_waivers(edit)?;
@@ -484,6 +488,7 @@ impl AppState {
             }
             _ => {
                 let held = self
+                    .model
                     .workspace
                     .content
                     .schematic_buffers
@@ -494,6 +499,7 @@ impl AppState {
                         format!("Open {} to change its waivers.", cell_view.display_path())
                     })?;
                 let mut editor = self
+                    .model
                     .workspace
                     .schematic_editor_mut(&held)
                     .ok_or_else(|| format!("{} could not be edited.", cell_view.display_path()))?;

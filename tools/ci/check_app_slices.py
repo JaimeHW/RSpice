@@ -70,6 +70,7 @@ SLICE_RULES = [
     (W + r"lifecycle/session/", "session"),
     (D + r"state(\.rs$|/)", "session"),
     # AppState sub-owners.
+    (W + r"app_state/model\.rs$", "model"),
     (W + r"app_state/(sim_setup|design_history|cell_usage)", "model"),
     (W + r"app_state/(design_checks|diagnostic_store|waivers|rule_deck)", "model"),
     (W + r"app_state/(problems_view|full_screen|active_viewer|interaction_state)", "framework"),

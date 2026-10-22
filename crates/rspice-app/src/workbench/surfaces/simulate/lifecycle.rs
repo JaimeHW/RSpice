@@ -15,7 +15,7 @@ pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(),
     let current = app.workbench.active_analysis_instance;
     let legacy_index = app.workbench.active_analysis;
     let resolved = {
-        let plan = app.sim_setup.stable_analysis_plan()?;
+        let plan = app.model.sim_setup.stable_analysis_plan()?;
         match current {
             Some(id) if plan.instance(id).is_some() => Some(id),
             Some(_) => plan.instances().first().map(|instance| instance.id()),
@@ -40,7 +40,7 @@ pub(super) fn selected_analysis(
     let Some(id) = app.state.workbench.active_analysis_instance else {
         return Ok(None);
     };
-    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    let plan = app.state.model.sim_setup.stable_analysis_plan()?;
     let Some((position, instance)) = plan
         .instances()
         .iter()
@@ -211,7 +211,7 @@ pub(super) fn contextual_dependency_error(
 }
 
 pub(super) fn commit_draft(app: &mut RSpiceApp, id: AnalysisInstanceId, draft: AnalysisDraft) {
-    let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .edit(id, |target| target.clone_from(&draft))
             .map_err(|error| error.to_string()),
@@ -238,7 +238,7 @@ pub(super) fn commit_numeric_override(
     id: AnalysisInstanceId,
     record: Option<crate::simulation::plan::AnalysisNumericOverride>,
 ) -> Result<(), String> {
-    let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .set_numeric_override(id, record)
             .map_err(|error| error.to_string()),
@@ -281,12 +281,12 @@ pub(super) fn insert_analysis_instance(
     app: &mut RSpiceApp,
     kind: AnalysisKind,
 ) -> Option<AnalysisInstanceId> {
-    app.state.sim_setup.session.palette_open = false;
-    app.state.sim_setup.session.palette_query.clear();
-    app.state.sim_setup.session.palette_active = 0;
-    app.state.sim_setup.session.palette_scroll_to_active = false;
+    app.state.model.sim_setup.session.palette_open = false;
+    app.state.model.sim_setup.session.palette_query.clear();
+    app.state.model.sim_setup.session.palette_active = 0;
+    app.state.model.sim_setup.session.palette_scroll_to_active = false;
     let repair_context = build_envelope_source_catalog(&app.state).dependency_repair_context();
-    let result: InsertAnalysisResult = match app.state.sim_setup.stable_analysis_plan_mut() {
+    let result: InsertAnalysisResult = match app.state.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
                 let has_prerequisites = !plan.required_prerequisite_roles(id).is_empty();
@@ -309,6 +309,7 @@ pub(super) fn insert_analysis_instance(
                 Some(Ok(bind_receipt)) => {
                     let issue = app
                         .state
+                        .model
                         .sim_setup
                         .stable_analysis_plan()
                         .ok()
@@ -354,7 +355,7 @@ pub(super) fn apply_analysis_action(
 ) {
     match action {
         AnalysisAction::Clone => {
-            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan.clone_instance(id).map_err(|error| error.to_string()),
                 Err(error) => Err(error),
             };
@@ -368,7 +369,7 @@ pub(super) fn apply_analysis_action(
             }
         }
         AnalysisAction::Earlier(position) | AnalysisAction::Later(position) => {
-            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .reorder(id, position)
                     .map_err(|error| error.to_string()),
@@ -385,7 +386,7 @@ pub(super) fn apply_analysis_action(
         AnalysisAction::BindDependencies => {
             let repair_context =
                 build_envelope_source_catalog(&app.state).dependency_repair_context();
-            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .auto_bind_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
@@ -403,7 +404,7 @@ pub(super) fn apply_analysis_action(
             prerequisite,
             target,
         } => {
-            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .bind_dependency(id, prerequisite, target)
                     .map_err(|error| error.to_string()),
@@ -420,7 +421,7 @@ pub(super) fn apply_analysis_action(
         AnalysisAction::RepairDependencies => {
             let repair_context =
                 build_envelope_source_catalog(&app.state).dependency_repair_context();
-            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .repair_dependencies_with_context(id, &repair_context)
                     .map_err(|error| error.to_string()),
@@ -445,6 +446,7 @@ pub(super) fn apply_analysis_action(
         AnalysisAction::PrepareAutonomousPss => {
             let existing = app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
@@ -464,7 +466,7 @@ pub(super) fn apply_analysis_action(
             };
             let repair_context =
                 build_envelope_source_catalog(&app.state).dependency_repair_context();
-            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .prepare_prerequisite_for_configuration(
                         id,
@@ -490,7 +492,7 @@ pub(super) fn apply_analysis_action(
         AnalysisAction::Validate => validate_analysis_instance(&mut app.state, id),
         AnalysisAction::Remove => remove_analysis_instance(app, id),
         AnalysisAction::SetEnabled(enabled) => {
-            let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+            let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .set_enabled(id, enabled)
                     .map_err(|error| error.to_string()),
@@ -510,7 +512,7 @@ pub(super) fn apply_analysis_action(
 pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanceId) {
     let envelope_sources = build_envelope_source_catalog(app);
     let result = (|| {
-        let plan = app.sim_setup.stable_analysis_plan()?;
+        let plan = app.model.sim_setup.stable_analysis_plan()?;
         let instance = plan
             .instance(id)
             .ok_or_else(|| format!("analysis instance {id} no longer exists"))?;
@@ -553,6 +555,7 @@ pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanc
 /// Retained runs holding a result attributed to this analysis.
 fn retained_runs_for_analysis(app: &RSpiceApp, id: AnalysisInstanceId) -> usize {
     app.state
+        .model
         .simulation
         .retained
         .runs
@@ -571,6 +574,7 @@ fn analyses_depending_on(
     id: AnalysisInstanceId,
 ) -> Vec<(AnalysisInstanceId, String)> {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -593,6 +597,7 @@ fn analyses_depending_on(
 /// What this analysis shows under, or a phrase that stands in for it.
 fn analysis_display_name(app: &RSpiceApp, id: AnalysisInstanceId) -> String {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -692,6 +697,7 @@ pub(super) fn apply_requested_blocker_reveal(state: &mut AppState) {
 fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
     let prior_run_ids = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -701,6 +707,7 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
         .collect();
     let position = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -714,7 +721,7 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
     // inside it: the plan speaks in instance ids and is right to, and the names
     // that make a refusal readable are only resolvable out here, against the
     // plan a refused transaction left standing.
-    let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .remove(id, prior_run_ids)
             .map_err(RemovalFailure::Refused),
@@ -725,6 +732,7 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
             refresh_analysis_projections(app);
             let next = app
                 .state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
@@ -783,7 +791,10 @@ fn removal_refusal_naming_instances(app: &RSpiceApp, error: &AnalysisPlanError) 
 }
 
 pub(super) fn refresh_analysis_projections(app: &mut RSpiceApp) {
-    app.state.sim_setup.refresh_legacy_analysis_projections();
+    app.state
+        .model
+        .sim_setup
+        .refresh_legacy_analysis_projections();
     app.invalidate_simulation_preflight();
 }
 

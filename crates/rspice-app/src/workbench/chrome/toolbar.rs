@@ -361,14 +361,14 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
 fn run_control_label(app: &RSpiceApp, layout: LayoutSpec) -> String {
     if app.state.workbench.preflight.checking.is_some() {
         "Stop".to_owned()
-    } else if app.state.simulation.cancellation_is_pending() {
+    } else if app.state.model.simulation.cancellation_is_pending() {
         "Stopping…".to_owned()
-    } else if app.state.simulation.execution.has_active_execution() {
+    } else if app.state.model.simulation.execution.has_active_execution() {
         "Stop".to_owned()
     } else if layout.compact_shell {
         format!(
             "Run · {}",
-            app.state.sim_setup.reference_pvt.process.short_name()
+            app.state.model.sim_setup.reference_pvt.process.short_name()
         )
     } else {
         "Run plan".to_owned()
@@ -397,7 +397,7 @@ fn reserved_run_control_width(ui: &egui::Ui, app: &RSpiceApp, layout: LayoutSpec
 }
 
 fn reserved_pvt_selector_width(ui: &egui::Ui, app: &RSpiceApp) -> f32 {
-    let reference = app.state.sim_setup.reference_pvt;
+    let reference = app.state.model.sim_setup.reference_pvt;
     let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
     let label = format!(
         "{} · {}",
@@ -487,11 +487,13 @@ fn workspace_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     }
     match workspace {
         Workspace::Project => project_tools(ui, app, layout),
-        Workspace::Design if app.state.workspace.content.active_view_type() == ViewType::Symbol => {
+        Workspace::Design
+            if app.state.model.workspace.content.active_view_type() == ViewType::Symbol =>
+        {
             symbol_tools(ui, app, layout);
         }
         Workspace::Design
-            if app.state.workspace.content.active_view_type() == ViewType::VerilogA =>
+            if app.state.model.workspace.content.active_view_type() == ViewType::VerilogA =>
         {
             veriloga_tools(ui, app, layout);
         }
@@ -561,7 +563,7 @@ fn design_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             context_separator(ui, layout);
         }
         let selected =
-            design_toolbar_command_selected(app.state.schematic.session.editor.tool, command);
+            design_toolbar_command_selected(app.state.model.schematic.session.editor.tool, command);
         toolbar_icon_command_selected_as(ui, app, command, icon, selected, label, layout);
     }
     context_separator(ui, layout);
@@ -1063,6 +1065,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
     }
     let Some((tracking, revision)) = app
         .state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -1107,6 +1110,7 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
         let next = ResultDocumentTracking::for_plan(next_mode, plan_id, analysis_id);
         let result = app
             .state
+            .model
             .workspace
             .content
             .transact_visualization_document(
@@ -1129,18 +1133,19 @@ fn results_tracking_button(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Layou
 }
 
 fn current_result_source_digest(app: &RSpiceApp) -> Option<ContentDigest> {
-    let netlist = &app.state.netlist_artifacts;
+    let netlist = &app.state.model.netlist_artifacts;
     (netlist.generation_error.is_none()
         && netlist.generated_input_digest.is_some()
         && netlist.generated_input_digest == netlist.current_generation_input_digest
         && !app
             .state
+            .model
             .simulation
             .source
             .netlist_content
             .trim()
             .is_empty())
-    .then(|| crate::state::content_digest(&app.state.simulation.source.netlist_content))
+    .then(|| crate::state::content_digest(&app.state.model.simulation.source.netlist_content))
 }
 
 fn run_has_current_success_authority(
@@ -1159,11 +1164,12 @@ fn run_has_current_success_authority(
 fn results_document_is_historical(app: &RSpiceApp) -> bool {
     use crate::workbench::state::WorkspaceDocumentId;
 
-    let project_revision = app.state.workspace.content.project.revision();
+    let project_revision = app.state.model.workspace.content.project.revision();
     let source_digest = current_result_source_digest(app);
     match app.state.workbench.documents.active(Workspace::Results) {
         Some(WorkspaceDocumentId::ResultDataset(dataset_id)) => app
             .state
+            .model
             .simulation
             .retained
             .runs
@@ -1174,6 +1180,7 @@ fn results_document_is_historical(app: &RSpiceApp) -> bool {
         Some(WorkspaceDocumentId::VisualizationDocument(document_id)) => {
             let Some(document) = app
                 .state
+                .model
                 .workspace
                 .content
                 .visualization_document(*document_id)
@@ -1195,7 +1202,7 @@ fn results_document_is_historical(app: &RSpiceApp) -> bool {
                 return true;
             };
             app.state
-                .simulation
+                .model.simulation
                 .retained.runs
                 .iter()
                 .filter(|run| {
@@ -1663,8 +1670,8 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     // A preflight preparing its run or building its decks is stopped the way
     // a run is: the control is Stop until it finishes.
     let checking = app.state.workbench.preflight.checking.is_some();
-    let execution_active = app.state.simulation.execution.has_active_execution() || checking;
-    let cancellation_pending = app.state.simulation.cancellation_is_pending();
+    let execution_active = app.state.model.simulation.execution.has_active_execution() || checking;
+    let cancellation_pending = app.state.model.simulation.cancellation_is_pending();
     let command = if execution_active {
         Command::StopSimulation
     } else {
@@ -1706,7 +1713,7 @@ fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             } else if execution_active {
                 "Stop active simulation".to_owned()
             } else {
-                let reference = app.state.sim_setup.reference_pvt;
+                let reference = app.state.model.sim_setup.reference_pvt;
                 let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
                 format!(
                     "Run active simulation plan at {} · {}",
@@ -1912,7 +1919,7 @@ const PVT_CHIP_CHEVRON_SPAN: f32 = 21.0;
 
 fn pvt_selector(ui: &mut egui::Ui, app: &mut RSpiceApp, height: f32) {
     let t = Tokens::get(ui.ctx());
-    let reference = app.state.sim_setup.reference_pvt;
+    let reference = app.state.model.sim_setup.reference_pvt;
     let quantity_policy = app.state.ui.preferences.quantity_presentation_policy();
     let label = format!(
         "{} · {}",
@@ -2051,13 +2058,13 @@ pub(in crate::workbench) fn commit_reference_pvt(
     process: crate::product::ProcessCorner,
     temperature_celsius: f64,
 ) -> Result<bool, String> {
-    let current = app.state.sim_setup.reference_pvt;
+    let current = app.state.model.sim_setup.reference_pvt;
     if current.process == process
         && (current.temperature_celsius - temperature_celsius).abs() < f64::EPSILON
     {
         return Ok(false);
     }
-    let mut setup = app.state.sim_setup.clone();
+    let mut setup = app.state.model.sim_setup.clone();
     setup.set_reference_pvt(process, temperature_celsius)?;
     let receipt = setup
         .commit_active_plan_configuration_change(format!(
@@ -2065,7 +2072,7 @@ pub(in crate::workbench) fn commit_reference_pvt(
             process.short_name()
         ))
         .map_err(|error| error.to_string())?;
-    app.state.sim_setup = setup;
+    app.state.model.sim_setup = setup;
     app.invalidate_simulation_preflight();
     app.state.record_plan_receipt(receipt.status_line());
     Ok(true)

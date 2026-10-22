@@ -43,8 +43,11 @@ fn add_module_cell_in(
     module: &str,
     source: &str,
 ) -> CellViewRef {
-    if state.library_manager.get_library(library).is_none() {
-        state.library_manager.add_library(Library::new(library));
+    if state.model.library_manager.get_library(library).is_none() {
+        state
+            .model
+            .library_manager
+            .add_library(Library::new(library));
     }
     let reference = CellViewRef::new(library, cell, "veriloga");
     let mut view = View::new("veriloga", ViewType::VerilogA);
@@ -55,6 +58,7 @@ fn add_module_cell_in(
     let mut library_cell = Cell::new(cell);
     library_cell.add_view(view);
     state
+        .model
         .library_manager
         .get_library_mut(library)
         .expect("the library")
@@ -69,6 +73,7 @@ fn add_module_cell_in(
     )
     .expect("a valid cell-view bundle");
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -88,7 +93,7 @@ fn conductance(module: &str, header: &str, declarations: &str) -> String {
 pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
     let selected = code_workspace::selected_veriloga_source(app).expect("a Verilog-A view is open");
     let receipt = code_workspace::compile_project_bundle_receipt(
-        app.state.workspace.content.project.id(),
+        app.state.model.workspace.content.project.id(),
         selected.bundle(),
         selected.selected_module(),
     )
@@ -110,9 +115,9 @@ pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
     );
     code_workspace::refresh_symbol_standing(
         &mut app.state.ui.code_workspace.veriloga,
-        &app.state.library_manager,
-        &app.state.workspace.content.active_view,
-        app.state.workspace.content.active_view_type(),
+        &app.state.model.library_manager,
+        &app.state.model.workspace.content.active_view,
+        app.state.model.workspace.content.active_view_type(),
     );
 }
 
@@ -132,6 +137,7 @@ pub(super) fn view<'a>(
     name: &str,
 ) -> Option<&'a View> {
     app.state
+        .model
         .library_manager
         .get_library(&reference.library)?
         .get_cell(&reference.cell)?
@@ -190,7 +196,7 @@ fn a_port_added_to_the_module_reaches_the_cell_and_its_generated_symbol() {
     );
     let generated = view(&app, &reference, GENERATED_SYMBOL_VIEW).expect("a symbol is generated");
     assert!(is_generated_symbol(generated));
-    assert!(app.state.workspace.content.project_metadata_dirty);
+    assert!(app.state.model.workspace.content.project_metadata_dirty);
 
     edit_source(
         &mut app,
@@ -268,6 +274,7 @@ fn place_configured_instance(state: &mut AppState, reference: &CellViewRef) -> u
 fn place_configured_instance_at(state: &mut AppState, reference: &CellViewRef, at: Point) -> u64 {
     let ports = rspice_design::library::metadata::metadata_ports(
         &state
+            .model
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -280,7 +287,10 @@ fn place_configured_instance_at(state: &mut AppState, reference: &CellViewRef, a
     let mut binding =
         LibraryCellInstance::new(&reference.library, &reference.cell, &reference.view);
     binding.bind_interface(&ports);
-    let id = state.schematic.add_library_cell_component(at, binding);
+    let id = state
+        .model
+        .schematic
+        .add_library_cell_component(at, binding);
     ensure_veriloga_configuration(state);
     id
 }
@@ -290,6 +300,7 @@ fn place_configured_instance_at(state: &mut AppState, reference: &CellViewRef, a
 pub(super) fn ensure_veriloga_configuration(state: &mut AppState) {
     let top = CellViewRef::default_top();
     if state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -297,6 +308,7 @@ pub(super) fn ensure_veriloga_configuration(state: &mut AppState) {
         .is_empty()
     {
         state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -322,21 +334,22 @@ pub(super) fn ensure_veriloga_configuration(state: &mut AppState) {
 pub(super) fn configured_deck(app: &RSpiceApp) -> Result<String, String> {
     let state = &app.state;
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     rspice_simulation::project_veriloga::preparation::prepared_configuration_veriloga_runtimes(
-        state.workspace.content.project.id(),
-        &state.workspace.content.project_sources,
+        state.model.workspace.content.project.id(),
+        &state.model.workspace.content.project_sources,
         &projection,
     )
     .map_err(|error| error.message().to_owned())?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
@@ -452,13 +465,14 @@ fn same_named_cells_in_two_libraries_each_bind_their_own_module() {
         .iter()
         .map(|(reference, id)| {
             let binding = crate::state::workspace::project_veriloga_binding_for_view(
-                &app.state.workspace,
-                &app.state.library_manager,
+                &app.state.model.workspace,
+                &app.state.model.library_manager,
                 reference,
             )
             .expect("the view owns its module");
             let name = app
                 .state
+                .model
                 .schematic
                 .document()
                 .components
@@ -578,6 +592,7 @@ fn a_module_that_differs_from_its_cells_schematic_is_refused_and_writes_nothing(
     );
     let schematic = CellViewRef::new(LIBRARY, "amp", "schematic");
     app.state
+        .model
         .library_manager
         .get_library_mut(LIBRARY)
         .and_then(|library| library.get_cell_mut("amp"))
@@ -598,6 +613,7 @@ fn a_module_that_differs_from_its_cells_schematic_is_refused_and_writes_nothing(
             .value = name.to_owned();
     }
     app.state
+        .model
         .workspace
         .insert_schematic_editor(schematic.key(), master);
     open_in_design(&mut app.state, &reference);
@@ -664,6 +680,7 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
     // The author's first edit takes the symbol over.
     let drawn = symbol(&app, &reference);
     app.state
+        .model
         .library_manager
         .edit_library(LIBRARY)
         .and_then(|mut library| library.store_symbol_document("amp", GENERATED_SYMBOL_VIEW, &drawn))
@@ -742,6 +759,7 @@ fn a_new_cells_empty_generated_symbol_netlists_the_modules_instance() {
     let mut empty = View::new(GENERATED_SYMBOL_VIEW, ViewType::Symbol);
     store_generated_symbol(&mut empty, &[], |_| None).expect("the empty symbol stores");
     app.state
+        .model
         .library_manager
         .get_library_mut(LIBRARY)
         .and_then(|library| library.get_cell_mut("gain"))
@@ -776,6 +794,7 @@ fn a_read_only_library_is_not_written_and_the_compile_says_so() {
         ),
     );
     app.state
+        .model
         .library_manager
         .get_library_mut(LIBRARY)
         .expect("the library")
@@ -800,7 +819,7 @@ fn a_read_only_library_is_not_written_and_the_compile_says_so() {
             .and_then(|receipt| receipt.interface.as_ref()),
         Some(VerilogAInterfaceOutcome::Refused(reason)) if reason.contains("read-only")
     ));
-    assert!(app.state.log_buffer.entries().any(|entry| {
+    assert!(app.state.model.log_buffer.entries().any(|entry| {
         entry
             .message
             .contains("did not become the cell's interface")
@@ -841,12 +860,14 @@ fn an_instance_placed_before_a_port_change_is_repaired_and_the_run_proceeds() {
     let masters = std::collections::HashMap::<String, crate::state::SchematicState>::new();
     assert_eq!(
         app.state
+            .model
             .schematic
-            .stale_instance_interfaces(&app.state.library_manager, &masters)
+            .stale_instance_interfaces(&app.state.model.library_manager, &masters)
             .len(),
         1
     );
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -893,6 +914,7 @@ fn render_the_veriloga_interface_findings_for_review() {
     let drawn = symbol(&drifted, &reference);
     drifted
         .state
+        .model
         .library_manager
         .edit_library(LIBRARY)
         .and_then(|mut library| {
@@ -932,6 +954,7 @@ fn render_the_veriloga_interface_findings_for_review() {
     );
     mismatched
         .state
+        .model
         .library_manager
         .get_library_mut(LIBRARY)
         .and_then(|library| library.get_cell_mut("amp"))

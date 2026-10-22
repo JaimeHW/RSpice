@@ -70,6 +70,7 @@ const MAX_NAMES: usize = 256;
 pub(crate) fn open_create_pins(state: &mut AppState) {
     let authority = PlacementAuthority::new(schematic_editor_request_source(state));
     let armed = state
+        .model
         .schematic
         .session
         .editor
@@ -88,7 +89,7 @@ pub(crate) fn open_create_pins(state: &mut AppState) {
         // one.
         None => match state.dialogs.pin_port.last_name.as_str() {
             "" => String::new(),
-            base => state.schematic.suggested_port_name(base),
+            base => state.model.schematic.suggested_port_name(base),
         },
     };
     let draft = &mut state.dialogs.pin_port;
@@ -167,7 +168,7 @@ fn draft(state: &AppState) -> Draft {
     }
     let several = names.len() > 1;
     for name in &names {
-        if let Err(error) = state.schematic.validate_new_port_name(name) {
+        if let Err(error) = state.model.schematic.validate_new_port_name(name) {
             // One name needs no prefix: the field it was typed in is the
             // subject. Several do, or the reader cannot tell which one.
             return Draft::Refused(if several {
@@ -187,7 +188,7 @@ fn declaration_line(state: &AppState, names: &[String]) -> Option<String> {
         return None;
     }
     let conductors: usize = names.iter().map(|name| declared_width(name.as_str())).sum();
-    let first = state.schematic.next_interface_order();
+    let first = state.model.schematic.next_interface_order();
     let positions = if names.len() == 1 {
         format!("port-list position {first}")
     } else {
@@ -233,7 +234,13 @@ impl RSpiceApp {
         // The cell whose interface this batch will change. It is the one thing
         // about the form that is not in the form, and the reason the
         // document-changed refusal exists at all.
-        let view_path = self.state.workspace.content.active_view.display_path();
+        let view_path = self
+            .state
+            .model
+            .workspace
+            .content
+            .active_view
+            .display_path();
 
         let form = &mut self.state.dialogs.pin_port;
         let choice = CommandForm::new(TITLE, PRIMARY)
@@ -282,9 +289,15 @@ impl RSpiceApp {
         .with_authority(authority);
         let last_name = names.last().cloned().unwrap_or_default();
         self.state
+            .model
             .schematic
             .arm_tool(Tool::Place(ComponentType::Port));
-        self.state.schematic.session.editor.pending_port_sequence = Some(sequence);
+        self.state
+            .model
+            .schematic
+            .session
+            .editor
+            .pending_port_sequence = Some(sequence);
         rspice_schematic_editor::view::canvas::request_focus(ctx);
         let form = &mut self.state.dialogs.pin_port;
         form.last_name = last_name;

@@ -34,8 +34,8 @@ fn retained_detail(analysis: &crate::state::AnalysisResult) -> Option<RetainedDe
     }
 }
 fn selected_op_evidence(state: &AppState) -> Option<OpEvidence> {
-    let run = state.simulation.active_run()?;
-    let analysis = state.simulation.active_analysis()?;
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
     if analysis.analysis_type != AnalysisType::DcOp {
         return None;
     }
@@ -149,14 +149,14 @@ pub(crate) fn export_csv(analysis: &crate::state::AnalysisResult) -> Option<supe
     })
 }
 fn result_mapping_is_current(state: &AppState) -> bool {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
     run.prepared_receipt().is_some_and(|receipt| {
-        receipt.project_revision() == state.workspace.content.project.revision()
-    }) && state.simulation.source.cross_probe.is_current_for(
-        &state.workspace.content.active_view,
-        state.schematic.topology_version(),
+        receipt.project_revision() == state.model.workspace.content.project.revision()
+    }) && state.model.simulation.source.cross_probe.is_current_for(
+        &state.model.workspace.content.active_view,
+        state.model.schematic.topology_version(),
     )
 }
 fn node_target_available(state: &AppState, name: &str) -> bool {
@@ -175,8 +175,8 @@ fn device_target(state: &AppState, name: &str) -> Option<u64> {
         return None;
     }
     rspice_design::schematic::component::component_for_engine_device(
-        &state.schematic.document().components,
-        &state.workspace.content.occurrence_path(),
+        &state.model.schematic.document().components,
+        &state.model.workspace.content.occurrence_path(),
         name,
     )
     .map(|component| component.id)
@@ -208,6 +208,7 @@ fn apply_action(state: &mut AppState, action: OpAction) {
         }
         OpAction::LocateDevice(component_id) => {
             let Some(component) = state
+                .model
                 .schematic
                 .document()
                 .components
@@ -219,12 +220,13 @@ fn apply_action(state: &mut AppState, action: OpAction) {
             };
             let position = component.pos;
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_only_component(component_id);
-            state.schematic.session.editor.center_request = Some(position);
+            state.model.schematic.session.editor.center_request = Some(position);
             state.ui.schematic_visibility.annotations =
                 SchematicAnnotationVisibility::OperatingPoint;
             state
@@ -258,20 +260,25 @@ pub(super) struct OpPlan {
 fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Arc<OpPlan>> {
     let key = OpPlanKey {
         source: (
-            state.simulation.retained.runs.revision(),
-            state.simulation.view.data_version,
+            state.model.simulation.retained.runs.revision(),
+            state.model.simulation.view.data_version,
         ),
         analysis,
         filter: state.ui.results.session.op_filter.clone(),
         sort: state.ui.results.session.op_sort.clone(),
-        root: state.workspace.content.simulation_root_reference().cell,
+        root: state
+            .model
+            .workspace
+            .content
+            .simulation_root_reference()
+            .cell,
     };
     if let Some(plan) = state.ui.results.plans.op.as_ref()
         && plan.key == key
     {
         return Some(Arc::clone(plan));
     }
-    let analysis_result = state.simulation.active_analysis()?;
+    let analysis_result = state.model.simulation.active_analysis()?;
     let detail = retained_detail(analysis_result);
     frame_work::note(DatasetWalk::OpPlan);
     let display = viewer::OpPlan::new(
@@ -303,7 +310,7 @@ impl viewer::SchematicMapping for OpMapping<'_> {
 }
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some(evidence) = selected_op_evidence(state) else {
-        let absence = match state.simulation.active_analysis() {
+        let absence = match state.model.simulation.active_analysis() {
             Some(_) => OpAbsence::OtherAnalysis,
             None => OpAbsence::Missing,
         };
@@ -311,6 +318,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let retains_values = state
+        .model
         .simulation
         .active_analysis()
         .is_some_and(|analysis| analysis.dc_op.is_some() || analysis.device_op.is_some());
@@ -319,14 +327,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let analysis_key = state.simulation.active_run().and_then(|run| {
+    let analysis_key = state.model.simulation.active_run().and_then(|run| {
         state
+            .model
             .simulation
             .active_analysis()
             .map(|analysis| AnalysisPresentationKey::new(run.dataset_id, analysis))
     });
     let plan = analysis_key.and_then(|key| op_plan(state, key));
-    let analysis = state.simulation.active_analysis();
+    let analysis = state.model.simulation.active_analysis();
     let dc = analysis.and_then(|analysis| analysis.dc_op.as_ref());
     let devices = analysis.and_then(|analysis| analysis.device_op.as_ref());
     let notations = dc
@@ -335,7 +344,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plan.as_ref()
                 .is_some_and(|plan| plan.display.node_shown() > 0)
         })
-        .map(|_| bus_notations(&state.workspace, &state.schematic));
+        .map(|_| bus_notations(&state.model.workspace, &state.model.schematic));
     let mapping = OpMapping { state, notations };
     let controls = plan
         .as_ref()
@@ -395,13 +404,13 @@ mod tests {
         let mut run = SimulationRun::new(3);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        state.model.simulation.view.active_analysis_idx = Some(0);
         state
     }
     fn active_key(state: &AppState) -> AnalysisPresentationKey {
-        let run = state.simulation.active_run().expect("retained run");
+        let run = state.model.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     }
     #[test]
@@ -421,12 +430,12 @@ mod tests {
         });
         run.add_analysis(first);
         run.add_analysis(AnalysisResult::new(2, AnalysisType::Transient, "TRAN"));
-        state.simulation.retained.runs.push(run);
-        state.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.retained.runs.push(run);
+        state.model.simulation.view.active_run_idx = Some(0);
 
-        state.simulation.view.active_analysis_idx = Some(1);
+        state.model.simulation.view.active_analysis_idx = Some(1);
         assert!(selected_op_evidence(&state).is_none());
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         let evidence = selected_op_evidence(&state).expect("selected OP evidence");
         assert_eq!(evidence.run_id, 9);
         assert_eq!(evidence.label, "OP 1");
@@ -448,18 +457,18 @@ mod tests {
             ..DcOpResult::default()
         });
         run.add_analysis(analysis);
-        state.simulation.retained.runs.push(run);
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs.push(run);
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
 
         let evidence = selected_op_evidence(&state).expect("retained OP evidence");
         assert_eq!(evidence.node_count, 1);
-        let dc = state.simulation.retained.runs[0].analyses[0]
+        let dc = state.model.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_ref()
             .expect("retained node voltages");
         assert!(
-            state.simulation.retained.runs[0].analyses[0]
+            state.model.simulation.retained.runs[0].analyses[0]
                 .device_op
                 .is_none()
         );
@@ -483,9 +492,9 @@ mod tests {
         let mut state = op_state(40, 40);
         let key = active_key(&state);
         let original = op_plan(&mut state, key).unwrap();
-        let version = state.simulation.view.data_version;
-        state.simulation.retained.runs[0].analyses[0] =
-            op_state(3, 2).simulation.retained.runs[0].analyses[0].clone();
+        let version = state.model.simulation.view.data_version;
+        state.model.simulation.retained.runs[0].analyses[0] =
+            op_state(3, 2).model.simulation.retained.runs[0].analyses[0].clone();
         let changed = op_plan(&mut state, key).unwrap();
         assert_eq!(changed.display.node_shown(), 3);
         assert_eq!(changed.display.device_shown(), 2);
@@ -502,7 +511,7 @@ mod tests {
                 right_panel(ui, &mut state);
             });
         });
-        assert_eq!(state.simulation.view.data_version, version);
+        assert_eq!(state.model.simulation.view.data_version, version);
     }
     #[test]
     fn the_readers_controls_are_part_of_the_row_plan_key() {
@@ -538,13 +547,14 @@ mod tests {
         let before = op_plan(&mut state, key).expect("a row plan");
         assert_eq!(before.display.node_shown(), 8);
 
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_mut()
             .expect("retained node voltages")
             .node_voltages
             .truncate(3);
-        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
+        state.model.simulation.view.data_version =
+            state.model.simulation.view.data_version.wrapping_add(1);
 
         let after = op_plan(&mut state, key).expect("a row plan");
         assert_eq!(

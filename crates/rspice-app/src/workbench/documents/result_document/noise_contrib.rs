@@ -30,7 +30,7 @@ fn selected_evidence(
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     bode::noise_spectrum_right_panel(ui, state);
     let index = bode::selected_noise_analysis_index(state);
-    let evidence = selected_evidence(&state.simulation, index);
+    let evidence = selected_evidence(&state.model.simulation, index);
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     view::right_panel(ui, evidence, &quantity_policy);
 }
@@ -161,12 +161,12 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(first);
         run.add_analysis(second);
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
-        assert!(state.simulation.select_analysis(1));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        assert!(state.model.simulation.select_analysis(1));
 
         let view::ContributorEvidence::Retained { summary, label } = selected_evidence(
-            &state.simulation,
+            &state.model.simulation,
             bode::selected_noise_analysis_index(&state),
         ) else {
             panic!("selected noise summary");

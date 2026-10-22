@@ -24,9 +24,12 @@ fn a_requested_route_is_applied_once() {
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
-    app.state.diagnostics.request_route(DiagnosticRoute::Repair(
-        PreflightRemediation::SimulationPlan { analysis: None },
-    ));
+    app.state
+        .model
+        .diagnostics
+        .request_route(DiagnosticRoute::Repair(
+            PreflightRemediation::SimulationPlan { analysis: None },
+        ));
 
     apply_pending(&context(), &mut app);
     assert_eq!(
@@ -57,6 +60,7 @@ fn a_source_route_to_a_departed_bundle_states_its_refusal() {
     app.state.open_project_session();
     let before = app.state.workbench.workspace;
     app.state
+        .model
         .diagnostics
         .request_route(DiagnosticRoute::CodeDocument {
             bundle: crate::state::ProjectSourceId::new(),
@@ -90,6 +94,7 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
     );
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -102,6 +107,7 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
         .expect("the automation bundle has a permission manifest")
         .to_owned();
     app.state
+        .model
         .diagnostics
         .request_route(DiagnosticRoute::CodeDocument {
             bundle: bundle_id,
@@ -134,6 +140,7 @@ fn a_netlist_route_to_a_retired_record_states_its_refusal() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state
+        .model
         .diagnostics
         .request_route(DiagnosticRoute::NetlistDiagnostic(uuid::Uuid::nil()));
 
@@ -162,13 +169,14 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
         cell.add_view(View::new("schematic", ViewType::Schematic));
         library.add_cell(cell);
     }
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     let top = CellViewRef::new("work", "top", "schematic");
     let aux = CellViewRef::new("work", "aux", "schematic");
 
     app.state.open_workspace_view(top.clone());
     let resistor = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(40, 40));
     app.state.sync_active_schematic_to_workspace();
@@ -188,6 +196,7 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
         .expect("the checks publish against top");
     let route = app
         .state
+        .model
         .diagnostics
         .batches()
         .flat_map(|batch| batch.records.iter())
@@ -198,23 +207,33 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
     // drawing and so may well share the resistor's.
     app.state.open_workspace_view(aux.clone());
     app.state
+        .model
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(-200, -200));
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         aux
     );
 
-    app.state.diagnostics.request_route(route);
+    app.state.model.diagnostics.request_route(route);
     apply_pending(&context(), &mut app);
 
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         top,
         "the finding's own view opens"
     );
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -225,6 +244,7 @@ fn following_a_rule_finding_opens_its_cell_view_before_selecting() {
     );
     assert!(
         app.state
+            .model
             .schematic
             .document()
             .components
@@ -247,6 +267,7 @@ fn every_source_in_a_loop_is_named_and_followed_into_its_view() {
     let code = rspice_design::drc::DrcViolationType::SourceToSource.rule_code();
     let places = app
         .state
+        .model
         .diagnostics
         .batches()
         .flat_map(|batch| batch.records.iter())
@@ -278,17 +299,22 @@ fn every_source_in_a_loop_is_named_and_followed_into_its_view() {
             .expect("a drawn source has somewhere to go");
 
         app.state.open_workspace_view(aux.clone());
-        app.state.diagnostics.request_route(route);
+        app.state.model.diagnostics.request_route(route);
         apply_pending(&context(), &mut app);
 
         assert_eq!(
-            app.state.workspace.content.active_schematic_reference(),
+            app.state
+                .model
+                .workspace
+                .content
+                .active_schematic_reference(),
             top,
             "{}: the loop's view opens",
             source.name
         );
         assert_eq!(
             app.state
+                .model
                 .schematic
                 .session
                 .editor
@@ -316,14 +342,21 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    let subject = app.state.workspace.content.active_schematic_reference();
+    let subject = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference();
     let ids = [Point::new(0, 0), Point::new(400, 0)].map(|at| {
         app.state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, at)
     });
     for component in app
         .state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -336,6 +369,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
     let key = subject.key();
     let first = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -343,6 +377,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
         .expect("a fresh cell view accepts its first governed sheet");
     let catalog = app
         .state
+        .model
         .workspace
         .content
         .design_management
@@ -372,6 +407,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
     let code = DrcViolationType::DuplicateName.rule_code();
     let record = app
         .state
+        .model
         .diagnostics
         .batches()
         .flat_map(|batch| batch.records.iter())
@@ -398,7 +434,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
         (place.route.clone(), other),
     ] {
         let route = route.expect("each instance has somewhere to go, on whichever sheet");
-        app.state.diagnostics.request_route(route);
+        app.state.model.diagnostics.request_route(route);
         apply_pending(&context(), &mut app);
 
         assert_eq!(
@@ -408,6 +444,7 @@ fn a_duplicate_name_on_another_sheet_is_named_and_followed_onto_its_sheet() {
         );
         assert_eq!(
             app.state
+                .model
                 .schematic
                 .session
                 .editor
@@ -431,17 +468,23 @@ fn a_rule_finding_about_a_view_that_is_not_open_keeps_its_route() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    let root = app.state.workspace.content.simulation_root_reference();
+    let root = app
+        .state
+        .model
+        .workspace
+        .content
+        .simulation_root_reference();
     let resistor = app
         .state
+        .model
         .workspace
         .schematic_editor_mut(&root.key())
         .expect("default configured root buffer")
         .editor
         .add_component(ComponentType::Resistor, Point::new(40, 40));
-    app.state.workspace.content.active_view =
+    app.state.model.workspace.content.active_view =
         CellViewRef::new("user", "unrelated_editor", "schematic");
-    app.state.schematic = SchematicState::default();
+    app.state.model.schematic = SchematicState::default();
 
     let mut result = DrcResult::new();
     result.add_violation(DrcViolation::new(
@@ -460,6 +503,7 @@ fn a_rule_finding_about_a_view_that_is_not_open_keeps_its_route() {
 
     let route = app
         .state
+        .model
         .diagnostics
         .batches()
         .flat_map(|batch| batch.records.iter())

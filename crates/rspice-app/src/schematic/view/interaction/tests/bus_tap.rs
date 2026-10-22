@@ -7,19 +7,23 @@ fn armed_bus_tap_state(sheets: bool) -> AppState {
     let mut state = AppState::default();
     let master = crate::state::CellViewRef::new("work", "tap_parent", "schematic");
     state
+        .model
         .workspace
         .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
     let bus_id = state
+        .model
         .schematic
         .add_bus(vec![Point::new(0, 0), Point::new(120, 0)], None)
         .unwrap();
     let wire_id = state
+        .model
         .schematic
         .add_wire(vec![Point::new(0, 20), Point::new(120, 20)])
         .unwrap();
-    state.schematic.clear_undo_history();
+    state.model.schematic.clear_undo_history();
     if sheets {
         state
+            .model
             .workspace
             .content
             .design_management
@@ -33,13 +37,13 @@ fn armed_bus_tap_state(sheets: bool) -> AppState {
         BusTapOrientation::Automatic,
     )
     .unwrap();
-    state.schematic.session.editor.pending_bus_tap = Some(
+    state.model.schematic.session.editor.pending_bus_tap = Some(
         rspice_schematic_editor::session::bus::PendingBusTapPlacement::new(
             configuration,
             requests::editor_request_source(&state),
         ),
     );
-    state.schematic.arm_tool(Tool::BusTap);
+    state.model.schematic.arm_tool(Tool::BusTap);
     state
 }
 
@@ -50,14 +54,14 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
         let source = requests::editor_request_source(&state);
         for x in [20, 60] {
             handle_bus_tap_click(&mut state, Point::new(x, 0), 6);
-            let tap = state.schematic.document().bus_taps.last().unwrap();
+            let tap = state.model.schematic.document().bus_taps.last().unwrap();
             assert_eq!(tap.bus_point, Point::new(x, 0));
             assert_eq!(tap.connection_point, Point::new(x, 20));
             assert_eq!(tap.orientation, BusTapOrientation::Down);
             assert_eq!(tap.slice.to_string(), "DATA[3]");
             state.sync_active_schematic_to_workspace();
         }
-        assert_eq!(state.schematic.document().bus_taps.len(), 2);
+        assert_eq!(state.model.schematic.document().bus_taps.len(), 2);
         let current = requests::editor_request_source(&state);
         assert_ne!(source.content_version, current.content_version);
         assert_ne!(source.topology_version, current.topology_version);
@@ -66,6 +70,7 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
         }
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -75,12 +80,13 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
                 .authority
                 .matches(&current)
         );
-        assert!(state.schematic.undo());
+        assert!(state.model.schematic.undo());
         state.sync_active_schematic_to_workspace();
-        assert_eq!(state.schematic.document().bus_taps.len(), 1);
+        assert_eq!(state.model.schematic.document().bus_taps.len(), 1);
         // A live declaration conflict refuses the click without adding history.
-        let bus = state.schematic.document().buses[0].clone();
+        let bus = state.model.schematic.document().buses[0].clone();
         state
+            .model
             .schematic
             .edit_bus_properties(
                 &bus,
@@ -88,20 +94,24 @@ fn bus_tap_batch_revalidates_live_geometry_and_preserves_atomic_undo() {
                 &|_| true,
             )
             .unwrap();
-        let version = state.schematic.content_version();
+        let version = state.model.schematic.content_version();
         handle_bus_tap_click(&mut state, Point::new(100, 0), 6);
-        assert_eq!(state.schematic.document().bus_taps.len(), 1);
-        assert_eq!(state.schematic.content_version(), version);
-        assert_eq!(state.schematic.session.editor.tool, Tool::BusTap);
-        assert!(state.schematic.undo());
+        assert_eq!(state.model.schematic.document().bus_taps.len(), 1);
+        assert_eq!(state.model.schematic.content_version(), version);
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::BusTap);
+        assert!(state.model.schematic.undo());
         state.sync_active_schematic_to_workspace();
         handle_bus_tap_click(&mut state, Point::new(100, 0), 6);
-        assert_eq!(state.schematic.document().bus_taps.len(), 2);
-        assert!(state.schematic.undo());
-        assert!(state.schematic.undo());
-        assert!(state.schematic.document().bus_taps.is_empty());
-        assert!(state.schematic.document().buses[0].declaration.is_none());
-        assert!(!state.schematic.can_undo());
+        assert_eq!(state.model.schematic.document().bus_taps.len(), 2);
+        assert!(state.model.schematic.undo());
+        assert!(state.model.schematic.undo());
+        assert!(state.model.schematic.document().bus_taps.is_empty());
+        assert!(
+            state.model.schematic.document().buses[0]
+                .declaration
+                .is_none()
+        );
+        assert!(!state.model.schematic.can_undo());
     }
 }
 
@@ -119,18 +129,20 @@ fn bus_tap_click_cannot_commit_after_its_context_or_permission_changes() {
     ] {
         let mut state = armed_bus_tap_state(true);
         match change {
-            "design" => state.design_execution_epoch += 1,
-            "buffer" => state.active_schematic_epoch += 1,
+            "design" => state.model.design_execution_epoch += 1,
+            "buffer" => state.model.active_schematic_epoch += 1,
             "occurrence" => {
-                let master = state.workspace.content.active_schematic_reference();
-                state.workspace.ascend_one().unwrap();
+                let master = state.model.workspace.content.active_schematic_reference();
+                state.model.workspace.ascend_one().unwrap();
                 state
+                    .model
                     .workspace
                     .descend_into("X2".to_owned(), master, ViewType::Schematic);
             }
             "sheet" => {
-                let master = state.workspace.content.active_schematic_reference();
+                let master = state.model.workspace.content.active_schematic_reference();
                 let catalog = state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -149,7 +161,7 @@ fn bus_tap_click_cannot_commit_after_its_context_or_permission_changes() {
                     .unwrap();
                 catalog.set_active(second).unwrap();
             }
-            "read-only" => state.schematic.session.read_only = true,
+            "read-only" => state.model.schematic.session.read_only = true,
             "safe-mode" => state.workbench.safe_mode.activate(
                 crate::state::write_policy::LocalSafeModeOptions {
                     open_project_read_only: true,
@@ -157,29 +169,44 @@ fn bus_tap_click_cannot_commit_after_its_context_or_permission_changes() {
                 },
                 "bus-tap test".to_owned(),
             ),
-            "missing" => state.schematic.session.editor.pending_bus_tap = None,
-            "tool" => state.schematic.session.editor.tool = Tool::Wire,
+            "missing" => state.model.schematic.session.editor.pending_bus_tap = None,
+            "tool" => state.model.schematic.session.editor.tool = Tool::Wire,
             _ => unreachable!(),
         }
-        let content = state.schematic.content_version();
-        let topology = state.schematic.topology_version();
+        let content = state.model.schematic.content_version();
+        let topology = state.model.schematic.topology_version();
         handle_bus_tap_click(&mut state, Point::new(20, 0), 6);
-        assert!(state.schematic.document().bus_taps.is_empty(), "{change}");
         assert!(
-            state.schematic.document().buses[0].declaration.is_none(),
+            state.model.schematic.document().bus_taps.is_empty(),
             "{change}"
         );
-        assert_eq!(state.schematic.content_version(), content, "{change}");
-        assert_eq!(state.schematic.topology_version(), topology, "{change}");
-        assert!(!state.schematic.can_undo(), "{change}");
+        assert!(
+            state.model.schematic.document().buses[0]
+                .declaration
+                .is_none(),
+            "{change}"
+        );
+        assert_eq!(state.model.schematic.content_version(), content, "{change}");
+        assert_eq!(
+            state.model.schematic.topology_version(),
+            topology,
+            "{change}"
+        );
+        assert!(!state.model.schematic.can_undo(), "{change}");
         if change != "missing" {
             assert_eq!(
-                state.schematic.session.editor.tool,
+                state.model.schematic.session.editor.tool,
                 Tool::Select,
                 "{change}"
             );
             assert!(
-                state.schematic.session.editor.pending_bus_tap.is_none(),
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .pending_bus_tap
+                    .is_none(),
                 "{change}"
             );
         }

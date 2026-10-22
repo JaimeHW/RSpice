@@ -100,6 +100,7 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
     let no_view = || "Open a Verilog-A cell view to work on its source.".to_owned();
     let owner = app
         .state
+        .model
         .workspace
         .active_source_owner(ProjectSourceLanguage::VerilogA)
         .ok_or_else(no_view)?;
@@ -109,8 +110,8 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
     // A view that names no module yet is still its author's to edit: a source
     // migrated before it parsed has no module to name until it does.
     let selected_module = match crate::state::workspace::project_veriloga_binding_for_view(
-        &app.state.workspace,
-        &app.state.library_manager,
+        &app.state.model.workspace,
+        &app.state.model.library_manager,
         reference,
     ) {
         Ok(binding) => Some(binding.selected_module().to_owned()),
@@ -119,6 +120,7 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
     };
     let bundle = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -142,6 +144,7 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
 /// Whether the Verilog-A view at `reference` exists and states no module.
 fn view_names_no_module(app: &RSpiceApp, reference: &crate::state::CellViewRef) -> bool {
     app.state
+        .model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -333,9 +336,10 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
     app.state.ui.code_workspace.veriloga.import_requested = false;
     if let Some(target) = app.state.ui.code_workspace.veriloga.import_target.take() {
         app.state.ui.code_workspace.veriloga.replace_target = None;
-        let target_is_current = app.state.workspace.content.project.id() == target.project_id
+        let target_is_current = app.state.model.workspace.content.project.id() == target.project_id
             && app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -425,9 +429,10 @@ fn current_replace_bundle<'a>(
     app: &'a RSpiceApp,
     target: &VerilogAReplaceTarget,
 ) -> Option<&'a ProjectSourceBundle> {
-    (target.project_id == app.state.workspace.content.project.id())
+    (target.project_id == app.state.model.workspace.content.project.id())
         .then(|| {
             app.state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -488,8 +493,8 @@ pub(crate) fn request_veriloga_source_replacement(
         return Err(format!("{logical_path} cannot be edited."));
     }
     app.state.ui.code_workspace.veriloga.replace_target = Some(VerilogAReplaceTarget {
-        project_id: app.state.workspace.content.project.id(),
-        view: app.state.workspace.content.active_view.clone(),
+        project_id: app.state.model.workspace.content.project.id(),
+        view: app.state.model.workspace.content.active_view.clone(),
         bundle_id: selected.bundle().id(),
         bundle_revision: selected.bundle().revision().get(),
         closure_digest: selected.bundle().closure_digest(),
@@ -519,6 +524,7 @@ pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<
     }
     let changed = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -555,10 +561,10 @@ impl VerilogAImportFormState {
     fn read(app: &RSpiceApp, file_name: String, contents: String) -> Self {
         let modules = crate::state::workspace::survey_veriloga_file(&file_name, &contents)
             .map(|survey| survey.tops);
-        let writable = writable_libraries(&app.state.library_manager);
+        let writable = writable_libraries(&app.state.model.library_manager);
         let library = [
-            &app.state.workspace.content.active_view.library,
-            &app.state.workspace.content.project.root_library,
+            &app.state.model.workspace.content.active_view.library,
+            &app.state.model.workspace.content.project.root_library,
         ]
         .into_iter()
         .find(|library| writable.contains(*library))
@@ -566,7 +572,7 @@ impl VerilogAImportFormState {
         .cloned()
         .unwrap_or_default();
         Self {
-            project_id: app.state.workspace.content.project.id(),
+            project_id: app.state.model.workspace.content.project.id(),
             file_name,
             contents,
             library,
@@ -673,6 +679,7 @@ fn add_bundle_file(
         .map_err(|error| error.to_string())?;
     let changed = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -704,9 +711,10 @@ pub(crate) fn invalidate_veriloga_evidence(app: &mut RSpiceApp, bundle_id: Proje
 /// The persisted bundle changed: the project has unsaved source, and so does
 /// the cell view that owns the bundle, whose tab says so.
 fn mark_bundle_unsaved(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
-    app.state.workspace.content.project_sources_dirty = true;
+    app.state.model.workspace.content.project_sources_dirty = true;
     let owner = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -715,6 +723,7 @@ fn mark_bundle_unsaved(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
     if let Some(ProjectSourceOwner::CellView { reference }) = owner
         && let Some(open) = app
             .state
+            .model
             .workspace
             .content
             .open_views
@@ -736,7 +745,7 @@ pub(crate) fn replace_selected_veriloga_file(
     contents: String,
 ) -> Result<bool, String> {
     let current = selected_veriloga_source(app)?;
-    let project_id = app.state.workspace.content.project.id();
+    let project_id = app.state.model.workspace.content.project.id();
     if !current.matches_token(project_id, expected.token(project_id)) {
         return Err(
             "The active Verilog-A source changed before this edit could be committed.".to_owned(),
@@ -744,6 +753,7 @@ pub(crate) fn replace_selected_veriloga_file(
     }
     let changed = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -807,7 +817,7 @@ pub(crate) fn write_veriloga_build_profile(
     match current.logical_path {
         Some(path) => replace_selected_veriloga_file(app, expected, &path, profile.to_toml()?),
         None => {
-            let project_id = app.state.workspace.content.project.id();
+            let project_id = app.state.model.workspace.content.project.id();
             if !selected_veriloga_source(app)?.matches_token(project_id, expected.token(project_id))
             {
                 return Err(
@@ -855,6 +865,7 @@ fn add_build_profile_document(
     let file =
         ProjectSourceFile::try_new(&path, profile.to_toml()?).map_err(|error| error.to_string())?;
     app.state
+        .model
         .workspace
         .content
         .add_project_source_bundle_file_with_role(
@@ -880,7 +891,7 @@ fn start_veriloga_compile(
     if app.state.ui.code_workspace.veriloga.pending.is_some() {
         return;
     }
-    let token = selected.token(app.state.workspace.content.project.id());
+    let token = selected.token(app.state.model.workspace.content.project.id());
     let (sender, receiver) = mpsc::channel();
     Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
     app.state.ui.code_workspace.veriloga.last_failure_token = None;
@@ -947,7 +958,10 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
     cancel_veriloga_compile(app);
 
     let is_current = selected_veriloga_source(app).is_ok_and(|selected| {
-        selected.matches_token(app.state.workspace.content.project.id(), pending.token)
+        selected.matches_token(
+            app.state.model.workspace.content.project.id(),
+            pending.token,
+        )
     });
     if !is_current {
         // The editor exposes one active compile receipt. Once an in-flight
@@ -961,6 +975,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
         Ok(VerilogACompileOutcome::Success(report)) => {
             let receipt_bundle = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1004,6 +1019,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
             }
             let previous_identity = app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1011,6 +1027,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 .and_then(ProjectSourceBundle::validated_identity);
             match app
                 .state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1020,24 +1037,25 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     if previous_identity
                         != app
                             .state
+                            .model
                             .workspace
                             .content
                             .project_sources
                             .get_bundle(pending.token.bundle_id)
                             .and_then(ProjectSourceBundle::validated_identity)
                     {
-                        app.state.workspace.content.project_sources_dirty = true;
+                        app.state.model.workspace.content.project_sources_dirty = true;
                     }
                     let receipt = match receipt_bundle.as_ref().map(ProjectSourceBundle::owner) {
                         Some(ProjectSourceOwner::CellView { reference }) => {
                             let applied = super::veriloga_interface::apply_compiled_interface(
-                                &mut app.state.library_manager,
-                                &app.state.workspace.content.schematic_buffers,
+                                &mut app.state.model.library_manager,
+                                &app.state.model.workspace.content.schematic_buffers,
                                 reference,
                                 &report.abi,
                             );
                             if applied.wrote {
-                                app.state.workspace.content.project_metadata_dirty = true;
+                                app.state.model.workspace.content.project_metadata_dirty = true;
                             }
                             if let super::veriloga_interface::VerilogAInterfaceOutcome::Refused(
                                 reason,
@@ -1187,7 +1205,7 @@ fn record_veriloga_qualification(
     diagnostics: &[CodeEditorDiagnostic],
 ) -> Result<u64, String> {
     let selected = selected_veriloga_source(app)?;
-    if !selected.matches_token(app.state.workspace.content.project.id(), token) {
+    if !selected.matches_token(app.state.model.workspace.content.project.id(), token) {
         return Err("qualification result no longer matches the current source bundle".to_owned());
     }
     let resolved = super::veriloga_profile::resolve_veriloga_build_profile(selected.bundle())?;
@@ -1272,6 +1290,7 @@ fn record_veriloga_qualification(
     };
     let sequence = app
         .state
+        .model
         .workspace
         .content
         .append_project_source_qualification(token.bundle_id, record)
@@ -1452,11 +1471,13 @@ mod tests {
     ) -> CellViewRef {
         if app
             .state
+            .model
             .library_manager
             .get_library("behavioral")
             .is_none()
         {
             app.state
+                .model
                 .library_manager
                 .add_library(Library::new("behavioral"));
         }
@@ -1468,6 +1489,7 @@ mod tests {
             .insert("veriloga.ports".to_owned(), r#"["p","n"]"#.to_owned());
         let library = app
             .state
+            .model
             .library_manager
             .get_library_mut("behavioral")
             .unwrap();
@@ -1484,6 +1506,7 @@ mod tests {
         )
         .unwrap();
         app.state
+            .model
             .workspace
             .content
             .project_sources
@@ -1498,7 +1521,10 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         let reference = add_module_view(&mut app, "legacy", "legacy.va", module, source);
-        app.state.workspace.open_view(reference, ViewType::VerilogA);
+        app.state
+            .model
+            .workspace
+            .open_view(reference, ViewType::VerilogA);
         app
     }
 
@@ -1525,6 +1551,7 @@ mod tests {
             .expect("the click took the closure");
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -1536,7 +1563,7 @@ mod tests {
             .unwrap();
         assert_eq!(profile_path, ".rspice/veriloga-build.toml");
         assert!(!bundle.root().content().contains(profile_path));
-        assert!(app.state.workspace.content.project_sources_dirty);
+        assert!(app.state.model.workspace.content.project_sources_dirty);
         assert_eq!(request.bundle().revision(), bundle.revision());
         assert_eq!(request.bundle().closure_digest(), bundle.closure_digest());
         assert!(request.bundle().contains_file(profile_path));
@@ -1583,7 +1610,7 @@ mod tests {
         let mut app = portless_module();
         request_veriloga_compile(&mut app).unwrap();
         let selected = selected_veriloga_source(&app).unwrap();
-        let token = selected.token(app.state.workspace.content.project.id());
+        let token = selected.token(app.state.model.workspace.content.project.id());
         let revision = selected.bundle().revision();
         let closure_digest = selected.bundle().closure_digest();
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
@@ -1608,6 +1635,7 @@ mod tests {
 
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -1637,6 +1665,7 @@ mod tests {
     fn only_the_open_veriloga_view_selects_a_source() {
         let mut app = RSpiceApp::test_instance();
         app.state
+            .model
             .workspace
             .content
             .project_sources
@@ -1656,6 +1685,7 @@ mod tests {
 
         let reference = add_cell_bundle(&mut app, "owned");
         app.state
+            .model
             .workspace
             .open_view(reference.clone(), ViewType::VerilogA);
         let selected = selected_veriloga_source(&app).unwrap();
@@ -1671,13 +1701,16 @@ mod tests {
     #[test]
     fn a_dropped_source_goes_to_the_import_form_and_never_replaces_the_open_view() {
         let mut app = portless_module();
-        let sources_before = app.state.workspace.content.project_sources.clone();
+        let sources_before = app.state.model.workspace.content.project_sources.clone();
         let source = "module dropped(p, n); inout p, n; electrical p, n; endmodule\n";
 
         import_dropped_veriloga_source(&mut app, "dropped.va".to_owned(), source.to_owned())
             .expect("drop import");
 
-        assert_eq!(app.state.workspace.content.project_sources, sources_before);
+        assert_eq!(
+            app.state.model.workspace.content.project_sources,
+            sources_before
+        );
         let form = app
             .state
             .ui
@@ -1725,6 +1758,7 @@ mod tests {
         assert!(review.restorable);
         let content = |app: &RSpiceApp| {
             app.state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1746,6 +1780,7 @@ mod tests {
         assert_eq!(content(&app), replacement);
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -1767,7 +1802,7 @@ mod tests {
     #[test]
     fn a_root_import_with_no_veriloga_view_reads_the_file_into_the_import_form() {
         let mut app = RSpiceApp::test_instance();
-        let sources_before = app.state.workspace.content.project_sources.clone();
+        let sources_before = app.state.model.workspace.content.project_sources.clone();
         let source = "module actual_model(p, n); inout p, n; electrical p, n; endmodule\n";
 
         app.state.ui.code_workspace.veriloga.import_requested = true;
@@ -1793,7 +1828,10 @@ mod tests {
                 ports: vec!["p".to_owned(), "n".to_owned()],
             }])
         );
-        assert_eq!(app.state.workspace.content.project_sources, sources_before);
+        assert_eq!(
+            app.state.model.workspace.content.project_sources,
+            sources_before
+        );
         assert!(!app.state.ui.code_workspace.veriloga.import_requested);
     }
 
@@ -1806,6 +1844,7 @@ mod tests {
 
         request_veriloga_source_replacement(&mut app, &root).unwrap();
         app.state
+            .model
             .workspace
             .content
             .replace_project_source_bundle_file(
@@ -1822,6 +1861,7 @@ mod tests {
 
         let bundle = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -1854,22 +1894,26 @@ mod tests {
     fn root_edit_invalidates_bundle_validation_and_compile_evidence() {
         let mut app = RSpiceApp::test_instance();
         let reference = add_cell_bundle(&mut app, "editable");
-        app.state.workspace.open_view(reference, ViewType::VerilogA);
+        app.state
+            .model
+            .workspace
+            .open_view(reference, ViewType::VerilogA);
         let selected = selected_veriloga_source(&app).unwrap();
         app.state
+            .model
             .workspace
             .content
             .project_sources
             .mark_bundle_validated(selected.bundle().id())
             .unwrap();
         let receipt = compile_project_bundle_receipt(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             selected.bundle(),
             selected.selected_module(),
         )
         .unwrap();
         app.state.ui.code_workspace.veriloga.receipt = Some(receipt);
-        let before = selected.token(app.state.workspace.content.project.id());
+        let before = selected.token(app.state.model.workspace.content.project.id());
 
         assert!(
             replace_selected_veriloga_file(
@@ -1883,13 +1927,13 @@ mod tests {
         );
 
         let edited = selected_veriloga_source(&app).unwrap();
-        let after = edited.token(app.state.workspace.content.project.id());
+        let after = edited.token(app.state.model.workspace.content.project.id());
         assert_eq!(after.bundle_id, before.bundle_id);
         assert!(after.revision > before.revision);
         assert_ne!(after.closure_digest, before.closure_digest);
         assert!(!edited.bundle().validation_is_current());
         assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
-        assert!(app.state.workspace.content.project_sources_dirty);
+        assert!(app.state.model.workspace.content.project_sources_dirty);
     }
 
     #[test]
@@ -1928,7 +1972,7 @@ mod tests {
         );
 
         let selected = selected_veriloga_source(&app).unwrap();
-        let token = selected.token(app.state.workspace.content.project.id());
+        let token = selected.token(app.state.model.workspace.content.project.id());
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("a discarded system task must not fail the compile")
         };
@@ -2021,7 +2065,7 @@ mod tests {
         );
 
         let selected = selected_veriloga_source(&app).unwrap();
-        let token = selected.token(app.state.workspace.content.project.id());
+        let token = selected.token(app.state.model.workspace.content.project.id());
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("a retained variable is legal Verilog-A and must not fail the compile")
         };
@@ -2077,10 +2121,13 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let first = add_cell_bundle(&mut app, "first");
         let second = add_cell_bundle(&mut app, "second");
-        app.state.workspace.open_view(first, ViewType::VerilogA);
+        app.state
+            .model
+            .workspace
+            .open_view(first, ViewType::VerilogA);
         let first_selected = selected_veriloga_source(&app).unwrap();
         let receipt = compile_project_bundle_receipt(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             first_selected.bundle(),
             first_selected.selected_module(),
         )
@@ -2096,7 +2143,10 @@ mod tests {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
-        app.state.workspace.open_view(second, ViewType::VerilogA);
+        app.state
+            .model
+            .workspace
+            .open_view(second, ViewType::VerilogA);
 
         poll_veriloga_compile(&mut app);
 
@@ -2104,7 +2154,7 @@ mod tests {
         assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
         let second_selected = selected_veriloga_source(&app).unwrap();
         assert!(!second_selected.matches_token(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             receipt.compilation.token()
         ));
     }
@@ -2114,11 +2164,12 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let reference = add_cell_bundle(&mut app, "module_change");
         app.state
+            .model
             .workspace
             .open_view(reference.clone(), ViewType::VerilogA);
         let selected = selected_veriloga_source(&app).unwrap();
         let receipt = compile_project_bundle_receipt(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             selected.bundle(),
             selected.selected_module(),
         )
@@ -2134,6 +2185,7 @@ mod tests {
             receiver: Arc::new(Mutex::new(receiver)),
         });
         app.state
+            .model
             .library_manager
             .get_library_mut(&reference.library)
             .and_then(|library| library.get_cell_mut(&reference.cell))
@@ -2148,7 +2200,7 @@ mod tests {
         assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
         let changed = selected_veriloga_source(&app).unwrap();
         assert!(!changed.matches_token(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             receipt.compilation.token()
         ));
         assert!(!changed.bundle().validation_is_current());

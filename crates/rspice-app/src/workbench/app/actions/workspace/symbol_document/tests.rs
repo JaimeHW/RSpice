@@ -45,7 +45,7 @@ fn state_with_open_symbol(parent_instances: usize) -> AppState {
     let mut top = Cell::new("top");
     top.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(top);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut declaring = SchematicState::default();
     for (index, name) in ["IN", "OUT"].into_iter().enumerate() {
@@ -58,7 +58,7 @@ fn state_with_open_symbol(parent_instances: usize) -> AppState {
             .expect("port exists")
             .value = name.to_owned();
     }
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         declaring,
     );
@@ -68,13 +68,14 @@ fn state_with_open_symbol(parent_instances: usize) -> AppState {
         place_instance(&mut parent, 900 + index as u64, index as i32 * 100);
     }
     state
+        .model
         .workspace
         .insert_schematic_editor(PARENT.to_owned(), parent);
 
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     // The live sheet is replaced when the view opens, so its instance is
     // placed afterwards.
-    place_instance(&mut state.schematic, 800, 0);
+    place_instance(&mut state.model.schematic, 800, 0);
     state
 }
 
@@ -103,6 +104,7 @@ fn place_instance(schematic: &mut SchematicState, id: u64, x: i32) {
 
 fn terminal_names(state: &AppState) -> Vec<String> {
     let mut names: Vec<String> = state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -115,6 +117,7 @@ fn terminal_names(state: &AppState) -> Vec<String> {
         .collect();
     names.extend(
         state
+            .model
             .schematic
             .document()
             .connections
@@ -141,7 +144,7 @@ fn pin_index(document: &SymbolDocument, name: &str) -> usize {
 #[test]
 fn the_save_point_tracks_publication_not_the_stored_view() {
     let mut state = state_with_open_symbol(0);
-    let key = state.workspace.content.active_key();
+    let key = state.model.workspace.content.active_key();
     let document = contract_matching_document(&state);
     let mut metadata = SymbolEditorMetadata::for_document(&document);
 
@@ -356,7 +359,7 @@ fn a_pin_rename_reaches_every_placed_instance() {
         "every placed instance follows the pin, in stored buffers and on the \
          live sheet alike"
     );
-    for component in &state.schematic.document().components {
+    for component in &state.model.schematic.document().components {
         let Some(binding) = component.library_cell.as_ref() else {
             continue;
         };
@@ -435,7 +438,7 @@ fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
     amp.add_view(View::new("schematic", ViewType::Schematic));
     amp.add_view(View::new("symbol", ViewType::Symbol));
     library.add_cell(amp);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let mut schematic = SchematicState::default();
     for index in 0..count {
@@ -448,7 +451,7 @@ fn state_with_unplaced_amp_symbol_pins(count: usize) -> AppState {
             .expect("port exists")
             .value = format!("P{index}");
     }
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         schematic,
     );
@@ -477,7 +480,7 @@ fn symbol_pin_checks_keep_every_finding_and_log_one_line() {
         Some(55),
         "every finding is a record, not a receipt the page has to be told about",
     );
-    let entries: Vec<_> = state.log_buffer.entries().collect();
+    let entries: Vec<_> = state.model.log_buffer.entries().collect();
     assert!(
         entries.iter().all(|entry| entry.anchor.is_none()),
         "a finding is a published record, not a line copied into the log",
@@ -511,6 +514,7 @@ fn pin_findings_digest_nothing_while_idle_and_stale_on_either_input() {
     let subject = CellViewRef::new("work", "amp", "symbol");
     let current = |state: &AppState| {
         let batch = state
+            .model
             .diagnostics
             .batch(&DiagnosticInputs::SymbolPins {
                 subject: subject.clone(),
@@ -547,7 +551,7 @@ fn pin_findings_digest_nothing_while_idle_and_stale_on_either_input() {
 
     state.run_active_symbol_pin_checks();
     assert!(current(&state));
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new("work", "amp", "schematic").key(),
         SchematicState::default(),
     );

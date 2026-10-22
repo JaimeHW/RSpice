@@ -18,6 +18,7 @@ pub(super) struct ReportFigureOption {
 pub(super) fn report_figure_options(state: &AppState) -> Vec<ReportFigureOption> {
     let mut options = Vec::new();
     for (document_index, document) in state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -48,7 +49,7 @@ pub(super) fn open_insert_result_document(app: &mut RSpiceApp) {
         return;
     }
     let first = &options[0];
-    let source = &app.state.workspace.content.visualization_documents[first.document_index];
+    let source = &app.state.model.workspace.content.visualization_documents[first.document_index];
     let editor = &mut app.state.workbench.report_authoring;
     editor.insert_result_document_index = 0;
     editor.insert_result_caption = first.label.clone();
@@ -82,6 +83,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     };
     let Some(source) = app
         .state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -207,7 +209,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
                 .report_authoring
                 .insert_result_document_open = false;
             app.state.workbench.report_authoring.transaction_error = None;
-            app.state.workspace.content.report_documents_dirty = true;
+            app.state.model.workspace.content.report_documents_dirty = true;
         }
         Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
     }
@@ -229,7 +231,8 @@ pub(super) fn select_result_document(
         .report_authoring
         .insert_result_document_index = index;
     if let Some(option) = figure {
-        let revision = app.state.workspace.content.visualization_documents[option.document_index]
+        let revision = app.state.model.workspace.content.visualization_documents
+            [option.document_index]
             .revision()
             .get();
         app.state.workbench.report_authoring.insert_result_caption = option.label.clone();

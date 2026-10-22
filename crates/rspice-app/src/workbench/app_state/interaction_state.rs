@@ -143,10 +143,10 @@ impl super::AppState {
     /// start, so that drag's first move frame does not pay for the copy. A
     /// drag that begins once the document has changed captures its own.
     pub(crate) fn prepare_schematic_drag(&mut self) {
-        if self.schematic.has_pending_operation() || self.schematic_edit_read_only() {
+        if self.model.schematic.has_pending_operation() || self.schematic_edit_read_only() {
             return;
         }
-        self.dialogs.interaction.drag.prepared = Some(self.schematic.prepare_operation());
+        self.dialogs.interaction.drag.prepared = Some(self.model.schematic.prepare_operation());
     }
 
     pub(crate) fn begin_schematic_drag(
@@ -155,7 +155,7 @@ impl super::AppState {
         kind: DragType,
         ctx: &egui::Context,
     ) -> bool {
-        if self.schematic.has_pending_operation() || self.schematic_edit_read_only() {
+        if self.model.schematic.has_pending_operation() || self.schematic_edit_read_only() {
             return false;
         }
         let description = match kind {
@@ -167,16 +167,18 @@ impl super::AppState {
         // A new pointer edit cannot leave another window's transaction
         // orphaned when it takes over the shared gesture owner.
         self.cancel_schematic_drag();
-        self.schematic
+        self.model
+            .schematic
             .begin_prepared_operation(prepared, description);
         let owner = SchematicDragOwner {
-            project: self.workspace.content.project.id(),
-            document: self.workspace.content.active_schematic_reference(),
-            occurrence: self.workspace.content.active_occurrence().cloned(),
+            project: self.model.workspace.content.project.id(),
+            document: self.model.workspace.content.active_schematic_reference(),
+            occurrence: self.model.workspace.content.active_occurrence().cloned(),
             sheet: self.schematic_drag_sheet(),
             window: self.workbench.window_session.current(),
             viewport: ctx.viewport_id(),
             operation_id: self
+                .model
                 .schematic
                 .pending_operation_id()
                 .expect("new drag operation"),
@@ -192,19 +194,27 @@ impl super::AppState {
             .owner
             .as_ref()
             .is_some_and(|owner| {
-                owner.project == self.workspace.content.project.id()
-                    && owner.document == self.workspace.content.active_schematic_reference()
-                    && Some(owner.operation_id) == self.schematic.pending_operation_id()
+                owner.project == self.model.workspace.content.project.id()
+                    && owner.document == self.model.workspace.content.active_schematic_reference()
+                    && Some(owner.operation_id) == self.model.schematic.pending_operation_id()
             })
     }
 
     fn schematic_drag_sheet(
         &self,
     ) -> Option<(Option<rspice_design_model::design_management::SheetId>, u64)> {
-        self.workspace
+        self.model
+            .workspace
             .content
             .design_management
-            .sheet_catalog(&self.workspace.content.active_schematic_reference().key())
+            .sheet_catalog(
+                &self
+                    .model
+                    .workspace
+                    .content
+                    .active_schematic_reference()
+                    .key(),
+            )
             .map(|catalog| (catalog.active_sheet_id(), catalog.revision()))
     }
 
@@ -217,7 +227,7 @@ impl super::AppState {
                 .owner
                 .as_ref()
                 .is_some_and(|owner| {
-                    owner.occurrence.as_ref() == self.workspace.content.active_occurrence()
+                    owner.occurrence.as_ref() == self.model.workspace.content.active_occurrence()
                         && owner.sheet == self.schematic_drag_sheet()
                 })
     }
@@ -263,9 +273,12 @@ impl super::AppState {
             return false;
         };
         if active {
-            self.schematic.cancel_operation();
-        } else if owner.project == self.workspace.content.project.id()
-            && let Some(mut schematic) = self.workspace.schematic_editor_mut(&owner.document.key())
+            self.model.schematic.cancel_operation();
+        } else if owner.project == self.model.workspace.content.project.id()
+            && let Some(mut schematic) = self
+                .model
+                .workspace
+                .schematic_editor_mut(&owner.document.key())
             && schematic.editor.pending_operation_id() == Some(owner.operation_id)
         {
             schematic.editor.cancel_operation();
@@ -310,7 +323,7 @@ impl super::AppState {
             return false;
         }
         let invalid_context = !self.schematic_drag_in_progress()
-            || self.schematic.session.editor.tool != crate::state::Tool::Select
+            || self.model.schematic.session.editor.tool != crate::state::Tool::Select
             || self.schematic_edit_read_only()
             || self.workbench.current_route().surface_id() != crate::workbench::SurfaceId::Design;
         let interrupted = ctx.input(|input| {

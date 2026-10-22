@@ -15,7 +15,7 @@ use crate::state::NetlistSourceIndex;
 /// unlike a revision counter it cannot go stale behind a writer that forgets
 /// to bump it.
 pub(crate) fn visible_source_index(state: &mut AppState) -> Arc<NetlistSourceIndex> {
-    let source = state.simulation.source.netlist_content.as_str();
+    let source = state.model.simulation.source.netlist_content.as_str();
     if !state.ui.netlist.source_index.describes(source) {
         state.ui.netlist.source_index = Arc::new(NetlistSourceIndex::parse(source));
     }
@@ -27,7 +27,7 @@ pub(crate) fn visible_source_index(state: &mut AppState) -> Arc<NetlistSourceInd
 /// session or a reopened project has put nothing in the editor, and an
 /// include file the editor has open is not the deck.
 pub(crate) fn root_deck_source_index(state: &mut AppState) -> Arc<NetlistSourceIndex> {
-    let Some(deck) = state.workspace.content.netlist_source.as_deref() else {
+    let Some(deck) = state.model.workspace.content.netlist_source.as_deref() else {
         return visible_source_index(state);
     };
     if state.ui.netlist.source_index.describes(deck) {

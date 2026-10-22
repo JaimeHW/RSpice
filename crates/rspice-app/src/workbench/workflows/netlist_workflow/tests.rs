@@ -190,6 +190,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
         "legacy.cir",
     ));
     app.state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -203,7 +204,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
             utf8_source.to_owned(),
         )
     );
-    assert!(app.state.netlist_artifacts.validation.is_none());
+    assert!(app.state.model.netlist_artifacts.validation.is_none());
     let imported_digest = app.state.ui.netlist.externally_saved_content_digest;
     let bytes = Rc::new(RefCell::new(Vec::new()));
     let io = CaptureIo {
@@ -219,9 +220,10 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
     ));
 
     assert_eq!(bytes.borrow().as_slice(), utf8_source.as_bytes());
-    assert!(app.state.netlist_artifacts.validation.is_none());
+    assert!(app.state.model.netlist_artifacts.validation.is_none());
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -328,9 +330,10 @@ fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
     assert_eq!(review.dependencies.len(), 2);
 
     assert!(commit_staged_netlist_import(&mut state));
-    assert!(state.workspace.content.netlist_source_path.is_none());
+    assert!(state.model.workspace.content.netlist_source_path.is_none());
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -338,7 +341,13 @@ fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
             .map(|descriptor| descriptor.artifact_name.as_str()),
         Some("portable-run.spice")
     );
-    let document = state.workspace.content.netlist_document.as_ref().unwrap();
+    let document = state
+        .model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .unwrap();
     assert!(document.dependency_graph_is_sealed());
     assert_eq!(document.dependencies().len(), 2);
 }
@@ -385,8 +394,8 @@ fn three_way_merge_combines_independent_lines_and_marks_overlaps() {
 #[test]
 fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
     let mut state = AppState::default();
-    let original_project = state.workspace.content.project.id();
-    let original_source = state.workspace.content.netlist_source.clone();
+    let original_project = state.model.workspace.content.project.id();
+    let original_source = state.model.workspace.content.netlist_source.clone();
     let transaction =
         crate::workbench::lifecycle::project_lifecycle::begin_project_replacement(&mut state)
             .expect("replacement transaction starts");
@@ -400,18 +409,22 @@ fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
         None,
         "staged.cir".to_owned(),
     ));
-    assert_eq!(state.workspace.content.project.id(), original_project);
-    assert_eq!(state.workspace.content.netlist_source, original_source);
+    assert_eq!(state.model.workspace.content.project.id(), original_project);
+    assert_eq!(
+        state.model.workspace.content.netlist_source,
+        original_source
+    );
     assert!(state.ui.netlist.import_review.is_some());
 
     assert!(commit_staged_netlist_import(&mut state));
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         std::str::from_utf8(&source).ok()
     );
     assert!(state.ui.netlist.import_review.is_none());
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -433,6 +446,7 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         "history.cir",
     ));
     let baseline_revision = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -447,6 +461,7 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         )
     );
     let modified_revision = state
+        .model
         .workspace
         .content
         .netlist_document
@@ -460,21 +475,23 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         .expect("comparison opens");
     assert!(
         state
+            .model
             .simulation
             .source
             .netlist_content
             .contains("-V1 out 0 1")
     );
     crate::workbench::documents::netlist_document::close_revision_comparison(&mut state);
-    assert_eq!(state.simulation.source.netlist_content, modified);
+    assert_eq!(state.model.simulation.source.netlist_content, modified);
 
     crate::workbench::documents::netlist_document::restore_owned_revision(&mut state, 0)
         .expect("history restore commits");
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(original)
     );
     let restored_revision = state
+        .model
         .workspace
         .content
         .netlist_document
@@ -484,6 +501,7 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
         .get();
     assert!(restored_revision > modified_revision);
     let history = &state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -494,12 +512,13 @@ fn owned_netlist_history_compare_and_restore_are_persisted_and_monotonic() {
     assert_eq!(history[1].source, modified);
     assert_eq!(history[2].source, original);
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
         .expect("restored workspace validates");
 
-    let persisted = serde_json::to_vec(&state.workspace).expect("serialize workspace");
+    let persisted = serde_json::to_vec(&state.model.workspace).expect("serialize workspace");
     let restored: crate::state::ProjectWorkspace =
         serde_json::from_slice(&persisted).expect("deserialize workspace");
     restored
@@ -591,10 +610,16 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
     review.selected_dialect = crate::state::NetlistSourceDialect::Hspice;
     assert!(commit_staged_netlist_import(&mut state));
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(retained_source.as_str())
     );
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
         Some(crate::state::NetlistSourceDialect::Hspice)
@@ -697,10 +722,16 @@ fn spectre_spice_interoperability_import_preserves_source_and_profile() {
     assert!(review.can_commit());
     assert!(commit_staged_netlist_import(&mut state));
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(retained_source.as_str())
     );
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
         Some(crate::state::NetlistSourceDialect::Spectre)
@@ -738,10 +769,16 @@ fn ads_spice_export_import_preserves_source_and_profile() {
     assert!(review.can_commit());
     assert!(commit_staged_netlist_import(&mut state));
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(retained_source.as_str())
     );
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
         Some(crate::state::NetlistSourceDialect::Ads)
@@ -778,7 +815,13 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
     assert!(review.can_commit());
     assert!(commit_staged_netlist_import(&mut state));
 
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
         Some(crate::state::NetlistSourceDialect::Spice3Ngspice)
@@ -788,7 +831,7 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
         descriptor.execution_profile,
         Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2)
     );
-    let persisted = serde_json::to_vec(&state.workspace).unwrap();
+    let persisted = serde_json::to_vec(&state.model.workspace).unwrap();
     let restored: crate::state::ProjectWorkspace = serde_json::from_slice(&persisted).unwrap();
     assert_eq!(
         restored
@@ -836,7 +879,13 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
     );
     assert!(commit_staged_netlist_import(&mut state));
 
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     assert_eq!(
         descriptor.imported_dialect,
         Some(crate::state::NetlistSourceDialect::Pspice)
@@ -846,7 +895,7 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
         descriptor.execution_profile,
         Some(crate::state::NetlistExecutionProfile::PspiceDeclarativeV2)
     );
-    let persisted = serde_json::to_vec(&state.workspace).unwrap();
+    let persisted = serde_json::to_vec(&state.model.workspace).unwrap();
     let restored: crate::state::ProjectWorkspace = serde_json::from_slice(&persisted).unwrap();
     assert_eq!(
         restored
@@ -868,13 +917,20 @@ fn quarantined_owned_ngspice_state() -> AppState {
         None,
         "legacy-ngspice.cir",
     ));
-    let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_mut()
+        .unwrap();
     descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
     descriptor.compatibility_reviewed = false;
     descriptor.execution_profile = None;
-    state.workspace.content.netlist_source_dirty = false;
-    state.workspace.content.project_metadata_dirty = false;
+    state.model.workspace.content.netlist_source_dirty = false;
+    state.model.workspace.content.project_metadata_dirty = false;
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -885,8 +941,9 @@ fn quarantined_owned_ngspice_state() -> AppState {
 #[test]
 fn quarantined_owned_source_requalifies_without_external_file_or_source_replacement() {
     let mut state = quarantined_owned_ngspice_state();
-    let source = state.workspace.content.netlist_source.clone();
+    let source = state.model.workspace.content.netlist_source.clone();
     let history = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -907,7 +964,13 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
     assert!(review.can_commit());
     assert!(commit_staged_netlist_import(&mut state));
 
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     assert_eq!(
         descriptor.execution_profile,
         Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2)
@@ -915,8 +978,8 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
     assert!(descriptor.compatibility_reviewed);
     assert!(!descriptor.execution_profile_review_required());
     assert_eq!(descriptor.revision_history, history);
-    assert_eq!(state.workspace.content.netlist_source, source);
-    assert!(state.workspace.content.project_metadata_dirty);
+    assert_eq!(state.model.workspace.content.netlist_source, source);
+    assert!(state.model.workspace.content.project_metadata_dirty);
     assert!(state.ui.netlist.import_review.is_none());
 }
 
@@ -939,7 +1002,13 @@ fn owned_profile_review_rejects_source_revision_change_transactionally() {
     );
 
     assert!(!commit_staged_netlist_import(&mut state));
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     assert!(descriptor.execution_profile.is_none());
     assert!(!descriptor.compatibility_reviewed);
     assert!(
@@ -1039,9 +1108,9 @@ fn state_with_owned_strategy(
         .expect("authored source");
 
     let mut state = AppState::default();
-    state.workspace.content.netlist_source = Some(authored_source.to_owned());
-    state.workspace.content.netlist_document = Some(owned);
-    state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+    state.model.workspace.content.netlist_source = Some(authored_source.to_owned());
+    state.model.workspace.content.netlist_document = Some(owned);
+    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
         artifact_name: "owned.cir".to_owned(),
         strategy,
@@ -1068,8 +1137,9 @@ fn owned_source_strategy_executes_exact_authored_bytes_without_generated_composi
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1092,8 +1162,9 @@ fn parameter_option_override_retains_base_and_appends_override_before_end() {
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1120,8 +1191,9 @@ fn include_order_override_replaces_all_base_include_cards_and_continuations() {
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1148,8 +1220,9 @@ fn analysis_only_deck_replaces_base_analysis_measurement_and_output_cards() {
     );
 
     let composed = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1176,8 +1249,9 @@ fn narrow_override_rejects_device_cards_and_cross_strategy_directives() {
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
     let error = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1196,8 +1270,9 @@ fn narrow_override_rejects_device_cards_and_cross_strategy_directives() {
         crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
     );
     let error = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1220,8 +1295,9 @@ fn narrow_override_rejects_orphan_continuation() {
     );
 
     let error = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1241,7 +1317,7 @@ fn narrow_override_rejects_orphan_continuation() {
 fn narrow_override_requires_retained_generated_base() {
     let authored = ".tran 1n 10n\n";
     let mut state = AppState::default();
-    state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
         artifact_name: "analysis.cir".to_owned(),
         strategy: crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck,
@@ -1257,8 +1333,9 @@ fn narrow_override_requires_retained_generated_base() {
     });
 
     let error = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1284,8 +1361,9 @@ fn narrow_override_rejects_generated_base_without_end_terminator() {
     );
 
     let error = compose_owned_netlist_execution_source(
-        state.workspace.content.netlist_descriptor.as_ref(),
+        state.model.workspace.content.netlist_descriptor.as_ref(),
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -1301,8 +1379,8 @@ fn narrow_override_rejects_generated_base_without_end_terminator() {
 #[test]
 fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs() {
     let mut state = AppState::default();
-    state.simulation.start_run();
-    assert!(state.simulation.retained.has_results());
+    state.model.simulation.start_run();
+    assert!(state.model.simulation.retained.has_results());
 
     let imported = apply_imported_netlist(
         &mut state,
@@ -1317,18 +1395,19 @@ fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs()
         crate::workbench::state::Workspace::Netlist
     );
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n")
     );
     assert_eq!(
-        state.workspace.content.netlist_source_path.as_deref(),
+        state.model.workspace.content.netlist_source_path.as_deref(),
         Some(std::path::Path::new("bias.cir"))
     );
-    assert!(state.workspace.content.netlist_source_dirty);
-    assert!(state.workspace.any_dirty());
-    assert!(state.workspace.content.netlist_document.is_some());
+    assert!(state.model.workspace.content.netlist_source_dirty);
+    assert!(state.model.workspace.any_dirty());
+    assert!(state.model.workspace.content.netlist_document.is_some());
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -1337,21 +1416,22 @@ fn imported_netlist_becomes_dirty_manual_source_without_deleting_retained_runs()
         Some("bias.cir")
     );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
         .expect("imported canonical source must satisfy project persistence invariants");
-    assert!(state.simulation.retained.has_results());
-    assert_eq!(state.simulation.retained.runs.len(), 1);
+    assert!(state.model.simulation.retained.has_results());
+    assert_eq!(state.model.simulation.retained.runs.len(), 1);
     assert!(state.recent_files.is_empty());
 }
 
 #[test]
 fn opening_a_netlist_commits_an_independent_netlist_first_project() {
     let mut state = AppState::default();
-    let original_project_id = state.workspace.content.project.id();
-    state.simulation.start_run();
-    state.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
+    let original_project_id = state.model.workspace.content.project.id();
+    state.model.simulation.start_run();
+    state.model.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
 
     assert!(apply_opened_netlist_project(
         &mut state,
@@ -1368,11 +1448,14 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
         Vec::new(),
     ));
 
-    assert_ne!(state.workspace.content.project.id(), original_project_id);
-    assert_eq!(state.workspace.content.project.name(), "bias");
-    assert!(!state.simulation.retained.has_results());
+    assert_ne!(
+        state.model.workspace.content.project.id(),
+        original_project_id
+    );
+    assert_eq!(state.model.workspace.content.project.name(), "bias");
+    assert!(!state.model.simulation.retained.has_results());
     assert_eq!(
-        state.workspace.content.netlist_source_path.as_deref(),
+        state.model.workspace.content.netlist_source_path.as_deref(),
         Some(std::path::Path::new("bias.cir"))
     );
     assert_eq!(
@@ -1386,7 +1469,7 @@ fn opening_a_netlist_commits_an_independent_netlist_first_project() {
 #[test]
 fn a_netlist_project_that_cannot_open_states_why() {
     let mut state = AppState::default();
-    let original_project_id = state.workspace.content.project.id();
+    let original_project_id = state.model.workspace.content.project.id();
     let source = "deck\nR1 out 0 1k\n.op\n.end\n";
 
     assert!(!apply_opened_netlist_project(
@@ -1405,8 +1488,12 @@ fn a_netlist_project_that_cannot_open_states_why() {
         Vec::new(),
     ));
 
-    assert_eq!(state.workspace.content.project.id(), original_project_id);
+    assert_eq!(
+        state.model.workspace.content.project.id(),
+        original_project_id
+    );
     let line = state
+        .model
         .log_buffer
         .entries()
         .last()
@@ -1432,7 +1519,7 @@ fn importing_a_deck_refuses_read_only_projects_without_mutation() {
         open_project_read_only: true,
         ..Default::default()
     };
-    state.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
+    state.model.workspace.content.netlist_source = Some("old\n.op\n.end\n".to_owned());
 
     assert!(!apply_imported_netlist(
         &mut state,
@@ -1441,7 +1528,7 @@ fn importing_a_deck_refuses_read_only_projects_without_mutation() {
         "new.cir",
     ));
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some("old\n.op\n.end\n")
     );
 }
@@ -1451,6 +1538,7 @@ fn importing_a_deck_refuses_read_only_projects_without_mutation() {
 fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1464,7 +1552,7 @@ fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding()
         "standalone.cir",
     ));
     assert!(validate_visible_netlist_source(&mut app));
-    assert!(app.state.netlist_artifacts.validation.is_some());
+    assert!(app.state.model.netlist_artifacts.validation.is_some());
     assert!(
         app.state
             .ui
@@ -1480,6 +1568,7 @@ fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding()
 fn validated_owned_source_can_run_before_external_source_synchronization() {
     let mut app = crate::workbench::RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1537,6 +1626,7 @@ fn validation_publishes_exact_direct_and_transitive_dependency_closure() {
 
     let document = app
         .state
+        .model
         .workspace
         .content
         .netlist_document
@@ -1597,6 +1687,7 @@ fn validation_distinguishes_inline_lib_sections_from_external_lib_paths() {
 
     let document = app
         .state
+        .model
         .workspace
         .content
         .netlist_document
@@ -1635,16 +1726,18 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
         parameter_source,
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
-    app.state.workspace.content.netlist_source_path = Some(root.clone());
-    app.state.ui.netlist.owned_document = app.state.workspace.content.netlist_document.clone();
+    app.state.model.workspace.content.netlist_source_path = Some(root.clone());
+    app.state.ui.netlist.owned_document =
+        app.state.model.workspace.content.netlist_document.clone();
     app.state.ui.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     app.state.ui.netlist.active_document_initialized = true;
-    app.state.simulation.source.netlist_content = parameter_source.to_owned();
+    app.state.model.simulation.source.netlist_content = parameter_source.to_owned();
 
     assert!(validate_visible_netlist_source(&mut app));
     let parameter_document = app
         .state
+        .model
         .workspace
         .content
         .netlist_document
@@ -1674,16 +1767,18 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
         include_source,
         crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride,
     );
-    app.state.workspace.content.netlist_source_path = Some(root);
-    app.state.ui.netlist.owned_document = app.state.workspace.content.netlist_document.clone();
+    app.state.model.workspace.content.netlist_source_path = Some(root);
+    app.state.ui.netlist.owned_document =
+        app.state.model.workspace.content.netlist_document.clone();
     app.state.ui.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     app.state.ui.netlist.active_document_initialized = true;
-    app.state.simulation.source.netlist_content = include_source.to_owned();
+    app.state.model.simulation.source.netlist_content = include_source.to_owned();
 
     assert!(validate_visible_netlist_source(&mut app));
     let include_document = app
         .state
+        .model
         .workspace
         .content
         .netlist_document
@@ -1706,23 +1801,24 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
 #[test]
 fn empty_netlist_import_is_rejected_without_clearing_existing_state() {
     let mut state = AppState::default();
-    state.workspace.content.netlist_source = Some("existing\n.op\n.end\n".to_owned());
-    state.workspace.content.netlist_source_path = Some(std::path::PathBuf::from("existing.cir"));
-    state.simulation.source.netlist_content = "existing\n.op\n.end\n".to_owned();
+    state.model.workspace.content.netlist_source = Some("existing\n.op\n.end\n".to_owned());
+    state.model.workspace.content.netlist_source_path =
+        Some(std::path::PathBuf::from("existing.cir"));
+    state.model.simulation.source.netlist_content = "existing\n.op\n.end\n".to_owned();
 
     let imported = apply_imported_netlist(&mut state, " \n\t".to_owned(), None, "empty.cir");
 
     assert!(!imported);
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some("existing\n.op\n.end\n")
     );
     assert_eq!(
-        state.workspace.content.netlist_source_path.as_deref(),
+        state.model.workspace.content.netlist_source_path.as_deref(),
         Some(std::path::Path::new("existing.cir"))
     );
     assert_eq!(
-        state.simulation.source.netlist_content,
+        state.model.simulation.source.netlist_content,
         "existing\n.op\n.end\n"
     );
 }
@@ -1766,7 +1862,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
     apply_staged_external_netlist_change(&mut app.state)
         .expect("explicit external reload succeeds");
     assert_eq!(
-        app.state.workspace.content.netlist_source.as_deref(),
+        app.state.model.workspace.content.netlist_source.as_deref(),
         Some(external)
     );
     assert!(app.state.ui.netlist.external_change.is_none());
@@ -1776,6 +1872,7 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
     );
     assert!(
         app.state
+            .model
             .workspace
             .content
             .netlist_descriptor

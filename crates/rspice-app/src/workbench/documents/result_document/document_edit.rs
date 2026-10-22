@@ -39,6 +39,7 @@ fn project_document(
     document_id: ResultDocumentId,
 ) -> Result<&VisualizationDocument, String> {
     state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -53,6 +54,7 @@ fn transact(
 ) -> Result<VisualizationTransactionReceipt, String> {
     let revision = project_document(state, document_id)?.revision();
     state
+        .model
         .workspace
         .content
         .transact_visualization_document(document_id, revision, edits)
@@ -67,7 +69,7 @@ fn reading_analysis(state: &AppState) -> Result<(&SimulationRun, &AnalysisResult
     if state.workbench.workspace != Workspace::Results {
         return Err("Open a result in Results.".to_owned());
     }
-    let runs = &state.simulation.retained.runs;
+    let runs = &state.model.simulation.retained.runs;
     if let Some(document_id) = active_document_id(state) {
         let (_, pane_id) = super::persistent_document::reading_position(state, document_id)
             .ok_or_else(|| "The result document has no pane.".to_owned())?;
@@ -81,12 +83,14 @@ fn reading_analysis(state: &AppState) -> Result<(&SimulationRun, &AnalysisResult
         return Ok((&runs[run], &runs[run].analyses[analysis]));
     }
     let run = state
+        .model
         .simulation
         .view
         .active_run_idx
         .and_then(|index| runs.get(index))
         .ok_or_else(|| "Select a result.".to_owned())?;
     let analysis = state
+        .model
         .simulation
         .view
         .active_analysis_idx
@@ -172,7 +176,7 @@ fn commit_open_dialog(state: &mut AppState) {
 /// Whether a pane can be added: a project result document is open and a
 /// retained dataset exists to bind the pane to.
 pub(crate) fn add_pane_available(state: &AppState) -> bool {
-    active_document_id(state).is_some() && state.simulation.retained.has_results()
+    active_document_id(state).is_some() && state.model.simulation.retained.has_results()
 }
 
 /// Open the Add pane form, seeded with the dataset, analysis and sheet the
@@ -182,8 +186,13 @@ pub(crate) fn open_add_pane(state: &mut AppState) {
         return;
     }
     let draft = AddPaneDraft {
-        dataset: state.simulation.active_run().map(|run| run.dataset_id),
+        dataset: state
+            .model
+            .simulation
+            .active_run()
+            .map(|run| run.dataset_id),
         analysis: state
+            .model
             .simulation
             .active_analysis()
             .map(|analysis| analysis.id),
@@ -214,7 +223,7 @@ fn pane_viewers(analysis: &AnalysisResult) -> Vec<(ResultViewer, String)> {
 /// Resolve the form's choices against the retained datasets, moving any
 /// selection that no longer exists onto the first one that does.
 fn add_pane_choices(state: &AppState, draft: &mut AddPaneDraft) -> AddPaneChoices {
-    let runs = &state.simulation.retained.runs;
+    let runs = &state.model.simulation.retained.runs;
     let datasets = runs
         .iter()
         .map(|run| (run.dataset_id, format!("Run {} · {}", run.id, run.label)))
@@ -247,6 +256,7 @@ fn add_pane_choices(state: &AppState, draft: &mut AddPaneDraft) -> AddPaneChoice
     let position = active_document_id(state).and_then(|document_id| {
         let (_, pane_id) = super::persistent_document::reading_position(state, document_id)?;
         let document = state
+            .model
             .workspace
             .content
             .visualization_document(document_id)?;
@@ -283,6 +293,7 @@ fn add_pane(state: &mut AppState, draft: &AddPaneDraft) -> Result<(), String> {
         .dataset
         .and_then(|dataset| {
             state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -368,7 +379,12 @@ pub(super) fn pane_menu(
     document_id: ResultDocumentId,
     pane_id: PaneId,
 ) -> PaneMenu {
-    let Some(document) = state.workspace.content.visualization_document(document_id) else {
+    let Some(document) = state
+        .model
+        .workspace
+        .content
+        .visualization_document(document_id)
+    else {
         return PaneMenu::default();
     };
     let Some((position, page_panes)) = page_order(document, pane_id) else {

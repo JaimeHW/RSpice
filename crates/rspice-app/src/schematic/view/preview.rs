@@ -17,7 +17,7 @@ use std::sync::Arc;
 pub(super) fn preview_view(state: &AppState) -> PreviewView<'_> {
     PreviewView {
         design: super::schematic_design_view(state),
-        editor: &state.schematic.session.editor,
+        editor: &state.model.schematic.session.editor,
         can_edit: !state.schematic_edit_read_only(),
     }
 }
@@ -75,7 +75,7 @@ pub(super) fn draw_interaction_previews(
     preview::draw_junction_preview(painter, response, &view, viewport);
     preview::draw_net_label_preview(painter, response, &view, viewport, symbol_context);
     preview::draw_design_note_preview(painter, response, &view, viewport, || {
-        state.workspace.content.active_view.display_path()
+        state.model.workspace.content.active_view.display_path()
     });
     preview::draw_documentation_shape_preview(painter, response, &view, viewport);
     preview::draw_component_preview(
@@ -94,6 +94,7 @@ pub(super) fn draw_interaction_previews(
 /// Show the next sequenced placement and the model's current refusal, if any.
 fn draw_placement_badge(painter: &Painter, response: &Response, state: &AppState) {
     let Some(sequence) = state
+        .model
         .schematic
         .session
         .editor
@@ -108,10 +109,10 @@ fn draw_placement_badge(painter: &Painter, response: &Response, state: &AppState
     let palette = crate::ui::tokens::active_palette();
     let refusal = sequence
         .next_placement(
-            state.schematic.topology_version(),
-            state.schematic.next_interface_order(),
+            state.model.schematic.topology_version(),
+            state.model.schematic.next_interface_order(),
         )
-        .and_then(|pending| state.schematic.validate_pending_port(&pending).err());
+        .and_then(|pending| state.model.schematic.validate_pending_port(&pending).err());
     let (label, color) = match refusal {
         None => (
             format!("{name}  {}/{}", sequence.position(), sequence.total),
@@ -131,7 +132,7 @@ fn draw_move_selection_preview(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     if state.schematic_edit_read_only()
-        || state.schematic.session.editor.tool != Tool::MoveSelection
+        || state.model.schematic.session.editor.tool != Tool::MoveSelection
         || !state.dialogs.move_selection.armed
     {
         return;
@@ -161,7 +162,7 @@ fn draw_move_selection_preview(
             &preview_view(state),
             diff,
             &transform_preview_style(state, symbol_context, symbol_library),
-            || state.workspace.content.active_view.display_path(),
+            || state.model.workspace.content.active_view.display_path(),
         );
     }
 
@@ -184,7 +185,7 @@ fn draw_stretch_selection_preview(
     symbol_context: &SchematicSymbolContext,
 ) {
     if state.schematic_edit_read_only()
-        || state.schematic.session.editor.tool != Tool::StretchSelection
+        || state.model.schematic.session.editor.tool != Tool::StretchSelection
         || !state.dialogs.stretch_selection.armed
     {
         return;
@@ -249,8 +250,8 @@ pub(super) fn drawing_inputs(
 ) -> DrawingInputs {
     let catalog = super::sheet_visibility::active_sheet_catalog(state);
     DrawingInputs {
-        topology_version: state.schematic.topology_version(),
-        content_version: state.schematic.content_version(),
+        topology_version: state.model.schematic.topology_version(),
+        content_version: state.model.schematic.content_version(),
         symbol_revision: symbol_context.revision(),
         active_sheet: catalog.and_then(crate::state::SheetCatalog::active_sheet_id),
         sheet_catalog_revision: catalog.map(crate::state::SheetCatalog::revision),
@@ -263,11 +264,18 @@ fn held_transform_preview(
     key: TransformPreviewKey,
     compute: impl FnOnce(&AppState) -> TransformPreviewOutcome,
 ) -> TransformPreviewOutcome {
-    if let Some(outcome) = state.schematic.session.transform_preview.current(&key) {
+    if let Some(outcome) = state
+        .model
+        .schematic
+        .session
+        .transform_preview
+        .current(&key)
+    {
         return outcome;
     }
     let outcome = compute(state);
     state
+        .model
         .schematic
         .session
         .transform_preview
@@ -286,14 +294,14 @@ pub(super) fn move_preview_diff(
     let key = TransformPreviewKey::Move {
         delta,
         mode,
-        selection: Box::new(state.schematic.session.editor.selection.clone()),
+        selection: Box::new(state.model.schematic.session.editor.selection.clone()),
         drawing: drawing_inputs(state, symbol_context),
     };
     held_transform_preview(state, key, |state| {
         let (candidate, result) = move_preview_candidate(state, symbol_context, delta, mode);
         match result {
             Ok(true) => Ok(Some(Arc::new(preview::TransformCandidateDiff::between(
-                state.schematic.document(),
+                state.model.schematic.document(),
                 candidate.document(),
             )))),
             Ok(false) => Ok(None),
@@ -320,7 +328,7 @@ pub(super) fn stretch_preview_diff(
     held_transform_preview(state, key, |state| {
         match stretch_preview_candidate(state, symbol_context, delta, target, policy) {
             Ok(Some(candidate)) => Ok(Some(Arc::new(preview::TransformCandidateDiff::between(
-                state.schematic.document(),
+                state.model.schematic.document(),
                 &candidate,
             )))),
             Ok(None) => Ok(None),
@@ -339,9 +347,9 @@ pub(super) fn move_preview_candidate(
     crate::state::SchematicState,
     Result<bool, rspice_design::schematic::movement::MoveSelectionError>,
 ) {
-    let mut candidate = state.schematic.clone();
+    let mut candidate = state.model.schematic.clone();
     let result = super::sheet_visibility::with_active_wire_topology_in(
-        &state.workspace,
+        &state.model.workspace,
         &mut candidate,
         |candidate, scope| {
             candidate.move_selection_with_mode_resolved(
@@ -366,13 +374,13 @@ pub(super) fn stretch_preview_candidate(
     Option<rspice_design::schematic::document::SchematicDocument>,
     rspice_design::schematic::stretch::StretchSelectionError,
 > {
-    state.schematic.preview_stretch_target_resolved(
+    state.model.schematic.preview_stretch_target_resolved(
         delta,
         target,
         policy,
         |component| symbol_context.terminal_points(component),
         |component| symbol_context.component_bounds_tuple(component),
-        super::sheet_visibility::off_active_sheet(&state.workspace),
+        super::sheet_visibility::off_active_sheet(&state.model.workspace),
     )
 }
 
@@ -385,7 +393,7 @@ fn draw_array_selection_preview(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     if state.schematic_edit_read_only()
-        || state.schematic.session.editor.tool != Tool::ArraySelection
+        || state.model.schematic.session.editor.tool != Tool::ArraySelection
         || !state.dialogs.array_selection.armed
     {
         return;
@@ -415,9 +423,9 @@ fn draw_array_selection_preview(
             return;
         }
     };
-    let library_revision = state.library_manager.revision();
+    let library_revision = state.model.library_manager.revision();
     let symbol_revision = symbol_context.revision();
-    let identity_cursor = state.schematic.identity_cursor();
+    let identity_cursor = state.model.schematic.identity_cursor();
     let mut cache = state.dialogs.array_selection.preview_cache.take();
     let cache_matches = cache.as_ref().is_some_and(|cached| {
         cached.plan == plan
@@ -427,6 +435,7 @@ fn draw_array_selection_preview(
     });
     if !cache_matches {
         let preview = state
+            .model
             .schematic
             .preview_array_selection_resolved(
                 &plan,
@@ -464,7 +473,7 @@ fn draw_array_selection_preview(
         &preview_view(state),
         preview,
         &transform_preview_style(state, symbol_context, symbol_library),
-        || state.workspace.content.active_view.display_path(),
+        || state.model.workspace.content.active_view.display_path(),
     );
 
     let impact = preview.impact();
@@ -489,14 +498,15 @@ fn draw_bus_preview(
     viewport: &Viewport,
 ) {
     if state.schematic_edit_read_only()
-        || state.schematic.session.editor.tool != Tool::Bus
-        || !state.schematic.session.editor.bus_drawing.active
+        || state.model.schematic.session.editor.tool != Tool::Bus
+        || !state.model.schematic.session.editor.bus_drawing.active
     {
         return;
     }
     if let Some(hover) = response.hover_pos() {
         let position = resolve_grid_pointer(state, viewport, hover).snapped_position;
         state
+            .model
             .schematic
             .session
             .editor
@@ -517,7 +527,7 @@ fn draw_wire_preview(
     if state.schematic_edit_read_only() {
         return;
     }
-    let wire_active = state.schematic.session.editor.wire_drawing.active;
+    let wire_active = state.model.schematic.session.editor.wire_drawing.active;
 
     let snap_feedback = if wire_active {
         response.hover_pos().and_then(|hover_pos| {
@@ -529,13 +539,20 @@ fn draw_wire_preview(
             );
             if let Some(result) = result.as_ref() {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
                     .wire_drawing
                     .update_preview(result.snapped_position);
             } else {
-                state.schematic.session.editor.wire_drawing.preview_pos = None;
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .wire_drawing
+                    .preview_pos = None;
             }
             result
         })
@@ -572,8 +589,8 @@ pub(super) fn draw_shelf_drag_preview(
         symbol_library,
         |binding| {
             SymbolResolver::new(
-                &state.library_manager,
-                &state.workspace.content.schematic_buffers,
+                &state.model.library_manager,
+                &state.model.workspace.content.schematic_buffers,
             )
             .resolve_binding(binding)
         },
@@ -590,7 +607,7 @@ mod tests {
     /// wire off its terminal that a stretch can take.
     fn movable_state() -> AppState {
         let mut state = super::super::sheet_visibility::two_sheet_state(&[1, 2, 3], &[4]);
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components.push(crate::state::Component::new(
             1,
             ComponentType::Resistor,
@@ -610,8 +627,14 @@ mod tests {
                 Point::new(60, 100),
             ],
         ));
-        state.schematic.bump_topology_version();
-        state.schematic.session.editor.selection.select_component(1);
+        state.model.schematic.bump_topology_version();
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
         state
     }
 
@@ -654,23 +677,38 @@ mod tests {
         type Change = (&'static str, fn(&mut AppState));
         let changes: [Change; 5] = [
             ("selection", |state| {
-                state.schematic.session.editor.selection.select_component(2);
+                state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .select_component(2);
             }),
-            ("topology", |state| state.schematic.bump_topology_version()),
+            ("topology", |state| {
+                state.model.schematic.bump_topology_version()
+            }),
             ("committed content", |state| {
-                state.schematic.init_undo_history();
-                state.schematic.begin_operation("rename");
-                state.schematic.document_mut_for_test().components[1].name = "R9".to_owned();
-                assert!(state.schematic.end_operation());
+                state.model.schematic.init_undo_history();
+                state.model.schematic.begin_operation("rename");
+                state.model.schematic.document_mut_for_test().components[1].name = "R9".to_owned();
+                assert!(state.model.schematic.end_operation());
             }),
             ("symbols", |state| {
                 state
+                    .model
                     .library_manager
                     .add_library(crate::state::Library::new("other"));
             }),
             ("sheet assignment", |state| {
-                let key = state.workspace.content.active_schematic_reference().key();
+                let key = state
+                    .model
+                    .workspace
+                    .content
+                    .active_schematic_reference()
+                    .key();
                 let catalog = state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -698,14 +736,16 @@ mod tests {
     #[test]
     fn the_stretch_preview_is_held_until_an_input_changes() {
         let mut state = movable_state();
-        state.schematic.session.editor.selection.clear();
+        state.model.schematic.session.editor.selection.clear();
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_wire_segment(3, 1);
         let target = state
+            .model
             .schematic
             .default_stretch_target()
             .expect("a segment to stretch");
@@ -719,7 +759,7 @@ mod tests {
         assert_eq!(
             *first,
             preview::TransformCandidateDiff::between(
-                state.schematic.document(),
+                state.model.schematic.document(),
                 &stretch_preview_candidate(&state, &symbols, Point::new(0, 20), target, policy)
                     .expect("valid stretch")
                     .expect("it changes the wire"),
@@ -727,7 +767,7 @@ mod tests {
         );
         assert!(!Arc::ptr_eq(&first, &diff(&mut state, Point::new(0, 40))));
         let held = diff(&mut state, Point::new(0, 40));
-        state.schematic.bump_topology_version();
+        state.model.schematic.bump_topology_version();
         assert!(!Arc::ptr_eq(&held, &diff(&mut state, Point::new(0, 40))));
     }
 
@@ -739,16 +779,21 @@ mod tests {
             name: "IN".to_string(),
             direction: crate::state::PortDirection::In,
         }]);
-        state.schematic.document_mut_for_test().components.push(
-            crate::state::Component::new(
-                1,
-                ComponentType::CellInstance,
-                crate::state::Point::new(40, 40),
-            )
-            .with_library_cell(binding),
-        );
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .push(
+                crate::state::Component::new(
+                    1,
+                    ComponentType::CellInstance,
+                    crate::state::Point::new(40, 40),
+                )
+                .with_library_cell(binding),
+            );
         let symbol_context = crate::schematic::view::schematic_symbol_context(&state);
-        let component = &state.schematic.document().components[0];
+        let component = &state.model.schematic.document().components[0];
         let terminal =
             component.terminal_positions_resolved(symbol_context.resolved_symbol(component))[0].1;
         let near_terminal = crate::state::Point::new(terminal.x + 1, terminal.y);
@@ -793,25 +838,25 @@ mod tests {
         .expect("symbol stores");
         cell.add_view(symbol_view);
         library.add_cell(cell);
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
 
         let mut binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
         binding.bind_interface(&[crate::state::PortSpec {
             name: "OUT".to_owned(),
             direction: crate::state::PortDirection::Out,
         }]);
-        state.schematic.session.editor.pending_library_cell = Some(
+        state.model.schematic.session.editor.pending_library_cell = Some(
             rspice_schematic_editor::session::placement::PendingLibraryCellPlacement::new(
                 binding,
                 crate::workbench::app::schematic_editor_request_source(&state),
             ),
         );
-        state.schematic.session.editor.preview_rotation = crate::state::Rotation::R90;
-        state.schematic.session.editor.preview_mirror_h = true;
+        state.model.schematic.session.editor.preview_rotation = crate::state::Rotation::R90;
+        state.model.schematic.session.editor.preview_mirror_h = true;
         let context = schematic_symbol_context(&state);
 
         let component = preview::pending_library_cell_component(
-            &state.schematic.session.editor,
+            &state.model.schematic.session.editor,
             Point::new(100, 50),
         )
         .expect("pending component");

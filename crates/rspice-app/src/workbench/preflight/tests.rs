@@ -49,7 +49,7 @@ fn prepared_contract() -> PreparedPreflightContract {
 }
 
 fn disable_global_process_axis(state: &mut AppState) {
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind
             == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
         {
@@ -61,7 +61,7 @@ fn disable_global_process_axis(state: &mut AppState) {
 #[test]
 fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     let mut app = RSpiceApp::test_instance();
-    app.state.schematic = crate::state::SchematicState::default();
+    app.state.model.schematic = crate::state::SchematicState::default();
     // A filter left from earlier reading, narrowing the page to nothing the
     // pass will file.
     app.state.problems_view.text = "no blocker says this".to_owned();
@@ -80,7 +80,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     start(&mut app.state, &mut app.simulation_controller, true);
     app.settle_preflight();
 
-    assert!(!app.state.simulation.execution.trigger_simulation);
+    assert!(!app.state.model.simulation.execution.trigger_simulation);
     let report = app
         .state
         .workbench
@@ -95,6 +95,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     // than in a modal over the design.
     let outcome = app
         .state
+        .model
         .log_buffer
         .entries()
         .filter(|entry| entry.message.starts_with("Preflight blocked"))
@@ -150,6 +151,7 @@ fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
 
     let outcome = app
         .state
+        .model
         .log_buffer
         .entries()
         .filter(|entry| entry.message.starts_with("Preflight"))
@@ -182,7 +184,7 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
         app.state.configured_topology_revision();
     let current_plan = app.state.active_plan_revision();
     app.state.workbench.preflight.report = Some(PreflightReport {
-        project_revision: app.state.workspace.content.project.revision().get(),
+        project_revision: app.state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
         topology_closure,
@@ -194,7 +196,7 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
     });
 
     assert!(queue_retained_run(&mut app.state));
-    assert!(app.state.simulation.execution.trigger_simulation);
+    assert!(app.state.model.simulation.execution.trigger_simulation);
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
 }
 
@@ -202,8 +204,9 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
 fn report_collects_all_independent_blocker_classes() {
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
-    state.schematic = crate::state::SchematicState::default();
+    state.model.schematic = crate::state::SchematicState::default();
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -217,7 +220,7 @@ fn report_collects_all_independent_blocker_classes() {
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
 
     assert!(!report.is_runnable_for(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -257,6 +260,7 @@ fn a_non_typical_reference_process_is_the_only_row_that_owns_the_missing_section
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
     state
+        .model
         .sim_setup
         .set_reference_pvt(crate::product::ProcessCorner::SS, 27.0)
         .expect("the reference point is valid");
@@ -292,7 +296,7 @@ fn a_non_typical_reference_process_is_the_only_row_that_owns_the_missing_section
 #[test]
 fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let mut library = crate::state::model_library::ModelLibrary::new("pdk");
     let mut corner = crate::state::model_library::ProcessCorner::new("hot");
     corner.minimum_temperature_c = Some(-40.0);
@@ -300,16 +304,16 @@ fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
     library.corners.clear();
     library.corners.insert("hot".to_owned(), corner);
     library.selected_corner = Some("hot".to_owned());
-    state.model_library_manager.add_library(library);
+    state.model.model_library_manager.add_library(library);
 
     // The reference point is inside the range, so nothing is said.
-    state.sim_setup.reference_pvt.temperature_celsius = 27.0;
+    state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
     assert!(
         temperature_validity_advisories(&state).is_empty(),
         "a corner that covers the run set is silent"
     );
 
-    state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+    state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
     let advisories = temperature_validity_advisories(&state);
     assert_eq!(advisories.len(), 1);
     assert!(
@@ -329,11 +333,11 @@ fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
     );
 
     // The endpoint itself is qualified, which is the rule the corner owns.
-    state.sim_setup.reference_pvt.temperature_celsius = 125.0;
+    state.model.sim_setup.reference_pvt.temperature_celsius = 125.0;
     assert!(temperature_validity_advisories(&state).is_empty());
 
     // And it is an advisory: the report it lands in blocks on nothing.
-    state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+    state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
     let report = collect_report(&state);
     assert!(
         report
@@ -357,7 +361,7 @@ fn a_run_outside_a_corner_s_qualified_range_advises_rather_than_blocks() {
 #[test]
 fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections() {
     let mut state = AppState::default();
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         match dimension.kind {
             rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection => {
                 dimension.enabled = true;
@@ -372,6 +376,7 @@ fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections() {
         }
     }
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("a default state owns a stable plan");
@@ -406,13 +411,15 @@ fn an_unaudited_technology_binding_blocks_on_reattachment_without_faking_drift()
     state.provision_test_project_technology_contract();
     // A project copy retains the exact binding and starts a fresh audit
     // history, which is precisely the binding-without-receipts state.
-    state.workspace.content.project = state
+    state.model.workspace.content.project = state
+        .model
         .workspace
         .content
         .project
         .fork_copy_at(std::path::PathBuf::from("preflight_copy.rspiceproj"));
     assert!(
         state
+            .model
             .workspace
             .content
             .project
@@ -421,6 +428,7 @@ fn an_unaudited_technology_binding_blocks_on_reattachment_without_faking_drift()
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .project
@@ -491,7 +499,7 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
 
     assert_eq!(
         report.project_revision,
-        state.workspace.content.project.revision().get()
+        state.model.workspace.content.project.revision().get()
     );
     let (plan_id, plan_revision) = state.active_plan_revision().expect("active plan");
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
@@ -501,7 +509,7 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
     assert_eq!(report.simulation_plan_id, Some(plan_id));
     assert_eq!(report.simulation_plan_revision, Some(plan_revision));
     assert!(report.is_current_for(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -509,19 +517,21 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
     ));
 
     let transient_id = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .instances()[0]
         .id();
     state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("stable plan")
         .edit(transient_id, |_| ())
         .expect("analysis edit advances the plan revision");
     assert!(!report.is_current_for(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
         &topology_closure,
@@ -532,9 +542,10 @@ fn report_is_bound_to_the_exact_project_topology_and_plan_revision() {
 #[test]
 fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor() {
     let mut state = AppState::default();
-    let configured_root = state.workspace.content.simulation_root_reference();
+    let configured_root = state.model.workspace.content.simulation_root_reference();
     let configured_root_key = configured_root.key();
     let mut stored_configured_schematic = state
+        .model
         .workspace
         .schematic_editor_mut(&configured_root_key)
         .expect("default configured root buffer");
@@ -546,10 +557,10 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
     let configured_revision = configured_schematic.topology_version();
     drop(stored_configured_schematic);
 
-    state.workspace.content.active_view =
+    state.model.workspace.content.active_view =
         crate::state::CellViewRef::new("user", "unrelated_editor", "schematic");
-    state.schematic = crate::state::SchematicState::default();
-    state.schematic.add_component(
+    state.model.schematic = crate::state::SchematicState::default();
+    state.model.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::new(80, 80),
     );
@@ -558,13 +569,13 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
     assert_eq!(report.topology_root, configured_root_key);
     assert_eq!(report.topology_revision, configured_revision);
 
-    state.schematic.add_component(
+    state.model.schematic.add_component(
         crate::state::ComponentType::Capacitor,
         crate::state::Point::new(120, 80),
     );
     let (live_root, live_revision, live_closure) = state.configured_topology_revision();
     assert!(report.is_current_for(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         &live_root,
         live_revision,
         &live_closure,
@@ -576,7 +587,7 @@ fn report_currentness_tracks_the_configured_root_not_an_unrelated_active_editor(
 fn report_currentness_expires_when_a_referenced_child_topology_changes() {
     let mut state = AppState::default();
     let child = crate::state::CellViewRef::new("user", "child", "schematic");
-    state.schematic.add_library_cell_component(
+    state.model.schematic.add_library_cell_component(
         crate::state::Point::new(40, 40),
         crate::state::LibraryCellInstance::new("user", "child", "schematic"),
     );
@@ -586,6 +597,7 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
         crate::state::Point::new(20, 20),
     );
     state
+        .model
         .workspace
         .insert_schematic_editor(child.key(), child_schematic.clone());
 
@@ -602,20 +614,20 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
     // before activating the child view. Mirror that contract explicitly;
     // otherwise this synthetic state would replace the edited root with
     // the stale default buffer and test a transition the UI cannot make.
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         crate::state::CellViewRef::default_top().key(),
-        state.schematic.clone(),
+        state.model.schematic.clone(),
     );
-    state.workspace.content.active_view = child;
-    state.schematic = child_schematic;
-    state.schematic.add_component(
+    state.model.workspace.content.active_view = child;
+    state.model.schematic = child_schematic;
+    state.model.schematic.add_component(
         crate::state::ComponentType::Resistor,
         crate::state::Point::new(80, 20),
     );
     let (live_root, live_revision, live_closure) = state.configured_topology_revision();
     assert_eq!(live_revision, root_revision);
     assert!(!report.is_current_for(
-        state.workspace.content.project.revision().get(),
+        state.model.workspace.content.project.revision().get(),
         &live_root,
         live_revision,
         &live_closure,
@@ -626,12 +638,13 @@ fn report_currentness_expires_when_a_referenced_child_topology_changes() {
 #[test]
 fn unresolved_hierarchy_is_an_ordered_preflight_blocker() {
     let mut state = AppState::default();
-    state.schematic.add_library_cell_component(
+    state.model.schematic.add_library_cell_component(
         crate::state::Point::new(20, 20),
         crate::state::LibraryCellInstance::new("missing_library", "missing_master", "schematic"),
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -673,16 +686,25 @@ fn app_with_an_open_root(
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     disable_global_process_axis(&mut app.state);
-    let root = app.state.workspace.content.simulation_root_reference();
+    let root = app
+        .state
+        .model
+        .workspace
+        .content
+        .simulation_root_reference();
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         root,
         "the fixture draws in the open root"
     );
     for &(kind, at) in components {
-        app.state.schematic.add_component(kind, at);
+        app.state.model.schematic.add_component(kind, at);
     }
-    let document = app.state.schematic.document_mut_for_test();
+    let document = app.state.model.schematic.document_mut_for_test();
     for (id, &(from, to)) in (1001..).zip(wires) {
         document.wires.push(Wire::segment(id, from, to));
     }
@@ -692,6 +714,7 @@ fn app_with_an_open_root(
     if operating_point {
         let plan = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("a default state owns a stable plan");
@@ -783,12 +806,22 @@ fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
     apply_remediation(&mut app, remediation);
 
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         root
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(
-        app.state.schematic.session.editor.selection.has_wire(wire),
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_wire(wire),
         "following the finding selects the wire that draws OUT"
     );
 }
@@ -814,10 +847,11 @@ fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
 
     let options = crate::simulation::dialog::SimulationOptions {
         rshunt: Some(1.0e9),
-        ..app.state.sim_setup.options.clone()
+        ..app.state.model.sim_setup.options.clone()
     };
-    app.state.sim_setup.commit_options(&options);
+    app.state.model.sim_setup.commit_options(&options);
     app.state
+        .model
         .sim_setup
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .expect("the plan takes the shunt");
@@ -873,9 +907,10 @@ fn stop_during_the_engine_pass_authorizes_and_queues_nothing() {
 
     assert!(app.state.workbench.preflight.checking.is_none());
     assert!(app.state.workbench.preflight.report.is_none());
-    assert!(!app.state.simulation.execution.trigger_simulation);
+    assert!(!app.state.model.simulation.execution.trigger_simulation);
     assert!(
         app.state
+            .model
             .log_buffer
             .entries()
             .any(|entry| entry.message.starts_with("Preflight cancelled")),
@@ -1122,7 +1157,7 @@ fn state_with_a_stop_view_warning() -> AppState {
         crate::state::ViewType::Schematic,
     ));
     work.add_cell(amp);
-    state.library_manager.add_library(work);
+    state.model.library_manager.add_library(work);
 
     let mut master = crate::state::SchematicState::default();
     master.add_component(
@@ -1130,14 +1165,17 @@ fn state_with_a_stop_view_warning() -> AppState {
         crate::state::Point::new(30, 0),
     );
     state
+        .model
         .workspace
         .insert_schematic_editor("work/amp/schematic".to_owned(), master);
 
     let binding = crate::state::LibraryCellInstance::new("work", "amp", "schematic");
     let instance = state
+        .model
         .schematic
         .add_library_cell_component(crate::state::Point::new(100, 0), binding);
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1147,8 +1185,9 @@ fn state_with_a_stop_view_warning() -> AppState {
         .name = "X1".to_owned();
     state.sync_active_schematic_to_workspace();
 
-    let root = state.workspace.content.active_view.clone();
+    let root = state.model.workspace.content.active_view.clone();
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -1205,6 +1244,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
     let name = state
+        .model
         .model_library_manager
         .load_library_bytes(
             "reference-binding.lib",
@@ -1213,6 +1253,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
         )
         .expect("the fixture source parses");
     state
+        .model
         .model_library_manager
         .get_library_mut(&name)
         .expect("the fixture library is retained")
@@ -1221,6 +1262,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     // only by carrying a TT section, so the ambiguity this case is about has to
     // be built from a source that has one.
     state
+        .model
         .model_library_manager
         .load_library_bytes(
             "second-declarer.lib",
@@ -1249,6 +1291,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     );
     assert!(
         state
+            .model
             .model_library_manager
             .libraries_declaring_process(crate::product::ProcessCorner::TT)
             .len()
@@ -1273,8 +1316,9 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
 fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process() {
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     let name = state
+        .model
         .model_library_manager
         .load_library_bytes(
             "sole-tt.lib",
@@ -1283,6 +1327,7 @@ fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process()
         )
         .expect("the fixture source parses");
     state
+        .model
         .model_library_manager
         .get_library_mut(&name)
         .expect("the fixture library is retained")
@@ -1301,14 +1346,18 @@ fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process()
     );
 
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager = state.model_library_manager.clone();
+    app.state.model.model_library_manager = state.model.model_library_manager.clone();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
     assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
     assert_eq!(
-        app.state.model_library_manager.selected_library.as_deref(),
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
         Some(name.as_str()),
         "the page must arrive on the library that declares the reference process"
     );
@@ -1326,9 +1375,10 @@ fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process()
 fn a_model_binding_blocker_with_no_single_library_names_what_to_select() {
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     for source in ["first-tt.lib", "second-tt.lib"] {
         let name = state
+            .model
             .model_library_manager
             .load_library_bytes(
                 source,
@@ -1337,6 +1387,7 @@ fn a_model_binding_blocker_with_no_single_library_names_what_to_select() {
             )
             .expect("the fixture source parses");
         state
+            .model
             .model_library_manager
             .get_library_mut(&name)
             .expect("the fixture library is retained")
@@ -1369,8 +1420,9 @@ fn a_model_binding_blocker_with_no_single_library_names_what_to_select() {
 fn a_models_route_to_a_departed_library_states_its_refusal() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     app.state
+        .model
         .model_library_manager
         .add_library(crate::state::model_library::ModelLibrary::new("still here"));
     app.state
@@ -1384,7 +1436,11 @@ fn a_models_route_to_a_departed_library_states_its_refusal() {
     );
 
     assert_eq!(
-        app.state.model_library_manager.selected_library.as_deref(),
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
         Some("still here"),
         "a refused selection leaves the previous one alone"
     );
@@ -1411,7 +1467,7 @@ fn a_models_route_to_a_departed_library_states_its_refusal() {
 fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     let mut library = crate::state::model_library::ModelLibrary::new("pdk");
     let mut corner = crate::state::model_library::ProcessCorner::new("hot");
     corner.minimum_temperature_c = Some(-40.0);
@@ -1419,15 +1475,17 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     library.corners.clear();
     library.corners.insert("hot".to_owned(), corner);
     library.selected_corner = Some("hot".to_owned());
-    app.state.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.add_library(library);
     app.state
+        .model
         .model_library_manager
         .add_library(crate::state::model_library::ModelLibrary::new("other"));
     app.state
+        .model
         .model_library_manager
         .select_library("other")
         .expect("the fixture library is loaded");
-    app.state.sim_setup.reference_pvt.temperature_celsius = 150.0;
+    app.state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
 
     let advisories = temperature_validity_advisories(&app.state);
     let remediation = advisories[0]
@@ -1440,7 +1498,11 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
     assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
     assert_eq!(
-        app.state.model_library_manager.selected_library.as_deref(),
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
         Some("pdk"),
         "the page must arrive on the library the advisory named"
     );
@@ -1516,6 +1578,7 @@ fn app_with_an_unfinished_transient_beside_a_selected_operating_point() -> (
     app.state.open_project_session();
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("a default state owns a stable plan");
@@ -1615,17 +1678,24 @@ fn app_with_a_failing_root_and_an_unrelated_open_view() -> (RSpiceApp, crate::st
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    let root = app.state.workspace.content.simulation_root_reference();
+    let root = app
+        .state
+        .model
+        .workspace
+        .content
+        .simulation_root_reference();
     app.state
+        .model
         .workspace
         .schematic_editor_mut(&root.key())
         .expect("default configured root buffer")
         .editor
         .add_component(ComponentType::Resistor, Point::new(40, 40));
-    app.state.workspace.content.active_view =
+    app.state.model.workspace.content.active_view =
         CellViewRef::new("user", "unrelated_editor", "schematic");
-    app.state.schematic = SchematicState::default();
+    app.state.model.schematic = SchematicState::default();
     app.state
+        .model
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(80, 80));
     (app, root)
@@ -1641,13 +1711,14 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
     use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
 
     let (mut app, root) = app_with_a_failing_root_and_an_unrelated_open_view();
-    let open_view = app.state.workspace.content.active_view.clone();
+    let open_view = app.state.model.workspace.content.active_view.clone();
 
     start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
 
     let rules = app
         .state
+        .model
         .diagnostics
         .batches()
         .find(|batch| {
@@ -1665,7 +1736,7 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
         .count();
     assert!(errors > 0, "an ungrounded root is an error: {rules:?}");
     assert!(
-        !app.state.diagnostics.batches().any(|batch| {
+        !app.state.model.diagnostics.batches().any(|batch| {
             batch.inputs
                 == DiagnosticInputs::DesignCheck {
                     subject: open_view.clone(),
@@ -1749,6 +1820,7 @@ fn invalidating_the_report_stales_the_findings_it_published() {
     app.settle_preflight();
     let dispatch = app
         .state
+        .model
         .diagnostics
         .batches()
         .find(|batch| batch.inputs.owner() == DiagnosticOwner::Dispatch)
@@ -1782,15 +1854,15 @@ fn the_design_rule_blocker_opens_the_findings_without_re_running_them() {
         .worst_design_rule_finding(&root)
         .expect("the root's findings are published");
     let published = app.state.design_rule_finding_identities(&root);
-    let entries_before = app.state.log_buffer.entries().count();
+    let entries_before = app.state.model.log_buffer.entries().count();
 
     apply_remediation(&mut app, PreflightRemediation::DesignChecks);
 
-    assert_eq!(app.state.workspace.content.active_view, root);
+    assert_eq!(app.state.model.workspace.content.active_view, root);
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert!(app.state.workbench.console_visible);
     assert_eq!(app.state.workbench.console_page, ConsolePage::Problems);
-    assert_eq!(app.state.diagnostics.current_finding(), Some(worst));
+    assert_eq!(app.state.model.diagnostics.current_finding(), Some(worst));
     assert_eq!(
         app.state.design_rule_finding_identities(&root),
         published,
@@ -1798,6 +1870,7 @@ fn the_design_rule_blocker_opens_the_findings_without_re_running_them() {
     );
     assert!(
         !app.state
+            .model
             .log_buffer
             .entries()
             .skip(entries_before)

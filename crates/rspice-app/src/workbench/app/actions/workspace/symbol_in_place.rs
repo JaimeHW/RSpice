@@ -69,12 +69,13 @@ impl AppState {
         &self,
     ) -> Result<(u64, CellViewRef), SymbolInPlaceRefusal> {
         if !matches!(
-            self.workspace.content.active_view_type(),
+            self.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         ) {
             return Err(SymbolInPlaceRefusal::NotSchematic);
         }
         let id = self
+            .model
             .schematic
             .session
             .editor
@@ -92,6 +93,7 @@ impl AppState {
     ) -> Result<CellViewRef, SymbolInPlaceRefusal> {
         use SymbolInPlaceRefusal as Refusal;
         let component = self
+            .model
             .schematic
             .document()
             .components
@@ -109,6 +111,7 @@ impl AppState {
             return Err(Refusal::BuiltInXspiceSymbol);
         }
         let library = self
+            .model
             .library_manager
             .get_library(&binding.library)
             .ok_or(Refusal::CellNotLoaded)?;
@@ -160,11 +163,11 @@ impl AppState {
             .symbol
             .in_place
             .as_deref()
-            .filter(|session| session.symbol == self.workspace.content.active_view)
+            .filter(|session| session.symbol == self.model.workspace.content.active_view)
     }
 
     pub(crate) fn symbol_in_place_mut(&mut self) -> Option<&mut SymbolInPlace> {
-        let active = &self.workspace.content.active_view;
+        let active = &self.model.workspace.content.active_view;
         self.ui
             .symbol
             .in_place
@@ -178,6 +181,7 @@ impl AppState {
     pub(crate) fn symbol_in_place_placement(&self) -> Option<SymbolPlacement> {
         let session = self.symbol_in_place()?;
         let parent = self
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -234,6 +238,7 @@ impl AppState {
 
     fn edit_symbol_in_place(&mut self, instance_id: u64, symbol: CellViewRef) -> bool {
         let Some(instance_name) = self
+            .model
             .schematic
             .document()
             .components
@@ -253,19 +258,20 @@ impl AppState {
                 return false;
             }
         };
-        let parent = self.workspace.content.active_view.clone();
+        let parent = self.model.workspace.content.active_view.clone();
         let (pan, zoom) = (
-            self.schematic.session.editor.pan,
-            self.schematic.session.editor.zoom,
+            self.model.schematic.session.editor.pan,
+            self.model.schematic.session.editor.zoom,
         );
         let symbol_was_open = self
+            .model
             .workspace
             .content
             .open_views
             .iter()
             .any(|open| open.reference == symbol);
         self.open_workspace_view(symbol.clone());
-        if self.workspace.content.active_view != symbol {
+        if self.model.workspace.content.active_view != symbol {
             // An inspector edit that could not be committed kept the parent.
             return false;
         }
@@ -448,20 +454,20 @@ impl AppState {
             return;
         };
         self.open_workspace_view(session.parent.clone());
-        if self.workspace.content.active_view != session.parent {
+        if self.model.workspace.content.active_view != session.parent {
             self.ui.symbol.in_place = Some(session);
             return;
         }
         if !session.symbol_was_open {
-            self.workspace.content.close_view(&session.symbol);
+            self.model.workspace.content.close_view(&session.symbol);
         }
-        let editor = &mut self.schematic.session.editor;
+        let editor = &mut self.model.schematic.session.editor;
         editor.pan = session.pan;
         editor.zoom = session.zoom;
         editor.selection.select_only_component(session.instance_id);
         match exit {
             SymbolInPlaceExit::Level(level)
-                if level + 1 < self.workspace.content.occurrence_depth() =>
+                if level + 1 < self.model.workspace.content.occurrence_depth() =>
             {
                 self.focus_workspace_breadcrumb(level);
             }

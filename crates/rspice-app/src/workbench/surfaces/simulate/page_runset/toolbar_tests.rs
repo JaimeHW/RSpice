@@ -30,7 +30,7 @@ impl Fixture {
             RunSetAction::AddDimension(RunSetDimensionKind::Parameter),
         );
         commit(&mut app, RunSetAction::Undo);
-        app.state.sim_setup.run_set.revision = revision;
+        app.state.model.sim_setup.run_set.revision = revision;
         let mut fixture = Self {
             app,
             ctx,
@@ -190,20 +190,20 @@ fn run_set_toolbar_keeps_status_and_every_control_inside_separate_bounds() {
 fn run_set_toolbar_pointer_actions_reach_their_own_controls_at_narrow_widths() {
     for width in [280.0, 560.0] {
         let mut fixture = Fixture::new(width, true, 3);
-        let dimensions = fixture.app.state.sim_setup.run_set.dimensions.len();
+        let dimensions = fixture.app.state.model.sim_setup.run_set.dimensions.len();
         fixture.click("Undo");
         assert_eq!(
-            fixture.app.state.sim_setup.run_set.dimensions.len(),
+            fixture.app.state.model.sim_setup.run_set.dimensions.len(),
             dimensions - 1
         );
         fixture.click("Redo");
         assert_eq!(
-            fixture.app.state.sim_setup.run_set.dimensions.len(),
+            fixture.app.state.model.sim_setup.run_set.dimensions.len(),
             dimensions
         );
-        let receipts = fixture.app.state.sim_setup.run_set.receipts.len();
+        let receipts = fixture.app.state.model.sim_setup.run_set.receipts.len();
         fixture.click("Validate and preview");
-        assert!(fixture.app.state.sim_setup.run_set.receipts.len() > receipts);
+        assert!(fixture.app.state.model.sim_setup.run_set.receipts.len() > receipts);
         fixture.click("Add dimension");
         fixture.frame(vec![]);
         let choice = fixture
@@ -214,7 +214,7 @@ fn run_set_toolbar_pointer_actions_reach_their_own_controls_at_narrow_widths() {
         assert!(choice.1.height() >= 44.0);
         fixture.click("Design parameter");
         assert_eq!(
-            fixture.app.state.sim_setup.run_set.dimensions.len(),
+            fixture.app.state.model.sim_setup.run_set.dimensions.len(),
             dimensions + 1
         );
     }

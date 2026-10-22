@@ -90,8 +90,11 @@ Rload out 0 {rload}\n\
 + 2000 1\n\
 .ENDDATA\n\
 .end\n";
-    let queue = build_manual_deck_queue(state.sim_setup.reference_pvt.temperature_celsius, source)
-        .expect("NOISE DATA queues");
+    let queue = build_manual_deck_queue(
+        state.model.sim_setup.reference_pvt.temperature_celsius,
+        source,
+    )
+    .expect("NOISE DATA queues");
     assert_eq!(queue.len(), 1);
     assert!(matches!(
         &queue[0].spec,
@@ -113,11 +116,14 @@ Rload out 0 {rload}\n\
 
 fn specs_for(source: &str) -> Vec<AnalysisSpec> {
     let state = AppState::default();
-    build_manual_deck_queue(state.sim_setup.reference_pvt.temperature_celsius, source)
-        .expect("manual deck queue")
-        .into_iter()
-        .map(|q| q.spec)
-        .collect()
+    build_manual_deck_queue(
+        state.model.sim_setup.reference_pvt.temperature_celsius,
+        source,
+    )
+    .expect("manual deck queue")
+    .into_iter()
+    .map(|q| q.spec)
+    .collect()
 }
 
 #[test]

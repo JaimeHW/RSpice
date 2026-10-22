@@ -81,7 +81,7 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
         return false;
     };
     let authority = SchematicEditAuthority::capture(state);
-    let parent_dirty = state.schematic.session.is_dirty;
+    let parent_dirty = state.model.schematic.session.is_dirty;
     let preferred_edit_mode = if state.hierarchical_edit_in_place_enabled() {
         HierarchyDescendEditMode::EditInPlace
     } else {
@@ -112,7 +112,7 @@ impl RSpiceApp {
             .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view))
             .unwrap_or_else(|| "Selection no longer resolves".to_owned());
         let instance = self.state.dialogs.descend_hierarchy.instance_name.clone();
-        let occurrence_path = descend_target_path(&self.state.workspace, &instance);
+        let occurrence_path = descend_target_path(&self.state.model.workspace, &instance);
         let choice = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::Transaction)
@@ -198,7 +198,11 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
         }
         HierarchyDescendEditMode::ReadOnlyReference => {
             state.open_workspace_view(reference);
-            state.workspace.content.set_active_read_only_reference(true);
+            state
+                .model
+                .workspace
+                .content
+                .set_active_read_only_reference(true);
         }
         HierarchyDescendEditMode::EditSymbolInPlace => {}
     }
@@ -453,13 +457,13 @@ mod tests {
 
     fn hierarchy_state() -> (AppState, CellViewRef, CellViewRef) {
         let mut state = AppState::default();
-        let parent = state.workspace.content.active_view.clone();
+        let parent = state.model.workspace.content.active_view.clone();
         let child = CellViewRef::new("hierarchy_test", "afe_core", "schematic");
         let mut cell = Cell::new("afe_core");
         cell.add_view(View::new("schematic", ViewType::Schematic));
         let mut library = Library::new("hierarchy_test");
         library.add_cell(cell);
-        state.library_manager.add_library(library);
+        state.model.library_manager.add_library(library);
 
         let mut instance = Component::new(91, ComponentType::CellInstance, Point::new(100, 100))
             .with_library_cell(LibraryCellInstance::new(
@@ -469,11 +473,13 @@ mod tests {
             ));
         instance.name = "XAFE".to_owned();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(instance);
         state
+            .model
             .schematic
             .session
             .editor
@@ -505,17 +511,18 @@ mod tests {
     #[test]
     fn the_target_row_names_the_occurrence_the_transaction_would_open() {
         let (mut state, _, child) = hierarchy_state();
-        assert_eq!(descend_target_path(&state.workspace, "XAFE"), "/XAFE");
+        assert_eq!(descend_target_path(&state.model.workspace, "XAFE"), "/XAFE");
 
         state
+            .model
             .workspace
             .descend_into("XAFE".to_owned(), child, ViewType::Schematic);
         assert_eq!(
-            descend_target_path(&state.workspace, "XBIAS"),
+            descend_target_path(&state.model.workspace, "XBIAS"),
             "/XAFE/XBIAS"
         );
         assert!(
-            descend_target_path(&state.workspace, "X BIAS").contains("X BIAS"),
+            descend_target_path(&state.model.workspace, "X BIAS").contains("X BIAS"),
             "an unspellable instance is reported, not silently truncated"
         );
     }
@@ -525,12 +532,12 @@ mod tests {
         let (mut state, parent, _) = hierarchy_state();
         assert!(open_descend_hierarchy_dialog(&mut state));
         assert!(state.dialogs.descend_hierarchy.open);
-        assert_eq!(state.workspace.content.active_view, parent);
+        assert_eq!(state.model.workspace.content.active_view, parent);
 
-        state.schematic.session.editor.selection.clear();
+        state.model.schematic.session.editor.selection.clear();
         let error = commit_descend_context(&mut state).expect_err("selection drift must block");
         assert!(error.contains("selected-object set changed"));
-        assert_eq!(state.workspace.content.active_view, parent);
+        assert_eq!(state.model.workspace.content.active_view, parent);
         assert!(state.dialogs.descend_hierarchy.open);
     }
 
@@ -538,9 +545,15 @@ mod tests {
     fn direct_gesture_descends_in_place_without_opening_the_menu_dialog() {
         let (mut state, _, child) = hierarchy_state();
         state.open_selected_instance_master();
-        assert_eq!(state.workspace.content.active_view, child);
+        assert_eq!(state.model.workspace.content.active_view, child);
         assert_eq!(
-            state.workspace.content.occurrence_labels().last().unwrap(),
+            state
+                .model
+                .workspace
+                .content
+                .occurrence_labels()
+                .last()
+                .unwrap(),
             "XAFE"
         );
         assert!(!state.dialogs.descend_hierarchy.open);
@@ -556,9 +569,12 @@ mod tests {
 
         state.open_selected_instance_master();
 
-        assert_eq!(state.workspace.content.active_view, child);
-        assert_eq!(state.workspace.content.hierarchy_stack, vec![child]);
-        assert_eq!(state.workspace.content.occurrence_labels(), ["afe_core"]);
+        assert_eq!(state.model.workspace.content.active_view, child);
+        assert_eq!(state.model.workspace.content.hierarchy_stack, vec![child]);
+        assert_eq!(
+            state.model.workspace.content.occurrence_labels(),
+            ["afe_core"]
+        );
         assert!(!state.dialogs.descend_hierarchy.open);
     }
 
@@ -578,9 +594,15 @@ mod tests {
         state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditInPlace;
         commit_descend_context(&mut state).expect("explicit edit-in-place choice remains valid");
 
-        assert_eq!(state.workspace.content.active_view, child);
+        assert_eq!(state.model.workspace.content.active_view, child);
         assert_eq!(
-            state.workspace.content.occurrence_labels().last().unwrap(),
+            state
+                .model
+                .workspace
+                .content
+                .occurrence_labels()
+                .last()
+                .unwrap(),
             "XAFE"
         );
     }
@@ -592,9 +614,10 @@ mod tests {
         state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditSymbolInPlace;
         let error = commit_descend_context(&mut state).expect_err("afe_core has no symbol view");
         assert!(error.contains("the cell has no symbol view"), "{error}");
-        assert_eq!(state.workspace.content.active_view, parent);
+        assert_eq!(state.model.workspace.content.active_view, parent);
 
         state
+            .model
             .library_manager
             .get_library_mut("hierarchy_test")
             .and_then(|library| library.get_cell_mut("afe_core"))
@@ -604,7 +627,7 @@ mod tests {
 
         assert!(!state.dialogs.descend_hierarchy.open);
         assert_eq!(
-            state.workspace.content.active_view,
+            state.model.workspace.content.active_view,
             CellViewRef::new("hierarchy_test", "afe_core", "symbol")
         );
         assert_eq!(
@@ -621,12 +644,13 @@ mod tests {
         state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::ReadOnlyReference;
         commit_descend_context(&mut state).expect("valid reference context");
 
-        assert_eq!(state.workspace.content.active_view, child);
-        assert!(state.workspace.content.active_read_only_reference());
+        assert_eq!(state.model.workspace.content.active_view, child);
+        assert!(state.model.workspace.content.active_read_only_reference());
         assert!(state.active_view_read_only());
-        assert!(!state.schematic.session.read_only);
+        assert!(!state.model.schematic.session.read_only);
         assert!(
             !state
+                .model
                 .library_manager
                 .get_library("hierarchy_test")
                 .expect("library")
@@ -635,14 +659,14 @@ mod tests {
 
         state.open_workspace_view(parent);
         assert!(
-            !state.workspace.content.active_read_only_reference(),
+            !state.model.workspace.content.active_read_only_reference(),
             "the parent was never opened as a reference"
         );
         assert!(!state.active_view_read_only());
 
         state.open_workspace_view(child);
         assert!(
-            state.workspace.content.active_read_only_reference(),
+            state.model.workspace.content.active_read_only_reference(),
             "returning to the reference document still refuses writes"
         );
         assert!(

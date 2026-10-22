@@ -10,14 +10,14 @@ pub(super) type AnalysisInputs<'a> = rspice_simulation::analysis_preparation::An
 
 pub(super) fn analysis_inputs(state: &AppState) -> AnalysisInputs<'_> {
     AnalysisInputs {
-        sim_setup: &state.sim_setup,
-        schematic: state.schematic.document(),
-        selected_components: &state.schematic.session.editor.selection.components,
-        selection_occurrence: state.workspace.content.active_occurrence(),
-        runs: &state.simulation.retained.runs,
-        active_run: state.simulation.active_run().map(|run| &run.data),
-        project_revision: state.workspace.content.project.revision(),
-        plan_payloads: &state.workspace.content.simulation_plan_payloads,
+        sim_setup: &state.model.sim_setup,
+        schematic: state.model.schematic.document(),
+        selected_components: &state.model.schematic.session.editor.selection.components,
+        selection_occurrence: state.model.workspace.content.active_occurrence(),
+        runs: &state.model.simulation.retained.runs,
+        active_run: state.model.simulation.active_run().map(|run| &run.data),
+        project_revision: state.model.workspace.content.project.revision(),
+        plan_payloads: &state.model.workspace.content.simulation_plan_payloads,
     }
 }
 
@@ -58,11 +58,11 @@ mod manifest_tests {
             disto.sweep.points = "1".into();
             disto.sweep.sweep = index;
 
-            state.sim_setup.stb.ensure_initialized();
-            state.sim_setup.stb.start_freq = "1k".into();
-            state.sim_setup.stb.stop_freq = "1k".into();
-            state.sim_setup.stb.num_points = "1".into();
-            state.sim_setup.stb.sweep_type_idx = index;
+            state.model.sim_setup.stb.ensure_initialized();
+            state.model.sim_setup.stb.start_freq = "1k".into();
+            state.model.sim_setup.stb.stop_freq = "1k".into();
+            state.model.sim_setup.stb.num_points = "1".into();
+            state.model.sim_setup.stb.sweep_type_idx = index;
 
             let specs = [
                 rspice_simulation::analysis_preparation::analysis_draft_spec(
@@ -75,7 +75,7 @@ mod manifest_tests {
                     &AnalysisDraft::Disto(disto),
                 )
                 .unwrap(),
-                rspice_simulation::analysis_preparation::build_stb_spec(&state.sim_setup.stb)
+                rspice_simulation::analysis_preparation::build_stb_spec(&state.model.sim_setup.stb)
                     .unwrap(),
             ];
             for spec in specs {
@@ -108,9 +108,9 @@ mod manifest_tests {
     #[test]
     fn noise_manifest_freezes_every_selected_field_without_singleton_fallback() {
         let mut state = AppState::default();
-        state.sim_setup.reference_pvt.temperature_celsius = 125.0;
-        state.sim_setup.noise.output = "wrong_singleton".to_owned();
-        state.sim_setup.ac.points = "999".to_owned();
+        state.model.sim_setup.reference_pvt.temperature_celsius = 125.0;
+        state.model.sim_setup.noise.output = "wrong_singleton".to_owned();
+        state.model.sim_setup.ac.points = "999".to_owned();
         let mut draft = crate::simulation::plan::NoiseDraft::default();
         draft.output = "V(out,ref)".to_owned();
         draft.input = "VIN_EXACT".to_owned();
@@ -150,10 +150,10 @@ mod manifest_tests {
     #[test]
     fn disto_manifest_freezes_its_owned_sweep_without_singleton_fallback() {
         let mut state = AppState::default();
-        state.sim_setup.ac.fstart = "900".to_owned();
-        state.sim_setup.ac.fstop = "2k".to_owned();
-        state.sim_setup.ac.points = "7".to_owned();
-        state.sim_setup.disto_f2_over_f1 = "0.2".to_owned();
+        state.model.sim_setup.ac.fstart = "900".to_owned();
+        state.model.sim_setup.ac.fstop = "2k".to_owned();
+        state.model.sim_setup.ac.points = "7".to_owned();
+        state.model.sim_setup.disto_f2_over_f1 = "0.2".to_owned();
 
         let mut draft = crate::simulation::plan::DistoDraft::default();
         draft.sweep.fstart = "3k".to_owned();
@@ -202,9 +202,9 @@ mod manifest_tests {
             ("1mil", 25.4e-6),
         ] {
             let mut state = AppState::default();
-            let mut draft = state.sim_setup.tran.clone();
+            let mut draft = state.model.sim_setup.tran.clone();
             draft.stop = typed.to_owned();
-            state.sim_setup.tran.stop = "stale singleton".to_owned();
+            state.model.sim_setup.tran.stop = "stale singleton".to_owned();
 
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
                 &analysis_inputs(&state),
@@ -224,7 +224,7 @@ mod manifest_tests {
         // run at a decade the engine would not have agreed with.
         for typed in ["1micro", "1wat", "1k5"] {
             let state = AppState::default();
-            let mut draft = state.sim_setup.tran.clone();
+            let mut draft = state.model.sim_setup.tran.clone();
             draft.stop = typed.to_owned();
             assert!(
                 rspice_simulation::analysis_preparation::analysis_draft_spec(
@@ -240,12 +240,12 @@ mod manifest_tests {
     #[test]
     fn ac_and_dc_specs_read_exact_authored_drafts() {
         let mut state = AppState::default();
-        let mut ac = state.sim_setup.ac.clone();
+        let mut ac = state.model.sim_setup.ac.clone();
         ac.fstart = "3k".to_owned();
         ac.fstop = "30k".to_owned();
         ac.points = "41".to_owned();
         ac.sweep = 2;
-        state.sim_setup.ac.fstart = "stale singleton".to_owned();
+        state.model.sim_setup.ac.fstart = "stale singleton".to_owned();
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
             &AnalysisDraft::Ac(ac),
@@ -261,10 +261,10 @@ mod manifest_tests {
             }
         ));
 
-        let mut dc = state.sim_setup.dc.clone();
+        let mut dc = state.model.sim_setup.dc.clone();
         dc.source = "VEXACT".to_owned();
         dc.stop = "3".to_owned();
-        state.sim_setup.dc.source = "stale singleton".to_owned();
+        state.model.sim_setup.dc.source = "stale singleton".to_owned();
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
             &AnalysisDraft::DcSweep(dc),
@@ -293,19 +293,20 @@ mod manifest_tests {
     #[test]
     fn the_optimizer_step_sizes_are_authorable_and_reach_the_run() {
         let mut state = AppState::default();
-        state.sim_setup.optimization.ensure_initialized();
+        state.model.sim_setup.optimization.ensure_initialized();
 
         let defaults = state
+            .model
             .sim_setup
             .optimization
             .to_config()
             .expect("the default optimization draft is runnable");
 
-        state.sim_setup.optimization.fd_step = "2.5e-3".to_owned();
-        state.sim_setup.optimization.initial_step = "0.25".to_owned();
-        state.sim_setup.optimization.min_step = "1e-6".to_owned();
-        let draft = AnalysisDraft::Optimization(state.sim_setup.optimization.clone());
-        state.sim_setup.optimization.fd_step = "not a number".to_owned();
+        state.model.sim_setup.optimization.fd_step = "2.5e-3".to_owned();
+        state.model.sim_setup.optimization.initial_step = "0.25".to_owned();
+        state.model.sim_setup.optimization.min_step = "1e-6".to_owned();
+        let draft = AnalysisDraft::Optimization(state.model.sim_setup.optimization.clone());
+        state.model.sim_setup.optimization.fd_step = "not a number".to_owned();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
@@ -361,11 +362,11 @@ mod manifest_tests {
     #[test]
     fn sp_noise_dialog_reaches_the_typed_request() {
         let mut state = AppState::default();
-        state.sim_setup.sp.port_source_idx = Some(1);
+        state.model.sim_setup.sp.port_source_idx = Some(1);
         for requested in [false, true] {
-            let mut draft = state.sim_setup.sp.clone();
+            let mut draft = state.model.sim_setup.sp.clone();
             draft.do_noise = requested;
-            state.sim_setup.sp.do_noise = !requested;
+            state.model.sim_setup.sp.do_noise = !requested;
             let draft = AnalysisDraft::SParameter(draft);
             let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
                 &analysis_inputs(&state),
@@ -453,23 +454,24 @@ mod manifest_tests {
     #[test]
     fn pss_draft_projects_every_owned_execution_field() {
         let mut state = AppState::default();
-        state.sim_setup.pss.ensure_initialized();
-        state.sim_setup.pss.fund_freq = "2.5Meg".to_owned();
-        state.sim_setup.pss.tone_sources = "VIN_LO, VIN_MOD".to_owned();
-        state.sim_setup.pss.tstab_periods = "37".to_owned();
-        state.sim_setup.pss.points_per_period = "1024".to_owned();
-        state.sim_setup.pss.tolerance = "2e-9".to_owned();
-        state.sim_setup.pss.num_harmonics = "17".to_owned();
-        state.sim_setup.pss.integration_method_idx = 0;
+        state.model.sim_setup.pss.ensure_initialized();
+        state.model.sim_setup.pss.fund_freq = "2.5Meg".to_owned();
+        state.model.sim_setup.pss.tone_sources = "VIN_LO, VIN_MOD".to_owned();
+        state.model.sim_setup.pss.tstab_periods = "37".to_owned();
+        state.model.sim_setup.pss.points_per_period = "1024".to_owned();
+        state.model.sim_setup.pss.tolerance = "2e-9".to_owned();
+        state.model.sim_setup.pss.num_harmonics = "17".to_owned();
+        state.model.sim_setup.pss.integration_method_idx = 0;
         // Driven: this draft names two tones, and an autonomous solve naming a
         // tone is a refused contradiction rather than a projectable draft. The
         // retained oscillator node is deliberately left set to prove the driven
         // projection drops it rather than carrying a node it will not use.
-        state.sim_setup.pss.osc_mode = false;
-        state.sim_setup.pss.osc_node = "osc_out".to_owned();
+        state.model.sim_setup.pss.osc_mode = false;
+        state.model.sim_setup.pss.osc_node = "osc_out".to_owned();
 
-        let spec = rspice_simulation::analysis_preparation::build_pss_spec(&state.sim_setup.pss)
-            .expect("PSS spec builds");
+        let spec =
+            rspice_simulation::analysis_preparation::build_pss_spec(&state.model.sim_setup.pss)
+                .expect("PSS spec builds");
         assert_eq!(
             spec,
             AnalysisSpec::Pss {
@@ -498,14 +500,15 @@ mod manifest_tests {
     #[test]
     fn an_autonomous_pss_draft_projects_its_oscillator_node_and_no_tones() {
         let mut state = AppState::default();
-        state.sim_setup.pss.ensure_initialized();
-        state.sim_setup.pss.integration_method_idx = 0;
-        state.sim_setup.pss.tone_sources.clear();
-        state.sim_setup.pss.osc_mode = true;
-        state.sim_setup.pss.osc_node = "osc_out".to_owned();
+        state.model.sim_setup.pss.ensure_initialized();
+        state.model.sim_setup.pss.integration_method_idx = 0;
+        state.model.sim_setup.pss.tone_sources.clear();
+        state.model.sim_setup.pss.osc_mode = true;
+        state.model.sim_setup.pss.osc_node = "osc_out".to_owned();
 
-        let spec = rspice_simulation::analysis_preparation::build_pss_spec(&state.sim_setup.pss)
-            .expect("PSS spec builds");
+        let spec =
+            rspice_simulation::analysis_preparation::build_pss_spec(&state.model.sim_setup.pss)
+                .expect("PSS spec builds");
         assert!(
             matches!(
                 spec,
@@ -523,13 +526,13 @@ mod manifest_tests {
     #[test]
     fn fourier_spec_and_command_use_frozen_draft() {
         let mut state = AppState::default();
-        state.sim_setup.fourier.ensure_initialized();
-        state.sim_setup.fourier.compute_thd = false;
-        state.sim_setup.fourier.normalize = true;
-        state.sim_setup.fourier.fundamental = "2k".into();
-        state.sim_setup.fourier.stop_time = "5m".into();
-        let draft = AnalysisDraft::Fourier(state.sim_setup.fourier.clone());
-        state.sim_setup.fourier.fundamental = "3k".into();
+        state.model.sim_setup.fourier.ensure_initialized();
+        state.model.sim_setup.fourier.compute_thd = false;
+        state.model.sim_setup.fourier.normalize = true;
+        state.model.sim_setup.fourier.fundamental = "2k".into();
+        state.model.sim_setup.fourier.stop_time = "5m".into();
+        let draft = AnalysisDraft::Fourier(state.model.sim_setup.fourier.clone());
+        state.model.sim_setup.fourier.fundamental = "3k".into();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
@@ -558,16 +561,16 @@ mod manifest_tests {
     #[test]
     fn envelope_spec_uses_frozen_draft_execution_fields() {
         let mut state = AppState::default();
-        state.sim_setup.envelope.ensure_initialized();
-        state.sim_setup.envelope.carrier_tones = "1Meg, 2.5Meg".to_owned();
-        state.sim_setup.envelope.stop_time = "10m".to_owned();
-        state.sim_setup.envelope.envelope_step = "1u".to_owned();
-        state.sim_setup.envelope.harmonic_order = "11".to_owned();
-        state.sim_setup.envelope.modulation_sources = "VIN_AM, VCTRL".to_owned();
-        state.sim_setup.envelope.initial_periodic_solve_idx = 1;
-        state.sim_setup.envelope.adaptive_mode_idx = 2;
-        let draft = AnalysisDraft::Envelope(Box::new(state.sim_setup.envelope.clone()));
-        state.sim_setup.envelope.carrier_tones = "not a frequency".into();
+        state.model.sim_setup.envelope.ensure_initialized();
+        state.model.sim_setup.envelope.carrier_tones = "1Meg, 2.5Meg".to_owned();
+        state.model.sim_setup.envelope.stop_time = "10m".to_owned();
+        state.model.sim_setup.envelope.envelope_step = "1u".to_owned();
+        state.model.sim_setup.envelope.harmonic_order = "11".to_owned();
+        state.model.sim_setup.envelope.modulation_sources = "VIN_AM, VCTRL".to_owned();
+        state.model.sim_setup.envelope.initial_periodic_solve_idx = 1;
+        state.model.sim_setup.envelope.adaptive_mode_idx = 2;
+        let draft = AnalysisDraft::Envelope(Box::new(state.model.sim_setup.envelope.clone()));
+        state.model.sim_setup.envelope.carrier_tones = "not a frequency".into();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
@@ -604,11 +607,11 @@ mod manifest_tests {
     #[test]
     fn soa_spec_and_command_use_frozen_draft() {
         let mut state = AppState::default();
-        state.sim_setup.soa.ensure_initialized();
-        state.sim_setup.soa.stop_time = "2m".into();
-        state.sim_setup.soa.step_time = "2u".into();
-        let draft = AnalysisDraft::Soa(state.sim_setup.soa.clone());
-        state.sim_setup.soa.stop_time = "not a time".into();
+        state.model.sim_setup.soa.ensure_initialized();
+        state.model.sim_setup.soa.stop_time = "2m".into();
+        state.model.sim_setup.soa.step_time = "2u".into();
+        let draft = AnalysisDraft::Soa(state.model.sim_setup.soa.clone());
+        state.model.sim_setup.soa.stop_time = "not a time".into();
 
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
@@ -638,10 +641,10 @@ mod manifest_tests {
     fn pole_zero_sensitivity_and_transfer_function_use_frozen_drafts() {
         let mut state = AppState::default();
 
-        state.sim_setup.pz.ensure_initialized();
-        state.sim_setup.pz.input_pos = "PZ_IN".into();
-        let pz_draft = AnalysisDraft::PoleZero(state.sim_setup.pz.clone());
-        state.sim_setup.pz.input_pos.clear();
+        state.model.sim_setup.pz.ensure_initialized();
+        state.model.sim_setup.pz.input_pos = "PZ_IN".into();
+        let pz_draft = AnalysisDraft::PoleZero(state.model.sim_setup.pz.clone());
+        state.model.sim_setup.pz.input_pos.clear();
         let pz_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
             &pz_draft,
@@ -661,10 +664,10 @@ mod manifest_tests {
             .contains("PZ_IN")
         );
 
-        state.sim_setup.sens.ensure_initialized();
-        state.sim_setup.sens.output_expr = "V(SENS_OUT)".into();
-        let sens_draft = AnalysisDraft::Sensitivity(state.sim_setup.sens.clone());
-        state.sim_setup.sens.output_expr.clear();
+        state.model.sim_setup.sens.ensure_initialized();
+        state.model.sim_setup.sens.output_expr = "V(SENS_OUT)".into();
+        let sens_draft = AnalysisDraft::Sensitivity(state.model.sim_setup.sens.clone());
+        state.model.sim_setup.sens.output_expr.clear();
         let sens_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
             &sens_draft,
@@ -684,11 +687,11 @@ mod manifest_tests {
             .contains("V(SENS_OUT)")
         );
 
-        state.sim_setup.xf.ensure_initialized();
-        state.sim_setup.xf.input_source = "VTF".into();
-        state.sim_setup.xf.output_expression = "V(TF_OUT)".into();
-        let tf_draft = AnalysisDraft::TransferFunction(state.sim_setup.xf.clone());
-        state.sim_setup.xf.input_source.clear();
+        state.model.sim_setup.xf.ensure_initialized();
+        state.model.sim_setup.xf.input_source = "VTF".into();
+        state.model.sim_setup.xf.output_expression = "V(TF_OUT)".into();
+        let tf_draft = AnalysisDraft::TransferFunction(state.model.sim_setup.xf.clone());
+        state.model.sim_setup.xf.input_source.clear();
         let tf_spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),
             &tf_draft,
@@ -712,11 +715,11 @@ mod manifest_tests {
     #[test]
     fn operating_point_uses_frozen_draft_and_live_reference_temperature() {
         let mut state = AppState::default();
-        state.sim_setup.reference_pvt.temperature_celsius = 42.0;
-        let mut authored = state.sim_setup.op.clone();
+        state.model.sim_setup.reference_pvt.temperature_celsius = 42.0;
+        let mut authored = state.model.sim_setup.op.clone();
         authored.temperature_mode_idx = 0;
         authored.temperature = "unfinished edit".into();
-        state.sim_setup.op.temperature_mode_idx = usize::MAX;
+        state.model.sim_setup.op.temperature_mode_idx = usize::MAX;
         let draft = AnalysisDraft::OperatingPoint(authored.clone());
         let spec = rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(&state),

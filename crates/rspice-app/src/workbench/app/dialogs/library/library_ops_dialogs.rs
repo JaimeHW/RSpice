@@ -20,13 +20,14 @@ impl AppState {
     pub(crate) fn open_new_library_dialog(&mut self) {
         self.dialogs.new_library_name.clear();
         self.dialogs.new_library_error = None;
-        self.dialogs.new_library_library_revision = self.library_manager.revision();
+        self.dialogs.new_library_library_revision = self.model.library_manager.revision();
         self.dialogs.new_library_dialog = true;
     }
 
     /// Open Rename Library pre-filled with the current name.
     pub(crate) fn open_rename_library_dialog(&mut self, library: &str) -> Result<(), String> {
         let target = self
+            .model
             .library_manager
             .get_library(library)
             .ok_or_else(|| format!("Library '{library}' no longer exists."))?;
@@ -39,26 +40,26 @@ impl AppState {
         self.dialogs.rename_library_current = library.to_owned();
         self.dialogs.rename_library_name = library.to_owned();
         self.dialogs.rename_library_error = None;
-        self.dialogs.rename_library_library_revision = self.library_manager.revision();
+        self.dialogs.rename_library_library_revision = self.model.library_manager.revision();
         self.dialogs.rename_library_dialog = true;
         Ok(())
     }
 
     /// Open the Delete Library review for one existing library.
     pub(crate) fn open_delete_library_review(&mut self, library: &str) -> Result<(), String> {
-        if self.library_manager.get_library(library).is_none() {
+        if self.model.library_manager.get_library(library).is_none() {
             return Err(format!("Library '{library}' no longer exists."));
         }
 
         self.dialogs.delete_library_target = library.to_owned();
         self.dialogs.delete_library_error = None;
-        self.dialogs.delete_library_library_revision = self.library_manager.revision();
+        self.dialogs.delete_library_library_revision = self.model.library_manager.revision();
         self.dialogs.delete_library_dialog = true;
         Ok(())
     }
 
     fn commit_new_library_dialog(&mut self) -> Result<String, String> {
-        if self.library_manager.revision() != self.dialogs.new_library_library_revision {
+        if self.model.library_manager.revision() != self.dialogs.new_library_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
         let name = self.dialogs.new_library_name.trim().to_owned();
@@ -69,7 +70,7 @@ impl AppState {
     }
 
     fn commit_rename_library_dialog(&mut self) -> Result<Option<usize>, String> {
-        if self.library_manager.revision() != self.dialogs.rename_library_library_revision {
+        if self.model.library_manager.revision() != self.dialogs.rename_library_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
         let name = self.dialogs.rename_library_name.trim().to_owned();
@@ -84,7 +85,7 @@ impl AppState {
     }
 
     fn commit_delete_library_review(&mut self) -> Result<usize, String> {
-        if self.library_manager.revision() != self.dialogs.delete_library_library_revision {
+        if self.model.library_manager.revision() != self.dialogs.delete_library_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
         let library = self.dialogs.delete_library_target.clone();
@@ -105,11 +106,12 @@ struct LibraryDeletionImpact {
 }
 
 fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionImpact {
-    let owned = state.library_manager.get_library(library);
+    let owned = state.model.library_manager.get_library(library);
     LibraryDeletionImpact {
         cells: owned.map_or(0, crate::state::Library::cell_count),
         views: owned.map_or(0, crate::state::Library::total_view_count),
         open_views: state
+            .model
             .workspace
             .content
             .open_views
@@ -118,6 +120,7 @@ fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionIm
             .count(),
         instance_references: state.external_instance_references_to_library(library),
         source_bundles: state
+            .model
             .workspace
             .content
             .project_sources
@@ -131,6 +134,7 @@ fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionIm
             })
             .count(),
         configuration_roots: state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -138,7 +142,7 @@ fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionIm
             .iter()
             .filter(|configuration| configuration.root().library == library)
             .count(),
-        project_root: state.workspace.content.project.root_library == library,
+        project_root: state.model.workspace.content.project.root_library == library,
     }
 }
 
@@ -161,7 +165,7 @@ impl RSpiceApp {
         let mut should_close = false;
         let mut should_create = false;
 
-        let catalog_current = self.state.library_manager.revision()
+        let catalog_current = self.state.model.library_manager.revision()
             == self.state.dialogs.new_library_library_revision;
         if !catalog_current {
             self.state.dialogs.new_library_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
@@ -220,7 +224,7 @@ impl RSpiceApp {
         let mut should_close = false;
         let mut should_rename = false;
 
-        let catalog_current = self.state.library_manager.revision()
+        let catalog_current = self.state.model.library_manager.revision()
             == self.state.dialogs.rename_library_library_revision;
         if !catalog_current {
             self.state.dialogs.rename_library_error =
@@ -287,7 +291,7 @@ impl RSpiceApp {
 
         let library = self.state.dialogs.delete_library_target.clone();
         let impact = library_deletion_impact(&self.state, &library);
-        let catalog_current = self.state.library_manager.revision()
+        let catalog_current = self.state.model.library_manager.revision()
             == self.state.dialogs.delete_library_library_revision;
         let blocker = self.state.library_deletion_blocker(&library);
         let displayed_error = if catalog_current {

@@ -35,10 +35,13 @@ fn project_named(path: &str) -> ProjectSnapshot {
 
 fn assert_active_grid_pitch_contract(state: &AppState, pitch: crate::state::SchematicGridPitch) {
     let expected = pitch.canvas_grid_size();
-    assert_eq!(state.schematic.document().document_policy.grid_pitch, pitch);
-    assert_eq!(state.schematic.document().grid_size, expected);
     assert_eq!(
-        state.schematic.session.editor.snap_engine.grid_size,
+        state.model.schematic.document().document_policy.grid_pitch,
+        pitch
+    );
+    assert_eq!(state.model.schematic.document().grid_size, expected);
+    assert_eq!(
+        state.model.schematic.session.editor.snap_engine.grid_size,
         expected
     );
     assert_eq!(state.ui.schematic_snap.grid_size, expected);
@@ -62,8 +65,19 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     state.assert_project_open_fact();
 
     assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Mil25);
-    assert_eq!(state.schematic.session.editor.snap_engine.snap_radius, 8);
-    assert!(!state.schematic.session.editor.snap_engine.snap_to_grid);
+    assert_eq!(
+        state.model.schematic.session.editor.snap_engine.snap_radius,
+        8
+    );
+    assert!(
+        !state
+            .model
+            .schematic
+            .session
+            .editor
+            .snap_engine
+            .snap_to_grid
+    );
 
     state
         .ui
@@ -77,8 +91,19 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
 
     assert!(close_project_discard(&mut state));
     assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Metric);
-    assert_eq!(state.schematic.session.editor.snap_engine.snap_radius, 8);
-    assert!(!state.schematic.session.editor.snap_engine.snap_to_grid);
+    assert_eq!(
+        state.model.schematic.session.editor.snap_engine.snap_radius,
+        8
+    );
+    assert!(
+        !state
+            .model
+            .schematic
+            .session
+            .editor
+            .snap_engine
+            .snap_to_grid
+    );
 }
 
 #[test]
@@ -211,6 +236,7 @@ fn startup_closes_a_saved_project_only_when_asked_and_nothing_is_lost() {
 
     let mut edited = reopened("edited.rspiceproj", 1);
     edited
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(3, 8));
     apply_startup_project_choice(&mut edited);
@@ -285,9 +311,13 @@ fn a_saved_project_comes_back_through_its_session() {
         .expect("save the project");
         if edited {
             state
+                .model
                 .schematic
                 .add_component(ComponentType::Resistor, Point::new(3, 8));
-            state.workspace.save_active_schematic(&state.schematic);
+            state
+                .model
+                .workspace
+                .save_active_schematic(&state.model.schematic);
         }
         ron::to_string(state.as_ref()).expect("the session serializes")
     };
@@ -309,8 +339,8 @@ fn a_saved_project_comes_back_through_its_session() {
 
     let edited = restart(&session("edited.rspiceproj", true), 1);
     assert!(edited.project_lifecycle.is_open(), "unsaved changes stay");
-    assert_eq!(edited.schematic.document().components.len(), 1);
-    assert!(edited.log_buffer.entries().any(|entry| {
+    assert_eq!(edited.model.schematic.document().components.len(), 1);
+    assert!(edited.model.log_buffer.entries().any(|entry| {
         entry.message == "The last project was reopened because it has unsaved changes."
     }));
 
@@ -335,6 +365,7 @@ fn closing_a_project_as_an_edit_settles_checks_nothing() {
     let start = crate::time_compat::Instant::now();
     let _ = state.refresh_live_checks(start);
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(4000, 4000));
     assert!(
@@ -346,6 +377,7 @@ fn closing_a_project_as_an_edit_settles_checks_nothing() {
     assert_eq!(state.refresh_live_checks(start), None);
     assert!(
         state
+            .model
             .diagnostics
             .batch(&DiagnosticInputs::LiveCheck { subject: amp })
             .is_none(),
@@ -353,6 +385,7 @@ fn closing_a_project_as_an_edit_settles_checks_nothing() {
     );
     assert!(
         !state
+            .model
             .log_buffer
             .entries()
             .any(|entry| entry.message.starts_with("Live checks could not run")),
@@ -381,7 +414,8 @@ fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
 #[test]
 fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
     let mut host = AppState::default();
-    host.workspace
+    host.model
+        .workspace
         .content
         .project
         .set_path(std::path::PathBuf::from("C:/host-only/design.rspiceproj"));
@@ -397,11 +431,11 @@ fn live_project_snapshot_applies_wholesale_and_never_keeps_the_host_path() {
     ));
     assert!(guest.project_lifecycle.is_open());
     assert_eq!(
-        guest.workspace.content.project.id(),
-        host.workspace.content.project.id()
+        guest.model.workspace.content.project.id(),
+        host.model.workspace.content.project.id()
     );
     // The host's on-disk location must never become a guest save target.
-    assert!(guest.workspace.content.project.path.is_none());
+    assert!(guest.model.workspace.content.project.path.is_none());
     #[cfg(not(target_arch = "wasm32"))]
     assert!(
         crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&guest).is_none()
@@ -417,13 +451,13 @@ fn live_project_snapshot_waits_out_a_local_run_and_rejects_garbage() {
         crate::io::project_io::serialize_project_file(&snapshot).expect("snapshot serializes");
 
     let mut guest = AppState::default();
-    guest.simulation.execution.is_running = true;
+    guest.model.simulation.execution.is_running = true;
     assert!(matches!(
         apply_live_project_snapshot(&mut guest, text.as_bytes(), "Jaime"),
         LiveProjectApply::RetryLater
     ));
 
-    guest.simulation.execution.is_running = false;
+    guest.model.simulation.execution.is_running = false;
     assert!(matches!(
         apply_live_project_snapshot(&mut guest, b"not a project", "Jaime"),
         LiveProjectApply::Rejected
@@ -505,10 +539,10 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
-    state.simulation.retained.next_run_id = 2;
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.next_run_id = 2;
 
     state.analysis.histogram_state.selected = Some("old measurement".to_owned());
     let mut bode = BodeData::new();
@@ -599,8 +633,8 @@ fn assert_specialized_viewer_caches_cleared(state: &AppState) {
 #[test]
 fn browser_import_applies_project_clears_runs_and_skips_recents() {
     let mut state = AppState::default();
-    seal_legacy_unattributed(state.simulation.start_run());
-    assert!(state.simulation.retained.has_results());
+    seal_legacy_unattributed(state.model.simulation.start_run());
+    assert!(state.model.simulation.retained.has_results());
 
     let mut project = project_named("browser-import.rspiceproj");
     project.file.workspace.project.path = None;
@@ -613,13 +647,13 @@ fn browser_import_applies_project_clears_runs_and_skips_recents() {
 
     assert!(imported);
     assert_eq!(
-        state.workspace.content.project.display_name(),
+        state.model.workspace.content.project.display_name(),
         "browser-import"
     );
-    assert!(state.workspace.content.project.path.is_none());
-    assert!(!state.simulation.retained.has_results());
+    assert!(state.model.workspace.content.project.path.is_none());
+    assert!(!state.model.simulation.retained.has_results());
     assert!(state.recent_files.is_empty());
-    assert!(state.log_buffer.entries().any(|entry| {
+    assert!(state.model.log_buffer.entries().any(|entry| {
         entry
             .message
             .contains("Imported project browser-import (browser-import.rspiceproj).")
@@ -638,7 +672,7 @@ fn browser_import_keeps_project_filename_as_save_suggestion_without_native_path(
     );
 
     assert!(imported);
-    assert!(state.workspace.content.project.path.is_none());
+    assert!(state.model.workspace.content.project.path.is_none());
     assert_eq!(
         state.browser_project_save_name.as_deref(),
         Some("browser-import.rspiceproj")
@@ -701,6 +735,7 @@ fn create_new_project_resets_project_owned_plan_and_model_context() {
 
     let mut state = AppState::default();
     let stale_plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -714,11 +749,12 @@ fn create_new_project_resets_project_owned_plan_and_model_context() {
         .expect("stale noise analysis inserts");
     let mut stale_models = ModelLibraryManager::new();
     stale_models.add_library(ModelLibrary::new("stale_project_models"));
-    state.model_library_manager = stale_models;
+    state.model.model_library_manager = stale_models;
 
     create_new_project(&mut state);
 
     let reset_plan = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("new project owns a stable plan");
@@ -727,11 +763,12 @@ fn create_new_project_resets_project_owned_plan_and_model_context() {
     assert!(reset_plan.instances()[0].enabled());
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("stale_project_models")
             .is_none()
     );
-    assert!(state.model_library_manager.library_count() > 0);
+    assert!(state.model.model_library_manager.library_count() > 0);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -751,11 +788,13 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     .expect("write configured PDK source");
 
     let mut state = AppState::default();
-    state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     state
+        .model
         .pdk_config
         .add_library_path(root.to_string_lossy().into_owned());
     state
+        .model
         .model_library_manager
         .add_library(ModelLibrary::new("previous_project_only"));
 
@@ -763,6 +802,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
 
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("configured")
             .is_some(),
@@ -770,6 +810,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     );
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("previous_project_only")
             .is_none(),
@@ -777,12 +818,14 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     );
 
     state
+        .model
         .model_library_manager
         .add_library(ModelLibrary::new("closing_project_only"));
     state.open_project_session();
     assert!(close_project_discard(&mut state));
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("configured")
             .is_some(),
@@ -790,6 +833,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
     );
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("closing_project_only")
             .is_none(),
@@ -809,12 +853,13 @@ fn a_new_projects_plan_owns_its_variables_outputs_and_specifications() {
     create_new_project(&mut state);
 
     let plan_id = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("a new project owns a stable plan")
         .id();
     assert!(
-        state.workspace.content.plan_data(plan_id).is_some(),
+        state.model.workspace.content.plan_data(plan_id).is_some(),
         "the new plan has its payload"
     );
 }
@@ -835,6 +880,7 @@ fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning(
 
     assert!(state.technology_gate_block_reason().is_ok());
     let blocked = state
+        .model
         .log_buffer
         .entries()
         .filter(|entry| entry.message.contains("Simulation is blocked"))
@@ -857,11 +903,14 @@ fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
 
     create_new_project(&mut state);
 
-    assert_eq!(state.sim_setup.options.itl1, 200);
-    assert_eq!(state.sim_setup.options.itl4, 20);
-    assert!(state.sim_setup.options.arc_length);
-    assert_eq!(state.sim_setup.options.method, IntegrationMethod::Gear2);
-    assert_eq!(state.sim_setup.options.temp, 27.0);
+    assert_eq!(state.model.sim_setup.options.itl1, 200);
+    assert_eq!(state.model.sim_setup.options.itl4, 20);
+    assert!(state.model.sim_setup.options.arc_length);
+    assert_eq!(
+        state.model.sim_setup.options.method,
+        IntegrationMethod::Gear2
+    );
+    assert_eq!(state.model.sim_setup.options.temp, 27.0);
 }
 
 #[test]
@@ -890,6 +939,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
     create_new_project(&mut state);
 
     let project_default = state
+        .model
         .workspace
         .content
         .design_management
@@ -956,6 +1006,7 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
     create_new_project(&mut state);
 
     let project_settings = state
+        .model
         .workspace
         .content
         .design_management
@@ -987,6 +1038,7 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
 
     let mut source = AppState::default();
     let source_plan = source
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -1007,17 +1059,19 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
     source_plan
         .bind_dependency(noise_id, AnalysisKind::OperatingPoint, op_id)
         .expect("noise binds exact OP");
-    source.sim_setup.options.reltol = 2e-4;
-    source.sim_setup.options.method = IntegrationMethod::Gear2;
-    source.sim_setup.options.solver = MatrixSolver::SparseLu;
-    source.sim_setup.options.arc_length = true;
+    source.model.sim_setup.options.reltol = 2e-4;
+    source.model.sim_setup.options.method = IntegrationMethod::Gear2;
+    source.model.sim_setup.options.solver = MatrixSolver::SparseLu;
+    source.model.sim_setup.options.arc_length = true;
     let mut project_models = ModelLibraryManager::new();
     project_models.add_library(ModelLibrary::new("project_exact_models"));
-    source.model_library_manager = project_models;
+    source.model.model_library_manager = project_models;
 
-    let context =
-        crate::io::capture_execution_context(&source.sim_setup, &source.model_library_manager)
-            .expect("source context validates");
+    let context = crate::io::capture_execution_context(
+        &source.model.sim_setup,
+        &source.model.model_library_manager,
+    )
+    .expect("source context validates");
     let expected_plan =
         serde_json::to_value(&context.simulation_plan).expect("expected plan serializes");
     let mut design_libraries = crate::state::LibraryManager::with_primitives();
@@ -1035,13 +1089,14 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
 
     let mut target = AppState::default();
     target
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
         .expect("target owns a stable plan")
         .insert(AnalysisKind::DcSweep)
         .expect("target stale analysis inserts");
-    target.model_library_manager.clear();
+    target.model.model_library_manager.clear();
     let imported = apply_loaded_project(
         &mut target,
         project,
@@ -1050,10 +1105,11 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
 
     assert!(imported);
     assert_eq!(
-        serde_json::to_value(&target.sim_setup).expect("restored plan serializes"),
+        serde_json::to_value(&target.model.sim_setup).expect("restored plan serializes"),
         expected_plan
     );
     let restored = target
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("import restores stable plan");
@@ -1085,12 +1141,13 @@ fn project_import_restores_plan_order_solver_options_and_model_catalog() {
         instance.enabled() && instance.lifecycle() == AnalysisLifecycleState::Draft
     }));
     assert_eq!(
-        target.sim_setup.session.options_draft.reltol,
+        target.model.sim_setup.session.options_draft.reltol,
         crate::simulation::dialog::options::format_si_value(2e-4)
     );
-    assert_eq!(target.model_library_manager.library_count(), 1);
+    assert_eq!(target.model.model_library_manager.library_count(), 1);
     assert!(
         target
+            .model
             .model_library_manager
             .get_library("project_exact_models")
             .is_some()
@@ -1116,8 +1173,14 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
     project.file.execution_context = Some(context);
 
     let mut state = AppState::default();
-    let original_project_name = state.workspace.content.project.display_name().to_owned();
-    let original_active_view = state.workspace.content.active_view.clone();
+    let original_project_name = state
+        .model
+        .workspace
+        .content
+        .project
+        .display_name()
+        .to_owned();
+    let original_active_view = state.model.workspace.content.active_view.clone();
 
     let imported = apply_loaded_project(
         &mut state,
@@ -1127,11 +1190,14 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
 
     assert!(!imported);
     assert_eq!(
-        state.workspace.content.project.display_name(),
+        state.model.workspace.content.project.display_name(),
         original_project_name
     );
-    assert_eq!(state.workspace.content.active_view, original_active_view);
-    assert!(state.log_buffer.entries().any(|entry| {
+    assert_eq!(
+        state.model.workspace.content.active_view,
+        original_active_view
+    );
+    assert!(state.model.log_buffer.entries().any(|entry| {
         entry
             .message
             .contains("its saved simulation setup is invalid")
@@ -1142,8 +1208,8 @@ fn invalid_execution_context_does_not_partially_replace_open_project() {
 #[test]
 fn browser_import_restores_project_simulation_results_and_skips_recents() {
     let mut state = AppState::default();
-    seal_legacy_unattributed(state.simulation.start_run());
-    assert!(state.simulation.retained.has_results());
+    seal_legacy_unattributed(state.model.simulation.start_run());
+    assert!(state.model.simulation.retained.has_results());
 
     let project = project_named_with_results("browser-import.rspiceproj");
 
@@ -1155,20 +1221,21 @@ fn browser_import_restores_project_simulation_results_and_skips_recents() {
 
     assert!(imported);
     assert_eq!(
-        state.workspace.content.project.display_name(),
+        state.model.workspace.content.project.display_name(),
         "browser-import"
     );
-    assert_eq!(state.simulation.retained.run_count(), 1);
+    assert_eq!(state.model.simulation.retained.run_count(), 1);
     assert_eq!(
         state
+            .model
             .simulation
             .active_run()
             .expect("active imported run")
             .label,
         "Run 4 (import fixture)"
     );
-    assert_eq!(state.simulation.view.waveforms.len(), 1);
-    assert_eq!(state.simulation.view.waveforms[0].name, "V(out)");
+    assert_eq!(state.model.simulation.view.waveforms.len(), 1);
+    assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
     assert!(state.recent_files.is_empty());
 }
 
@@ -1178,18 +1245,19 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     // An actually running local simulation deliberately blocks project
     // replacement. These are stale, non-persisted controls from an
     // already-finished run and must be reset by the accepted import.
-    state.simulation.execution.is_running = false;
-    state.simulation.execution.trigger_simulation = true;
-    state.simulation.execution.trigger_abort = true;
-    state.simulation.execution.progress = 0.75;
-    state.simulation.execution.status = "Running stale project".to_string();
-    state.simulation.source.netlist_content = "stale netlist".to_string();
+    state.model.simulation.execution.is_running = false;
+    state.model.simulation.execution.trigger_simulation = true;
+    state.model.simulation.execution.trigger_abort = true;
+    state.model.simulation.execution.progress = 0.75;
+    state.model.simulation.execution.status = "Running stale project".to_string();
+    state.model.simulation.source.netlist_content = "stale netlist".to_string();
     state
+        .model
         .simulation
         .view
         .node_to_waveform
         .insert("stale".to_string(), 99);
-    state.simulation.view.ground_node = Some("OLD_GND".to_string());
+    state.model.simulation.view.ground_node = Some("OLD_GND".to_string());
     state.ui.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     state.ui.code_workspace.automation.debug.watches.push(
@@ -1209,6 +1277,7 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         .unwrap(),
     );
     state
+        .model
         .log_buffer
         .warning(crate::diagnostics::LogSource::Run, "old project warning");
     let project = project_named_with_results("browser-import.rspiceproj");
@@ -1219,15 +1288,18 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         ProjectLoadOrigin::BrowserImport("browser-import.rspiceproj"),
     ));
 
-    assert!(!state.simulation.execution.is_running);
-    assert!(!state.simulation.execution.trigger_simulation);
-    assert!(!state.simulation.execution.trigger_abort);
-    assert_eq!(state.simulation.execution.progress, 0.0);
-    assert!(state.simulation.execution.status.is_empty());
-    assert!(state.simulation.source.netlist_content.is_empty());
-    assert_eq!(state.simulation.view.node_to_waveform.get("stale"), None);
-    assert_eq!(state.simulation.view.ground_node, None);
-    assert_eq!(state.simulation.view.waveforms[0].name, "V(out)");
+    assert!(!state.model.simulation.execution.is_running);
+    assert!(!state.model.simulation.execution.trigger_simulation);
+    assert!(!state.model.simulation.execution.trigger_abort);
+    assert_eq!(state.model.simulation.execution.progress, 0.0);
+    assert!(state.model.simulation.execution.status.is_empty());
+    assert!(state.model.simulation.source.netlist_content.is_empty());
+    assert_eq!(
+        state.model.simulation.view.node_to_waveform.get("stale"),
+        None
+    );
+    assert_eq!(state.model.simulation.view.ground_node, None);
+    assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
     assert_eq!(
         state.ui.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
@@ -1237,6 +1309,7 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     // The Console is the session's record: the old project's history stays,
     // and the replacement states itself once after it.
     let messages: Vec<_> = state
+        .model
         .log_buffer
         .entries()
         .map(|entry| entry.message.as_str())
@@ -1270,10 +1343,10 @@ fn save_project_to_path_writes_simulation_results() {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.retained.next_run_id = 9;
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 9;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1318,12 +1391,16 @@ fn save_project_to_path_round_trips_result_markers() {
             .with_waveforms(vec![waveform]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.retained.next_run_id = 11;
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 11;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 
-    let active = state.simulation.active_run().expect("active retained run");
+    let active = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
     let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
     let anchor = state
         .ui
@@ -1368,7 +1445,7 @@ fn save_project_to_path_round_trips_result_markers() {
     );
 
     let mut reopened = AppState::default();
-    reopened.simulation = state.simulation.clone();
+    reopened.model.simulation = state.model.simulation.clone();
     crate::workbench::documents::result_document::restore_presentation(
         &mut reopened,
         loaded.file.result_presentation,
@@ -1406,12 +1483,16 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         ),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.retained.next_run_id = 12;
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 12;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 
-    let active = state.simulation.active_run().expect("active retained run");
+    let active = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
     let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
     let pane = WavePanePresentationKey {
         analysis,
@@ -1452,7 +1533,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
 
     // An older file that already carries an orphan is still filtered on load.
     let mut reopened = AppState::default();
-    reopened.simulation = state.simulation.clone();
+    reopened.model.simulation = state.model.simulation.clone();
     let mut older_file = loaded.file.result_presentation.log_y_panes;
     older_file.push(orphan);
     crate::workbench::documents::result_document::restore_log_y_panes(&mut reopened, older_file);
@@ -1484,23 +1565,27 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
             )]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.retained.next_run_id = 13;
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 13;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     let expression_owner =
         crate::workbench::documents::result_document::AnalysisPresentationKey::new(
-            state.simulation.retained.runs[0].dataset_id,
-            &state.simulation.retained.runs[0].analyses[0],
+            state.model.simulation.retained.runs[0].dataset_id,
+            &state.model.simulation.retained.runs[0].analyses[0],
         );
     assert!(
         state
             .ui
             .results
-            .add_expression_trace(&state.simulation, expression_owner, "V(out) * 2".to_owned(),)
+            .add_expression_trace(
+                &state.model.simulation,
+                expression_owner,
+                "V(out) * 2".to_owned(),
+            )
             .expect("retained expression owner")
     );
-    state.workspace.content.visualization_documents_dirty = true;
+    state.model.workspace.content.visualization_documents_dirty = true;
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1527,7 +1612,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     );
 
     let mut reopened = AppState::default();
-    reopened.simulation = state.simulation.clone();
+    reopened.model.simulation = state.model.simulation.clone();
     crate::workbench::documents::result_document::restore_expression_groups(
         &mut reopened,
         loaded.file.result_presentation.expression_groups,
@@ -1536,7 +1621,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
         reopened
             .ui
             .results
-            .project_expression_groups(&reopened.simulation)[0]
+            .project_expression_groups(&reopened.model.simulation)[0]
             .traces[0]
             .text,
         "V(out) * 2"
@@ -1563,11 +1648,11 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
             )]),
     );
     seal_legacy_unattributed(&mut run);
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.retained.next_run_id = 21;
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
-    let run = &state.simulation.retained.runs[0];
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 21;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
+    let run = &state.model.simulation.retained.runs[0];
     let analysis = &run.analyses[0];
     let source =
         crate::workbench::documents::result_document::visualization_source_dataset(run, analysis)
@@ -1655,6 +1740,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
         )
         .expect("authored entities commit");
     let document_id = state
+        .model
         .workspace
         .content
         .insert_visualization_document(document)
@@ -1707,10 +1793,10 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
         crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![waveform]),
     );
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.retained.next_run_id = 10;
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.retained.next_run_id = 10;
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1728,6 +1814,7 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
     assert!(!saved);
     assert!(!published);
     let line = state
+        .model
         .log_buffer
         .entries()
         .find(|entry| entry.message.contains("Project save failed"))
@@ -1779,7 +1866,7 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
     )
     .expect("a validated identity creates a project");
 
-    let workspace = &state.workspace;
+    let workspace = &state.model.workspace;
     assert_eq!(workspace.content.project.name(), "Precision Sensor AFE");
     assert_eq!(workspace.content.project.root_library, "afe");
     assert_eq!(workspace.content.project.top_cell, "core");
@@ -1812,6 +1899,7 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
     // The requested library is the one the project seed created — role
     // metadata and all — rather than the default one renamed afterwards.
     let library = state
+        .model
         .library_manager
         .get_library("afe")
         .expect("the requested design library exists");
@@ -1838,7 +1926,7 @@ fn a_named_new_project_seeds_every_owner_of_its_identity() {
 #[test]
 fn an_invalid_identity_creates_nothing_and_names_the_field() {
     let mut state = AppState::default();
-    let before = state.workspace.content.project.id();
+    let before = state.model.workspace.content.project.id();
 
     let error = create_new_project_with(
         &mut state,
@@ -1851,7 +1939,7 @@ fn an_invalid_identity_creates_nothing_and_names_the_field() {
     .expect_err("a library segment with a space is refused");
 
     assert!(error.starts_with("Library"), "{error}");
-    assert_eq!(state.workspace.content.project.id(), before);
+    assert_eq!(state.model.workspace.content.project.id(), before);
     assert!(
         state
             .prompt_text()
@@ -1868,18 +1956,22 @@ fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
 
     assert!(!state.dialogs.new_project.open);
     let defaults = NewProjectParams::default();
-    assert_eq!(state.workspace.content.project.name(), defaults.name);
+    assert_eq!(state.model.workspace.content.project.name(), defaults.name);
     assert_eq!(
-        state.workspace.content.project.root_library,
+        state.model.workspace.content.project.root_library,
         defaults.root_library
     );
-    assert_eq!(state.workspace.content.project.top_cell, defaults.top_cell);
     assert_eq!(
-        state.workspace.content.active_view,
+        state.model.workspace.content.project.top_cell,
+        defaults.top_cell
+    );
+    assert_eq!(
+        state.model.workspace.content.active_view,
         crate::state::CellViewRef::default_top()
     );
     assert!(
         state
+            .model
             .library_manager
             .get_library(&defaults.root_library)
             .and_then(|library| library.get_cell(&defaults.top_cell))
@@ -1910,10 +2002,12 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
     }
 
     let mut source = AppState::default();
-    source.sim_setup.run_set = temperatures(&["0", "27", "85"]);
-    let context =
-        crate::io::capture_execution_context(&source.sim_setup, &source.model_library_manager)
-            .expect("the source context validates");
+    source.model.sim_setup.run_set = temperatures(&["0", "27", "85"]);
+    let context = crate::io::capture_execution_context(
+        &source.model.sim_setup,
+        &source.model.model_library_manager,
+    )
+    .expect("the source context validates");
 
     // A project written before the run space had one owner: its Corner draft
     // carries a second, disagreeing declaration inline, and its execution
@@ -1946,12 +2040,12 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
     ));
 
     assert_eq!(
-        state.sim_setup.run_set.point_count(),
+        state.model.sim_setup.run_set.point_count(),
         3,
         "the plan-global declaration is the one the plan runs"
     );
     assert!(
-        state.log_buffer.entries().any(|entry| {
+        state.model.log_buffer.entries().any(|entry| {
             entry
                 .message
                 .contains("Corner analysis carried its own run space")
@@ -1959,7 +2053,7 @@ fn a_disagreeing_legacy_corner_run_space_is_reported_on_load() {
         "the dropped declaration must reach the console the load reports through"
     );
     assert!(
-        state.sim_setup.legacy_run_set_notes.is_empty(),
+        state.model.sim_setup.legacy_run_set_notes.is_empty(),
         "the record is drained once it has been reported"
     );
 }
@@ -2002,7 +2096,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
         crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state).as_deref()
     ));
     assert!(names_renamed(
-        state.workspace.content.project.path.as_deref()
+        state.model.workspace.content.project.path.as_deref()
     ));
     assert!(names_renamed(
         state
@@ -2015,7 +2109,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     eframe::set_value(&mut storage, eframe::APP_KEY, &state);
     let restored = AppState::restore_eframe_session(&storage).expect("the session restores");
     assert!(names_renamed(
-        restored.workspace.content.project.path.as_deref()
+        restored.model.workspace.content.project.path.as_deref()
     ));
     assert!(names_renamed(
         restored

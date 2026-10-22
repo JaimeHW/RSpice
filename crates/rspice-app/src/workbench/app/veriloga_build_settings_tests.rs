@@ -472,7 +472,7 @@ fn save_and_compile_compiles_with_the_new_settings() {
     let receipt = veriloga.receipt.as_ref().expect("the module compiled");
     assert!(
         selected.matches_token(
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             receipt.compilation.token()
         ),
         "with the settings just saved"

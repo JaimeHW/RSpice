@@ -57,7 +57,7 @@ impl DragWork {
 }
 
 fn drawing_objects(state: &AppState) -> usize {
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     document.components.len()
         + document.wires.len()
         + document.buses.len()
@@ -78,6 +78,7 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
     let part = fixture.components[0][columns * (rows / 2) + columns / 2];
     let mut state = fixture.state;
     let at = state
+        .model
         .schematic
         .document()
         .components
@@ -85,8 +86,8 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
         .find(|component| component.id == part)
         .map(|component| component.pos)
         .expect("the part is on the sheet");
-    let grid = state.schematic.document().grid_size;
-    let editor = &mut state.schematic.session.editor;
+    let grid = state.model.schematic.document().grid_size;
+    let editor = &mut state.model.schematic.session.editor;
     editor.needs_fit = false;
     editor.zoom = 1.0;
     editor.pan = (
@@ -146,6 +147,7 @@ fn drag_work(columns: usize, rows: usize) -> DragWork {
 
     let steps = i32::try_from(MOVES).expect("a few moves");
     let dropped = state
+        .model
         .schematic
         .document()
         .components

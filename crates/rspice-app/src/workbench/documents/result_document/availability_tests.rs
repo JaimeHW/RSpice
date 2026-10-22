@@ -16,8 +16,8 @@ fn state_with_analysis(analysis: AnalysisResult) -> AppState {
     let mut state = AppState::default();
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    state.simulation.retained.runs = vec![run].into();
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run(0));
     state
 }
 
@@ -38,17 +38,21 @@ fn frame_boundary_repairs_a_selector_that_drifted_from_the_open_dataset() {
     );
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![first, background].into();
-    assert!(state.simulation.select_run(1));
+    state.model.simulation.retained.runs = vec![first, background].into();
+    assert!(state.model.simulation.select_run(1));
     state
         .workbench
         .documents
         .activate(WorkspaceDocumentId::ResultDataset(displayed_dataset));
 
     assert!(synchronize_quick_view_dataset_authority(&mut state));
-    assert_eq!(state.simulation.view.active_run_idx, Some(0));
+    assert_eq!(state.model.simulation.view.active_run_idx, Some(0));
     assert_eq!(
-        state.simulation.active_run().map(|run| run.dataset_id),
+        state
+            .model
+            .simulation
+            .active_run()
+            .map(|run| run.dataset_id),
         Some(displayed_dataset)
     );
     assert!(
@@ -102,8 +106,8 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
     let dataset_id = run.dataset_id;
     let first_key = AnalysisPresentationKey::new(dataset_id, &run.analyses[0]);
     let second_key = AnalysisPresentationKey::new(dataset_id, &run.analyses[1]);
-    state.simulation.retained.runs = vec![run].into();
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run(0));
 
     state.ui.results.session.hidden_strips.insert(first_key);
     state.ui.results.session.maximized_strip = Some(second_key);
@@ -123,8 +127,12 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
         .x = Some((0.25, 0.75));
     state.ui.results.session.table.analysis = Some(second_key);
 
-    state.simulation.retained.runs[0].analyses.swap(0, 1);
-    let reordered = state.simulation.active_run().expect("active retained run");
+    state.model.simulation.retained.runs[0].analyses.swap(0, 1);
+    let reordered = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
     assert_eq!(
         first_key.resolve(reordered).map(|(index, _)| index),
         Some(1)
@@ -143,7 +151,7 @@ fn presentation_state_follows_analysis_identity_after_reorder() {
     state
         .ui
         .results
-        .toggle_expression_visibility_by_key(&state.simulation, &expression)
+        .toggle_expression_visibility_by_key(&state.model.simulation, &expression)
         .expect("stable expression identity resolves after analysis reorder");
     assert!(!state.ui.results.session.analysis_exprs[&first_key][0].visible);
     assert_eq!(
@@ -165,7 +173,11 @@ fn table_and_marker_waveform_identity_survive_waveform_reorder() {
         RetainedTrace::new("V(b)", vec![0.0, 1.0], vec![3.0, 4.0], "#4ec9b0"),
     ]);
     let mut state = state_with_analysis(analysis);
-    let run = state.simulation.active_run().expect("active retained run");
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     let trace = TracePresentationKey {
         source_name: "V(a)".to_owned(),
@@ -185,7 +197,7 @@ fn table_and_marker_waveform_identity_survive_waveform_reorder() {
         .add_marker(analysis_key, waveform.clone(), "V(a)".to_owned(), 0.5)
         .unwrap();
 
-    state.simulation.retained.runs[0].analyses[0]
+    state.model.simulation.retained.runs[0].analyses[0]
         .waveforms
         .swap(0, 1);
     assert_eq!(
@@ -207,7 +219,11 @@ fn selected_trace_identity_fails_closed_after_active_dataset_changes() {
     let mut state = state_with_analysis(analysis.clone());
     state.ui.results.session.selected_trace = Some(
         SelectedResultTrace::from_run_indices(
-            state.simulation.active_run().expect("active retained run"),
+            state
+                .model
+                .simulation
+                .active_run()
+                .expect("active retained run"),
             0,
             0,
         )
@@ -217,17 +233,17 @@ fn selected_trace_identity_fails_closed_after_active_dataset_changes() {
         state
             .ui
             .results
-            .valid_selected_trace(&state.simulation)
+            .valid_selected_trace(&state.model.simulation)
             .is_some()
     );
 
-    state.simulation.start_run().add_analysis(analysis);
+    state.model.simulation.start_run().add_analysis(analysis);
 
     assert!(
         state
             .ui
             .results
-            .valid_selected_trace(&state.simulation)
+            .valid_selected_trace(&state.model.simulation)
             .is_none()
     );
 }
@@ -266,8 +282,8 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
         ]),
     );
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run(0));
 
     assert!(viewer_availability(&state, ResultViewer::Waves).available);
     assert!(viewer_availability(&state, ResultViewer::DcSweep).available);
@@ -275,7 +291,7 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
     state.ui.results.session.viewer = ResultViewer::Waves;
     let presentation = state.ui.preferences.result_presentation_policy();
     let waves = waves::cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -285,7 +301,7 @@ fn dc_sweep_is_a_distinct_mockup_viewer_and_waveform_projection() {
 
     state.ui.results.session.viewer = ResultViewer::DcSweep;
     let dc = waves::cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -470,12 +486,12 @@ fn op_viewer_requires_the_selected_analysis_device_report() {
         "OP without report",
     ));
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![run].into();
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs = vec![run].into();
+    assert!(state.model.simulation.select_run(0));
 
-    assert!(state.simulation.select_analysis(1));
+    assert!(state.model.simulation.select_analysis(1));
     assert!(!viewer_availability(&state, ResultViewer::Op).available);
-    assert!(state.simulation.select_analysis(0));
+    assert!(state.model.simulation.select_analysis(0));
     assert!(viewer_availability(&state, ResultViewer::Op).available);
 }
 
@@ -502,6 +518,7 @@ fn the_op_tab_is_offered_only_where_the_op_sheet_renders() {
     assert!(
         op_inspector::export_csv(
             transient
+                .model
                 .simulation
                 .active_analysis()
                 .expect("the fixture selects an analysis")
@@ -540,16 +557,16 @@ fn the_specs_tab_speaks_for_the_active_run_and_not_the_history() {
     );
 
     let mut state = AppState::default();
-    state.simulation.retained.runs = vec![measured, unmeasured].into();
-    assert!(state.workspace.content.specs.is_empty());
+    state.model.simulation.retained.runs = vec![measured, unmeasured].into();
+    assert!(state.model.workspace.content.specs.is_empty());
 
-    assert!(state.simulation.select_run(0));
+    assert!(state.model.simulation.select_run(0));
     assert!(
         viewer_availability(&state, ResultViewer::Specs).available,
         "the run the sheet reads holds a measurement"
     );
 
-    assert!(state.simulation.select_run(1));
+    assert!(state.model.simulation.select_run(1));
     assert!(
         !viewer_availability(&state, ResultViewer::Specs).available,
         "the tab was offered for a measurement in a run the sheet never reads"
@@ -686,7 +703,7 @@ fn stage_bar_stands_down_without_a_retained_dataset() {
     assert!(!result_stage_bar_visible(&empty));
 
     let mut allocated = AppState::default();
-    allocated.simulation.start_run();
+    allocated.model.simulation.start_run();
     assert!(!result_stage_bar_visible(&allocated));
 
     let retained = state_with_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
@@ -697,7 +714,11 @@ fn stage_bar_stands_down_without_a_retained_dataset() {
 fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
     let analysis = AnalysisResult::new(1, AnalysisType::Transient, "TRAN");
     let mut state = state_with_analysis(analysis);
-    let run = state.simulation.active_run().expect("active retained run");
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     state.ui.results.session.hidden_strips.insert(key);
 
@@ -711,7 +732,7 @@ fn hidden_wave_strips_make_the_instrument_restore_control_reachable() {
         other_run.dataset_id,
         other_run.analyses.first().expect("other analysis"),
     );
-    state.simulation.retained.runs.push(other_run);
+    state.model.simulation.retained.runs.push(other_run);
     state.ui.results.session.hidden_strips.insert(other_key);
 
     assert_eq!(hidden_wave_strip_count(&state), 1);
@@ -1218,9 +1239,9 @@ fn operating_point_app(devices: usize) -> RSpiceApp {
     );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.retained.runs = vec![run].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app
 }
 
@@ -1243,9 +1264,9 @@ fn sensitivity_app(parameters: usize) -> RSpiceApp {
     );
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    app.state.simulation.retained.runs = vec![run].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app
 }
 
@@ -1259,9 +1280,9 @@ fn manifest_app(analyses: usize) -> RSpiceApp {
             format!("TRAN {index}"),
         ));
     }
-    app.state.simulation.retained.runs = vec![run].into();
-    assert!(app.state.simulation.select_run(0));
-    assert!(app.state.simulation.select_analysis(0));
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    assert!(app.state.model.simulation.select_analysis(0));
     app
 }
 
@@ -1317,7 +1338,7 @@ fn a_run_that_did_not_complete_says_so_on_the_sheet_that_draws_it() {
     );
     let clean_purpose = sheet_purpose(&app.state);
 
-    app.state.simulation.retained.runs[0].analyses[0].success = false;
+    app.state.model.simulation.retained.runs[0].analyses[0].success = false;
 
     // Still drawable: refusing the partial samples would take away the
     // one view that answers "where did it go wrong?".
@@ -1509,7 +1530,11 @@ fn transient_state() -> AppState {
 }
 
 fn active_analysis_key(state: &AppState) -> AnalysisPresentationKey {
-    let run = state.simulation.active_run().expect("active retained run");
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active retained run");
     AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
 }
 
@@ -1548,8 +1573,8 @@ fn a_re_run_keeps_the_window_the_reader_zoomed_the_wave_stack_to() {
     // The same authored analysis, solved again into a new dataset.
     let mut rerun = SimulationRun::new(2);
     rerun.add_analysis(authored);
-    state.simulation.retained.runs.insert(0, rerun);
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs.insert(0, rerun);
+    assert!(state.model.simulation.select_run(0));
     let second = active_analysis_key(&state);
     assert_ne!(
         first.dataset_id(),
@@ -1584,11 +1609,11 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
     );
     let discarded =
         AnalysisPresentationKey::new(discarded_run.dataset_id, &discarded_run.analyses[0]);
-    state.simulation.retained.runs.push(discarded_run);
+    state.model.simulation.retained.runs.push(discarded_run);
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
 
     for (analysis, name) in [(kept, "V(out)"), (discarded, "V(gone)")] {
         state
@@ -1628,6 +1653,7 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
 
     // Retention discards the second run.
     state
+        .model
         .simulation
         .retained
         .runs
@@ -1635,7 +1661,7 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
 
     assert_eq!(state.ui.results.session.markers.len(), 1);
     assert_eq!(state.ui.results.session.markers[0].analysis, kept);
@@ -1648,7 +1674,7 @@ fn pruning_a_run_drops_the_presentation_state_that_named_its_dataset() {
         state
             .ui
             .results
-            .project_expression_groups(&state.simulation)
+            .project_expression_groups(&state.model.simulation)
             .iter()
             .all(|group| group.analysis == kept),
         "a save must not carry a group about a dataset the project dropped"
@@ -1677,42 +1703,42 @@ fn retained_history_reconciliation_skips_reads_and_tracks_edits_and_replacement(
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
     let baseline = WorkCounts::reset();
     for _ in 0..12 {
         state
             .ui
             .results
-            .reconcile_retained_datasets(&state.simulation);
+            .reconcile_retained_datasets(&state.model.simulation);
     }
-    let unchanged = state.simulation.clone();
+    let unchanged = state.model.simulation.clone();
     state.ui.results.reconcile_retained_datasets(&unchanged);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 0);
 
     // No manual data-version bump: mutable access to a nested run is enough.
-    state.simulation.retained.runs[0].analyses[0]
+    state.model.simulation.retained.runs[0].analyses[0]
         .label
         .push_str(" edited");
     let baseline = WorkCounts::reset();
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
     assert_eq!(state.ui.results.session.markers.len(), 1);
 
     // Same run count and sequence, different dataset: no old annotation survives.
-    state.simulation.retained.runs = transient_state().simulation.retained.runs;
+    state.model.simulation.retained.runs = transient_state().model.simulation.retained.runs;
     let baseline = WorkCounts::reset();
     state
         .ui
         .results
-        .reconcile_retained_datasets(&state.simulation);
+        .reconcile_retained_datasets(&state.model.simulation);
     assert_eq!(baseline.since().get(DatasetWalk::RetainedHistoryScan), 1);
     assert!(state.ui.results.session.markers.is_empty());
 }

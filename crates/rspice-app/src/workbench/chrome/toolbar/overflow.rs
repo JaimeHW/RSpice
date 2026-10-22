@@ -270,11 +270,11 @@ mod tests {
                             "Draw wire",
                             WorkbenchIcon::Wire,
                             (|state: &mut AppState| {
-                                state.schematic.session.editor.tool = Tool::Wire;
+                                state.model.schematic.session.editor.tool = Tool::Wire;
                             }) as fn(&mut AppState),
                         ),
                         ("Place probe", WorkbenchIcon::Probe, |state| {
-                            state.schematic.session.editor.tool = Tool::Probe;
+                            state.model.schematic.session.editor.tool = Tool::Probe;
                         }),
                     ] {
                         set_aside(
@@ -361,7 +361,7 @@ mod tests {
         }
 
         fn tool(&self) -> Tool {
-            self.app.state.schematic.session.editor.tool
+            self.app.state.model.schematic.session.editor.tool
         }
     }
 

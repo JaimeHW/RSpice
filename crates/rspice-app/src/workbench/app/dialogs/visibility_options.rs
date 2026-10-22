@@ -134,11 +134,11 @@ fn apply_display_options(state: &mut AppState) {
 
 fn capture_visibility_recovery(state: &AppState) -> crate::workbench::SchematicVisibilityRecovery {
     crate::workbench::SchematicVisibilityRecovery {
-        view_path: state.workspace.content.active_view.display_path(),
+        view_path: state.model.workspace.content.active_view.display_path(),
         policy: state.ui.schematic_visibility,
         routing_mode: state.ui.schematic_routing_mode,
-        net_highlight: state.schematic.session.editor.net_highlight.clone(),
-        selection: state.schematic.session.editor.selection.clone(),
+        net_highlight: state.model.schematic.session.editor.net_highlight.clone(),
+        selection: state.model.schematic.session.editor.selection.clone(),
     }
 }
 
@@ -148,7 +148,7 @@ fn visibility_recovery_available(state: &AppState) -> bool {
         .schematic_visibility_recovery
         .as_ref()
         .is_some_and(|recovery| {
-            recovery.view_path == state.workspace.content.active_view.display_path()
+            recovery.view_path == state.model.workspace.content.active_view.display_path()
         })
 }
 
@@ -158,35 +158,72 @@ fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
         .schematic_visibility_recovery
         .clone()
         .ok_or_else(|| "No prior schematic visibility state is available.".to_owned())?;
-    if recovery.view_path != state.workspace.content.active_view.display_path() {
+    if recovery.view_path != state.model.workspace.content.active_view.display_path() {
         return Err(
             "The active cell/view changed; its prior visibility state was not applied.".to_owned(),
         );
     }
     state.ui.schematic_visibility = recovery.policy;
     state.ui.schematic_routing_mode = recovery.routing_mode;
-    state.schematic.session.editor.wire_drawing.routing_mode = recovery.routing_mode;
-    state.schematic.session.editor.bus_drawing.routing_mode = recovery.routing_mode;
-    state.schematic.session.editor.net_highlight = recovery.net_highlight;
-    state.schematic.session.editor.selection = recovery.selection;
-    let active_key = state.workspace.content.active_schematic_reference().key();
-    if let Some(mut buffer) = state.workspace.schematic_editor_mut(&active_key) {
-        buffer.editor.session.editor.selection = state.schematic.session.editor.selection.clone();
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .wire_drawing
+        .routing_mode = recovery.routing_mode;
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .bus_drawing
+        .routing_mode = recovery.routing_mode;
+    state.model.schematic.session.editor.net_highlight = recovery.net_highlight;
+    state.model.schematic.session.editor.selection = recovery.selection;
+    let active_key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&active_key) {
+        buffer.editor.session.editor.selection =
+            state.model.schematic.session.editor.selection.clone();
     }
     state.ui.schematic_visibility_recovery = None;
     Ok(())
 }
 
 pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicVisibilityPolicy) {
-    let current = state.schematic.session.editor.wire_drawing.routing_mode;
+    let current = state
+        .model
+        .schematic
+        .session
+        .editor
+        .wire_drawing
+        .routing_mode;
     let routing_mode = routing_mode_for(policy.wire_routing, current);
-    state.schematic.session.editor.wire_drawing.routing_mode = routing_mode;
-    state.schematic.session.editor.bus_drawing.routing_mode = routing_mode;
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .wire_drawing
+        .routing_mode = routing_mode;
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .bus_drawing
+        .routing_mode = routing_mode;
     state.ui.schematic_routing_mode = routing_mode;
     if !policy.net_highlighting.lights_selected_net() {
-        state.schematic.session.editor.net_highlight.clear();
+        state.model.schematic.session.editor.net_highlight.clear();
     }
     let selectable_note_ids = state
+        .model
         .schematic
         .document()
         .design_notes
@@ -209,6 +246,7 @@ pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicV
         .map(|note| note.id)
         .collect::<std::collections::HashSet<_>>();
     state
+        .model
         .schematic
         .session
         .editor
@@ -483,9 +521,9 @@ mod tests {
     #[test]
     fn applying_visibility_changes_only_session_owned_runtime_state() {
         let mut state = AppState::default();
-        let design_before =
-            serde_json::to_value(&state.schematic).expect("serialize project-owned schematic");
-        let topology_before = state.schematic.topology_version();
+        let design_before = serde_json::to_value(&state.model.schematic)
+            .expect("serialize project-owned schematic");
+        let topology_before = state.model.schematic.topology_version();
         let policy = SchematicVisibilityPolicy {
             wire_routing: SchematicWireRoutingStyle::FortyFiveDegree,
             net_highlighting: SchematicNetHighlighting::Off,
@@ -497,17 +535,29 @@ mod tests {
 
         assert_eq!(state.ui.schematic_visibility, policy);
         assert_eq!(
-            state.schematic.session.editor.wire_drawing.routing_mode,
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .routing_mode,
             WireRoutingMode::FortyFiveDegree
         );
         assert_eq!(
-            state.schematic.session.editor.bus_drawing.routing_mode,
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .bus_drawing
+                .routing_mode,
             WireRoutingMode::FortyFiveDegree
         );
-        assert_eq!(state.schematic.topology_version(), topology_before);
-        assert!(!state.schematic.can_undo());
+        assert_eq!(state.model.schematic.topology_version(), topology_before);
+        assert!(!state.model.schematic.can_undo());
         assert_eq!(
-            serde_json::to_value(&state.schematic).expect("serialize schematic after apply"),
+            serde_json::to_value(&state.model.schematic).expect("serialize schematic after apply"),
             design_before
         );
     }
@@ -515,18 +565,20 @@ mod tests {
     #[test]
     fn visibility_recovery_restores_policy_routing_highlight_and_selection() {
         let mut state = AppState::default();
-        let selected = state.schematic.add_component(
+        let selected = state.model.schematic.add_component(
             crate::state::ComponentType::Resistor,
             crate::state::Point::origin(),
         );
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(selected);
-        state.schematic.session.editor.net_highlight.active = true;
+        state.model.schematic.session.editor.net_highlight.active = true;
         state
+            .model
             .schematic
             .session
             .editor
@@ -544,7 +596,7 @@ mod tests {
                 ..SchematicVisibilityPolicy::default()
             },
         );
-        state.schematic.session.editor.selection.clear();
+        state.model.schematic.session.editor.selection.clear();
         restore_visibility_recovery(&mut state).expect("restore device-local view");
 
         assert_eq!(
@@ -552,12 +604,19 @@ mod tests {
             SchematicVisibilityPolicy::default()
         );
         assert_eq!(
-            state.schematic.session.editor.wire_drawing.routing_mode,
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .wire_drawing
+                .routing_mode,
             WireRoutingMode::HorizontalFirst
         );
-        assert!(state.schematic.session.editor.net_highlight.active);
+        assert!(state.model.schematic.session.editor.net_highlight.active);
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -567,6 +626,7 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .schematic
                 .session
                 .editor

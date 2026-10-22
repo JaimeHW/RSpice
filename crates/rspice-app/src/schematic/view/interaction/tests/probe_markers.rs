@@ -11,49 +11,60 @@ fn empty_space_probe_retains_one_unbound_marker_and_undo_removes_it() {
 
     let id =
         retain_probe_flag(&mut state, position, None, None).expect("editable active schematic");
-    assert_eq!(state.schematic.document().probes.len(), 1);
-    assert_eq!(state.schematic.document().probes[0].id, id);
-    assert_eq!(state.schematic.document().probes[0].position, position);
+    assert_eq!(state.model.schematic.document().probes.len(), 1);
+    assert_eq!(state.model.schematic.document().probes[0].id, id);
     assert_eq!(
-        state.schematic.document().probes[0].reference,
+        state.model.schematic.document().probes[0].position,
+        position
+    );
+    assert_eq!(
+        state.model.schematic.document().probes[0].reference,
         format!("P{id}")
     );
     assert!(
-        state.schematic.document().probes[0]
+        state.model.schematic.document().probes[0]
             .source_expression
             .is_none()
     );
     assert_eq!(
-        state.schematic.undo_description(),
+        state.model.schematic.undo_description(),
         Some("place schematic probe")
     );
 
-    assert!(state.schematic.undo());
-    assert!(state.schematic.document().probes.is_empty());
+    assert!(state.model.schematic.undo());
+    assert!(state.model.schematic.document().probes.is_empty());
 }
 
 #[test]
 fn probe_marker_rejects_read_only_and_replaced_view_identity_without_mutation() {
     let mut read_only = AppState::default();
-    read_only.schematic.session.read_only = true;
+    read_only.model.schematic.session.read_only = true;
     assert!(retain_probe_flag(&mut read_only, Point::origin(), None, None).is_err());
-    assert!(read_only.schematic.document().probes.is_empty());
-    assert!(!read_only.schematic.can_undo());
+    assert!(read_only.model.schematic.document().probes.is_empty());
+    assert!(!read_only.model.schematic.can_undo());
 
     let mut read_only_reference = AppState::default();
     read_only_reference
+        .model
         .workspace
         .content
         .set_active_read_only_reference(true);
     assert!(retain_probe_flag(&mut read_only_reference, Point::origin(), None, None).is_err());
-    assert!(read_only_reference.schematic.document().probes.is_empty());
-    assert!(!read_only_reference.schematic.can_undo());
+    assert!(
+        read_only_reference
+            .model
+            .schematic
+            .document()
+            .probes
+            .is_empty()
+    );
+    assert!(!read_only_reference.model.schematic.can_undo());
 
     let mut replaced = AppState::default();
-    replaced.workspace.content.active_view.view = "symbol".to_owned();
+    replaced.model.workspace.content.active_view.view = "symbol".to_owned();
     assert!(retain_probe_flag(&mut replaced, Point::origin(), None, None).is_err());
-    assert!(replaced.schematic.document().probes.is_empty());
-    assert!(!replaced.schematic.can_undo());
+    assert!(replaced.model.schematic.document().probes.is_empty());
+    assert!(!replaced.model.schematic.can_undo());
 }
 
 #[test]
@@ -67,9 +78,12 @@ fn bound_probe_marker_retains_the_exact_source_expression() {
     )
     .expect("bound marker");
 
-    assert_eq!(state.schematic.document().probes[0].reference, "V(OUT)");
     assert_eq!(
-        state.schematic.document().probes[0]
+        state.model.schematic.document().probes[0].reference,
+        "V(OUT)"
+    );
+    assert_eq!(
+        state.model.schematic.document().probes[0]
             .source_expression
             .as_deref(),
         Some("V(OUT)")
@@ -79,7 +93,7 @@ fn bound_probe_marker_retains_the_exact_source_expression() {
 #[test]
 fn probe_placed_while_descended_names_the_occurrence() {
     let mut state = AppState::default();
-    state.workspace.descend_into(
+    state.model.workspace.descend_into(
         "X1".to_owned(),
         crate::state::CellViewRef::new("user", "amp", "schematic"),
         ViewType::Schematic,
@@ -123,9 +137,12 @@ fn an_occurrence_probe_saves_the_display_name_and_requests_the_engine_node() {
 
     retain_probe_flag(&mut state, Point::new(10, 20), Some(&spelling), None)
         .expect("marker retains");
-    assert_eq!(state.schematic.document().probes[0].reference, "V(/X1/n1)");
     assert_eq!(
-        state.schematic.document().probes[0]
+        state.model.schematic.document().probes[0].reference,
+        "V(/X1/n1)"
+    );
+    assert_eq!(
+        state.model.schematic.document().probes[0]
             .source_expression
             .as_deref(),
         Some("V(x1.n1)")
@@ -150,15 +167,15 @@ fn bound_probe_marker_retains_stable_plan_output_identity() {
     .expect("bound marker");
 
     assert_eq!(
-        state.schematic.document().probes[0].plan_id,
+        state.model.schematic.document().probes[0].plan_id,
         Some(binding.0)
     );
     assert_eq!(
-        state.schematic.document().probes[0].saved_output_id,
+        state.model.schematic.document().probes[0].saved_output_id,
         Some(binding.1)
     );
-    assert!(state.schematic.document().probes[0].enabled);
-    assert!(state.schematic.document().probes[0].plot_on_materialization);
+    assert!(state.model.schematic.document().probes[0].enabled);
+    assert!(state.model.schematic.document().probes[0].plot_on_materialization);
 }
 
 #[test]
@@ -172,7 +189,7 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
         None,
     )
     .expect("first marker");
-    state.schematic.clear_undo_history();
+    state.model.schematic.clear_undo_history();
 
     let repeated = retain_probe_flag(
         &mut state,
@@ -183,12 +200,18 @@ fn equivalent_probe_marker_placement_reuses_identity_without_an_undo_step() {
     .expect("existing marker");
 
     assert_eq!(repeated, id);
-    assert_eq!(state.schematic.document().probes.len(), 1);
+    assert_eq!(state.model.schematic.document().probes.len(), 1);
     assert_eq!(
-        state.schematic.session.editor.selection.single_probe(),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .single_probe(),
         Some(id)
     );
-    assert!(!state.schematic.can_undo());
+    assert!(!state.model.schematic.can_undo());
 }
 
 #[test]
@@ -203,7 +226,7 @@ fn late_safe_mode_activation_rejects_probe_marker_without_mutation() {
     );
 
     assert!(retain_probe_flag(&mut state, Point::new(10, 20), None, None).is_err());
-    assert!(state.schematic.document().probes.is_empty());
-    assert!(!state.schematic.session.is_dirty);
-    assert!(!state.schematic.can_undo());
+    assert!(state.model.schematic.document().probes.is_empty());
+    assert!(!state.model.schematic.session.is_dirty);
+    assert!(!state.model.schematic.can_undo());
 }

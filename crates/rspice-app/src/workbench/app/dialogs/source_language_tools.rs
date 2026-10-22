@@ -75,7 +75,7 @@ const fn symbol_kind_message(kind: SourceSymbolKind) -> MessageId {
 pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), String> {
     let language = code_workspace::active_source_language(
         app.state.workbench.workspace,
-        &app.state.workspace,
+        &app.state.model.workspace,
         app.state.ui.code_workspace.page,
     )
     .ok_or_else(|| {
@@ -84,12 +84,13 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
     })?;
     let bundle_id = app
         .state
+        .model
         .workspace
         .active_source_bundle(language)
         .map(crate::state::ProjectSourceBundle::id)
         .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let logical_path = code_workspace::active_bundle_path(
-        &app.state.workspace,
+        &app.state.model.workspace,
         &app.state.ui.code_workspace,
         language,
     )
@@ -126,7 +127,7 @@ pub(crate) fn navigate_active_source(
 
     let Some(language) = code_workspace::active_source_language(
         app.state.workbench.workspace,
-        &app.state.workspace,
+        &app.state.model.workspace,
         app.state.ui.code_workspace.page,
     ) else {
         let message = match command {
@@ -145,12 +146,13 @@ pub(crate) fn navigate_active_source(
     };
     let bundle_id = app
         .state
+        .model
         .workspace
         .active_source_bundle(language)
         .map(crate::state::ProjectSourceBundle::id)
         .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let logical_path = code_workspace::active_bundle_path(
-        &app.state.workspace,
+        &app.state.model.workspace,
         &app.state.ui.code_workspace,
         language,
     )
@@ -230,12 +232,16 @@ pub(crate) fn navigate_active_source(
 pub(crate) fn language_tools_are_available(state: &AppState) -> bool {
     code_workspace::active_source_language(
         state.workbench.workspace,
-        &state.workspace,
+        &state.model.workspace,
         state.ui.code_workspace.page,
     )
     .is_some_and(|language| {
-        code_workspace::active_bundle_path(&state.workspace, &state.ui.code_workspace, language)
-            .is_some()
+        code_workspace::active_bundle_path(
+            &state.model.workspace,
+            &state.ui.code_workspace,
+            language,
+        )
+        .is_some()
     })
 }
 
@@ -272,6 +278,7 @@ impl RSpiceApp {
         // it just must not be allowed to write. State which of the two it is.
         let stale = self
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -279,7 +286,7 @@ impl RSpiceApp {
             .is_none_or(|bundle| {
                 !tools
                     .index
-                    .is_current(self.state.workspace.content.project.id(), bundle)
+                    .is_current(self.state.model.workspace.content.project.id(), bundle)
             });
 
         let messages = self.state.ui.messages();
@@ -928,8 +935,9 @@ mod tests {
         cell.add_view(view);
         let mut library = crate::state::Library::new("behavioral");
         library.add_cell(cell);
-        app.state.library_manager.add_library(library);
+        app.state.model.library_manager.add_library(library);
         app.state
+            .model
             .workspace
             .content
             .project_sources

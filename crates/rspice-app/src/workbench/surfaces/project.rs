@@ -353,7 +353,7 @@ fn project_revision_label(ui: &mut Ui, app: &RSpiceApp, tokens: &Tokens) {
     ui.label(
         egui::RichText::new(format!(
             "main @ r{}",
-            app.state.workspace.content.project.revision().get()
+            app.state.model.workspace.content.project.revision().get()
         ))
         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
         .color(tokens.color.text_faint),
@@ -365,7 +365,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.is_netlist_first_without_schematic() {
         let (label, description, problem) = app
             .state
-            .workspace
+            .model.workspace
             .content.netlist_document
             .as_ref()
             .map_or_else(
@@ -405,7 +405,12 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             Command::OpenWorkspace(Workspace::Netlist).execute(app);
         }
     } else {
-        let root = app.state.workspace.content.simulation_root_reference();
+        let root = app
+            .state
+            .model
+            .workspace
+            .content
+            .simulation_root_reference();
         let (checks_label, checks_description, checks_problem) = match app
             .state
             .simulation_root_design_check_status()
@@ -456,7 +461,13 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         }
     }
 
-    let active_configuration = app.state.workspace.content.configuration_sets.active();
+    let active_configuration = app
+        .state
+        .model
+        .workspace
+        .content
+        .configuration_sets
+        .active();
     let configuration = active_configuration.map_or("none", |configuration| configuration.name());
     // A configuration's name is a name, not a state, and "none" is a project
     // that has not pinned one rather than a fault.
@@ -473,7 +484,16 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         Command::ConfigurationSets.execute(app);
     }
 
-    if let Some((index, run)) = app.state.simulation.retained.runs.iter().enumerate().next() {
+    if let Some((index, run)) = app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .iter()
+        .enumerate()
+        .next()
+    {
         let has_dataset = !run.analyses.is_empty();
         // A run that completed with data is the ordinary run, so the chip
         // names only the two cases that are not.
@@ -510,7 +530,7 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
                 has_dataset,
                 app.state.is_netlist_first_without_schematic(),
             );
-            if app.state.simulation.select_run(index) {
+            if app.state.model.simulation.select_run(index) {
                 Command::OpenWorkspace(destination).execute(app);
             }
         }
@@ -1063,13 +1083,14 @@ mod tests {
         app.state.open_project_session();
         let _ = app
             .state
+            .model
             .workspace
             .content
             .project
             .rename("lna-frontend-28g");
         let now = crate::time_compat::unix_epoch().as_secs_f64();
         {
-            let run = app.state.simulation.start_run();
+            let run = app.state.model.simulation.start_run();
             run.lifecycle = SimulationRunLifecycle::Completed;
             run.success = true;
             run.timestamp = now - 3.0 * 3600.0;
@@ -1084,7 +1105,7 @@ mod tests {
                 .expect("seal run");
         }
         {
-            let run = app.state.simulation.start_run();
+            let run = app.state.model.simulation.start_run();
             run.lifecycle = SimulationRunLifecycle::Failed;
             run.success = false;
             run.timestamp = now - 40.0 * 60.0;
@@ -1095,7 +1116,7 @@ mod tests {
                 .expect("seal run");
         }
         {
-            let run = app.state.simulation.start_run();
+            let run = app.state.model.simulation.start_run();
             run.lifecycle = SimulationRunLifecycle::Completed;
             run.success = true;
             run.timestamp = now - 6.0 * 60.0;
@@ -1125,9 +1146,9 @@ mod tests {
             use rspice_design::drc::{
                 DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,
             };
-            app.state.workspace.content.active_view = crate::state::CellViewRef::new(
-                &app.state.workspace.content.project.root_library,
-                &app.state.workspace.content.project.top_cell,
+            app.state.model.workspace.content.active_view = crate::state::CellViewRef::new(
+                &app.state.model.workspace.content.project.root_library,
+                &app.state.model.workspace.content.project.top_cell,
                 crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
             );
             let mut result = DrcResult::new();
@@ -1242,8 +1263,8 @@ mod tests {
         let mut app = populated_project_app();
         app.state.workbench.project_page = ProjectPage::Recovery;
         let now = crate::time_compat::checked_unix_time_ms().expect("clock");
-        let name = app.state.workspace.content.project.name().to_owned();
-        let project_id = app.state.workspace.content.project.id().to_string();
+        let name = app.state.model.workspace.content.project.name().to_owned();
+        let project_id = app.state.model.workspace.content.project.id().to_string();
         let catalog = [
             (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
             (

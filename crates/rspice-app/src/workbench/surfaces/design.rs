@@ -25,7 +25,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     occurrence_scope_banner(ui, app);
     tool_options::show(ui, &mut app.state);
     let content_rect = ui.available_rect_before_wrap();
-    let view_type = app.state.workspace.content.active_view_type();
+    let view_type = app.state.model.workspace.content.active_view_type();
     let canvas_document = matches!(view_type, ViewType::Schematic | ViewType::Testbench);
     match view_type {
         ViewType::Schematic | ViewType::Testbench => {
@@ -60,7 +60,10 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
     use crate::services::live_protocol::CursorLocus;
 
-    let doc = format!("schematic/{}", app.state.workspace.content.active_key());
+    let doc = format!(
+        "schematic/{}",
+        app.state.model.workspace.content.active_key()
+    );
     let cursors: Vec<_> = app
         .live_session
         .peers()
@@ -84,11 +87,11 @@ fn paint_live_cursors(ui: &mut Ui, app: &RSpiceApp, canvas: Rect) {
 
     let t = Tokens::get(ui.ctx());
     let painter = ui.painter_at(canvas);
-    let grid = app.state.schematic.document().grid_size.max(1) as f32;
-    let zoom = app.state.schematic.session.editor.zoom as f32;
+    let grid = app.state.model.schematic.document().grid_size.max(1) as f32;
+    let zoom = app.state.model.schematic.session.editor.zoom as f32;
     let pan = egui::vec2(
-        app.state.schematic.session.editor.pan.0 as f32,
-        app.state.schematic.session.editor.pan.1 as f32,
+        app.state.model.schematic.session.editor.pan.0 as f32,
+        app.state.model.schematic.session.editor.pan.1 as f32,
     );
     const COLORS: [egui::Color32; 8] = [
         egui::Color32::from_rgb(0x2F, 0xC7, 0xE5),
@@ -245,6 +248,7 @@ fn breadcrumb(ctx: &Context, state: &mut AppState, content_rect: Rect) {
 fn symbol_in_place_breadcrumb_segments(state: &AppState) -> Option<Vec<BreadcrumbCrumb>> {
     let session = state.symbol_in_place()?;
     let occurrence = state
+        .model
         .workspace
         .content
         .open_views
@@ -386,8 +390,9 @@ fn crumb_width(ui: &Ui, text: &str, weight: FontWeight) -> f32 {
 /// The whole occurrence path, library first; a row too narrow for it elides
 /// the middle rather than any choice dropping levels.
 fn hierarchy_breadcrumb_segments(state: &AppState) -> Vec<BreadcrumbCrumb> {
-    let active = &state.workspace.content.active_view;
+    let active = &state.model.workspace.content.active_view;
     let occurrence = state
+        .model
         .workspace
         .content
         .active_occurrence()
@@ -451,7 +456,7 @@ fn occurrence_scope_banner(ui: &mut Ui, app: &RSpiceApp) {
         &format!(
             "Edits here apply to all {} occurrences of {}.",
             occurrences.len(),
-            app.state.workspace.content.active_view.cell
+            app.state.model.workspace.content.active_view.cell
         ),
     )
     .on_hover_text(occurrences.join("\n"));
@@ -499,9 +504,10 @@ fn canvas_banner(ui: &mut Ui, problem: Problem, message: &str) -> egui::Response
 /// and which file, rather than pointing at another workspace that could not
 /// show it either.
 fn source_reference_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
-    let reference = &app.state.workspace.content.active_view;
+    let reference = &app.state.model.workspace.content.active_view;
     let bound_file = app
         .state
+        .model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -540,7 +546,7 @@ fn unsupported_document(ui: &mut Ui, app: &RSpiceApp, view_type: ViewType) {
         &format!("{} view", view_type.display_name()),
         &format!(
             "{} is registered in the project and available for downstream integrations.",
-            app.state.workspace.content.active_display_path()
+            app.state.model.workspace.content.active_display_path()
         ),
     );
 }
@@ -561,7 +567,7 @@ mod tests {
     }
 
     fn descended(state: &mut AppState, instance: &str, cell: &str) {
-        state.workspace.descend_into(
+        state.model.workspace.descend_into(
             instance.to_owned(),
             crate::state::CellViewRef::new("user", cell, "schematic"),
             ViewType::Schematic,
@@ -595,7 +601,7 @@ mod tests {
 
         descended(&mut state, "XBIAS", "bias");
         assert_eq!(
-            state.workspace.content.occurrence_path().to_string(),
+            state.model.workspace.content.occurrence_path().to_string(),
             "/XAFE/XBIAS"
         );
         assert_eq!(
@@ -634,10 +640,18 @@ mod tests {
         app.state.focus_workspace_breadcrumb(intermediate);
 
         assert_eq!(
-            app.state.workspace.content.occurrence_path().to_string(),
+            app.state
+                .model
+                .workspace
+                .content
+                .occurrence_path()
+                .to_string(),
             "/XAFE"
         );
-        assert_eq!(app.state.workspace.content.active_view.cell, "afe_core");
+        assert_eq!(
+            app.state.model.workspace.content.active_view.cell,
+            "afe_core"
+        );
 
         let root = hierarchy_breadcrumb_segments(&app.state)
             .into_iter()
@@ -646,8 +660,15 @@ mod tests {
             .expect("the design root is a crumb");
         app.state.focus_workspace_breadcrumb(root);
 
-        assert!(app.state.workspace.content.occurrence_path().is_root());
-        assert_eq!(app.state.workspace.content.active_view.cell, "top");
+        assert!(
+            app.state
+                .model
+                .workspace
+                .content
+                .occurrence_path()
+                .is_root()
+        );
+        assert_eq!(app.state.model.workspace.content.active_view.cell, "top");
     }
 
     /// A crumb states the instance *and* its master. Two occurrences of one
@@ -702,21 +723,24 @@ mod tests {
         };
 
         let mut app = RSpiceApp::test_instance();
-        let root = app.state.workspace.content.active_view.clone();
+        let root = app.state.model.workspace.content.active_view.clone();
         let shared = CellViewRef::new("user", "pad", "schematic");
 
         if app
             .state
+            .model
             .library_manager
             .get_library(&shared.library)
             .is_none()
         {
             app.state
+                .model
                 .library_manager
                 .add_library(Library::new(&shared.library));
         }
         let cell = app
             .state
+            .model
             .library_manager
             .get_library_mut(&shared.library)
             .expect("the project library")
@@ -728,6 +752,7 @@ mod tests {
         let mut master = SchematicState::default();
         master.add_component(ComponentType::Resistor, Point::new(30, 0));
         app.state
+            .model
             .workspace
             .insert_schematic_editor(shared.key(), master);
 
@@ -736,8 +761,9 @@ mod tests {
         let mut root_sheet = SchematicState::default();
         root_sheet.add_library_cell_component(Point::new(400, 400), binding.clone());
         root_sheet.add_library_cell_component(Point::new(600, 400), binding);
-        app.state.schematic = root_sheet.clone();
+        app.state.model.schematic = root_sheet.clone();
         app.state
+            .model
             .workspace
             .insert_schematic_editor(root.key(), root_sheet);
         (app, shared)
@@ -770,13 +796,16 @@ mod tests {
 
         let master = app
             .state
+            .model
             .workspace
             .clone_schematic_editor(&shared.key())
             .expect("the shared master buffer");
-        app.state
-            .workspace
-            .descend_into("X1".to_owned(), shared.clone(), ViewType::Schematic);
-        app.state.schematic = master;
+        app.state.model.workspace.descend_into(
+            "X1".to_owned(),
+            shared.clone(),
+            ViewType::Schematic,
+        );
+        app.state.model.schematic = master;
 
         assert_eq!(
             app.state.master_occurrence_paths().len(),

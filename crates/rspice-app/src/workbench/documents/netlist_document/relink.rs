@@ -94,11 +94,12 @@ pub(crate) fn commit_dependency_relink(
     let mut candidate = state.clone();
     match transaction.root {
         ActiveNetlistDocument::Generated => {
-            candidate.netlist_artifacts.generated_document = Some(next.clone());
-            candidate.netlist_artifacts.generated_source = next.source().to_owned();
+            candidate.model.netlist_artifacts.generated_document = Some(next.clone());
+            candidate.model.netlist_artifacts.generated_source = next.source().to_owned();
         }
         ActiveNetlistDocument::OwnedSource => {
             if let Some(include) = candidate
+                .model
                 .workspace
                 .content
                 .netlist_descriptor
@@ -116,10 +117,11 @@ pub(crate) fn commit_dependency_relink(
                     .ok_or_else(|| "Owned include revision overflowed.".to_owned())?;
                 include.content_digest = crate::state::content_digest(&source);
             }
-            candidate.workspace.content.netlist_document = Some(next.clone());
-            candidate.workspace.content.netlist_source_dirty = true;
+            candidate.model.workspace.content.netlist_document = Some(next.clone());
+            candidate.model.workspace.content.netlist_source_dirty = true;
             candidate.ui.netlist.owned_document = Some(next);
             candidate
+                .model
                 .workspace
                 .content
                 .validate_simulation_configuration()
@@ -133,7 +135,7 @@ pub(crate) fn commit_dependency_relink(
     candidate.ui.netlist.active_document = transaction.root;
     candidate.ui.netlist.active_dependency_root = Some(transaction.root);
     candidate.ui.netlist.active_dependency_identity = Some(transaction.logical_identity.clone());
-    candidate.simulation.source.netlist_content = source;
+    candidate.model.simulation.source.netlist_content = source;
     candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
     candidate.ui.netlist.completion_open = false;
     candidate.manual_run.edited_lines.clear();

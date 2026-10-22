@@ -50,7 +50,7 @@ fn painted_families(ctx: &egui::Context, state: &mut AppState) -> Vec<String> {
 fn repainting_an_untouched_catalog_reads_no_symbol_twice() {
     let ctx = egui::Context::default();
     let mut state = AppState::default();
-    state.library_manager = symbol_catalog("nch");
+    state.model.library_manager = symbol_catalog("nch");
 
     crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(0));
     assert_eq!(painted_families(&ctx, &mut state), vec!["nch".to_owned()]);
@@ -79,17 +79,17 @@ fn a_catalog_replaced_at_the_same_revision_is_still_re_read() {
     // paint the first catalog's symbol contracts over the second's artwork.
     let ctx = egui::Context::default();
     let mut state = AppState::default();
-    state.library_manager = symbol_catalog("nch");
+    state.model.library_manager = symbol_catalog("nch");
     assert_eq!(painted_families(&ctx, &mut state), vec!["nch".to_owned()]);
 
     let replacement = symbol_catalog("pch");
     assert_eq!(
         replacement.revision(),
-        state.library_manager.revision(),
+        state.model.library_manager.revision(),
         "the two catalogs must be indistinguishable by revision, or this test \
          proves nothing about the content half of the key"
     );
-    state.library_manager = replacement;
+    state.model.library_manager = replacement;
 
     assert_eq!(painted_families(&ctx, &mut state), vec!["pch".to_owned()]);
 }
@@ -413,11 +413,13 @@ fn a_template_the_netlist_writer_refuses_produces_no_token_table() {
 pub(in crate::workbench::surfaces::models::manager) fn seed_symbol_registry(state: &mut AppState) {
     use crate::state::{PortSpec, SymbolDocument};
 
-    state.library_manager = LibraryManager::new();
+    state.model.library_manager = LibraryManager::new();
     state
+        .model
         .library_manager
         .add_library(Library::new("project_symbols"));
     let library = state
+        .model
         .library_manager
         .get_library_mut("project_symbols")
         .expect("the library was just added");
@@ -631,8 +633,9 @@ fn the_two_corpora_are_grouped_and_the_band_names_the_technology() {
 fn place(state: &mut AppState, components: Vec<crate::state::Component>) {
     use crate::state::{ComponentType, Point};
 
-    state.workspace.ensure_active_buffer();
+    state.model.workspace.ensure_active_buffer();
     let mut schematic = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -645,7 +648,7 @@ fn place(state: &mut AppState, components: Vec<crate::state::Component>) {
     resistor.name = "R1".to_owned();
     resistor.value = "1k".to_owned();
     schematic.document_mut_for_test().components.push(resistor);
-    state.workspace.save_active_schematic(&schematic);
+    state.model.workspace.save_active_schematic(&schematic);
 }
 
 #[test]
@@ -764,6 +767,7 @@ fn a_repainted_instances_card_walks_the_sheet_once() {
         "symbol",
     ));
     let existing = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.document().components.clone())

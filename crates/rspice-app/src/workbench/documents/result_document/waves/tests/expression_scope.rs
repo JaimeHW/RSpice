@@ -5,11 +5,12 @@ use super::*;
 fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
     let mut state = AppState::default();
     state
+        .model
         .simulation
         .start_run()
         .add_analysis(family_analysis(vec![10.0, 10.0, 1.0, 1.0, 7.0, 7.0]));
-    state.simulation.complete_run();
-    let run = state.simulation.active_run().unwrap();
+    state.model.simulation.complete_run();
+    let run = state.model.simulation.active_run().unwrap();
     let analysis = &run.analyses[0];
     let manifest =
         FamilyManifest::from_metadata(analysis.analysis_type, analysis.family_metadata.as_ref())
@@ -24,10 +25,10 @@ fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
     state
         .ui
         .results
-        .add_expression_trace(&state.simulation, key, text.to_owned())
+        .add_expression_trace(&state.model.simulation, key, text.to_owned())
         .unwrap();
     let models = build_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut DerivedSeries::default(),
         &Tokens::default(),
         false,
@@ -89,7 +90,7 @@ fn stateful_expressions_restart_at_each_member_and_use_the_displayed_axis() {
 fn empty_family_selection_is_an_error_instead_of_a_successful_empty_trace() {
     let (state, _) = fixture(vec![], "max(V(out))");
     let error = evaluate_expression(
-        &state.simulation,
+        &state.model.simulation,
         0,
         "max(V(out))",
         state.ui.results.session.sample_selection.as_ref(),
@@ -103,8 +104,8 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
     let first = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
     assert_eq!(first[0].y.as_slice(), &[1.0, 1.0]);
-    let version = state.simulation.view.data_version;
-    let run = state.simulation.active_run().unwrap();
+    let version = state.model.simulation.view.data_version;
+    let run = state.model.simulation.active_run().unwrap();
     let digest = run.dataset_content_digest();
     let manifest = FamilyManifest::from_metadata(
         run.analyses[0].analysis_type,
@@ -123,9 +124,10 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
     toggle_visibility(&mut state, 0, 0);
     let hidden = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
     assert_eq!(hidden[0].y, second[0].y);
-    assert_eq!(state.simulation.view.data_version, version);
+    assert_eq!(state.model.simulation.view.data_version, version);
     assert_eq!(
         state
+            .model
             .simulation
             .active_run()
             .unwrap()
@@ -147,7 +149,10 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
         },
     });
     let bytes = serde_json::to_vec(&(
-        state.ui.results.project_presentation(&state.simulation),
+        state
+            .ui
+            .results
+            .project_presentation(&state.model.simulation),
         policy,
     ))
     .unwrap();
@@ -156,9 +161,9 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
         FamilyPresentationPolicy,
     ) = serde_json::from_slice(&bytes).unwrap();
     let mut reopened = AppState::default();
-    reopened.simulation = state.simulation.clone();
+    reopened.model.simulation = state.model.simulation.clone();
     super::super::super::restore_presentation(&mut reopened, presentation);
-    let run = reopened.simulation.active_run().unwrap();
+    let run = reopened.model.simulation.active_run().unwrap();
     let manifest = FamilyManifest::from_metadata(
         run.analyses[0].analysis_type,
         run.analyses[0].family_metadata.as_ref(),

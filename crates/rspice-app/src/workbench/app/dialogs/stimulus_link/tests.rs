@@ -32,6 +32,7 @@ fn fixture() -> (RSpiceApp, u64) {
     let mut app = RSpiceApp::test_instance();
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSourcePulse, Point::new(40, 40));
     for held in [
@@ -45,6 +46,7 @@ fn fixture() -> (RSpiceApp, u64) {
         definition("leak", ComponentType::CurrentSource, "1u", ""),
     ] {
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -73,6 +75,7 @@ fn wide_fixture() -> (RSpiceApp, u64) {
         ),
     ] {
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -87,6 +90,7 @@ fn kind_only_fixture() -> (RSpiceApp, u64) {
     let mut app = RSpiceApp::test_instance();
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSourcePulse, Point::new(40, 40));
     for held in [
@@ -99,6 +103,7 @@ fn kind_only_fixture() -> (RSpiceApp, u64) {
         ),
     ] {
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -110,6 +115,7 @@ fn kind_only_fixture() -> (RSpiceApp, u64) {
 
 fn instance_of(app: &RSpiceApp, id: u64) -> Component {
     app.state
+        .model
         .schematic
         .document()
         .components
@@ -123,7 +129,7 @@ fn instance_of(app: &RSpiceApp, id: u64) -> Component {
 fn groups_of(app: &RSpiceApp, id: u64, filter: &str, cache: &mut MiniCache) -> Vec<String> {
     ensure_minis(
         cache,
-        &app.state.workspace.content.stimulus_library,
+        &app.state.model.workspace.content.stimulus_library,
         PreviewTiming::default(),
     );
     let component = instance_of(app, id);
@@ -137,8 +143,8 @@ fn groups_of(app: &RSpiceApp, id: u64, filter: &str, cache: &mut MiniCache) -> V
 
 fn nets_of(app: &RSpiceApp, id: u64) -> Vec<String> {
     crate::simulation::placed_sources::placed_sources(
-        &app.state.schematic,
-        &app.state.workspace.content.stimulus_library,
+        &app.state.model.schematic,
+        &app.state.model.workspace.content.stimulus_library,
         None,
     )
     .into_iter()
@@ -159,6 +165,7 @@ fn a_cross_family_adoption_re_places_the_instance_and_keeps_both_nets() {
 
     let held = app
         .state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -175,6 +182,7 @@ fn a_cross_family_adoption_re_places_the_instance_and_keeps_both_nets() {
     assert_eq!(component.params, "va=3m freq=1k");
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -183,7 +191,7 @@ fn a_cross_family_adoption_re_places_the_instance_and_keeps_both_nets() {
     );
     assert_eq!(nets_of(&app, id), before, "both terminals keep their nets");
 
-    assert!(app.state.schematic.undo(), "the adoption is undoable");
+    assert!(app.state.model.schematic.undo(), "the adoption is undoable");
     let restored = instance_of(&app, id);
     assert_eq!(restored.kind, ComponentType::VoltageSourcePulse);
     assert!(
@@ -203,6 +211,7 @@ fn a_same_family_adoption_is_a_copy_with_a_receipt() {
         "v2=1.8 pw=1u per=2u",
     );
     app.state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -223,6 +232,7 @@ fn a_cross_kind_adoption_is_refused_rather_than_converted() {
     let (mut app, id) = fixture();
     let held = app
         .state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -313,7 +323,7 @@ fn arrow_keys_step_over_the_rows_that_cannot_be_adopted() {
     let mut cache = MiniCache::new();
     ensure_minis(
         &mut cache,
-        &app.state.workspace.content.stimulus_library,
+        &app.state.model.workspace.content.stimulus_library,
         PreviewTiming::default(),
     );
     let component = instance_of(&app, id);
@@ -363,7 +373,7 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
     assert_eq!(
         ensure_minis(
             &mut cache,
-            &app.state.workspace.content.stimulus_library,
+            &app.state.model.workspace.content.stimulus_library,
             timing
         ),
         5,
@@ -373,7 +383,7 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
         assert_eq!(
             ensure_minis(
                 &mut cache,
-                &app.state.workspace.content.stimulus_library,
+                &app.state.model.workspace.content.stimulus_library,
                 timing
             ),
             0,
@@ -382,6 +392,7 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
     }
 
     app.state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -395,7 +406,7 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
     assert_eq!(
         ensure_minis(
             &mut cache,
-            &app.state.workspace.content.stimulus_library,
+            &app.state.model.workspace.content.stimulus_library,
             timing
         ),
         1,
@@ -415,7 +426,7 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
     assert_eq!(
         ensure_minis(
             &mut stale,
-            &app.state.workspace.content.stimulus_library,
+            &app.state.model.workspace.content.stimulus_library,
             timing
         ),
         6,
@@ -436,6 +447,7 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
     assert!(line.contains("v1_pulse"), "{line}");
     let held = app
         .state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -448,6 +460,7 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
     let component = instance_of(&app, id);
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -470,24 +483,26 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
 fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() {
     let (mut app, id) = fixture();
     open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
-    let held = app.state.workspace.content.stimulus_library.clone();
+    let held = app.state.model.workspace.content.stimulus_library.clone();
 
     // A name the library already holds is refused before anything moves.
     app.state.dialogs.stimulus_link.name = "sensor_drive".to_owned();
     let refusal = commit_extraction(&mut app.state, id).expect_err("the name is taken");
     assert!(refusal.contains("already defines"), "{refusal}");
-    assert_eq!(app.state.workspace.content.stimulus_library, held);
+    assert_eq!(app.state.model.workspace.content.stimulus_library, held);
 
     // An instance transaction the schematic refuses takes the definition back
     // out, so the two halves cannot land apart.
     app.state.dialogs.stimulus_link.name = "v1_pulse".to_owned();
     app.state
+        .model
         .schematic
         .begin_operation("a gesture already in flight");
     let refusal = commit_extraction(&mut app.state, id)
         .expect_err("a pending gesture refuses a component edit");
     assert!(
         app.state
+            .model
             .workspace
             .content
             .stimulus_library
@@ -495,7 +510,7 @@ fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() 
             .is_none(),
         "the definition is withdrawn when the instance edit refuses: {refusal}"
     );
-    assert_eq!(app.state.workspace.content.stimulus_library, held);
+    assert_eq!(app.state.model.workspace.content.stimulus_library, held);
     let component = instance_of(&app, id);
     assert!(component.stimulus_provenance.is_none());
 }
@@ -554,6 +569,7 @@ fn adopt_refuses_to_open_over_an_empty_library() {
     let mut app = RSpiceApp::test_instance();
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSourcePulse, Point::new(40, 40));
     let refusal = open_stimulus_link(&mut app.state, id, StimulusLinkMode::Adopt)
@@ -571,6 +587,7 @@ fn adopt_opens_on_the_definition_the_instance_already_carries() {
     let (mut app, id) = fixture();
     let held = app
         .state
+        .model
         .workspace
         .content
         .stimulus_library

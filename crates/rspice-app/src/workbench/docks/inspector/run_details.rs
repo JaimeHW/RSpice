@@ -30,6 +30,7 @@ const FORCED_LIST_HEIGHT: f32 = 160.0;
 /// retained opens nothing.
 pub(in crate::workbench::docks) fn open(state: &mut AppState, run_id: u64) {
     let Some(run) = state
+        .model
         .simulation
         .retained
         .runs
@@ -51,6 +52,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     let run_id = dialog.run_id;
     let Some(run) = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -64,6 +66,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     let manifest = &dialog.manifest;
     let executed = app
         .state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -73,13 +76,14 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
     // offered only for the run that is active.
     let plan_block = app
         .state
+        .model
         .simulation
         .active_run()
         .is_some_and(|active| active.id == run_id)
         .then(|| {
             crate::workbench::state::plan_provenance::producing_plan_block(
-                &app.state.simulation,
-                app.state.sim_setup.stable_analysis_plan().ok(),
+                &app.state.model.simulation,
+                app.state.model.sim_setup.stable_analysis_plan().ok(),
             )
         });
     let digits = usize::from(

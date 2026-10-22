@@ -225,6 +225,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
     let (first, second) = {
         let plan = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the test instance has a stable plan");
@@ -256,6 +257,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
         studio
             .app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("plan")
@@ -268,6 +270,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
 
     let plan_records = |app: &RSpiceApp| {
         app.state
+            .model
             .log_buffer
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
@@ -279,6 +282,7 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
         studio
             .app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("plan")
@@ -312,6 +316,7 @@ fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
     // thing under test.
     let axis = app
         .state
+        .model
         .sim_setup
         .run_set
         .dimensions
@@ -322,13 +327,14 @@ fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
         .clone();
     let declared = |app: &RSpiceApp| {
         app.state
+            .model
             .sim_setup
             .run_set
-            .declared_temperatures_celsius(app.state.sim_setup.reference_pvt)
+            .declared_temperatures_celsius(app.state.model.sim_setup.reference_pvt)
     };
     let authored = declared(&app).expect("the default axis is a list of temperatures");
     let transaction = dispatch(
-        &mut app.state.sim_setup.run_set,
+        &mut app.state.model.sim_setup.run_set,
         RunSetAction::SetValues {
             id: axis,
             text: "-55\n27\n150".to_owned(),
@@ -354,12 +360,12 @@ fn the_run_set_toolbar_undoes_redoes_and_previews_the_declaration() {
     );
 
     assert!(
-        studio.app.state.sim_setup.run_set.preview.is_none(),
+        studio.app.state.model.sim_setup.run_set.preview.is_none(),
         "nothing has been forecast yet"
     );
     studio.click(|label| label == "Validate and preview");
     assert!(
-        studio.app.state.sim_setup.run_set.preview.is_some(),
+        studio.app.state.model.sim_setup.run_set.preview.is_some(),
         "the preview action freezes a forecast"
     );
 }
@@ -384,6 +390,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     let mut app = RSpiceApp::test_instance();
     let plan = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance has a stable plan")
@@ -400,6 +407,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
         )
         .expect("valid saved output");
         app.state
+            .model
             .workspace
             .content
             .add_saved_output(plan, output)
@@ -413,6 +421,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
         ));
         ids.push(
             app.state
+                .model
                 .workspace
                 .content
                 .add_capture_group(plan, group)
@@ -421,6 +430,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     }
     let order = |app: &RSpiceApp| {
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan)
@@ -537,6 +547,7 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
     let mut app = RSpiceApp::test_instance();
     let names = |app: &RSpiceApp| {
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("plan")
@@ -548,6 +559,7 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
     let selected = {
         let plan = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the test instance has a stable plan");
@@ -631,6 +643,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
     let app = RSpiceApp::test_instance();
     let before = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the test instance has a stable plan")
@@ -645,7 +658,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
 
     studio.click(|label| label == Command::AddAnalysis.spec().label);
     assert!(
-        studio.app.state.sim_setup.session.palette_open,
+        studio.app.state.model.sim_setup.session.palette_open,
         "the press arms the catalogue"
     );
     assert!(
@@ -657,6 +670,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
     let plan = studio
         .app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the plan still resolves");
@@ -681,7 +695,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
         "the reader lands on the one route that can configure it"
     );
     assert!(
-        !studio.app.state.sim_setup.session.palette_open,
+        !studio.app.state.model.sim_setup.session.palette_open,
         "the catalogue closes behind the choice"
     );
     assert!(
@@ -718,6 +732,7 @@ fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
     let (other, reported) = {
         let plan = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the test instance has a stable plan");
@@ -746,6 +761,7 @@ fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
     app.state.workbench.active_analysis_instance = Some(other);
     let name = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the plan survives the override")
@@ -754,6 +770,7 @@ fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
         .position(|instance| instance.id() == reported)
         .and_then(|index| {
             app.state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
@@ -799,6 +816,7 @@ fn a_click_on_an_option_switch_authors_the_override_it_states() {
     let mut app = RSpiceApp::test_instance();
     let sweep = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("the test instance has a stable plan")
@@ -822,6 +840,7 @@ fn a_click_on_an_option_switch_authors_the_override_it_states() {
     let authored = studio
         .app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the plan survives the press")

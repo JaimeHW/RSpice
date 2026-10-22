@@ -34,7 +34,7 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
         ..NewProjectParams::default()
     };
     create_new_project_with(state, &params)?;
-    load_example(example.name, &mut state.schematic);
+    load_example(example.name, &mut state.model.schematic);
     state.sync_active_schematic_to_workspace();
     Ok(())
 }
@@ -189,7 +189,7 @@ mod tests {
                 example.name
             );
             assert!(
-                app.state.simulation.execution.trigger_simulation,
+                app.state.model.simulation.execution.trigger_simulation,
                 "{}: the authorized run is queued",
                 example.name
             );
@@ -207,7 +207,7 @@ mod tests {
         loop {
             app.simulation_controller
                 .update(&mut app.state, &*app.export_workflow_io);
-            let execution = &app.state.simulation.execution;
+            let execution = &app.state.model.simulation.execution;
             if !execution.has_active_execution() && !execution.trigger_simulation {
                 break;
             }
@@ -216,6 +216,7 @@ mod tests {
         }
         let run = app
             .state
+            .model
             .simulation
             .retained
             .runs
@@ -242,18 +243,18 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         create_example_project(&mut app.state, example).expect("the example opens as a project");
         assert_eq!(
-            app.state.workspace.content.project.display_name(),
+            app.state.model.workspace.content.project.display_name(),
             example.name
         );
         assert!(
-            !app.state.schematic.document().components.is_empty(),
+            !app.state.model.schematic.document().components.is_empty(),
             "{} draws its circuit",
             example.name
         );
         // The default plan runs a millisecond at 10 ns steps; the engine
         // checks the same plan over a shorter window.
-        app.state.sim_setup.tran.step = "1n".to_owned();
-        app.state.sim_setup.tran.stop = stop.to_owned();
+        app.state.model.sim_setup.tran.step = "1n".to_owned();
+        app.state.model.sim_setup.tran.stop = stop.to_owned();
         // The frame after the project opens, on which the controller lets go
         // of the design it replaced; a check started before it would be
         // dropped with that design.
@@ -298,7 +299,7 @@ mod tests {
     fn an_example_does_not_replace_unsaved_work() {
         let mut state = AppState::default();
         state.open_project_session();
-        load_example("Voltage Divider", &mut state.schematic);
+        load_example("Voltage Divider", &mut state.model.schematic);
         state.sync_active_schematic_to_workspace();
         assert!(open_refusal(&state).is_some());
     }

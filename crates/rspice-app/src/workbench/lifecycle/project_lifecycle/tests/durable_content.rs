@@ -22,9 +22,9 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
         )
         .unwrap();
         let solver_input = generated_netlist_input_digest(&state).unwrap();
-        assert_eq!(state.simulation.start_run().id, 1);
-        state.simulation.clear_runs();
-        assert!(state.simulation.retained.runs.is_empty());
+        assert_eq!(state.model.simulation.start_run().id, 1);
+        state.model.simulation.clear_runs();
+        assert!(state.model.simulation.retained.runs.is_empty());
         assert!(active_document_is_dirty(&state));
         assert_eq!(dirty_document_count(&state), 1);
         assert_eq!(
@@ -33,6 +33,7 @@ fn cleared_run_sequence_is_dirty_and_survives_scoped_and_all_saves() {
         );
 
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(4, 4));
         save_native(&mut state, scope, &path, DestinationAuthority::Canonical).unwrap();
@@ -69,8 +70,8 @@ pub(super) fn retained_results() -> (AppState, AnalysisPresentationKey) {
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    state.simulation.retained.runs.push(run);
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs.push(run);
+    assert!(state.model.simulation.select_run(0));
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
@@ -133,7 +134,7 @@ fn annotations(project: &ProjectSnapshot) -> serde_json::Value {
 fn result_presentation_retains_flat_project_wire_format_and_legacy_defaults() {
     let (mut state, key) = retained_results();
     for annotation in Annotation::ALL {
-        annotation.add(&mut state.ui.results, &state.simulation, key);
+        annotation.add(&mut state.ui.results, &state.model.simulation, key);
     }
     let project = snapshot(&state).unwrap();
     let wire = serde_json::to_value(&project).unwrap();
@@ -172,7 +173,10 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
                 unit: unit.clone(),
             });
     }
-    let presentation = state.ui.results.project_presentation(&state.simulation);
+    let presentation = state
+        .ui
+        .results
+        .project_presentation(&state.model.simulation);
     assert_eq!(
         presentation
             .log_y_panes
@@ -184,7 +188,13 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
     let expected = serde_json::to_value(&presentation).unwrap();
     crate::workbench::documents::result_document::restore_presentation(&mut state, presentation);
     assert_eq!(
-        serde_json::to_value(state.ui.results.project_presentation(&state.simulation)).unwrap(),
+        serde_json::to_value(
+            state
+                .ui
+                .results
+                .project_presentation(&state.model.simulation)
+        )
+        .unwrap(),
         expected
     );
 }
@@ -198,7 +208,7 @@ fn every_result_annotation_is_dirty_revertible_and_independent_of_solver_inputs(
         state
             .project_lifecycle
             .accept_project(baseline.clone(), None);
-        annotation.add(&mut state.ui.results, &state.simulation, key);
+        annotation.add(&mut state.ui.results, &state.model.simulation, key);
         assert!(has_unsaved_changes(&state), "{annotation:?}");
         assert!(active_document_is_dirty(&state), "{annotation:?}");
         assert_eq!(dirty_document_count(&state), 1);
@@ -249,8 +259,9 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             DestinationAuthority::UserSelected,
         )
         .unwrap();
-        annotation.add(&mut state.ui.results, &state.simulation, key);
+        annotation.add(&mut state.ui.results, &state.model.simulation, key);
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(4, 4));
         let edited = snapshot(&state).unwrap();
@@ -264,7 +275,8 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
         let saved = crate::io::load_project_file(&path).unwrap();
         assert_eq!(annotations(&saved), annotations(&edited), "{annotation:?}");
         assert!(
-            saved.file.workspace.schematic_buffers[&state.workspace.content.active_view.key()]
+            saved.file.workspace.schematic_buffers
+                [&state.model.workspace.content.active_view.key()]
                 .document()
                 .components
                 .is_empty()
@@ -277,7 +289,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
 
         // Save acceptance compares against the actual published snapshot.
         // A later annotation must remain dirty even if an earlier write finishes.
-        annotation.add(&mut state.ui.results, &state.simulation, key);
+        annotation.add(&mut state.ui.results, &state.model.simulation, key);
         state.ui.results.session.log_y_panes.clear();
         state
             .ui
@@ -312,7 +324,8 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             annotations(&snapshot(&state).unwrap())
         );
         assert_eq!(
-            all_saved.file.workspace.schematic_buffers[&state.workspace.content.active_view.key()]
+            all_saved.file.workspace.schematic_buffers
+                [&state.model.workspace.content.active_view.key()]
                 .document()
                 .components
                 .len(),
@@ -328,7 +341,7 @@ fn unbound_probe_edits_participate_in_dirty_undo_redo_and_revert() {
     let mut state = AppState::default();
     let baseline = snapshot(&state).unwrap();
     state.project_lifecycle.accept_project(baseline, None);
-    state.schematic.with_undo("Place probe", |schematic| {
+    state.model.schematic.with_undo("Place probe", |schematic| {
         schematic
             .document_mut_for_test()
             .probes
@@ -337,16 +350,16 @@ fn unbound_probe_edits_participate_in_dirty_undo_redo_and_revert() {
     assert!(has_unsaved_changes(&state));
     assert!(active_document_is_dirty(&state));
     assert_eq!(dirty_document_count(&state), 1);
-    assert!(state.schematic.undo());
+    assert!(state.model.schematic.undo());
     assert!(
         !has_unsaved_changes(&state),
         "undo returns to accepted content"
     );
-    assert!(state.schematic.redo());
+    assert!(state.model.schematic.redo());
     assert!(has_unsaved_changes(&state));
     let token = prepare_revert_active_document(&state).unwrap();
     confirm_revert_active_document(&mut state, &token).unwrap();
-    assert!(state.schematic.document().probes.is_empty());
+    assert!(state.model.schematic.document().probes.is_empty());
     assert!(!has_unsaved_changes(&state));
 }
 
@@ -358,12 +371,13 @@ fn grid_and_document_policy_are_owned_by_the_schematic_document() {
         state.project_lifecycle.accept_project(baseline, None);
         if edit_policy {
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .document_policy
                 .net_naming = crate::state::NetNamingPolicy::SpiceCompatibleRelaxed;
         } else {
-            state.schematic.document_mut_for_test().grid_size += 1;
+            state.model.schematic.document_mut_for_test().grid_size += 1;
         }
         assert!(has_unsaved_changes(&state));
         assert!(active_document_is_dirty(&state));

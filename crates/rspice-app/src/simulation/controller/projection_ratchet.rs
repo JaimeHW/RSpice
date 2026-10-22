@@ -290,16 +290,16 @@ const STUDY_BASE: &str = r#""6f2b1c34-0d5e-4a7b-9c18-3e4f5a6b7c8d""#;
 /// perturbation of the tone list itself is still judged.
 pub(super) fn engine_facing_state(draft: &AnalysisDraft) -> AppState {
     let mut state = AppState::default();
-    state.sim_setup.pss.ensure_initialized();
+    state.model.sim_setup.pss.ensure_initialized();
     apply_fixture_draft(&mut state, draft);
     state
 }
 
 fn apply_fixture_draft(state: &mut AppState, draft: &AnalysisDraft) {
-    if state.sim_setup.pss.tone_sources.trim().is_empty() {
-        state.sim_setup.pss.tone_sources = "VSRC".to_owned();
+    if state.model.sim_setup.pss.tone_sources.trim().is_empty() {
+        state.model.sim_setup.pss.tone_sources = "VSRC".to_owned();
     }
-    state.sim_setup.apply_analysis_draft_projection(draft);
+    state.model.sim_setup.apply_analysis_draft_projection(draft);
 }
 
 /// The default draft body for `kind`, with the fixture context an empty
@@ -330,8 +330,8 @@ fn projection(draft: &AnalysisDraft) -> String {
         // trial instead of recompiling the bootstrapped workspaces each time.
         static FIXTURE: RefCell<(AppState, SimSetupState)> = {
             let mut state = AppState::default();
-            state.sim_setup.pss.ensure_initialized();
-            let setup = state.sim_setup.clone();
+            state.model.sim_setup.pss.ensure_initialized();
+            let setup = state.model.sim_setup.clone();
             RefCell::new((state, setup))
         };
     }
@@ -339,7 +339,7 @@ fn projection(draft: &AnalysisDraft) -> String {
     FIXTURE.with(|fixture| {
         let mut fixture = fixture.borrow_mut();
         let (state, setup) = &mut *fixture;
-        state.sim_setup.clone_from(setup);
+        state.model.sim_setup.clone_from(setup);
         apply_fixture_draft(state, draft);
         let spec = match rspice_simulation::analysis_preparation::analysis_draft_spec(
             &analysis_inputs(state),
@@ -356,7 +356,7 @@ fn projection(draft: &AnalysisDraft) -> String {
         );
         let options = with_sealed_process_library(|sealed| {
             rspice_simulation::analysis_preparation::analysis_spec_execution_options(
-                &state.sim_setup,
+                &state.model.sim_setup,
                 draft,
                 None,
                 &spec,
@@ -852,6 +852,7 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
 
     let mut state = super::prepared_run::tests::runnable_state();
     let id = state
+        .model
         .sim_setup
         .enabled_analysis_instances()
         .find(|instance| instance.kind() == AnalysisKind::Transient)
@@ -859,11 +860,12 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
         .expect("a fresh plan holds one enabled transient");
 
     let digest_of = |state: &AppState| -> Vec<u8> {
-        let plan = SimulationController::build_analysis_plan(&state.sim_setup)
+        let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
+            .model
             .model_library_manager
-            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
             .expect("the fixture library seals");
         SimulationController::build_queue_from_plan(state, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
@@ -900,6 +902,7 @@ fn every_authored_advanced_option_moves_the_prepared_task_identity() {
             )
             .unwrap_or_else(|error| panic!("{} is authorable: {error}", option.key()));
         state
+            .model
             .sim_setup
             .analysis_plan
             .as_mut()
@@ -985,17 +988,23 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
     );
 
     let soa = {
-        let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+        let plan = state
+            .model
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("stable plan");
         let (soa, _) = plan.insert(AnalysisKind::Soa).expect("Soa inserts");
         soa
     };
 
     let digest_of = |state: &AppState| -> Vec<u8> {
-        let plan = SimulationController::build_analysis_plan(&state.sim_setup)
+        let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
+            .model
             .model_library_manager
-            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
             .expect("the fixture library seals");
         SimulationController::build_queue_from_plan(state, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
@@ -1010,6 +1019,7 @@ fn the_step_ceiling_a_transient_cannot_carry_is_judged_through_a_kind_that_can()
         .set_for_instance(AnalysisKind::Soa, SolverOwnership::NONE, CEILING, "700p")
         .expect("SOA may author a step ceiling");
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -1066,7 +1076,12 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
     );
 
     let hb = {
-        let plan = state.sim_setup.analysis_plan.as_mut().expect("stable plan");
+        let plan = state
+            .model
+            .sim_setup
+            .analysis_plan
+            .as_mut()
+            .expect("stable plan");
         let op = plan
             .instances()
             .iter()
@@ -1086,11 +1101,12 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
     };
 
     let digest_of = |state: &AppState| -> Vec<u8> {
-        let plan = SimulationController::build_analysis_plan(&state.sim_setup)
+        let plan = SimulationController::build_analysis_plan(&state.model.sim_setup)
             .unwrap_or_else(|errors| panic!("the fixture plan compiles: {}", errors.join("; ")));
         let sealed = state
+            .model
             .model_library_manager
-            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
             .expect("the fixture library seals");
         SimulationController::build_queue_from_plan(state, &plan, &sealed)
             .unwrap_or_else(|errors| panic!("the fixture queue builds: {}", errors.join("; ")))
@@ -1110,6 +1126,7 @@ fn the_harmonic_balance_initial_state_a_transient_cannot_carry_is_judged_through
         )
         .expect("harmonic balance may author its own initial state");
     state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -1153,16 +1170,17 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
     let mut state = super::prepared_run::tests::runnable_state();
     // One axis, and a reference the axis actually declares, so all three
     // settings resolve rather than one of them refusing for its own reasons.
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
     }
     state
+        .model
         .sim_setup
         .set_reference_pvt(crate::product::ProcessCorner::TT, 25.0)
         .expect("25 °C is a valid reference temperature");
 
     let points: Vec<String> =
-        rspice_simulation_contract::run_set::resolve(&state.sim_setup.run_set)
+        rspice_simulation_contract::run_set::resolve(&state.model.sim_setup.run_set)
             .expect("the fixture space expands exactly")
             .iter()
             .map(RunSetPoint::point_key)
@@ -1172,6 +1190,7 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
         "the fixture space must be able to distinguish all, one, and some"
     );
     let id = state
+        .model
         .sim_setup
         .enabled_analysis_instances()
         .find(|instance| instance.kind() == AnalysisKind::Transient)
@@ -1187,6 +1206,7 @@ fn every_run_set_participation_moves_the_dispatched_task_set() {
     ] {
         let label = run_at.label();
         state
+            .model
             .sim_setup
             .analysis_plan
             .as_mut()

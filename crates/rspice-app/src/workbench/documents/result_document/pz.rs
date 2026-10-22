@@ -9,7 +9,7 @@ use rspice_results::pole_zero::data::{ComplexRoot, PoleZeroData};
 use rspice_results_ui::pole_zero as view;
 
 fn active_data(state: &AppState) -> Option<PoleZeroData> {
-    let analysis = state.simulation.active_analysis()?;
+    let analysis = state.model.simulation.active_analysis()?;
     if !analysis.success || analysis.analysis_type != AnalysisType::PoleZero {
         return None;
     }
@@ -122,11 +122,11 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7"));
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         assert!(active_data(&state).is_none());
 
-        state.simulation.retained.runs[0].analyses[0] =
+        state.model.simulation.retained.runs[0].analyses[0] =
             AnalysisResult::new(7, AnalysisType::PoleZero, "PZ 7").with_result_payload(
                 AnalysisResultPayload::PoleZero {
                     poles: vec![

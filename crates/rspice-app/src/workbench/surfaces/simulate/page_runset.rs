@@ -121,7 +121,7 @@ struct RunSetFrame {
 
 impl RunSetFrame {
     fn resolve(app: &RSpiceApp) -> Self {
-        let state = &app.state.sim_setup.run_set;
+        let state = &app.state.model.sim_setup.run_set;
         // The one expansion. `run_set::retained` subtracts the exclusions from
         // this list rather than composing a second one.
         let composed = run_set::compose(state);
@@ -227,6 +227,7 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
 fn axis_name<'a>(app: &'a RSpiceApp, dimension_id: Option<&str>) -> Option<&'a str> {
     let id = dimension_id?;
     app.state
+        .model
         .sim_setup
         .run_set
         .dimensions
@@ -241,7 +242,7 @@ fn axis_name<'a>(app: &'a RSpiceApp, dimension_id: Option<&str>) -> Option<&'a s
 /// forecast they resolve to.
 fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     let validation = &frame.validation;
-    let mode = app.state.sim_setup.run_set.composition.mode;
+    let mode = app.state.model.sim_setup.run_set.composition.mode;
     let status = format!("{} composition", mode.as_str());
     let tone = match validation.status {
         run_set::RunSetStatus::Ready => Tone::Neutral,
@@ -257,7 +258,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
         |ui| {
             card_body(ui, |ui| {
                 let selected = app.state.workbench.selected_run_set_dimension.clone();
-                let dimensions = app.state.sim_setup.run_set.dimensions.clone();
+                let dimensions = app.state.model.sim_setup.run_set.dimensions.clone();
                 for row in space_rows(ui.available_width(), dimensions.len()) {
                     // Top-aligned, because an egui row places each item
                     // against the row height known when the item is added, and
@@ -636,10 +637,11 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     let active = app
         .state
+        .model
         .sim_setup
         .has_enabled_analysis_kind(AnalysisKind::MonteCarlo);
     let sample_count = if active {
-        let mut setup = app.state.sim_setup.mc.clone();
+        let mut setup = app.state.model.sim_setup.mc.clone();
         setup.ensure_initialized();
         setup.to_config().ok().map(|config| config.num_runs)
     } else {
@@ -729,9 +731,10 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
         .workbench
         .selected_run_set_dimension
         .clone()
-        .filter(|id| app.state.sim_setup.run_set.dimension(id).is_some())
+        .filter(|id| app.state.model.sim_setup.run_set.dimension(id).is_some())
         .or_else(|| {
             app.state
+                .model
                 .sim_setup
                 .run_set
                 .dimensions
@@ -755,6 +758,7 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
     };
     let dimension = app
         .state
+        .model
         .sim_setup
         .run_set
         .dimension(&id)
@@ -762,11 +766,12 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
         .clone();
     let index = app
         .state
+        .model
         .sim_setup
         .run_set
         .index_of(&id)
         .unwrap_or_default();
-    let last = app.state.sim_setup.run_set.dimensions.len() - 1;
+    let last = app.state.model.sim_setup.run_set.dimensions.len() - 1;
     let title = format!("Selected dimension · {}", dimension.name);
     // Enabled is the normal state, and states nothing.
     let status = if dimension.kind.execution_blocker().is_some() {
@@ -948,7 +953,7 @@ fn policy_label(policy: InvalidValuePolicy) -> &'static str {
 // ------------------------------------------------------------- composition
 
 fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
-    let current_composition = app.state.sim_setup.run_set.composition.clone();
+    let current_composition = app.state.model.sim_setup.run_set.composition.clone();
     let mode = current_composition.mode;
     let excluded = current_composition.excluded_points.len();
     let mut action: Option<RunSetAction> = None;
@@ -1009,7 +1014,7 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
                         action = Some(RunSetAction::SetComposition(edited.clone()));
                     }
                     super::page_kit::note_line(ui, "Authorized upstream dimensions", Tone::Dim);
-                    for dimension in app.state.sim_setup.run_set.enabled_dimensions() {
+                    for dimension in app.state.model.sim_setup.run_set.enabled_dimensions() {
                         let mut selected = edited
                             .upstream_dimension_ids
                             .iter()
@@ -1159,7 +1164,7 @@ fn composition(ui: &mut Ui, app: &mut RSpiceApp) {
 // ----------------------------------------------------------------- budgets
 
 fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
-    let current = app.state.sim_setup.run_set.budgets;
+    let current = app.state.model.sim_setup.run_set.budgets;
     let validation = &frame.validation;
     let exceeded = validation
         .errors
@@ -1285,7 +1290,7 @@ fn budgets_from(drafts: &RunSetBudgetDrafts) -> Result<RunSetBudgets, String> {
 
 fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     let validation = &frame.validation;
-    let state: &RunSetState = &app.state.sim_setup.run_set;
+    let state: &RunSetState = &app.state.model.sim_setup.run_set;
     let Some(points) = frame.composed.as_ref() else {
         card(
             ui,
@@ -1463,7 +1468,7 @@ fn point_table(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
 /// family to answer "is there one" would be a per-frame cost paid for nothing.
 pub(super) fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
     let run = super::output_evidence::selected_plan_dataset(app).ok_or_else(|| {
-        if app.state.simulation.active_run().is_some() {
+        if app.state.model.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so its family does not describe \
              these points."
         } else {
@@ -1475,6 +1480,7 @@ pub(super) fn family_target(app: &RSpiceApp) -> Result<usize, &'static str> {
     // looking at when that analysis has a family of its own.
     let active = app
         .state
+        .model
         .simulation
         .view
         .active_analysis_idx
@@ -1509,7 +1515,7 @@ pub(super) fn open_point_in_family(
     let Some(query) = family_query_for_point(&mut app.state, analysis_index, coordinates) else {
         return;
     };
-    if !app.state.simulation.select_analysis(analysis_index) {
+    if !app.state.model.simulation.select_analysis(analysis_index) {
         app.state.prompt(
             "The retained analysis that holds the family could not be selected, so the family \
              view was left unchanged.",
@@ -1534,11 +1540,12 @@ pub(super) fn family_query_for_point(
     coordinates: &[(String, String, String)],
 ) -> Option<String> {
     let manifest = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| state.simulation.active_run_for_plan(plan_id))
+        .and_then(|plan_id| state.model.simulation.active_run_for_plan(plan_id))
         .and_then(|run| run.analyses.get(analysis_index))
         .and_then(|analysis| {
             rspice_results::family_projection::FamilyManifest::from_metadata(
@@ -1860,14 +1867,14 @@ pub(super) fn point_table_note(composed: usize, drawn: usize, refused: usize) ->
 /// it move together or not at all.
 fn commit(app: &mut RSpiceApp, action: RunSetAction) {
     let previewing = matches!(action, RunSetAction::Preview);
-    let before = app.state.sim_setup.run_set.clone();
+    let before = app.state.model.sim_setup.run_set.clone();
     let kinds = enabled_analysis_kinds(app);
     let (exact_task_count, workload_error) = match exact_plan_task_count(app) {
         Ok(count) => (count, None),
         Err(error) => (None, Some(error)),
     };
     let transaction = run_set::dispatch_for_plan(
-        &mut app.state.sim_setup.run_set,
+        &mut app.state.model.sim_setup.run_set,
         action,
         &kinds,
         exact_task_count,
@@ -1912,7 +1919,7 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
     let prunes = match super::participation::reconcile_selections(&app.state) {
         Ok(prunes) => prunes,
         Err(reason) => {
-            app.state.sim_setup.run_set = before;
+            app.state.model.sim_setup.run_set = before;
             app.state
                 .record_plan_refusal(format!("{reason} The run set is unchanged."));
             return;
@@ -1927,6 +1934,7 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
 
     match app
         .state
+        .model
         .sim_setup
         .commit_active_plan_configuration_change(format!(
             "Run set · {}",
@@ -1951,6 +1959,7 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
 
 fn enabled_analysis_kinds(app: &RSpiceApp) -> Vec<AnalysisKind> {
     app.state
+        .model
         .sim_setup
         .enabled_analysis_instances()
         .map(|instance| instance.kind())
@@ -2037,11 +2046,11 @@ fn plan_run_set_validation_from(
         .and_then(|workload| workload.total_tasks().map(Some));
     match exact {
         Ok(exact_task_count) => {
-            run_set::validate_for_plan(&app.state.sim_setup.run_set, &kinds, exact_task_count)
+            run_set::validate_for_plan(&app.state.model.sim_setup.run_set, &kinds, exact_task_count)
         }
         Err(error) => {
             let mut validation =
-                run_set::validate_for_plan(&app.state.sim_setup.run_set, &kinds, None);
+                run_set::validate_for_plan(&app.state.model.sim_setup.run_set, &kinds, None);
             validation.push_global_error("RUNSET-PLAN-WORKLOAD", error);
             validation
         }

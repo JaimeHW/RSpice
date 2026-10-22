@@ -23,7 +23,7 @@ pub(super) fn handle_armed_move_selection(
     symbol_context: &SchematicSymbolContext,
 ) {
     if state.application_modal_open()
-        || state.schematic.session.editor.tool != Tool::MoveSelection
+        || state.model.schematic.session.editor.tool != Tool::MoveSelection
         || !state.dialogs.move_selection.armed
     {
         return;
@@ -41,11 +41,11 @@ pub(super) fn handle_armed_move_selection(
         MoveInputView {
             design: super::schematic_design_view(state),
             canvas: &state.dialogs.move_selection.canvas,
-            selection: &state.schematic.session.editor.selection,
+            selection: &state.model.schematic.session.editor.selection,
             filter: state.ui.schematic_selection_filter,
-            snap_engine: &state.schematic.session.editor.snap_engine,
+            snap_engine: &state.model.schematic.session.editor.snap_engine,
         },
-        || state.workspace.content.active_view.display_path(),
+        || state.model.workspace.content.active_view.display_path(),
     ) {
         let request = capture(state, transition);
         apply(state, symbol_context, request);
@@ -55,7 +55,7 @@ pub(super) fn handle_armed_move_selection(
 fn capture(state: &AppState, transition: TransformInputTransition) -> MoveInputRequest {
     MoveInputRequest {
         source: editor_request_source(state),
-        selection: state.schematic.session.editor.selection.clone(),
+        selection: state.model.schematic.session.editor.selection.clone(),
         generation: state.dialogs.move_selection.generation,
         mode: state.dialogs.move_selection.mode,
         transition,
@@ -65,11 +65,11 @@ fn capture(state: &AppState, transition: TransformInputTransition) -> MoveInputR
 fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveInputRequest) {
     let draft = &state.dialogs.move_selection;
     if request.source != editor_request_source(state)
-        || request.selection != state.schematic.session.editor.selection
+        || request.selection != state.model.schematic.session.editor.selection
         || request.generation != draft.generation
         || request.mode != draft.mode
         || request.transition.expected != draft.canvas
-        || state.schematic.session.editor.tool != Tool::MoveSelection
+        || state.model.schematic.session.editor.tool != Tool::MoveSelection
         || !draft.armed
         || state.application_modal_open()
         || armed_move_selection_authority(state).is_err()
@@ -98,7 +98,7 @@ pub(super) fn commit_armed_move_selection(
         cancel_armed_move_selection(state);
         return;
     }
-    state.schematic.begin_operation("move selection");
+    state.model.schematic.begin_operation("move selection");
     // A wire end on another sheet can share a selected pin's coordinates;
     // the rubber band and its cleanup must not reach it.
     let movement = with_active_wire_topology(state, |schematic, scope| {
@@ -126,12 +126,12 @@ pub(super) fn commit_armed_move_selection(
     });
     match movement {
         Ok(true) => {
-            let recorded = state.schematic.end_operation();
+            let recorded = state.model.schematic.end_operation();
             state.sync_active_schematic_to_workspace();
             state.prompt(if recorded {
                 format!(
                     "Moved {} objects by ({}, {}) in {} mode.",
-                    state.schematic.live_movable_selection_count(),
+                    state.model.schematic.live_movable_selection_count(),
                     delta.x,
                     delta.y,
                     mode.label(),
@@ -142,12 +142,12 @@ pub(super) fn commit_armed_move_selection(
             cancel_armed_move_selection(state);
         }
         Ok(false) => {
-            state.schematic.cancel_operation();
+            state.model.schematic.cancel_operation();
             state.prompt("Nothing moved.");
             cancel_armed_move_selection(state);
         }
         Err(error) => {
-            state.schematic.cancel_operation();
+            state.model.schematic.cancel_operation();
             state.dialogs.move_selection.canvas.preview_error = Some(error.to_string());
             state.dialogs.move_selection.canvas.anchor = None;
             state.dialogs.move_selection.canvas.preview_delta = Point::origin();
@@ -170,23 +170,26 @@ mod tests {
     fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-        let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
+        let terminal = state.model.schematic.document().components[0].terminal_positions()[0].1;
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::segment(2, terminal, Point::new(20, 0)));
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(1);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
         state.dialogs.move_selection.canvas.preview_delta = Point::origin();
         let symbols = schematic_symbol_context(&state);
@@ -240,19 +243,31 @@ mod tests {
         }
 
         assert_eq!(
-            state.schematic.document().components[0].pos,
+            state.model.schematic.document().components[0].pos,
             Point::new(0, 10)
         );
         assert_eq!(
-            state.schematic.document().wires[0].points[0],
+            state.model.schematic.document().wires[0].points[0],
             Point::new(terminal.x, terminal.y + 10)
         );
-        assert_eq!(state.schematic.undo_description(), Some("move selection"));
-        assert!(state.schematic.session.editor.selection.has_component(1));
-        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
+        assert_eq!(
+            state.model.schematic.undo_description(),
+            Some("move selection")
+        );
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(1)
+        );
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
         assert!(!state.dialogs.move_selection.armed);
         assert_eq!(
             state
+                .model
                 .workspace
                 .active_schematic()
                 .expect("active workspace buffer")
@@ -261,13 +276,13 @@ mod tests {
                 .pos,
             Point::new(0, 10)
         );
-        assert!(state.schematic.undo());
+        assert!(state.model.schematic.undo());
         assert_eq!(
-            state.schematic.document().components[0].pos,
+            state.model.schematic.document().components[0].pos,
             Point::origin()
         );
         assert!(
-            !state.schematic.can_undo(),
+            !state.model.schematic.can_undo(),
             "the gesture owns one undo record"
         );
     }
@@ -277,24 +292,27 @@ mod tests {
     fn moving_a_part_leaves_another_sheets_wire_end_in_place() {
         let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[20]);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-        let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
+        let terminal = state.model.schematic.document().components[0].terminal_positions()[0].1;
         let hidden = Wire::segment(20, terminal, Point::new(terminal.x - 40, terminal.y));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(hidden.clone());
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(1);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
         state.dialogs.move_selection.canvas.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
@@ -302,10 +320,10 @@ mod tests {
         commit_armed_move_selection(&mut state, &symbols);
 
         assert_eq!(
-            state.schematic.document().components[0].pos,
+            state.model.schematic.document().components[0].pos,
             Point::new(0, 10)
         );
-        assert_eq!(state.schematic.document().wires, vec![hidden]);
+        assert_eq!(state.model.schematic.document().wires, vec![hidden]);
     }
 
     /// R1 (id 1) at the origin and R2 (id 2) touching it pin to pin on its
@@ -315,10 +333,15 @@ mod tests {
         let left = probe.terminal_positions()[0].1;
         let right = probe.terminal_positions()[1].1;
         let pitch = Point::new(right.x - left.x, right.y - left.y);
-        state.schematic.document_mut_for_test().components.extend([
-            Component::new(1, ComponentType::Resistor, Point::origin()),
-            Component::new(2, ComponentType::Resistor, pitch),
-        ]);
+        state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .extend([
+                Component::new(1, ComponentType::Resistor, Point::origin()),
+                Component::new(2, ComponentType::Resistor, pitch),
+            ]);
         right
     }
 
@@ -330,12 +353,13 @@ mod tests {
         let mut state = AppState::default();
         let pin = abutting_resistors(&mut state);
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(2);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
         state.dialogs.move_selection.canvas.preview_delta = Point::new(30, 20);
         let symbols = schematic_symbol_context(&state);
@@ -343,15 +367,15 @@ mod tests {
         commit_armed_move_selection(&mut state, &symbols);
 
         let moved = Point::new(pin.x + 30, pin.y + 20);
-        let wires = &state.schematic.document().wires;
+        let wires = &state.model.schematic.document().wires;
         assert!(
             wires.iter().any(|wire| wire.is_orthogonal()
                 && wire.points.first() == Some(&pin)
                 && wire.points.last() == Some(&moved)),
             "{wires:?}"
         );
-        assert!(state.schematic.undo());
-        assert!(state.schematic.document().wires.is_empty());
+        assert!(state.model.schematic.undo());
+        assert!(state.model.schematic.document().wires.is_empty());
     }
 
     /// The part R2 touched is on Sheet 2. Moving R2 on Sheet 1 wires
@@ -360,14 +384,15 @@ mod tests {
     fn moving_a_part_off_another_sheets_pin_draws_no_wire() {
         let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[2], &[1]);
         abutting_resistors(&mut state);
-        let start = state.schematic.document().components[1].pos;
+        let start = state.model.schematic.document().components[1].pos;
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(2);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
         state.dialogs.move_selection.canvas.preview_delta = Point::new(30, 20);
         let symbols = schematic_symbol_context(&state);
@@ -375,11 +400,11 @@ mod tests {
         commit_armed_move_selection(&mut state, &symbols);
 
         assert_eq!(
-            state.schematic.document().components[1].pos,
+            state.model.schematic.document().components[1].pos,
             Point::new(start.x + 30, start.y + 20),
             "the move ran"
         );
-        assert!(state.schematic.document().wires.is_empty());
+        assert!(state.model.schematic.document().wires.is_empty());
     }
 
     /// The preview shows what the commit will do, so it runs with the other
@@ -389,18 +414,21 @@ mod tests {
     fn the_move_preview_leaves_another_sheets_wire_end_in_place() {
         let mut state = crate::schematic::view::sheet_visibility::two_sheet_state(&[1], &[20]);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
-        let terminal = state.schematic.document().components[0].terminal_positions()[0].1;
+        let terminal = state.model.schematic.document().components[0].terminal_positions()[0].1;
         let hidden = Wire::segment(20, terminal, Point::new(terminal.x - 40, terminal.y));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(hidden.clone());
         state
+            .model
             .schematic
             .session
             .editor
@@ -423,29 +451,39 @@ mod tests {
     fn cancelling_armed_move_preserves_geometry_selection_and_history() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(Component::new(1, ComponentType::Resistor, Point::origin()));
         state
+            .model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(1);
-        state.schematic.init_undo_history();
+        state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
         state.dialogs.move_selection.canvas.preview_delta = Point::new(40, 10);
 
         crate::workbench::app::cancel_armed_move_selection(&mut state);
 
         assert_eq!(
-            state.schematic.document().components[0].pos,
+            state.model.schematic.document().components[0].pos,
             Point::origin()
         );
-        assert!(state.schematic.session.editor.selection.has_component(1));
-        assert_eq!(state.schematic.session.editor.tool, Tool::Select);
-        assert!(!state.schematic.can_undo());
+        assert!(
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .has_component(1)
+        );
+        assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
+        assert!(!state.model.schematic.can_undo());
     }
     #[test]
     fn move_requests_recheck_source_mode_and_draft_without_cancelling_a_replacement() {
@@ -462,15 +500,17 @@ mod tests {
         ] {
             let mut state = AppState::default();
             let id = state
+                .model
                 .schematic
                 .add_component(ComponentType::Resistor, Point::origin());
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .selection
                 .select_only_component(id);
-            state.schematic.clear_undo_history();
+            state.model.schematic.clear_undo_history();
             arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
             let expected = state.dialogs.move_selection.canvas.clone();
             let mut next = expected.clone();
@@ -484,15 +524,15 @@ mod tests {
                 },
             );
             match change {
-                "document" => state.active_schematic_epoch += 1,
-                "selection" => state.schematic.session.editor.selection.clear(),
+                "document" => state.model.active_schematic_epoch += 1,
+                "selection" => state.model.schematic.session.editor.selection.clear(),
                 "mode" => {
                     state.dialogs.move_selection.mode = crate::state::MoveSelectionMode::Shove
                 }
                 "draft" => state.dialogs.move_selection.canvas.anchor = Some(Point::new(10, 0)),
                 "modal" => state.dialogs.preferences_open = true,
-                "read-only" => state.schematic.session.read_only = true,
-                "tool" => state.schematic.arm_tool(Tool::Select),
+                "read-only" => state.model.schematic.session.read_only = true,
+                "tool" => state.model.schematic.arm_tool(Tool::Select),
                 "replacement" => {
                     cancel_armed_move_selection(&mut state);
                     arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
@@ -511,17 +551,20 @@ mod tests {
             apply(&mut state, &symbols, request);
             if change == "none" {
                 assert_eq!(
-                    state.schematic.document().components[0].pos,
+                    state.model.schematic.document().components[0].pos,
                     Point::new(100, 0)
                 );
-                assert_eq!(state.schematic.undo_description(), Some("move selection"));
+                assert_eq!(
+                    state.model.schematic.undo_description(),
+                    Some("move selection")
+                );
             } else {
                 assert_eq!(
-                    state.schematic.document().components[0].pos,
+                    state.model.schematic.document().components[0].pos,
                     Point::origin(),
                     "{change}"
                 );
-                assert!(!state.schematic.can_undo(), "{change}");
+                assert!(!state.model.schematic.can_undo(), "{change}");
                 assert_eq!(state.dialogs.move_selection.canvas, canvas, "{change}");
                 assert!(state.dialogs.move_selection.armed, "{change}");
             }

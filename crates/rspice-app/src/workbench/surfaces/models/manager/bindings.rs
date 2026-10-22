@@ -61,13 +61,13 @@ impl ConsumerIndex {
 
         let mut by_provider = BTreeMap::<(String, String, String), Vec<String>>::new();
         let mut diagnostics = Vec::new();
-        let Some(schematic) = app.state.workspace.active_schematic() else {
+        let Some(schematic) = app.state.model.workspace.active_schematic() else {
             return Self {
                 by_provider,
                 diagnostics,
             };
         };
-        let sheet = app.state.workspace.content.active_view.display_path();
+        let sheet = app.state.model.workspace.content.active_view.display_path();
         for component in &schematic.document().components {
             let Some(model) = explicit_component_model(component) else {
                 continue;
@@ -94,6 +94,7 @@ impl ConsumerIndex {
                 .filter(|provider| !provider.is_empty());
             match app
                 .state
+                .model
                 .model_library_manager
                 .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model)
             {
@@ -211,6 +212,7 @@ pub(super) fn unresolved_card(
     // A bin's selection binds its family, as the detail's Bind does.
     let selected_model = app
         .state
+        .model
         .model_library_manager
         .selected_library
         .clone()
@@ -218,6 +220,7 @@ pub(super) fn unresolved_card(
         .map(|(library, model)| {
             let binding = app
                 .state
+                .model
                 .model_library_manager
                 .get_library(&library)
                 .and_then(|catalog| selection_family(catalog, &model))
@@ -294,6 +297,7 @@ fn unresolved_row(
                 .clicked()
             {
                 app.state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -347,12 +351,14 @@ pub(super) fn effective_model_consumers(
     model_name: &str,
 ) -> Vec<String> {
     app.state
+        .model
         .model_library_manager
         .effective_definition_provider(ModelConsumerScope::PrimitiveModel, model_name)
         .ok()
         .flatten()
         .and_then(|provider| {
             app.state
+                .model
                 .model_library_manager
                 .get_library(&provider.library)
                 .map(|library| model_consumers_for_provider(app, library, model_name))

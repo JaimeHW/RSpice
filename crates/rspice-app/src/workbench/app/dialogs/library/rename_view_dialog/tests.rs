@@ -9,7 +9,7 @@ fn state_with_amplifier_schematic() -> AppState {
     let mut cell = Cell::new("amplifier");
     cell.add_view(View::new("schematic", ViewType::Schematic));
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state
 }
 
@@ -29,7 +29,7 @@ fn rename_view_dialog_starts_with_the_exact_active_view_identity() {
     assert!(state.dialogs.rename_view_error.is_none());
     assert_eq!(
         state.dialogs.rename_view_library_revision,
-        state.library_manager.revision()
+        state.model.library_manager.revision()
     );
 }
 
@@ -45,6 +45,7 @@ fn rename_view_entry_point_rejects_missing_and_read_only_targets() {
     );
 
     state
+        .model
         .library_manager
         .get_library_mut("work")
         .expect("work library exists")
@@ -66,6 +67,7 @@ fn rename_view_commit_rejects_an_intervening_catalog_change() {
         .expect("rename dialog opens");
     state.dialogs.rename_view_name = "schematic_v2".to_owned();
     state
+        .model
         .library_manager
         .add_library(Library::new("intervening"));
 
@@ -75,6 +77,7 @@ fn rename_view_commit_rejects_an_intervening_catalog_change() {
 
     assert_eq!(error, LIBRARY_CATALOG_STALE_MESSAGE);
     let cell = state
+        .model
         .library_manager
         .get_library("work")
         .and_then(|library| library.get_cell("amplifier"))

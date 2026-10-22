@@ -28,9 +28,9 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
             rspice_core::MeasureResult::success("bandwidth_3db", 1.0e6),
         ]),
     );
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.workspace.content.specs = vec![
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.workspace.content.specs = vec![
         SpecEntry {
             measurement: "gain_dc".to_owned(),
             expression: "db20(V(out))".to_owned(),
@@ -294,11 +294,13 @@ fn rows_preserve_declared_contract_order_then_first_retained_order() {
 fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
     let mut state = crate::workbench::AppState::default();
     let plan_id = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan")
         .id();
     let source_revision = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan")
@@ -318,6 +320,7 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
     assert!(apply_drafts(&mut state));
 
     let owned = state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -338,9 +341,10 @@ fn authored_plan_measurements_editor_commits_the_active_plan_definition() {
             maximum: 40.0,
         }
     );
-    assert_eq!(state.workspace.content.specs, owned.specs);
+    assert_eq!(state.model.workspace.content.specs, owned.specs);
     assert!(
         state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("default plan")
@@ -356,6 +360,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
 
     let mut state = crate::workbench::AppState::default();
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan");
@@ -391,6 +396,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
     });
     let original = definition.clone();
     state
+        .model
         .workspace
         .content
         .replace_active_specification_definitions(plan_id, vec![definition]);
@@ -401,6 +407,7 @@ fn governed_editor_preserves_identity_source_waiver_producer_and_equality_kind()
     assert!(apply_drafts(&mut state));
 
     let retained = &state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -795,10 +802,10 @@ fn two_runs_over_a_long_contract() -> AppState {
                     .collect(),
             ),
         );
-        state.simulation.retained.runs.push(run);
+        state.model.simulation.retained.runs.push(run);
     }
-    state.simulation.view.active_run_idx = Some(0);
-    state.workspace.content.specs = names
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.workspace.content.specs = names
         .iter()
         .map(|name| SpecEntry {
             measurement: name.clone(),
@@ -867,7 +874,7 @@ fn the_carried_limit_is_scrolled_to_again_in_the_next_run() {
         "the hop into the first run puts its limit on screen: {first:?}"
     );
 
-    state.simulation.view.active_run_idx = Some(1);
+    state.model.simulation.view.active_run_idx = Some(1);
     let second = carried_row_position(&ctx, &mut state, screen);
 
     assert!(
@@ -906,11 +913,11 @@ fn the_source_button_opens_the_viewer_the_shared_map_names() {
             },
         ),
     );
-    state.simulation.retained.runs = vec![run].into();
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs = vec![run].into();
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
 
-    let optimization = state.simulation.retained.runs[0].analyses[1].clone();
+    let optimization = state.model.simulation.retained.runs[0].analyses[1].clone();
 
     assert_eq!(
         super::source_viewer(&optimization),

@@ -214,7 +214,7 @@ fn palette_names_are_canonical_labels_without_ellipsis() {
 #[cfg(not(target_arch = "wasm32"))]
 fn test_app() -> RSpiceApp {
     let state = crate::workbench::app_state::AppState::default();
-    let automation_runtime_project_id = state.workspace.content.project.id();
+    let automation_runtime_project_id = state.model.workspace.content.project.id();
     RSpiceApp {
         state,
         first_frame: false,
@@ -488,7 +488,7 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
         crate::state::ViewType::Schematic,
     ));
     library.add_cell(cell);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
 
     let mut rows = app.palette_rows(
         "precision gain_stage",
@@ -503,11 +503,15 @@ fn real_cellview_records_are_searchable_and_open_the_workspace_document() {
     entry.execute(&mut app).expect("open real cellview");
 
     assert_eq!(
-        app.state.workspace.content.active_view,
+        app.state.model.workspace.content.active_view,
         crate::state::CellViewRef::new("precision_analog", "gain_stage", "schematic")
     );
     assert_eq!(
-        app.state.library_manager.selected_lcv_path().as_deref(),
+        app.state
+            .model
+            .library_manager
+            .selected_lcv_path()
+            .as_deref(),
         Some("precision_analog/gain_stage/schematic")
     );
     assert_eq!(
@@ -532,8 +536,11 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
         crate::state::ViewType::Schematic,
     ));
     library.add_cell(cell);
-    app.state.library_manager.add_library(library);
-    app.state.library_manager.select_cell("behavioral", "gain");
+    app.state.model.library_manager.add_library(library);
+    app.state
+        .model
+        .library_manager
+        .select_cell("behavioral", "gain");
 
     for (query, command) in [
         ("Verilog-A device", Command::NewVerilogADevice),
@@ -563,6 +570,7 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
     read_only.state.open_project_session();
     let names = read_only
         .state
+        .model
         .library_manager
         .libraries_sorted()
         .iter()
@@ -571,6 +579,7 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
     for name in names {
         read_only
             .state
+            .model
             .library_manager
             .get_library_mut(&name)
             .expect("the library")
@@ -624,8 +633,8 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     );
     model.description = "Low-noise qualified input device".to_owned();
     library.add_model(model);
-    app.state.model_library_manager.add_library(library);
-    app.state.model_library_manager.filter_type =
+    app.state.model.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.filter_type =
         Some(crate::state::model_library::ModelType::Pmos);
 
     let mut rows = app.palette_rows(
@@ -645,7 +654,11 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     entry.execute(&mut app).expect("open real model record");
 
     assert_eq!(
-        app.state.model_library_manager.selected_library.as_deref(),
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
         Some("foundry_65lp")
     );
     assert_eq!(
@@ -653,10 +666,10 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
         Some("nmos_ulvt_precision")
     );
     assert_eq!(
-        app.state.model_library_manager.filter_text,
+        app.state.model.model_library_manager.filter_text,
         "nmos_ulvt_precision"
     );
-    assert_eq!(app.state.model_library_manager.filter_type, None);
+    assert_eq!(app.state.model.model_library_manager.filter_type, None);
     assert_eq!(
         app.state.workbench.models_page,
         crate::state::ModelsPage::Models
@@ -678,7 +691,7 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
         "opa189_a",
         crate::state::model_library::ModelType::Other,
     ));
-    app.state.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.add_library(library);
     app.state.dialogs.command_palette.open();
     app.state.dialogs.command_palette.query = "opa189_a".to_owned();
 
@@ -689,7 +702,11 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
 
     assert!(!app.state.dialogs.command_palette.open);
     assert_eq!(
-        app.state.model_library_manager.selected_library.as_deref(),
+        app.state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref(),
         Some("vendor_models")
     );
     assert_eq!(
@@ -730,8 +747,8 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     );
     let active_dataset_id = active_run.dataset_id;
 
-    app.state.simulation.retained.runs = vec![stale_run, active_run].into();
-    assert!(app.state.simulation.select_run(1));
+    app.state.model.simulation.retained.runs = vec![stale_run, active_run].into();
+    assert!(app.state.model.simulation.select_run(1));
     assert!(
         app.palette_rows(
             "V(stale)",
@@ -762,12 +779,12 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Bode;
     let hidden_strip = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
         active_dataset_id,
-        &app.state.simulation.retained.runs[1].analyses[1],
+        &app.state.model.simulation.retained.runs[1].analyses[1],
     );
     let maximized_strip =
         crate::workbench::documents::result_document::AnalysisPresentationKey::new(
             active_dataset_id,
-            &app.state.simulation.retained.runs[1].analyses[0],
+            &app.state.model.simulation.retained.runs[1].analyses[0],
         );
     app.state
         .ui
@@ -776,18 +793,18 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         .hidden_strips
         .insert(hidden_strip);
     app.state.ui.results.session.maximized_strip = Some(maximized_strip);
-    let version_before = app.state.simulation.view.data_version;
+    let version_before = app.state.model.simulation.view.data_version;
     entry.execute(&mut app).expect("open real result signal");
 
-    assert_eq!(app.state.simulation.view.active_run_idx, Some(1));
-    assert_eq!(app.state.simulation.view.active_analysis_idx, Some(1));
+    assert_eq!(app.state.model.simulation.view.active_run_idx, Some(1));
+    assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(1));
     assert_eq!(
-        app.state.simulation.retained.runs[1].dataset_id,
+        app.state.model.simulation.retained.runs[1].dataset_id,
         active_dataset_id
     );
-    assert!(app.state.simulation.retained.runs[1].analyses[1].waveforms[0].visible);
-    assert!(app.state.simulation.view.waveforms[0].visible);
-    assert!(app.state.simulation.view.data_version > version_before);
+    assert!(app.state.model.simulation.retained.runs[1].analyses[1].waveforms[0].visible);
+    assert!(app.state.model.simulation.view.waveforms[0].visible);
+    assert!(app.state.model.simulation.view.data_version > version_before);
     assert_eq!(
         app.state.ui.results.session.viewer,
         crate::workbench::ResultViewer::Waves
@@ -1024,8 +1041,9 @@ fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
     ctx.enable_accesskit();
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     app.state
+        .model
         .pdk_config
         .add_library_path(missing.to_string_lossy().into_owned());
     app.state.dialogs.command_palette.open();
@@ -1046,13 +1064,13 @@ fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
         "the toasts were drawn before the palette ran it"
     );
     assert!(
-        !app.state.notices.is_empty(),
+        !app.state.model.notices.is_empty(),
         "the frame ends with it queued"
     );
 
     let next = application_frame(&ctx, &mut app, Vec::new());
     assert!(drawn(&next), "the next frame draws it: {next:?}");
-    assert!(app.state.notices.is_empty());
+    assert!(app.state.model.notices.is_empty());
     let activity = app.state.ui.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), title);

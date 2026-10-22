@@ -54,6 +54,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let Some(configuration) = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -62,6 +63,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
     else {
         let count = app
             .state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -73,10 +75,10 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     };
 
-    let inspection = app.state.workspace.inspect_design_projection(
-        &app.state.library_manager,
-        &app.state.workspace.content.active_view,
-        &app.state.schematic,
+    let inspection = app.state.model.workspace.inspect_design_projection(
+        &app.state.model.library_manager,
+        &app.state.model.workspace.content.active_view,
+        &app.state.model.schematic,
     );
     let resolution = inspection
         .as_ref()
@@ -136,6 +138,7 @@ fn configuration_context(ui: &mut Ui, app: &RSpiceApp) -> Option<ContextIntent> 
     let t = Tokens::get(ui.ctx());
     let configurations = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -154,11 +157,18 @@ fn configuration_context(ui: &mut Ui, app: &RSpiceApp) -> Option<ContextIntent> 
         .collect::<Vec<_>>();
     let active_id = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
         .active_configuration_id();
-    let active = app.state.workspace.content.configuration_sets.active();
+    let active = app
+        .state
+        .model
+        .workspace
+        .content
+        .configuration_sets
+        .active();
     let selected_label = active
         .map(|configuration| {
             format!(
@@ -274,7 +284,7 @@ fn apply_context_intent(ctx: &Context, app: &mut RSpiceApp, intent: ContextInten
 }
 
 fn activate_configuration(app: &mut RSpiceApp, id: ConfigurationSetId) -> Result<String, String> {
-    let current: &ConfigurationSetCatalog = &app.state.workspace.content.configuration_sets;
+    let current: &ConfigurationSetCatalog = &app.state.model.workspace.content.configuration_sets;
     let selected = current
         .find(id)
         .ok_or_else(|| "The selected configuration no longer exists.".to_owned())?;
@@ -290,12 +300,16 @@ fn activate_configuration(app: &mut RSpiceApp, id: ConfigurationSetId) -> Result
     validate_candidate_configuration(app, &candidate)?;
     let revision = app
         .state
+        .model
         .workspace
         .content
         .replace_configuration_sets(candidate)
         .map_err(|error| error.to_string())?;
     app.invalidate_simulation_preflight();
-    app.state.netlist_artifacts.current_generation_input_digest = None;
+    app.state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = None;
     Ok(format!(
         "Activated {name} at project revision {}.",
         revision.get()
@@ -306,13 +320,13 @@ fn validate_candidate_configuration(
     app: &RSpiceApp,
     catalog: &ConfigurationSetCatalog,
 ) -> Result<(), String> {
-    let mut workspace = app.state.workspace.clone();
+    let mut workspace = app.state.model.workspace.clone();
     *workspace.content.configuration_sets = catalog.clone();
     let projection = workspace
         .configuration_execution_projection(
-            &app.state.library_manager,
-            &app.state.workspace.content.active_view,
-            &app.state.schematic,
+            &app.state.model.library_manager,
+            &app.state.model.workspace.content.active_view,
+            &app.state.model.schematic,
         )
         .map_err(|error| format!("Configuration cannot be activated: {error}"))?;
     projection
@@ -323,7 +337,7 @@ fn validate_candidate_configuration(
         "Configuration cannot be activated without its root schematic.".to_owned()
     })?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        app.state.library_manager.catalog(),
+        app.state.model.library_manager.catalog(),
         &projection,
     );
     let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
@@ -347,8 +361,8 @@ fn validate_candidate_configuration(
         &generated,
         root.current_file(),
         &app.state.include_search_chain(),
-        app.state.model_library_manager.catalog(),
-        app.state.model_library_manager.resolution_records(),
+        app.state.model.model_library_manager.catalog(),
+        app.state.model.model_library_manager.resolution_records(),
     )
     .map_err(|error| {
         format!("Configuration cannot be activated because source sealing failed: {error}")
@@ -527,12 +541,13 @@ fn execution_contract(ui: &mut Ui, configuration: &ConfigurationSet, app: &RSpic
     let definition = configuration.definition();
     let technology = app
         .state
+        .model
         .workspace
         .content
         .project
         .technology_binding()
         .map(crate::state::ProjectTechnologyBinding::display_label)
-        .or_else(|| app.state.workspace.content.project.technology.clone())
+        .or_else(|| app.state.model.workspace.content.project.technology.clone())
         .unwrap_or_else(|| "Not attached".to_owned());
     section_header(
         ui,
@@ -566,7 +581,7 @@ fn execution_contract(ui: &mut Ui, configuration: &ConfigurationSet, app: &RSpic
 }
 
 fn connectivity_contract(ui: &mut Ui, app: &RSpiceApp) {
-    let connectivity = &app.state.workspace.content.connectivity;
+    let connectivity = &app.state.model.workspace.content.connectivity;
     let validation = connectivity.validate();
     // A contract that holds is the ordinary case and says nothing; the error
     // below the rows is what a blocked one has to say.
@@ -1115,18 +1130,19 @@ mod tests {
             crate::workbench::examples::hierarchy_reference::omit_missing_instance(&mut app.state);
             let projection = app
                 .state
+                .model
                 .workspace
                 .design_projection(
-                    &app.state.library_manager,
-                    &app.state.workspace.content.active_view,
-                    &app.state.schematic,
+                    &app.state.model.library_manager,
+                    &app.state.model.workspace.content.active_view,
+                    &app.state.model.schematic,
                 )
                 .unwrap();
             let expected = projection.hierarchy_resolution();
-            let authored = app.state.workspace.resolve_hierarchy_with_active(
-                &app.state.library_manager,
-                &app.state.workspace.content.active_view,
-                &app.state.schematic,
+            let authored = app.state.model.workspace.resolve_hierarchy_with_active(
+                &app.state.model.library_manager,
+                &app.state.model.workspace.content.active_view,
+                &app.state.model.schematic,
             );
             assert_ne!(authored.total_instances, expected.total_instances);
             let label = format!(
@@ -1163,6 +1179,7 @@ mod tests {
         let fixture = crate::workbench::examples::hierarchy_reference::build();
         let configuration = fixture
             .state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -1244,19 +1261,19 @@ mod tests {
     #[test]
     fn activating_a_missing_configuration_is_fail_closed() {
         let mut app = RSpiceApp::test_instance();
-        let before_catalog = app.state.workspace.content.configuration_sets.clone();
-        let before_revision = app.state.workspace.content.project.revision();
+        let before_catalog = app.state.model.workspace.content.configuration_sets.clone();
+        let before_revision = app.state.model.workspace.content.project.revision();
 
         let error = activate_configuration(&mut app, ConfigurationSetId::new())
             .expect_err("a missing configuration identity must be rejected");
 
         assert!(error.contains("no longer exists"));
         assert_eq!(
-            app.state.workspace.content.configuration_sets,
+            app.state.model.workspace.content.configuration_sets,
             before_catalog
         );
         assert_eq!(
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
             before_revision
         );
     }

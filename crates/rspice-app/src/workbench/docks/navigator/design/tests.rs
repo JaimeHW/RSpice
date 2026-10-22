@@ -34,10 +34,14 @@ fn add_master(
 ) {
     use crate::state::{Library, View, ViewType};
 
-    if state.library_manager.get_library(library).is_none() {
-        state.library_manager.add_library(Library::new(library));
+    if state.model.library_manager.get_library(library).is_none() {
+        state
+            .model
+            .library_manager
+            .add_library(Library::new(library));
     }
     let owner = state
+        .model
         .library_manager
         .get_library_mut(library)
         .expect("the fixture library exists");
@@ -45,7 +49,7 @@ fn add_master(
     if target.get_view("schematic").is_none() {
         target.add_view(View::new("schematic", ViewType::Schematic));
     }
-    state.workspace.insert_schematic_editor(
+    state.model.workspace.insert_schematic_editor(
         CellViewRef::new(library, cell, "schematic").key(),
         schematic,
     );
@@ -72,8 +76,9 @@ fn placed(id: u64, name: &str, library: &str, cell: &str) -> crate::state::Compo
 /// `/XA/XLOOP` is the occurrence the resolver refuses to descend.
 fn recursive_design() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    let root = app.state.workspace.content.active_view.clone();
+    let root = app.state.model.workspace.content.active_view.clone();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -97,7 +102,7 @@ fn two_sheet_named_signals() -> RSpiceApp {
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    let components = &mut app.state.schematic.document_mut_for_test().components;
+    let components = &mut app.state.model.schematic.document_mut_for_test().components;
     for (id, name) in [(301, "VIN"), (302, "VBIAS")] {
         let mut source = crate::state::Component::new(
             id,
@@ -109,7 +114,7 @@ fn two_sheet_named_signals() -> RSpiceApp {
     }
     app.state.sync_active_schematic_to_workspace();
 
-    let workspace = &mut app.state.workspace.content;
+    let workspace = &mut app.state.model.workspace.content;
     let key = workspace.active_schematic_reference().key();
     let first = workspace
         .design_management
@@ -216,8 +221,8 @@ fn moving_the_sheet_scope_never_touches_the_project() {
     let mut app = two_sheet_named_signals();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let revision = app.state.workspace.content.project.revision().get();
-    let catalog = app.state.workspace.content.design_management.clone();
+    let revision = app.state.model.workspace.content.project.revision().get();
+    let catalog = app.state.model.workspace.content.design_management.clone();
 
     for scope in SheetScope::OPTIONS {
         sheet_visibility::set_sheet_scope(&ctx, scope);
@@ -225,28 +230,29 @@ fn moving_the_sheet_scope_never_touches_the_project() {
     }
 
     assert_eq!(
-        app.state.workspace.content.project.revision().get(),
+        app.state.model.workspace.content.project.revision().get(),
         revision
     );
-    assert_eq!(app.state.workspace.content.design_management, catalog);
+    assert_eq!(app.state.model.workspace.content.design_management, catalog);
 }
 
 /// The occurrence rows of one app against one reading position.
 fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTreeRow> {
     let projection = app
         .state
+        .model
         .workspace
         .design_projection(
-            &app.state.library_manager,
-            &app.state.workspace.content.active_view,
-            &app.state.schematic,
+            &app.state.model.library_manager,
+            &app.state.model.workspace.content.active_view,
+            &app.state.model.schematic,
         )
         .expect("the fixture design projects");
     hierarchy_tree::occurrence_rows(
         &hierarchy_tree::TreeSource {
             projection: projection.as_ref(),
-            sheets: &app.state.workspace.content.design_management,
-            libraries: &app.state.library_manager,
+            sheets: &app.state.model.workspace.content.design_management,
+            libraries: &app.state.model.library_manager,
             query: "",
         },
         tree,
@@ -256,11 +262,12 @@ fn occurrence_rows(app: &RSpiceApp, tree: &NavigatorTreeState) -> Vec<DesignTree
 /// One app's design projection, which every hierarchy rail reads.
 fn projection_of(app: &RSpiceApp) -> std::sync::Arc<crate::state::workspace::DesignProjection> {
     app.state
+        .model
         .workspace
         .design_projection(
-            &app.state.library_manager,
-            &app.state.workspace.content.active_view,
-            &app.state.schematic,
+            &app.state.model.library_manager,
+            &app.state.model.workspace.content.active_view,
+            &app.state.model.schematic,
         )
         .expect("the fixture design projects")
 }
@@ -330,16 +337,19 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
     let leaf = instance.child("XLEAF").expect("the leaf is nameable");
 
     hierarchy_tree::open_occurrence(&mut app.state, &leaf);
-    assert_eq!(app.state.workspace.content.occurrence_path(), leaf);
+    assert_eq!(app.state.model.workspace.content.occurrence_path(), leaf);
     assert_eq!(
-        app.state.workspace.content.active_view,
+        app.state.model.workspace.content.active_view,
         CellViewRef::new("work", "leaf", "schematic")
     );
 
     hierarchy_tree::open_occurrence(&mut app.state, &instance);
-    assert_eq!(app.state.workspace.content.occurrence_path(), instance);
     assert_eq!(
-        app.state.workspace.content.active_view,
+        app.state.model.workspace.content.occurrence_path(),
+        instance
+    );
+    assert_eq!(
+        app.state.model.workspace.content.active_view,
         CellViewRef::new("work", "child", "schematic")
     );
 }
@@ -349,7 +359,7 @@ fn an_occurrence_row_lands_the_session_on_that_occurrence() {
 /// records it unresolved rather than binding it.
 fn design_with_a_broken_master() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    let components = &mut app.state.schematic.document_mut_for_test().components;
+    let components = &mut app.state.model.schematic.document_mut_for_test().components;
     components.push(placed(101, "XA", "work", "child"));
     components.push(placed(102, "XGONE", "work", "missing"));
     components.push(placed(103, "XGONE2", "work", "missing"));
@@ -488,6 +498,7 @@ fn design_placing_a_builtin_xspice_device() -> (RSpiceApp, InstancePath) {
     .with_library_cell(binding);
     component.name = "A1".to_owned();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -510,7 +521,7 @@ fn design_placing_a_builtin_xspice_device() -> (RSpiceApp, InstancePath) {
 #[test]
 fn a_built_in_device_master_is_inert_in_both_hierarchy_rails() {
     let (mut app, occurrence) = design_placing_a_builtin_xspice_device();
-    let root_view = app.state.workspace.content.active_view.clone();
+    let root_view = app.state.model.workspace.content.active_view.clone();
     let device = CellViewRef::new("rspice", "d_pwm", "xspice");
 
     let mut tree = NavigatorTreeState::default();
@@ -532,25 +543,26 @@ fn a_built_in_device_master_is_inert_in_both_hierarchy_rails() {
 
     // The predicate the Masters rail asks before it offers to open a row.
     assert!(
-        !hierarchy_tree::authored_view(&app.state.library_manager, &device),
+        !hierarchy_tree::authored_view(&app.state.model.library_manager, &device),
         "no library holds the engine's own code model"
     );
     assert!(
-        hierarchy_tree::authored_view(&app.state.library_manager, &root_view),
+        hierarchy_tree::authored_view(&app.state.model.library_manager, &root_view),
         "the project's own master is openable"
     );
 
     hierarchy_tree::open_occurrence(&mut app.state, &occurrence);
     assert_eq!(
-        app.state.workspace.content.active_view, root_view,
+        app.state.model.workspace.content.active_view, root_view,
         "descending into a device leaves the session where it stood"
     );
     assert_eq!(
-        app.state.workspace.content.occurrence_path(),
+        app.state.model.workspace.content.occurrence_path(),
         InstancePath::root()
     );
     assert!(
         app.state
+            .model
             .workspace
             .clone_schematic_editor(&device.key())
             .is_none(),
@@ -563,7 +575,7 @@ fn a_built_in_device_master_is_inert_in_both_hierarchy_rails() {
 #[test]
 fn sheet_nodes_appear_only_above_one_sheet() {
     let mut app = RSpiceApp::test_instance();
-    let project = &mut app.state.workspace.content;
+    let project = &mut app.state.model.workspace.content;
     let reference = project.active_view.clone();
     let key = reference.key();
     let first = project
@@ -860,7 +872,7 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
         port: Some(crate::state::PortDirection::Out),
         wire_ids: Vec::new(),
     };
-    let session = &mut app.state.schematic.session;
+    let session = &mut app.state.model.schematic.session;
     session.editor.selection.select_only_component(9);
     session
         .editor
@@ -868,7 +880,7 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
         .highlight_named_wires(&net.name, HashSet::new());
     assert!(navigator_net_selection_matches(&app.state, &net));
 
-    let session = &mut app.state.schematic.session;
+    let session = &mut app.state.model.schematic.session;
     session.editor.selection.select_only_component(10);
     session.editor.net_highlight.clear();
     assert!(!navigator_net_selection_matches(&app.state, &net));
@@ -879,8 +891,9 @@ fn wireless_navigator_net_selection_is_exact_and_self_invalidating() {
 /// design projection refuses such a configuration, so a rail that still
 /// lists nets afterwards is listing the editor buffer's.
 fn unresolve_configuration(state: &mut crate::workbench::app_state::AppState) {
-    let root = state.workspace.content.active_view.clone();
+    let root = state.model.workspace.content.active_view.clone();
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -982,6 +995,7 @@ fn glyph_canvas(glyph: ShelfGlyph) -> crate::ui::raster::Canvas {
 fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -991,6 +1005,7 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
             crate::state::Point::new(40, 0),
         ));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
@@ -1050,6 +1065,7 @@ fn the_nets_section_states_an_unresolved_configuration_instead_of_buffer_nets() 
 fn a_net_row_announces_the_meta_column_it_paints() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
@@ -1059,6 +1075,7 @@ fn a_net_row_announces_the_meta_column_it_paints() {
             crate::state::Point::new(40, 0),
         ));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .net_labels
@@ -1133,7 +1150,7 @@ fn port(
 fn interface_design() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    let components = &mut app.state.schematic.document_mut_for_test().components;
+    let components = &mut app.state.model.schematic.document_mut_for_test().components;
     for (id, name, order, direction) in [
         (401, "BETA", 2, PortDirection::In),
         (402, "ALPHA", 1, PortDirection::In),

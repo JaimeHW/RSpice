@@ -204,8 +204,8 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
             ctx.enable_accesskit();
             let mut app = RSpiceApp::test_instance();
             app.state.workbench.models_page = page;
-            app.state.library_manager.clear();
-            app.state.model_library_manager.clear();
+            app.state.model.library_manager.clear();
+            app.state.model.model_library_manager.clear();
 
             let output = ctx.run_ui(
                 egui::RawInput {
@@ -352,7 +352,7 @@ fn qualification_domain_projection_preserves_distinct_tolerance_contracts() {
 #[test]
 fn project_model_without_suites_is_truthfully_unqualified() {
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+    app.state.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
     let definition = crate::state::model_library::ProjectModelDefinition {
         name: "nch_owned".to_owned(),
         spice_type: "NMOS".to_owned(),
@@ -364,6 +364,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
         string_parameters: std::collections::BTreeMap::new(),
     };
     app.state
+        .model
         .model_library_manager
         .create_project_model("owned-models", &definition)
         .expect("create project model");
@@ -381,6 +382,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
     assert!(summary.evidence_digest.is_none());
 
     app.state
+        .model
         .model_library_manager
         .select_library(&summary.library)
         .expect("the fixture library is loaded");
@@ -572,7 +574,7 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
     };
 
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+    app.state.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
     let definition = crate::state::model_library::ProjectModelDefinition {
         name: "nch_correlated".to_owned(),
         spice_type: "NMOS".to_owned(),
@@ -581,11 +583,12 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         string_parameters: BTreeMap::new(),
     };
     app.state
+        .model
         .model_library_manager
         .create_project_model("owned-models", &definition)
         .unwrap();
     let resolved = model_editor::resolve_project_model_for_editor(
-        &app.state.model_library_manager,
+        &app.state.model.model_library_manager,
         "owned-models",
         "nch_correlated",
     )
@@ -626,6 +629,7 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
     let correlation = ModelCorrelationState::try_new(vec![suite], Vec::new()).unwrap();
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library("owned-models")
         .unwrap();

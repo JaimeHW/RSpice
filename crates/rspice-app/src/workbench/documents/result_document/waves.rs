@@ -113,12 +113,12 @@ pub(super) fn source_waveform_anchor(
 ) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
-    let active_analysis_index = state.simulation.view.active_analysis_idx?;
+    let active_analysis_index = state.model.simulation.view.active_analysis_idx?;
     let model = models
         .iter()
         .find(|model| model.analysis_index == active_analysis_index)?;
@@ -137,7 +137,7 @@ pub(super) fn source_waveform_anchor(
 pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         t,
@@ -149,7 +149,7 @@ pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
     let preferred_analysis = state
         .ui
         .results
-        .valid_selected_trace(&state.simulation)
+        .valid_selected_trace(&state.model.simulation)
         .map(SelectedResultTrace::analysis_key)
         .or_else(|| {
             state.ui.results.session.cursor_strip.and_then(|index| {
@@ -251,7 +251,7 @@ fn matching_spec_limits(
 pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         t,
@@ -263,7 +263,7 @@ pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
 pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> bool {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         t,
@@ -313,7 +313,7 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
     let selected_source = state
         .ui
         .results
-        .valid_selected_trace(&state.simulation)
+        .valid_selected_trace(&state.model.simulation)
         .filter(|selected| selected.analysis_key() == model.analysis_key)
         .map(SelectedResultTrace::source_name);
     let trace = state
@@ -368,7 +368,7 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
 pub(super) fn marker_at_cursor_a_available(state: &mut AppState, t: &Tokens) -> bool {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         t,
@@ -379,7 +379,7 @@ pub(super) fn marker_at_cursor_a_available(state: &mut AppState, t: &Tokens) -> 
 pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         t,
@@ -438,13 +438,13 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     let t = Tokens::get(ui.ctx());
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &t,
     );
     if models.is_empty() {
-        let hint = if state.simulation.active_run().is_none() {
+        let hint = if state.model.simulation.active_run().is_none() {
             let shortcut = state.ui.preferences.shortcuts().resolved_label(
                 &crate::workbench::commands::vocabulary::CommandRegistry,
                 crate::workbench::commands::vocabulary::Command::RunSimulation.key(),
@@ -564,7 +564,7 @@ pub(crate) fn active_shared_x_status(
         .as_ref()
         .map(|key| key.analysis);
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         tokens,
@@ -609,7 +609,7 @@ fn active_pane_analysis(tokens: &Tokens, state: &mut AppState) -> Option<String>
     let key = state.ui.results.session.active_wave_pane.clone()?;
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         tokens,
@@ -618,6 +618,7 @@ fn active_pane_analysis(tokens: &Tokens, state: &mut AppState) -> Option<String>
         .iter()
         .find(|model| model.analysis_key == key.analysis)?;
     state
+        .model
         .simulation
         .active_run()
         .and_then(|run| run.analyses.get(model.analysis_index))
@@ -639,7 +640,7 @@ fn active_pane_extents(
     };
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         tokens,
@@ -705,7 +706,7 @@ pub(crate) fn set_active_pane_axis_range(
     };
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         tokens,
@@ -746,7 +747,7 @@ fn active_pane_x_unit(tokens: &Tokens, state: &mut AppState) -> Option<String> {
     let key = state.ui.results.session.active_wave_pane.clone()?;
     let presentation = state.ui.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         tokens,

@@ -615,6 +615,7 @@ pub(super) fn commit(app: &mut RSpiceApp, instance: AnalysisInstanceId, edits: &
             OptionEdit::Clear(option) => {
                 let cleared = app
                     .state
+                    .model
                     .sim_setup
                     .stable_analysis_plan()
                     .ok()

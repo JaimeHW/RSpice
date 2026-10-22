@@ -55,6 +55,7 @@ fn fixture() -> Fixture {
     let mut cell = Cell::new(&spare.cell);
     cell.add_view(View::new(&spare.view, ViewType::Schematic));
     state
+        .model
         .library_manager
         .edit_library(USER_LIBRARY)
         .expect("the project library")
@@ -66,10 +67,11 @@ fn fixture() -> Fixture {
     let mut library = Library::new(&borrowed.library);
     library.read_only = true;
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     state.open_workspace_view(reference.amp_schematic.clone());
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(4000, 4000));
     Fixture {
@@ -211,7 +213,7 @@ const SOURCE_LOOP: &str = "DRC-SOURCE-TO-SOURCE";
 /// the global that only a walk of the whole design can see: `amp` alone
 /// holds one source, and one source closes nothing.
 pub(in crate::workbench) fn draw_supply_source(state: &mut AppState) {
-    let schematic = &mut state.schematic;
+    let schematic = &mut state.model.schematic;
     let id = schematic.add_component(ComponentType::VoltageSource, Point::new(3000, 3000));
     let terminals = schematic
         .document()
@@ -294,7 +296,7 @@ const GROUND_NOT_ZERO: &str = "DRC-GROUND-NOT-NODE-ZERO";
 /// `gnd` at the same point: the name that claimed the net first keeps it, so
 /// the deck writes `vx` where the drawing says ground.
 fn draw_lost_ground_label(state: &mut AppState) {
-    let schematic = &mut state.schematic;
+    let schematic = &mut state.model.schematic;
     let id = schematic.add_component(ComponentType::Resistor, Point::new(3000, 3600));
     let leg = schematic
         .document()
@@ -390,7 +392,7 @@ fn a_deck_cannot_make_an_unused_cellview_block_a_run() {
     let shipped = errors(&mut fixture());
 
     let mut promoted = fixture();
-    promoted.state.workspace.content.design_rules = serde_json::from_str(
+    promoted.state.model.workspace.content.design_rules = serde_json::from_str(
         r#"{"schema_version":1,"severities":{"DRC-UNUSED-CELLVIEW":"Error"}}"#,
     )
     .expect("a stored deck always reads");
@@ -493,12 +495,14 @@ fn an_edit_settling_as_its_view_is_left_is_checked_without_a_warning() {
     };
     let stated = |state: &AppState| {
         state
+            .model
             .diagnostics
             .batch(&live)
             .map_or(0, |batch| batch.records.len())
     };
     let before = stated(&state);
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(4000, 4000));
     assert!(
@@ -514,6 +518,7 @@ fn an_edit_settling_as_its_view_is_left_is_checked_without_a_warning() {
     );
     assert!(
         !state
+            .model
             .log_buffer
             .entries()
             .any(|entry| entry.message.starts_with("Live checks could not run")),

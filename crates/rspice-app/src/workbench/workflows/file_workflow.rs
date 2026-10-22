@@ -131,20 +131,22 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
     // new active buffer, then mirror the derived pitch back into the session.
     schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
-    state.schematic = schematic;
-    state.ui.schematic_snap = state.schematic.session.editor.snap_engine.clone();
+    state.model.schematic = schematic;
+    state.ui.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
-    match state.workspace.content.active_view_type() {
+    match state.model.workspace.content.active_view_type() {
         ViewType::Schematic | ViewType::Testbench => {
             state.sync_active_schematic_to_workspace();
         }
         _ => {
-            let reference = state.workspace.content.active_schematic_reference();
-            let dirty = state.schematic.session.is_dirty;
+            let reference = state.model.workspace.content.active_schematic_reference();
+            let dirty = state.model.schematic.session.is_dirty;
             state
+                .model
                 .workspace
-                .insert_schematic_editor(reference.key(), state.schematic.clone());
+                .insert_schematic_editor(reference.key(), state.model.schematic.clone());
             if let Some(open_view) = state
+                .model
                 .workspace
                 .content
                 .open_views
@@ -272,8 +274,8 @@ pub(crate) fn import_loaded_schematic_as_cell_view(
 ) -> Result<crate::state::CellViewRef, String> {
     use crate::state::{Cell, CellViewRef, ProjectLibraryMutation, View};
 
-    let library = state.workspace.content.active_view.library.clone();
-    let Some(existing) = state.library_manager.get_library(&library) else {
+    let library = state.model.workspace.content.active_view.library.clone();
+    let Some(existing) = state.model.library_manager.get_library(&library) else {
         return Err(format!("library `{library}` is not in this project"));
     };
     if existing.read_only {
@@ -282,7 +284,7 @@ pub(crate) fn import_loaded_schematic_as_cell_view(
     let name = unique_cell_name(existing, &cell_name_from_file(origin.file_stem()));
     let mut cell = Cell::new(&name);
     cell.add_view(View::new("schematic", ViewType::Schematic));
-    let mut candidate_libraries = state.library_manager.clone();
+    let mut candidate_libraries = state.model.library_manager.clone();
     let Some(mut candidate_library) = candidate_libraries.edit_library(&library) else {
         return Err(format!("library `{library}` is not in this project"));
     };
@@ -297,9 +299,10 @@ pub(crate) fn import_loaded_schematic_as_cell_view(
     schematic.session.is_dirty = true;
     schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
-    state.library_manager = candidate_libraries;
+    state.model.library_manager = candidate_libraries;
     let reference = CellViewRef::new(&library, &name, "schematic");
     state
+        .model
         .workspace
         .insert_schematic_editor(reference.key(), schematic);
     state.publish_project_library_mutation(mutation);
@@ -410,6 +413,7 @@ fn file_name_string(path: &Path) -> Option<String> {
 
 fn schematic_save_dialog_default_name(state: &AppState) -> Option<String> {
     state
+        .model
         .schematic
         .session
         .current_file
@@ -517,15 +521,15 @@ pub(crate) fn save_schematic_to_path_with_io(
         .ui
         .preferences
         .toggle(crate::workbench::TogglePreference::KeepSaveBackup);
-    match io.save_schematic(&state.schematic, path, keep_backup) {
+    match io.save_schematic(&state.model.schematic, path, keep_backup) {
         Ok(()) => {
             let saved_path_is_reopenable = io.saved_paths_are_reopenable();
             if saved_path_is_reopenable && update_current_file {
-                state.schematic.session.current_file = Some(path.to_path_buf());
+                state.model.schematic.session.current_file = Some(path.to_path_buf());
             }
             if saved_path_is_reopenable {
                 state.browser_schematic_save_name = None;
-                state.schematic.session.is_dirty = false;
+                state.model.schematic.session.is_dirty = false;
                 // Retire only the checkpoint whose writer lease and committed
                 // identity prove this process owns these exact bytes. Foreign,
                 // legacy, or replaced recovery evidence is retained.
@@ -582,7 +586,7 @@ pub(crate) fn save_schematic_with_io(
     state: &mut AppState,
     io: &(impl FileWorkflowIo + ?Sized),
 ) -> bool {
-    if let Some(path) = state.schematic.session.current_file.clone() {
+    if let Some(path) = state.model.schematic.session.current_file.clone() {
         save_schematic_to_path_with_io(state, &path, false, io)
     } else {
         save_schematic_as_with_io(state, io)
@@ -688,18 +692,30 @@ mod tests {
 
         let expected = crate::state::SchematicGridPitch::Metric.canvas_grid_size();
         assert_eq!(
-            state.schematic.document().document_policy.grid_pitch,
+            state.model.schematic.document().document_policy.grid_pitch,
             crate::state::SchematicGridPitch::Metric
         );
-        assert_eq!(state.schematic.document().grid_size, expected);
+        assert_eq!(state.model.schematic.document().grid_size, expected);
         assert_eq!(
-            state.schematic.session.editor.snap_engine.grid_size,
+            state.model.schematic.session.editor.snap_engine.grid_size,
             expected
         );
-        assert_eq!(state.schematic.session.editor.snap_engine.snap_radius, 8);
-        assert!(!state.schematic.session.editor.snap_engine.snap_to_grid);
+        assert_eq!(
+            state.model.schematic.session.editor.snap_engine.snap_radius,
+            8
+        );
         assert!(
             !state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_grid
+        );
+        assert!(
+            !state
+                .model
                 .schematic
                 .session
                 .editor
@@ -708,15 +724,15 @@ mod tests {
         );
         assert_eq!(
             state.ui.schematic_snap,
-            state.schematic.session.editor.snap_engine
+            state.model.schematic.session.editor.snap_engine
         );
     }
 
     #[test]
     fn browser_import_applies_schematic_clears_runs_and_skips_recents() {
         let mut state = no_project_state();
-        state.simulation.start_run();
-        assert!(state.simulation.retained.has_results());
+        state.model.simulation.start_run();
+        assert!(state.model.simulation.retained.has_results());
 
         let schematic = SchematicState::default();
 
@@ -727,10 +743,10 @@ mod tests {
         );
 
         assert!(imported);
-        assert!(state.schematic.session.current_file.is_none());
-        assert!(!state.simulation.retained.has_results());
+        assert!(state.model.schematic.session.current_file.is_none());
+        assert!(!state.model.simulation.retained.has_results());
         assert!(state.recent_files.is_empty());
-        assert!(state.log_buffer.entries().any(|entry| {
+        assert!(state.model.log_buffer.entries().any(|entry| {
             entry
                 .message
                 .contains("Imported schematic browser-filter.rsch.")
@@ -750,7 +766,7 @@ mod tests {
         );
 
         assert!(imported);
-        assert!(state.schematic.session.current_file.is_none());
+        assert!(state.model.schematic.session.current_file.is_none());
         assert_eq!(
             state.browser_schematic_save_name.as_deref(),
             Some("browser-filter.rsch")
@@ -781,7 +797,7 @@ mod tests {
             defaults.borrow().as_slice(),
             &[Some("browser-filter.rsch".to_string())]
         );
-        assert!(state.schematic.session.current_file.is_none());
+        assert!(state.model.schematic.session.current_file.is_none());
         assert_eq!(
             state.browser_schematic_save_name.as_deref(),
             Some("browser-save.rsch")
@@ -790,14 +806,15 @@ mod tests {
     }
 
     fn seed_stale_design_execution_context(state: &mut AppState) {
-        state.workspace.content.netlist_source = Some("old manual deck\n.end\n".to_owned());
-        state.simulation.source.netlist_content = "old generated deck\n.end\n".to_owned();
+        state.model.workspace.content.netlist_source = Some("old manual deck\n.end\n".to_owned());
+        state.model.simulation.source.netlist_content = "old generated deck\n.end\n".to_owned();
         state
+            .model
             .simulation
             .retained
             .runs
             .push(crate::state::SimulationRun::new(1));
-        state.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_run_idx = Some(0);
         state.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
         state.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
         state.manual_run.pending_manual_run_id = Some(1);
@@ -807,9 +824,9 @@ mod tests {
     }
 
     fn assert_design_execution_context_cleared(state: &AppState) {
-        assert!(state.workspace.content.netlist_source.is_none());
-        assert!(state.simulation.source.netlist_content.is_empty());
-        assert!(!state.simulation.retained.has_results());
+        assert!(state.model.workspace.content.netlist_source.is_none());
+        assert!(state.model.simulation.source.netlist_content.is_empty());
+        assert!(!state.model.simulation.retained.has_results());
         assert!(state.manual_run.last_run_buffer.is_none());
         assert!(state.manual_run.pending_run_buffer.is_none());
         assert!(state.manual_run.pending_manual_run_id.is_none());
@@ -819,13 +836,14 @@ mod tests {
     }
 
     fn open_default_symbol_view(state: &mut AppState) -> CellViewRef {
-        let schematic_reference = state.workspace.content.active_schematic_reference();
+        let schematic_reference = state.model.workspace.content.active_schematic_reference();
         let symbol_reference = CellViewRef::new(
             &schematic_reference.library,
             &schematic_reference.cell,
             "symbol",
         );
         let library = state
+            .model
             .library_manager
             .get_library_mut(&symbol_reference.library)
             .expect("default project library exists");
@@ -836,7 +854,10 @@ mod tests {
             cell.add_view(View::new("symbol", ViewType::Symbol));
         }
         state.open_workspace_view(symbol_reference);
-        assert_eq!(state.workspace.content.active_view_type(), ViewType::Symbol);
+        assert_eq!(
+            state.model.workspace.content.active_view_type(),
+            ViewType::Symbol
+        );
         schematic_reference
     }
 
@@ -844,8 +865,9 @@ mod tests {
         let mut stale = SchematicState::default();
         stale.session.current_file = Some(PathBuf::from("stale-symbol-context.rsch"));
         stale.session.is_dirty = true;
-        state.schematic = stale.clone();
+        state.model.schematic = stale.clone();
         state
+            .model
             .workspace
             .insert_schematic_editor(reference.key(), stale);
     }
@@ -864,22 +886,24 @@ mod tests {
     fn create_new_schematic_from_symbol_view_replaces_paired_schematic_buffer() {
         let mut state = AppState::default();
         let schematic_reference = open_default_symbol_view(&mut state);
-        let symbol_key = state.workspace.content.active_key();
+        let symbol_key = state.model.workspace.content.active_key();
         install_stale_paired_schematic(&mut state, &schematic_reference);
 
         create_new_schematic(&mut state);
 
         let buffer = state
+            .model
             .workspace
             .session
             .schematic_sessions
             .get(&schematic_reference.key())
             .expect("paired schematic buffer exists");
-        assert!(state.schematic.session.current_file.is_none());
+        assert!(state.model.schematic.session.current_file.is_none());
         assert!(buffer.current_file.is_none());
         assert!(!buffer.is_dirty);
         assert!(
             !state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -904,7 +928,7 @@ mod tests {
         assert!(loaded);
         assert_design_execution_context_cleared(&state);
         assert_eq!(
-            state.schematic.session.current_file.as_deref(),
+            state.model.schematic.session.current_file.as_deref(),
             Some(Path::new("fresh.rsch"))
         );
     }
@@ -917,8 +941,9 @@ mod tests {
 
         let mut state = AppState::default();
         state.open_project_session();
-        let active = state.workspace.content.active_view.clone();
+        let active = state.model.workspace.content.active_view.clone();
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::origin());
         state.sync_active_schematic_to_workspace();
@@ -933,10 +958,11 @@ mod tests {
             SchematicLoadOrigin::PersistentPath(path),
         ));
         let imported = CellViewRef::new(&active.library, "RC_low_pass", "schematic");
-        assert_eq!(state.workspace.content.active_view, imported);
-        assert_eq!(state.schematic.document().components.len(), 2);
-        assert_eq!(state.schematic.session.current_file, None);
+        assert_eq!(state.model.workspace.content.active_view, imported);
+        assert_eq!(state.model.schematic.document().components.len(), 2);
+        assert_eq!(state.model.schematic.session.current_file, None);
         let original = state
+            .model
             .workspace
             .clone_schematic_editor(&active.key())
             .expect("the open cell view keeps its buffer");
@@ -951,14 +977,17 @@ mod tests {
             file,
             SchematicLoadOrigin::PersistentPath(path),
         ));
-        assert_eq!(state.workspace.content.active_view.cell, "RC_low_pass_2");
+        assert_eq!(
+            state.model.workspace.content.active_view.cell,
+            "RC_low_pass_2"
+        );
     }
 
     #[test]
     fn load_schematic_from_symbol_view_replaces_paired_schematic_buffer() {
         let mut state = no_project_state();
         let schematic_reference = open_default_symbol_view(&mut state);
-        let symbol_key = state.workspace.content.active_key();
+        let symbol_key = state.model.workspace.content.active_key();
         install_stale_paired_schematic(&mut state, &schematic_reference);
 
         let mut schematic = SchematicState::default();
@@ -971,10 +1000,11 @@ mod tests {
 
         assert!(loaded);
         assert_eq!(
-            state.schematic.session.current_file.as_deref(),
+            state.model.schematic.session.current_file.as_deref(),
             Some(Path::new("fresh-symbol-context.rsch"))
         );
         let buffer = state
+            .model
             .workspace
             .session
             .schematic_sessions
@@ -986,6 +1016,7 @@ mod tests {
         );
         assert!(
             !state
+                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -997,7 +1028,7 @@ mod tests {
     #[test]
     fn download_only_schematic_save_keeps_document_dirty_without_recent_entry() {
         let mut state = AppState::default();
-        state.schematic.session.is_dirty = true;
+        state.model.schematic.session.is_dirty = true;
 
         let io = TestFileWorkflowIo {
             saved_paths_are_reopenable: false,
@@ -1007,13 +1038,13 @@ mod tests {
             save_schematic_to_path_with_io(&mut state, Path::new("browser-save.rsch"), true, &io);
 
         assert!(saved);
-        assert!(state.schematic.session.current_file.is_none());
+        assert!(state.model.schematic.session.current_file.is_none());
         assert_eq!(
             state.browser_schematic_save_name.as_deref(),
             Some("browser-save.rsch")
         );
-        assert!(state.schematic.session.is_dirty);
-        assert!(state.workspace.any_dirty());
+        assert!(state.model.schematic.session.is_dirty);
+        assert!(state.model.workspace.any_dirty());
         assert!(state.recent_files.is_empty());
     }
 

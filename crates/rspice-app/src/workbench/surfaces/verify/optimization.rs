@@ -181,7 +181,7 @@ pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.simulation, index);
+        select_verification_run(&mut app.state.model.simulation, index);
     }
     action_problem_line(ui, app);
 

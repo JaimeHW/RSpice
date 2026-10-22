@@ -13,9 +13,10 @@ use crate::workbench::app::RSpiceApp;
 fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .add_component(ComponentType::VoltageSource, Point::origin());
-    let expected = app.state.schematic.document().components[0].clone();
+    let expected = app.state.model.schematic.document().components[0].clone();
     let source = SavedOutput::new(
         SavedOutputKind::RawVoltageOrCurrent,
         "current",
@@ -26,8 +27,15 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
         SavedOutputStreaming::StoreOnly,
     )
     .unwrap();
-    let plan = app.state.sim_setup.stable_analysis_plan().unwrap().id();
+    let plan = app
+        .state
+        .model
+        .sim_setup
+        .stable_analysis_plan()
+        .unwrap()
+        .id();
     app.state
+        .model
         .workspace
         .content
         .add_saved_output(plan, source.clone())
@@ -36,13 +44,20 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
         SchematicProbe::new(100, Point::new(80, 20), "I(V1)", Some("I(V1)".to_owned())).unwrap();
     probe.bind_saved_output(plan, source.id);
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .probes
         .push(probe);
-    let root = app.state.workspace.content.active_schematic_reference();
+    let root = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference();
     let id = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -59,8 +74,8 @@ fn fixture() -> (RSpiceApp, Component, ConfigurationSetId, SimulationPlanId) {
             model_profile: ConfigurationModelProfile::ProjectRunSetSections,
         })
         .unwrap();
-    app.state.schematic.session.is_dirty = false;
-    app.state.workspace.content.project_metadata_dirty = false;
+    app.state.model.schematic.session.is_dirty = false;
+    app.state.model.workspace.content.project_metadata_dirty = false;
     (app, expected, id, plan)
 }
 
@@ -70,9 +85,13 @@ fn assert_reference(
     plan: SimulationPlanId,
     name: &str,
 ) {
-    assert_eq!(app.state.schematic.document().components[0].name, name);
+    assert_eq!(
+        app.state.model.schematic.document().components[0].name,
+        name
+    );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -83,6 +102,7 @@ fn assert_reference(
     );
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan)
@@ -92,7 +112,7 @@ fn assert_reference(
         format!("I({name})")
     );
     assert_eq!(
-        app.state.schematic.document().probes[0]
+        app.state.model.schematic.document().probes[0]
             .source_expression
             .as_deref(),
         Some(format!("I({name})").as_str())
@@ -103,6 +123,7 @@ fn assert_reference(
 fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     let (mut app, expected, configuration, plan) = fixture();
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -110,6 +131,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
         .select_only_component(expected.id);
     let output_id = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan)
@@ -124,6 +146,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     assert_reference(&app, configuration, plan, "V9");
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -133,12 +156,13 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     );
     app.action_edit_undo();
     assert_reference(&app, configuration, plan, "V1");
-    assert!(!app.state.schematic.can_undo());
+    assert!(!app.state.model.schematic.can_undo());
     assert!(app.state.project_undo_sequence().is_none());
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .configuration_sets
@@ -149,6 +173,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     );
     let output = &app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan)
@@ -157,7 +182,7 @@ fn rename_undo_redo_carries_live_bindings_and_advances_revisions() {
     assert_eq!(output.id, output_id);
     assert_eq!(output.revision, ObjectRevision::new(4).unwrap());
     assert_eq!(
-        app.state.schematic.document().probes[0].saved_output_id,
+        app.state.model.schematic.document().probes[0].saved_output_id,
         Some(output_id)
     );
 }
@@ -175,13 +200,15 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
         match refusal {
             "configuration revision" => {
                 let mut json =
-                    serde_json::to_value(&app.state.workspace.content.configuration_sets).unwrap();
+                    serde_json::to_value(&app.state.model.workspace.content.configuration_sets)
+                        .unwrap();
                 json["configurations"][0]["revision"] = serde_json::json!(u64::MAX);
-                app.state.workspace.content.configuration_sets =
+                app.state.model.workspace.content.configuration_sets =
                     serde_json::from_value(json).unwrap();
             }
             "output revision" => {
                 app.state
+                    .model
                     .workspace
                     .content
                     .plan_data_mut(plan)
@@ -189,16 +216,19 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
                     .saved_outputs[0]
                     .revision = ObjectRevision::new(u64::MAX).unwrap()
             }
-            "read only" => app.state.schematic.session.read_only = true,
+            "read only" => app.state.model.schematic.session.read_only = true,
             "stale target" => {
-                app.state.schematic.document_mut_for_test().components[0].value = "8".to_owned()
+                app.state.model.schematic.document_mut_for_test().components[0].value =
+                    "8".to_owned()
             }
             "duplicate" => {
                 let id = app
                     .state
+                    .model
                     .schematic
                     .add_component(ComponentType::VoltageSource, Point::new(100, 0));
                 app.state
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .components
@@ -209,11 +239,17 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             }
             _ => unreachable!(),
         }
-        let before = SchematicSnapshot::capture(app.state.schematic.document());
-        let catalog = app.state.workspace.content.configuration_sets.clone();
-        let payloads = app.state.workspace.content.simulation_plan_payloads.clone();
-        let dirty = app.state.schematic.session.is_dirty;
-        let epoch = app.state.design_execution_epoch;
+        let before = SchematicSnapshot::capture(app.state.model.schematic.document());
+        let catalog = app.state.model.workspace.content.configuration_sets.clone();
+        let payloads = app
+            .state
+            .model
+            .workspace
+            .content
+            .simulation_plan_payloads
+            .clone();
+        let dirty = app.state.model.schematic.session.is_dirty;
+        let epoch = app.state.model.design_execution_epoch;
         let mut candidate = expected.clone();
         candidate.name = "V9".to_owned();
         candidate.value = "12".to_owned();
@@ -225,20 +261,24 @@ fn preparation_failure_never_publishes_any_owner_or_history() {
             "{refusal}"
         );
         assert!(
-            before.is_equal_document(app.state.schematic.document()),
+            before.is_equal_document(app.state.model.schematic.document()),
             "{refusal}"
         );
-        assert_eq!(catalog, app.state.workspace.content.configuration_sets);
+        assert_eq!(
+            catalog,
+            app.state.model.workspace.content.configuration_sets
+        );
         assert_eq!(
             payloads,
-            app.state.workspace.content.simulation_plan_payloads
+            app.state.model.workspace.content.simulation_plan_payloads
         );
-        assert_eq!(dirty, app.state.schematic.session.is_dirty);
-        assert!(!app.state.workspace.content.project_metadata_dirty);
-        assert_eq!(epoch, app.state.design_execution_epoch);
+        assert_eq!(dirty, app.state.model.schematic.session.is_dirty);
+        assert!(!app.state.model.workspace.content.project_metadata_dirty);
+        assert_eq!(epoch, app.state.model.design_execution_epoch);
         assert!(app.state.project_undo_sequence().is_none());
         assert_eq!(
             app.state
+                .model
                 .workspace
                 .content
                 .configuration_sets
@@ -256,7 +296,13 @@ fn undo_preserves_unrelated_outputs_and_current_output_metadata() {
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
-    let payload = app.state.workspace.content.plan_data_mut(plan).unwrap();
+    let payload = app
+        .state
+        .model
+        .workspace
+        .content
+        .plan_data_mut(plan)
+        .unwrap();
     payload.saved_outputs[0].name = "reviewed current".to_owned();
     payload.saved_outputs[0].revision = payload.saved_outputs[0].revision.next().unwrap();
     let mut unrelated = payload.saved_outputs[0].clone();
@@ -266,7 +312,7 @@ fn undo_preserves_unrelated_outputs_and_current_output_metadata() {
     payload.saved_outputs.push(unrelated.clone());
     app.action_edit_undo();
     assert_reference(&app, configuration, plan, "V1");
-    let payload = app.state.workspace.content.plan_data(plan).unwrap();
+    let payload = app.state.model.workspace.content.plan_data(plan).unwrap();
     assert_eq!(payload.saved_outputs[0].name, "reviewed current");
     assert_eq!(
         payload.saved_outputs[0].revision,
@@ -284,6 +330,7 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
     let sequence = app.state.project_undo_sequence();
     let revision = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan)
@@ -291,6 +338,7 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
         .saved_outputs[0]
         .revision;
     app.state
+        .model
         .workspace
         .content
         .plan_data_mut(plan)
@@ -301,6 +349,7 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(sequence, app.state.project_undo_sequence());
     app.state
+        .model
         .workspace
         .content
         .plan_data_mut(plan)
@@ -314,28 +363,32 @@ fn history_refusal_keeps_the_transaction_available_for_retry() {
 #[test]
 fn undo_does_not_cross_a_blocked_rename_into_older_local_history() {
     let (mut app, expected, _, plan) = fixture();
-    app.state.schematic.with_undo("change value", |schematic| {
-        schematic.document_mut_for_test().components[0].value = "2".to_owned();
-    });
+    app.state
+        .model
+        .schematic
+        .with_undo("change value", |schematic| {
+            schematic.document_mut_for_test().components[0].value = "2".to_owned();
+        });
     let mut expected = expected;
     expected.value = "2".to_owned();
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     app.state
+        .model
         .workspace
         .content
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
         .source_expression = "I(V_other)".to_owned();
-    let snapshot = SchematicSnapshot::capture(app.state.schematic.document());
+    let snapshot = SchematicSnapshot::capture(app.state.model.schematic.document());
     let sequence = app.state.project_undo_sequence();
     app.action_edit_undo();
-    assert!(snapshot.is_equal_document(app.state.schematic.document()));
+    assert!(snapshot.is_equal_document(app.state.model.schematic.document()));
     assert_eq!(sequence, app.state.project_undo_sequence());
     assert!(
-        app.state.schematic.can_undo(),
+        app.state.model.schematic.can_undo(),
         "the older value edit was not consumed"
     );
 }
@@ -346,13 +399,16 @@ fn local_edit_and_project_rename_follow_one_global_history_order() {
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
-    app.state.schematic.with_undo("change value", |schematic| {
-        schematic.document_mut_for_test().components[0].value = "2".to_owned();
-    });
+    app.state
+        .model
+        .schematic
+        .with_undo("change value", |schematic| {
+            schematic.document_mut_for_test().components[0].value = "2".to_owned();
+        });
     app.action_edit_undo();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
-        app.state.schematic.document().components[0].value,
+        app.state.model.schematic.document().components[0].value,
         expected.value
     );
     app.action_edit_undo();
@@ -360,26 +416,32 @@ fn local_edit_and_project_rename_follow_one_global_history_order() {
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
     app.action_edit_redo();
-    assert_eq!(app.state.schematic.document().components[0].value, "2");
+    assert_eq!(
+        app.state.model.schematic.document().components[0].value,
+        "2"
+    );
     assert_reference(&app, configuration, plan, "V9");
 }
 
 #[test]
 fn rename_starts_a_new_history_branch_without_stale_local_redo() {
     let (mut app, expected, configuration, plan) = fixture();
-    app.state.schematic.with_undo("change value", |schematic| {
-        schematic.document_mut_for_test().components[0].value = "2".to_owned();
-    });
+    app.state
+        .model
+        .schematic
+        .with_undo("change value", |schematic| {
+            schematic.document_mut_for_test().components[0].value = "2".to_owned();
+        });
     app.action_edit_undo();
-    assert!(app.state.schematic.can_redo());
+    assert!(app.state.model.schematic.can_redo());
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
-    assert!(!app.state.schematic.can_redo());
+    assert!(!app.state.model.schematic.can_redo());
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
-        app.state.schematic.document().components[0].value,
+        app.state.model.schematic.document().components[0].value,
         expected.value
     );
 }
@@ -387,37 +449,44 @@ fn rename_starts_a_new_history_branch_without_stale_local_redo() {
 #[test]
 fn switching_documents_does_not_redirect_rename_history() {
     let (mut app, expected, configuration, plan) = fixture();
-    let owner = app.state.workspace.content.active_schematic_reference();
+    let owner = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference();
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     let other = CellViewRef::new("work", "other", "schematic");
     app.state
+        .model
         .workspace
         .activate_view(other.clone(), crate::state::ViewType::Schematic);
-    app.state.schematic = SchematicState::default();
+    app.state.model.schematic = SchematicState::default();
     app.state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(50, 50));
-    let other_snapshot = SchematicSnapshot::capture(app.state.schematic.document());
+    let other_snapshot = SchematicSnapshot::capture(app.state.model.schematic.document());
     app.action_edit_undo();
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         owner
     );
     assert_reference(&app, configuration, plan, "V1");
-    assert!(
-        other_snapshot.is_equal_document(
-            app.state.workspace.content.schematic_buffers[&other.key()].document()
-        )
-    );
+    assert!(other_snapshot.is_equal_document(
+        app.state.model.workspace.content.schematic_buffers[&other.key()].document()
+    ));
     app.action_edit_redo();
     assert_reference(&app, configuration, plan, "V9");
-    assert!(
-        other_snapshot.is_equal_document(
-            app.state.workspace.content.schematic_buffers[&other.key()].document()
-        )
-    );
+    assert!(other_snapshot.is_equal_document(
+        app.state.model.workspace.content.schematic_buffers[&other.key()].document()
+    ));
 }
 
 #[test]
@@ -428,6 +497,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
     // This test's voltage source is a primitive, not a hierarchical DUT.
     let mut definition = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -437,6 +507,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         .clone();
     definition.dut_path = "/".to_owned();
     app.state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -444,6 +515,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         .unwrap();
     let mut source = app
         .state
+        .model
         .workspace
         .content
         .plan_data(first_plan)
@@ -451,8 +523,14 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
         .saved_outputs[0]
         .clone();
     source.id = SavedOutputId::new();
-    let second_plan = app.state.sim_setup.create_plan("Second plan").unwrap();
+    let second_plan = app
+        .state
+        .model
+        .sim_setup
+        .create_plan("Second plan")
+        .unwrap();
     app.state
+        .model
         .workspace
         .content
         .add_saved_output(second_plan, source)
@@ -460,7 +538,7 @@ fn active_and_inactive_plan_references_survive_native_save_and_reopen() {
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
-    app.state.sim_setup.activate_plan(first_plan).unwrap();
+    app.state.model.sim_setup.activate_plan(first_plan).unwrap();
     let path = std::env::temp_dir().join(format!(
         "rspice-component-rename-{}.rspiceproj",
         uuid::Uuid::new_v4()
@@ -509,6 +587,7 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
     let (mut app, expected, configuration, plan) = fixture();
     let mut unrelated = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -520,6 +599,7 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
     unrelated.root.cell = "other".to_owned();
     let id = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -527,6 +607,7 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
         .unwrap();
     let original = app
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -538,12 +619,22 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
         .unwrap();
     assert_reference(&app, configuration, plan, "V9");
     assert_eq!(
-        app.state.workspace.content.configuration_sets.find(id),
+        app.state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .find(id),
         Some(&original)
     );
     app.action_edit_undo();
     assert_eq!(
-        app.state.workspace.content.configuration_sets.find(id),
+        app.state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .find(id),
         Some(&original)
     );
 }
@@ -552,22 +643,24 @@ fn a_same_spelled_instance_in_another_configuration_root_is_unchanged() {
 fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
     let (mut app, mut expected, _, plan) = fixture();
     expected.name = "bias".to_owned();
-    app.state.schematic.document_mut_for_test().components[0] = expected.clone();
+    app.state.model.schematic.document_mut_for_test().components[0] = expected.clone();
     app.state
+        .model
         .workspace
         .content
         .plan_data_mut(plan)
         .unwrap()
         .saved_outputs[0]
         .source_expression = "I(Vbias)".to_owned();
-    app.state.schematic.document_mut_for_test().probes[0].source_expression =
+    app.state.model.schematic.document_mut_for_test().probes[0].source_expression =
         Some("I(Vbias)".to_owned());
-    app.state.schematic.document_mut_for_test().probes[0].reference = "I(Vbias)".to_owned();
+    app.state.model.schematic.document_mut_for_test().probes[0].reference = "I(Vbias)".to_owned();
     app.state
         .rename_component_transaction(&expected, "V9".to_owned())
         .unwrap();
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan)
@@ -576,10 +669,14 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
             .source_expression,
         "I(V9)"
     );
-    assert_eq!(app.state.schematic.document().probes[0].reference, "I(V9)");
+    assert_eq!(
+        app.state.model.schematic.document().probes[0].reference,
+        "I(V9)"
+    );
     app.action_edit_undo();
     assert_eq!(
         app.state
+            .model
             .workspace
             .content
             .plan_data(plan)
@@ -588,7 +685,10 @@ fn imported_primitive_current_probes_follow_the_emitted_card_identity() {
             .source_expression,
         "I(Vbias)"
     );
-    assert_eq!(app.state.schematic.document().components[0].name, "bias");
+    assert_eq!(
+        app.state.model.schematic.document().components[0].name,
+        "bias"
+    );
 }
 
 #[test]
@@ -596,9 +696,11 @@ fn an_unchanged_name_preserves_authored_reference_spelling_and_history() {
     let (mut app, expected, _, _) = fixture();
     let id = app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Cccs, Point::new(100, 0));
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -606,15 +708,15 @@ fn an_unchanged_name_preserves_authored_reference_spelling_and_history() {
         .find(|component| component.id == id)
         .unwrap()
         .params = "vref=v1".to_owned();
-    let before = SchematicSnapshot::capture(app.state.schematic.document());
-    let epoch = app.state.design_execution_epoch;
+    let before = SchematicSnapshot::capture(app.state.model.schematic.document());
+    let epoch = app.state.model.design_execution_epoch;
     assert!(
         !app.state
             .rename_component_transaction(&expected, expected.name.clone())
             .unwrap()
     );
-    assert!(before.is_equal_document(app.state.schematic.document()));
-    assert_eq!(app.state.design_execution_epoch, epoch);
+    assert!(before.is_equal_document(app.state.model.schematic.document()));
+    assert_eq!(app.state.model.design_execution_epoch, epoch);
     assert!(app.state.project_undo_sequence().is_none());
-    assert!(!app.state.workspace.content.project_metadata_dirty);
+    assert!(!app.state.model.workspace.content.project_metadata_dirty);
 }

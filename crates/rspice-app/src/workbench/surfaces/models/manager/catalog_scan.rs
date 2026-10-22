@@ -24,7 +24,7 @@ pub(super) fn project_catalog_scan(
     let mut total = 0usize;
     let mut facets = [0usize; ProjectModelFacet::ALL.len()];
     let mut review_shown = 0usize;
-    for library in app.state.model_library_manager.libraries_sorted() {
+    for library in app.state.model.model_library_manager.libraries_sorted() {
         let pinned = model_is_pinned(library);
         let built_in = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
         let drifted = !drift::findings_for(app.state, &library.name).is_empty();

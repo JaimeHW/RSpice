@@ -143,7 +143,7 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.simulation, index);
+        select_verification_run(&mut app.state.model.simulation, index);
     }
     action_problem_line(ui, app);
 
@@ -194,6 +194,7 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
 pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Result<(), String> {
     let component_id = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -202,6 +203,7 @@ pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Re
         .map(|component| component.id)
         .ok_or_else(|| format!("{device_id} is not on the open schematic"))?;
     app.state
+        .model
         .schematic
         .session
         .editor

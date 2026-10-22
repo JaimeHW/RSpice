@@ -64,17 +64,22 @@ impl RSpiceApp {
             DialogChoice::Primary => {
                 if let Ok(pending) = validate_draft(&self.state) {
                     self.state
+                        .model
                         .schematic
                         .session
                         .editor
                         .pending_documentation_shape = Some(pending);
                     self.state
+                        .model
                         .schematic
                         .session
                         .editor
                         .documentation_shape_drawing
                         .clear();
-                    self.state.schematic.arm_tool(Tool::DocumentationShape);
+                    self.state
+                        .model
+                        .schematic
+                        .arm_tool(Tool::DocumentationShape);
                     self.state.dialogs.documentation_shape.close();
                 }
             }
@@ -94,28 +99,28 @@ fn validate_draft(state: &AppState) -> Result<PendingDocumentationShapePlacement
     let Some(source) = draft.source.as_ref() else {
         return Err("Reopen Draw documentation shape to capture the active schematic.".to_owned());
     };
-    if source.design_epoch != state.design_execution_epoch {
+    if source.design_epoch != state.model.design_execution_epoch {
         return Err(
             "The design document changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if source.document_epoch != state.active_schematic_epoch {
+    if source.document_epoch != state.model.active_schematic_epoch {
         return Err(
             "The active schematic buffer changed. Close and reopen Draw documentation shape."
                 .to_owned(),
         );
     }
-    if source.topology_version != state.schematic.topology_version() {
+    if source.topology_version != state.model.schematic.topology_version() {
         return Err(
             "The schematic topology changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if source.document.display_path() != state.workspace.content.active_view.display_path() {
+    if source.document.display_path() != state.model.workspace.content.active_view.display_path() {
         return Err(
             "The active cell/view changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if draft.expected_shapes != state.schematic.document().documentation_shapes {
+    if draft.expected_shapes != state.model.schematic.document().documentation_shapes {
         return Err(
             "The schematic graphics changed. Close and reopen Draw documentation shape.".to_owned(),
         );
@@ -143,7 +148,7 @@ mod tests {
         let mut state = AppState::default();
         assert!(validate_draft(&state).is_err());
         let master = crate::state::CellViewRef::new("work", "shape_child", "schematic");
-        state.workspace.descend_into(
+        state.model.workspace.descend_into(
             "X1".to_owned(),
             master.clone(),
             crate::state::ViewType::Schematic,
@@ -157,15 +162,24 @@ mod tests {
             panic!("current dialog must arm the tool");
         };
         assert_eq!(pending.source.as_ref(), Some(&source));
-        state.workspace.ascend_one().unwrap();
-        state
-            .workspace
-            .descend_into("X2".to_owned(), master, crate::state::ViewType::Schematic);
+        state.model.workspace.ascend_one().unwrap();
+        state.model.workspace.descend_into(
+            "X2".to_owned(),
+            master,
+            crate::state::ViewType::Schematic,
+        );
         assert!(validate_draft(&state).is_err());
         assert_eq!(state.dialogs.documentation_shape.source, Some(source));
         state.dialogs.documentation_shape.close();
         assert!(state.dialogs.documentation_shape.source.is_none());
-        assert!(state.schematic.document().documentation_shapes.is_empty());
-        assert!(!state.schematic.can_undo());
+        assert!(
+            state
+                .model
+                .schematic
+                .document()
+                .documentation_shapes
+                .is_empty()
+        );
+        assert!(!state.model.schematic.can_undo());
     }
 }

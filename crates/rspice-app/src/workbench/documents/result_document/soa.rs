@@ -42,17 +42,18 @@ fn active_soa(
 
 /// The memoized retained-evidence verdict for whichever analysis is active.
 fn active_evidence_is_valid(state: &AppState) -> bool {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
     state
+        .model
         .simulation
         .active_analysis()
         .is_some_and(|analysis| super::analysis_evidence_is_valid(state, run.dataset_id, analysis))
 }
 
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
-    active_soa(&state.simulation, active_evidence_is_valid(state)).is_some()
+    active_soa(&state.model.simulation, active_evidence_is_valid(state)).is_some()
 }
 
 /// Every rule's scanned facts, built once per retained SOA analysis.
@@ -80,14 +81,14 @@ fn soa_plan(
 ) -> Option<std::sync::Arc<SoaPlan>> {
     // Eligibility and validation precede even a cache hit. Neither a stable
     // presentation key nor a numeric version proves the evidence is current.
-    let dataset_id = state.simulation.active_run()?.dataset_id;
+    let dataset_id = state.model.simulation.active_run()?.dataset_id;
     let (analysis, evaluations, _) =
-        active_soa(&state.simulation, active_evidence_is_valid(state))?;
+        active_soa(&state.model.simulation, active_evidence_is_valid(state))?;
     if AnalysisPresentationKey::new(dataset_id, analysis) != analysis_key {
         return None;
     }
-    let source = state.simulation.retained.runs.revision();
-    let version = state.simulation.view.data_version;
+    let source = state.model.simulation.retained.runs.revision();
+    let version = state.model.simulation.view.data_version;
     state.ui.results.session.cache.ensure_source(&source);
     if let Some(plan) = state.ui.results.plans.soa.as_ref()
         && plan.source == source
@@ -113,12 +114,18 @@ fn soa_plan(
 }
 
 pub fn show(ui: &mut Ui, state: &mut AppState) {
-    let Some(dataset_id) = state.simulation.active_run().map(|run| run.dataset_id) else {
+    let Some(dataset_id) = state
+        .model
+        .simulation
+        .active_run()
+        .map(|run| run.dataset_id)
+    else {
         well_hint(ui, "Select a dataset with SOA results");
         return;
     };
     let evidence_is_valid = active_evidence_is_valid(state);
     let Some(analysis_key) = state
+        .model
         .simulation
         .active_analysis()
         .map(|analysis| AnalysisPresentationKey::new(dataset_id, analysis))
@@ -133,7 +140,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let Some((analysis, evaluations, violation_count)) =
-        active_soa(&state.simulation, evidence_is_valid)
+        active_soa(&state.model.simulation, evidence_is_valid)
     else {
         well_hint(ui, "Select a validated safe-operating-area analysis");
         return;
@@ -160,9 +167,9 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         &mut state.ui.results.session.cache,
         |key, device| {
             soa_device_target(
-                &state.simulation,
-                &state.workspace,
-                &state.schematic,
+                &state.model.simulation,
+                &state.model.workspace,
+                &state.model.schematic,
                 key,
                 device,
             )
@@ -213,7 +220,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     // The plan has checked this active analysis and its complete evidence.
-    let Some(analysis) = state.simulation.active_analysis() else {
+    let Some(analysis) = state.model.simulation.active_analysis() else {
         return;
     };
     let Some(AnalysisResultPayload::Soa {
@@ -245,9 +252,9 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             facts,
             event_count,
             schematic_available: soa_device_target(
-                &state.simulation,
-                &state.workspace,
-                &state.schematic,
+                &state.model.simulation,
+                &state.model.workspace,
+                &state.model.schematic,
                 selection.analysis,
                 &evaluation.device_id,
             )
@@ -301,9 +308,9 @@ fn soa_device_target(
 
 fn apply_schematic_cross_probe(state: &mut AppState, selection: &SoaRuleSelection) {
     let Some((component_id, position)) = soa_device_target(
-        &state.simulation,
-        &state.workspace,
-        &state.schematic,
+        &state.model.simulation,
+        &state.model.workspace,
+        &state.model.schematic,
         selection.analysis,
         &selection.device_id,
     ) else {
@@ -314,12 +321,13 @@ fn apply_schematic_cross_probe(state: &mut AppState, selection: &SoaRuleSelectio
         return;
     };
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(component_id);
-    state.schematic.session.editor.center_request = Some(position);
+    state.model.schematic.session.editor.center_request = Some(position);
     state.ui.schematic_visibility.annotations =
         crate::state::SchematicAnnotationVisibility::ViolationsOnly;
     state
@@ -337,12 +345,12 @@ mod tests {
         let mut state = AppState::default();
         let mut run = crate::state::SimulationRun::new(1);
         run.add_analysis(analysis);
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         state
     }
     pub(super) fn active_key(state: &AppState) -> AnalysisPresentationKey {
-        let run = state.simulation.active_run().expect("retained run");
+        let run = state.model.simulation.active_run().expect("retained run");
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     }
 
@@ -361,9 +369,10 @@ mod tests {
         // Replace the stress history with one that never crosses the warning
         // band, so the interval the plan reports has to change.
         let flattened: Vec<f64> = vec![0.1; 32];
-        state.simulation.retained.runs[0].analyses[0].waveforms[0].y =
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
             std::sync::Arc::new(flattened);
-        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
+        state.model.simulation.view.data_version =
+            state.model.simulation.view.data_version.wrapping_add(1);
 
         let after = soa_plan(&mut state, key).expect("a validated SOA plan");
         assert_ne!(
@@ -390,16 +399,16 @@ mod tests {
     fn a_plan_is_never_keyed_to_an_analysis_it_did_not_read() {
         let mut state = soa_state(2, 32, 3.0);
         let mut donor = soa_state(1, 8, 3.0);
-        let second = donor.simulation.retained.runs[0].analyses.remove(0);
-        state.simulation.retained.runs[0].add_analysis(second);
+        let second = donor.model.simulation.retained.runs[0].analyses.remove(0);
+        state.model.simulation.retained.runs[0].add_analysis(second);
         assert_eq!(
-            state.simulation.view.active_analysis_idx,
+            state.model.simulation.view.active_analysis_idx,
             Some(0),
             "the first analysis stays active"
         );
 
         let inactive = {
-            let run = state.simulation.active_run().expect("retained run");
+            let run = state.model.simulation.active_run().expect("retained run");
             AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1])
         };
         assert_ne!(

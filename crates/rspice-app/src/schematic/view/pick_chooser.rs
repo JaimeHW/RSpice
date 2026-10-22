@@ -64,7 +64,7 @@ pub(super) fn candidates_at(
         symbol_context,
         ctx,
         viewport,
-        || state.workspace.content.active_view.display_path(),
+        || state.model.workspace.content.active_view.display_path(),
     )
 }
 
@@ -219,7 +219,7 @@ pub(super) fn open_chooser_at(
 ) {
     let query = ToolPointerView {
         design: super::schematic_design_view(state),
-        snap_engine: &state.schematic.session.editor.snap_engine,
+        snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: !state.schematic_edit_read_only(),
     }
     .selection_query(viewport, position);
@@ -262,7 +262,7 @@ pub(super) fn show_chooser(ctx: &Context, state: &mut AppState) {
     if let Some(target) = target {
         let request = EditorRequest {
             source: super::requests::editor_request_source(state),
-            selection: state.schematic.session.editor.selection.clone(),
+            selection: state.model.schematic.session.editor.selection.clone(),
             action: EditorAction::SelectPointer {
                 target: Some(target),
                 additive,
@@ -275,24 +275,25 @@ pub(super) fn show_chooser(ctx: &Context, state: &mut AppState) {
 
 /// The chooser's rows: each candidate's kind and identity.
 pub(super) fn chooser_rows(state: &AppState, candidates: &[PointerTarget]) -> Vec<ChooserRow> {
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     let nets = candidates
         .iter()
         .any(|target| matches!(target, PointerTarget::Wire(_)))
         .then(|| {
             state
+                .model
                 .workspace
                 .design_projection(
-                    &state.library_manager,
-                    &state.workspace.content.active_view,
-                    &state.schematic,
+                    &state.model.library_manager,
+                    &state.model.workspace.content.active_view,
+                    &state.model.schematic,
                 )
                 .ok()
                 .map(|projection| {
                     projection_nets(
-                        state.library_manager.catalog(),
+                        state.model.library_manager.catalog(),
                         &projection,
-                        &state.workspace.content.active_view.key(),
+                        &state.model.workspace.content.active_view.key(),
                     )
                 })
         })

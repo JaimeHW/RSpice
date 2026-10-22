@@ -45,15 +45,19 @@ pub(super) fn analysis_is_renderable(analysis: &crate::state::AnalysisResult) ->
 /// is why it is spelled through the structural gate and not through
 /// [`analysis_is_renderable`].
 pub(super) fn availability(state: &AppState) -> super::ViewerAvailability {
-    if state.simulation.active_run().is_some_and(|run| {
-        state.simulation.active_analysis().is_some_and(|analysis| {
-            super::analysis_answers_structural_gate(
-                state,
-                run.dataset_id,
-                analysis,
-                super::StructuralGate::SParameterStructure,
-            ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
-        })
+    if state.model.simulation.active_run().is_some_and(|run| {
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .is_some_and(|analysis| {
+                super::analysis_answers_structural_gate(
+                    state,
+                    run.dataset_id,
+                    analysis,
+                    super::StructuralGate::SParameterStructure,
+                ) && super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
+            })
     }) {
         super::ViewerAvailability::available(
             "Retained S-parameter coefficients and per-port reference impedances are available",
@@ -112,12 +116,12 @@ pub(super) fn synchronize_active_analysis(state: &mut AppState) -> bool {
     if state.viewer_capability(ActiveViewer::SmithChart).available {
         return true;
     }
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         state.analysis.smith_chart_state.clear_traces();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
     };
-    let Some(analysis) = state.simulation.active_analysis() else {
+    let Some(analysis) = state.model.simulation.active_analysis() else {
         state.analysis.smith_chart_state.clear_traces();
         state.clear_specialized_viewer_cache_authority(ActiveViewer::SmithChart);
         return false;
@@ -350,16 +354,16 @@ mod tests {
         run.add_analysis(sparam_analysis(1, "SP low", &[(0.1, 0.0), (0.2, 0.1)]));
         run.add_analysis(sparam_analysis(2, "SP high", &[(-0.6, 0.3), (-0.5, 0.4)]));
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
-        assert!(state.simulation.select_analysis(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        assert!(state.model.simulation.select_analysis(0));
 
         assert!(synchronize_active_analysis(&mut state));
         draw(&mut state);
         let first = state.analysis.smith_chart_state.traces[0].points[0].s.re;
         assert!((first - 0.1).abs() < 1.0e-12, "{first}");
 
-        assert!(state.simulation.select_analysis(1));
+        assert!(state.model.simulation.select_analysis(1));
         assert!(synchronize_active_analysis(&mut state));
         draw(&mut state);
         let second = state.analysis.smith_chart_state.traces[0].points[0].s.re;

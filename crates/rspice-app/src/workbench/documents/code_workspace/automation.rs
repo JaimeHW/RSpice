@@ -80,6 +80,7 @@ pub fn dry_run_automation_workflow(app: &mut RSpiceApp) {
 
 fn python_automation_requires_managed_worker(app: &RSpiceApp) -> bool {
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -118,6 +119,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
     let Some(bundle) = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -128,7 +130,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.workspace.content.project.id(),
+        project_id: app.state.model.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
@@ -172,8 +174,8 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
         .runtime_execution
         .clone()
     {
-        if app.state.simulation.execution.has_active_execution()
-            || app.state.simulation.execution.trigger_simulation
+        if app.state.model.simulation.execution.has_active_execution()
+            || app.state.model.simulation.execution.trigger_simulation
         {
             if let Some(session_id) = pending.session_id
                 && let Err(error) = app
@@ -204,10 +206,10 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
     }
     match app.state.ui.code_workspace.automation.execution.clone() {
         AutomationExecutionState::AwaitingDispatch { .. }
-            if app.state.simulation.execution.trigger_simulation
-                && !app.state.simulation.execution.has_active_execution() =>
+            if app.state.model.simulation.execution.trigger_simulation
+                && !app.state.model.simulation.execution.has_active_execution() =>
         {
-            app.state.simulation.execution.trigger_simulation = false;
+            app.state.model.simulation.execution.trigger_simulation = false;
             app.invalidate_simulation_preflight();
             let runtime = &mut app.state.ui.code_workspace.automation;
             runtime.execution = AutomationExecutionState::Cancelled;
@@ -222,7 +224,7 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
         }
         AutomationExecutionState::AwaitingDispatch { .. }
         | AutomationExecutionState::Running { .. } => {
-            match app.state.simulation.request_abort_active_run() {
+            match app.state.model.simulation.request_abort_active_run() {
                 Ok(_) => {
                     app.state.ui.code_workspace.automation.cancel_requested = true;
                     app.state.prompt("Cancelling the active Automation run.");
@@ -247,6 +249,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
     let Some(bundle) = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -257,7 +260,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.workspace.content.project.id(),
+        project_id: app.state.model.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
@@ -276,7 +279,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
                         }
                     };
                     match crate::automation_workflow::build_automation_runtime_snapshot(
-                        app.state.workspace.content.project.id(),
+                        app.state.model.workspace.content.project.id(),
                         &bundle,
                         manifest,
                         capabilities,
@@ -673,6 +676,7 @@ fn complete_automation_validation(
     }
     if let Err(error) = app
         .state
+        .model
         .workspace
         .content
         .mark_project_source_bundle_validated(bundle_id)
@@ -1138,6 +1142,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     }
     let Some(bundle) = app
         .state
+        .model
         .workspace
         .content
         .project_sources
@@ -1150,7 +1155,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         return;
     };
     let token = SourceOperationToken {
-        project_id: app.state.workspace.content.project.id(),
+        project_id: app.state.model.workspace.content.project.id(),
         revision: bundle.revision().get(),
         content_digest: bundle.closure_digest(),
     };
@@ -1188,7 +1193,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
                     }
                 };
                 match crate::automation_workflow::build_automation_runtime_snapshot(
-                    app.state.workspace.content.project.id(),
+                    app.state.model.workspace.content.project.id(),
                     &bundle,
                     manifest,
                     capabilities,
@@ -1212,7 +1217,13 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     Arc::make_mut(&mut app.state.ui.code_workspace.automation.diagnostics).clear();
     app.state.ui.code_workspace.automation.diagnostic_token = None;
 
-    let active_name = app.state.sim_setup.active_plan_name().as_str().to_owned();
+    let active_name = app
+        .state
+        .model
+        .sim_setup
+        .active_plan_name()
+        .as_str()
+        .to_owned();
     let plan_id = match active_plan_id(app) {
         Ok(plan_id) => plan_id,
         Err(error) => {
@@ -1220,7 +1231,14 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
             return;
         }
     };
-    let Some(plan_payload) = app.state.workspace.content.plan_data(plan_id).cloned() else {
+    let Some(plan_payload) = app
+        .state
+        .model
+        .workspace
+        .content
+        .plan_data(plan_id)
+        .cloned()
+    else {
         fail(
             app,
             "The active simulation plan has no governed configuration payload.",
@@ -1273,6 +1291,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     }
     if let Err(error) = app
         .state
+        .model
         .workspace
         .content
         .mark_project_source_bundle_validated(bundle.id())
@@ -1286,6 +1305,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
 
     let Some(plan_revision) = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -1349,8 +1369,8 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         }
     };
     let snapshot = AutomationDispatchSnapshot {
-        project_id: app.state.workspace.content.project.id(),
-        project_revision: app.state.workspace.content.project.revision(),
+        project_id: app.state.model.workspace.content.project.id(),
+        project_revision: app.state.model.workspace.content.project.revision(),
         plan_id,
         plan_revision,
         prepared_snapshot_digest: prepared.snapshot_digest,
@@ -1358,12 +1378,13 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         prepared_inputs,
         plan_name: active_name,
         plan_payload,
-        project_sources: app.state.workspace.content.project_sources.clone(),
+        project_sources: app.state.model.workspace.content.project_sources.clone(),
         baseline_run: Arc::new(baseline_run),
         baseline_digest,
     };
     let prior_run_ids = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -1391,7 +1412,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
 pub(crate) fn automation_task_count(app: &RSpiceApp) -> Result<usize, String> {
     use crate::simulation::plan::AnalysisKind;
 
-    let plan = app.state.sim_setup.stable_analysis_plan()?;
+    let plan = app.state.model.sim_setup.stable_analysis_plan()?;
     let enabled = plan
         .instances()
         .iter()
@@ -1403,11 +1424,12 @@ pub(crate) fn automation_task_count(app: &RSpiceApp) -> Result<usize, String> {
         .any(|instance| instance.enabled() && instance.kind() == AnalysisKind::Corner);
     let pvt_points = if corner_enabled {
         app.state
+            .model
             .sim_setup
             .corner
             .to_config(
-                &app.state.sim_setup.run_set,
-                app.state.sim_setup.reference_pvt,
+                &app.state.model.sim_setup.run_set,
+                app.state.model.sim_setup.reference_pvt,
             )
             .map_or(0, |config| config.num_corners())
     } else {
@@ -1431,7 +1453,7 @@ fn automation_capabilities(
     use rspice_automation_protocol::{CapabilityGrant, CapabilityKind};
     use uuid::Uuid;
 
-    let project_scope = app.state.workspace.content.project.id().to_string();
+    let project_scope = app.state.model.workspace.content.project.id().to_string();
     let mut grants = Vec::new();
     if manifest.project_files.eq_ignore_ascii_case("read") {
         grants.push(CapabilityGrant {
@@ -1677,6 +1699,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             }
             let matching_run_ids = app
                 .state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -1694,7 +1717,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 return;
             }
             if let Some(run_id) = matching_run_ids.first().copied() {
-                if app.state.simulation.execution.has_active_execution() {
+                if app.state.model.simulation.execution.has_active_execution() {
                     app.state.ui.code_workspace.automation.execution =
                         AutomationExecutionState::Running {
                             token,
@@ -1705,8 +1728,8 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
                 } else {
                     finish_run(app, token, &plan, run_id, &snapshot);
                 }
-            } else if !app.state.simulation.execution.trigger_simulation
-                && !app.state.simulation.execution.has_active_execution()
+            } else if !app.state.model.simulation.execution.trigger_simulation
+                && !app.state.model.simulation.execution.has_active_execution()
             {
                 fail(
                     app,
@@ -1719,7 +1742,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             plan,
             run_id,
             snapshot,
-        } if !app.state.simulation.execution.has_active_execution() => {
+        } if !app.state.model.simulation.execution.has_active_execution() => {
             if app.state.ui.code_workspace.automation.cancel_requested {
                 let runtime = &mut app.state.ui.code_workspace.automation;
                 runtime.execution = AutomationExecutionState::Cancelled;
@@ -1900,6 +1923,7 @@ fn finish_run(
     }
     let Some(candidate) = app
         .state
+        .model
         .simulation
         .retained
         .run_by_stable_id(run_id)
@@ -2003,6 +2027,7 @@ fn finish_run(
 
 fn active_plan_id(app: &RSpiceApp) -> Result<SimulationPlanId, String> {
     app.state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -2011,7 +2036,7 @@ fn active_plan_id(app: &RSpiceApp) -> Result<SimulationPlanId, String> {
 }
 
 fn validate_requested_analyses(app: &RSpiceApp, requested: &[String]) -> Result<(), String> {
-    let stable = app.state.sim_setup.stable_analysis_plan()?;
+    let stable = app.state.model.sim_setup.stable_analysis_plan()?;
     let enabled = stable
         .instances()
         .iter()
@@ -2035,7 +2060,7 @@ fn validate_requested_analyses(app: &RSpiceApp, requested: &[String]) -> Result<
 
 fn require_corner_matrix(app: &RSpiceApp) -> Result<(), String> {
     use crate::simulation::plan::AnalysisKind;
-    let stable = app.state.sim_setup.stable_analysis_plan()?;
+    let stable = app.state.model.sim_setup.stable_analysis_plan()?;
     if !stable
         .instances()
         .iter()
@@ -2047,11 +2072,12 @@ fn require_corner_matrix(app: &RSpiceApp) -> Result<(), String> {
         );
     }
     app.state
+        .model
         .sim_setup
         .corner
         .to_config(
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.reference_pvt,
+            &app.state.model.sim_setup.run_set,
+            app.state.model.sim_setup.reference_pvt,
         )
         .map(|_| ())
         .map_err(|error| format!("The configured PVT matrix is invalid: {error}"))
@@ -2060,6 +2086,7 @@ fn require_corner_matrix(app: &RSpiceApp) -> Result<(), String> {
 fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<SimulationRun, String> {
     let run_id = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -2070,6 +2097,7 @@ fn baseline_run(app: &RSpiceApp, plan_id: SimulationPlanId) -> Result<Simulation
         })?;
     let run = app
         .state
+        .model
         .simulation
         .retained
         .run_by_stable_id(run_id)
@@ -2144,8 +2172,8 @@ fn dispatch_snapshot_is_current(
     app: &RSpiceApp,
     snapshot: &AutomationDispatchSnapshot,
 ) -> Result<(), String> {
-    if app.state.workspace.content.project.id() != snapshot.project_id
-        || app.state.workspace.content.project.revision() != snapshot.project_revision
+    if app.state.model.workspace.content.project.id() != snapshot.project_id
+        || app.state.model.workspace.content.project.revision() != snapshot.project_revision
     {
         return Err(
             "The project changed while the Automation workflow was running; its results were not published."
@@ -2154,6 +2182,7 @@ fn dispatch_snapshot_is_current(
     }
     let current_plan = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -2164,19 +2193,26 @@ fn dispatch_snapshot_is_current(
                 .to_owned(),
         );
     }
-    if app.state.sim_setup.active_plan_name().as_str() != snapshot.plan_name {
+    if app.state.model.sim_setup.active_plan_name().as_str() != snapshot.plan_name {
         return Err(
             "The active simulation plan was renamed after the Automation workflow started; its results were not published."
                 .to_owned(),
         );
     }
-    if app.state.workspace.content.plan_data(snapshot.plan_id) != Some(&snapshot.plan_payload) {
+    if app
+        .state
+        .model
+        .workspace
+        .content
+        .plan_data(snapshot.plan_id)
+        != Some(&snapshot.plan_payload)
+    {
         return Err(
             "The plan's settings, specifications, baseline, or tolerances changed after the Automation workflow started; its results were not published."
                 .to_owned(),
         );
     }
-    if app.state.workspace.content.project_sources != snapshot.project_sources {
+    if app.state.model.workspace.content.project_sources != snapshot.project_sources {
         return Err(
             "A project source or its validation changed after the Automation workflow started; its results were not published."
                 .to_owned(),
@@ -2192,6 +2228,7 @@ fn dispatch_snapshot_is_current(
         })?;
     let current_baseline = app
         .state
+        .model
         .simulation
         .retained
         .run_by_stable_id(snapshot.baseline_run.run_id)
@@ -2241,6 +2278,7 @@ fn validate_regression_policy(
 
 fn source_token_is_current(app: &RSpiceApp, token: SourceOperationToken) -> bool {
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -2248,7 +2286,7 @@ fn source_token_is_current(app: &RSpiceApp, token: SourceOperationToken) -> bool
             ProjectSourceLanguage::RSpiceAutomation,
         ))
         .is_some_and(|bundle| {
-            app.state.workspace.content.project.id() == token.project_id
+            app.state.model.workspace.content.project.id() == token.project_id
                 && bundle.revision().get() == token.revision
                 && bundle.closure_digest() == token.content_digest
         })

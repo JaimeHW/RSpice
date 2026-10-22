@@ -71,11 +71,11 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                 .and(app.simulation_controller.preflight_stage());
             let engine = match checking {
                 Some(stage) => Some(preflight_status(stage)),
-                None => simulation_engine_status(&app.state.simulation, &availability),
+                None => simulation_engine_status(&app.state.model.simulation, &availability),
             };
             let engine_mark = engine_status_mark(
                 &availability,
-                app.state.simulation.execution.has_active_execution() || checking.is_some(),
+                app.state.model.simulation.execution.has_active_execution() || checking.is_some(),
             );
             let platform = platform_label();
             let prompt = current_prompt(ctx, &mut app.state.workbench.prompt);
@@ -244,12 +244,12 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         // report, so the bar shows no chip then.
                         if let Some(engine) = engine.as_deref() {
                         let can_retry = (availability == EngineAvailability::Restartable || availability.failure_reason().is_some())
-                            && !app.state.simulation.execution.has_active_execution();
+                            && !app.state.model.simulation.execution.has_active_execution();
                         let can_open = availability == EngineAvailability::Ready
                             && app.state.project_lifecycle.is_open()
                             && app
                                 .state
-                                .simulation
+                                .model.simulation
                                 .retained.newest_retained_result_run_index()
                                 .is_some();
                         let engine_response = ui
@@ -514,7 +514,7 @@ fn schematic_cursor_summary(
     grid_x: f64,
     grid_y: f64,
 ) -> String {
-    let grid = f64::from(state.schematic.document().grid_size.max(1));
+    let grid = f64::from(state.model.schematic.document().grid_size.max(1));
     let sheet = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(state);
     sheet.cursor_status(grid_x * grid, grid_y * grid)
 }
@@ -545,7 +545,7 @@ fn engineering_context_summary(
     }
     match app.state.workbench.workspace {
         Workspace::Design => {
-            let view_type = app.state.workspace.content.active_view_type();
+            let view_type = app.state.model.workspace.content.active_view_type();
             app.state.ui.canvas_hover.map_or_else(
                 || match view_type {
                     crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
@@ -555,12 +555,12 @@ fn engineering_context_summary(
                     crate::state::ViewType::Symbol => {
                         format!(
                             "x — · y — · grid {}",
-                            app.state.schematic.document().grid_size.max(1)
+                            app.state.model.schematic.document().grid_size.max(1)
                         )
                     }
                     _ => format!(
                         "revision {}",
-                        app.state.workspace.content.project.revision().get()
+                        app.state.model.workspace.content.project.revision().get()
                     ),
                 },
                 |(x, y)| match view_type {
@@ -570,11 +570,11 @@ fn engineering_context_summary(
                     crate::state::ViewType::Layout => {
                         // The open layout's own database unit is the one its
                         // coordinates count in.
-                        let content = &app.state.workspace.content;
+                        let content = &app.state.model.workspace.content;
                         content
                             .physical_layout_document(&content.active_view)
                             .map(|document| document.technology().database_unit())
-                            .or(app.state.pdk_config.layout_database_unit)
+                            .or(app.state.model.pdk_config.layout_database_unit)
                             .map_or_else(
                                 || format!("x {x:.0} · y {y:.0} DBU unavailable"),
                                 |dbu| {
@@ -590,11 +590,11 @@ fn engineering_context_summary(
                     }
                     crate::state::ViewType::Symbol => format!(
                         "x {x:.0} · y {y:.0} · grid {}",
-                        app.state.schematic.document().grid_size.max(1)
+                        app.state.model.schematic.document().grid_size.max(1)
                     ),
                     _ => format!(
                         "revision {}",
-                        app.state.workspace.content.project.revision().get()
+                        app.state.model.workspace.content.project.revision().get()
                     ),
                 },
             )
@@ -608,7 +608,7 @@ fn engineering_context_summary(
         | Workspace::Netlist => {
             format!(
                 "revision {}",
-                app.state.workspace.content.project.revision().get()
+                app.state.model.workspace.content.project.revision().get()
             )
         }
     }
@@ -627,10 +627,11 @@ fn results_view_summary(
         return view.span.clone();
     }
     app.state
+        .model
         .simulation
         .view
         .active_run_idx
-        .and_then(|index| app.state.simulation.retained.runs.get(index))
+        .and_then(|index| app.state.model.simulation.retained.runs.get(index))
         .map_or_else(
             // The selection segment beside this one already reports that no
             // dataset is chosen. This segment answers a different question —
@@ -667,10 +668,11 @@ fn selection_summary(app: &RSpiceApp) -> String {
     if app.state.workbench.workspace == Workspace::Results {
         return app
             .state
+            .model
             .simulation
             .view
             .active_run_idx
-            .and_then(|index| app.state.simulation.retained.runs.get(index))
+            .and_then(|index| app.state.model.simulation.retained.runs.get(index))
             .map_or_else(
                 || "No result dataset selected".to_owned(),
                 |run| {
@@ -690,9 +692,10 @@ fn selection_summary(app: &RSpiceApp) -> String {
     if app.state.workbench.workspace != Workspace::Design {
         return app.state.workbench.workspace.label().to_owned();
     }
-    let selection = &app.state.schematic.session.editor.selection;
+    let selection = &app.state.model.schematic.session.editor.selection;
     if let Some(id) = selection.single_component() {
         app.state
+            .model
             .schematic
             .document()
             .components
@@ -711,11 +714,11 @@ fn selection_summary(app: &RSpiceApp) -> String {
 /// reaches here — its chip reports plot magnification instead.
 fn zoom_factor(app: &RSpiceApp) -> f64 {
     if app.state.workbench.workspace == Workspace::Design
-        && app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+        && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
     {
         f64::from(app.state.ui.symbol.editor.zoom)
     } else {
-        app.state.schematic.session.editor.zoom
+        app.state.model.schematic.session.editor.zoom
     }
 }
 
@@ -1195,6 +1198,7 @@ mod tests {
         // the count moves to the stale column, which is neither an error nor
         // an advisory about the design in front of the reader.
         app.state
+            .model
             .workspace
             .content
             .connectivity
@@ -1433,12 +1437,14 @@ mod tests {
         app.state.open_project_session();
         let key = app
             .state
+            .model
             .workspace
             .content
             .active_schematic_reference()
             .key();
         let first = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1448,6 +1454,7 @@ mod tests {
 
         let catalog = app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -1489,7 +1496,7 @@ mod tests {
     #[test]
     fn schematic_coordinates_use_the_permanent_sheet_origin_and_status_context() {
         let mut state = crate::workbench::app_state::AppState::default();
-        state.schematic.document_mut_for_test().grid_size = 10;
+        state.model.schematic.document_mut_for_test().grid_size = 10;
         assert_eq!(
             schematic_cursor_summary(&state, -14.0, -4.0),
             "x 0 · y 0 mm"

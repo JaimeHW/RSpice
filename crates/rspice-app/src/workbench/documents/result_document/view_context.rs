@@ -52,6 +52,7 @@ impl ResolvedResultView {
     /// vector ordinal on its own.
     pub(crate) fn run<'a>(&self, state: &'a AppState) -> Option<&'a SimulationRun> {
         state
+            .model
             .simulation
             .retained
             .runs
@@ -100,13 +101,14 @@ fn resolve_dataset_view(
     dataset_id: DatasetId,
 ) -> Result<ResolvedResultView, String> {
     let run_index = state
+        .model
         .simulation
         .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == dataset_id)
         .ok_or_else(|| "The active result dataset is no longer retained.".to_owned())?;
-    let run = &state.simulation.retained.runs[run_index];
+    let run = &state.model.simulation.retained.runs[run_index];
     let viewer = state.ui.results.session.viewer;
     let mut analysis_indices = run
         .analyses
@@ -164,8 +166,8 @@ fn selected_primary_index(
         .and_then(|key| key.resolve(run).map(|(index, _)| index))
         .filter(|index| candidates.contains(index))
         .or_else(|| {
-            (state.simulation.view.active_run_idx == Some(run_index))
-                .then_some(state.simulation.view.active_analysis_idx)
+            (state.model.simulation.view.active_run_idx == Some(run_index))
+                .then_some(state.model.simulation.view.active_analysis_idx)
                 .flatten()
                 .filter(|index| candidates.contains(index))
         })
@@ -177,6 +179,7 @@ fn resolve_visualization_pane(
     document_id: ResultDocumentId,
 ) -> Result<ResolvedResultView, String> {
     let document = state
+        .model
         .workspace
         .content
         .visualization_document(document_id)
@@ -212,13 +215,14 @@ fn resolve_visualization_pane(
         .binding
         .ok_or_else(|| "The selected result pane is not bound to a run.".to_owned())?;
     let run_index = state
+        .model
         .simulation
         .retained
         .runs
         .iter()
         .position(|run| run.dataset_id == binding.dataset.dataset_id)
         .ok_or_else(|| "The pane's run is no longer in the run history.".to_owned())?;
-    let run = &state.simulation.retained.runs[run_index];
+    let run = &state.model.simulation.retained.runs[run_index];
     if super::retained_dataset_digest(state, run) != binding.dataset.content_digest {
         return Err(
             "The run's results no longer match the ones this pane was bound to.".to_owned(),
@@ -471,9 +475,9 @@ mod tests {
         }
         let dataset_id = run.dataset_id;
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs = vec![run].into();
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         state
             .workbench
             .documents
@@ -508,7 +512,7 @@ mod tests {
         let all = resolve_displayed_result_view(&state).expect("wave stack context");
         assert_eq!(all.analysis_indices, vec![0, 1]);
 
-        let run = state.simulation.active_run().unwrap();
+        let run = state.model.simulation.active_run().unwrap();
         state.ui.results.session.maximized_strip = Some(AnalysisPresentationKey::new(
             run.dataset_id,
             &run.analyses[1],

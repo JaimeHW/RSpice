@@ -16,11 +16,11 @@ fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
     assert!(result.success);
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(result);
+    state.model.simulation.start_run().add_analysis(result);
     state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -42,11 +42,11 @@ fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
     assert!(result.success);
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(result);
+    state.model.simulation.start_run().add_analysis(result);
     state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -65,14 +65,15 @@ fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
 /// A DC sweep of a current source, with the deck the run actually executed.
 fn swept_current_source() -> AppState {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 5.0], "#fff"),
         ]),
     );
-    let run_id = state.simulation.retained.runs[0].id;
+    let run_id = state.model.simulation.retained.runs[0].id;
     state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -91,7 +92,7 @@ fn swept_current_source() -> AppState {
 fn model_axis(state: &mut AppState) -> (String, String) {
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -106,14 +107,15 @@ fn imported_dc_axes_use_retained_name_and_unit_instead_of_voltage_defaults() {
     };
     for unit in [Some("A"), Some("K"), Some("1"), None] {
         let mut state = swept_current_source();
-        state.simulation.retained.runs[0].analyses[0].import_source = Some(ResultImportSource {
-            source_name: "axis.raw".into(),
-            format: ResultImportFormat::SpiceRaw,
-            coordinate: Some(ResultImportCoordinate {
-                name: "source-axis".into(),
-                unit: unit.map(str::to_owned),
-            }),
-        });
+        state.model.simulation.retained.runs[0].analyses[0].import_source =
+            Some(ResultImportSource {
+                source_name: "axis.raw".into(),
+                format: ResultImportFormat::SpiceRaw,
+                coordinate: Some(ResultImportCoordinate {
+                    name: "source-axis".into(),
+                    unit: unit.map(str::to_owned),
+                }),
+            });
         assert_eq!(
             model_axis(&mut state),
             ("source-axis".into(), unit.unwrap_or("").to_owned())
@@ -268,11 +270,11 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
         "1 V within configured relative tolerance; got {voltage:.16e}"
     );
     let mut state = AppState::default();
-    state.simulation = crate::simulation::controller::dc_history_tests::history(analysis);
+    state.model.simulation = crate::simulation::controller::dc_history_tests::history(analysis);
     state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
-    let stored = crate::io::capture_simulation_results(&state.simulation);
-    crate::io::restore_simulation_results(stored, &mut state.simulation).unwrap();
+    let stored = crate::io::capture_simulation_results(&state.model.simulation);
+    crate::io::restore_simulation_results(stored, &mut state.model.simulation).unwrap();
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
 }
 
@@ -282,7 +284,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
 fn a_dc_sweep_without_a_retained_deck_keeps_the_analysis_default() {
     let mut state = swept_current_source();
     assert_eq!(model_axis(&mut state), ("Ibias".to_owned(), "A".to_owned()));
-    state.simulation.retained.executed_decks = Default::default();
+    state.model.simulation.retained.executed_decks = Default::default();
     assert_eq!(model_axis(&mut state), ("x".to_owned(), "V".to_owned()));
 }
 
@@ -293,23 +295,28 @@ fn a_dc_sweep_without_a_retained_deck_keeps_the_analysis_default() {
 #[test]
 fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
-    let earlier = state.simulation.retained.runs[0].dataset_id;
-    state.simulation.start_run().add_analysis(
+    let earlier = state.model.simulation.retained.runs[0].dataset_id;
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
         ]),
     );
-    state.simulation.view.overlay_dataset_ids.push(earlier);
+    state
+        .model
+        .simulation
+        .view
+        .overlay_dataset_ids
+        .push(earlier);
 
     let tokens = Tokens::default();
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &tokens,
@@ -331,11 +338,11 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
     state
         .ui
         .results
-        .add_expression_trace(&state.simulation, analysis, "V(out)*2".to_owned())
+        .add_expression_trace(&state.model.simulation, analysis, "V(out)*2".to_owned())
         .expect("the strip accepts an expression");
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &tokens,
@@ -359,24 +366,29 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
 #[test]
 fn an_overlay_row_names_the_run_it_came_from() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
         ]),
     );
-    let earlier = state.simulation.retained.runs[0].dataset_id;
-    state.simulation.start_run().add_analysis(
+    let earlier = state.model.simulation.retained.runs[0].dataset_id;
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
         ]),
     );
-    state.simulation.view.overlay_dataset_ids.push(earlier);
+    state
+        .model
+        .simulation
+        .view
+        .overlay_dataset_ids
+        .push(earlier);
     state.ui.results.session.cursor_strip = Some(0);
 
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -467,12 +479,12 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
     let result = crate::simulation::results::qpnoise_retained_test_fixture();
     assert!(result.success);
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(result);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.start_run().add_analysis(result);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state.ui.results.session.viewer = super::super::super::ResultViewer::NoiseContrib;
     assert!(super::super::super::view_context::analysis_supports_viewer(
         state.ui.results.session.viewer,
-        state.simulation.active_analysis().unwrap()
+        state.model.simulation.active_analysis().unwrap()
     ));
     assert!(super::super::super::viewer_is_available(
         &state,
@@ -480,7 +492,7 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
     ));
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),

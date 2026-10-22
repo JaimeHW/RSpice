@@ -106,14 +106,15 @@ struct RunRow {
 impl RunRow {
     fn from_run(state: &AppState, run: &SimulationRun, active: bool) -> Self {
         let executor_owned = active && !run.lifecycle.is_terminal();
-        let current_analysis_progress = state.simulation.execution.progress.clamp(0.0, 1.0) as f32;
+        let current_analysis_progress =
+            state.model.simulation.execution.progress.clamp(0.0, 1.0) as f32;
         let (status, tone) = match run.lifecycle {
             SimulationRunLifecycle::LegacyUnknown => {
                 ("Legacy status not retained".to_owned(), RunTone::Neutral)
             }
             SimulationRunLifecycle::Preparing => ("Preparing".to_owned(), RunTone::Active),
             SimulationRunLifecycle::Running => {
-                let detail = state.simulation.execution.status.trim();
+                let detail = state.model.simulation.execution.status.trim();
                 (
                     if active && !detail.is_empty() {
                         detail.to_owned()
@@ -142,6 +143,7 @@ impl RunRow {
         // analysis that never produced it.
         let run_plan = plan_id.and_then(|plan_id| {
             state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
@@ -151,13 +153,15 @@ impl RunRow {
             run_authority_rows(run, executor_owned, current_analysis_progress, run_plan);
         let mut scope = plan_id.map_or(scope, |plan_id| {
             let name = state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
                 .filter(|plan| plan.id() == plan_id)
-                .map(|_| state.sim_setup.active_plan_name().to_string())
+                .map(|_| state.model.sim_setup.active_plan_name().to_string())
                 .or_else(|| {
                     state
+                        .model
                         .sim_setup
                         .inactive_plans()
                         .iter()
@@ -182,6 +186,7 @@ impl RunRow {
         let progress = batch_progress(&tasks);
         let task_count = tasks.len().max(run.analyses.len());
         let executed_deck_points = state
+            .model
             .simulation
             .retained
             .executed_decks
@@ -238,16 +243,19 @@ struct JobsSnapshot {
 impl JobsSnapshot {
     fn capture(state: &AppState, requested: Option<RunId>, scope: JobsPlanScope) -> Self {
         let active_run_id = state
+            .model
             .simulation
             .execution
             .active_execution
             .map(|execution| execution.run_id);
         let active_plan_id = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id());
         let rows = state
+            .model
             .simulation
             .retained
             .runs
@@ -299,6 +307,7 @@ impl JobsSnapshot {
             running: active_run_id.is_some(),
             cancelling: active_run_id.is_some_and(|run_id| {
                 state
+                    .model
                     .simulation
                     .retained
                     .run_by_stable_id(run_id)
@@ -427,6 +436,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
     let Some(index) = app
         .state
+        .model
         .simulation
         .retained
         .runs
@@ -438,7 +448,7 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
         ));
         return;
     };
-    if !app.state.simulation.select_run(index) {
+    if !app.state.model.simulation.select_run(index) {
         app.state.prompt(format!(
             "Run {run_id} could not be selected, so Results was left unchanged."
         ));
@@ -1285,7 +1295,8 @@ fn legacy_task_rows(run: &SimulationRun) -> Vec<TaskRow> {
 
 fn export_selected_manifest(app: &mut RSpiceApp) {
     let selected_id = app.state.workbench.jobs_manager.selected_run_id;
-    let Some(run) = selected_id.and_then(|id| app.state.simulation.retained.run_by_stable_id(id))
+    let Some(run) =
+        selected_id.and_then(|id| app.state.model.simulation.retained.run_by_stable_id(id))
     else {
         app.state
             .prompt("No retained run is selected for manifest export.");
@@ -1513,17 +1524,17 @@ mod tests {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Simulate);
-        let first = app.state.simulation.start_run().run_id;
-        app.state.simulation.retained.runs[0]
+        let first = app.state.model.simulation.start_run().run_id;
+        app.state.model.simulation.retained.runs[0]
             .analyses
             .push(AnalysisResult::new(
                 1,
                 AnalysisType::Transient,
                 "retained TRAN",
             ));
-        let second = app.state.simulation.start_run().run_id;
+        let second = app.state.model.simulation.start_run().run_id;
         assert_eq!(
-            app.state.simulation.active_run().map(|run| run.id),
+            app.state.model.simulation.active_run().map(|run| run.id),
             Some(2),
             "the newest run is selected before the hop"
         );
@@ -1534,7 +1545,7 @@ mod tests {
             crate::workbench::state::Workspace::Results
         );
         assert_eq!(
-            app.state.simulation.active_run().map(|run| run.id),
+            app.state.model.simulation.active_run().map(|run| run.id),
             Some(1),
             "the row's own run is what the hop carried, not the active one"
         );
@@ -1543,11 +1554,12 @@ mod tests {
             .workbench
             .activate(crate::workbench::state::Workspace::Simulate);
         app.state
+            .model
             .simulation
             .retained
             .runs
             .retain(|run| run.run_id != second);
-        let before = app.state.log_buffer.revision();
+        let before = app.state.model.log_buffer.revision();
         open_run_in_results(&mut app, second);
         assert_eq!(
             app.state.workbench.workspace,
@@ -1560,20 +1572,22 @@ mod tests {
                 .is_some_and(|text| text.contains("no longer retained")),
             "the refusal answers the gesture"
         );
-        assert_eq!(app.state.log_buffer.revision(), before);
+        assert_eq!(app.state.model.log_buffer.revision(), before);
     }
 
     #[test]
     fn stale_selection_reanchors_to_the_active_stable_run() {
         let mut state = AppState::default();
-        let first = state.simulation.start_run().run_id;
+        let first = state.model.simulation.start_run().run_id;
         state
+            .model
             .simulation
             .view
             .active_run_idx
             .expect("first run is selected");
-        let second = state.simulation.start_run().run_id;
-        state.simulation.execution.active_execution = state
+        let second = state.model.simulation.start_run().run_id;
+        state.model.simulation.execution.active_execution = state
+            .model
             .simulation
             .retained
             .run_by_stable_id(second)
@@ -1582,6 +1596,7 @@ mod tests {
         assert_eq!(snapshot.selected_run_id, Some(first));
 
         state
+            .model
             .simulation
             .retained
             .runs
@@ -1593,8 +1608,9 @@ mod tests {
     #[test]
     fn history_scope_never_mixes_active_plan_inactive_plan_and_manual_decks() {
         let mut state = AppState::default();
-        let inactive_plan_id = state.sim_setup.stable_analysis_plan().unwrap().id();
+        let inactive_plan_id = state.model.sim_setup.stable_analysis_plan().unwrap().id();
         let active_plan_id = state
+            .model
             .sim_setup
             .create_plan("Campaign member")
             .expect("create second plan");
@@ -1602,6 +1618,7 @@ mod tests {
         let campaign_id = crate::product::SimulationCampaignId::new();
         let inactive_run = {
             let run = state
+                .model
                 .simulation
                 .start_prepared_run(plan_receipt(inactive_plan_id, 1))
                 .unwrap();
@@ -1619,6 +1636,7 @@ mod tests {
         };
         let active_run = {
             let run = state
+                .model
                 .simulation
                 .start_prepared_run(plan_receipt(active_plan_id, 11))
                 .unwrap();
@@ -1634,7 +1652,7 @@ mod tests {
             .unwrap();
             run.run_id
         };
-        let manual_run = state.simulation.start_run().run_id;
+        let manual_run = state.model.simulation.start_run().run_id;
 
         let active = JobsSnapshot::capture(&state, None, JobsPlanScope::ActivePlan);
         assert_eq!(active.rows.len(), 1);
@@ -1842,7 +1860,7 @@ mod tests {
     #[test]
     fn execution_target_card_lists_only_the_live_runtime() {
         let mut state = AppState::default();
-        state.simulation.start_run();
+        state.model.simulation.start_run();
         let snapshot = JobsSnapshot::capture(&state, None, JobsPlanScope::AllPlans);
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);

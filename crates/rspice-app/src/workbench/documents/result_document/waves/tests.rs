@@ -135,7 +135,7 @@ fn family_analysis(values: Vec<f64>) -> AnalysisResult {
 /// A one-analysis transient run with a single ramp on `V(out)`.
 fn marker_fixture() -> AppState {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
         ]),
@@ -150,31 +150,36 @@ fn retained_and_live_expressions_align_real_analysis_waveforms() {
     let mut state = AppState::default();
     let first = vec![0.0, 1.0, 3.0];
     let second = vec![0.0, 2.0, 3.0];
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", first.clone(), first, "#fff"),
             RetainedTrace::new("V(b)", second.clone(), second, "#0af"),
         ]),
     );
-    state.simulation.complete_run();
+    state.model.simulation.complete_run();
     let before = state
+        .model
         .simulation
         .active_analysis()
         .unwrap()
         .waveforms
         .clone();
 
-    let outputs = evaluate_expression(&state.simulation, 0, "V(a)-V(b)", None).unwrap();
+    let outputs = evaluate_expression(&state.model.simulation, 0, "V(a)-V(b)", None).unwrap();
     let series = &outputs[0].waveform;
     assert_eq!(series.x.as_slice(), &[0.0, 1.0, 2.0, 3.0]);
     assert_eq!(series.y.as_slice(), &[0.0; 4]);
     let expression = parser::try_parse("min(V(a)-V(b))").unwrap();
     assert_eq!(
-        evaluator::evaluate(&expression, &SimulationContext::new(&state.simulation)).unwrap(),
+        evaluator::evaluate(
+            &expression,
+            &SimulationContext::new(&state.model.simulation)
+        )
+        .unwrap(),
         CalcValue::Real(calculator::RealValue::Scalar(0.0))
     );
     assert_eq!(
-        state.simulation.active_analysis().unwrap().waveforms,
+        state.model.simulation.active_analysis().unwrap().waveforms,
         before
     );
 }
@@ -191,7 +196,7 @@ fn deep_readout_fixture(trace_count: usize) -> AppState {
         })
         .collect();
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms),
     );
     state.ui.results.session.cursors.place(0.5);
@@ -202,7 +207,7 @@ fn deep_readout_fixture(trace_count: usize) -> AppState {
 #[test]
 fn a_value_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
             RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
@@ -211,7 +216,7 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -242,7 +247,7 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
 #[test]
 fn a_readout_states_the_value_while_a_table_column_pads_it() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.5], "#fff"),
         ]),
@@ -250,7 +255,7 @@ fn a_readout_states_the_value_while_a_table_column_pads_it() {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -296,7 +301,7 @@ fn a_readout_states_the_value_while_a_table_column_pads_it() {
 #[test]
 fn a_slope_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
             RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
@@ -305,7 +310,7 @@ fn a_slope_is_named_by_its_own_unit_not_the_strips() {
     let presentation = state.ui.preferences.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -339,7 +344,7 @@ fn a_slope_is_named_by_its_own_unit_not_the_strips() {
 #[test]
 fn a_copied_value_is_named_by_its_own_unit_not_the_strips() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 5.0], "#fff"),
             RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
@@ -367,7 +372,7 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
     let mut state = AppState::default();
     // 4e-12 V²/Hz projects to 2000 nV/√Hz — past the point where an SI copy
     // would reach for "k" and paste "2 knV/√Hz".
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
             RetainedTrace::new("onoise", vec![1.0, 10.0], vec![4.0e-12, 4.0e-12], "#fff"),
         ]),
@@ -390,10 +395,10 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
 #[test]
 fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
     let mut state = marker_fixture();
-    state.simulation.retained.runs[0].analyses[0].waveforms[0].visible = false;
+    state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible = false;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -407,8 +412,9 @@ fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
 #[test]
 fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     let mut state = marker_fixture();
-    let retained_default = state.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
+    let retained_default = state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible;
     let live_default = state
+        .model
         .simulation
         .view
         .waveforms
@@ -418,11 +424,12 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     toggle_visibility(&mut state, 0, 0);
 
     assert_eq!(
-        state.simulation.retained.runs[0].analyses[0].waveforms[0].visible, retained_default,
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible, retained_default,
         "quick-view presentation must not rewrite the retained dataset"
     );
     assert_eq!(
         state
+            .model
             .simulation
             .view
             .waveforms
@@ -433,7 +440,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     );
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -450,7 +457,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     toggle_visibility(&mut state, 0, 0);
     assert!(state.ui.results.session.waveform_visibility.is_empty());
     assert_eq!(
-        state.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
         retained_default
     );
 }
@@ -463,7 +470,7 @@ fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
     state.ui.results.session.cursors.b = Some(0.75);
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -507,7 +514,7 @@ fn each_cursor_trace_reports_its_own_linear_slope() {
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let complex_display = presentation.complex_number_display();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         complex_display,
         &Tokens::default(),
@@ -532,7 +539,11 @@ fn each_cursor_trace_reports_its_own_linear_slope() {
 }
 
 fn marker_identity(state: &AppState) -> (AnalysisPresentationKey, WaveformPresentationKey) {
-    let run = state.simulation.active_run().expect("active marker run");
+    let run = state
+        .model
+        .simulation
+        .active_run()
+        .expect("active marker run");
     let analysis = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     let waveform = WaveformPresentationKey {
         analysis,
@@ -1549,7 +1560,7 @@ fn the_retired_radians_mode_reads_back_as_magnitude_and_phase() {
 #[test]
 fn cursor_copy_uses_explicit_scientific_si_policy() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Noise, "Noise").with_waveforms(vec![
             RetainedTrace::new("onoise", vec![1.0, 10.0], vec![2.0e-18, 4.0e-18], "#fff"),
         ]),
@@ -1577,7 +1588,7 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
 fn inline_readout_speaks_only_for_a_collapsed_strip() {
     let t = Tokens::default();
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 1.0], "#fff"),
         ]),
@@ -1611,7 +1622,7 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
 #[test]
 fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#fff"),
@@ -1650,7 +1661,7 @@ fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
 fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
     let t = Tokens::default();
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
@@ -1687,7 +1698,7 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
 #[test]
 fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     for (id, analysis_type, signal) in [
         (1, AnalysisType::Pac, "V(pac)"),
         (2, AnalysisType::Pxf, "H(pxf)"),
@@ -1739,7 +1750,7 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
     state.ui.results.session.viewer = super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -1766,7 +1777,7 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
 #[test]
 fn waves_models_include_pss_and_envelope_complex_data() {
     let mut state = AppState::default();
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Pss, "PSS").with_waveforms(vec![RetainedTrace::new(
             "V(pss)",
@@ -1787,7 +1798,7 @@ fn waves_models_include_pss_and_envelope_complex_data() {
     state.ui.results.session.viewer = super::super::ResultViewer::Waves;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),
@@ -1809,7 +1820,7 @@ fn waves_models_include_pss_and_envelope_complex_data() {
 #[test]
 fn disto_frequency_curves_preserve_raw_values_and_units() {
     let mut state = AppState::default();
-    state.simulation.start_run().add_analysis(
+    state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Disto, "DISTO").with_waveforms(vec![
             RetainedTrace::new(
                 "V(out) HD3(dBc)",
@@ -1823,7 +1834,7 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
     state.ui.results.session.viewer = super::super::ResultViewer::Bode;
     let presentation = state.ui.preferences.result_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::default(),

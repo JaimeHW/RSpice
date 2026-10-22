@@ -41,11 +41,11 @@ fn standalone_connection_directive_is_an_authenticated_prepared_dependency() {
 #[test]
 fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
-    state.simulation.retained.next_run_id = u64::MAX;
-    let baseline = crate::io::capture_simulation_results(&state.simulation);
+    state.model.simulation.retained.next_run_id = u64::MAX;
+    let baseline = crate::io::capture_simulation_results(&state.model.simulation);
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -56,19 +56,20 @@ fn exhausted_run_sequence_blocks_dispatch_without_starting_a_batch() {
 
     controller.start_authorized_snapshot(&mut state);
 
-    assert_eq!(state.simulation.execution.status, "Run blocked");
+    assert_eq!(state.model.simulation.execution.status, "Run blocked");
     assert!(!controller.has_active_batch());
     assert!(controller.runner.can_accept_prepared_task());
     assert!(controller.cached_netlist.is_none());
-    assert!(state.simulation.execution.active_execution.is_none());
+    assert!(state.model.simulation.execution.active_execution.is_none());
     assert!(state.manual_run.pending_manual_run_id.is_none());
-    assert_eq!(state.simulation.retained.next_run_id, u64::MAX);
+    assert_eq!(state.model.simulation.retained.next_run_id, u64::MAX);
     assert_eq!(
-        crate::io::capture_simulation_results(&state.simulation),
+        crate::io::capture_simulation_results(&state.model.simulation),
         baseline
     );
     assert!(
         state
+            .model
             .log_buffer
             .entries()
             .any(|message| { message.message.contains("run sequence is exhausted") })
@@ -138,18 +139,18 @@ fn fixture_dir(label: &str) -> PathBuf {
 /// demands one.
 fn technology_free_runnable_state() -> AppState {
     let mut state = AppState::default();
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind
             == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
         {
             dimension.enabled = false;
         }
     }
-    load_example("Voltage Divider", &mut state.schematic);
+    load_example("Voltage Divider", &mut state.model.schematic);
     let mut drc = DrcResult::new();
     drc.completed = true;
     state.dialogs.drc_results = Some(drc);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
     state
 }
 
@@ -165,13 +166,14 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
     use crate::state::{ComponentType, Point};
 
     let mut state = technology_free_runnable_state();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     for name in ["alpha", "beta"] {
         let mut library = ModelLibrary::new(name);
         library.add_model(DeviceModel::new("shared_diode", ModelType::Diode));
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
     }
     state
+        .model
         .model_library_manager
         .resolve_definition_provider(
             ModelConsumerScope::PrimitiveModel,
@@ -182,9 +184,11 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
         .expect("resolve the contested global model provider");
 
     let id = state
+        .model
         .schematic
         .add_component(ComponentType::Diode, Point::new(160, 80));
     let component = state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -196,19 +200,24 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
     component.params = "model_library=beta".to_owned();
 
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .expect("freeze schematic hierarchy");
     let error = validate_projected_model_binding_authority(
-        state.model_library_manager.catalog(),
-        state.model_library_manager.resolution_records(),
-        state.library_manager.catalog(),
-        state.workspace.content.project.technology_binding(),
-        state.pdk_config.technology_registry.validated_packages(),
+        state.model.model_library_manager.catalog(),
+        state.model.model_library_manager.resolution_records(),
+        state.model.library_manager.catalog(),
+        state.model.workspace.content.project.technology_binding(),
+        state
+            .model
+            .pdk_config
+            .technology_registry
+            .validated_packages(),
         &projection,
     )
     .expect_err("stale per-instance provider metadata must fail preflight");
@@ -219,6 +228,7 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
     );
 
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -227,19 +237,24 @@ fn frozen_hierarchy_rejects_stale_instance_model_library_metadata() {
         .expect("placed diode")
         .params = "model_library=alpha".to_owned();
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .expect("freeze rebound schematic hierarchy");
     validate_projected_model_binding_authority(
-        state.model_library_manager.catalog(),
-        state.model_library_manager.resolution_records(),
-        state.library_manager.catalog(),
-        state.workspace.content.project.technology_binding(),
-        state.pdk_config.technology_registry.validated_packages(),
+        state.model.model_library_manager.catalog(),
+        state.model.model_library_manager.resolution_records(),
+        state.model.library_manager.catalog(),
+        state.model.workspace.content.project.technology_binding(),
+        state
+            .model
+            .pdk_config
+            .technology_registry
+            .validated_packages(),
         &projection,
     )
     .expect("matching provider metadata is executable");
@@ -269,8 +284,8 @@ fn prepared_project_run_materializes_exact_signed_pdk_reference_models() {
 fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths() {
     let mut state = AppState::default();
     state.provision_test_project_technology_contract();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source =
         Some("signed project deck\nV1 d 0 1\nM1 d d 0 0 nmos_demo\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
@@ -293,8 +308,8 @@ fn receipt_backed_manual_project_deck_uses_signed_pdk_models_without_host_paths(
 fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_paths() {
     let mut state = AppState::default();
     state.provision_test_project_veriloga_technology_contract();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source =
         Some("signed Verilog-A project deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
@@ -315,6 +330,7 @@ fn governed_manual_deck_dispatches_signed_pdk_veriloga_runtime_without_host_path
 
 fn edit_frozen_transient_stop(state: &mut AppState, stop: &str) {
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -343,12 +359,15 @@ fn prepared_snapshot_detects_analysis_mutation_without_revision_change() {
     let prepared =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("prepare first snapshot");
-    let revision = state.workspace.content.project.revision().get();
+    let revision = state.model.workspace.content.project.revision().get();
     edit_frozen_transient_stop(&mut state, "2m");
     let changed =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("prepare changed snapshot");
-    assert_eq!(state.workspace.content.project.revision().get(), revision);
+    assert_eq!(
+        state.model.workspace.content.project.revision().get(),
+        revision
+    );
     assert_ne!(prepared.digest(), changed.digest());
 }
 
@@ -358,19 +377,19 @@ fn prepared_snapshot_detects_non_topology_source_mutation() {
     let prepared =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("prepare first snapshot");
-    let topology = state.schematic.topology_version();
-    state.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
+    let topology = state.model.schematic.topology_version();
+    state.model.schematic.document_mut_for_test().components[0].value = "2k".to_owned();
     let changed =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("prepare changed snapshot");
-    assert_eq!(state.schematic.topology_version(), topology);
+    assert_eq!(state.model.schematic.topology_version(), topology);
     assert_ne!(prepared.digest(), changed.digest());
 }
 
 #[test]
 fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
     let mut state = runnable_state();
-    state.sim_setup.save_policy.output_selection_mode =
+    state.model.sim_setup.save_policy.output_selection_mode =
         crate::state::OutputSelectionMode::ExplicitOnly;
     let without_output =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
@@ -378,6 +397,7 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
     assert_eq!(without_output.metadata().saved_output_contract_count, 0);
 
     let plan_id = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
@@ -393,6 +413,7 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
     )
     .expect("valid output");
     state
+        .model
         .workspace
         .content
         .add_saved_output(plan_id, output)
@@ -408,10 +429,10 @@ fn prepared_snapshot_authenticates_plan_owned_saved_outputs() {
 #[test]
 fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     let mut state = AppState::default();
-    state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
+    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
         &crate::simulation::dialog::SpConfig::default(),
     );
-    state.schematic.session.current_file = Some(PathBuf::from("designs").join("amp.rsch"));
+    state.model.schematic.session.current_file = Some(PathBuf::from("designs").join("amp.rsch"));
     let tasks = vec![QueuedAnalysis {
         numeric_override: None,
         spec: AnalysisSpec::SParameter {
@@ -435,19 +456,20 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
     let prepared = touchstone_export_policy(
         &state,
         &tasks,
-        state.schematic.session.current_file.as_deref(),
+        state.model.schematic.session.current_file.as_deref(),
     )
     .expect("capture enabled policy");
     let prepared_path = prepared.output_path(7, 1, 2).expect("enabled export path");
 
-    state.schematic.session.current_file = Some(PathBuf::from("redirect").join("changed.rsch"));
+    state.model.schematic.session.current_file =
+        Some(PathBuf::from("redirect").join("changed.rsch"));
     let mut disabled = crate::simulation::dialog::SpConfig::default();
     disabled.touchstone_export = false;
-    state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&disabled);
+    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&disabled);
     let current = touchstone_export_policy(
         &state,
         &tasks,
-        state.schematic.session.current_file.as_deref(),
+        state.model.schematic.session.current_file.as_deref(),
     )
     .expect("capture disabled policy");
 
@@ -458,15 +480,16 @@ fn automatic_touchstone_export_policy_captures_live_dialog_and_path_once() {
 #[test]
 fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.schematic.session.current_file = Some(PathBuf::from("stale").join("schematic.rsch"));
-    state.workspace.content.netlist_source_path =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.schematic.session.current_file =
+        Some(PathBuf::from("stale").join("schematic.rsch"));
+    state.model.workspace.content.netlist_source_path =
         Some(PathBuf::from("imported").join("rf_fixture.cir"));
-    state.workspace.content.netlist_source = Some(
+    state.model.workspace.content.netlist_source = Some(
             "deck\nV2 out 0 dc 0 ac 1 portnum 2 z0 75\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in out 100\n.sp lin 3 1Meg 3Meg\n.end\n"
                 .to_owned(),
         );
-    state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
+    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(
         &crate::simulation::dialog::SpConfig::default(),
     );
 
@@ -494,8 +517,8 @@ fn manual_touchstone_export_uses_imported_deck_origin_not_stale_schematic_path()
 #[test]
 fn manual_fourier_is_topologically_bound_to_its_exact_transient_task() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(
         "Fourier deck\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.four 1k V(out)\n.tran 10u 5m\n.end\n"
             .to_owned(),
     );
@@ -525,9 +548,9 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("baseline save policy prepares");
 
-    state.sim_setup.save_policy.live_streaming_enabled = false;
-    state.sim_setup.save_policy.retain_failure_diagnostics = false;
-    state.sim_setup.save_policy.retained_dataset_limit = 5;
+    state.model.sim_setup.save_policy.live_streaming_enabled = false;
+    state.model.sim_setup.save_policy.retain_failure_diagnostics = false;
+    state.model.sim_setup.save_policy.retained_dataset_limit = 5;
     let changed =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect("changed save policy prepares");
@@ -538,11 +561,13 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
     );
 
     let plan_id = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
     state
+        .model
         .workspace
         .content
         .add_saved_output(
@@ -559,7 +584,7 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
             .expect("valid output"),
         )
         .expect("plan owns output");
-    state.sim_setup.save_policy.maximum_storage_bytes = 1;
+    state.model.sim_setup.save_policy.maximum_storage_bytes = 1;
     let error =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect_err("one-byte plan budget must refuse retained output");
@@ -570,12 +595,14 @@ fn prepared_snapshot_authenticates_and_enforces_plan_owned_save_policy() {
 fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
     let mut state = runnable_state();
     let plan_id = state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("stable plan")
         .id();
     for name in ["deferred_voltage", "deferred_voltage_copy"] {
         state
+            .model
             .workspace
             .content
             .add_saved_output(
@@ -595,12 +622,12 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
     }
     let one_source =
         rspice_simulation::output_contract::retained_engine_source_upper_bound_bytes(1);
-    state.sim_setup.save_policy.maximum_storage_bytes = one_source;
+    state.model.sim_setup.save_policy.maximum_storage_bytes = one_source;
 
     SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
         .expect("two deferred outputs share the same prepared analysis source state");
 
-    state.sim_setup.save_policy.maximum_storage_bytes = one_source - 1;
+    state.model.sim_setup.save_policy.maximum_storage_bytes = one_source - 1;
     let error =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
             .expect_err("the shared source-state ceiling is still enforced");
@@ -610,8 +637,8 @@ fn deferred_outputs_share_one_sealed_engine_source_budget_per_analysis() {
 #[test]
 fn manual_periodic_analyses_are_topologically_bound_to_seed_and_pss() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(
         "Periodic deck\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\nLPROBE out sensed 1n\nR2 sensed 0 1k\n.pss fund=1Meg points=128 harms=8\n.pac dec 20 1k 100Meg input=V1 out=out\n.pnoise dec 10 1 1Meg out=out\n.pxf dec 10 1k 10Meg input=V1 out=out outsideband=1\n.pstb probe=LPROBE maxharm=8 nmults=6\n.end\n"
             .to_owned(),
     );
@@ -681,6 +708,7 @@ fn an_unedited_rule_deck_and_waivers_never_refuse_the_dispatch() {
             && rule.rule().floor.deck <= DrcSeverity::Info
         {
             state
+                .model
                 .workspace
                 .content
                 .design_rules
@@ -688,7 +716,7 @@ fn an_unedited_rule_deck_and_waivers_never_refuse_the_dispatch() {
                 .expect("the rule may be reported as a note");
         }
     }
-    assert!(state.workspace.content.design_rules.len() >= 8);
+    assert!(state.model.workspace.content.design_rules.len() >= 8);
     for cell in ["a", "b", "c", "d", "e", "f", "g", "h"] {
         let mut stored = crate::state::SchematicState::default();
         stored
@@ -701,6 +729,7 @@ fn an_unedited_rule_deck_and_waivers_never_refuse_the_dispatch() {
             })
             .expect("the rule may be waived");
         state
+            .model
             .workspace
             .insert_schematic_editor(format!("work/{cell}/schematic"), stored);
     }
@@ -720,12 +749,12 @@ fn an_unedited_rule_deck_and_waivers_never_refuse_the_dispatch() {
 #[test]
 fn an_equal_setup_rebuilt_before_dispatch_does_not_refuse_it() {
     let mut state = runnable_state();
-    state.sim_setup.listed = (0..24).collect();
+    state.model.sim_setup.listed = (0..24).collect();
     let mut controller = SimulationController::new();
     controller
         .prepare_run_set_for_preflight(&state)
         .expect("preflight");
-    state.sim_setup.listed = (0..24).rev().collect();
+    state.model.sim_setup.listed = (0..24).rev().collect();
     controller
         .consume_snapshot_for_dispatch(&state)
         .expect("the setup holds what it held");
@@ -759,6 +788,7 @@ fn governed_snapshot_check_rejects_in_flight_pvt_change() {
     );
 
     state
+        .model
         .sim_setup
         .set_reference_pvt(crate::product::ProcessCorner::TT, 125.0)
         .expect("physical temperature");
@@ -779,7 +809,7 @@ fn governed_snapshot_check_rejects_in_flight_pvt_change() {
 #[test]
 fn manual_include_without_origin_fails_closed() {
     let mut state = AppState::default();
-    state.workspace.content.netlist_source =
+    state.model.workspace.content.netlist_source =
         Some("deck\n.include models.lib\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let error =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
@@ -894,6 +924,7 @@ fn an_unchanged_setup_cloned_and_refreshed_after_its_check_still_dispatches() {
     let mut state = runnable_state();
     {
         let plan = state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the setup holds a plan");
@@ -909,7 +940,7 @@ fn an_unchanged_setup_cloned_and_refreshed_after_its_check_still_dispatches() {
                 .expect("a listed analysis can be disabled");
         }
     }
-    state.sim_setup.refresh_legacy_analysis_projections();
+    state.model.sim_setup.refresh_legacy_analysis_projections();
     let mut controller = SimulationController::new();
     let snapshot =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::SimulateRunSet)
@@ -918,8 +949,8 @@ fn an_unchanged_setup_cloned_and_refreshed_after_its_check_still_dispatches() {
         .retain_prepared_from(&state, snapshot)
         .expect("the run is authorized");
 
-    state.sim_setup = state.sim_setup.clone();
-    state.sim_setup.refresh_legacy_analysis_projections();
+    state.model.sim_setup = state.model.sim_setup.clone();
+    state.model.sim_setup.refresh_legacy_analysis_projections();
 
     controller
         .consume_snapshot_for_dispatch(&state)
@@ -972,7 +1003,7 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         "veriloga",
     ));
     state
-        .workspace
+        .model.workspace
         .content
         .insert_project_source_bundle(
             crate::state::ProjectSourceBundle::try_new(
@@ -987,24 +1018,26 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
         )
         .expect("install the cell view's Verilog-A source");
     let bundle = state
+        .model
         .workspace
         .content
         .project_sources
         .bundle_for_owner(&owner)
         .expect("installed project source bundle");
     let receipt =
-        compile_project_bundle_receipt(state.workspace.content.project.id(), bundle, None)
+        compile_project_bundle_receipt(state.model.workspace.content.project.id(), bundle, None)
             .expect("compile project Verilog-A source");
     state.ui.code_workspace.veriloga.receipt = Some(receipt);
 
     let bundle = state
+        .model
         .workspace
         .content
         .project_sources
         .bundle_for_owner(&owner)
         .expect("installed project source bundle");
     let source_key = rspice_design::project_sources::project_veriloga_bundle_source_key(
-        state.workspace.content.project.id(),
+        state.model.workspace.content.project.id(),
         bundle,
         "owned",
     )
@@ -1012,8 +1045,8 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let exact_directive =
         rspice_simulation::netlist_preparation::project_veriloga_directive(&source_key, "owned");
     let exact_runtimes = project_veriloga_runtimes_referenced_by(
-        state.workspace.content.project.id(),
-        &state.workspace.content.project_sources,
+        state.model.workspace.content.project.id(),
+        &state.model.workspace.content.project_sources,
         state
             .ui
             .code_workspace
@@ -1036,8 +1069,8 @@ fn case_altered_project_veriloga_key_is_rejected_before_dispatch() {
     let altered_directive =
         rspice_simulation::netlist_preparation::project_veriloga_directive(&altered_key, "owned");
     let altered_runtimes = project_veriloga_runtimes_referenced_by(
-        state.workspace.content.project.id(),
-        &state.workspace.content.project_sources,
+        state.model.workspace.content.project.id(),
+        &state.model.workspace.content.project_sources,
         state
             .ui
             .code_workspace
@@ -1076,7 +1109,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
     cell.add_view(view);
     let mut library = crate::state::Library::new("behavioral");
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
 
     let bundle = crate::state::ProjectSourceBundle::try_new(
             crate::state::ProjectSourceOwner::cell_view(reference),
@@ -1097,6 +1130,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         .expect("valid sealed Verilog-A bundle");
     let expected_digest = bundle.closure_digest();
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -1106,9 +1140,11 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
     let mut placed = crate::state::LibraryCellInstance::new("behavioral", "gain", "schematic");
     placed.terminal_order = vec!["p".to_owned(), "n".to_owned()];
     state
+        .model
         .schematic
         .add_library_cell_component(crate::state::Point::new(20, 20), placed);
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -1128,22 +1164,23 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         .expect("create executable mixed-signal configuration");
 
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .expect("resolve configured behavioral view");
     let runtimes = prepared_configuration_veriloga_runtimes(
-        state.workspace.content.project.id(),
-        &state.workspace.content.project_sources,
+        state.model.workspace.content.project.id(),
+        &state.model.workspace.content.project_sources,
         &projection,
     )
     .expect("compile exact configured source closure");
 
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
@@ -1202,7 +1239,7 @@ fn statistical_deferred_file_waveforms_are_rejected_before_dispatch() {
         );
         fs::write(&path, &source).unwrap();
         let mut state = manual_deck_state(&source);
-        state.workspace.content.netlist_source_path = Some(path.clone());
+        state.model.workspace.content.netlist_source_path = Some(path.clone());
         let result =
             SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck);
         if file_backed {
@@ -1303,8 +1340,8 @@ fn every_materialized_corner_binding_is_audited_before_dispatch() {
 #[test]
 fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
@@ -1315,7 +1352,7 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
         .retain_prepared_from(&state, snapshot)
         .expect("authorize replacement request");
 
-    let active_run_id = state.simulation.start_run().id;
+    let active_run_id = state.model.simulation.start_run().id;
     controller.current_run_id = Some(active_run_id);
     controller.current_spec = Some(AnalysisSpec::dc_op());
     controller.current_analysis_idx = 1;
@@ -1332,7 +1369,7 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
         controller.cached_netlist.as_deref(),
         Some("existing sealed batch")
     );
-    assert_eq!(state.simulation.retained.runs.len(), 1);
+    assert_eq!(state.model.simulation.retained.runs.len(), 1);
     assert_eq!(
         controller
             .run_authorization
@@ -1345,8 +1382,8 @@ fn active_batch_reentry_preserves_prepared_authorization_and_batch_metadata() {
 #[test]
 fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
     let snapshot =
@@ -1357,13 +1394,19 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
         .retain_prepared_from(&state, snapshot)
         .expect("authorize replacement request");
     controller.runner = crate::simulation::controller::test_execution::start_manual_deck(
-        state.workspace.content.netlist_source.as_deref().unwrap(),
+        state
+            .model
+            .workspace
+            .content
+            .netlist_source
+            .as_deref()
+            .unwrap(),
     );
     crate::simulation::controller::test_execution::wait_until_finished_unpolled(&controller.runner);
 
     controller.start_authorized_snapshot(&mut state);
 
-    assert!(state.simulation.retained.runs.is_empty());
+    assert!(state.model.simulation.retained.runs.is_empty());
     assert_eq!(controller.total_analyses, 0);
     assert_eq!(
         controller
@@ -1378,8 +1421,8 @@ fn unpolled_completion_reentry_does_not_consume_or_replace_authorization() {
 #[test]
 fn direct_manual_run_cannot_bypass_internal_prepare_and_permit_consumption() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
     let mut controller = SimulationController::new();
 
@@ -1415,9 +1458,9 @@ fn included_source_mutation_after_prepare_is_rejected() {
     fs::write(&origin, source).expect("write deck origin");
 
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(source.to_owned());
-    state.workspace.content.netlist_source_path = Some(origin);
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.workspace.content.netlist_source_path = Some(origin);
     let mut controller = SimulationController::new();
     let metadata = controller
         .validate_manual_deck_document(&state)
@@ -1447,9 +1490,9 @@ fn dispatched_include_closure_never_reopens_mutated_source_files() {
     fs::write(&origin, source).expect("write deck origin");
 
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(source.to_owned());
-    state.workspace.content.netlist_source_path = Some(origin);
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.workspace.content.netlist_source_path = Some(origin);
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -1513,7 +1556,7 @@ fn an_edit_to_a_validated_manual_deck_refuses_its_run() {
         .validate_manual_deck_document(&state)
         .expect("the deck validates");
     thread_preparations::take();
-    state.workspace.content.netlist_source = Some(MANUAL_DECK.replace("1k", "2k"));
+    state.model.workspace.content.netlist_source = Some(MANUAL_DECK.replace("1k", "2k"));
 
     let error = controller
         .consume_snapshot_for_dispatch(&state)
@@ -1536,13 +1579,14 @@ fn an_edit_to_a_validated_manual_deck_refuses_its_run() {
 #[test]
 fn a_schematic_edit_a_manual_deck_does_not_read_leaves_it_to_run() {
     let mut state = manual_deck_state(MANUAL_DECK);
-    load_example("Voltage Divider", &mut state.schematic);
+    load_example("Voltage Divider", &mut state.model.schematic);
     let mut controller = SimulationController::new();
     let validated = controller
         .validate_manual_deck_document(&state)
         .expect("the deck validates");
-    let topology = state.schematic.topology_version();
+    let topology = state.model.schematic.topology_version();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1550,7 +1594,7 @@ fn a_schematic_edit_a_manual_deck_does_not_read_leaves_it_to_run() {
         .find(|component| component.name == "R2")
         .expect("the divider draws R2")
         .value = "22k".to_owned();
-    assert_eq!(state.schematic.topology_version(), topology);
+    assert_eq!(state.model.schematic.topology_version(), topology);
 
     let dispatch = controller
         .consume_snapshot_for_dispatch(&state)
@@ -1570,11 +1614,13 @@ fn accepted_model_file_mutation_after_prepare_fails_closed() {
     .expect("write model");
     let mut state = runnable_state();
     let library_name = state
+        .model
         .model_library_manager
         .load_library_file(&model, None)
         .expect("load model library");
-    state.sim_setup.model_bindings.push(
+    state.model.sim_setup.model_bindings.push(
         state
+            .model
             .model_library_manager
             .simulation_plan_binding(&library_name)
             .expect("explicitly bind the loaded library to this plan"),
@@ -1669,6 +1715,7 @@ fn insert_enabled_draft(
     draft: crate::simulation::plan::AnalysisDraft,
 ) -> crate::product::AnalysisInstanceId {
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("test state owns a stable plan");
@@ -1685,8 +1732,8 @@ fn insert_enabled_draft(
 
 fn manual_deck_state(deck: &str) -> AppState {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(deck.to_owned());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(deck.to_owned());
     state
 }
 
@@ -1700,7 +1747,13 @@ fn reviewed_foreign_profile_is_applied_when_the_owned_deck_is_prepared() {
         None,
         "reviewed.cir",
     ));
-    let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_mut()
+        .unwrap();
     descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
     descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::SpectreSpiceV1);
     descriptor.compatibility_reviewed = true;
@@ -1733,7 +1786,13 @@ fn an_unreviewed_owned_profile_cannot_acquire_a_manual_execution_permit() {
         None,
         "quarantined.cir",
     ));
-    let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_mut()
+        .unwrap();
     descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
     descriptor.execution_profile = None;
     descriptor.compatibility_reviewed = false;
@@ -1752,7 +1811,13 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
         None,
         "reviewed.cir"
     ));
-    let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_mut()
+        .unwrap();
     descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spice3Ngspice);
     descriptor.execution_profile = Some(crate::state::NetlistExecutionProfile::Spice3NgspiceV2);
     descriptor.compatibility_reviewed = true;
@@ -1781,7 +1846,7 @@ fn reviewed_ngspice_profile_binds_engine_defaults_and_revalidates_edits() {
         ),
         source.replace(".control; analyses", ".unsupported_card\n.control"),
     ] {
-        state.workspace.content.netlist_source = Some(edit);
+        state.model.workspace.content.netlist_source = Some(edit);
         assert!(controller.validate_manual_deck_document(&state).is_err());
         assert!(controller.run_authorization.retained_snapshot().is_none());
     }
@@ -1819,8 +1884,8 @@ fn an_enabled_corner_analysis_without_a_technology_blocks_preparation() {
     let mut state = technology_free_runnable_state();
     // The sections are declared by the plan, which is the only place a run
     // space is declared now. The corner instance reads them.
-    state.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::default();
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    state.model.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::default();
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind == rspice_simulation_contract::run_set::RunSetDimensionKind::Supply {
             dimension.source = format!(
                 "{}VDD",
@@ -1860,13 +1925,15 @@ fn a_technology_binding_without_an_audit_receipt_blocks_preparation() {
     let mut state = runnable_state();
     // A copy keeps the binding and starts a fresh audit history, which is
     // exactly the shape the reattach contract refuses.
-    state.workspace.content.project = state
+    state.model.workspace.content.project = state
+        .model
         .workspace
         .content
         .project
         .fork_copy_at(PathBuf::from("forked").join("copy.rsproj"));
     assert!(
         state
+            .model
             .workspace
             .content
             .project
@@ -1932,6 +1999,7 @@ fn builder_resolvable_model_names_prepare_without_any_card() {
 fn a_generated_run_set_names_its_unresolved_device_models() {
     let mut state = technology_free_runnable_state();
     let bound = state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -2001,10 +2069,14 @@ fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
             .expect("the two terminals are joined");
     }
 
-    if state.library_manager.get_library("user").is_none() {
-        state.library_manager.add_library(Library::new("user"));
+    if state.model.library_manager.get_library("user").is_none() {
+        state
+            .model
+            .library_manager
+            .add_library(Library::new("user"));
     }
     let cell = state
+        .model
         .library_manager
         .get_library_mut("user")
         .expect("the project library")
@@ -2014,26 +2086,29 @@ fn an_error_inside_an_instantiated_cellview_refuses_the_run() {
     }
     let reference = CellViewRef::new("user", "loop", "schematic");
     state
+        .model
         .workspace
         .insert_schematic_editor(reference.key(), master);
 
     let mut binding = LibraryCellInstance::new("user", "loop", "schematic");
     binding.bind_interface(&[]);
     state
+        .model
         .schematic
         .add_library_cell_component(Point::new(400, 400), binding);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
 
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .expect("the authored hierarchy projects");
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     let root = projection
@@ -2108,10 +2183,14 @@ fn author_two_occurrences_of_one_cell(state: &mut AppState) {
     master.add_wire(vec![Point::new(10, 0), Point::new(10, 40)]);
     master.add_wire(vec![Point::new(50, 0), Point::new(50, 40)]);
 
-    if state.library_manager.get_library("user").is_none() {
-        state.library_manager.add_library(Library::new("user"));
+    if state.model.library_manager.get_library("user").is_none() {
+        state
+            .model
+            .library_manager
+            .add_library(Library::new("user"));
     }
     let cell = state
+        .model
         .library_manager
         .get_library_mut("user")
         .expect("the project library")
@@ -2120,18 +2199,21 @@ fn author_two_occurrences_of_one_cell(state: &mut AppState) {
         cell.add_view(View::new("schematic", ViewType::Schematic));
     }
     state
+        .model
         .workspace
         .insert_schematic_editor(CellViewRef::new("user", "pad", "schematic").key(), master);
 
     let mut binding = LibraryCellInstance::new("user", "pad", "schematic");
     binding.bind_interface(&[]);
     state
+        .model
         .schematic
         .add_library_cell_component(Point::new(400, 400), binding.clone());
     state
+        .model
         .schematic
         .add_library_cell_component(Point::new(600, 400), binding);
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
 }
 
 #[test]
@@ -2140,15 +2222,16 @@ fn the_prepared_snapshot_carries_the_decks_emission_map() {
     author_two_occurrences_of_one_cell(&mut state);
 
     let projection = state
+        .model
         .workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .expect("the authored hierarchy projects");
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
@@ -2260,7 +2343,13 @@ fn reviewed_spectre_header_survives_path_based_dependency_expansion() {
             Some(path),
             "export"
         ));
-        let descriptor = state.workspace.content.netlist_descriptor.as_mut().unwrap();
+        let descriptor = state
+            .model
+            .workspace
+            .content
+            .netlist_descriptor
+            .as_mut()
+            .unwrap();
         descriptor.imported_dialect = Some(crate::state::NetlistSourceDialect::Spectre);
         descriptor.execution_profile = Some(profile);
         descriptor.compatibility_reviewed = true;

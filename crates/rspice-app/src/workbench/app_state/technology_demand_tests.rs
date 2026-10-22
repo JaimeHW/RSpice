@@ -10,6 +10,7 @@ use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
 fn insert_corner(state: &mut AppState, corner: CornerDialogState) -> AnalysisInstanceId {
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("a default state owns a stable plan");
@@ -30,7 +31,7 @@ fn insert_corner(state: &mut AppState, corner: CornerDialogState) -> AnalysisIns
 /// corner analysis demands come from the plan's axis rather than from the
 /// instance — so a test about section demand has to declare one.
 fn enable_global_process_axis(state: &mut AppState) {
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind == RunSetDimensionKind::ProcessSection {
             dimension.enabled = true;
         }
@@ -48,7 +49,7 @@ fn sole_reason(demand: &TechnologyDemand) -> &TechnologyDemandReason {
 }
 
 fn disable_global_process_axis(state: &mut AppState) {
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind == RunSetDimensionKind::ProcessSection {
             dimension.enabled = false;
         }
@@ -79,8 +80,8 @@ fn a_nominal_global_run_set_demands_no_technology() {
 #[test]
 fn the_default_global_pvt_run_set_demands_its_non_typical_sections() {
     let mut state = AppState::default();
-    bind_supply_source(&mut state.sim_setup.run_set);
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    bind_supply_source(&mut state.model.sim_setup.run_set);
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         dimension.enabled = true;
     }
     let demand = state.technology_demand();
@@ -101,6 +102,7 @@ fn a_non_typical_reference_process_demands_its_section() {
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
     state
+        .model
         .sim_setup
         .set_reference_pvt(ProcessCorner::SS, 27.0)
         .expect("the reference point is valid");
@@ -132,7 +134,7 @@ fn a_non_typical_reference_process_demands_its_section() {
 fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections_once() {
     let mut state = AppState::default();
     enable_global_process_axis(&mut state);
-    bind_supply_source(&mut state.sim_setup.run_set);
+    bind_supply_source(&mut state.model.sim_setup.run_set);
     insert_corner(&mut state, CornerDialogState::default());
     insert_corner(&mut state, CornerDialogState::default());
 
@@ -167,6 +169,7 @@ fn a_corner_without_a_process_axis_does_not_restate_the_reference_section() {
     let mut state = AppState::default();
     disable_global_process_axis(&mut state);
     state
+        .model
         .sim_setup
         .set_reference_pvt(ProcessCorner::SS, 27.0)
         .expect("the reference point is valid");

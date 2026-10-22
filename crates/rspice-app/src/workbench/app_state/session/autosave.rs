@@ -24,13 +24,13 @@ impl RSpiceApp {
     pub(in crate::workbench) fn autosave_tick(&mut self, ctx: &Context) {
         let minutes = self.state.ui.autosave_minutes;
         if minutes == 0
-            || !self.state.schematic.session.is_dirty
-            || self.state.schematic.session.read_only
+            || !self.state.model.schematic.session.is_dirty
+            || self.state.model.schematic.session.read_only
         {
             self.autosave_last = None;
             return;
         }
-        let Some(path) = self.state.schematic.session.current_file.clone() else {
+        let Some(path) = self.state.model.schematic.session.current_file.clone() else {
             // Nothing to anchor a checkpoint to — save once and autosave
             // takes over.
             return;
@@ -60,7 +60,7 @@ impl RSpiceApp {
         let was_failing = self.state.ui.autosave_failing;
         let written = crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(
             &path,
-            &self.state.schematic,
+            &self.state.model.schematic,
         );
         self.state.ui.autosave_failing = written.is_err();
         match written {
@@ -244,8 +244,8 @@ mod tests {
 
         let mut app = RSpiceApp::test_instance();
         app.state.ui.autosave_minutes = 1;
-        app.state.schematic.session.is_dirty = true;
-        app.state.schematic.session.current_file = Some(blocker.join("design.rspice"));
+        app.state.model.schematic.session.is_dirty = true;
+        app.state.model.schematic.session.current_file = Some(blocker.join("design.rspice"));
         app.autosave_last =
             Some(std::time::Instant::now() - std::time::Duration::from_secs(2 * 60));
         let ctx = egui::Context::default();

@@ -353,9 +353,9 @@ fn symbol_corpus_revision<'a>(
     hasher: &mut DefaultHasher,
     views: &mut Vec<SymbolViewSite<'a>>,
 ) {
-    app.state.library_manager.revision().hash(hasher);
-    app.state.library_manager.show_read_only.hash(hasher);
-    for library in app.state.library_manager.libraries_sorted() {
+    app.state.model.library_manager.revision().hash(hasher);
+    app.state.model.library_manager.show_read_only.hash(hasher);
+    for library in app.state.model.library_manager.libraries_sorted() {
         library.name.hash(hasher);
         library.read_only.hash(hasher);
         for cell in library.cells_sorted() {
@@ -508,7 +508,7 @@ fn parse_symbol_view(site: &SymbolViewSite<'_>) -> ParsedSymbolView {
 /// is the same one the linear search found.
 fn model_names_by_cell(app: &ManagerRenderContext<'_>) -> BTreeMap<String, String> {
     let mut names = BTreeMap::new();
-    for library in app.state.model_library_manager.libraries_sorted() {
+    for library in app.state.model.model_library_manager.libraries_sorted() {
         for model in library.models.values() {
             names
                 .entry(model.name.to_ascii_lowercase())
@@ -826,7 +826,7 @@ pub(super) fn placed_instances(
     app: &ManagerRenderContext<'_>,
     row: &SymbolRow,
 ) -> PlacedInstances {
-    let Some(schematic) = app.state.workspace.active_schematic() else {
+    let Some(schematic) = app.state.model.workspace.active_schematic() else {
         return PlacedInstances {
             total: 0,
             shown: Vec::new(),
@@ -834,7 +834,7 @@ pub(super) fn placed_instances(
     };
     // `family` is `library/model`; an instance names the model alone.
     let family = row.family.rsplit('/').next().unwrap_or_default().to_owned();
-    let sheet = app.state.workspace.content.active_view.display_path();
+    let sheet = app.state.model.workspace.content.active_view.display_path();
     let mut hasher = DefaultHasher::new();
     row.reference.library.hash(&mut hasher);
     row.reference.cell.hash(&mut hasher);

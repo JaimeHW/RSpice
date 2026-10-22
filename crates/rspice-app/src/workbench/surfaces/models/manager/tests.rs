@@ -15,13 +15,14 @@ mod provider_dialog;
 #[test]
 fn bound_consumers_are_attributed_only_to_the_effective_provider() {
     let mut state = AppState::default();
-    state.model_library_manager.clear();
+    state.model.model_library_manager.clear();
     for name in ["alpha", "beta"] {
         let mut library = ModelLibrary::new(name);
         library.add_model(DeviceModel::new("nch", ModelType::Nmos));
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
     }
     state
+        .model
         .model_library_manager
         .resolve_definition_provider(
             ModelConsumerScope::PrimitiveModel,
@@ -31,8 +32,9 @@ fn bound_consumers_are_attributed_only_to_the_effective_provider() {
         )
         .expect("the contested provider can be resolved");
 
-    state.workspace.ensure_active_buffer();
+    state.model.workspace.ensure_active_buffer();
     let mut schematic = state
+        .model
         .workspace
         .active_schematic()
         .map(|source| source.clone_editor())
@@ -41,7 +43,7 @@ fn bound_consumers_are_attributed_only_to_the_effective_provider() {
     component.name = "M1".to_owned();
     component.params = "model=nch model_library=alpha".to_owned();
     schematic.document_mut_for_test().components.push(component);
-    state.workspace.save_active_schematic(&schematic);
+    state.model.workspace.save_active_schematic(&schematic);
 
     let mut pending_actions = Vec::new();
     let render = ManagerRenderContext {
@@ -77,10 +79,10 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
         let mut library = ModelLibrary::new(library_name);
         library.pack_id = Some("shared-pack".to_owned());
         library.add_model(DeviceModel::new(model_name, ModelType::Nmos));
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
     }
-    let initial_revision = state.workspace.content.project.revision();
-    let initial_epoch = state.design_execution_epoch;
+    let initial_revision = state.model.workspace.content.project.revision();
+    let initial_epoch = state.model.design_execution_epoch;
     let mut pending_actions = Vec::new();
     let mut render = ManagerRenderContext {
         state: &mut state,
@@ -92,6 +94,7 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
     assert!(
         render
             .state
+            .model
             .model_library_manager
             .get_library("pack-a")
             .is_none()
@@ -99,16 +102,24 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
     assert!(
         render
             .state
+            .model
             .model_library_manager
             .get_library("pack-b")
             .is_none()
     );
     assert_eq!(
-        render.state.workspace.content.project.revision().get(),
+        render
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .revision()
+            .get(),
         initial_revision.get() + 1
     );
     assert_eq!(
-        render.state.design_execution_epoch,
+        render.state.model.design_execution_epoch,
         initial_epoch.wrapping_add(1)
     );
 }
@@ -118,9 +129,10 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
     let mut state = AppState::default();
     state.provision_test_project_symbol_technology_contract();
     state
+        .model
         .library_manager
         .add_library(crate::state::Library::new("signed_variant_test"));
-    let initial_revision = state.workspace.content.project.revision();
+    let initial_revision = state.model.workspace.content.project.revision();
     let package_digest = state
         .project_signed_technology_package()
         .expect("exact package resolves")
@@ -143,11 +155,19 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
 
     assert!(receipt.contains("signed technology symbol 'demo180/nmos_demo'"));
     assert_eq!(
-        render.state.workspace.content.project.revision().get(),
+        render
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .revision()
+            .get(),
         initial_revision.get() + 1
     );
     let view = render
         .state
+        .model
         .library_manager
         .get_library("signed_variant_test")
         .and_then(|library| library.get_cell("nmos_custom"))
@@ -175,7 +195,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .validate()
         .expect("project variant stays executable");
 
-    let committed_revision = render.state.workspace.content.project.revision();
+    let committed_revision = render.state.model.workspace.content.project.revision();
     assert!(
         author_technology_symbol_variant(
             &mut render,
@@ -187,7 +207,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .is_err()
     );
     assert_eq!(
-        render.state.workspace.content.project.revision(),
+        render.state.model.workspace.content.project.revision(),
         committed_revision,
         "a rejected overwrite must not publish a partial transaction"
     );
@@ -619,7 +639,7 @@ impl ModelsStudio {
 /// to, with the selection sitting on that instance.
 fn one_model_project() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
-    app.state.model_library_manager.clear();
+    app.state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("alpha");
     let mut model = DeviceModel::new("nch", ModelType::Nmos);
     model.file_path = Some(PathBuf::from("alpha.lib"));
@@ -629,7 +649,7 @@ fn one_model_project() -> RSpiceApp {
     library
         .model_qualification
         .insert("nch".to_owned(), ModelQualificationState::default());
-    app.state.model_library_manager.add_library(library);
+    app.state.model.model_library_manager.add_library(library);
     app.state.select_model_library("alpha");
     app.state.workbench.selected_model = Some("nch".to_owned());
     app.state.workbench.models_page = ModelsPage::Models;
@@ -638,11 +658,13 @@ fn one_model_project() -> RSpiceApp {
     component.name = "M1".to_owned();
     component.params = "model=nch".to_owned();
     app.state
+        .model
         .schematic
         .document_mut_for_test()
         .components
         .push(component);
     app.state
+        .model
         .schematic
         .session
         .editor
@@ -669,7 +691,7 @@ fn the_bind_primary_names_the_instance_it_would_bind() {
     // With nothing selected there is nothing to name, and the base spelling —
     // the one the control ratchet reads — is what comes back.
     let mut app = one_model_project();
-    app.state.schematic.session.editor.selection.clear();
+    app.state.model.schematic.session.editor.selection.clear();
     let unselected = ModelsStudio::open(app);
     assert!(
         unselected.announces(|label| label == "Bind to selection…"),

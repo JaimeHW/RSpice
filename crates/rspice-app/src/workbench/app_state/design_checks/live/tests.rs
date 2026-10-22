@@ -44,10 +44,12 @@ fn rows_about(state: &AppState, name: &str) -> Vec<(uuid::Uuid, String, String, 
 fn place_open_resistor(state: &mut AppState, at: Instant, x: i32) -> String {
     let _ = state.refresh_live_checks(at);
     let id = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(x, 400));
     settle(state, at);
     state
+        .model
         .schematic
         .document()
         .components
@@ -75,6 +77,7 @@ fn an_edit_is_checked_once_it_settles_and_a_frame_without_one_checks_nothing() {
     );
 
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(400, 400));
     let wait = state
@@ -93,12 +96,12 @@ fn an_edit_is_checked_once_it_settles_and_a_frame_without_one_checks_nothing() {
             .any(|rule| rule.rule_code() == code)
     }));
 
-    let published = state.design_checks.published;
+    let published = state.model.design_checks.published;
     for frame in 2..8 {
         assert_eq!(state.refresh_live_checks(start + wait * frame), None);
     }
     assert_eq!(
-        state.design_checks.published, published,
+        state.model.design_checks.published, published,
         "a frame with no edit checks nothing"
     );
 }
@@ -111,6 +114,7 @@ fn a_finding_fixed_while_drawing_leaves_at_once_and_check_design_lists_it_nowher
     assert!(!rows_about(&state, &name).is_empty());
 
     let id = state
+        .model
         .schematic
         .document()
         .components
@@ -119,12 +123,13 @@ fn a_finding_fixed_while_drawing_leaves_at_once_and_check_design_lists_it_nowher
         .map(|component| component.id)
         .expect("the resistor is placed");
     state
+        .model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(id);
-    assert!(state.schematic.delete_selection());
+    assert!(state.model.schematic.delete_selection());
     settle(&mut state, start);
     assert!(rows_about(&state, &name).is_empty(), "{:?}", rows(&state));
 
@@ -165,7 +170,7 @@ type Marker = (String, String, String);
 
 fn marked(state: &AppState) -> Option<Vec<Marker>> {
     let result = state.dialogs.drc_results.as_ref()?;
-    (state.dialogs.drc_checked_version == state.schematic.topology_version()).then(|| {
+    (state.dialogs.drc_checked_version == state.model.schematic.topology_version()).then(|| {
         result
             .violations()
             .iter()
@@ -192,6 +197,7 @@ fn marked_about(state: &AppState, name: &str) -> Option<Vec<Marker>> {
 
 fn select_component_named(state: &mut AppState, name: &str) {
     let id = state
+        .model
         .schematic
         .document()
         .components
@@ -200,6 +206,7 @@ fn select_component_named(state: &mut AppState, name: &str) {
         .map(|component| component.id)
         .expect("the component is placed");
     state
+        .model
         .schematic
         .session
         .editor
@@ -227,7 +234,7 @@ fn a_finding_fixed_while_drawing_loses_its_marker_at_once() {
     assert_eq!(marked_about(&state, &name).map(sorted), Some(live));
 
     select_component_named(&mut state, &name);
-    assert!(state.schematic.delete_selection());
+    assert!(state.model.schematic.delete_selection());
     assert_eq!(marked(&state), None, "a drawing that moved marks nothing");
     settle(&mut state, start);
     assert_eq!(marked_about(&state, &name), Some(Vec::new()));
@@ -244,7 +251,7 @@ fn a_finding_a_live_pass_restated_is_marked_once_where_it_now_is() {
     state
         .check_active_cellview()
         .expect("the open cellview checks");
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     // Both passes describe the drawing; the live one is the newer.
     state
         .run_live_check(subject.clone())
@@ -297,8 +304,9 @@ fn a_waiver_applies_to_a_live_finding_as_to_any_other() {
     let mut state = open_state();
     let start = Instant::now();
     let name = place_open_resistor(&mut state, start, 400);
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     let (id, target) = state
+        .model
         .diagnostics
         .batch(&DiagnosticInputs::LiveCheck { subject })
         .expect("the live pass is published")
@@ -340,7 +348,7 @@ fn turning_live_checking_off_withdraws_its_findings() {
     state
         .check_active_cellview()
         .expect("the open cellview checks");
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     state
         .run_live_check(subject)
         .expect("the live rules check the drawing");
@@ -359,7 +367,7 @@ fn turning_live_checking_off_withdraws_its_findings() {
         rows(&state)
     );
     assert!(
-        state.design_checks.live.is_empty(),
+        state.model.design_checks.live.is_empty(),
         "no live pass is left standing"
     );
 
@@ -380,8 +388,9 @@ fn turning_live_checking_off_withdraws_its_findings() {
 #[test]
 fn a_drawing_that_cannot_be_checked_says_so_once() {
     let mut state = open_state();
-    let root = state.workspace.content.active_view.clone();
+    let root = state.model.workspace.content.active_view.clone();
     state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -403,12 +412,14 @@ fn a_drawing_that_cannot_be_checked_says_so_once() {
     let _ = state.refresh_live_checks(start);
     for x in [400, 600] {
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(x, 400));
         settle(&mut state, start);
     }
 
     let said = state
+        .model
         .log_buffer
         .entries()
         .filter(|entry| entry.message.starts_with("Live checks could not run: "))

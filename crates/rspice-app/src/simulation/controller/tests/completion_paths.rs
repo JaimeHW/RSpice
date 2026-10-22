@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn touchstone_auto_export_uses_export_workflow_io() {
     let mut state = AppState::default();
-    state.simulation.start_run();
+    state.model.simulation.start_run();
 
     let mut controller = SimulationController::new();
     controller.touchstone_export_policy = TouchstoneExportPolicy::enabled(
@@ -37,11 +37,12 @@ fn touchstone_auto_export_uses_export_workflow_io() {
     controller.current_analysis_idx = 1;
     // Live editor mutations after dispatch must not redirect or reformat
     // the prepared automatic export.
-    state.schematic.session.current_file = Some(PathBuf::from("changed").join("redirect.sch"));
+    state.model.schematic.session.current_file =
+        Some(PathBuf::from("changed").join("redirect.sch"));
     let mut changed = crate::simulation::dialog::SpConfig::default();
     changed.touchstone_export = false;
     changed.touchstone_version = 1;
-    state.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&changed);
+    state.model.sim_setup.sp = crate::simulation::dialog::SpDialogState::from_config(&changed);
 
     let export_io = MockExportWorkflowIo::default();
     let prepared = controller
@@ -88,7 +89,7 @@ fn the_exported_file_is_the_version_that_was_chosen() {
             .expect("an enabled export prepares a policy");
 
         let mut state = AppState::default();
-        state.simulation.start_run();
+        state.model.simulation.start_run();
         let mut controller = SimulationController::new();
         controller.touchstone_export_policy = policy;
         // Uniform references throughout: v1 cannot carry per-port impedances
@@ -663,30 +664,36 @@ fn incomplete_soa_results_fail_closed_without_retained_payloads() {
 #[test]
 fn sensitivity_spec_projects_frequency_only_in_ac_mode() {
     let mut state = AppState::default();
-    state.sim_setup.sens = crate::simulation::dialog::SensDialogState::from_config(
+    state.model.sim_setup.sens = crate::simulation::dialog::SensDialogState::from_config(
         &rspice_simulation_contract::sens_draft::SensConfig::default(),
     );
-    state.sim_setup.sens.ac_freq = "invalid".to_owned();
+    state.model.sim_setup.sens.ac_freq = "invalid".to_owned();
     assert!(matches!(
-        rspice_simulation::analysis_preparation::build_sensitivity_spec(&state.sim_setup.sens)
-            .unwrap(),
+        rspice_simulation::analysis_preparation::build_sensitivity_spec(
+            &state.model.sim_setup.sens
+        )
+        .unwrap(),
         crate::simulation::multi_run::AnalysisSpec::Sensitivity {
             ac_mode: false,
             frequency: None,
             ..
         }
     ));
-    state.sim_setup.sens.sens_type_idx = 1;
+    state.model.sim_setup.sens.sens_type_idx = 1;
     assert!(
-        rspice_simulation::analysis_preparation::build_sensitivity_spec(&state.sim_setup.sens)
-            .is_err()
+        rspice_simulation::analysis_preparation::build_sensitivity_spec(
+            &state.model.sim_setup.sens
+        )
+        .is_err()
     );
     for (text, expected) in [("2k", 2_000.0), ("3Meg", 3_000_000.0)] {
-        state.sim_setup.sens.ac_freq = text.to_owned();
+        state.model.sim_setup.sens.ac_freq = text.to_owned();
         let crate::simulation::multi_run::AnalysisSpec::Sensitivity {
             ac_mode, frequency, ..
-        } = rspice_simulation::analysis_preparation::build_sensitivity_spec(&state.sim_setup.sens)
-            .unwrap()
+        } = rspice_simulation::analysis_preparation::build_sensitivity_spec(
+            &state.model.sim_setup.sens,
+        )
+        .unwrap()
         else {
             panic!("sensitivity spec")
         };
@@ -727,7 +734,7 @@ fn sensitivity_completion_preserves_unavailable_results_and_logs_no_values() {
     let mut state = AppState::default();
     controller.apply_result_side_effects(&mut state, &result);
     assert!(
-        state.log_buffer.is_empty(),
+        state.model.log_buffer.is_empty(),
         "result values are the Results workspace's to show, not the log's"
     );
     let retained = controller.convert_to_analysis_result_with_metadata_owned(
@@ -814,6 +821,7 @@ fn sensitivity_study_fixture() -> crate::state::SensitivityStudyEvidence {
 fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
     let mut state = AppState::default();
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -821,9 +829,9 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
-    state.workspace.content.netlist_source =
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
-    state.simulation.execution.request_manual_deck_run();
+    state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -837,8 +845,8 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
         .as_ref()
         .map(AnalysisResultProvenance::source_domain);
     let cached_netlist = controller.cached_netlist.clone().unwrap_or_default();
-    let run_count = state.simulation.retained.runs.len();
-    let status = state.simulation.execution.status.clone();
+    let run_count = state.model.simulation.retained.runs.len();
+    let status = state.model.simulation.execution.status.clone();
     controller.abort();
 
     assert_eq!(total_analyses, 1);
@@ -853,6 +861,7 @@ fn manual_deck_trigger_runs_deck_analysis_without_enabled_run_set() {
 fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_stripped() {
     let mut state = AppState::default();
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -860,10 +869,10 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("run-set analysis disables");
-    state.workspace.content.netlist_source =
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
-    let project_revision = state.workspace.content.project.revision();
-    state.simulation.execution.request_manual_deck_run();
+    let project_revision = state.model.workspace.content.project.revision();
+    state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -884,7 +893,11 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
         expanded.as_bytes(),
     );
     {
-        let run = state.simulation.active_run().expect("manual run starts");
+        let run = state
+            .model
+            .simulation
+            .active_run()
+            .expect("manual run starts");
         let receipt = run.prepared_receipt().expect("manual run is sealed");
         assert_eq!(
             receipt.source_domain(),
@@ -910,6 +923,7 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
     }
 
     let run = state
+        .model
         .simulation
         .active_run_mut()
         .expect("manual run remains active");
@@ -930,9 +944,9 @@ fn controller_manual_run_receipt_remains_authoritative_if_result_provenance_is_s
 #[test]
 fn controller_manual_run_receipt_survives_production_project_round_trip() {
     let mut state = AppState::default();
-    state.workspace.content.netlist_source =
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned());
-    state.simulation.execution.request_manual_deck_run();
+    state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -944,6 +958,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
         .expect("controller owns the prepared manual task");
     let expected_source_id = task_provenance.source_instance_id();
     state
+        .model
         .simulation
         .active_run_mut()
         .expect("prepared manual run")
@@ -992,6 +1007,7 @@ fn controller_manual_run_receipt_survives_production_project_round_trip() {
 fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     let mut state = AppState::default();
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -999,10 +1015,10 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
     let transient_id = plan.instances()[0].id();
     plan.set_enabled(transient_id, false)
         .expect("the sole run-set analysis disables");
-    state.sim_setup.options.reltol = 1.0e-4;
-    state.workspace.content.netlist_source =
+    state.model.sim_setup.options.reltol = 1.0e-4;
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
-    state.simulation.execution.request_manual_deck_run();
+    state.model.simulation.execution.request_manual_deck_run();
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -1020,11 +1036,12 @@ fn manual_deck_run_preserves_editor_source_without_ui_option_injection() {
 #[test]
 fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
-    state.workspace.content.netlist_source =
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
+    state.model.workspace.content.netlist_source =
         Some("deck\n.include models.lib\nV1 out 0 1\n.op\n.end\n".to_string());
-    state.workspace.content.netlist_source_path = Some(PathBuf::from("decks").join("bias.cir"));
+    state.model.workspace.content.netlist_source_path =
+        Some(PathBuf::from("decks").join("bias.cir"));
 
     assert_eq!(
         SimulationController::analysis_source_path(&state).as_deref(),
@@ -1035,9 +1052,10 @@ fn manual_deck_runs_use_imported_netlist_origin_for_relative_includes() {
 #[test]
 fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
-    state.workspace.content.netlist_source = Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.schematic.session.current_file = Some(PathBuf::from("schematics").join("amp.rsch"));
+    state.model.workspace.content.netlist_source =
+        Some("deck\nV1 out 0 1\n.op\n.end\n".to_string());
 
     assert!(
         SimulationController::analysis_source_path(&state).is_none(),
@@ -1049,6 +1067,7 @@ fn manual_deck_runs_do_not_fall_back_to_schematic_path() {
 fn simulate_run_set_does_not_run_manual_deck_source() {
     let mut state = AppState::default();
     let plan = state
+        .model
         .sim_setup
         .analysis_plan
         .as_mut()
@@ -1060,14 +1079,14 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
         .insert_at(AnalysisKind::OperatingPoint, 0)
         .expect("OP inserts as the sole enabled analysis");
     assert_eq!(plan.instances()[0].id(), op_id);
-    state.workspace.content.netlist_source =
+    state.model.workspace.content.netlist_source =
         Some("deck\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_string());
-    state.simulation.execution.request_simulate_run_set();
+    state.model.simulation.execution.request_simulate_run_set();
     let mut controller = SimulationController::new();
 
     controller.start_simulation(&mut state);
-    let status = state.simulation.execution.status.clone();
-    let run_count = state.simulation.retained.runs.len();
+    let status = state.model.simulation.execution.status.clone();
+    let run_count = state.model.simulation.retained.runs.len();
     let total_analyses = controller.total_analyses;
     controller.abort();
 
@@ -1080,9 +1099,9 @@ fn simulate_run_set_does_not_run_manual_deck_source() {
 fn successful_manual_deck_run_promotes_pending_baseline() {
     let mut state = AppState::default();
     let mut controller = SimulationController::new();
-    state.simulation.source.netlist_content =
+    state.model.simulation.source.netlist_content =
         "deck\n.param r=1k cl = 2p expr={x}\n.op\n.end\n".to_string();
-    let run_id = state.simulation.start_run().id;
+    let run_id = state.model.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
     state.manual_run.pending_manual_run_id = Some(run_id);
     state.manual_run.pending_run_buffer =
@@ -1108,7 +1127,7 @@ fn failed_manual_deck_run_keeps_previous_baseline() {
     let mut state = AppState::default();
     let mut controller = SimulationController::new();
     state.manual_run.last_run_buffer = Some("old\n.op\n.end\n".to_string());
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     let run_id = run.id;
     run.success = false;
     bind_test_run_running(&mut state, &mut controller, run_id);
@@ -1128,8 +1147,9 @@ fn failed_manual_deck_run_keeps_previous_baseline() {
 #[test]
 fn batch_without_exact_run_ownership_does_not_modify_selected_history() {
     let mut state = AppState::default();
-    let historical_id = state.simulation.start_run().id;
+    let historical_id = state.model.simulation.start_run().id;
     let historical_lifecycle = state
+        .model
         .simulation
         .retained
         .run_by_sequence(historical_id)
@@ -1141,29 +1161,35 @@ fn batch_without_exact_run_ownership_does_not_modify_selected_history() {
     controller.finish_simulation_batch(&mut state);
 
     let historical = state
+        .model
         .simulation
         .retained
         .run_by_sequence(historical_id)
         .expect("historical run remains");
     assert!(historical.success);
     assert_eq!(historical.lifecycle, historical_lifecycle);
-    assert_eq!(state.simulation.execution.status, "Completed with errors");
+    assert_eq!(
+        state.model.simulation.execution.status,
+        "Completed with errors"
+    );
 }
 
 #[test]
 fn disappeared_batch_target_does_not_reselect_the_active_historical_analysis() {
     let mut state = AppState::default();
-    let historical_id = state.simulation.start_run().id;
+    let historical_id = state.model.simulation.start_run().id;
     let historical = state
+        .model
         .simulation
         .retained
         .run_by_sequence_mut(historical_id)
         .expect("historical run");
     historical.add_analysis(AnalysisResult::new(1, AnalysisType::DcOp, "first"));
     historical.add_analysis(AnalysisResult::new(2, AnalysisType::Ac, "second"));
-    assert!(state.simulation.select_latest_analysis());
+    assert!(state.model.simulation.select_latest_analysis());
     assert_eq!(
         state
+            .model
             .simulation
             .active_analysis()
             .map(|analysis| analysis.label.as_str()),
@@ -1178,6 +1204,7 @@ fn disappeared_batch_target_does_not_reselect_the_active_historical_analysis() {
 
     assert_eq!(
         state
+            .model
             .simulation
             .active_analysis()
             .map(|analysis| analysis.label.as_str()),
@@ -1541,8 +1568,8 @@ fn live_transient_accumulator_compacts_aligned_source_traces() {
 fn successful_manual_deck_run_preserves_post_launch_diff_pips() {
     let mut state = AppState::default();
     let mut controller = SimulationController::new();
-    state.simulation.source.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
-    let run_id = state.simulation.start_run().id;
+    state.model.simulation.source.netlist_content = "deck\n.op\nR1 out 0 2k\n.end\n".to_string();
+    let run_id = state.model.simulation.start_run().id;
     bind_test_run_running(&mut state, &mut controller, run_id);
     state.manual_run.pending_manual_run_id = Some(run_id);
     state.manual_run.pending_run_buffer = Some("deck\n.op\nR1 out 0 1k\n.end\n".to_string());
@@ -1576,7 +1603,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
     use crate::simulation::plan::AnalysisDraft;
 
     let mut state = super::super::test_execution::pvt::divider();
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let (corner, _) = plan.insert(AnalysisKind::Corner).unwrap();
     plan.edit(corner, |draft| {
         let AnalysisDraft::Corner(draft) = draft else {
@@ -1608,7 +1635,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
     // The reference point did not converge. The declaration must retain that
     // failure in its own position
     // rather than being dispatched to find out.
-    let run = state.simulation.start_run();
+    let run = state.model.simulation.start_run();
     run.restore_provenance(SimulationRunProvenance::Prepared(Box::new(receipt)))
         .unwrap();
     let run_sequence = run.id;
@@ -1624,6 +1651,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
     .expect("point provenance")
     .with_pvt_point(point.pvt_point().cloned());
     state
+        .model
         .simulation
         .retained
         .run_by_sequence_mut(run_sequence)
@@ -1650,6 +1678,7 @@ fn a_corner_declarations_turn_assembles_its_family_without_reaching_the_runner()
         "the batch finished in the same call, so nothing is awaiting an engine"
     );
     let run = state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -1681,8 +1710,8 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
     use crate::state::model_library::ModelLibraryManager;
 
     let mut state = AppState::default();
-    let epoch = state.design_execution_epoch;
-    let project_revision = state.workspace.content.project.revision();
+    let epoch = state.model.design_execution_epoch;
+    let project_revision = state.model.workspace.content.project.revision();
 
     let mut first = ModelLibraryManager::new();
     first
@@ -1701,19 +1730,22 @@ fn a_wholesale_catalogue_replacement_cannot_reuse_an_inspection_key_it_did_not_e
         )
         .expect("the second project's catalogue imports");
 
-    state.model_library_manager = first;
+    state.model.model_library_manager = first;
     let before = prepared_run::design_inspection_input_digest(&state);
 
-    state.model_library_manager = serde_json::from_str(
+    state.model.model_library_manager = serde_json::from_str(
         &serde_json::to_string(&second).expect("a catalogue serializes into a project file"),
     )
     .expect("a catalogue restores out of a project file");
 
     assert_eq!(
-        state.design_execution_epoch, epoch,
+        state.model.design_execution_epoch, epoch,
         "the collision is only real while every counter the digest folds in is unmoved"
     );
-    assert_eq!(state.workspace.content.project.revision(), project_revision);
+    assert_eq!(
+        state.model.workspace.content.project.revision(),
+        project_revision
+    );
     assert_ne!(
         prepared_run::design_inspection_input_digest(&state),
         before,
@@ -1747,7 +1779,7 @@ fn a_failed_analysis_is_written_once_in_its_runs_log_and_filed_in_problems() {
         },
     );
 
-    let run_sequence = state.simulation.start_run().id;
+    let run_sequence = state.model.simulation.start_run().id;
     SimulationController::report_failed_analysis(
         &mut state,
         "Transient",
@@ -1765,13 +1797,17 @@ fn a_failed_analysis_is_written_once_in_its_runs_log_and_filed_in_problems() {
         "the run's log records the event once, in the engine's own prose"
     );
     assert!(
-        state.log_buffer.is_empty(),
+        state.model.log_buffer.is_empty(),
         "a run's failure is its own log's, not the session's"
     );
     // The objects the engine named are the Problems record's route, which
     // `app_state::diagnostic_store` covers; the log's job here is the event.
     assert_eq!(
-        state.diagnostics.published_run_failures(run_sequence).len(),
+        state
+            .model
+            .diagnostics
+            .published_run_failures(run_sequence)
+            .len(),
         1
     );
 }
@@ -1782,6 +1818,7 @@ fn run_log_messages(
     run_sequence: u64,
 ) -> Vec<(crate::diagnostics::LogSeverity, String)> {
     state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -1820,7 +1857,7 @@ fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named()
 
     let mut state = AppState::default();
     state.open_project_session();
-    let run_sequence = state.simulation.start_run().id;
+    let run_sequence = state.model.simulation.start_run().id;
     let message = format!("Operating point failed: {error}");
     SimulationController::report_failed_analysis(
         &mut state,
@@ -1836,7 +1873,11 @@ fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named()
         "an attributed failure writes the engine's prose once; the attribution is the record's"
     );
     assert_eq!(
-        state.diagnostics.published_run_failures(run_sequence).len(),
+        state
+            .model
+            .diagnostics
+            .published_run_failures(run_sequence)
+            .len(),
         1
     );
 }
@@ -1845,7 +1886,7 @@ fn a_real_operating_point_refusal_is_filed_with_the_conductor_the_engine_named()
 fn a_failure_that_named_nothing_writes_one_line() {
     let mut state = AppState::default();
     state.open_project_session();
-    let run_sequence = state.simulation.start_run().id;
+    let run_sequence = state.model.simulation.start_run().id;
 
     SimulationController::report_failed_analysis(
         &mut state,
@@ -1888,12 +1929,12 @@ fn manual_deck_parameters_authored_with_units_are_read() {
 fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
     let mut controller = SimulationController::new();
     let mut state = AppState::default();
-    let run_sequence = state.simulation.start_run().id;
+    let run_sequence = state.model.simulation.start_run().id;
     controller.current_run_id = Some(run_sequence);
-    assert!(state.simulation.select_run(0));
+    assert!(state.model.simulation.select_run(0));
 
-    let before = state.simulation.view.data_version;
-    let digest_before = state.simulation.retained.runs[0]
+    let before = state.model.simulation.view.data_version;
+    let digest_before = state.model.simulation.retained.runs[0]
         .dataset_content_digest()
         .to_string();
 
@@ -1906,20 +1947,20 @@ fn sealing_an_aborted_run_declares_a_new_dataset_generation() {
         )),
     );
 
-    assert!(!state.simulation.retained.runs[0].success);
+    assert!(!state.model.simulation.retained.runs[0].success);
     assert_eq!(
-        state.simulation.retained.runs[0].lifecycle,
+        state.model.simulation.retained.runs[0].lifecycle,
         SimulationRunLifecycle::Aborted
     );
     assert_ne!(
-        state.simulation.retained.runs[0]
+        state.model.simulation.retained.runs[0]
             .dataset_content_digest()
             .to_string(),
         digest_before,
         "the fixture must actually change the retained evidence"
     );
     assert_ne!(
-        state.simulation.view.data_version, before,
+        state.model.simulation.view.data_version, before,
         "the aborted run was sealed at the generation the memos already describe"
     );
 }

@@ -5,7 +5,7 @@ use super::*;
 use crate::schematic::view::sheet_visibility::two_sheet_state;
 
 fn crossing(state: &mut AppState, first: u64, second: u64) {
-    state.schematic.document_mut_for_test().wires.extend([
+    state.model.schematic.document_mut_for_test().wires.extend([
         Wire::segment(first, Point::new(-100, 0), Point::new(100, 0)),
         Wire::segment(second, Point::new(0, -100), Point::new(0, 100)),
     ]);
@@ -25,6 +25,7 @@ fn the_label_tool_refuses_an_unmarked_crossing() {
     ));
 
     state
+        .model
         .schematic
         .document_mut_for_test()
         .junctions
@@ -48,11 +49,12 @@ fn resistor_with_first_pin_at(pin: Point) -> Point {
 fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(1, Point::new(0, -100), Point::new(0, 100)));
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
 
     place_component(
         &mut state,
@@ -60,7 +62,7 @@ fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
         resistor_with_first_pin_at(Point::origin()),
     );
 
-    let wires = &state.schematic.document().wires;
+    let wires = &state.model.schematic.document().wires;
     assert_eq!(
         wires
             .iter()
@@ -70,6 +72,7 @@ fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
     );
     assert_eq!(
         state
+            .model
             .schematic
             .document()
             .junctions
@@ -78,8 +81,12 @@ fn a_part_dropped_with_a_pin_inside_a_wire_splits_it() {
             .collect::<Vec<_>>(),
         vec![Point::origin()]
     );
-    assert!(state.schematic.undo());
-    assert_eq!(state.schematic.document().wires.len(), 1, "one undo step");
+    assert!(state.model.schematic.undo());
+    assert_eq!(
+        state.model.schematic.document().wires.len(),
+        1,
+        "one undo step"
+    );
 }
 
 /// Sheet 2's wire under the dropped pin is on another page: it stays whole.
@@ -88,11 +95,12 @@ fn a_part_dropped_over_another_sheets_wire_leaves_it_whole() {
     let mut state = two_sheet_state(&[], &[1]);
     let hidden = Wire::segment(1, Point::new(-100, 0), Point::new(100, 0));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(hidden.clone());
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
 
     place_component(
         &mut state,
@@ -100,8 +108,8 @@ fn a_part_dropped_over_another_sheets_wire_leaves_it_whole() {
         resistor_with_first_pin_at(Point::origin()),
     );
 
-    assert_eq!(state.schematic.document().wires, vec![hidden]);
-    assert!(state.schematic.document().junctions.is_empty());
+    assert_eq!(state.model.schematic.document().wires, vec![hidden]);
+    assert!(state.model.schematic.document().junctions.is_empty());
 }
 
 /// A pin dropped exactly where two wires cross is ambiguous: neither wire is
@@ -119,6 +127,7 @@ fn a_part_dropped_on_an_unmarked_crossing_splits_neither_wire() {
 
     assert!(
         !state
+            .model
             .schematic
             .document()
             .wires
@@ -135,17 +144,18 @@ fn a_route_drawn_along_another_sheets_wire_is_not_folded_into_it() {
     let mut state = two_sheet_state(&[], &[1]);
     let hidden = Wire::segment(1, Point::new(0, 0), Point::new(40, 0));
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(hidden.clone());
-    state.schematic.init_undo_history();
+    state.model.schematic.init_undo_history();
 
-    state.schematic.start_wire(Point::new(20, 0));
-    state.schematic.extend_wire(Point::new(60, 0));
+    state.model.schematic.start_wire(Point::new(20, 0));
+    state.model.schematic.extend_wire(Point::new(60, 0));
     finish_wire_on_active_sheet(&mut state).expect("the route is drawn");
 
-    let wires = &state.schematic.document().wires;
+    let wires = &state.model.schematic.document().wires;
     assert_eq!(wires.iter().find(|wire| wire.id == 1), Some(&hidden));
     assert_eq!(wires.len(), 2);
 }
@@ -233,8 +243,8 @@ fn backspace(ctx: &egui::Context, state: &mut AppState, time: f64) {
 
 /// The wire tool armed on an editable canvas, one idle frame in.
 fn wire_tool(ctx: &egui::Context, state: &mut AppState) {
-    state.schematic.init_undo_history();
-    state.schematic.arm_tool(Tool::Wire);
+    state.model.schematic.init_undo_history();
+    state.model.schematic.arm_tool(Tool::Wire);
     canvas_frame(ctx, state, 0.0, Vec::new());
 }
 
@@ -245,28 +255,30 @@ fn a_double_click_on_a_wire_ends_the_route_without_starting_another() {
     let ctx = egui::Context::default();
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .document_mut_for_test()
         .wires
         .push(Wire::segment(1, Point::new(100, 200), Point::new(300, 200)));
     wire_tool(&ctx, &mut state);
     click(&ctx, &mut state, 0.1, Point::new(200, 100));
-    assert!(state.schematic.session.editor.wire_drawing.active);
+    assert!(state.model.schematic.session.editor.wire_drawing.active);
 
     click(&ctx, &mut state, 1.0, Point::new(200, 200));
     click(&ctx, &mut state, 1.1, Point::new(200, 200));
 
-    let drawing = &state.schematic.session.editor.wire_drawing;
+    let drawing = &state.model.schematic.session.editor.wire_drawing;
     assert!(!drawing.active, "a new route began at {:?}", drawing.points);
     assert!(
         state
+            .model
             .schematic
             .document()
             .wires
             .iter()
             .any(|wire| wire.points == vec![Point::new(200, 100), Point::new(200, 200)]),
         "{:?}",
-        state.schematic.document().wires
+        state.model.schematic.document().wires
     );
 }
 
@@ -276,26 +288,28 @@ fn a_click_on_a_pin_ends_the_route() {
     let ctx = egui::Context::default();
     let mut state = AppState::default();
     state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::new(200, 200));
-    let pin = state.schematic.document().components[0].terminal_positions()[0].1;
+    let pin = state.model.schematic.document().components[0].terminal_positions()[0].1;
     let start = Point::new(pin.x, pin.y - 100);
     wire_tool(&ctx, &mut state);
     click(&ctx, &mut state, 0.1, start);
 
     click(&ctx, &mut state, 1.0, pin);
 
-    let drawing = &state.schematic.session.editor.wire_drawing;
+    let drawing = &state.model.schematic.session.editor.wire_drawing;
     assert!(!drawing.active, "the route ran on: {:?}", drawing.points);
     assert!(
         state
+            .model
             .schematic
             .document()
             .wires
             .iter()
             .any(|wire| wire.points == vec![start, pin]),
         "{:?}",
-        state.schematic.document().wires
+        state.model.schematic.document().wires
     );
 }
 
@@ -316,24 +330,31 @@ fn backspace_takes_back_the_last_route_vertex() {
     click(&ctx, &mut state, 1.0, second);
     click(&ctx, &mut state, 2.0, third);
     assert_eq!(
-        state.schematic.session.editor.wire_drawing.points.len(),
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .points
+            .len(),
         4,
         "two clicks in line and one that turns a corner"
     );
 
     backspace(&ctx, &mut state, 3.0);
     assert_eq!(
-        state.schematic.session.editor.wire_drawing.points,
+        state.model.schematic.session.editor.wire_drawing.points,
         vec![first, second]
     );
     backspace(&ctx, &mut state, 3.1);
     assert_eq!(
-        state.schematic.session.editor.wire_drawing.points,
+        state.model.schematic.session.editor.wire_drawing.points,
         vec![first]
     );
-    assert!(state.schematic.session.editor.wire_drawing.active);
+    assert!(state.model.schematic.session.editor.wire_drawing.active);
 
     backspace(&ctx, &mut state, 3.2);
-    assert!(!state.schematic.session.editor.wire_drawing.active);
-    assert!(state.schematic.document().wires.is_empty());
+    assert!(!state.model.schematic.session.editor.wire_drawing.active);
+    assert!(state.model.schematic.document().wires.is_empty());
 }

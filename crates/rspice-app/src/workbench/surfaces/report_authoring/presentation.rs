@@ -180,6 +180,7 @@ impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
     fn run_options(&self) -> Vec<String> {
         self.0
             .state
+            .model
             .simulation
             .retained
             .runs

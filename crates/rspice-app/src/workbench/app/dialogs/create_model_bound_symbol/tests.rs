@@ -66,8 +66,9 @@ fn rects_overlap(a: egui::accesskit::Rect, b: egui::accesskit::Rect) -> bool {
 fn state_with_bound_mos_model() -> AppState {
     let mut state = AppState::default();
     state.open_project_session();
-    state.library_manager.clear();
+    state.model.library_manager.clear();
     state
+        .model
         .library_manager
         .add_library(Library::new("analog_blocks"));
     let mut models = crate::state::model_library::ModelLibraryManager::new();
@@ -82,7 +83,7 @@ fn state_with_bound_mos_model() -> AppState {
     model.add_parameter("vth0", 0.47);
     model_library.add_model(model);
     models.add_library(model_library);
-    state.model_library_manager = models;
+    state.model.model_library_manager = models;
     state.workbench.selected_model = Some("nmos_core".to_owned());
     state
 }
@@ -109,8 +110,9 @@ fn inferred_standard_model_contracts_remain_ordered_and_review_gated() {
 #[test]
 fn opening_uses_real_writable_library_and_selected_model() {
     let mut state = AppState::default();
-    state.library_manager.clear();
+    state.model.library_manager.clear();
     state
+        .model
         .library_manager
         .add_library(Library::new("analog_blocks"));
     let mut models = crate::state::model_library::ModelLibraryManager::new();
@@ -120,7 +122,7 @@ fn opening_uses_real_writable_library_and_selected_model() {
         DeviceModel::new("OPA189_A", ModelType::Other),
     );
     models.add_library(model_library);
-    state.model_library_manager = models;
+    state.model.model_library_manager = models;
     state.workbench.selected_model = Some("OPA189_A".to_owned());
 
     open_create_model_bound_symbol_dialog(&mut state);
@@ -139,7 +141,7 @@ fn opening_uses_real_writable_library_and_selected_model() {
 #[test]
 fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
     let mut state = state_with_bound_mos_model();
-    let initial_project_revision = state.workspace.content.project.revision();
+    let initial_project_revision = state.model.workspace.content.project.revision();
     open_create_model_bound_symbol_dialog(&mut state);
     state
         .dialogs
@@ -149,11 +151,15 @@ fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
     commit_create_model_bound_symbol(&mut state).expect("model-bound symbol commit");
 
     assert!(!state.dialogs.create_model_bound_symbol.open);
-    assert_eq!(state.workspace.content.active_view.view, "symbol");
-    assert_eq!(state.workspace.content.active_view.library, "analog_blocks");
-    assert_eq!(state.workspace.content.active_view.cell, "nmos_core");
-    assert!(state.workspace.content.project.revision() > initial_project_revision);
+    assert_eq!(state.model.workspace.content.active_view.view, "symbol");
+    assert_eq!(
+        state.model.workspace.content.active_view.library,
+        "analog_blocks"
+    );
+    assert_eq!(state.model.workspace.content.active_view.cell, "nmos_core");
+    assert!(state.model.workspace.content.project.revision() > initial_project_revision);
     let cell = state
+        .model
         .library_manager
         .get_library("analog_blocks")
         .and_then(|library| library.get_cell("nmos_core"))
@@ -206,6 +212,7 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
 
     let fixture_ref = CellViewRef::new("analog_blocks", "nmos_core", "testbench");
     let fixture = state
+        .model
         .workspace
         .schematic_editor(&fixture_ref.key())
         .expect("published editable fixture");
@@ -267,12 +274,14 @@ fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
 fn existing_schematic_source_is_identity_locked_and_preserves_the_master() {
     let mut state = AppState::default();
     state.open_project_session();
-    let library = state.workspace.content.active_view.library.clone();
-    let cell = state.workspace.content.active_view.cell.clone();
+    let library = state.model.workspace.content.active_view.library.clone();
+    let cell = state.model.workspace.content.active_view.cell.clone();
     let port_id = state
+        .model
         .schematic
         .add_component(ComponentType::Port, Point::origin());
     let port = state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -331,8 +340,12 @@ fn blank_contract_publishes_truthful_review_views_but_never_a_fixture() {
     assert!(!definition.generated_views.simulation_test_fixture);
 
     commit_create_model_bound_symbol(&mut state).expect("publish unbound review symbol");
-    assert_eq!(state.workspace.content.active_view.view, "parameter_form");
+    assert_eq!(
+        state.model.workspace.content.active_view.view,
+        "parameter_form"
+    );
     let cell = state
+        .model
         .library_manager
         .get_library("analog_blocks")
         .and_then(|library| library.get_cell("nmos_core"))

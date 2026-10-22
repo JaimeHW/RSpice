@@ -720,6 +720,7 @@ fn support_bundle_log(
     home: Option<&str>,
 ) -> Vec<serde_json::Value> {
     state
+        .model
         .log_buffer
         .entries()
         .map(|entry| {

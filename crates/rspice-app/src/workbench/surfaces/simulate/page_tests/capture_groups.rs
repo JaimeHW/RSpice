@@ -28,6 +28,7 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
         )
         .expect("valid saved output");
         app.state
+            .model
             .workspace
             .content
             .add_saved_output(id, output)
@@ -39,6 +40,7 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
     ));
     group.points = Some(SavedOutputPolicy::EveryAcceptedPoint);
     app.state
+        .model
         .workspace
         .content
         .add_capture_group(id, group)
@@ -48,6 +50,7 @@ fn seed_capture_group(app: &mut RSpiceApp) -> crate::product::CaptureGroupId {
 /// The group as the plan currently stores it.
 fn stored_group(app: &RSpiceApp, id: crate::product::CaptureGroupId) -> crate::state::CaptureGroup {
     app.state
+        .model
         .workspace
         .content
         .plan_data(plan_id(app))
@@ -76,6 +79,7 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
     let id = seed_capture_group(&mut app);
     let member = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id(&app))
@@ -91,6 +95,7 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
         // carry it through untouched however the rules change.
         group.members.push(member);
         app.state
+            .model
             .workspace
             .content
             .replace_capture_group(plan_id(&app), id, group)
@@ -162,6 +167,7 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
 fn page_capture_ledger(app: &RSpiceApp) -> rspice_simulation::capture_ledger::CaptureLedger {
     let payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id(app))
@@ -180,7 +186,7 @@ fn page_capture_ledger(app: &RSpiceApp) -> rspice_simulation::capture_ledger::Ca
         &outputs,
         &reports,
         &membership,
-        app.state.sim_setup.save_policy.output_selection_mode,
+        app.state.model.sim_setup.save_policy.output_selection_mode,
         &super::super::page_save::capture_workload(app).0,
     )
 }
@@ -198,6 +204,7 @@ fn the_capture_ledger_total_is_the_sum_of_its_rows_and_counts_each_output_once()
     seed_capture_group(&mut app);
     let payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id(&app))
@@ -246,6 +253,7 @@ fn a_capture_group_override_reaches_the_effective_output_the_run_will_use() {
     seed_capture_group(&mut app);
     let payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id(&app))
@@ -323,6 +331,7 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
 
     let detail = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("plan")
@@ -366,6 +375,7 @@ fn an_edit_that_moves_nothing_receipts_only_what_it_changed() {
 
     let detail = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("plan")
@@ -440,12 +450,14 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
     let watchlist = CaptureGroup::new("Watchlist").expect("group");
     let watchlist_id = watchlist.id;
     app.state
+        .model
         .workspace
         .content
         .add_capture_group(id, watchlist)
         .expect("second group");
     let output_id = app
         .state
+        .model
         .workspace
         .content
         .plan_data(id)
@@ -468,7 +480,13 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
         "the naming commits"
     );
 
-    let payload = app.state.workspace.content.plan_data(id).expect("payload");
+    let payload = app
+        .state
+        .model
+        .workspace
+        .content
+        .plan_data(id)
+        .expect("payload");
     let membership = crate::state::CaptureGroupMembership::resolve(
         &payload.capture_groups,
         &payload.saved_outputs,
@@ -480,6 +498,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
     );
     let detail = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("plan")
@@ -512,12 +531,14 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
     ));
     let group_id = app
         .state
+        .model
         .workspace
         .content
         .add_capture_group(id, group.clone())
         .expect("the plan accepts a two-rule group");
     let output_id = app
         .state
+        .model
         .workspace
         .content
         .plan_data(id)
@@ -525,6 +546,7 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
         .saved_outputs[1]
         .id;
     app.state
+        .model
         .workspace
         .content
         .set_capture_group_member(id, group_id, output_id, true)
@@ -536,6 +558,7 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
 
     let stored = app
         .state
+        .model
         .workspace
         .content
         .plan_data(id)
@@ -585,11 +608,12 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
 
     // A declared space with more than one point, and one analysis narrowed to
     // the nominal one — the case a scalar point count prices wrongly.
-    for dimension in &mut app.state.sim_setup.run_set.dimensions {
+    for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
         dimension.enabled = dimension.kind == RunSetDimensionKind::Temperature;
     }
     let nominal_only = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -600,16 +624,17 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
                 .map(AnalysisInstance::id)
         })
         .expect("the test plan runs a transient");
-    if let Some(plan) = app.state.sim_setup.analysis_plan.as_mut() {
+    if let Some(plan) = app.state.model.sim_setup.analysis_plan.as_mut() {
         let _ = plan.set_run_at(nominal_only, AnalysisRunAt::NominalPoint);
     }
     assert!(
-        app.state.sim_setup.run_set.point_count() > 1,
+        app.state.model.sim_setup.run_set.point_count() > 1,
         "the space has to multiply, or the two arithmetics cannot disagree"
     );
 
     let payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id(&app))
@@ -630,7 +655,7 @@ fn the_registry_size_and_the_ledger_row_price_one_output_once() {
     // the old cell was the authored record's own estimate times the declared
     // point count, and at least one output must not price that way.
     let matrix =
-        u64::try_from(app.state.sim_setup.run_set.point_count().max(1)).unwrap_or(u64::MAX);
+        u64::try_from(app.state.model.sim_setup.run_set.point_count().max(1)).unwrap_or(u64::MAX);
     let flat: Vec<u64> = app
         .simulation_controller
         .saved_outputs_preflight(&app.state, &payload.saved_outputs)

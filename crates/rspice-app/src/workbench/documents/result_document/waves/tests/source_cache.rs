@@ -132,12 +132,13 @@ fn wave_cache_unchanged_reads_and_clones_reuse_complete_models() {
 #[test]
 fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
     let mut state = AppState::default();
-    state.simulation = restored_spectrum(1.0, 3);
-    let models = spectrum_models(&state.simulation, &mut state.ui.results);
+    state.model.simulation = restored_spectrum(1.0, 3);
+    let models = spectrum_models(&state.model.simulation, &mut state.ui.results);
     assert_eq!(models[0].traces[0].y.as_slice(), [0.0; 3]);
     state.ui.results.session.cursor_strip = Some(0);
     state.ui.results.session.cursors.a = Some(1.0);
-    Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].y).fill(10.0);
+    Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
+        .fill(10.0);
 
     let copied = copy_cursor_text(&mut state).expect("the cursor has a retained readout");
     let magnitude = copied
@@ -261,7 +262,7 @@ fn wave_cache_family_envelopes_follow_rebuilt_model_generations() {
 fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
     let mut state = branches::hysteresis_run();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
         &Tokens::default(),

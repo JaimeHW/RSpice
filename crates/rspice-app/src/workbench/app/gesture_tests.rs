@@ -25,6 +25,7 @@ fn symbol_draft_survives_passive_window_projection() {
         let library = fixture
             .app
             .state
+            .model
             .workspace
             .content
             .active_view
@@ -44,6 +45,7 @@ fn symbol_draft_survives_passive_window_projection() {
             fixture
                 .app
                 .state
+                .model
                 .library_manager
                 .get_library_mut(&library)
                 .unwrap()
@@ -133,7 +135,7 @@ fn symbol_draft_survives_passive_window_projection() {
             });
         }
         assert_eq!(
-            fixture.app.state.workspace.content.active_view,
+            fixture.app.state.model.workspace.content.active_view,
             primary_view
         );
         assert_eq!(
@@ -204,22 +206,28 @@ impl Fixture {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
-        app.state.schematic = SchematicState::default();
-        app.state.schematic.session.editor.needs_fit = false;
-        app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+        app.state.model.schematic = SchematicState::default();
+        app.state.model.schematic.session.editor.needs_fit = false;
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit = false;
         if wires {
-            app.state.schematic.document_mut_for_test().wires = vec![
+            app.state.model.schematic.document_mut_for_test().wires = vec![
                 Wire::new(1, vec![Point::new(100, 100), Point::new(200, 100)]),
                 Wire::new(2, vec![Point::new(100, 100), Point::new(100, 200)]),
             ];
-            app.state.schematic.recalculate_runtime_state();
+            app.state.model.schematic.recalculate_runtime_state();
         } else {
             app.state
+                .model
                 .schematic
                 .add_component(ComponentType::Resistor, Point::new(100, 100));
         }
-        app.state.schematic.clear_undo_history();
-        app.state.schematic.session.is_dirty = false;
+        app.state.model.schematic.clear_undo_history();
+        app.state.model.schematic.session.is_dirty = false;
         app.state.sync_active_schematic_to_workspace();
         let mut fixture = Self {
             ctx,
@@ -254,7 +262,8 @@ impl Fixture {
                 app.state.reconcile_schematic_drag(ui.ctx(), false);
                 app.handle_shortcuts(ui.ctx());
                 *origin = ui.available_rect_before_wrap().min;
-                if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+                if app.state.model.workspace.content.active_view_type()
+                    == crate::state::ViewType::Symbol
                 {
                     crate::schematic::symbol_editor::show(ui, &mut app.state, None);
                 } else {
@@ -303,6 +312,7 @@ impl Fixture {
         let original = self
             .app
             .state
+            .model
             .workspace
             .content
             .active_schematic_reference();
@@ -311,18 +321,21 @@ impl Fixture {
         cell.add_view(View::new(&reference.view, ViewType::Schematic));
         self.app
             .state
+            .model
             .library_manager
             .get_library_mut(&reference.library)
             .unwrap()
             .add_cell(cell);
         self.app
             .state
+            .model
             .workspace
             .content
             .open_views
             .push(OpenCellView::new(reference.clone(), ViewType::Schematic));
         self.app
             .state
+            .model
             .workspace
             .insert_schematic_editor(reference.key(), SchematicState::default());
         reference
@@ -330,10 +343,10 @@ impl Fixture {
     fn enter_reused_master(&mut self) -> crate::state::CellViewRef {
         use crate::state::LibraryCellInstance;
         let master = self.second_document();
-        let child = self.app.state.schematic.clone();
-        self.app.state.schematic = SchematicState::default();
+        let child = self.app.state.model.schematic.clone();
+        self.app.state.model.schematic = SchematicState::default();
         for x in [0, 200] {
-            self.app.state.schematic.add_library_cell_component(
+            self.app.state.model.schematic.add_library_cell_component(
                 Point::new(x, 0),
                 LibraryCellInstance::new(&master.library, &master.cell, &master.view),
             );
@@ -341,6 +354,7 @@ impl Fixture {
         self.app.state.sync_active_schematic_to_workspace();
         self.app
             .state
+            .model
             .workspace
             .insert_schematic_editor(master.key(), child);
         self.app
@@ -354,28 +368,29 @@ impl Fixture {
 fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
     for wires in [false, true] {
         let mut fixture = Fixture::new(wires);
-        let original = fixture.app.state.schematic.clone();
+        let original = fixture.app.state.model.schematic.clone();
         fixture.drag(if wires {
             DragType::WireVertex
         } else {
             DragType::MoveSelection
         });
         assert!(
-            original.document().components != fixture.app.state.schematic.document().components
-                || original.document().wires != fixture.app.state.schematic.document().wires
+            original.document().components
+                != fixture.app.state.model.schematic.document().components
+                || original.document().wires != fixture.app.state.model.schematic.document().wires
         );
         fixture.frame(vec![fixture.button(170.0, false)], true);
-        assert!(!fixture.app.state.schematic.has_pending_operation());
-        assert!(fixture.app.state.schematic.undo());
+        assert!(!fixture.app.state.model.schematic.has_pending_operation());
+        assert!(fixture.app.state.model.schematic.undo());
         assert_eq!(
             original.document().components,
-            fixture.app.state.schematic.document().components
+            fixture.app.state.model.schematic.document().components
         );
         assert_eq!(
             original.document().wires,
-            fixture.app.state.schematic.document().wires
+            fixture.app.state.model.schematic.document().wires
         );
-        assert!(!fixture.app.state.schematic.can_undo());
+        assert!(!fixture.app.state.model.schematic.can_undo());
     }
 }
 
@@ -383,7 +398,15 @@ fn gesture_release_commits_selection_and_wire_vertex_moves_once() {
 fn gesture_escape_restores_geometry_and_release_cannot_recommit_it() {
     let mut fixture = Fixture::new(false);
     fixture.drag(DragType::MoveSelection);
-    let selection = fixture.app.state.schematic.session.editor.selection.clone();
+    let selection = fixture
+        .app
+        .state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .clone();
     fixture.frame(
         vec![egui::Event::Key {
             key: egui::Key::Escape,
@@ -395,26 +418,26 @@ fn gesture_escape_restores_geometry_and_release_cannot_recommit_it() {
         true,
     );
     assert_eq!(
-        fixture.app.state.schematic.document().components[0].pos,
+        fixture.app.state.model.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
     assert_eq!(
-        fixture.app.state.schematic.session.editor.selection,
+        fixture.app.state.model.schematic.session.editor.selection,
         selection
     );
     fixture.frame(vec![fixture.button(170.0, false)], true);
-    assert!(!fixture.app.state.schematic.can_undo());
-    assert!(!fixture.app.state.schematic.session.is_dirty);
+    assert!(!fixture.app.state.model.schematic.can_undo());
+    assert!(!fixture.app.state.model.schematic.session.is_dirty);
     fixture.drag(DragType::MoveSelection);
     fixture.frame(vec![fixture.button(170.0, false)], true);
-    assert!(fixture.app.state.schematic.can_undo());
+    assert!(fixture.app.state.model.schematic.can_undo());
 }
 
 #[test]
 fn gesture_returning_to_start_preserves_the_original_dirty_state() {
     for was_dirty in [false, true] {
         let mut fixture = Fixture::new(false);
-        fixture.app.state.schematic.session.is_dirty = was_dirty;
+        fixture.app.state.model.schematic.session.is_dirty = was_dirty;
         fixture.drag(DragType::MoveSelection);
         fixture.frame(
             vec![egui::Event::PointerMoved(
@@ -424,12 +447,15 @@ fn gesture_returning_to_start_preserves_the_original_dirty_state() {
         );
         fixture.frame(vec![fixture.button(100.0, false)], true);
         assert_eq!(
-            fixture.app.state.schematic.document().components[0].pos,
+            fixture.app.state.model.schematic.document().components[0].pos,
             Point::new(100, 100)
         );
-        assert_eq!(fixture.app.state.schematic.session.is_dirty, was_dirty);
-        assert!(!fixture.app.state.schematic.can_undo());
-        assert!(!fixture.app.state.schematic.has_pending_operation());
+        assert_eq!(
+            fixture.app.state.model.schematic.session.is_dirty,
+            was_dirty
+        );
+        assert!(!fixture.app.state.model.schematic.can_undo());
+        assert!(!fixture.app.state.model.schematic.has_pending_operation());
     }
 }
 
@@ -452,8 +478,15 @@ fn an_edit_while_the_button_is_held_survives_undoing_the_drag() {
             vec![Point::new(300, 300), Point::new(340, 300)],
         ));
     };
-    assert!(fixture.app.state.schematic.with_undo("add wire", add_wire));
-    let edited = fixture.app.state.schematic.document().wires.clone();
+    assert!(
+        fixture
+            .app
+            .state
+            .model
+            .schematic
+            .with_undo("add wire", add_wire)
+    );
+    let edited = fixture.app.state.model.schematic.document().wires.clone();
     for x in [110.0, 170.0] {
         fixture.frame(
             vec![egui::Event::PointerMoved(
@@ -465,18 +498,18 @@ fn an_edit_while_the_button_is_held_survives_undoing_the_drag() {
     assert!(fixture.app.state.schematic_drag_in_progress());
     fixture.frame(vec![fixture.button(170.0, false)], true);
     assert_ne!(
-        fixture.app.state.schematic.document().components[0].pos,
+        fixture.app.state.model.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
 
-    assert!(fixture.app.state.schematic.undo());
+    assert!(fixture.app.state.model.schematic.undo());
     assert_eq!(
-        fixture.app.state.schematic.document().components[0].pos,
+        fixture.app.state.model.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
-    assert_eq!(fixture.app.state.schematic.document().wires, edited);
-    assert!(fixture.app.state.schematic.undo());
-    assert!(!fixture.app.state.schematic.can_undo());
+    assert_eq!(fixture.app.state.model.schematic.document().wires, edited);
+    assert!(fixture.app.state.model.schematic.undo());
+    assert!(!fixture.app.state.model.schematic.can_undo());
 }
 
 #[test]
@@ -500,11 +533,11 @@ fn gesture_focus_loss_pointer_loss_and_touch_cancel_restore_the_baseline() {
         };
         fixture.frame(events, cause != 0);
         assert_eq!(
-            fixture.app.state.schematic.document().components[0].pos,
+            fixture.app.state.model.schematic.document().components[0].pos,
             Point::new(100, 100)
         );
-        assert!(!fixture.app.state.schematic.has_pending_operation());
-        assert!(!fixture.app.state.schematic.can_undo());
+        assert!(!fixture.app.state.model.schematic.has_pending_operation());
+        assert!(!fixture.app.state.model.schematic.can_undo());
     }
 }
 
@@ -516,18 +549,19 @@ fn gesture_tool_and_workspace_changes_cancel_without_starting_a_new_edit() {
         if workspace_change {
             fixture.app.state.workbench.activate(Workspace::Results);
         } else {
-            fixture.app.state.schematic.arm_tool(Tool::Wire);
+            fixture.app.state.model.schematic.arm_tool(Tool::Wire);
         }
         fixture.frame(vec![], true);
         assert_eq!(
-            fixture.app.state.schematic.document().components[0].pos,
+            fixture.app.state.model.schematic.document().components[0].pos,
             Point::new(100, 100)
         );
-        assert!(!fixture.app.state.schematic.has_pending_operation());
+        assert!(!fixture.app.state.model.schematic.has_pending_operation());
         assert!(
             !fixture
                 .app
                 .state
+                .model
                 .schematic
                 .session
                 .editor
@@ -541,22 +575,28 @@ fn gesture_tool_and_workspace_changes_cancel_without_starting_a_new_edit() {
 fn gesture_stale_owner_cannot_cancel_a_new_transaction() {
     let mut fixture = Fixture::new(false);
     fixture.drag(DragType::MoveSelection);
-    fixture.app.state.schematic.cancel_operation();
-    fixture.app.state.schematic.begin_operation("new edit");
+    fixture.app.state.model.schematic.cancel_operation();
     fixture
         .app
         .state
+        .model
+        .schematic
+        .begin_operation("new edit");
+    fixture
+        .app
+        .state
+        .model
         .schematic
         .document_mut_for_test()
         .components[0]
         .value = "2k".to_owned();
     fixture.app.state.cancel_schematic_drag();
-    assert!(fixture.app.state.schematic.has_pending_operation());
+    assert!(fixture.app.state.model.schematic.has_pending_operation());
     assert_eq!(
-        fixture.app.state.schematic.document().components[0].value,
+        fixture.app.state.model.schematic.document().components[0].value,
         "2k"
     );
-    assert!(fixture.app.state.schematic.end_operation());
+    assert!(fixture.app.state.model.schematic.end_operation());
 }
 
 #[test]
@@ -566,7 +606,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
     fixture.app.state.sync_active_schematic_to_workspace();
     let project =
         crate::workbench::lifecycle::project_lifecycle::snapshot(&fixture.app.state).unwrap();
-    let key = fixture.app.state.workspace.content.active_key();
+    let key = fixture.app.state.model.workspace.content.active_key();
     assert_eq!(
         project.file.workspace.schematic_buffers[&key]
             .document()
@@ -577,7 +617,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
     let json = serde_json::to_string(&fixture.app.state).unwrap();
     let restored: AppState = serde_json::from_str(&json).unwrap();
     assert_eq!(
-        restored.workspace.content.schematic_buffers[&key]
+        restored.model.workspace.content.schematic_buffers[&key]
             .document()
             .components[0]
             .pos,
@@ -585,7 +625,7 @@ fn gesture_project_and_session_snapshots_preserve_committed_geometry() {
     );
     assert!(fixture.app.state.schematic_drag_in_progress());
     assert_ne!(
-        fixture.app.state.schematic.document().components[0].pos,
+        fixture.app.state.model.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
 }
@@ -614,6 +654,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
                 fixture
                     .app
                     .state
+                    .model
                     .schematic
                     .with_undo("change resistor", |schematic| {
                         schematic.document_mut_for_test().components[0].value = "2k".to_owned();
@@ -628,7 +669,7 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
             )
             .unwrap();
             let saved = crate::io::load_project_file(&path).unwrap();
-            let key = fixture.app.state.workspace.content.active_key();
+            let key = fixture.app.state.model.workspace.content.active_key();
             assert_eq!(
                 saved.file.workspace.schematic_buffers[&key]
                     .document()
@@ -656,11 +697,11 @@ fn gesture_native_save_acceptance_rebases_cancel_and_release_dirty_state() {
             );
             assert_eq!(has_unsaved_changes(&fixture.app.state), completion == 2);
             assert_eq!(
-                fixture.app.state.schematic.session.is_dirty,
+                fixture.app.state.model.schematic.session.is_dirty,
                 completion == 2,
                 "dirty before drag={dirty_before_drag}, completion={completion}"
             );
-            assert!(!fixture.app.state.schematic.has_pending_operation());
+            assert!(!fixture.app.state.model.schematic.has_pending_operation());
             for suffix in ["", ".bak", ".rspice.lock"] {
                 let mut artifact = path.as_os_str().to_os_string();
                 artifact.push(suffix);
@@ -698,21 +739,25 @@ fn gesture_document_navigation_rolls_back_before_buffering_the_original() {
     let original = fixture
         .app
         .state
+        .model
         .workspace
         .content
         .active_schematic_reference();
     let second = fixture.second_document();
     fixture.drag(DragType::MoveSelection);
     fixture.app.state.open_workspace_view(second.clone());
-    assert_eq!(fixture.app.state.workspace.content.active_view, second);
-    let buffer = &fixture.app.state.workspace.content.schematic_buffers[&original.key()];
+    assert_eq!(
+        fixture.app.state.model.workspace.content.active_view,
+        second
+    );
+    let buffer = &fixture.app.state.model.workspace.content.schematic_buffers[&original.key()];
     assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
     assert!(buffer.pending_operation_id().is_none());
     fixture.app.state.open_workspace_view(original);
     fixture.frame(vec![fixture.button(170.0, false)], true);
-    assert!(!fixture.app.state.schematic.can_undo());
+    assert!(!fixture.app.state.model.schematic.can_undo());
     assert_eq!(
-        fixture.app.state.schematic.document().components[0].pos,
+        fixture.app.state.model.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
 }
@@ -724,6 +769,7 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
     let original = fixture
         .app
         .state
+        .model
         .workspace
         .content
         .active_schematic_reference();
@@ -744,12 +790,15 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
         .unwrap();
     fixture.app.capture_application_window_projection(primary);
     fixture.drag(DragType::MoveSelection);
-    let operation = fixture.app.state.schematic.pending_operation_id();
+    let operation = fixture.app.state.model.schematic.pending_operation_id();
     fixture.app.state.sync_active_schematic_to_workspace();
 
     for _ in 0..3 {
         assert!(fixture.app.project_application_window(secondary, layout));
-        assert_eq!(fixture.app.state.workspace.content.active_view, second);
+        assert_eq!(
+            fixture.app.state.model.workspace.content.active_view,
+            second
+        );
         assert!(
             !fixture
                 .app
@@ -772,7 +821,7 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
         let restored: AppState =
             serde_json::from_str(&serde_json::to_string(&fixture.app.state).unwrap()).unwrap();
         assert_eq!(
-            restored.workspace.content.schematic_buffers[&original.key()]
+            restored.model.workspace.content.schematic_buffers[&original.key()]
                 .document()
                 .components[0]
                 .pos,
@@ -787,21 +836,21 @@ fn gesture_window_projection_preserves_ownership_and_inactive_save_baselines() {
                 .schematic_drag_owned_by_context(&fixture.ctx)
         );
         assert_eq!(
-            fixture.app.state.schematic.pending_operation_id(),
+            fixture.app.state.model.schematic.pending_operation_id(),
             operation
         );
         assert_ne!(
-            fixture.app.state.schematic.document().components[0].pos,
+            fixture.app.state.model.schematic.document().components[0].pos,
             Point::new(100, 100)
         );
     }
     fixture.frame(vec![fixture.button(170.0, false)], true);
-    assert!(fixture.app.state.schematic.undo());
+    assert!(fixture.app.state.model.schematic.undo());
     assert_eq!(
-        fixture.app.state.schematic.document().components[0].pos,
+        fixture.app.state.model.schematic.document().components[0].pos,
         Point::new(100, 100)
     );
-    assert!(!fixture.app.state.schematic.can_undo());
+    assert!(!fixture.app.state.model.schematic.can_undo());
 }
 
 #[test]
@@ -810,10 +859,11 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
     for occurrence_change in [false, true] {
         let mut fixture = Fixture::new(false);
         let master = fixture.enter_reused_master();
-        let id = fixture.app.state.schematic.document().components[0].id;
+        let id = fixture.app.state.model.schematic.document().components[0].id;
         let first = fixture
             .app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -822,6 +872,7 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
         let catalog = fixture
             .app
             .state
+            .model
             .workspace
             .content
             .design_management
@@ -841,16 +892,17 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
         catalog.set_active(first).unwrap();
         fixture.drag(DragType::MoveSelection);
         if occurrence_change {
-            fixture.app.state.workspace.ascend_one().unwrap();
-            fixture
-                .app
-                .state
-                .workspace
-                .descend_into("X2".into(), master, ViewType::Schematic);
+            fixture.app.state.model.workspace.ascend_one().unwrap();
+            fixture.app.state.model.workspace.descend_into(
+                "X2".into(),
+                master,
+                ViewType::Schematic,
+            );
         } else {
             fixture
                 .app
                 .state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -862,11 +914,11 @@ fn gesture_occurrence_and_sheet_changes_cancel_the_original_transaction() {
         assert!(!fixture.app.state.schematic_drag_in_progress());
         fixture.frame(vec![fixture.button(170.0, false)], true);
         assert_eq!(
-            fixture.app.state.schematic.document().components[0].pos,
+            fixture.app.state.model.schematic.document().components[0].pos,
             Point::new(100, 100)
         );
-        assert!(!fixture.app.state.schematic.has_pending_operation());
-        assert!(!fixture.app.state.schematic.can_undo());
+        assert!(!fixture.app.state.model.schematic.has_pending_operation());
+        assert!(!fixture.app.state.model.schematic.can_undo());
     }
 }
 
@@ -887,9 +939,16 @@ fn conductor_routes_validate_source_before_finishing() {
             "window transfer",
         ] {
             let mut fixture = Fixture::new(false);
-            let root = fixture.app.state.workspace.content.active_view.clone();
+            let root = fixture
+                .app
+                .state
+                .model
+                .workspace
+                .content
+                .active_view
+                .clone();
             let master = fixture.enter_reused_master();
-            fixture.app.state.schematic.arm_tool(tool);
+            fixture.app.state.model.schematic.arm_tool(tool);
             for x in [300.0, 400.0] {
                 fixture.frame(
                     vec![
@@ -900,7 +959,7 @@ fn conductor_routes_validate_source_before_finishing() {
                 );
                 fixture.frame(vec![fixture.button(x, false)], true);
             }
-            let editor = &fixture.app.state.schematic.session.editor;
+            let editor = &fixture.app.state.model.schematic.session.editor;
             assert!(if tool == Tool::Wire {
                 editor.wire_drawing.active && editor.wire_drawing.points.len() >= 2
             } else {
@@ -917,21 +976,22 @@ fn conductor_routes_validate_source_before_finishing() {
                         .descend_into_instance(Some("X2".into()), master);
                 }
                 "sheet" => {
-                    let id = fixture.app.state.schematic.document().components[0].id;
+                    let id = fixture.app.state.model.schematic.document().components[0].id;
                     fixture
                         .app
                         .state
+                        .model
                         .workspace
                         .content
                         .design_management
                         .bootstrap_for_cell_view(&master.key(), "Sheet 1", [id])
                         .unwrap();
                 }
-                "topology" => fixture.app.state.schematic.bump_topology_version(),
-                "read-only" => fixture.app.state.schematic.session.read_only = true,
+                "topology" => fixture.app.state.model.schematic.bump_topology_version(),
+                "read-only" => fixture.app.state.model.schematic.session.read_only = true,
                 "replacement" => {
-                    let document = fixture.app.state.schematic.document().clone();
-                    fixture.app.state.schematic = SchematicState::from_document(document);
+                    let document = fixture.app.state.model.schematic.document().clone();
+                    fixture.app.state.model.schematic = SchematicState::from_document(document);
                     fixture.app.state.bump_active_schematic_epoch();
                 }
                 "document round trip" => {
@@ -978,7 +1038,7 @@ fn conductor_routes_validate_source_before_finishing() {
                 }],
                 true,
             );
-            let document = fixture.app.state.schematic.document();
+            let document = fixture.app.state.model.schematic.document();
             let count = if tool == Tool::Wire {
                 document.wires.len()
             } else {
@@ -993,6 +1053,7 @@ fn conductor_routes_validate_source_before_finishing() {
                 !fixture
                     .app
                     .state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -1003,6 +1064,7 @@ fn conductor_routes_validate_source_before_finishing() {
                 !fixture
                     .app
                     .state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -1010,15 +1072,33 @@ fn conductor_routes_validate_source_before_finishing() {
                     .active
             );
             assert_eq!(
-                fixture.app.state.schematic.can_undo(),
+                fixture.app.state.model.schematic.can_undo(),
                 can_finish,
                 "{tool:?}: {change}"
             );
             if can_finish {
-                assert!(fixture.app.state.schematic.undo());
-                assert!(fixture.app.state.schematic.document().wires.is_empty());
-                assert!(fixture.app.state.schematic.document().buses.is_empty());
-                assert!(!fixture.app.state.schematic.can_undo());
+                assert!(fixture.app.state.model.schematic.undo());
+                assert!(
+                    fixture
+                        .app
+                        .state
+                        .model
+                        .schematic
+                        .document()
+                        .wires
+                        .is_empty()
+                );
+                assert!(
+                    fixture
+                        .app
+                        .state
+                        .model
+                        .schematic
+                        .document()
+                        .buses
+                        .is_empty()
+                );
+                assert!(!fixture.app.state.model.schematic.can_undo());
             }
         }
     }
@@ -1032,6 +1112,7 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
         let original = fixture
             .app
             .state
+            .model
             .workspace
             .content
             .active_schematic_reference();
@@ -1057,7 +1138,7 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
         // Closing an unrelated window must not cancel the primary gesture.
         fixture.app.state.cancel_schematic_drag_in_window(secondary);
         assert!(
-            fixture.app.state.workspace.content.schematic_buffers[&original.key()]
+            fixture.app.state.model.workspace.content.schematic_buffers[&original.key()]
                 .pending_operation_id()
                 .is_some()
         );
@@ -1076,7 +1157,7 @@ fn gesture_new_window_owner_and_owner_window_close_restore_the_old_buffer() {
                     .schematic_drag_owned_by_context(&fixture.ctx)
             );
         }
-        let buffer = &fixture.app.state.workspace.content.schematic_buffers[&original.key()];
+        let buffer = &fixture.app.state.model.workspace.content.schematic_buffers[&original.key()];
         assert!(buffer.pending_operation_id().is_none());
         assert_eq!(buffer.document().components[0].pos, Point::new(100, 100));
     }
@@ -1096,10 +1177,11 @@ fn key(key: egui::Key) -> egui::Event {
 /// canvas at screen `(x, 100)`.
 fn float_a_pasted_resistor(fixture: &mut Fixture, x: f32) {
     use crate::workbench::commands::vocabulary::Command;
-    let id = fixture.app.state.schematic.document().components[0].id;
+    let id = fixture.app.state.model.schematic.document().components[0].id;
     fixture
         .app
         .state
+        .model
         .schematic
         .session
         .editor
@@ -1125,7 +1207,17 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
 
     let mut fixture = Fixture::new(false);
     float_a_pasted_resistor(&mut fixture, 300.0);
-    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+    assert_eq!(
+        fixture
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .len(),
+        1
+    );
     let start = fixture
         .app
         .state
@@ -1156,13 +1248,23 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
         "the copy did not follow: {start:?} -> {at:?}"
     );
     assert_eq!(floating.objects.components[0].rotation, Rotation::R90);
-    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+    assert_eq!(
+        fixture
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .len(),
+        1
+    );
 
     fixture.frame(vec![fixture.button(400.0, true)], true);
     fixture.frame(vec![fixture.button(400.0, false)], true);
 
     assert!(fixture.app.state.dialogs.floating_paste.is_none());
-    let document = fixture.app.state.schematic.document();
+    let document = fixture.app.state.model.schematic.document();
     assert_eq!(document.components.len(), 2, "the click placed the copy");
     let pasted = &document.components[1];
     assert_eq!(pasted.rotation, Rotation::R90);
@@ -1170,11 +1272,21 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
     assert!(pasted.pos.x % grid == 0 && pasted.pos.y % grid == 0);
     assert!(Command::Undo.is_enabled(&fixture.app));
     assert!(
-        fixture.app.state.schematic.undo(),
+        fixture.app.state.model.schematic.undo(),
         "the paste is one undo step"
     );
-    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
-    assert!(!fixture.app.state.schematic.can_undo());
+    assert_eq!(
+        fixture
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .len(),
+        1
+    );
+    assert!(!fixture.app.state.model.schematic.can_undo());
 }
 
 /// Carried to the canvas edge, a floating copy pans the view and keeps
@@ -1184,18 +1296,18 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
 fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
     let mut fixture = Fixture::new(false);
     let near_right_edge = fixture.origin + egui::vec2(590.0, 100.0);
-    let pan_before = fixture.app.state.schematic.session.editor.pan;
+    let pan_before = fixture.app.state.model.schematic.session.editor.pan;
     for _ in 0..3 {
         fixture.frame(vec![egui::Event::PointerMoved(near_right_edge)], true);
     }
     assert_eq!(
-        fixture.app.state.schematic.session.editor.pan, pan_before,
+        fixture.app.state.model.schematic.session.editor.pan, pan_before,
         "an idle pointer at the edge moved the view"
     );
 
     float_a_pasted_resistor(&mut fixture, 300.0);
     fixture.frame(vec![egui::Event::PointerMoved(near_right_edge)], true);
-    let first = fixture.app.state.schematic.session.editor.pan;
+    let first = fixture.app.state.model.schematic.session.editor.pan;
     let at_first = fixture
         .app
         .state
@@ -1207,7 +1319,7 @@ fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
     for _ in 0..5 {
         fixture.frame(vec![], true);
     }
-    let later = fixture.app.state.schematic.session.editor.pan;
+    let later = fixture.app.state.model.schematic.session.editor.pan;
     let at_later = fixture
         .app
         .state
@@ -1231,18 +1343,29 @@ fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
 #[test]
 fn escape_lets_a_floating_paste_go() {
     let mut fixture = Fixture::new(false);
-    let before = crate::state::SchematicSnapshot::capture(fixture.app.state.schematic.document());
+    let before =
+        crate::state::SchematicSnapshot::capture(fixture.app.state.model.schematic.document());
     float_a_pasted_resistor(&mut fixture, 300.0);
     assert!(fixture.app.state.dialogs.floating_paste.is_some());
 
     fixture.frame(vec![key(egui::Key::Escape)], true);
 
     assert!(fixture.app.state.dialogs.floating_paste.is_none());
-    assert!(before.is_equal_document(fixture.app.state.schematic.document()));
-    assert!(!fixture.app.state.schematic.can_undo());
+    assert!(before.is_equal_document(fixture.app.state.model.schematic.document()));
+    assert!(!fixture.app.state.model.schematic.can_undo());
     fixture.frame(vec![fixture.button(400.0, true)], true);
     fixture.frame(vec![fixture.button(400.0, false)], true);
-    assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+    assert_eq!(
+        fixture
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .len(),
+        1
+    );
 }
 
 /// Esc drops the tool and the canvas keeps the keyboard, so the next bare
@@ -1256,7 +1379,7 @@ fn after_escape_the_canvas_still_takes_its_keys() {
     fixture.frame(vec![egui::Event::PointerMoved(empty)], true);
     fixture.frame(vec![fixture.button(400.0, true)], true);
     fixture.frame(vec![fixture.button(400.0, false)], true);
-    let tool = |fixture: &Fixture| fixture.app.state.schematic.session.editor.tool;
+    let tool = |fixture: &Fixture| fixture.app.state.model.schematic.session.editor.tool;
     let tap = |fixture: &mut Fixture, pressed: egui::Key| {
         fixture.frame(vec![key(pressed)], true);
         fixture.frame(

@@ -11,20 +11,21 @@ mod pvt_base_tests {
     #[test]
     fn pvt_base_transient_window_survives_configuration_and_worker_transport() {
         let mut state = AppState::default();
-        state.sim_setup.tran.stop = "1m".into();
-        state.sim_setup.tran.step = "10u".into();
+        state.model.sim_setup.tran.stop = "1m".into();
+        state.model.sim_setup.tran.step = "10u".into();
         let temperature = rspice_simulation_contract::temp_draft::TempConfig {
             base_analysis: rspice_simulation_contract::temp_draft::TempBaseAnalysis::Transient,
             ..Default::default()
         };
         let corner = rspice_simulation_contract::corner_config::CornerConfig::default();
         let sealed = state
+            .model
             .model_library_manager
-            .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+            .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
             .unwrap();
         assert!(matches!(
             rspice_simulation::analysis_preparation::temp_run_config_from_dialog(
-                &state.sim_setup,
+                &state.model.sim_setup,
                 &temperature
             )
             .unwrap()
@@ -32,18 +33,18 @@ mod pvt_base_tests {
             CornerBaseMode::Transient { .. }
         ));
 
-        state.sim_setup.tran.start = "200u".into();
-        state.sim_setup.tran.max_step = "2u".into();
-        state.sim_setup.tran.uic = true;
+        state.model.sim_setup.tran.start = "200u".into();
+        state.model.sim_setup.tran.max_step = "2u".into();
+        state.model.sim_setup.tran.uic = true;
         for mode in [
             rspice_simulation::analysis_preparation::temp_run_config_from_dialog(
-                &state.sim_setup,
+                &state.model.sim_setup,
                 &temperature,
             )
             .unwrap()
             .base_mode,
             rspice_simulation::analysis_preparation::corner_run_config_from_dialog(
-                &state.sim_setup,
+                &state.model.sim_setup,
                 &corner,
                 &sealed,
             )
@@ -72,17 +73,17 @@ mod pvt_base_tests {
         }
 
         // Invalid inherited fields must fail on the study form as they do on Transient.
-        state.sim_setup.tran.max_step = "-2u".into();
+        state.model.sim_setup.tran.max_step = "-2u".into();
         assert!(
             rspice_simulation::analysis_preparation::temp_run_config_from_dialog(
-                &state.sim_setup,
+                &state.model.sim_setup,
                 &temperature
             )
             .is_err()
         );
         assert!(
             rspice_simulation::analysis_preparation::corner_run_config_from_dialog(
-                &state.sim_setup,
+                &state.model.sim_setup,
                 &corner,
                 &sealed
             )

@@ -28,6 +28,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 /// Every `PLAN` entry the Console holds, oldest first.
 fn plan_entries(app: &RSpiceApp) -> Vec<(LogSeverity, String)> {
     app.state
+        .model
         .log_buffer
         .entries()
         .filter(|entry| entry.source == LogSource::Plan)
@@ -38,6 +39,7 @@ fn plan_entries(app: &RSpiceApp) -> Vec<(LogSeverity, String)> {
 /// The first analysis instance of the fixture's plan.
 fn first_instance(app: &RSpiceApp) -> AnalysisInstanceId {
     app.state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the fixture has a stable plan")

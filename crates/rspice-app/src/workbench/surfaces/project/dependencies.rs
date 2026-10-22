@@ -242,6 +242,7 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.spacing_mut().item_spacing.y = 0.0;
     let binding = app
         .state
+        .model
         .workspace
         .content
         .project
@@ -327,8 +328,8 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         property_row_toned(ui, "Signed package", "Not attached", t.color.text_faint);
     }
-    let libraries = app.state.model_library_manager.library_count();
-    let models = app.state.model_library_manager.total_model_count();
+    let libraries = app.state.model.model_library_manager.library_count();
+    let models = app.state.model.model_library_manager.total_model_count();
     property_row(
         ui,
         "Model catalog",
@@ -595,7 +596,7 @@ fn unset_columns<const N: usize>(cells: &[&str; N]) -> Vec<usize> {
 
 fn dependency_rows(state: &AppState) -> Vec<DependencyRow> {
     let mut rows = Vec::new();
-    for library in state.library_manager.libraries_sorted() {
+    for library in state.model.library_manager.libraries_sorted() {
         rows.push(DependencyRow {
             identity: library.name.clone(),
             resource_type: "Design library".to_owned(),
@@ -617,7 +618,7 @@ fn dependency_rows(state: &AppState) -> Vec<DependencyRow> {
             },
         });
     }
-    for library in state.model_library_manager.libraries_sorted() {
+    for library in state.model.model_library_manager.libraries_sorted() {
         let authority = match library.source_authority {
             ModelSourceAuthority::BuiltIn => "Built-in catalog",
             ModelSourceAuthority::External => "External source",
@@ -693,6 +694,7 @@ fn display_path(path: &std::path::Path) -> String {
 
 fn dependency_manifest(state: &AppState) -> DependencyManifest {
     let technology = state
+        .model
         .workspace
         .content
         .project
@@ -706,8 +708,8 @@ fn dependency_manifest(state: &AppState) -> DependencyManifest {
         });
     DependencyManifest {
         schema_version: 1,
-        project_id: state.workspace.content.project.id().to_string(),
-        project_revision: state.workspace.content.project.revision().get(),
+        project_id: state.model.workspace.content.project.id().to_string(),
+        project_revision: state.model.workspace.content.project.revision().get(),
         technology,
         resources: dependency_rows(state),
     }
@@ -727,6 +729,7 @@ fn export_dependency_manifest(state: &mut AppState) {
     let filename = format!(
         "{}-dependencies.json",
         state
+            .model
             .workspace
             .content
             .project

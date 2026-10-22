@@ -801,7 +801,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                         mono: false,
                         meta: Some(meta),
                         alert: master.condition.is_some(),
-                        selected: state.workspace.content.active_view == reference,
+                        selected: state.model.workspace.content.active_view == reference,
                     },
                 );
                 // A master that did not resolve says why, and how much of the
@@ -821,7 +821,7 @@ pub(super) fn masters_section(ui: &mut Ui, state: &mut crate::workbench::app_sta
                     });
                     continue;
                 }
-                if !authored_view(&state.library_manager, &reference) {
+                if !authored_view(&state.model.library_manager, &reference) {
                     response.row.on_hover_text(DEVICE_MASTER_HINT);
                     continue;
                 }
@@ -888,8 +888,8 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
     let rows = occurrence_rows(
         &TreeSource {
             projection: projection.as_ref(),
-            sheets: &app.state.workspace.content.design_management,
-            libraries: &app.state.library_manager,
+            sheets: &app.state.model.workspace.content.design_management,
+            libraries: &app.state.model.library_manager,
             query: query.as_str(),
         },
         &tree,
@@ -917,7 +917,7 @@ pub(super) fn occurrences_section(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
 
-    let active = app.state.workspace.content.occurrence_path();
+    let active = app.state.model.workspace.content.occurrence_path();
     let scroll_to = tree.take_scroll_to();
     let mut descend = None;
     let mut enter_sheet = None;
@@ -1029,10 +1029,10 @@ fn resolved_projection(
     state: &crate::workbench::app_state::AppState,
     section: DesignNavigatorSection,
 ) -> Option<Arc<DesignProjection>> {
-    match state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    match state.model.workspace.design_projection(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     ) {
         Ok(projection) => Some(projection),
         Err(error) => {
@@ -1050,11 +1050,12 @@ fn resolved_projection(
 /// is offered exactly where there is one: on a child of the occurrence being
 /// edited. A row deeper in the tree names an instance none of them can reach.
 fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &OccurrenceRow) {
-    if row.path.parent().as_ref() != Some(&app.state.workspace.content.occurrence_path()) {
+    if row.path.parent().as_ref() != Some(&app.state.model.workspace.content.occurrence_path()) {
         return;
     }
     let Some(object) = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -1078,6 +1079,7 @@ fn occurrence_context_menu(response: &Response, app: &mut RSpiceApp, row: &Occur
 fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
     let Some(component) = app
         .state
+        .model
         .schematic
         .session
         .editor
@@ -1091,6 +1093,7 @@ fn reveal_canvas_selection(app: &RSpiceApp, tree: &mut NavigatorTreeState) {
     };
     let Ok(path) = app
         .state
+        .model
         .workspace
         .content
         .occurrence_path()
@@ -1128,10 +1131,10 @@ pub(super) fn open_occurrence(
     state: &mut crate::workbench::app_state::AppState,
     path: &InstancePath,
 ) {
-    let Ok(projection) = state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    let Ok(projection) = state.model.workspace.design_projection(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     ) else {
         return;
     };
@@ -1156,17 +1159,18 @@ pub(super) fn open_occurrence(
     }
     drop(projection);
     if let Some((_, terminal)) = steps.last()
-        && !authored_view(&state.library_manager, terminal)
+        && !authored_view(&state.model.library_manager, terminal)
     {
         return;
     }
 
     let rooted_here = state
+        .model
         .workspace
         .content
         .active_occurrence()
         .is_some_and(|occurrence| occurrence.root == root);
-    let current = state.workspace.content.occurrence_path();
+    let current = state.model.workspace.content.occurrence_path();
     let shared = if rooted_here {
         shared_prefix(&current, path)
     } else {

@@ -18,10 +18,11 @@ impl Editor {
         app.state.workbench.activate(Workspace::Design);
         let id = app
             .state
+            .model
             .schematic
             .add_component(ComponentType::VoltageSource, crate::state::Point::origin());
-        app.state.schematic.clear_undo_history();
-        app.state.schematic.session.is_dirty = false;
+        app.state.model.schematic.clear_undo_history();
+        app.state.model.schematic.session.is_dirty = false;
         Self {
             ctx,
             app,
@@ -45,6 +46,7 @@ impl Editor {
                 let component = self
                     .app
                     .state
+                    .model
                     .schematic
                     .document()
                     .components
@@ -157,6 +159,7 @@ fn parameter_field_commit_preserves_quoted_neighbors_and_undo_restores_duplicate
     editor
         .app
         .state
+        .model
         .schematic
         .document_mut_for_test()
         .components[0]
@@ -164,11 +167,11 @@ fn parameter_field_commit_preserves_quoted_neighbors_and_undo_restores_duplicate
     let note = r#"["a b" "C:\my data"] w=0"#;
     editor.edit("Note", note);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].params,
+        editor.app.state.model.schematic.document().components[0].params,
         original
     );
     editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
-    let committed = editor.app.state.schematic.document().components[0]
+    let committed = editor.app.state.model.schematic.document().components[0]
         .params
         .clone();
     assert!(committed.starts_with(r#"label="a  b" note="#));
@@ -185,20 +188,20 @@ fn parameter_field_commit_preserves_quoted_neighbors_and_undo_restores_duplicate
     );
     assert_eq!(
         field_value(
-            &editor.app.state.schematic.document().components[0],
+            &editor.app.state.model.schematic.document().components[0],
             &InlineEditField::Parameter("note".to_owned())
         ),
         note
     );
-    assert!(editor.app.state.schematic.undo());
+    assert!(editor.app.state.model.schematic.undo());
     assert_eq!(
-        editor.app.state.schematic.document().components[0].params,
+        editor.app.state.model.schematic.document().components[0].params,
         original
     );
-    assert!(!editor.app.state.schematic.can_undo());
-    assert!(editor.app.state.schematic.redo());
+    assert!(!editor.app.state.model.schematic.can_undo());
+    assert!(editor.app.state.model.schematic.redo());
     assert_eq!(
-        editor.app.state.schematic.document().components[0].params,
+        editor.app.state.model.schematic.document().components[0].params,
         committed
     );
 }
@@ -210,6 +213,7 @@ fn malformed_parameter_text_retains_the_field_draft_until_raw_text_is_repaired()
     editor
         .app
         .state
+        .model
         .schematic
         .document_mut_for_test()
         .components[0]
@@ -217,19 +221,19 @@ fn malformed_parameter_text_retains_the_field_draft_until_raw_text_is_repaired()
     editor.edit("Note", "repair");
     editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].params,
+        editor.app.state.model.schematic.document().components[0].params,
         original
     );
     let draft = editor.app.state.workbench.inline_edit.session().unwrap();
     assert_eq!(draft.buffer, "repair");
     assert!(draft.error.as_ref().unwrap().contains("unterminated"));
-    assert!(!editor.app.state.schematic.can_undo());
+    assert!(!editor.app.state.model.schematic.can_undo());
     editor.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
     let repaired = r#"note="repaired" label=" a  b ""#;
     editor.edit("Parameters", repaired);
     editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].params,
+        editor.app.state.model.schematic.document().components[0].params,
         repaired
     );
     assert_eq!(
@@ -241,7 +245,7 @@ fn malformed_parameter_text_retains_the_field_draft_until_raw_text_is_repaired()
     editor.edit("Parameters", "note=one NOTE=two");
     editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].params,
+        editor.app.state.model.schematic.document().components[0].params,
         repaired
     );
     assert!(
@@ -258,12 +262,12 @@ fn malformed_parameter_text_retains_the_field_draft_until_raw_text_is_repaired()
             .contains("more than once")
     );
     editor.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
-    assert!(editor.app.state.schematic.undo());
+    assert!(editor.app.state.model.schematic.undo());
     assert_eq!(
-        editor.app.state.schematic.document().components[0].params,
+        editor.app.state.model.schematic.document().components[0].params,
         original
     );
-    assert!(!editor.app.state.schematic.can_undo());
+    assert!(!editor.app.state.model.schematic.can_undo());
 }
 
 #[test]
@@ -272,7 +276,7 @@ fn direct_property_dialog_open_captures_the_committed_inline_value() {
     editor.edit("Value", "12");
     crate::workbench::app::open_property_editor(&mut editor.app.state, editor.id);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].value,
+        editor.app.state.model.schematic.document().components[0].value,
         "12"
     );
     assert_eq!(
@@ -298,19 +302,22 @@ fn escape_discards_valid_and_invalid_fields_without_design_or_history_changes() 
     ] {
         let mut editor = Editor::new();
         let before =
-            crate::state::SchematicSnapshot::capture(editor.app.state.schematic.document());
-        let topology = editor.app.state.schematic.topology_version();
+            crate::state::SchematicSnapshot::capture(editor.app.state.model.schematic.document());
+        let topology = editor.app.state.model.schematic.topology_version();
         editor.edit(label, draft);
-        assert!(before.is_equal_document(editor.app.state.schematic.document()));
+        assert!(before.is_equal_document(editor.app.state.model.schematic.document()));
         editor.pass(vec![key(egui::Key::Escape, egui::Modifiers::NONE)]);
         assert!(
             editor.app.state.workbench.inline_edit.session().is_none(),
             "{label}: {draft}"
         );
-        assert!(before.is_equal_document(editor.app.state.schematic.document()));
-        assert!(!editor.app.state.schematic.session.is_dirty);
-        assert_eq!(editor.app.state.schematic.topology_version(), topology);
-        assert!(!editor.app.state.schematic.can_undo());
+        assert!(before.is_equal_document(editor.app.state.model.schematic.document()));
+        assert!(!editor.app.state.model.schematic.session.is_dirty);
+        assert_eq!(
+            editor.app.state.model.schematic.topology_version(),
+            topology
+        );
+        assert!(!editor.app.state.model.schematic.can_undo());
         assert!(editor.app.state.project_undo_sequence().is_none());
     }
 }
@@ -322,50 +329,53 @@ fn switching_fields_in_either_render_order_commits_each_edit_once() {
         [("Value", "12"), ("Instance", "V9")],
     ] {
         let mut editor = Editor::new();
-        let before = editor.app.state.schematic.document().components[0].clone();
+        let before = editor.app.state.model.schematic.document().components[0].clone();
         editor.edit(order[0].0, order[0].1);
         editor.edit(order[1].0, order[1].1);
         editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
         assert_eq!(
-            editor.app.state.schematic.document().components[0].name,
+            editor.app.state.model.schematic.document().components[0].name,
             "V9"
         );
         assert_eq!(
-            editor.app.state.schematic.document().components[0].value,
+            editor.app.state.model.schematic.document().components[0].value,
             "12"
         );
         editor.app.action_edit_undo();
         if order[1].0 == "Value" {
             assert_eq!(
-                editor.app.state.schematic.document().components[0].name,
+                editor.app.state.model.schematic.document().components[0].name,
                 "V9"
             );
             assert_eq!(
-                editor.app.state.schematic.document().components[0].value,
+                editor.app.state.model.schematic.document().components[0].value,
                 before.value
             );
         } else {
             assert_eq!(
-                editor.app.state.schematic.document().components[0].name,
+                editor.app.state.model.schematic.document().components[0].name,
                 "V1"
             );
             assert_eq!(
-                editor.app.state.schematic.document().components[0].value,
+                editor.app.state.model.schematic.document().components[0].value,
                 "12"
             );
         }
         editor.app.action_edit_undo();
-        assert_eq!(editor.app.state.schematic.document().components[0], before);
-        assert!(!editor.app.state.schematic.can_undo());
+        assert_eq!(
+            editor.app.state.model.schematic.document().components[0],
+            before
+        );
+        assert!(!editor.app.state.model.schematic.can_undo());
         assert!(editor.app.state.project_undo_sequence().is_none());
         editor.app.action_edit_redo();
         editor.app.action_edit_redo();
         assert_eq!(
-            editor.app.state.schematic.document().components[0].name,
+            editor.app.state.model.schematic.document().components[0].name,
             "V9"
         );
         assert_eq!(
-            editor.app.state.schematic.document().components[0].value,
+            editor.app.state.model.schematic.document().components[0].value,
             "12"
         );
     }
@@ -382,13 +392,13 @@ fn a_rejected_field_keeps_its_text_and_focus_until_repaired_or_cancelled() {
     assert!(session.error.is_some());
     assert_eq!(editor.ctx.memory(|memory| memory.focused()), session.widget);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V1"
     );
     editor.replace("V9");
     editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V9"
     );
     assert!(editor.app.state.workbench.inline_edit.session().is_none());
@@ -419,7 +429,7 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
             .take_run_and_queue_request()
     );
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V1"
     );
     assert!(editor.app.state.workbench.inline_edit.session().is_some());
@@ -427,7 +437,7 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
     Command::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
     assert_eq!(editor.app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V9"
     );
     assert!(editor.app.state.workbench.inline_edit.session().is_none());
@@ -440,6 +450,7 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
         let original = editor
             .app
             .state
+            .model
             .workspace
             .content
             .active_schematic_reference();
@@ -448,10 +459,11 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
         other_schematic
             .document_mut_for_test()
             .components
-            .push(editor.app.state.schematic.document().components[0].clone());
+            .push(editor.app.state.model.schematic.document().components[0].clone());
         editor
             .app
             .state
+            .model
             .workspace
             .insert_schematic_editor(other.key(), other_schematic);
         editor.edit("Instance", if valid { "V9" } else { "invalid name" });
@@ -461,17 +473,18 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
                 editor
                     .app
                     .state
+                    .model
                     .workspace
                     .content
                     .active_schematic_reference(),
                 other
             );
             assert_eq!(
-                editor.app.state.schematic.document().components[0].name,
+                editor.app.state.model.schematic.document().components[0].name,
                 "V1"
             );
             assert_eq!(
-                editor.app.state.workspace.content.schematic_buffers[&original.key()]
+                editor.app.state.model.workspace.content.schematic_buffers[&original.key()]
                     .document()
                     .components[0]
                     .name,
@@ -482,13 +495,14 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
                 editor
                     .app
                     .state
+                    .model
                     .workspace
                     .content
                     .active_schematic_reference(),
                 original
             );
             assert_eq!(
-                editor.app.state.schematic.document().components[0].name,
+                editor.app.state.model.schematic.document().components[0].name,
                 "V1"
             );
         } else {
@@ -496,13 +510,14 @@ fn opening_another_document_commits_to_the_original_component_and_preserves_refu
                 editor
                     .app
                     .state
+                    .model
                     .workspace
                     .content
                     .active_schematic_reference(),
                 original
             );
             assert_eq!(
-                editor.app.state.schematic.document().components[0].name,
+                editor.app.state.model.schematic.document().components[0].name,
                 "V1"
             );
             assert_eq!(
@@ -526,17 +541,20 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
         let mut editor = Editor::new();
         editor.edit("Instance", "V9");
         match change {
-            "design" => editor.app.state.design_execution_epoch += 1,
-            "buffer" => editor.app.state.active_schematic_epoch += 1,
+            "design" => editor.app.state.model.design_execution_epoch += 1,
+            "buffer" => editor.app.state.model.active_schematic_epoch += 1,
             "project" => {
-                editor.app.state.workspace.content.project =
+                editor.app.state.model.workspace.content.project =
                     crate::state::ProjectDescriptor::default()
             }
-            "view" => editor.app.state.workspace.content.active_view.cell = "different".to_owned(),
+            "view" => {
+                editor.app.state.model.workspace.content.active_view.cell = "different".to_owned()
+            }
             "component" => {
                 editor
                     .app
                     .state
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .components[0]
@@ -545,13 +563,13 @@ fn changed_document_authority_or_component_never_reauthorizes_an_old_draft() {
             _ => unreachable!(),
         }
         let before =
-            crate::state::SchematicSnapshot::capture(editor.app.state.schematic.document());
+            crate::state::SchematicSnapshot::capture(editor.app.state.model.schematic.document());
         assert!(
             editor.app.state.commit_inline_component_edit().is_err(),
             "{change}"
         );
         assert!(
-            before.is_equal_document(editor.app.state.schematic.document()),
+            before.is_equal_document(editor.app.state.model.schematic.document()),
             "{change}"
         );
         assert_eq!(
@@ -575,6 +593,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
     let plan = editor
         .app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .unwrap()
@@ -592,6 +611,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
     editor
         .app
         .state
+        .model
         .workspace
         .content
         .add_saved_output(plan, output)
@@ -600,7 +620,7 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
     editor.click("Instance");
     editor.replace("V9");
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V1",
         "typing must not publish a partial rename"
     );
@@ -613,16 +633,17 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
             .buffer_for(editor.id, &InlineEditField::Instance),
         Some("V9")
     );
-    assert!(!editor.app.state.schematic.can_undo());
+    assert!(!editor.app.state.model.schematic.can_undo());
     editor.pass(vec![key(egui::Key::Enter, egui::Modifiers::NONE)]);
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V9"
     );
     assert_eq!(
         editor
             .app
             .state
+            .model
             .workspace
             .content
             .plan_data(plan)
@@ -633,13 +654,14 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
     );
     editor.app.action_edit_undo();
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V1"
     );
     assert_eq!(
         editor
             .app
             .state
+            .model
             .workspace
             .content
             .plan_data(plan)
@@ -649,16 +671,17 @@ fn rendered_instance_name_is_a_draft_until_one_reference_transaction_commits() {
         "I(V1)"
     );
     assert!(editor.app.state.project_undo_sequence().is_none());
-    assert!(!editor.app.state.schematic.can_undo());
+    assert!(!editor.app.state.model.schematic.can_undo());
     editor.app.action_edit_redo();
     assert_eq!(
-        editor.app.state.schematic.document().components[0].name,
+        editor.app.state.model.schematic.document().components[0].name,
         "V9"
     );
     assert_eq!(
         editor
             .app
             .state
+            .model
             .workspace
             .content
             .plan_data(plan)

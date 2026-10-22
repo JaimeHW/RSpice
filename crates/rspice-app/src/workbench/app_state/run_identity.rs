@@ -33,7 +33,8 @@ impl AppState {
         crate::product::SimulationPlanId,
         crate::product::ObjectRevision,
     )> {
-        self.sim_setup
+        self.model
+            .sim_setup
             .analysis_plan
             .as_ref()
             .map(|plan| (plan.id(), plan.revision()))
@@ -42,15 +43,19 @@ impl AppState {
     /// Stable identity and revision of the configured execution root, with the
     /// per-reference topology versions of everything it instantiates.
     pub(crate) fn configured_topology_revision(&self) -> (String, u64, Vec<(String, u64)>) {
-        let root = self.workspace.content.simulation_root_reference();
+        let root = self.model.workspace.content.simulation_root_reference();
         let closure = self.configured_closure(|_, topology_version| topology_version);
         let root_key = root.key();
         let revision = closure
             .get(&root_key.to_ascii_lowercase())
             .copied()
             .or_else(|| {
-                self.workspace
-                    .simulation_root_schematic(&self.workspace.content.active_view, &self.schematic)
+                self.model
+                    .workspace
+                    .simulation_root_schematic(
+                        &self.model.workspace.content.active_view,
+                        &self.model.schematic,
+                    )
                     .map(|source| source.design.topology_version())
             })
             .unwrap_or(0);
@@ -81,11 +86,11 @@ impl AppState {
         &self,
         measure: impl Fn(&SchematicDocument, u64) -> T,
     ) -> BTreeMap<String, T> {
-        let root = self.workspace.content.simulation_root_reference();
-        let projection = self.workspace.configuration_execution_projection(
-            &self.library_manager,
-            &self.workspace.content.active_view,
-            &self.schematic,
+        let root = self.model.workspace.content.simulation_root_reference();
+        let projection = self.model.workspace.configuration_execution_projection(
+            &self.model.library_manager,
+            &self.model.workspace.content.active_view,
+            &self.model.schematic,
         );
         let mut closure = BTreeMap::new();
         if let Ok(projection) = &projection {
@@ -149,15 +154,16 @@ impl AppState {
                 }
             }
         } else {
-            closure.extend(self.workspace.content.schematic_buffers.iter().map(
+            closure.extend(self.model.workspace.content.schematic_buffers.iter().map(
                 |(key, schematic)| {
                     let measured = measure(schematic.document(), schematic.topology_version());
                     (key.to_ascii_lowercase(), measured)
                 },
             ));
-            let active = self.schematic.editor_ref().design;
+            let active = self.model.schematic.editor_ref().design;
             closure.insert(
-                self.workspace
+                self.model
+                    .workspace
                     .content
                     .active_view
                     .key()

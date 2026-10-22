@@ -204,7 +204,7 @@ fn render_every_analysis_option_form() {
         AnalysisKind::DcMismatch,
     ] {
         let canvas = raster(SimulationPage::Analyses, page_width(), |app| {
-            let Ok(plan) = app.state.sim_setup.stable_analysis_plan_mut() else {
+            let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan_mut() else {
                 return;
             };
             let instance = plan

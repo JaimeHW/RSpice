@@ -39,16 +39,17 @@ pub(crate) fn save_owned_netlist_source(
     } else {
         commit_message
     };
-    let Some(source) = state.workspace.content.netlist_source.clone() else {
+    let Some(source) = state.model.workspace.content.netlist_source.clone() else {
         state.prompt("There is no editable deck to save.");
         return false;
     };
-    if source != state.simulation.source.netlist_content {
+    if source != state.model.simulation.source.netlist_content {
         state.prompt("The deck was not saved: the editor and the project's deck differ.");
         return false;
     }
     let visible_digest = crate::state::content_digest(&source);
     let default_name = state
+        .model
         .workspace
         .content
         .netlist_source_path
@@ -57,6 +58,7 @@ pub(crate) fn save_owned_netlist_source(
         .map(|name| name.to_string_lossy().into_owned())
         .or_else(|| {
             state
+                .model
                 .workspace
                 .content
                 .netlist_descriptor
@@ -73,16 +75,18 @@ pub(crate) fn save_owned_netlist_source(
         .unwrap_or_else(|| "top.cir".to_owned());
     let reopenable_origin = io
         .saved_paths_are_reopenable()
-        .then(|| state.workspace.content.netlist_source_path.clone())
+        .then(|| state.model.workspace.content.netlist_source_path.clone())
         .flatten();
     let ordinary_save_to_origin = !save_as && reopenable_origin.is_some();
     let expected_external_sha256 = state
+        .model
         .workspace
         .content
         .netlist_descriptor
         .as_ref()
         .and_then(|descriptor| descriptor.external_file_sha256);
     let source_encoding = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -172,7 +176,7 @@ pub(crate) fn save_owned_netlist_source(
     };
     let next_descriptor = match (
         canonical_publication
-            .then_some(state.workspace.content.netlist_descriptor.as_ref())
+            .then_some(state.model.workspace.content.netlist_descriptor.as_ref())
             .flatten(),
         next_owned_document.as_ref(),
     ) {
@@ -226,13 +230,13 @@ pub(crate) fn save_owned_netlist_source(
     match result {
         Ok(()) => {
             if canonical_publication {
-                state.workspace.content.netlist_source_path = Some(path.clone());
+                state.model.workspace.content.netlist_source_path = Some(path.clone());
             }
             if let Some(descriptor) = next_descriptor {
-                state.workspace.content.netlist_descriptor = Some(descriptor);
+                state.model.workspace.content.netlist_descriptor = Some(descriptor);
             }
             if let Some(document) = next_owned_document {
-                state.workspace.content.netlist_document = Some(document.clone());
+                state.model.workspace.content.netlist_document = Some(document.clone());
                 state.ui.netlist.owned_document = Some(document);
             }
             if canonical_publication {

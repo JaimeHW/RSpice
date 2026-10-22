@@ -61,12 +61,12 @@ pub(super) fn handle_tool_interactions(
         return;
     }
     // The armed zoom box owns the next primary drag, whatever the tool.
-    if state.schematic.session.editor.zoom_box.armed {
+    if state.model.schematic.session.editor.zoom_box.armed {
         super::zoom_box::handle_zoom_box(ui, response, state, viewport);
         return;
     }
-    let grid_size = state.schematic.document().grid_size;
-    let current_tool = state.schematic.session.editor.tool;
+    let grid_size = state.model.schematic.document().grid_size;
+    let current_tool = state.model.schematic.session.editor.tool;
     // A floating copy owns the canvas until it lands; a tool chosen since
     // it began is the next command, and the copy is let go.
     if state.dialogs.floating_paste.is_some() && current_tool != Tool::Select {
@@ -83,34 +83,34 @@ pub(super) fn handle_tool_interactions(
         // the legacy direct-drag path.
         return;
     } else if current_tool == Tool::MoveSelection && !state.dialogs.move_selection.armed {
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     } else if state.dialogs.stretch_selection.armed && current_tool != Tool::StretchSelection {
         state.dialogs.stretch_selection.close();
         return;
     } else if current_tool == Tool::StretchSelection && !state.dialogs.stretch_selection.armed {
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     } else if state.dialogs.array_selection.armed && current_tool != Tool::ArraySelection {
         state.dialogs.array_selection.close();
         return;
     } else if current_tool == Tool::ArraySelection && !state.dialogs.array_selection.armed {
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     }
     let input = ToolInput::read(
         ui,
         response,
         current_tool,
-        state.schematic.session.editor.wire_drawing.active
-            || state.schematic.session.editor.bus_drawing.active,
+        state.model.schematic.session.editor.wire_drawing.active
+            || state.model.schematic.session.editor.bus_drawing.active,
     );
     if input.finish_route {
         finish_active_route(ui, state);
         return;
     }
     if input.remove_route_point {
-        state.schematic.retract_wire();
+        state.model.schematic.retract_wire();
         return;
     }
 
@@ -156,8 +156,8 @@ pub(super) fn handle_tool_interactions(
                 position,
                 ends_route,
             } => match position {
-                Some(wire_pos) if state.schematic.session.editor.wire_drawing.active => {
-                    state.schematic.extend_wire(wire_pos);
+                Some(wire_pos) if state.model.schematic.session.editor.wire_drawing.active => {
+                    state.model.schematic.extend_wire(wire_pos);
                     if ends_route {
                         let _ = finish_wire_on_active_sheet(state);
                     }
@@ -166,10 +166,11 @@ pub(super) fn handle_tool_interactions(
                 None => report_unrepresentable_conductor_attachment(state),
             },
             ToolPointerAction::Bus(bus_pos) => {
-                if state.schematic.session.editor.bus_drawing.active {
-                    state.schematic.extend_bus(bus_pos);
+                if state.model.schematic.session.editor.bus_drawing.active {
+                    state.model.schematic.extend_bus(bus_pos);
                 } else {
                     let declaration = state
+                        .model
                         .schematic
                         .session
                         .editor
@@ -243,6 +244,7 @@ pub(super) fn handle_tool_interactions(
         match select_double_click_action(state, target, canvas_is_empty_at_pointer) {
             SelectDoubleClickAction::Descend(id) => {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -252,6 +254,7 @@ pub(super) fn handle_tool_interactions(
             }
             SelectDoubleClickAction::OpenVerilogA(id) => {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -262,6 +265,7 @@ pub(super) fn handle_tool_interactions(
             SelectDoubleClickAction::ActivateRequirement(id) => {
                 if activate_requirement_link(state, id, ui.ctx()) {
                     state
+                        .model
                         .schematic
                         .session
                         .editor
@@ -295,7 +299,8 @@ pub(super) fn handle_tool_interactions(
         }
     }
 
-    if state.schematic.session.editor.tool == Tool::DocumentationShape && response.has_focus() {
+    if state.model.schematic.session.editor.tool == Tool::DocumentationShape && response.has_focus()
+    {
         handle_documentation_shape_keyboard(ui, response, state, viewport, grid_size);
     }
 }
@@ -303,7 +308,7 @@ pub(super) fn handle_tool_interactions(
 fn tool_pointer_view(state: &AppState) -> ToolPointerView<'_> {
     ToolPointerView {
         design: super::schematic_design_view(state),
-        snap_engine: &state.schematic.session.editor.snap_engine,
+        snap_engine: &state.model.schematic.session.editor.snap_engine,
         can_edit: !state.schematic_edit_read_only(),
     }
 }
@@ -312,11 +317,11 @@ fn finish_active_route(ui: &Ui, state: &mut AppState) -> bool {
     if state.reconcile_conductor_route(ui.ctx()) {
         return false;
     }
-    if state.schematic.session.editor.wire_drawing.active {
+    if state.model.schematic.session.editor.wire_drawing.active {
         return finish_wire_on_active_sheet(state).is_some();
     }
-    if state.schematic.session.editor.bus_drawing.active {
-        return match state.schematic.finish_bus() {
+    if state.model.schematic.session.editor.bus_drawing.active {
+        return match state.model.schematic.finish_bus() {
             Ok(bus) => bus.is_some(),
             Err(error) => {
                 state.prompt(format!("Bus not committed: {error}"));
@@ -356,7 +361,9 @@ fn select_double_click_action(
         // Ascend belongs to the document under the pointer, so the depth read
         // is the open document's own occurrence rather than the session-global
         // breadcrumb, which describes whichever document was activated last.
-        None if canvas_is_empty_at_pointer && state.workspace.content.occurrence_depth() > 1 => {
+        None if canvas_is_empty_at_pointer
+            && state.model.workspace.content.occurrence_depth() > 1 =>
+        {
             SelectDoubleClickAction::Ascend
         }
         None => SelectDoubleClickAction::None,
@@ -365,6 +372,7 @@ fn select_double_click_action(
 
 fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Context) -> bool {
     let target = state
+        .model
         .schematic
         .document()
         .design_notes
@@ -393,20 +401,27 @@ fn activate_requirement_link(state: &mut AppState, note_id: u64, ctx: &egui::Con
 fn handle_bus_tap_click(state: &mut AppState, requested: Point, hit_radius: i32) {
     if state.schematic_edit_read_only() {
         state.deny_read_only_edit();
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     }
-    let Some(placement) = state.schematic.session.editor.pending_bus_tap.as_ref() else {
+    let Some(placement) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_bus_tap
+        .as_ref()
+    else {
         report_bus_candidate_error(state, BusTapCandidateError::MissingConfiguration);
         return;
     };
-    if state.schematic.session.editor.tool != Tool::BusTap
+    if state.model.schematic.session.editor.tool != Tool::BusTap
         || !placement
             .authority
             .matches(&super::requests::editor_request_source(state))
     {
         state.prompt("The active schematic changed. Reopen Place bus tap.");
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     }
     let candidate = match resolve_bus_tap_candidate_on_active_sheet(state, requested, hit_radius) {
@@ -421,7 +436,7 @@ fn handle_bus_tap_click(state: &mut AppState, requested: Point, hit_radius: i32)
         orientation: candidate.orientation,
         ..pending.clone()
     };
-    match state.schematic.place_configured_bus_tap(
+    match state.model.schematic.place_configured_bus_tap(
         candidate.bus_id,
         candidate.bus_point,
         candidate.connection_point,
@@ -456,7 +471,7 @@ fn report_unrepresentable_conductor_attachment(state: &mut AppState) {
 /// Whether a label dropped at `anchor` would sit exactly where two of this
 /// sheet's wires cross with no junction, naming neither of them.
 fn label_anchor_on_unmarked_crossing(state: &AppState, anchor: Point) -> bool {
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     let wires = objects_on_active_sheet(state, &document.wires, |wire| wire.id);
     let junctions = objects_on_active_sheet(state, &document.junctions, |junction| junction.id);
     rspice_design::schematic::junction_edit::CrossingIndex::new(&wires, &junctions)
@@ -511,13 +526,21 @@ pub(super) fn place_component(
     match component_type {
         ComponentType::Port => place_pending_port(state, grid_pos),
         ComponentType::CellInstance => {
-            let Some(pending) = state.schematic.session.editor.pending_library_cell.as_ref() else {
+            let Some(pending) = state
+                .model
+                .schematic
+                .session
+                .editor
+                .pending_library_cell
+                .as_ref()
+            else {
                 state.prompt("Choose a library cell to place.");
-                state.schematic.cancel_tool();
+                state.model.schematic.cancel_tool();
                 return;
             };
             if state.schematic_edit_read_only()
-                || state.schematic.session.editor.tool != Tool::Place(ComponentType::CellInstance)
+                || state.model.schematic.session.editor.tool
+                    != Tool::Place(ComponentType::CellInstance)
                 || !pending
                     .authority
                     .matches(&super::requests::editor_request_source(state))
@@ -525,13 +548,14 @@ pub(super) fn place_component(
                 state.prompt(
                     "Library cell not placed: the active schematic changed. Choose the cell again.",
                 );
-                state.schematic.cancel_tool();
+                state.model.schematic.cancel_tool();
                 return;
             }
             let library_cell = pending.binding.clone();
             let symbols = super::schematic_symbol_context(state);
-            let workspace = &state.workspace;
+            let workspace = &state.model.workspace;
             let changed = state
+                .model
                 .schematic
                 .with_undo("place library cell", |schematic| {
                     let id = schematic.add_library_cell_component(grid_pos, library_cell);
@@ -544,8 +568,8 @@ pub(super) fn place_component(
         // An armed stimulus definition is placed as an adopter in this undo group.
         _ => {
             let symbols = super::schematic_symbol_context(state);
-            let workspace = &state.workspace;
-            let changed = state.schematic.with_undo(
+            let workspace = &state.model.workspace;
+            let changed = state.model.schematic.with_undo(
                 format!("place {}", component_type.display_name()),
                 |schematic| {
                     let id = schematic.add_armed_component(component_type, grid_pos);
@@ -560,9 +584,16 @@ pub(super) fn place_component(
 }
 
 fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
-    let Some(pending) = state.schematic.session.editor.pending_design_note.clone() else {
+    let Some(pending) = state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_design_note
+        .clone()
+    else {
         state.prompt("No note is armed. Reopen Place text or note.");
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     };
     let authority_matches = pending
@@ -571,37 +602,44 @@ fn place_pending_design_note(state: &mut AppState, grid_pos: Point) {
         .is_some_and(|source| *source == super::requests::editor_request_source(state));
     if state.schematic_edit_read_only() || !authority_matches {
         state.prompt("Note not placed: the active schematic changed. Reopen Place text or note.");
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     }
     let kind = pending.kind.label();
-    match state.schematic.place_pending_design_note(grid_pos, pending) {
+    match state
+        .model
+        .schematic
+        .place_pending_design_note(grid_pos, pending)
+    {
         Ok(_) => {
-            state.schematic.cancel_tool();
+            state.model.schematic.cancel_tool();
             state.sync_active_schematic_to_workspace();
             state.prompt(format!("Placed {kind}."));
         }
         Err(error) => {
             state.prompt(format!("Note not placed: {error}"));
-            state.schematic.cancel_tool();
+            state.model.schematic.cancel_tool();
         }
     }
 }
 
 fn handle_documentation_shape_click(state: &mut AppState, grid_pos: Point, finish_polygon: bool) {
     state
+        .model
         .schematic
         .session
         .editor
         .documentation_shape_drawing
         .keyboard_cursor = Some(grid_pos);
     state
+        .model
         .schematic
         .session
         .editor
         .documentation_shape_drawing
         .keyboard_active = false;
     let Some(pending) = state
+        .model
         .schematic
         .session
         .editor
@@ -609,7 +647,7 @@ fn handle_documentation_shape_click(state: &mut AppState, grid_pos: Point, finis
         .as_ref()
     else {
         state.prompt("No shape is armed. Reopen Draw documentation shape.");
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     };
     let authority_matches = pending
@@ -620,11 +658,12 @@ fn handle_documentation_shape_click(state: &mut AppState, grid_pos: Point, finis
         state.prompt(
             "Shape not placed: the active schematic changed. Reopen Draw documentation shape.",
         );
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     }
     let kind = pending.kind;
     match state
+        .model
         .schematic
         .session
         .editor
@@ -641,16 +680,22 @@ fn handle_documentation_shape_click(state: &mut AppState, grid_pos: Point, finis
 
 fn shape_input_view(state: &AppState) -> ShapeInputView<'_> {
     ShapeInputView {
-        drawing: &state.schematic.session.editor.documentation_shape_drawing,
+        drawing: &state
+            .model
+            .schematic
+            .session
+            .editor
+            .documentation_shape_drawing,
         kind: state
+            .model
             .schematic
             .session
             .editor
             .pending_documentation_shape
             .as_ref()
             .map(|pending| pending.kind),
-        snap_engine: &state.schematic.session.editor.snap_engine,
-        grid_size: state.schematic.document().grid_size,
+        snap_engine: &state.model.schematic.session.editor.snap_engine,
+        grid_size: state.model.schematic.document().grid_size,
     }
 }
 
@@ -677,6 +722,7 @@ fn capture_shape_input(state: &AppState, transition: ShapeInputTransition) -> Sh
     ShapeInputRequest {
         source: super::requests::editor_request_source(state),
         kind: state
+            .model
             .schematic
             .session
             .editor
@@ -691,24 +737,37 @@ fn apply_shape_input(state: &mut AppState, request: ShapeInputRequest) {
     if request.source != super::requests::editor_request_source(state)
         || request.kind
             != state
+                .model
                 .schematic
                 .session
                 .editor
                 .pending_documentation_shape
                 .as_ref()
                 .map(|pending| pending.kind)
-        || request.transition.expected != state.schematic.session.editor.documentation_shape_drawing
-        || state.schematic.session.editor.tool != Tool::DocumentationShape
+        || request.transition.expected
+            != state
+                .model
+                .schematic
+                .session
+                .editor
+                .documentation_shape_drawing
+        || state.model.schematic.session.editor.tool != Tool::DocumentationShape
         || state.application_modal_open()
     {
         return;
     }
-    state.schematic.session.editor.documentation_shape_drawing = request.transition.next;
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .documentation_shape_drawing = request.transition.next;
     match request.transition.action {
         Some(ShapeInputAction::PlacePoint(cursor)) => {
             handle_documentation_shape_click(state, cursor, false);
-            if state.schematic.session.editor.tool == Tool::DocumentationShape {
+            if state.model.schematic.session.editor.tool == Tool::DocumentationShape {
                 state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -723,6 +782,7 @@ fn apply_shape_input(state: &mut AppState, request: ShapeInputRequest) {
 
 fn finish_documentation_polygon(state: &mut AppState) {
     let Some(kind) = state
+        .model
         .schematic
         .session
         .editor
@@ -739,6 +799,7 @@ fn finish_documentation_polygon(state: &mut AppState) {
 
 fn finish_documentation_shape(state: &mut AppState, kind: crate::state::DocumentationShapeKind) {
     let geometry = match state
+        .model
         .schematic
         .session
         .editor
@@ -752,6 +813,7 @@ fn finish_documentation_shape(state: &mut AppState, kind: crate::state::Document
         }
     };
     let Some(pending) = state
+        .model
         .schematic
         .session
         .editor
@@ -769,15 +831,16 @@ fn finish_documentation_shape(state: &mut AppState, kind: crate::state::Document
     };
     if let Some(error) = authority_error {
         report_documentation_shape_error(state, error);
-        state.schematic.cancel_tool();
+        state.model.schematic.cancel_tool();
         return;
     }
     match state
+        .model
         .schematic
         .commit_documentation_shape(pending, geometry)
     {
         Ok(_) => {
-            state.schematic.cancel_tool();
+            state.model.schematic.cancel_tool();
             state.sync_active_schematic_to_workspace();
             state.prompt(format!("Placed {}.", kind.label()));
         }
@@ -788,7 +851,7 @@ fn finish_documentation_shape(state: &mut AppState, kind: crate::state::Document
                 crate::state::DocumentationShapeError::ReadOnly
                     | crate::state::DocumentationShapeError::StaleDocument
             ) {
-                state.schematic.cancel_tool();
+                state.model.schematic.cancel_tool();
             }
         }
     }
@@ -816,7 +879,7 @@ enum JunctionPlacementOutcome {
 /// whether or not one is placed there: a T, three wire ends or wires on a
 /// pin, as opposed to a crossing that only a placed dot joins.
 fn dot_required_on_active_sheet(state: &AppState, point: Point) -> bool {
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     let sheet = rspice_design::schematic::document::SchematicDocument {
         wires: objects_on_active_sheet(state, &document.wires, |wire| wire.id).into_owned(),
         components: objects_on_active_sheet(state, &document.components, |part| part.id)
@@ -828,34 +891,42 @@ fn dot_required_on_active_sheet(state: &AppState, point: Point) -> bool {
 }
 
 fn commit_explicit_junction(state: &mut AppState, requested: Point) -> JunctionPlacementOutcome {
-    let grid_size = state.schematic.document().grid_size;
+    let grid_size = state.model.schematic.document().grid_size;
     let Some(target) =
         super::schematic_design_view(state).nearest_junction_candidate(requested, grid_size)
     else {
         return JunctionPlacementOutcome::NoIntersection;
     };
 
-    let buses = objects_on_active_sheet(state, &state.schematic.document().buses, |item| item.id);
+    let buses = objects_on_active_sheet(state, &state.model.schematic.document().buses, |item| {
+        item.id
+    });
     if buses.iter().any(|bus| bus.contains_point(target)) {
         return JunctionPlacementOutcome::MixedBus;
     }
 
     if let Some(junction_id) = active_junction_at(state, target) {
-        let automatic = state.schematic.session.editor.automatic_junctions;
+        let automatic = state.model.schematic.session.editor.automatic_junctions;
         if automatic && dot_required_on_active_sheet(state, target) {
             return JunctionPlacementOutcome::Required(target);
         }
-        state.schematic.with_undo("remove junction", |schematic| {
-            schematic.remove_junction(junction_id);
-        });
-        state.schematic.session.editor.net_highlight.clear();
+        state
+            .model
+            .schematic
+            .with_undo("remove junction", |schematic| {
+                schematic.remove_junction(junction_id);
+            });
+        state.model.schematic.session.editor.net_highlight.clear();
         return JunctionPlacementOutcome::Removed(target);
     }
 
-    state.schematic.with_undo("place junction", |schematic| {
-        schematic.add_junction(target);
-    });
-    state.schematic.session.editor.net_highlight.clear();
+    state
+        .model
+        .schematic
+        .with_undo("place junction", |schematic| {
+            schematic.add_junction(target);
+        });
+    state.model.schematic.session.editor.net_highlight.clear();
     JunctionPlacementOutcome::Placed(target)
 }
 
@@ -917,7 +988,7 @@ fn handle_select_click(
     );
     let request = rspice_schematic_editor::requests::EditorRequest {
         source: super::requests::editor_request_source(state),
-        selection: state.schematic.session.editor.selection.clone(),
+        selection: state.model.schematic.session.editor.selection.clone(),
         action: rspice_schematic_editor::requests::EditorAction::SelectPointer {
             target,
             additive,
@@ -945,16 +1016,22 @@ enum ProbeSignalOutcome {
 /// including bare net names and generated numeric node names.
 fn toggle_materialized_waveform(state: &mut AppState, probe_name: &str) -> Option<bool> {
     let before = state
+        .model
         .simulation
         .view
         .waveforms
         .iter()
         .map(|waveform| waveform.visible)
         .collect::<Vec<_>>();
-    if !state.simulation.toggle_waveform_visibility(probe_name) {
+    if !state
+        .model
+        .simulation
+        .toggle_waveform_visibility(probe_name)
+    {
         return None;
     }
     state
+        .model
         .simulation
         .view
         .waveforms
@@ -1000,8 +1077,8 @@ fn unique_probe_output_name(outputs: &[SavedOutput], preferred: &str) -> String 
 
 fn select_materialized_probe_trace(state: &mut AppState, probe_name: &str) {
     let selected = {
-        let run = state.simulation.active_run();
-        let analysis = state.simulation.active_analysis();
+        let run = state.model.simulation.active_run();
+        let analysis = state.model.simulation.active_analysis();
         run.zip(analysis).and_then(|(run, analysis)| {
             let analysis_index = run
                 .analyses
@@ -1033,12 +1110,13 @@ fn ensure_plan_probe_output(
     state: &mut AppState,
     spelling: &OccurrenceProbeSpelling,
 ) -> Result<ProbeOutputBinding, String> {
-    let mut setup = state.sim_setup.clone();
+    let mut setup = state.model.sim_setup.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     let plan_name = setup.active_plan_name().to_string();
     let expression = spelling.engine().trim();
     let expression_key = raw_output_expression_key(expression);
     if state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -1059,6 +1137,7 @@ fn ensure_plan_probe_output(
 
     let output_name = unique_probe_output_name(
         state
+            .model
             .workspace
             .content
             .plan_data(plan_id)
@@ -1089,7 +1168,7 @@ fn ensure_plan_probe_output(
         ));
     }
 
-    let mut workspace = state.workspace.clone();
+    let mut workspace = state.model.workspace.clone();
     workspace
         .content
         .add_saved_output(plan_id, output)
@@ -1104,8 +1183,8 @@ fn ensure_plan_probe_output(
         ))
         .map_err(|error| error.to_string())?;
 
-    state.sim_setup = setup;
-    state.workspace = workspace;
+    state.model.sim_setup = setup;
+    state.model.workspace = workspace;
     state.workbench.preflight.invalidate();
     state.record_plan_receipt(receipt.status_line());
     Ok(ProbeOutputBinding {
@@ -1166,7 +1245,7 @@ fn request_probe_signal_visible(
         Ok(binding) => binding,
         Err(reason) => return ProbeSignalOutcome::Rejected { reason },
     };
-    match state.simulation.ensure_waveform_visible(engine) {
+    match state.model.simulation.ensure_waveform_visible(engine) {
         Some(true) => {
             select_materialized_probe_trace(state, engine);
             ProbeSignalOutcome::WaveformShown
@@ -1201,7 +1280,7 @@ fn probe_spelling_for(
     }) else {
         return Ok(OccurrenceProbeSpelling::verbatim(display));
     };
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     OccurrenceProbeSpelling::for_leaf(&occurrence, quantity, name)
         .ok_or_else(|| unspellable_occurrence(&occurrence))
 }
@@ -1219,7 +1298,7 @@ fn commit_element_current(
     drawn: &str,
     engine: &str,
 ) -> (OccurrenceProbeSpelling, ProbeSignalOutcome) {
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     match OccurrenceProbeSpelling::for_element(&occurrence, 'I', drawn, engine) {
         Some(spelling) => {
             let outcome = request_probe_signal(state, &spelling);
@@ -1303,7 +1382,7 @@ pub(crate) fn ensure_retained_probe_visible_with_feedback(
     let outcome = if is_ground_voltage_expression(&engine) {
         ProbeSignalOutcome::GroundReference
     } else {
-        match state.simulation.ensure_waveform_visible(&engine) {
+        match state.model.simulation.ensure_waveform_visible(&engine) {
             Some(true) => {
                 select_materialized_probe_trace(state, &engine);
                 ProbeSignalOutcome::WaveformShown
@@ -1346,15 +1425,17 @@ fn report_probe_outcome(state: &mut AppState, display: &str, outcome: ProbeSigna
 
 fn probe_edit_identity_is_current(state: &AppState) -> Result<(), String> {
     if !matches!(
-        state.workspace.content.active_view_type(),
+        state.model.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     ) {
         return Err("the active cell/view is not a schematic document".to_owned());
     }
-    if state.workspace.content.active_schematic_reference() != state.workspace.content.active_view {
+    if state.model.workspace.content.active_schematic_reference()
+        != state.model.workspace.content.active_view
+    {
         return Err("the active schematic identity changed before the probe was placed".to_owned());
     }
-    if state.workspace.active_schematic().is_none() {
+    if state.model.workspace.active_schematic().is_none() {
         return Err("the active schematic has no project-owned document buffer".to_owned());
     }
     if state.schematic_edit_read_only() {
@@ -1370,9 +1451,10 @@ fn current_probe_output_binding(
     crate::product::SimulationPlanId,
     crate::product::SavedOutputId,
 )> {
-    let plan_id = state.sim_setup.stable_analysis_plan().ok()?.id();
+    let plan_id = state.model.sim_setup.stable_analysis_plan().ok()?.id();
     let expression_key = raw_output_expression_key(expression);
     let output_id = state
+        .model
         .workspace
         .content
         .plan_data(plan_id)?
@@ -1406,16 +1488,24 @@ fn retain_probe_flag(
     let validation_reference = label.as_deref().unwrap_or("P1");
     SchematicProbe::new(1, position, validation_reference, source_expression.clone())?;
     let source_key = source_expression.as_deref().map(raw_output_expression_key);
-    if let Some(existing_id) = state.schematic.document().probes.iter().find_map(|probe| {
-        (probe.position == position
-            && probe
-                .source_expression
-                .as_deref()
-                .map(raw_output_expression_key)
-                == source_key)
-            .then_some(probe.id)
-    }) {
+    if let Some(existing_id) = state
+        .model
+        .schematic
+        .document()
+        .probes
+        .iter()
+        .find_map(|probe| {
+            (probe.position == position
+                && probe
+                    .source_expression
+                    .as_deref()
+                    .map(raw_output_expression_key)
+                    == source_key)
+                .then_some(probe.id)
+        })
+    {
         let needs_binding_refresh = state
+            .model
             .schematic
             .document()
             .probes
@@ -1428,12 +1518,14 @@ fn retain_probe_flag(
             });
         if needs_binding_refresh {
             state
+                .model
                 .schematic
                 .bind_probe_saved_output(existing_id, binding);
             state.sync_active_schematic_to_workspace();
         }
         let id = existing_id;
         state
+            .model
             .schematic
             .session
             .editor
@@ -1446,6 +1538,7 @@ fn retain_probe_flag(
     }
     let probe_id =
         state
+            .model
             .schematic
             .place_schematic_probe(position, label, source_expression, binding)?;
     state.dialogs.interaction.schematic_keyboard_focus = Some(
@@ -1463,15 +1556,15 @@ fn retain_probe_flag(
 /// wrong rather than approximate. The reason is logged so the gesture that
 /// found no name is explicable.
 fn live_design_nets(state: &AppState) -> std::sync::Arc<Vec<DesignNet>> {
-    match state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    match state.model.workspace.design_projection(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     ) {
         Ok(projection) => projection_nets(
-            state.library_manager.catalog(),
+            state.model.library_manager.catalog(),
             &projection,
-            &state.workspace.content.active_view.key(),
+            &state.model.workspace.content.active_view.key(),
         ),
         Err(error) => {
             log::warn!("Probe naming has no design projection: {error}");
@@ -1499,13 +1592,14 @@ pub(super) fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&Design
         Some((name, wire_ids)) => {
             log::info!("Highlighted net '{name}' with {} wires", wire_ids.len());
             state
+                .model
                 .schematic
                 .session
                 .editor
                 .net_highlight
                 .highlight_named_wires(name, wire_ids);
         }
-        None => state.schematic.session.editor.net_highlight.clear(),
+        None => state.model.schematic.session.editor.net_highlight.clear(),
     }
 }
 
@@ -1543,12 +1637,13 @@ fn live_terminal_probe_net_name(
 
 fn retained_probe_net_name(state: &AppState, position: Point) -> Option<String> {
     state
+        .model
         .simulation
         .source
         .cross_probe
         .net_at_in(
-            &state.workspace.content.active_view,
-            state.schematic.topology_version(),
+            &state.model.workspace.content.active_view,
+            state.model.schematic.topology_version(),
             super::sheet_visibility::active_sheet_id(state),
             position,
         )
@@ -1576,6 +1671,7 @@ fn component_probe_expression(
     symbol_context: &SchematicSymbolContext,
 ) -> Option<ComponentProbe> {
     let component = state
+        .model
         .schematic
         .document()
         .components
@@ -1681,14 +1777,15 @@ fn handle_probe_click(
             state.prompt("Nothing probed: this wire does not resolve to one net.");
         }
     } else {
-        let components =
-            objects_on_active_sheet(state, &state.schematic.document().components, |item| {
-                item.id
-            });
+        let components = objects_on_active_sheet(
+            state,
+            &state.model.schematic.document().components,
+            |item| item.id,
+        );
         let Some(comp_id) =
             symbol_context.component_at_resolved_symbol(components.as_ref(), grid_pos)
         else {
-            state.schematic.session.editor.net_highlight.clear();
+            state.model.schematic.session.editor.net_highlight.clear();
             match retain_probe_flag(state, grid_pos, None, None) {
                 Ok(id) => state.prompt(format!(
                     "Placed probe P{id}; move it onto a conductor to bind it to a signal."
@@ -1708,6 +1805,7 @@ fn handle_component_probe(
     symbol_context: &SchematicSymbolContext,
 ) {
     if let Some(component) = state
+        .model
         .schematic
         .document()
         .components
@@ -1770,7 +1868,7 @@ fn open_object_properties(
         viewport,
         pointer_pos,
     );
-    let selection = &mut state.schematic.session.editor.selection;
+    let selection = &mut state.model.schematic.session.editor.selection;
     match target {
         Some(PointerTarget::Component(id)) => selection.select_only_component(id),
         Some(PointerTarget::DesignNote(id)) => selection.select_only_design_note(id),

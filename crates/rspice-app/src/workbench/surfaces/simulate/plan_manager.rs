@@ -1008,9 +1008,10 @@ fn handle_plan_manager_action(
             None
         }
         Some(PlanManagerAction::Clone) => {
-            let name = simulation_plan_catalog_entry(&app.state.sim_setup, draft.selected_plan_id)
-                .map(|entry| entry.0)
-                .unwrap_or_else(|| "Simulation plan".to_owned());
+            let name =
+                simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.selected_plan_id)
+                    .map(|entry| entry.0)
+                    .unwrap_or_else(|| "Simulation plan".to_owned());
             app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
                 ClonePlanDraft::for_source(draft.selected_plan_id, &name),
             ));
@@ -1029,11 +1030,11 @@ fn handle_plan_manager_action(
             &draft.name,
         )),
         Some(PlanManagerAction::ConfirmArchive) => Some(lifecycle::commit_archive_plan(
-            &mut app.state.sim_setup,
+            &mut app.state.model.sim_setup,
             draft.selected_plan_id,
         )),
         Some(PlanManagerAction::Restore) => Some(lifecycle::commit_restore_plan(
-            &mut app.state.sim_setup,
+            &mut app.state.model.sim_setup,
             draft.selected_plan_id,
         )),
         None => None,

@@ -175,9 +175,9 @@ impl PlanWorkload {
     /// exactly the budget an operator would approve by mistake.
     pub(super) fn resolve(app: &RSpiceApp) -> Result<Self, String> {
         Self::resolve_for(
-            app.state.sim_setup.enabled_analysis_instances(),
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.reference_pvt,
+            app.state.model.sim_setup.enabled_analysis_instances(),
+            &app.state.model.sim_setup.run_set,
+            app.state.model.sim_setup.reference_pvt,
         )
     }
 
@@ -224,9 +224,9 @@ impl PlanWorkload {
         participation: &PlanParticipation,
     ) -> Result<Self, String> {
         Self::priced(
-            app.state.sim_setup.enabled_analysis_instances(),
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.reference_pvt,
+            app.state.model.sim_setup.enabled_analysis_instances(),
+            &app.state.model.sim_setup.run_set,
+            app.state.model.sim_setup.reference_pvt,
             &ResolvedParticipation::Reported(participation),
         )
     }
@@ -372,6 +372,7 @@ impl PlanWorkload {
 pub(super) fn instance_task_rate(app: &RSpiceApp, draft: &AnalysisDraft) -> Option<usize> {
     let global_axes_active = app
         .state
+        .model
         .sim_setup
         .run_set
         .enabled_dimensions()
@@ -379,8 +380,8 @@ pub(super) fn instance_task_rate(app: &RSpiceApp, draft: &AnalysisDraft) -> Opti
         .is_some();
     task_rate(
         draft,
-        &app.state.sim_setup.run_set,
-        app.state.sim_setup.reference_pvt,
+        &app.state.model.sim_setup.run_set,
+        app.state.model.sim_setup.reference_pvt,
         global_axes_active,
     )
     .ok()
@@ -478,7 +479,7 @@ fn task_rate(
 pub(super) fn modelled_duration(app: &AppState, task_count: usize) -> String {
     run_set::format_duration_ms(run_set::modelled_cost_ms(
         task_count,
-        app.sim_setup.run_set.budgets.cost_per_point_ms,
+        app.model.sim_setup.run_set.budgets.cost_per_point_ms,
     ))
 }
 
@@ -600,7 +601,7 @@ pub(super) fn task_rate_card(
             // different queues under one heading. `instance_list_label` is the
             // plan's answer to what an instance is called beside its siblings, and
             // the tab strip above this card now asks the same question of it.
-            let plan = app.state.sim_setup.stable_analysis_plan().ok();
+            let plan = app.state.model.sim_setup.stable_analysis_plan().ok();
             for row in &workload.rows {
                 let listed = plan
                     .and_then(|plan| {

@@ -15,6 +15,7 @@ fn app_with_open_candidate() -> RSpiceApp {
 
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .model_library_manager
         .create_project_model(
             "owned-models",
@@ -31,12 +32,12 @@ fn app_with_open_candidate() -> RSpiceApp {
             },
         )
         .expect("create project model");
-    let revision = app.state.workspace.content.project.revision();
+    let revision = app.state.model.workspace.content.project.revision();
     app.state
         .workbench
         .model_editor
         .open(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,
@@ -448,7 +449,7 @@ fn the_header_announces_no_status_for_a_validated_candidate() {
         Some(("Not validated".to_owned(), None))
     );
 
-    let revision = app.state.workspace.content.project.revision();
+    let revision = app.state.model.workspace.content.project.revision();
     let evidence = app
         .state
         .workbench
@@ -456,7 +457,7 @@ fn the_header_announces_no_status_for_a_validated_candidate() {
         .draft
         .as_ref()
         .expect("open candidate")
-        .validate(&app.state.model_library_manager, revision)
+        .validate(&app.state.model.model_library_manager, revision)
         .expect("the fixture candidate validates");
     app.state.workbench.model_editor.validation = Some(evidence);
     assert_eq!(candidate_status(&app, &records), None);

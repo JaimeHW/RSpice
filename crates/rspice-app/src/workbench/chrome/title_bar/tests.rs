@@ -19,7 +19,7 @@ fn desktop_and_compact_title_contexts_have_distinct_mockup_ownership() {
 
     assert_eq!(
         title_context_text(&app, false),
-        app.state.workspace.content.project.display_name()
+        app.state.model.workspace.content.project.display_name()
     );
     assert_eq!(title_context_text(&app, true), "top · schematic");
     assert_eq!(active_title_cell(&app), "top · schematic");
@@ -104,7 +104,7 @@ fn unsaved_project_changes_put_a_star_after_the_painted_title() {
     app.state.workbench.workspace = Workspace::Design;
     assert_eq!(painted(&app, 640.0), "Untitled Project");
 
-    app.state.schematic.session.is_dirty = true;
+    app.state.model.schematic.session.is_dirty = true;
     assert_eq!(painted(&app, 640.0), "Untitled Project*");
     assert!(
         painted(&app, 90.0).ends_with("\u{2026}*"),
@@ -256,7 +256,7 @@ fn rendered_simulate_menu_rows(
     let mut app = title_test_app();
     app.state.open_project_session();
     if !stable_analysis_plan {
-        app.state.sim_setup.analysis_plan = None;
+        app.state.model.sim_setup.analysis_plan = None;
     }
     let availability = Command::ManageSimulationPlans.availability(&app);
     let output = ctx.run_ui(
@@ -771,12 +771,12 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
     ctx.enable_accesskit();
     let mut app = title_test_app();
     app.state.workbench.activate(Workspace::Design);
-    let document = app.state.schematic.document_mut_for_test();
+    let document = app.state.model.schematic.document_mut_for_test();
     document.components = vec![
         Component::new(1, ComponentType::Resistor, Point::new(0, 0)),
         Component::new(2, ComponentType::Resistor, Point::new(200, 100)),
     ];
-    let selection = &mut app.state.schematic.session.editor.selection;
+    let selection = &mut app.state.model.schematic.session.editor.selection;
     selection.select_component(1);
     selection.select_component(2);
     let arrange = menu_entries::submenu_row_id("Arrange");
@@ -801,7 +801,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         .map(|command| command.spec().label)
         .collect();
     assert_eq!(arrange_labels.len(), 13);
-    let before = app.state.schematic.document().components[1].pos;
+    let before = app.state.model.schematic.document().components[1].pos;
     let mut frame = |events| {
         menu_items_after_frame(&ctx, events, |ui| {
             menus(ui, &mut app, MenuProjection::All, false, 35.0);
@@ -851,7 +851,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
     let _ = frame(Vec::new());
     assert!(!Popup::is_id_open(&ctx, design_menu));
     assert_ne!(
-        app.state.schematic.document().components[1].pos,
+        app.state.model.schematic.document().components[1].pos,
         before,
         "Rotate clockwise turned the selection"
     );
@@ -1135,7 +1135,7 @@ fn every_menu_shows_exactly_its_pinned_rows() {
 #[test]
 fn a_grey_run_row_says_a_run_is_already_in_progress() {
     let mut app = title_test_app();
-    app.state.simulation.execution.trigger_simulation = true;
+    app.state.model.simulation.execution.trigger_simulation = true;
     assert_eq!(
         Command::RunSimulation.availability(&app),
         CommandAvailability::Disabled("a run is already in progress")

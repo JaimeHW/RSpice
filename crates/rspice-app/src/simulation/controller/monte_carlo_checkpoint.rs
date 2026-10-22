@@ -52,6 +52,7 @@ impl SimulationController {
             .ok_or("checkpoint has no active simulation run")?;
         let checkpoint = MonteCarloCheckpointEvidence::from_bytes(bytes)?;
         let run = state
+            .model
             .simulation
             .retained
             .run_by_sequence_mut(run_id)
@@ -83,6 +84,7 @@ impl SimulationController {
         self.validate_analysis_retention(run, &partial)?;
         run.upsert_live_analysis(partial)?;
         state
+            .model
             .simulation
             .select_latest_analysis_in_run_sequence(run_id);
         Ok(())

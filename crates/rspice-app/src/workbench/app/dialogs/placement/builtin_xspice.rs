@@ -195,10 +195,13 @@ mod tests {
             let mut app = RSpiceApp::test_instance();
             let state = &mut app.state;
             let master = CellViewRef::new("work", "xspice_child", "schematic");
-            state
-                .workspace
-                .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
+            state.model.workspace.descend_into(
+                "X1".to_owned(),
+                master.clone(),
+                ViewType::Schematic,
+            );
             let first = state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -219,16 +222,19 @@ mod tests {
             assert!(validate_draft(&app).is_ok());
             let state = &mut app.state;
             match change {
-                "design" => state.design_execution_epoch += 1,
-                "buffer" => state.active_schematic_epoch += 1,
+                "design" => state.model.design_execution_epoch += 1,
+                "buffer" => state.model.active_schematic_epoch += 1,
                 "occurrence" => {
-                    state.workspace.ascend_one().unwrap();
-                    state
-                        .workspace
-                        .descend_into("X2".to_owned(), master, ViewType::Schematic);
+                    state.model.workspace.ascend_one().unwrap();
+                    state.model.workspace.descend_into(
+                        "X2".to_owned(),
+                        master,
+                        ViewType::Schematic,
+                    );
                 }
                 "sheet" => {
                     let catalog = state
+                        .model
                         .workspace
                         .content
                         .design_management
@@ -249,11 +255,12 @@ mod tests {
                 }
                 "content" => {
                     state
+                        .model
                         .schematic
                         .add_component(ComponentType::Resistor, Point::origin());
-                    state.schematic.init_undo_history();
+                    state.model.schematic.init_undo_history();
                 }
-                "read-only" => state.schematic.session.read_only = true,
+                "read-only" => state.model.schematic.session.read_only = true,
                 "safe-mode" => state.workbench.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
                         open_project_read_only: true,
@@ -275,14 +282,15 @@ mod tests {
             let state = &mut app.state;
             assert!(
                 state
+                    .model
                     .schematic
                     .session
                     .editor
                     .pending_library_cell
                     .is_none()
             );
-            assert_eq!(state.schematic.session.editor.tool, Tool::Select);
-            assert!(!state.schematic.can_undo());
+            assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
+            assert!(!state.model.schematic.can_undo());
             if change != "missing" {
                 assert_eq!(state.dialogs.builtin_xspice_placement.source, Some(source));
             }

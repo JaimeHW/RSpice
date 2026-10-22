@@ -146,14 +146,15 @@ fn layer_and_via_helpers_preserve_stream_and_connectivity_completeness() {
 fn installed_revision_exposes_unsigned_authoring_entrypoint() {
     let mut app = RSpiceApp::test_instance();
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.pdk_config.publisher_trust_store = trust;
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config.publisher_trust_store = trust;
     app.state
+        .model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &bytes,
-            &app.state.pdk_config.publisher_trust_store,
+            &app.state.model.pdk_config.publisher_trust_store,
             &authority,
             "install authoring surface fixture",
         )
@@ -189,7 +190,7 @@ fn installed_revision_exposes_unsigned_authoring_entrypoint() {
 #[test]
 fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {
     let mut app = RSpiceApp::test_instance();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -233,7 +234,7 @@ fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {
 #[test]
 fn phone_header_stacks_runtime_status_below_the_title_without_overlap() {
     let mut app = RSpiceApp::test_instance();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -286,7 +287,7 @@ fn phone_header_stacks_runtime_status_below_the_title_without_overlap() {
 #[test]
 fn empty_registry_still_exposes_accessible_trust_root_provisioning() {
     let mut app = RSpiceApp::test_instance();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -330,14 +331,15 @@ fn empty_registry_still_exposes_accessible_trust_root_provisioning() {
 fn display_profile_editor_is_accessible_at_phone_width_and_package_bound() {
     let mut app = RSpiceApp::test_instance();
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.pdk_config.publisher_trust_store = trust;
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config.publisher_trust_store = trust;
     app.state
+        .model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &bytes,
-            &app.state.pdk_config.publisher_trust_store,
+            &app.state.model.pdk_config.publisher_trust_store,
             &authority,
             "install display editor fixture",
         )
@@ -402,14 +404,15 @@ fn display_profile_editor_is_accessible_at_phone_width_and_package_bound() {
 fn revision_comparison_fails_closed_at_phone_width_without_a_second_trusted_revision() {
     let mut app = RSpiceApp::test_instance();
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.pdk_config.publisher_trust_store = trust;
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config.publisher_trust_store = trust;
     app.state
+        .model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &bytes,
-            &app.state.pdk_config.publisher_trust_store,
+            &app.state.model.pdk_config.publisher_trust_store,
             &authority,
             "install comparison fixture",
         )
@@ -460,24 +463,26 @@ fn revision_comparison_table_is_complete_and_accessible_at_phone_width() {
     let mut app = RSpiceApp::test_instance();
     let (baseline, candidate, trust, authority) =
         crate::state::pdk_config::signed_technology_diff_test_fixture();
-    app.state.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.pdk_config.publisher_trust_store = trust;
+    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.state.model.pdk_config.publisher_trust_store = trust;
     app.state
+        .model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &baseline,
-            &app.state.pdk_config.publisher_trust_store,
+            &app.state.model.pdk_config.publisher_trust_store,
             &authority,
             "install comparison baseline",
         )
         .expect("install baseline");
     app.state
+        .model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &candidate,
-            &app.state.pdk_config.publisher_trust_store,
+            &app.state.model.pdk_config.publisher_trust_store,
             &authority,
             "install comparison candidate",
         )
@@ -572,8 +577,17 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
             callback_id: "derive-device".to_owned(),
         },
     );
-    assert_eq!(app.state.workspace.content.pdk_callback_receipts().len(), 1);
+    assert_eq!(
+        app.state
+            .model
+            .workspace
+            .content
+            .pdk_callback_receipts()
+            .len(),
+        1
+    );
     app.state
+        .model
         .workspace
         .content
         .validate_pdk_callback_receipts()

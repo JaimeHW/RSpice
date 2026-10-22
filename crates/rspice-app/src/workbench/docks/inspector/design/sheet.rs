@@ -154,7 +154,7 @@ fn schematic_section(
     edit: &mut Option<SchematicEdit>,
 ) {
     section_header(ui, "Schematic", None);
-    let policy = &state.schematic.document().document_policy;
+    let policy = &state.model.schematic.document().document_policy;
     let grids = SchematicGridPitch::ALL.map(|pitch| (pitch, grid_pitch_label(pitch)));
     if let Some(pitch) = choice_row(
         ui,
@@ -184,15 +184,15 @@ fn schematic_section(
 fn apply_schematic_edit(state: &mut AppState, edit: SchematicEdit) {
     let changed = match edit {
         SchematicEdit::Grid(pitch) => {
-            let changed = state.schematic.change_grid_pitch(pitch);
+            let changed = state.model.schematic.change_grid_pitch(pitch);
             if changed {
-                state.schematic.reconcile_grid_pitch_runtime();
+                state.model.schematic.reconcile_grid_pitch_runtime();
                 state.ui.schematic_snap.grid_size =
-                    state.schematic.session.editor.snap_engine.grid_size;
+                    state.model.schematic.session.editor.snap_engine.grid_size;
             }
             changed
         }
-        SchematicEdit::NetNameCharacters(policy) => state.schematic.change_net_naming(policy),
+        SchematicEdit::NetNameCharacters(policy) => state.model.schematic.change_net_naming(policy),
     };
     if changed {
         state.sync_active_schematic_to_workspace();
@@ -374,6 +374,7 @@ fn document_section(
         "Every sheet in the project letters these values, so a change here changes them all.",
     );
     let control = &state
+        .model
         .workspace
         .content
         .design_management
@@ -510,6 +511,7 @@ fn stored_title_value(
     field: DrawingSheetTitleFieldId,
 ) -> String {
     let settings = state
+        .model
         .workspace
         .content
         .design_management
@@ -589,6 +591,7 @@ impl SheetText {
                 AuthoredDrawingSheetSize::Standard { .. } => String::new(),
             },
             Self::ChangeReference => state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -631,8 +634,9 @@ struct TextDraft {
 type SheetIdentity = (String, Option<SheetId>);
 
 fn sheet_identity(state: &AppState) -> SheetIdentity {
-    let key = state.workspace.content.active_key();
+    let key = state.model.workspace.content.active_key();
     let sheet = state
+        .model
         .workspace
         .content
         .design_management

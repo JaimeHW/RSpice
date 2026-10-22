@@ -391,7 +391,7 @@ fn shelf_page(
         .trim()
         .to_ascii_lowercase();
     let held = held_parts::held_parts(
-        &app.state.model_library_manager,
+        &app.state.model.model_library_manager,
         installed,
         &HeldQuery {
             needle: &needle,
@@ -436,6 +436,7 @@ fn browse(
     limit: usize,
 ) -> (usize, Vec<PackModelHit>) {
     app.state
+        .model
         .model_library_manager
         .browse_pack_models(
             &app.state.workbench.models_view.catalog_query,
@@ -862,6 +863,7 @@ fn pack_scope_identity(app: &ManagerRenderContext<'_>, row: &ShelfRow) -> Option
         PartOrigin::InstalledPack { pack_id, .. } => Some(pack_id.clone()),
         PartOrigin::Foundation { library } | PartOrigin::ProjectRetained { library } => app
             .state
+            .model
             .model_library_manager
             .get_library(library)
             .and_then(|library| library.pack_id.clone()),
@@ -1354,18 +1356,19 @@ mod tests {
             .find(|row| row.hit.name == "RSPICE_DIODE")
             .expect("the foundation diode is on the shelf");
 
-        let route = place::place_route(&state.model_library_manager, row)
+        let route = place::place_route(&state.model.model_library_manager, row)
             .expect("a foundation diode places");
         let place::PlaceRoute::Arm(placement) = route else {
             panic!("a card the build already holds is armed, not retained: {route:?}");
         };
         crate::workbench::app::arm_pack_part(&mut state, *placement);
         assert_eq!(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::Diode)
         );
         assert_eq!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -1386,6 +1389,7 @@ mod tests {
     fn a_retained_macromodel_places_as_a_cell_instance_in_its_own_port_order() {
         let mut state = AppState::default();
         state
+            .model
             .model_library_manager
             .add_library(retained_library("proving_parts"));
 
@@ -1403,17 +1407,18 @@ mod tests {
             "a part the project holds says so, quietly"
         );
 
-        let route = place::place_route(&state.model_library_manager, row)
+        let route = place::place_route(&state.model.model_library_manager, row)
             .expect("a retained subckt places");
         let place::PlaceRoute::Arm(placement) = route else {
             panic!("bytes already in the project are armed, not retained: {route:?}");
         };
         crate::workbench::app::arm_pack_part(&mut state, *placement);
         assert_eq!(
-            state.schematic.session.editor.tool,
+            state.model.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::CellInstance)
         );
         let binding = state
+            .model
             .schematic
             .session
             .editor
@@ -1470,7 +1475,7 @@ mod tests {
             "a release nobody adopted is not in the project"
         );
         assert_eq!(
-            place::place_route(&state.model_library_manager, row)
+            place::place_route(&state.model.model_library_manager, row)
                 .expect("an installed part routes"),
             place::PlaceRoute::Retain {
                 pack_id: PACK_ID.to_owned(),
@@ -1482,7 +1487,12 @@ mod tests {
 
         // The retention itself — the one call `InstallPack { part }` makes.
         let library = hub
-            .add_part_to_project(&mut state.model_library_manager, PACK_ID, VERSION, PART_ID)
+            .add_part_to_project(
+                &mut state.model.model_library_manager,
+                PACK_ID,
+                VERSION,
+                PART_ID,
+            )
             .expect("the proved bytes are retained");
 
         let (_, rows) = page(&mut state, hub.installed());
@@ -1503,13 +1513,15 @@ mod tests {
         );
 
         let place::PlaceRoute::Arm(placement) =
-            place::place_route(&state.model_library_manager, row).expect("a retained part places")
+            place::place_route(&state.model.model_library_manager, row)
+                .expect("a retained part places")
         else {
             panic!("bytes already retained are armed, not retained again");
         };
         crate::workbench::app::arm_pack_part(&mut state, *placement);
         assert_eq!(
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -1535,6 +1547,7 @@ mod tests {
         let mut state = AppState::default();
         let before = page(&mut state, &[]).0;
         state
+            .model
             .model_library_manager
             .add_library(retained_library("proving_parts"));
         let (after, rows) = page(&mut state, &[]);
@@ -1556,7 +1569,7 @@ mod tests {
                 Some(("in project", StateTone::Quiet)),
                 "an indexed part the project adopted says so rather than looking unadded"
             );
-            let route = place::place_route(&state.model_library_manager, indexed)
+            let route = place::place_route(&state.model.model_library_manager, indexed)
                 .expect("an adopted corpus part places");
             assert!(
                 matches!(route, place::PlaceRoute::Arm(_)),
@@ -1569,7 +1582,7 @@ mod tests {
     #[test]
     fn an_unplaceable_part_disables_the_control_and_says_why() {
         let mut state = AppState::default();
-        state.workspace.ensure_active_buffer();
+        state.model.workspace.ensure_active_buffer();
 
         // A card whose declared family no schematic device is drawn for.
         let mut library = ModelLibrary::new("opaque");
@@ -1577,7 +1590,7 @@ mod tests {
         let mut card = DeviceModel::new("VENDOR_PRIVATE", ModelType::Other);
         card.spice_type = Some("VENDOR_PRIVATE".to_owned());
         library.add_model(card);
-        state.model_library_manager.add_library(library);
+        state.model.model_library_manager.add_library(library);
 
         let (_, rows) = page(&mut state, &[]);
         let opaque = row_named(
@@ -1698,11 +1711,12 @@ mod tests {
     fn the_scope_chip_and_the_shelf_agree_about_how_many_parts_there_are() {
         let mut state = AppState::default();
         state
+            .model
             .model_library_manager
             .add_library(retained_library("proving_parts"));
 
-        let chip = state.model_library_manager.pack_definition_count()
-            + held_parts::held_count(&state.model_library_manager, &[]);
+        let chip = state.model.model_library_manager.pack_definition_count()
+            + held_parts::held_count(&state.model.model_library_manager, &[]);
         assert_eq!(chip, page(&mut state, &[]).0);
         assert!(chip > 0, "the guard is measuring something");
     }
@@ -1711,11 +1725,11 @@ mod tests {
     #[test]
     fn a_view_that_is_not_a_schematic_refuses_placement_and_says_so() {
         let mut state = AppState::default();
-        state.workspace.activate_view(
+        state.model.workspace.activate_view(
             crate::state::CellViewRef::new("design", "top", "symbol"),
             crate::state::ViewType::Symbol,
         );
-        assert!(state.workspace.active_schematic().is_none());
+        assert!(state.model.workspace.active_schematic().is_none());
 
         let (_, rows) = page(&mut state, &[]);
         let row = rows

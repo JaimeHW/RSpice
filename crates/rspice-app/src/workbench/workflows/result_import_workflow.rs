@@ -185,7 +185,7 @@ fn result_import_block_reason(state: &AppState) -> Option<String> {
     if state.workbench.safe_mode.project_read_only() {
         return Some("The project is read-only; result history cannot be changed.".to_owned());
     }
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         return Some(
             "Wait for the active simulation execution to finish before importing result data."
                 .to_owned(),
@@ -426,11 +426,11 @@ fn commit_parsed_result_dataset(
     });
     analysis.validate_retained_evidence()?;
 
-    let previous_simulation = state.simulation.clone();
+    let previous_simulation = state.model.simulation.clone();
     let previous_workbench = state.workbench.clone();
 
     let (run_sequence, dataset_id) = {
-        let run = state.simulation.start_imported_run()?;
+        let run = state.model.simulation.start_imported_run()?;
         run.job_id = None;
         run.execution_target = None;
         run.label = format!("Imported · {source_name}");
@@ -444,19 +444,19 @@ fn commit_parsed_result_dataset(
             .restore_provenance(SimulationRunProvenance::LegacyUnattributed)
             .and_then(|()| run.restore_lifecycle(SimulationRunLifecycle::LegacyUnknown, 0.0));
         if let Err(error) = sealed {
-            state.simulation = previous_simulation;
+            state.model.simulation = previous_simulation;
             return Err(format!("could not seal imported result history: {error}"));
         }
         (run_sequence, dataset_id)
     };
 
-    state.simulation.complete_run();
+    state.model.simulation.complete_run();
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
     let document = crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id);
     if !crate::workbench::chrome::document_bar::activate_document_by_id(state, &document) {
-        state.simulation = previous_simulation;
+        state.model.simulation = previous_simulation;
         state.workbench = previous_workbench;
         return Err(
             "The imported dataset could not be activated; no result history was changed."
@@ -1458,7 +1458,7 @@ mod tests {
         state.workbench.result_import.analysis_type = AnalysisType::Transient;
         let error = commit_result_import_draft(&mut state).unwrap_err();
         assert!(error.contains("incompatible"), "{error}");
-        assert!(state.simulation.retained.runs.is_empty());
+        assert!(state.model.simulation.retained.runs.is_empty());
         assert!(state.workbench.result_import.open);
     }
 
@@ -1548,7 +1548,11 @@ mod tests {
         )
         .expect("Touchstone import succeeds");
 
-        let analysis = state.simulation.active_analysis().expect("active import");
+        let analysis = state
+            .model
+            .simulation
+            .active_analysis()
+            .expect("active import");
         assert_eq!(analysis.analysis_type, AnalysisType::SParameter);
         assert_eq!(analysis.waveforms.len(), 4);
         assert_eq!(analysis.waveforms[0].x.as_slice(), &[1.0e6, 2.0e6]);
@@ -1581,7 +1585,14 @@ mod tests {
     fn touchstone_noise_import_commits_independent_axes_and_persists_units() {
         let mut state = loaded_project_state();
         apply_imported_result_dataset(&mut state, "noise.ts", b"[Version] 2.0\n# MHz S RI R 75\n[Number of Ports] 2\n[Two-Port Data Order] 21_12\n[Number of Frequencies] 2\n[Number of Noise Frequencies] 1\n[Reference] 25 100\n[Network Data]\n1 0 0 1 0 0 0 0 0\n3 0 0 1 0 0 0 0 0\n[Noise Data]\n2 3 0 0 15\n[End]\n").unwrap();
-        let analysis = &state.simulation.retained.runs.last().unwrap().analyses[0];
+        let analysis = &state
+            .model
+            .simulation
+            .retained
+            .runs
+            .last()
+            .unwrap()
+            .analyses[0];
         analysis.validate_retained_evidence().unwrap();
         assert_eq!(analysis.waveforms.len(), 7);
         let rn = analysis
@@ -1724,10 +1735,10 @@ mod tests {
     #[test]
     fn exhausted_run_sequence_retains_the_import_draft_and_existing_dataset() {
         let mut state = loaded_project_state();
-        state.simulation.retained.next_run_id = u64::MAX - 1;
+        state.model.simulation.retained.next_run_id = u64::MAX - 1;
         apply_imported_result_dataset(&mut state, "last.csv", b"time [s],V(out) [V]\n0,0\n1,1\n")
             .expect("the last sequence can be imported");
-        assert_eq!(state.simulation.active_run().unwrap().id, u64::MAX);
+        assert_eq!(state.model.simulation.active_run().unwrap().id, u64::MAX);
         let baseline = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let workspace = state.workbench.workspace;
         let document = state.workbench.documents.active(workspace).cloned();
@@ -1771,6 +1782,7 @@ mod tests {
         .expect("import succeeds");
 
         let run = state
+            .model
             .simulation
             .active_run()
             .expect("imported run selected");
@@ -1785,6 +1797,7 @@ mod tests {
         assert_eq!(run.analyses.len(), 1);
         assert_eq!(
             state
+                .model
                 .simulation
                 .active_analysis()
                 .map(|analysis| analysis.analysis_type),
@@ -1845,7 +1858,7 @@ mod tests {
     #[test]
     fn staging_and_discarding_import_never_mutates_retained_history() {
         let mut state = loaded_project_state();
-        let initial_run_count = state.simulation.retained.runs.len();
+        let initial_run_count = state.model.simulation.retained.runs.len();
         let initial_workspace = state.workbench.workspace;
 
         stage_imported_result_dataset(
@@ -1860,7 +1873,10 @@ mod tests {
             state.workbench.result_import.stage,
             ResultImportStage::Detect
         );
-        assert_eq!(state.simulation.retained.runs.len(), initial_run_count);
+        assert_eq!(
+            state.model.simulation.retained.runs.len(),
+            initial_run_count
+        );
         assert_eq!(state.workbench.workspace, initial_workspace);
         assert!(
             !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state),
@@ -1869,7 +1885,10 @@ mod tests {
 
         discard_result_import_draft(&mut state);
         assert!(!state.workbench.result_import.open);
-        assert_eq!(state.simulation.retained.runs.len(), initial_run_count);
+        assert_eq!(
+            state.model.simulation.retained.runs.len(),
+            initial_run_count
+        );
         assert_eq!(state.workbench.workspace, initial_workspace);
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
     }
@@ -1888,7 +1907,7 @@ mod tests {
         let error = commit_result_import_draft(&mut state).expect_err("empty mapping rejected");
         assert!(error.contains("at least one signal"), "{error}");
         assert!(state.workbench.result_import.open);
-        assert!(state.simulation.retained.runs.is_empty());
+        assert!(state.model.simulation.retained.runs.is_empty());
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
     }
 
@@ -1905,7 +1924,11 @@ mod tests {
 
         commit_result_import_draft(&mut state).expect("commit succeeds");
 
-        let analysis = state.simulation.active_analysis().expect("active import");
+        let analysis = state
+            .model
+            .simulation
+            .active_analysis()
+            .expect("active import");
         assert_eq!(analysis.waveforms.len(), 1);
         assert_eq!(analysis.waveforms[0].name, "V(out)");
         assert!(!state.workbench.result_import.open);
@@ -1920,6 +1943,6 @@ mod tests {
 
         let error = commit_result_import_draft(&mut state).expect_err("invalid frequency rejected");
         assert!(error.contains("greater than zero"), "{error}");
-        assert!(state.simulation.retained.runs.is_empty());
+        assert!(state.model.simulation.retained.runs.is_empty());
     }
 }

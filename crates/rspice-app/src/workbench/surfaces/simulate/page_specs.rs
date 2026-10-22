@@ -125,8 +125,9 @@ fn role_label(role: SpecificationRole) -> &'static str {
 /// one here, because a broken plan's results are not unjudged, they are
 /// unknown.
 fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
-    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
     app.state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -143,7 +144,7 @@ fn plan_payload(app: &RSpiceApp) -> Result<SimulationPlanPayload, String> {
 fn declared_process_corners(app: &RSpiceApp) -> Vec<String> {
     use rspice_simulation_contract::run_set::RunSetDimensionKind;
 
-    let run_set = &app.state.sim_setup.run_set;
+    let run_set = &app.state.model.sim_setup.run_set;
     match run_set.enabled_dimension_of(RunSetDimensionKind::ProcessSection) {
         Some(dimension) if !dimension.values.is_empty() => dimension
             .values
@@ -152,6 +153,7 @@ fn declared_process_corners(app: &RSpiceApp) -> Vec<String> {
             .collect(),
         _ => vec![
             app.state
+                .model
                 .sim_setup
                 .reference_pvt
                 .process
@@ -796,7 +798,7 @@ fn guard_banded_margin(
 /// or a corner the run set has since dropped — is appended so that opening the
 /// record and picking nothing cannot quietly rewrite the requirement.
 fn scope_options(app: &RSpiceApp, current: &SpecPointScope) -> Vec<(String, SpecPointScope)> {
-    let points = app.state.sim_setup.run_set.point_count();
+    let points = app.state.model.sim_setup.run_set.point_count();
     let mut options = vec![
         (
             format!("All {points} PVT points"),
@@ -901,6 +903,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         .and_then(|definition| definition.producing_analysis);
     let producer_position = producer_id.and_then(|id| {
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .ok()
@@ -951,7 +954,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // coverage row already says, because a limit is judged against the dataset
     // this plan produced and no other.
     let evidence_block = if super::output_evidence::selected_plan_dataset(app).is_none() {
-        Some(if app.state.simulation.active_run().is_some() {
+        Some(if app.state.model.simulation.active_run().is_some() {
             "The active dataset was not produced by this plan, so it holds no result for this \
              limit."
         } else {
@@ -1092,6 +1095,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
 pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPointScope) {
     let Ok(plan_id) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
@@ -1132,9 +1136,11 @@ fn evidence_coverage(
         // Verify give the same reason for declining the same dataset.
         return app
             .state
+            .model
             .simulation
             .evidence_domain(
                 app.state
+                    .model
                     .sim_setup
                     .stable_analysis_plan()
                     .ok()
@@ -1175,7 +1181,7 @@ fn monte_carlo_policy_label(policy: &MonteCarloSpecificationGate) -> String {
 fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let dataset = super::output_evidence::selected_plan_dataset(app).map_or_else(
         || {
-            app.state.simulation.active_run().map_or_else(
+            app.state.model.simulation.active_run().map_or_else(
                 || "none · no dataset is loaded".to_owned(),
                 |run| format!("Run {} · belongs to another plan or a manual deck", run.id),
             )
@@ -1205,7 +1211,7 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
     );
     let acceptance = super::output_evidence::selected_plan_dataset(app).map_or_else(
         || {
-            if app.state.simulation.active_run().is_some() {
+            if app.state.model.simulation.active_run().is_some() {
                 "not evaluated · active dataset does not belong to this plan".to_owned()
             } else {
                 "not evaluated · no dataset is loaded".to_owned()
@@ -1353,6 +1359,7 @@ fn evaluation_policy(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanP
 pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: SpecificationPolicy) {
     let Ok(plan_id) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())

@@ -247,9 +247,9 @@ fn prepare_pdk_configuration(
         ]);
     }
     prepare_pdk_configuration_candidate(
-        state.model_library_manager.clone(),
-        &state.pdk_config,
-        state.workspace.content.project.technology_binding(),
+        state.model.model_library_manager.clone(),
+        &state.model.pdk_config,
+        state.model.workspace.content.project.technology_binding(),
         config,
     )
 }
@@ -285,7 +285,7 @@ fn apply_pdk_configuration_with_persistence(
     config: crate::state::pdk_config::PdkConfig,
     persist: impl FnMut(&crate::state::pdk_config::PdkConfig) -> Result<(), String>,
 ) -> Result<usize, Vec<String>> {
-    let previous = state.pdk_config.clone();
+    let previous = state.model.pdk_config.clone();
     let prepared = prepare_pdk_configuration(state, config)?;
     publish_prepared_pdk_configuration_with_persistence(state, previous, prepared, persist)
 }
@@ -311,7 +311,7 @@ fn publish_prepared_pdk_configuration_with_persistence(
         publish_model_library_set_candidate(state, candidate, "apply configured PDK model sources")
             .map(|_| ())
     } else {
-        state.model_library_manager = candidate;
+        state.model.model_library_manager = candidate;
         Ok(())
     };
     if let Err(error) = publication {
@@ -325,7 +325,7 @@ fn publish_prepared_pdk_configuration_with_persistence(
         return Err(errors);
     }
 
-    state.pdk_config = config;
+    state.model.pdk_config = config;
     Ok(loaded)
 }
 
@@ -369,8 +369,8 @@ fn emit_pdk_file_load_success_message(
     library_name: &str,
     library_stats: Option<(usize, usize)>,
 ) {
-    state.pdk_config.add_recent_file(path);
-    if let Err(err) = crate::state::pdk_config::save(&state.pdk_config) {
+    state.model.pdk_config.add_recent_file(path);
+    if let Err(err) = crate::state::pdk_config::save(&state.model.pdk_config) {
         emit_pdk_save_warning(state, "was updated", err.to_string());
     }
 
@@ -503,6 +503,7 @@ impl RSpiceApp {
     ) {
         let Some(library) = self
             .state
+            .model
             .model_library_manager
             .get_library(&library_name)
             .cloned()
@@ -652,10 +653,11 @@ impl RSpiceApp {
             ctx,
             NativeModelCatalogOperation::ApplyConfiguration(Box::new(
                 NativePdkConfigurationOperation {
-                    previous: self.state.pdk_config.clone(),
+                    previous: self.state.model.pdk_config.clone(),
                     config,
                     technology_binding: self
                         .state
+                        .model
                         .workspace
                         .content
                         .project
@@ -716,7 +718,9 @@ impl RSpiceApp {
         };
         let scope = RecallNoticeScope {
             catalog_digest: identity.digest.clone(),
-            pack_pin_key: crate::state::model_hub::pack_pin_key(&self.state.model_library_manager),
+            pack_pin_key: crate::state::model_hub::pack_pin_key(
+                &self.state.model.model_library_manager,
+            ),
         };
         if self.state.workbench.models_view.recall_notice.as_ref() == Some(&scope) {
             return;
@@ -727,7 +731,7 @@ impl RSpiceApp {
         };
         let recalled = crate::state::model_hub::recalled_pins(
             hub.recalls(),
-            &self.state.model_library_manager,
+            &self.state.model.model_library_manager,
         );
         if recalled.is_empty() {
             return;
@@ -801,7 +805,7 @@ impl RSpiceApp {
             return;
         }
         let authority = capture_native_model_import_authority(&self.state);
-        let candidate = self.state.model_library_manager.clone();
+        let candidate = self.state.model.model_library_manager.clone();
         let store = self.model_hub.store().cloned();
         note_models_operation(
             &mut self.state,
@@ -901,9 +905,9 @@ fn capture_native_model_import_authority(state: &AppState) -> NativeModelImportA
         project_id: state
             .project_lifecycle
             .is_open()
-            .then(|| state.workspace.content.project.id().to_string()),
-        project_revision: state.workspace.content.project.revision().get(),
-        catalog_digest: state.model_library_manager.execution_catalog_digest(),
+            .then(|| state.model.workspace.content.project.id().to_string()),
+        project_revision: state.model.workspace.content.project.revision().get(),
+        catalog_digest: state.model.model_library_manager.execution_catalog_digest(),
     }
 }
 
@@ -916,9 +920,9 @@ fn native_model_import_authority_is_current(
         == state
             .project_lifecycle
             .is_open()
-            .then(|| state.workspace.content.project.id().to_string())
-        && authority.project_revision == state.workspace.content.project.revision().get()
-        && authority.catalog_digest == state.model_library_manager.execution_catalog_digest()
+            .then(|| state.model.workspace.content.project.id().to_string())
+        && authority.project_revision == state.model.workspace.content.project.revision().get()
+        && authority.catalog_digest == state.model.model_library_manager.execution_catalog_digest()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1015,6 +1019,7 @@ fn publish_native_model_catalog_library(
 ) -> Result<String, Vec<String>> {
     if let NativeModelCatalogOperation::AddPart { part_name, .. } = operation
         && state
+            .model
             .model_library_manager
             .get_library(library_name)
             .is_some()
@@ -1050,7 +1055,7 @@ fn publish_native_model_catalog_library(
                 .map_err(|error| vec![error])?,
         )
     } else {
-        state.model_library_manager = candidate;
+        state.model.model_library_manager = candidate;
         None
     };
     let location = revision.map_or_else(
@@ -1172,7 +1177,7 @@ fn poll_native_model_imports(
                     candidate,
                     loaded,
                 } = *output;
-                if state.pdk_config != previous {
+                if state.model.pdk_config != previous {
                     let error = "PDK settings changed while their model sources were loading, so the loaded result was discarded and nothing changed. Apply the current settings again."
                         .to_owned();
                     state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
@@ -1451,9 +1456,9 @@ fn start_browser_model_import(
         project_id: state
             .project_lifecycle
             .is_open()
-            .then(|| state.workspace.content.project.id().to_string()),
-        project_revision: state.workspace.content.project.revision().get(),
-        catalog_digest: state.model_library_manager.execution_catalog_digest(),
+            .then(|| state.model.workspace.content.project.id().to_string()),
+        project_revision: state.model.workspace.content.project.revision().get(),
+        catalog_digest: state.model.model_library_manager.execution_catalog_digest(),
         replace_library: replace_library.clone(),
     };
     let repaint = ctx.clone();
@@ -1603,12 +1608,16 @@ impl RSpiceApp {
                 .state
                 .project_lifecycle
                 .is_open()
-                .then(|| self.state.workspace.content.project.id().to_string()),
-            project_revision: self.state.workspace.content.project.revision().get(),
-            catalog_digest: self.state.model_library_manager.execution_catalog_digest(),
+                .then(|| self.state.model.workspace.content.project.id().to_string()),
+            project_revision: self.state.model.workspace.content.project.revision().get(),
+            catalog_digest: self
+                .state
+                .model
+                .model_library_manager
+                .execution_catalog_digest(),
             replace_library: None,
         };
-        let candidate = self.state.model_library_manager.clone();
+        let candidate = self.state.model.model_library_manager.clone();
         note_models_operation(
             &mut self.state,
             request.description(),
@@ -1656,12 +1665,12 @@ fn poll_browser_model_hub_operations(
                 let current = state
                     .project_lifecycle
                     .is_open()
-                    .then(|| state.workspace.content.project.id().to_string());
+                    .then(|| state.model.workspace.content.project.id().to_string());
                 let authority_current = completion.authority.project_id == current
                     && completion.authority.project_revision
-                        == state.workspace.content.project.revision().get()
+                        == state.model.workspace.content.project.revision().get()
                     && completion.authority.catalog_digest
-                        == state.model_library_manager.execution_catalog_digest();
+                        == state.model.model_library_manager.execution_catalog_digest();
                 if output.part.is_some() && !authority_current {
                     let error = format!(
                         "The {} finished after the project changed, so its result was discarded \
@@ -1703,12 +1712,12 @@ fn poll_browser_model_imports(state: &mut AppState) {
         let current_project_id = state
             .project_lifecycle
             .is_open()
-            .then(|| state.workspace.content.project.id().to_string());
+            .then(|| state.model.workspace.content.project.id().to_string());
         let authority_current = completion.authority.project_id == current_project_id
             && completion.authority.project_revision
-                == state.workspace.content.project.revision().get()
+                == state.model.workspace.content.project.revision().get()
             && completion.authority.catalog_digest
-                == state.model_library_manager.execution_catalog_digest();
+                == state.model.model_library_manager.execution_catalog_digest();
         let replace_library = completion.authority.replace_library.clone();
         if let Some(candidates) = completion.root_candidates {
             if authority_current {
@@ -1761,13 +1770,13 @@ fn poll_browser_model_imports(state: &mut AppState) {
                         "Replacement sources resolved library '{library_name}' instead of expected '{expected}'; the candidate was discarded."
                     ));
                 }
-                if state.model_library_manager.get_library(expected).is_none() {
+                if state.model.model_library_manager.get_library(expected).is_none() {
                     return Err(format!(
                         "Model library '{expected}' was removed while replacement sources were parsing."
                     ));
                 }
             } else if state
-                .model_library_manager
+                .model.model_library_manager
                 .get_library(&library_name)
                 .is_some()
             {
@@ -1781,7 +1790,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
                         .to_owned(),
                 );
             }
-            let mut candidate = state.model_library_manager.clone();
+            let mut candidate = state.model.model_library_manager.clone();
             candidate.add_library(parsed.library);
             if state.project_lifecycle.is_open() {
                 publish_model_library_candidate(
@@ -1795,7 +1804,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
                     },
                 )?;
             } else {
-                state.model_library_manager = candidate;
+                state.model.model_library_manager = candidate;
             }
             Ok(Some((
                 library_name,
@@ -2163,10 +2172,10 @@ mod tests {
         let beta_root = configured_root("beta", "beta.lib", "beta_n");
         let mut state = AppState::default();
         state.open_project_session();
-        state.model_library_manager.clear();
-        state.pdk_config = PdkConfig::default();
-        let initial_revision = state.workspace.content.project.revision();
-        let initial_epoch = state.design_execution_epoch;
+        state.model.model_library_manager.clear();
+        state.model.pdk_config = PdkConfig::default();
+        let initial_revision = state.model.workspace.content.project.revision();
+        let initial_epoch = state.model.design_execution_epoch;
         let mut config = PdkConfig::default();
         config.add_library_path(alpha_root.to_string_lossy().into_owned());
         config.add_library_path(beta_root.to_string_lossy().into_owned());
@@ -2176,26 +2185,56 @@ mod tests {
                 .expect("configured sources publish"),
             2
         );
-        let first_revision = state.workspace.content.project.revision();
+        let first_revision = state.model.workspace.content.project.revision();
         assert!(first_revision > initial_revision);
-        assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(1));
-        assert!(state.workspace.content.project_metadata_dirty);
-        assert!(state.model_library_manager.get_library("alpha").is_some());
-        assert!(state.model_library_manager.get_library("beta").is_some());
-        assert_eq!(state.pdk_config.managed_model_sources.len(), 2);
+        assert_eq!(
+            state.model.design_execution_epoch,
+            initial_epoch.wrapping_add(1)
+        );
+        assert!(state.model.workspace.content.project_metadata_dirty);
+        assert!(
+            state
+                .model
+                .model_library_manager
+                .get_library("alpha")
+                .is_some()
+        );
+        assert!(
+            state
+                .model
+                .model_library_manager
+                .get_library("beta")
+                .is_some()
+        );
+        assert_eq!(state.model.pdk_config.managed_model_sources.len(), 2);
         assert!(state.can_undo_project_design());
 
-        let mut disabled = state.pdk_config.clone();
+        let mut disabled = state.model.pdk_config.clone();
         disabled.toggle_path_enabled(0);
         assert_eq!(
             apply_pdk_configuration_with_persistence(&mut state, disabled, |_| Ok(()))
                 .expect("disabled source publishes"),
             1
         );
-        assert!(state.workspace.content.project.revision() > first_revision);
-        assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(2));
-        assert!(state.model_library_manager.get_library("alpha").is_none());
-        assert!(state.model_library_manager.get_library("beta").is_some());
+        assert!(state.model.workspace.content.project.revision() > first_revision);
+        assert_eq!(
+            state.model.design_execution_epoch,
+            initial_epoch.wrapping_add(2)
+        );
+        assert!(
+            state
+                .model
+                .model_library_manager
+                .get_library("alpha")
+                .is_none()
+        );
+        assert!(
+            state
+                .model
+                .model_library_manager
+                .get_library("beta")
+                .is_some()
+        );
 
         assert_eq!(
             state
@@ -2203,9 +2242,24 @@ mod tests {
                 .expect("undo configured source set"),
             Some("apply configured PDK model sources".to_owned())
         );
-        assert!(state.model_library_manager.get_library("alpha").is_some());
-        assert!(state.model_library_manager.get_library("beta").is_some());
-        assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(3));
+        assert!(
+            state
+                .model
+                .model_library_manager
+                .get_library("alpha")
+                .is_some()
+        );
+        assert!(
+            state
+                .model
+                .model_library_manager
+                .get_library("beta")
+                .is_some()
+        );
+        assert_eq!(
+            state.model.design_execution_epoch,
+            initial_epoch.wrapping_add(3)
+        );
 
         std::fs::remove_dir_all(alpha_root).expect("remove alpha source root");
         std::fs::remove_dir_all(beta_root).expect("remove beta source root");
@@ -2216,10 +2270,10 @@ mod tests {
         let root = configured_root("persistence", "persisted.lib", "persisted_n");
         let mut state = AppState::default();
         state.open_project_session();
-        state.model_library_manager.clear();
-        state.pdk_config = PdkConfig::default();
-        let revision = state.workspace.content.project.revision();
-        let epoch = state.design_execution_epoch;
+        state.model.model_library_manager.clear();
+        state.model.pdk_config = PdkConfig::default();
+        let revision = state.model.workspace.content.project.revision();
+        let epoch = state.model.design_execution_epoch;
         let mut config = PdkConfig::default();
         config.add_library_path(root.to_string_lossy().into_owned());
 
@@ -2235,13 +2289,14 @@ mod tests {
         );
         assert!(
             state
+                .model
                 .model_library_manager
                 .get_library("persisted")
                 .is_none()
         );
-        assert!(state.pdk_config.library_paths().is_empty());
-        assert_eq!(state.workspace.content.project.revision(), revision);
-        assert_eq!(state.design_execution_epoch, epoch);
+        assert!(state.model.pdk_config.library_paths().is_empty());
+        assert_eq!(state.model.workspace.content.project.revision(), revision);
+        assert_eq!(state.model.design_execution_epoch, epoch);
         assert!(!state.can_undo_project_design());
 
         std::fs::remove_dir_all(root).expect("remove persistence source root");
@@ -2251,23 +2306,29 @@ mod tests {
     fn startup_service_hydrates_persisted_sources_without_dirtying_a_closed_project() {
         let root = configured_root("startup", "startup.lib", "startup_n");
         let mut state = AppState::default();
-        state.model_library_manager.clear();
-        let revision = state.workspace.content.project.revision();
-        let epoch = state.design_execution_epoch;
+        state.model.model_library_manager.clear();
+        let revision = state.model.workspace.content.project.revision();
+        let epoch = state.model.design_execution_epoch;
         let mut config = PdkConfig::default();
         config.add_library_path(root.to_string_lossy().into_owned());
 
-        state.pdk_config = config;
+        state.model.pdk_config = config;
         let (manager, loaded) = crate::workbench::app_state::restore_session_model_library_manager(
-            &mut state.pdk_config,
+            &mut state.model.pdk_config,
         )
         .expect("startup configured source hydration");
-        state.model_library_manager = manager;
+        state.model.model_library_manager = manager;
         assert_eq!(loaded, 1);
-        assert!(state.model_library_manager.get_library("startup").is_some());
-        assert_eq!(state.workspace.content.project.revision(), revision);
-        assert_eq!(state.design_execution_epoch, epoch);
-        assert!(!state.workspace.content.project_metadata_dirty);
+        assert!(
+            state
+                .model
+                .model_library_manager
+                .get_library("startup")
+                .is_some()
+        );
+        assert_eq!(state.model.workspace.content.project.revision(), revision);
+        assert_eq!(state.model.design_execution_epoch, epoch);
+        assert!(!state.model.workspace.content.project_metadata_dirty);
         assert!(!state.can_undo_project_design());
 
         std::fs::remove_dir_all(root).expect("remove startup source root");
@@ -2279,12 +2340,12 @@ mod tests {
         let path = root.join("background.lib");
         let mut state = AppState::default();
         state.open_project_session();
-        state.model_library_manager.clear();
+        state.model.model_library_manager.clear();
         let authority = capture_native_model_import_authority(&state);
         assert!(native_model_import_authority_is_current(&authority, &state));
 
         let output = run_native_model_catalog_operation(
-            state.model_library_manager.clone(),
+            state.model.model_library_manager.clone(),
             &NativeModelCatalogOperation::ImportFile { path: path.clone() },
             None,
             model_hub_progress(),
@@ -2302,21 +2363,21 @@ mod tests {
         assert!(candidate.get_library("background").is_some());
         assert!(
             state
+                .model
                 .model_library_manager
                 .get_library("background")
                 .is_none()
         );
 
-        state
-            .model_library_manager
-            .add_library(crate::state::model_library::ModelLibrary::new(
-                "concurrent-change",
-            ));
+        state.model.model_library_manager.add_library(
+            crate::state::model_library::ModelLibrary::new("concurrent-change"),
+        );
         assert!(!native_model_import_authority_is_current(
             &authority, &state
         ));
         assert!(
             state
+                .model
                 .model_library_manager
                 .get_library("background")
                 .is_none()

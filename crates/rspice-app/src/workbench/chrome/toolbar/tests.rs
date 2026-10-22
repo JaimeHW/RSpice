@@ -92,19 +92,22 @@ fn running_dataset_is_never_presented_as_current() {
     let source = "R1 1 0 1k\n";
     let source_digest = crate::state::content_digest(source);
     let generation_input = digest(0x81);
-    app.state.simulation.source.netlist_content = source.to_owned();
-    app.state.netlist_artifacts.generated_input_digest = Some(generation_input);
-    app.state.netlist_artifacts.current_generation_input_digest = Some(generation_input);
-    let revision = app.state.workspace.content.project.revision();
+    app.state.model.simulation.source.netlist_content = source.to_owned();
+    app.state.model.netlist_artifacts.generated_input_digest = Some(generation_input);
+    app.state
+        .model
+        .netlist_artifacts
+        .current_generation_input_digest = Some(generation_input);
+    let revision = app.state.model.workspace.content.project.revision();
     let run = completed_prepared_run(revision, source_digest);
     let dataset_id = run.dataset_id;
-    app.state.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.retained.runs = vec![run].into();
     app.state.workbench.documents.activate(
         crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
 
     assert!(!results_document_is_historical(&app));
-    app.state.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
+    app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
     assert!(results_document_is_historical(&app));
 }
 
@@ -112,10 +115,10 @@ fn running_dataset_is_never_presented_as_current() {
 fn missing_current_generated_source_never_authenticates_a_retained_dataset() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Results;
-    let revision = app.state.workspace.content.project.revision();
+    let revision = app.state.model.workspace.content.project.revision();
     let run = completed_prepared_run(revision, digest(0x83));
     let dataset_id = run.dataset_id;
-    app.state.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.retained.runs = vec![run].into();
     app.state.workbench.documents.activate(
         crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
@@ -138,15 +141,20 @@ fn run_control_label_tracks_stable_execution_and_cancellation_lifecycle() {
 
     let identity = app
         .state
+        .model
         .simulation
         .start_run()
         .execution_identity()
         .expect("current run has execution identity");
-    app.state.simulation.execution.active_execution = Some(identity);
-    app.state.simulation.execution.is_running = false;
+    app.state.model.simulation.execution.active_execution = Some(identity);
+    app.state.model.simulation.execution.is_running = false;
     assert_eq!(run_control_label(&app, desktop), "Stop");
 
-    app.state.simulation.request_abort_active_run().unwrap();
+    app.state
+        .model
+        .simulation
+        .request_abort_active_run()
+        .unwrap();
     assert_eq!(run_control_label(&app, desktop), "Stopping…");
 }
 
@@ -328,6 +336,7 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
     let mut app = RSpiceApp::test_instance();
     let (plan_id, source_revision) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| (plan.id(), plan.revision()))
@@ -335,7 +344,7 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     app.state.workbench.preflight.report = Some(crate::state::PreflightReport {
-        project_revision: app.state.workspace.content.project.revision().get(),
+        project_revision: app.state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
         topology_closure,
@@ -353,6 +362,7 @@ fn reference_pvt_commit_advances_the_plan_and_invalidates_preflight() {
 
     assert_eq!(
         app.state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("plan remains available")

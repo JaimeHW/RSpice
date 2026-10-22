@@ -681,11 +681,13 @@ pub(in crate::workbench::surfaces::simulate) fn export_simulation_plan_package(
 ) -> Result<String, String> {
     let plan = app
         .state
+        .model
         .sim_setup
         .export_plan(id)
         .map_err(|error| error.to_string())?;
     let payload = app
         .state
+        .model
         .workspace
         .content
         .plan_data(id)
@@ -714,12 +716,13 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
     package.plan.name = crate::workbench::app_state::SimulationPlanName::new(name.to_owned())
         .map_err(|error| error.to_string())?;
     app.state
+        .model
         .model_library_manager
         .validate_simulation_plan_bindings(&package.plan.model_bindings)
         .map_err(|error| format!("Imported model bindings require review: {error}"))?;
 
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_id);
     let outcome = setup
@@ -737,7 +740,7 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    crate::io::capture_execution_context(&setup, &app.state.model_library_manager)?;
+    crate::io::capture_execution_context(&setup, &app.state.model.model_library_manager)?;
 
     let first_instance = setup
         .stable_analysis_plan()?
@@ -746,8 +749,8 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
         .map(|instance| instance.id());
     let id = outcome.cloned_plan_id;
     let imported_name = setup.active_plan_name().to_string();
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.workspace = workspace;
     app.state.workbench.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     Ok((
@@ -769,6 +772,7 @@ mod tests {
         let app = RSpiceApp::test_instance();
         let id = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
@@ -897,6 +901,7 @@ mod tests {
         app.state.provision_test_project_technology_contract();
         let id = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
@@ -913,6 +918,7 @@ mod tests {
                 .expect("the fixture's own package imports");
         let owned = app
             .state
+            .model
             .workspace
             .content
             .plan_data(imported_id)

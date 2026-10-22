@@ -76,7 +76,7 @@ pub(super) enum DesignSubject {
 /// Wire IDs implied by the selection, including wires that merely own a
 /// selected segment or vertex.
 fn selected_wire_ids(state: &AppState) -> Vec<u64> {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let mut ids: Vec<u64> = selection.wires.iter().copied().collect();
     ids.extend(
         selection
@@ -93,7 +93,7 @@ fn selected_wire_ids(state: &AppState) -> Vec<u64> {
 /// `true` when the selection holds conductors only — wires, their segments
 /// and vertices, and net labels — and at least one of them.
 fn conductors_only(state: &AppState) -> bool {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let empty = selection.wires.is_empty()
         && selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
@@ -109,12 +109,13 @@ fn conductors_only(state: &AppState) -> bool {
 }
 
 pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     if let Some(name) = navigator_selected_net_name(state, nets) {
         return DesignSubject::Net(name);
     }
     if let Some(id) = selection.single_component() {
         if let Some(port) = state
+            .model
             .schematic
             .document()
             .components
@@ -158,6 +159,7 @@ pub(super) fn subject(state: &AppState, nets: &[DesignNet]) -> DesignSubject {
 /// projection and the concrete schematic selection still match exactly.
 fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
     let authority = state
+        .model
         .schematic
         .session
         .editor
@@ -178,6 +180,7 @@ fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<S
     component_ids.sort_unstable();
     component_ids.dedup();
     if state
+        .model
         .schematic
         .session
         .editor
@@ -188,7 +191,7 @@ fn navigator_selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<S
         return None;
     }
 
-    let selection = &state.schematic.session.editor.selection;
+    let selection = &state.model.schematic.session.editor.selection;
     let no_other_classes = selection.wire_segments.is_empty()
         && selection.wire_vertices.is_empty()
         && selection.junctions.is_empty()
@@ -223,8 +226,9 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         }
     };
     // A selected label names its net outright.
-    for label in &state.schematic.document().net_labels {
+    for label in &state.model.schematic.document().net_labels {
         if state
+            .model
             .schematic
             .session
             .editor
@@ -245,6 +249,7 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         }
     }
     if !state
+        .model
         .schematic
         .session
         .editor
@@ -259,10 +264,11 @@ fn selected_net_name(state: &AppState, nets: &[DesignNet]) -> Option<String> {
         // still says which net that conductor is on, so membership is never
         // re-derived here. An ambiguous crossing takes one stable seed rather
         // than joining two electrical nets.
-        let connectivity = extract(&state.schematic, None);
-        for junction in &state.schematic.session.editor.selection.junctions {
+        let connectivity = extract(&state.model.schematic, None);
+        for junction in &state.model.schematic.session.editor.selection.junctions {
             let Some(extracted) = connectivity.net_at(junction.pos).or_else(|| {
                 state
+                    .model
                     .schematic
                     .document()
                     .wires
@@ -296,6 +302,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             || app.state.schematic_edit_read_only()
             || !app
                 .state
+                .model
                 .schematic
                 .document()
                 .components
@@ -345,6 +352,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             Ok(false) => {}
             Err(_) => {
                 app.state
+                    .model
                     .schematic
                     .session
                     .editor
@@ -393,10 +401,10 @@ struct SheetConnectivity {
 /// depends on instance values and port parameters, which do not advance the
 /// schematic topology version.
 fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
-    let projection = match state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    let projection = match state.model.workspace.design_projection(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     ) {
         Ok(projection) => projection,
         Err(error) => {
@@ -408,11 +416,11 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
         }
     };
     let hierarchy =
-        HierarchySource::from_design_projection(state.library_manager.catalog(), &projection);
+        HierarchySource::from_design_projection(state.model.library_manager.catalog(), &projection);
     let nets = rspice_design::connectivity::summary::projection_nets(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
-        &state.workspace.content.active_view.key(),
+        &state.model.workspace.content.active_view.key(),
     );
 
     let mut bound: HashMap<(u64, &str), &str> = HashMap::new();
@@ -433,6 +441,7 @@ fn sheet_connectivity(state: &AppState) -> SheetConnectivity {
     }
 
     let terminals = state
+        .model
         .schematic
         .document()
         .components
@@ -589,8 +598,14 @@ fn sheet_row(ui: &mut Ui, state: &AppState, object_id: u64) {
     let Some(catalog) = sheet_visibility::multi_sheet_catalog(state) else {
         return;
     };
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     let Some(id) = state
+        .model
         .workspace
         .content
         .design_management
@@ -692,7 +707,7 @@ fn findings_problem(findings: &[&DrcViolation]) -> Problem {
 /// `true` when schematic checks were run against the drawing as it stands.
 fn checks_current(state: &AppState) -> bool {
     state.dialogs.drc_results.is_some()
-        && state.dialogs.drc_checked_version == state.schematic.topology_version()
+        && state.dialogs.drc_checked_version == state.model.schematic.topology_version()
 }
 
 /// What the Checks header says, only when the check is not current and clean:
@@ -729,12 +744,14 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     let scope = sheet_visibility::sheet_scope(ui.ctx());
     let selected: Vec<(u64, String, String)> = app
         .state
+        .model
         .schematic
         .document()
         .components
         .iter()
         .filter(|component| {
             app.state
+                .model
                 .schematic
                 .session
                 .editor
@@ -751,10 +768,10 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect();
     let total = match scope {
-        SheetScope::AllSheets => app.state.schematic.session.editor.selection.count(),
+        SheetScope::AllSheets => app.state.model.schematic.session.editor.selection.count(),
         SheetScope::ActiveSheet => sheet_visibility::selection_filtered_to_active_sheet(
             &app.state,
-            &app.state.schematic.session.editor.selection,
+            &app.state.model.schematic.session.editor.selection,
         )
         .count(),
     };
@@ -797,6 +814,7 @@ fn multi_panel(ui: &mut Ui, app: &mut RSpiceApp) {
 fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(note) = app
         .state
+        .model
         .schematic
         .document()
         .design_notes
@@ -819,6 +837,7 @@ fn note_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
 fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(shape) = app
         .state
+        .model
         .schematic
         .document()
         .documentation_shapes
@@ -837,6 +856,7 @@ fn shape_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
 fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
     let Some(probe) = app
         .state
+        .model
         .schematic
         .document()
         .probes
@@ -880,10 +900,11 @@ fn probe_panel(ui: &mut Ui, app: &mut RSpiceApp, id: u64) {
         plot_response.on_disabled_hover_text("Save the signal before choosing to plot it.");
     }
     if enabled != probe.enabled || plot_on_materialization != probe.plot_on_materialization {
-        let changed = app
-            .state
-            .schematic
-            .edit_probe_intent(id, enabled, plot_on_materialization);
+        let changed =
+            app.state
+                .model
+                .schematic
+                .edit_probe_intent(id, enabled, plot_on_materialization);
         if changed {
             app.state.sync_active_schematic_to_workspace();
             app.invalidate_simulation_preflight();
@@ -937,14 +958,14 @@ impl AppState {
     /// The document's occurrence ends at its own reference by construction, so
     /// the master asked about is `active_view`.
     pub(crate) fn master_occurrence_paths(&self) -> Vec<String> {
-        let Ok(projection) = self.workspace.design_projection(
-            &self.library_manager,
-            &self.workspace.content.active_view,
-            &self.schematic,
+        let Ok(projection) = self.model.workspace.design_projection(
+            &self.model.library_manager,
+            &self.model.workspace.content.active_view,
+            &self.model.schematic,
         ) else {
             return Vec::new();
         };
-        let master = self.workspace.content.active_view.key();
+        let master = self.model.workspace.content.active_view.key();
         projection
             .plan()
             .bindings()

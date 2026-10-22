@@ -162,17 +162,30 @@ pub(super) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
     section_header(
         ui,
         "Loaded model libraries",
-        Some(&app.state.model_library_manager.library_count().to_string()),
+        Some(
+            &app.state
+                .model
+                .model_library_manager
+                .library_count()
+                .to_string(),
+        ),
     );
     let libraries: Vec<_> = app
         .state
+        .model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
         .map(|library| (library.name.clone(), library.model_count()))
         .collect();
     for (name, count) in libraries {
-        let selected = app.state.model_library_manager.selected_library.as_deref() == Some(&name);
+        let selected = app
+            .state
+            .model
+            .model_library_manager
+            .selected_library
+            .as_deref()
+            == Some(&name);
         if nav_row(
             ui,
             WorkbenchIcon::Models,

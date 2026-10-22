@@ -69,34 +69,35 @@ impl DigestKey {
     /// cheaply and exactly, which recomputes the digest every time: a design
     /// whose authorities cannot be serialized has no projection key.
     pub(super) fn of(state: &AppState, inputs: &DiagnosticInputs) -> Option<Self> {
-        let project = state.workspace.content.project.id();
+        let project = state.model.workspace.content.project.id();
         let design = || {
-            state.workspace.design_projection_key(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+            state.model.workspace.design_projection_key(
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
         };
         match inputs {
             DiagnosticInputs::DesignCheck { .. } | DiagnosticInputs::LiveCheck { .. } => {
                 Some(Self::DesignCheck {
                     design: design()?,
-                    deck: state.workspace.content.design_rules.stamp(),
+                    deck: state.model.workspace.content.design_rules.stamp(),
                     project,
                 })
             }
             DiagnosticInputs::SymbolPins { subject } => Some(Self::SymbolPins {
-                library: state.library_manager.revision(),
+                library: state.model.library_manager.revision(),
                 contract: state.symbol_contract_stamp(subject),
                 project,
             }),
             DiagnosticInputs::Dispatch => Some(Self::Dispatch {
                 design: design()?,
                 root_topology: state
+                    .model
                     .workspace
                     .simulation_root_schematic(
-                        &state.workspace.content.active_view,
-                        &state.schematic,
+                        &state.model.workspace.content.active_view,
+                        &state.model.schematic,
                     )
                     .map(|source| source.design.topology_version()),
                 plan: state.active_plan_revision(),
@@ -106,30 +107,47 @@ impl DigestKey {
             DiagnosticInputs::Run { run_sequence } => Some(Self::Run {
                 design: design()?,
                 retained: state
+                    .model
                     .simulation
                     .retained
                     .runs
                     .iter()
                     .any(|run| run.id == *run_sequence),
                 plan: state.active_plan_revision(),
-                options: state.sim_setup.options.to_spice_options(),
-                process: format!("{:?}", state.sim_setup.reference_pvt.process),
-                temperature: state.sim_setup.reference_pvt.temperature_celsius.to_bits(),
-                models: state.model_library_manager.design_inspection_catalog_key(),
+                options: state.model.sim_setup.options.to_spice_options(),
+                process: format!("{:?}", state.model.sim_setup.reference_pvt.process),
+                temperature: state
+                    .model
+                    .sim_setup
+                    .reference_pvt
+                    .temperature_celsius
+                    .to_bits(),
+                models: state
+                    .model
+                    .model_library_manager
+                    .design_inspection_catalog_key(),
                 project,
             }),
             DiagnosticInputs::CampaignMember { .. } => Some(Self::Run {
                 design: design()?,
                 retained: false,
                 plan: state.active_plan_revision(),
-                options: state.sim_setup.options.to_spice_options(),
-                process: format!("{:?}", state.sim_setup.reference_pvt.process),
-                temperature: state.sim_setup.reference_pvt.temperature_celsius.to_bits(),
-                models: state.model_library_manager.design_inspection_catalog_key(),
+                options: state.model.sim_setup.options.to_spice_options(),
+                process: format!("{:?}", state.model.sim_setup.reference_pvt.process),
+                temperature: state
+                    .model
+                    .sim_setup
+                    .reference_pvt
+                    .temperature_celsius
+                    .to_bits(),
+                models: state
+                    .model
+                    .model_library_manager
+                    .design_inspection_catalog_key(),
                 project,
             }),
             DiagnosticInputs::RuleDeck => Some(Self::RuleDeck {
-                deck: state.workspace.content.design_rules.stamp(),
+                deck: state.model.workspace.content.design_rules.stamp(),
                 project,
                 label: super::super::rule_deck::project_file_label(state),
             }),

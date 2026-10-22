@@ -364,7 +364,7 @@ fn studio_state(app: &RSpiceApp) -> String {
     let state: &AppState = &app.state;
     format!(
         "{:?}\n{:?}\n{:?}\n{:?}",
-        state.sim_setup, state.workbench, state.dialogs, state.workspace
+        state.model.sim_setup, state.workbench, state.dialogs, state.model.workspace
     )
 }
 
@@ -378,6 +378,7 @@ fn studio_state(app: &RSpiceApp) -> String {
 fn place_a_source(state: &mut AppState) {
     use crate::state::{Component, ComponentType, Point};
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -1292,6 +1293,7 @@ fn transient_checkpoint_import_answers_without_a_dialog() {
         sweep
             .app
             .state
+            .model
             .simulation
             .retained
             .imported_transient_checkpoints
@@ -1587,6 +1589,7 @@ impl Sweep {
         let recorded = self
             .app
             .state
+            .model
             .log_buffer
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
@@ -1600,7 +1603,7 @@ impl Sweep {
     fn plan_records(&self) -> String {
         format!(
             "{:?}\n{:?}",
-            self.app.state.sim_setup, self.app.state.workspace
+            self.app.state.model.sim_setup, self.app.state.model.workspace
         )
     }
 }

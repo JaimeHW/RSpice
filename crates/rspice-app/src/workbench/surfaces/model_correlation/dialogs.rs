@@ -221,6 +221,7 @@ pub(super) fn retained_run_options(app: &RSpiceApp) -> Vec<RetainedRunOption> {
         return Vec::new();
     };
     app.state
+        .model
         .simulation
         .retained
         .runs
@@ -967,7 +968,7 @@ s2,gain,-0.95,dB,0.04,1,100,27\n\
 s3,gain,-1.9,dB,0.04,1,1000,27\n";
 
         let mut app = RSpiceApp::test_instance();
-        app.state.model_library_manager = ModelLibraryManager::new();
+        app.state.model.model_library_manager = ModelLibraryManager::new();
         let definition = ProjectModelDefinition {
             name: "nch_corr".to_owned(),
             spice_type: "NMOS".to_owned(),
@@ -976,11 +977,12 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
             string_parameters: BTreeMap::new(),
         };
         app.state
+            .model
             .model_library_manager
             .create_project_model("owned-models", &definition)
             .expect("project model");
         let resolved = resolve_project_model_for_editor(
-            &app.state.model_library_manager,
+            &app.state.model.model_library_manager,
             "owned-models",
             "nch_corr",
         )
@@ -1085,6 +1087,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
         let correlation =
             ModelCorrelationState::try_new(vec![suite], Vec::new()).expect("correlation state");
         app.state
+            .model
             .model_library_manager
             .replace_project_model_correlation(
                 "owned-models",
@@ -1096,7 +1099,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
                 &correlation,
             )
             .expect("retained correlation");
-        app.state.model_library_manager.selected_library = Some("owned-models".to_owned());
+        app.state.model.model_library_manager.selected_library = Some("owned-models".to_owned());
         app.state.workbench.selected_model = Some("nch_corr".to_owned());
         app
     }

@@ -55,9 +55,10 @@ struct ResolvedDraft<'a> {
 pub(crate) fn open(app: &mut RSpiceApp) {
     let dataset_id = app
         .state
+        .model
         .simulation
         .active_run()
-        .or_else(|| app.state.simulation.retained.runs.last())
+        .or_else(|| app.state.model.simulation.retained.runs.last())
         .map(|run| run.dataset_id);
     let family = ResultDocumentFamily::WaveformWorksheet;
     let viewer_id =
@@ -157,6 +158,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
 
     fn datasets(&self) -> impl Iterator<Item = (DatasetId, String)> {
         self.0
+            .model
             .simulation
             .retained
             .runs
@@ -195,6 +197,7 @@ impl CreateDocumentHost for CreateDocumentSources<'_> {
 
 fn retained_run(state: &AppState, dataset_id: DatasetId) -> Option<&SimulationRun> {
     state
+        .model
         .simulation
         .retained
         .runs
@@ -340,6 +343,7 @@ fn next_document_name(state: &AppState, family: ResultDocumentFamily) -> String 
     for sequence in 1..=u32::MAX {
         let candidate = format!("{} · {sequence:02}", family.label());
         if !state
+            .model
             .workspace
             .content
             .visualization_documents
@@ -378,6 +382,7 @@ fn resolve_draft<'a>(
         ));
     }
     if state
+        .model
         .workspace
         .content
         .visualization_documents
@@ -1021,15 +1026,21 @@ fn document_tracking(
 pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResultDocumentError> {
     let resolved = resolve_draft(&app.state, &app.state.workbench.create_result_document)?;
     let tracking = document_tracking(
-        &app.state.simulation.retained.runs,
+        &app.state.model.simulation.retained.runs,
         resolved.run,
         resolved.analysis,
     );
     let document = build_document(resolved, tracking)?;
-    let previous_documents_dirty = app.state.workspace.content.visualization_documents_dirty;
+    let previous_documents_dirty = app
+        .state
+        .model
+        .workspace
+        .content
+        .visualization_documents_dirty;
     let previous_workspace = app.state.workbench.workspace;
     let document_id = app
         .state
+        .model
         .workspace
         .content
         .insert_visualization_document(document)?;
@@ -1044,6 +1055,7 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
     ) {
         if let Some(index) = app
             .state
+            .model
             .workspace
             .content
             .visualization_documents
@@ -1051,12 +1063,17 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
             .position(|document| document.id() == document_id)
         {
             app.state
+                .model
                 .workspace
                 .content
                 .visualization_documents
                 .remove(index);
         }
-        app.state.workspace.content.visualization_documents_dirty = previous_documents_dirty;
+        app.state
+            .model
+            .workspace
+            .content
+            .visualization_documents_dirty = previous_documents_dirty;
         app.state.workbench.activate(previous_workspace);
         return Err(CreateResultDocumentError::InvalidDraft(
             "The created result document could not resolve its retained dataset binding."
@@ -1103,7 +1120,7 @@ mod tests {
         let transient_id = transient.dataset_id;
         let ac = retained_run_with(AnalysisType::Ac);
         let ac_id = ac.dataset_id;
-        app.state.simulation.retained.runs = vec![transient, ac].into();
+        app.state.model.simulation.retained.runs = vec![transient, ac].into();
 
         assert_eq!(
             first_compatible_viewer(
@@ -1128,7 +1145,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.retained.runs = vec![run].into();
+        app.state.model.simulation.retained.runs = vec![run].into();
         let family = ResultDocumentFamily::WaveformWorksheet;
         assert!(viewer_is_creatable(
             &app.state,
@@ -1157,7 +1174,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.retained.runs = vec![run].into();
+        app.state.model.simulation.retained.runs = vec![run].into();
         app.state.workbench.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Transient review".to_owned(),
@@ -1171,9 +1188,16 @@ mod tests {
 
         let document_id = commit(&mut app).expect("document commits");
 
-        assert!(app.state.workspace.content.visualization_documents_dirty);
+        assert!(
+            app.state
+                .model
+                .workspace
+                .content
+                .visualization_documents_dirty
+        );
         let document = app
             .state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -1220,7 +1244,7 @@ mod tests {
         run.lifecycle = SimulationRunLifecycle::Completed;
         run.analyses.push(analysis);
         let dataset_id = run.dataset_id;
-        app.state.simulation.retained.runs = vec![run].into();
+        app.state.model.simulation.retained.runs = vec![run].into();
         app.state.workbench.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Typed OP datasheet".to_owned(),
@@ -1235,6 +1259,7 @@ mod tests {
         let document_id = commit(&mut app).expect("typed OP table commits");
         let document = app
             .state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -1243,7 +1268,7 @@ mod tests {
         assert_eq!(document.axes().len(), 2);
         assert!(document.traces().is_empty());
         assert!(
-            app.state.simulation.retained.runs[0].analyses[0]
+            app.state.model.simulation.retained.runs[0].analyses[0]
                 .waveforms
                 .is_empty()
         );
@@ -1358,7 +1383,7 @@ mod tests {
             run.lifecycle = SimulationRunLifecycle::Completed;
             run.analyses.push(analysis);
             let dataset_id = run.dataset_id;
-            app.state.simulation.retained.runs = vec![run].into();
+            app.state.model.simulation.retained.runs = vec![run].into();
             app.state.workbench.create_result_document = CreateResultDocumentDialogState {
                 open: true,
                 name: format!("{viewer_id} review"),
@@ -1373,6 +1398,7 @@ mod tests {
             let document_id = commit(&mut app).expect("typed release-target viewer commits");
             let document = app
                 .state
+                .model
                 .workspace
                 .content
                 .visualization_document(document_id)
@@ -1389,7 +1415,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
-        app.state.simulation.retained.runs = vec![run].into();
+        app.state.model.simulation.retained.runs = vec![run].into();
         let draft = CreateResultDocumentDialogState {
             open: true,
             name: "Transient review".to_owned(),
@@ -1403,11 +1429,22 @@ mod tests {
         app.state.workbench.create_result_document = draft.clone();
         commit(&mut app).expect("first document commits");
         app.state.workbench.create_result_document = draft;
-        let before = app.state.workspace.content.visualization_documents.len();
+        let before = app
+            .state
+            .model
+            .workspace
+            .content
+            .visualization_documents
+            .len();
 
         assert!(commit(&mut app).is_err());
         assert_eq!(
-            app.state.workspace.content.visualization_documents.len(),
+            app.state
+                .model
+                .workspace
+                .content
+                .visualization_documents
+                .len(),
             before
         );
     }

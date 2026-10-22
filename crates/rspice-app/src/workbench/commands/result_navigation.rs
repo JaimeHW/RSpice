@@ -21,7 +21,7 @@ use super::vocabulary::Command;
 pub(super) fn dataset_export_is_resolvable(state: &crate::workbench::AppState) -> bool {
     use crate::workbench::state::{Workspace, WorkspaceDocumentId};
 
-    state.simulation.retained.has_results()
+    state.model.simulation.retained.has_results()
         && matches!(
             state.workbench.documents.active(Workspace::Results),
             Some(
@@ -40,13 +40,14 @@ pub(super) fn dataset_export_is_resolvable(state: &crate::workbench::AppState) -
 pub(crate) fn open_newest_retained_run(app: &mut RSpiceApp) -> bool {
     let Some(index) = app
         .state
+        .model
         .simulation
         .retained
         .newest_retained_result_run_index()
     else {
         return false;
     };
-    if !app.state.simulation.select_run(index) {
+    if !app.state.model.simulation.select_run(index) {
         return false;
     }
     Command::OpenRunInResults.execute(app);
@@ -62,7 +63,12 @@ pub(crate) fn open_newest_retained_run(app: &mut RSpiceApp) -> bool {
 pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: NotificationAction) {
     match action {
         NotificationAction::OpenRunInResults { run_sequence } => {
-            if app.state.simulation.select_run_by_sequence(run_sequence) {
+            if app
+                .state
+                .model
+                .simulation
+                .select_run_by_sequence(run_sequence)
+            {
                 Command::OpenRunInResults.execute(app);
             } else {
                 app.state
@@ -79,6 +85,7 @@ pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: Notificat
 /// view, or at the end of the log when the line has since been dropped.
 pub(crate) fn show_session_line(state: &mut crate::workbench::AppState, log_id: u64) {
     let severity = state
+        .model
         .log_buffer
         .entries()
         .find(|entry| entry.id == log_id)
@@ -98,6 +105,7 @@ pub(crate) fn show_session_line(state: &mut crate::workbench::AppState, log_id: 
 /// channel.
 pub(crate) fn open_run_log(state: &mut crate::workbench::AppState, run_sequence: u64) {
     if state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -126,6 +134,7 @@ pub(crate) fn show_run_line(
     line: usize,
 ) {
     let Some(severity) = state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -168,8 +177,8 @@ fn open_console_page(workbench: &mut crate::workbench::state::WorkbenchState) {
 /// drift apart.
 pub(crate) fn producing_plan_hop(app: &RSpiceApp) -> Result<ProducingPlanHop, &'static str> {
     plan_provenance::producing_plan_hop(
-        &app.state.simulation,
-        app.state.sim_setup.stable_analysis_plan().ok(),
+        &app.state.model.simulation,
+        app.state.model.sim_setup.stable_analysis_plan().ok(),
     )
 }
 
@@ -183,11 +192,13 @@ pub(crate) fn producing_plan_hop(app: &RSpiceApp) -> Result<ProducingPlanHop, &'
 pub(crate) fn task_deck_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
     let run = app
         .state
+        .model
         .simulation
         .active_run()
         .ok_or("no run is selected")?;
     if app
         .state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -224,7 +235,7 @@ pub(crate) fn open_task_deck(state: &mut crate::workbench::AppState, sequence: u
 /// rather than choosing, because five quantities can come from five runs, and
 /// picking one silently would be the studio deciding which the reader meant.
 pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
-    if app.state.simulation.active_run().is_none() {
+    if app.state.model.simulation.active_run().is_none() {
         return Err("no run is selected");
     }
     let checked = &app.state.ui.results.session.checked_result_quantities;
@@ -233,6 +244,6 @@ pub(crate) fn producer_log_hop(app: &RSpiceApp) -> Result<u64, &'static str> {
         1 => checked.iter().next().expect("one check-marked quantity"),
         _ => return Err("check-mark exactly one Data Browser quantity"),
     };
-    producing_run(&app.state.simulation.retained.runs, key.dataset_id())
+    producing_run(&app.state.model.simulation.retained.runs, key.dataset_id())
         .ok_or("the run that produced the check-marked quantity is no longer held")
 }

@@ -25,7 +25,7 @@ pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
 }
 
 pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
-    state.simulation.active_run().is_some_and(|run| {
+    state.model.simulation.active_run().is_some_and(|run| {
         run.analyses.iter().any(|analysis| {
             super::analysis_answers_structural_gate(
                 state,
@@ -38,8 +38,9 @@ pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
 }
 
 fn selected_hb_analysis(state: &AppState) -> Option<&AnalysisResult> {
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     state
+        .model
         .simulation
         .view
         .active_analysis_idx
@@ -126,14 +127,14 @@ const fn harmonic_trace_cache_key(analysis_id: u64, waveform_index: usize) -> u6
 }
 
 fn active_incomplete_fft(state: &AppState) -> Option<String> {
-    let analysis = state.simulation.active_analysis()?;
+    let analysis = state.model.simulation.active_analysis()?;
     analysis
         .success
         .then(|| recorded_fft::incomplete_history_sentence(&analysis.data))?
 }
 
 fn active_hb_failure(state: &AppState) -> Option<&str> {
-    let analysis = state.simulation.active_analysis()?;
+    let analysis = state.model.simulation.active_analysis()?;
     (matches!(
         analysis.analysis_type,
         AnalysisType::HarmonicBalance | AnalysisType::Fourier | AnalysisType::Qpss

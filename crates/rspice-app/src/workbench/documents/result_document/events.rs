@@ -24,17 +24,20 @@ use viewer::EventRowSelection;
 mod source_tests;
 fn active_event_origin(state: &AppState) -> EventOrigin<'_> {
     if let Some(source) = state
+        .model
         .simulation
         .active_analysis()
         .and_then(|analysis| analysis.import_source.as_ref())
     {
         EventOrigin::Imported(source)
     } else if state
+        .model
         .simulation
         .active_analysis()
         .and_then(AnalysisResult::provenance)
         .is_some()
         && state
+            .model
             .simulation
             .active_run()
             .is_some_and(|run| run.prepared_receipt().is_some())
@@ -52,12 +55,12 @@ pub(crate) struct EventOrderCache {
     order: Arc<EventOrder>,
 }
 fn event_order(state: &mut AppState) -> Option<Arc<EventOrder>> {
-    let run = state.simulation.active_run()?;
-    let analysis = state.simulation.active_analysis()?;
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
     let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let source = (
-        state.simulation.retained.runs.revision(),
-        state.simulation.view.data_version,
+        state.model.simulation.retained.runs.revision(),
+        state.model.simulation.view.data_version,
     );
     let expanded = &state.ui.results.session.expanded_event_buses;
     if let Some(cache) = &state.ui.results.event_order_cache
@@ -98,10 +101,10 @@ pub(super) fn analysis_is_renderable(analysis: &AnalysisResult) -> bool {
         ) || analysis.waveforms.iter().any(waveform_is_event))
 }
 pub(super) fn active_analysis_is_renderable(state: &AppState) -> bool {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return false;
     };
-    let Some(analysis) = state.simulation.active_analysis() else {
+    let Some(analysis) = state.model.simulation.active_analysis() else {
         return false;
     };
     super::analysis_answers_structural_gate(
@@ -134,8 +137,8 @@ fn event_rows(analysis: &AnalysisResult) -> Vec<EventRow<'_>> {
 }
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let Some((analysis_key, structurally_renderable)) =
-        state.simulation.active_run().and_then(|run| {
-            state.simulation.active_analysis().map(|analysis| {
+        state.model.simulation.active_run().and_then(|run| {
+            state.model.simulation.active_analysis().map(|analysis| {
                 (
                     AnalysisPresentationKey::new(run.dataset_id, analysis),
                     super::analysis_answers_structural_gate(
@@ -163,6 +166,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let analysis = state
+        .model
         .simulation
         .active_analysis()
         .expect("active analysis resolved above");
@@ -223,11 +227,12 @@ fn event_selection_block(
     selection: &DigitalEventSelection,
 ) -> Option<EventSelectionBlock> {
     let block = |reason, stale| Some(EventSelectionBlock { reason, stale });
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return block(SelectionAbsence::NoDataset, false);
     };
     let Some((analysis_index, _)) = selection.analysis.resolve(run) else {
         if state
+            .model
             .simulation
             .retained
             .runs
@@ -238,13 +243,13 @@ fn event_selection_block(
         }
         return block(SelectionAbsence::UnretainedAnalysis, true);
     };
-    if state.simulation.view.active_analysis_idx != Some(analysis_index) {
+    if state.model.simulation.view.active_analysis_idx != Some(analysis_index) {
         return block(SelectionAbsence::OtherAnalysis, false);
     }
     let Some(order) = event_order(state) else {
         return block(SelectionAbsence::InvalidEvidence, false);
     };
-    let analysis = state.simulation.active_analysis()?;
+    let analysis = state.model.simulation.active_analysis()?;
     if event_row_for_selection(
         analysis,
         order.buses(),
@@ -275,6 +280,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     };
     let buses = order.buses();
     let Some(event) = state
+        .model
         .simulation
         .active_run()
         .and_then(|run| selection.analysis.resolve(run))
@@ -377,9 +383,9 @@ mod tests {
             })
         );
 
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
-        assert!(state.simulation.select_analysis(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        assert!(state.model.simulation.select_analysis(0));
 
         // The row resolves: nothing blocks the inspector.
         assert_eq!(event_selection_block(&mut state, &selection), None);
@@ -410,7 +416,7 @@ mod tests {
         );
 
         // A selection on a retained analysis that is not the active one.
-        assert!(state.simulation.select_analysis(1));
+        assert!(state.model.simulation.select_analysis(1));
         assert_eq!(
             event_selection_block(&mut state, &selection),
             Some(EventSelectionBlock {
@@ -467,8 +473,8 @@ mod availability_tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         assert!(
             !active_analysis_is_renderable(&state),
             "an unvalidated, invalid analysis was offered its sheet"

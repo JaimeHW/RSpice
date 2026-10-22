@@ -27,8 +27,11 @@ pub(super) fn add_veriloga_cell(
     root: &str,
     module: &str,
 ) -> (CellViewRef, ProjectSourceId) {
-    if state.library_manager.get_library(LIBRARY).is_none() {
-        state.library_manager.add_library(Library::new(LIBRARY));
+    if state.model.library_manager.get_library(LIBRARY).is_none() {
+        state
+            .model
+            .library_manager
+            .add_library(Library::new(LIBRARY));
     }
     let reference = CellViewRef::new(LIBRARY, cell, "veriloga");
     let mut view = View::new("veriloga", ViewType::VerilogA);
@@ -39,6 +42,7 @@ pub(super) fn add_veriloga_cell(
     let mut library_cell = Cell::new(cell);
     library_cell.add_view(view);
     state
+        .model
         .library_manager
         .get_library_mut(LIBRARY)
         .expect("the behavioral library")
@@ -54,6 +58,7 @@ pub(super) fn add_veriloga_cell(
     .expect("a valid cell-view bundle");
     let id = bundle.id();
     state
+        .model
         .workspace
         .content
         .project_sources
@@ -147,6 +152,7 @@ pub(super) const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
 
 fn tab_is_dirty(app: &RSpiceApp, reference: &CellViewRef) -> bool {
     app.state
+        .model
         .workspace
         .content
         .open_views
@@ -192,6 +198,7 @@ fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
     open_in_design(&mut app.state, &reference);
     assert!(
         app.state
+            .model
             .workspace
             .content
             .project_sources
@@ -367,7 +374,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     // The worker answers while Design is still the workspace on screen.
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     let receipt = code_workspace::compile_project_bundle_receipt(
-        app.state.workspace.content.project.id(),
+        app.state.model.workspace.content.project.id(),
         selected.bundle(),
         selected.selected_module(),
     )
@@ -483,7 +490,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     let messages = app.state.ui.messages();
     let (status, problem) = code_workspace::veriloga_compile_status(
         veriloga,
-        app.state.workspace.content.project.id(),
+        app.state.model.workspace.content.project.id(),
         &edited,
         messages,
     )
@@ -529,7 +536,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     assert!(
         !code_workspace::veriloga_diagnostics(
             veriloga,
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             &current
         )
         .is_empty(),
@@ -544,6 +551,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     );
     assert!(
         app.state
+            .model
             .log_buffer
             .count_by_severity(crate::diagnostics::LogSeverity::Error)
             > 0,
@@ -642,7 +650,10 @@ fn session_restore_reopens_the_veriloga_tab_in_design() {
     reopened.state = restored;
 
     assert_eq!(reopened.state.workbench.workspace, Workspace::Design);
-    assert_eq!(reopened.state.workspace.content.active_view, reference);
+    assert_eq!(
+        reopened.state.model.workspace.content.active_view,
+        reference
+    );
     assert_eq!(
         crate::workbench::lifecycle::project_lifecycle::active_document(&reopened.state),
         crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId::CellView(
@@ -681,6 +692,7 @@ fn render_the_veriloga_design_document_for_review() {
     let mut report = stderr.lock();
     let schematic = RSpiceApp::test_instance()
         .state
+        .model
         .workspace
         .content
         .active_view
@@ -704,7 +716,7 @@ fn render_the_veriloga_design_document_for_review() {
             let selected = code_workspace::selected_veriloga_source(&app).unwrap();
             app.state.ui.code_workspace.veriloga.receipt = Some(
                 code_workspace::compile_project_bundle_receipt(
-                    app.state.workspace.content.project.id(),
+                    app.state.model.workspace.content.project.id(),
                     selected.bundle(),
                     selected.selected_module(),
                 )

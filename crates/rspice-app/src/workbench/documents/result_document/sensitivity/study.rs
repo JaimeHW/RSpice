@@ -10,7 +10,7 @@ use std::sync::Arc;
 use viewer::{ActiveStudy, StudyView};
 
 pub(super) fn active_study(state: &AppState) -> ActiveStudy<'_> {
-    let Some(analysis) = state.simulation.active_analysis() else {
+    let Some(analysis) = state.model.simulation.active_analysis() else {
         return ActiveStudy::Missing;
     };
     let Some(payload @ AnalysisResultPayload::SensitivityStudy { evidence }) =
@@ -28,12 +28,16 @@ pub(super) fn active_study(state: &AppState) -> ActiveStudy<'_> {
     })
 }
 pub(super) fn serves_active_analysis(state: &AppState) -> bool {
-    state.simulation.active_analysis().is_some_and(|analysis| {
-        matches!(
-            analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::SensitivityStudy { .. })
-        )
-    })
+    state
+        .model
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| {
+            matches!(
+                analysis.result_payload.as_ref(),
+                Some(AnalysisResultPayload::SensitivityStudy { .. })
+            )
+        })
 }
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
     matches!(active_study(state), ActiveStudy::Ready(_))
@@ -47,12 +51,12 @@ pub(in crate::workbench::documents::result_document) struct StudyPlan {
 }
 fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
     let source = (
-        state.simulation.retained.runs.revision(),
-        state.simulation.view.data_version,
+        state.model.simulation.retained.runs.revision(),
+        state.model.simulation.view.data_version,
     );
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     let analysis_key =
-        AnalysisPresentationKey::new(run.dataset_id, state.simulation.active_analysis()?);
+        AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
     let ActiveStudy::Ready(view) = active_study(state) else {
         return None;
     };
@@ -127,9 +131,9 @@ mod tests {
                 },
             ),
         );
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
-        assert!(state.simulation.select_analysis(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
+        assert!(state.model.simulation.select_analysis(0));
         state
     }
     #[test]
@@ -169,7 +173,7 @@ mod tests {
         assert!(serves_active_analysis(&state));
         assert!(active_payload_is_valid(&state));
 
-        state.simulation.retained.runs[0].analyses[0].success = false;
+        state.model.simulation.retained.runs[0].analyses[0].success = false;
         assert!(serves_active_analysis(&state), "the payload is still there");
         assert!(matches!(active_study(&state), ActiveStudy::Invalid));
         assert!(study_plan(&mut state).is_none());

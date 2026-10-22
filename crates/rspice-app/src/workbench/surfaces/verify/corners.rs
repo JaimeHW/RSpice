@@ -488,12 +488,13 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
     let reference = ReferenceCorner {
         process: app
             .state
+            .model
             .sim_setup
             .reference_pvt
             .process
             .short_name()
             .to_owned(),
-        temperature: app.state.sim_setup.reference_pvt.temperature_celsius,
+        temperature: app.state.model.sim_setup.reference_pvt.temperature_celsius,
     };
     let matrix = latest_analysis(app, crate::state::AnalysisType::Corner)
         .zip(verification_run(app))
@@ -544,7 +545,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.simulation, index);
+        select_verification_run(&mut app.state.model.simulation, index);
     }
     action_problem_line(ui, app);
 
@@ -652,7 +653,7 @@ pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
     let result_id =
         latest_analysis(app, crate::state::AnalysisType::Corner).map(|result| result.id);
     let analysis_index = result_id.and_then(|result_id| {
-        app.state.simulation.active_run().and_then(|run| {
+        app.state.model.simulation.active_run().and_then(|run| {
             run.analyses.iter().position(|analysis| {
                 analysis.id == result_id
                     && analysis.analysis_type == crate::state::AnalysisType::Corner
@@ -661,7 +662,7 @@ pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
         })
     });
     if let Some(index) = analysis_index {
-        app.state.simulation.select_analysis(index);
+        app.state.model.simulation.select_analysis(index);
         Command::ExportWaveformsCsv.execute(app);
         app.state.workbench.verification.action_problem = None;
     } else {
@@ -677,7 +678,7 @@ pub(super) fn corner_point_labels(
     use crate::simulation::plan::AnalysisDraft;
 
     let provenance = result.provenance.as_ref()?;
-    let plan = app.state.sim_setup.stable_analysis_plan().ok()?;
+    let plan = app.state.model.sim_setup.stable_analysis_plan().ok()?;
     let instance = plan
         .instances()
         .iter()
@@ -690,8 +691,8 @@ pub(super) fn corner_point_labels(
     };
     let labels = state
         .to_config(
-            &app.state.sim_setup.run_set,
-            app.state.sim_setup.reference_pvt,
+            &app.state.model.sim_setup.run_set,
+            app.state.model.sim_setup.reference_pvt,
         )
         .ok()?
         .corner_names();

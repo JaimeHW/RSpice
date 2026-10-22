@@ -112,7 +112,7 @@ fn install_imported_netlist(
             "SPICE deck import is unavailable: the project is open read-only.",
         ));
     }
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         return Err(ImportFailure::Refused(
             "SPICE deck import is unavailable while a simulation is running.",
         ));
@@ -128,7 +128,8 @@ fn install_imported_netlist(
     )
     .map_err(ImportFailure::Failed)?;
     let mut candidate = state.clone();
-    if !initializing_netlist_project && candidate.workspace.content.netlist_document.is_some() {
+    if !initializing_netlist_project && candidate.model.workspace.content.netlist_document.is_some()
+    {
         crate::workbench::documents::netlist_document::retain_active_top_deck(&mut candidate)
             .map_err(ImportFailure::Failed)?;
     }
@@ -139,19 +140,23 @@ fn install_imported_netlist(
         );
     // Importing a new source deck changes future execution authority but does
     // not delete immutable datasets or a previously active top deck.
-    candidate.design_execution_epoch = candidate.design_execution_epoch.wrapping_add(1);
+    candidate.model.design_execution_epoch = candidate.model.design_execution_epoch.wrapping_add(1);
     candidate.ui.netlist = Default::default();
-    *candidate.netlist_artifacts = Default::default();
+    *candidate.model.netlist_artifacts = Default::default();
     *candidate.manual_run = Default::default();
     candidate.workbench.netlist_open_documents.clear();
     let source_digest = crate::state::content_digest(&source);
     let reopenable_import = source_path.is_some();
-    candidate.workspace.content.netlist_source = Some(source.clone());
-    candidate.workspace.content.netlist_document = Some(document.clone());
-    candidate.workspace.content.netlist_descriptor = Some(descriptor);
-    candidate.workspace.content.netlist_source_path = source_path;
-    candidate.workspace.content.set_netlist_source_dirty(true);
-    candidate.simulation.source.netlist_content = source;
+    candidate.model.workspace.content.netlist_source = Some(source.clone());
+    candidate.model.workspace.content.netlist_document = Some(document.clone());
+    candidate.model.workspace.content.netlist_descriptor = Some(descriptor);
+    candidate.model.workspace.content.netlist_source_path = source_path;
+    candidate
+        .model
+        .workspace
+        .content
+        .set_netlist_source_dirty(true);
+    candidate.model.simulation.source.netlist_content = source;
     candidate.ui.netlist.owned_document = Some(document);
     candidate.ui.netlist.externally_saved_content_digest =
         reopenable_import.then_some(source_digest);
@@ -164,6 +169,7 @@ fn install_imported_netlist(
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
     candidate
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -199,7 +205,7 @@ pub(super) fn netlist_import_start_block_reason(
     state: &AppState,
     mode: NetlistImportMode,
 ) -> Option<&'static str> {
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         return Some("a simulation execution still owns the project");
     }
     if mode == NetlistImportMode::ImportIntoProject && !state.project_lifecycle.is_open() {
@@ -228,7 +234,7 @@ pub(super) fn apply_opened_netlist_project(
         );
         return false;
     }
-    if state.simulation.execution.has_active_execution() {
+    if state.model.simulation.execution.has_active_execution() {
         state.prompt("A netlist project cannot be opened while a simulation is running.");
         return false;
     }

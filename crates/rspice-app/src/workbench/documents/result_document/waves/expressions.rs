@@ -28,7 +28,7 @@ pub(super) fn expr_editor_row(
         .sample_selection
         .as_ref()
         .and_then(|selection| {
-            let run = state.simulation.active_run()?;
+            let run = state.model.simulation.active_run()?;
             let analysis = run.analyses.get(analysis_index)?;
             (selection.dataset_id == run.dataset_id && selection.analysis_sequence == analysis.id)
                 .then(|| {
@@ -72,7 +72,7 @@ pub(super) fn expr_editor_row(
             }
             let sample_selection = state.ui.results.session.sample_selection.clone();
             let series = evaluate_expression(
-                &state.simulation,
+                &state.model.simulation,
                 analysis_index,
                 &text,
                 sample_selection.as_ref(),
@@ -83,7 +83,7 @@ pub(super) fn expr_editor_row(
                         (analysis_key, text.clone()),
                         ExprSeries {
                             version: expression_version(
-                                state.simulation.view.data_version,
+                                state.model.simulation.view.data_version,
                                 sample_selection.as_ref(),
                                 ComplexExpressionPolicy::Rectangular,
                             ),
@@ -93,10 +93,10 @@ pub(super) fn expr_editor_row(
                     let added = state
                         .ui
                         .results
-                        .add_expression_trace(&state.simulation, analysis_key, text)
+                        .add_expression_trace(&state.model.simulation, analysis_key, text)
                         .expect("the expression editor is bound to a retained analysis");
                     if added {
-                        state.workspace.content.visualization_documents_dirty = true;
+                        state.model.workspace.content.visualization_documents_dirty = true;
                     }
                     state.ui.results.session.expr_editor = None;
                 }
@@ -153,7 +153,7 @@ pub(super) fn resolve_strip_exprs(
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
-            state.simulation.view.data_version,
+            state.model.simulation.view.data_version,
             sample_selection.as_ref(),
             expr.complex_policy,
         );
@@ -166,7 +166,7 @@ pub(super) fn resolve_strip_exprs(
             .is_some_and(|s| s.version == version);
         if !fresh {
             let series = evaluate_expression_with_policy(
-                &state.simulation,
+                &state.model.simulation,
                 model.analysis_index,
                 &expr.text,
                 sample_selection.as_ref(),
@@ -278,7 +278,7 @@ pub(crate) fn toggle_visibility(
     analysis_index: usize,
     waveform_index: usize,
 ) {
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return;
     };
     let Some(analysis) = run.analyses.get(analysis_index) else {
@@ -301,6 +301,7 @@ pub(crate) fn toggle_visibility(
         .filter(|context| context.analysis == key.analysis())
     {
         let retained = state
+            .model
             .workspace
             .content
             .visualization_document(context.document_id)
@@ -329,11 +330,11 @@ pub(crate) fn toggle_visibility(
                 })
                 .collect::<Vec<_>>();
             if !edits.is_empty()
-                && let Err(error) = state.workspace.content.transact_visualization_document(
-                    context.document_id,
-                    revision,
-                    edits,
-                )
+                && let Err(error) = state
+                    .model
+                    .workspace
+                    .content
+                    .transact_visualization_document(context.document_id, revision, edits)
             {
                 state.prompt(format!("Could not change trace visibility: {error}"));
                 return;
@@ -358,7 +359,10 @@ pub(crate) fn toggle_visibility(
 /// This is the Edit → Copy consumer for the Units copied-value policy.
 pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let x = state.ui.results.session.cursors.a?;
-    state.ui.results.synchronize_wave_caches(&state.simulation);
+    state
+        .ui
+        .results
+        .synchronize_wave_caches(&state.model.simulation);
     let presentation = state.ui.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
@@ -368,7 +372,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     let phase_continuous = state.ui.results.session.presented_phase_continuous();
     let ac = state.ui.results.session.ac_display;
     let mut models = build_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results.session.derived,
         &Tokens::default(),
         phase_continuous,
@@ -379,7 +383,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     );
     apply_waveform_visibility(
         &mut models,
-        state.simulation.active_run().map(AsRef::as_ref),
+        state.model.simulation.active_run().map(AsRef::as_ref),
         &waveform_visibility,
         &hidden_family_traces,
     );
@@ -410,7 +414,7 @@ mod tests {
     #[test]
     fn complex_quick_trace_upgrade_refreshes_cached_values_without_rewriting_evidence() {
         let mut state = AppState::default();
-        state.simulation.start_run().add_analysis(
+        state.model.simulation.start_run().add_analysis(
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
                 .with_waveforms(vec![
                     RetainedTrace::new("|V(a)|", vec![1.0, 2.0], vec![1.0; 2], "#fff")
@@ -419,16 +423,17 @@ mod tests {
                         .with_complex_components("V(b)", vec![-1.0; 2], vec![0.0; 2]),
                 ]),
         );
-        state.simulation.complete_run();
+        state.model.simulation.complete_run();
         state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
         let digest = state
+            .model
             .simulation
             .active_run()
             .unwrap()
             .dataset_content_digest();
         let policy = state.ui.result_presentation_policy();
         let models = cached_models(
-            &state.simulation,
+            &state.model.simulation,
             &mut state.ui.results,
             policy.complex_number_display(),
             &Tokens::default(),
@@ -462,7 +467,7 @@ mod tests {
                 .ui
                 .results
                 .add_expression_trace(
-                    &state.simulation,
+                    &state.model.simulation,
                     model.analysis_key,
                     "V(a)-V(b)".to_owned()
                 )
@@ -474,6 +479,7 @@ mod tests {
         assert_ne!(old[0].cache_key, current[0].cache_key);
         assert_eq!(
             state
+                .model
                 .simulation
                 .active_run()
                 .unwrap()
@@ -485,7 +491,7 @@ mod tests {
                 .ui
                 .results
                 .add_expression_trace(
-                    &state.simulation,
+                    &state.model.simulation,
                     model.analysis_key,
                     "V(a)-V(b)".to_owned()
                 )

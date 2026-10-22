@@ -94,7 +94,7 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
     // A placement is armed on a sheet's cursor, so there has to be a sheet.
     // The active view having no schematic buffer is exactly that condition:
     // a symbol view is in front, and a device has nowhere to land on one.
-    if state.workspace.active_schematic().is_none() {
+    if state.model.workspace.active_schematic().is_none() {
         return Some(
             "The view in front is not a schematic, so a placed part would have nowhere to land. Open a schematic first.",
         );
@@ -135,7 +135,7 @@ pub(super) struct PlaceOffer {
 
 impl PlaceOffer {
     pub(super) fn for_row(state: &AppState, installed: &[InstalledPack], row: &ShelfRow) -> Self {
-        let manager = &state.model_library_manager;
+        let manager = &state.model.model_library_manager;
         // A retention names a release; if the store no longer holds it, the
         // route is a promise about something that is gone.
         if let PartOrigin::InstalledPack { pack_id, version } = &row.origin

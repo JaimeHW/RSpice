@@ -47,10 +47,10 @@ fn forecast_line(app: &RSpiceApp, validation: &RunSetValidation, revision: u32) 
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation) {
     let t = Tokens::get(ui.ctx());
-    let addable = app.state.sim_setup.run_set.addable_kinds();
-    let can_undo = !app.state.sim_setup.run_set.history.is_empty();
-    let can_redo = !app.state.sim_setup.run_set.future.is_empty();
-    let revision = app.state.sim_setup.run_set.revision;
+    let addable = app.state.model.sim_setup.run_set.addable_kinds();
+    let can_undo = !app.state.model.sim_setup.run_set.history.is_empty();
+    let can_redo = !app.state.model.sim_setup.run_set.future.is_empty();
+    let revision = app.state.model.sim_setup.run_set.revision;
     let mut action: Option<RunSetAction> = None;
     let minimum_height = if app.state.workbench.coarse_pointer {
         44.0

@@ -50,8 +50,9 @@ struct FrameSimulationInput {
 impl FrameSimulationInput {
     fn capture(state: &AppState) -> Self {
         Self {
-            topology_version: state.schematic.topology_version(),
+            topology_version: state.model.schematic.topology_version(),
             analysis_plan: state
+                .model
                 .sim_setup
                 .analysis_plan
                 .as_ref()
@@ -326,7 +327,7 @@ fn configure_platform_input_contract(ctx: &Context) {
 
 impl RSpiceApp {
     fn terminate_automation_runtime_after_project_change(&mut self) {
-        let project_id = self.state.workspace.content.project.id();
+        let project_id = self.state.model.workspace.content.project.id();
         if project_id == self.automation_runtime_project_id {
             return;
         }
@@ -382,7 +383,7 @@ impl RSpiceApp {
         if let Some(reason) = self.state.manual_deck_run_block_reason() {
             return Some(reason);
         }
-        let receipt = self.state.netlist_artifacts.validation.as_ref()?;
+        let receipt = self.state.model.netlist_artifacts.validation.as_ref()?;
         if !self
             .simulation_controller
             .has_retained_manual_authorization(receipt.prepared_snapshot_digest)
@@ -398,7 +399,7 @@ impl RSpiceApp {
     #[cfg(test)]
     pub(crate) fn test_instance() -> Self {
         let state = AppState::default();
-        let automation_runtime_project_id = state.workspace.content.project.id();
+        let automation_runtime_project_id = state.model.workspace.content.project.id();
         Self {
             state,
             first_frame: false,
@@ -454,7 +455,11 @@ impl RSpiceApp {
         state.workbench.set_workspace_preset(workspace_preset);
         state.start_waveform_viewer_session();
         state.workbench.window_session.normalize_after_restore();
-        state.workspace.content.migrate_owned_netlist_deck_ids();
+        state
+            .model
+            .workspace
+            .content
+            .migrate_owned_netlist_deck_ids();
 
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
         state
@@ -479,8 +484,13 @@ impl RSpiceApp {
 
         // Restore global user Verilog-A library (commercial-style user library).
         let startup_faults = [
-            restore_global_veriloga_library(&mut state.library_manager, &mut state.workspace).err(),
+            restore_global_veriloga_library(
+                &mut state.model.library_manager,
+                &mut state.model.workspace,
+            )
+            .err(),
             state
+                .model
                 .model_library_manager
                 .spice_pack_error()
                 .map(str::to_owned),
@@ -547,7 +557,7 @@ impl RSpiceApp {
             controller.set_engine_wakeup(std::sync::Arc::new(move || ctx.request_repaint()));
             controller
         };
-        let automation_runtime_project_id = state.workspace.content.project.id();
+        let automation_runtime_project_id = state.model.workspace.content.project.id();
         Self {
             state,
             first_frame: true,
@@ -623,9 +633,9 @@ impl RSpiceApp {
         // library revision, so neither the editor nor the inspector parses it.
         crate::workbench::documents::code_workspace::refresh_symbol_standing(
             &mut self.state.ui.code_workspace.veriloga,
-            &self.state.library_manager,
-            &self.state.workspace.content.active_view,
-            self.state.workspace.content.active_view_type(),
+            &self.state.model.library_manager,
+            &self.state.model.workspace.content.active_view,
+            self.state.model.workspace.content.active_view_type(),
         );
         crate::workbench::documents::code_workspace::poll_automation_source_import(self);
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
@@ -687,22 +697,29 @@ impl RSpiceApp {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::browser::accessibility::publish_workspace_context(
             self.state.workbench.workspace.label(),
-            &self.state.workspace.content.active_view.display_path(),
-            self.state.simulation.execution.has_active_execution(),
+            &self
+                .state
+                .model
+                .workspace
+                .content
+                .active_view
+                .display_path(),
+            self.state.model.simulation.execution.has_active_execution(),
         );
-        if self.state.simulation.execution.has_active_execution()
+        if self.state.model.simulation.execution.has_active_execution()
             || self.state.workbench.preflight.checking.is_some()
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         if matches!(
-            self.state.workspace.content.active_view_type(),
+            self.state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         ) {
             self.state
+                .model
                 .workspace
                 .content
-                .set_active_dirty(self.state.schematic.session.is_dirty);
+                .set_active_dirty(self.state.model.schematic.session.is_dirty);
         }
         self.sync_window_title(ctx);
         self.handle_image_export();
@@ -729,11 +746,11 @@ impl RSpiceApp {
         } else {
             ""
         };
-        let view = &self.state.workspace.content.active_view;
+        let view = &self.state.model.workspace.content.active_view;
         let title = format!(
             "{}{dirty} — {} — RSpice",
             view.cell,
-            self.state.workspace.content.project.display_name()
+            self.state.model.workspace.content.project.display_name()
         );
         if self.last_window_title != title {
             #[cfg(not(target_arch = "wasm32"))]
@@ -1136,7 +1153,7 @@ impl eframe::App for RSpiceApp {
         self.state.persist_preferences_file(&ctx);
         self.end_frame(&simulation_input_before_frame);
         // A notice a dialog reported after the toasts is raised next frame.
-        if !self.state.notices.is_empty() {
+        if !self.state.model.notices.is_empty() {
             ctx.request_repaint();
         }
     }
@@ -1168,9 +1185,10 @@ impl eframe::App for RSpiceApp {
         self.state.sync_active_schematic_to_workspace();
         self.state.workbench.capture_authoring_recovery();
         log::debug!("save: veriloga library");
-        if let Err(error) =
-            save_global_veriloga_library(&self.state.library_manager, &self.state.workspace)
-        {
+        if let Err(error) = save_global_veriloga_library(
+            &self.state.model.library_manager,
+            &self.state.model.workspace,
+        ) {
             self.state.record(
                 crate::diagnostics::LogSeverity::Error,
                 crate::diagnostics::LogSource::Studio,
@@ -1508,7 +1526,7 @@ mod tests {
             fixture.frame(click(target(&output, "Resistor")));
             assert_eq!(fixture.app.state.workbench.drawer, None);
             assert_eq!(
-                fixture.app.state.schematic.session.editor.tool,
+                fixture.app.state.model.schematic.session.editor.tool,
                 Tool::Place(ComponentType::Resistor)
             );
             fixture.frame(Vec::new());
@@ -1524,9 +1542,28 @@ mod tests {
                 .find(|(id, _)| *id == tree.focus)
                 .map(|(_, node)| (node.label(), node.role()))
         );
-            assert!(fixture.app.state.schematic.document().components.is_empty());
+            assert!(
+                fixture
+                    .app
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .is_empty()
+            );
             fixture.frame(click(target(&output, "Schematic canvas")));
-            assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+            assert_eq!(
+                fixture
+                    .app
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .len(),
+                1
+            );
 
             // A new modal task supersedes a still-pending placement focus request.
             rspice_schematic_editor::view::canvas::request_focus(&fixture.ctx);
@@ -1535,7 +1572,17 @@ mod tests {
             fixture.frame(Vec::new());
             fixture.frame(vec![egui::Event::Text("help".to_owned())]);
             assert_eq!(fixture.app.state.dialogs.command_palette.query, "help");
-            assert_eq!(fixture.app.state.schematic.document().components.len(), 1);
+            assert_eq!(
+                fixture
+                    .app
+                    .state
+                    .model
+                    .schematic
+                    .document()
+                    .components
+                    .len(),
+                1
+            );
         }
     }
 
@@ -1560,12 +1607,14 @@ mod tests {
         let mut state = AppState::default();
         // These readiness tests isolate schematic/DRC policy. Project-owned
         // behavioral sources have their own compile-before-run contract.
-        state.workspace.content.project_sources = Default::default();
+        state.model.workspace.content.project_sources = Default::default();
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(0, 0));
         assert!(
             state
+                .model
                 .sim_setup
                 .stable_analysis_plan()
                 .is_ok_and(|plan| plan.instances().iter().any(|instance| instance.enabled())),
@@ -1576,10 +1625,10 @@ mod tests {
 
     fn schematic_readiness(state: &AppState) -> Option<String> {
         crate::workbench::app_state::run_preflight::run_preflight_block_reason(
-            &state.sim_setup,
-            &state.workspace,
-            &state.schematic,
-            &state.model_library_manager,
+            &state.model.sim_setup,
+            &state.model.workspace,
+            &state.model.schematic,
+            &state.model.model_library_manager,
             state.current_blocking_drc_result(),
         )
     }
@@ -1612,6 +1661,7 @@ mod tests {
         schematic: SchematicState,
     ) {
         state
+            .model
             .workspace
             .insert_schematic_editor(root.key(), schematic);
         let mut catalog = ConfigurationSetCatalog::default();
@@ -1630,6 +1680,7 @@ mod tests {
             })
             .expect("valid alternate configuration");
         state
+            .model
             .workspace
             .content
             .replace_configuration_sets(catalog)
@@ -1654,11 +1705,11 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.preflight.report =
             Some(crate::state::PreflightReport::retained_for_test(
-                app.state.workspace.content.project.revision().get(),
+                app.state.model.workspace.content.project.revision().get(),
             ));
         let before = FrameSimulationInput::capture(&app.state);
 
-        app.state.schematic.bump_topology_version();
+        app.state.model.schematic.bump_topology_version();
         app.invalidate_simulation_preflight_after_frame_edit(&before);
 
         assert!(app.state.workbench.preflight.report.is_none());
@@ -1682,7 +1733,7 @@ mod tests {
     fn legacy_drc_projection_is_never_execution_authority() {
         let mut state = runnable_state();
         state.dialogs.drc_results = Some(drc_result(DrcViolationType::MissingGround, None));
-        state.dialogs.drc_checked_version = state.schematic.topology_version();
+        state.dialogs.drc_checked_version = state.model.schematic.topology_version();
 
         assert!(
             schematic_readiness(&state).is_none(),
@@ -1698,6 +1749,7 @@ mod tests {
             drc_result(DrcViolationType::MissingGround, None),
         );
         state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(20, 20));
         assert!(
@@ -1752,6 +1804,7 @@ mod tests {
     fn unreferenced_veriloga_source_never_blocks_schematic_run_readiness() {
         let mut state = runnable_state();
         state
+            .model
             .workspace
             .content
             .project_sources
@@ -1773,6 +1826,7 @@ mod tests {
             .expect("unique cell-view source");
         assert!(
             state
+                .model
                 .workspace
                 .content
                 .project_sources
@@ -1798,6 +1852,7 @@ mod tests {
         assert!(state.can_run_simulation());
 
         state
+            .model
             .sim_setup
             .set_reference_pvt(ProcessCorner::SS, 27.0)
             .expect("the reference point is valid");
@@ -1819,7 +1874,8 @@ mod tests {
         state.provision_test_project_technology_contract();
         // A project copy retains the exact binding and starts a fresh audit
         // history, which is precisely the binding-without-receipts state.
-        state.workspace.content.project = state
+        state.model.workspace.content.project = state
+            .model
             .workspace
             .content
             .project
@@ -1846,6 +1902,7 @@ mod tests {
         );
 
         let attached_library = state
+            .model
             .workspace
             .content
             .project
@@ -1854,6 +1911,7 @@ mod tests {
             .model_library()
             .to_owned();
         state
+            .model
             .model_library_manager
             .remove_library(&attached_library);
 
@@ -1866,7 +1924,8 @@ mod tests {
     #[test]
     fn generated_and_manual_runs_have_separate_drc_readiness() {
         let mut state = runnable_state();
-        state.workspace.content.netlist_source = Some("V1 in 0 1\nR1 in 0 1k\n.end\n".to_string());
+        state.model.workspace.content.netlist_source =
+            Some("V1 in 0 1\nR1 in 0 1k\n.end\n".to_string());
         publish_drc_result(
             &mut state,
             drc_result(DrcViolationType::MissingGround, None),
@@ -1890,26 +1949,27 @@ mod tests {
     fn netlist_manual_run_request_queues_when_engine_is_busy() {
         let mut state = AppState::default();
         let identity = state
+            .model
             .simulation
             .start_run()
             .execution_identity()
             .expect("current run has execution identity");
-        state.simulation.execution.active_execution = Some(identity);
-        state.simulation.execution.is_running = false;
+        state.model.simulation.execution.active_execution = Some(identity);
+        state.model.simulation.execution.is_running = false;
         state.request_netlist_manual_deck_run();
 
         assert_eq!(
-            state.simulation.execution.run_intent,
+            state.model.simulation.execution.run_intent,
             crate::state::SimulationRunIntent::ManualDeck
         );
-        assert!(!state.simulation.execution.trigger_simulation);
+        assert!(!state.model.simulation.execution.trigger_simulation);
         assert!(state.ui.netlist.rerun_queued);
 
-        state.simulation.execution.active_execution = None;
+        state.model.simulation.execution.active_execution = None;
         state.ui.netlist.rerun_queued = false;
         state.request_netlist_manual_deck_run();
 
-        assert!(state.simulation.execution.trigger_simulation);
+        assert!(state.model.simulation.execution.trigger_simulation);
         assert!(!state.ui.netlist.rerun_queued);
     }
 
@@ -1964,9 +2024,9 @@ mod tests {
         assert!(state.application_modal_open());
         state.dialogs.preferences_open = false;
 
-        state.sim_setup.session.palette_open = true;
+        state.model.sim_setup.session.palette_open = true;
         assert!(state.application_modal_open());
-        state.sim_setup.session.palette_open = false;
+        state.model.sim_setup.session.palette_open = false;
 
         state.tabbed_property_dialog.open = true;
         assert!(state.application_modal_open());
@@ -2167,24 +2227,24 @@ mod tests {
             .expect("RSpice must be able to restore a session it just saved");
 
         assert_eq!(
-            restored.workspace.content.project.id(),
-            expected.workspace.content.project.id()
+            restored.model.workspace.content.project.id(),
+            expected.model.workspace.content.project.id()
         );
         assert_eq!(
-            restored.schematic.document().components,
-            expected.schematic.document().components
+            restored.model.schematic.document().components,
+            expected.model.schematic.document().components
         );
         assert_eq!(
-            restored.schematic.document().wires,
-            expected.schematic.document().wires
+            restored.model.schematic.document().wires,
+            expected.model.schematic.document().wires
         );
-        assert_eq!(restored.log_buffer.entries().count(), 0);
+        assert_eq!(restored.model.log_buffer.entries().count(), 0);
 
         // A session that will not decode starts a new one, and says so in
         // words: the decoder's position and expectation stay out of it.
         eframe::Storage::set_string(&mut storage, eframe::APP_KEY, "(not a session".to_owned());
         let replaced = AppState::restore_eframe_session(&storage).expect("a stored session");
-        let entries: Vec<_> = replaced.log_buffer.entries().collect();
+        let entries: Vec<_> = replaced.model.log_buffer.entries().collect();
         assert_eq!(entries.len(), 1);
         assert_eq!(
             entries[0].severity,

@@ -118,7 +118,7 @@ impl SimulationController {
                     .map(|yield_results| {
                         let provenance = target_run_id
                             .and_then(|run_sequence| {
-                                state.simulation.retained.run_by_sequence(run_sequence)
+                                state.model.simulation.retained.run_by_sequence(run_sequence)
                             })
                             .and_then(|run| {
                                 rspice_simulation::results::yield_provenance_from_monte_carlo_result(
@@ -211,6 +211,7 @@ impl SimulationController {
                                 prepared_yield_evidence.take()
                             {
                                 state
+                                    .model
                                     .simulation
                                     .replace_yield_evidence(yield_results, provenance);
                             }
@@ -263,6 +264,7 @@ impl SimulationController {
                 // Display the just-completed analysis without rebuilding waveform buffers.
                 if let Some(run_id) = target_run_id {
                     state
+                        .model
                         .simulation
                         .select_latest_analysis_in_run_sequence(run_id);
                 }
@@ -354,11 +356,11 @@ impl SimulationController {
                 self.touchstone_export_policy = TouchstoneExportPolicy::disabled();
                 self.current_analysis_idx = 0;
                 self.total_analyses = 0;
-                state.simulation.execution.active_execution = None;
-                state.simulation.execution.abort_request = None;
+                state.model.simulation.execution.active_execution = None;
+                state.model.simulation.execution.abort_request = None;
                 state.manual_run.pending_manual_run_id = None;
                 state.manual_run.pending_run_buffer = None;
-                state.simulation.execution.status = "Aborted".to_string();
+                state.model.simulation.execution.status = "Aborted".to_string();
                 self.complete_campaign_member(state, false);
             }
             Err(e) => {
@@ -441,7 +443,7 @@ impl SimulationController {
                     );
                     self.start_next_analysis(state);
                 } else {
-                    state.simulation.execution.status = "Completed with errors".to_string();
+                    state.model.simulation.execution.status = "Completed with errors".to_string();
                     self.finish_simulation_batch(state);
                 }
             }
@@ -536,15 +538,16 @@ mod tests {
         let mut state = AppState::default();
         let mut controller = SimulationController::new();
         let export_io = super::super::tests::MockExportWorkflowIo::default();
-        let run_sequence = state.simulation.start_run().id;
+        let run_sequence = state.model.simulation.start_run().id;
         let run = state
+            .model
             .simulation
             .retained
             .run_by_sequence_mut(run_sequence)
             .expect("the test run is retained");
         run.mark_running()
             .expect("the test run enters running state");
-        state.simulation.execution.active_execution = run.execution_identity();
+        state.model.simulation.execution.active_execution = run.execution_identity();
         controller.current_run_id = Some(run_sequence);
         controller.current_analysis_label = Some("Transient".to_owned());
         controller.current_provenance = Some(
@@ -565,7 +568,7 @@ mod tests {
             Err(SimulationError::SolverError("singular matrix".to_owned())),
         );
 
-        let published = state.diagnostics.published_run_failures(run_sequence);
+        let published = state.model.diagnostics.published_run_failures(run_sequence);
         assert_eq!(published.len(), 1, "{published:?}");
         assert_eq!(published[0].0, format!("Transient · run {run_sequence}"));
         assert!(
@@ -583,15 +586,16 @@ mod tests {
         let mut state = AppState::default();
         let mut controller = SimulationController::new();
         let export_io = super::super::tests::MockExportWorkflowIo::default();
-        let run_sequence = state.simulation.start_run().id;
+        let run_sequence = state.model.simulation.start_run().id;
         let run = state
+            .model
             .simulation
             .retained
             .run_by_sequence_mut(run_sequence)
             .expect("the test run is retained");
         run.mark_running()
             .expect("the test run enters running state");
-        state.simulation.execution.active_execution = run.execution_identity();
+        state.model.simulation.execution.active_execution = run.execution_identity();
         controller.current_run_id = Some(run_sequence);
         controller.current_analysis_label = Some("Transient".to_owned());
         controller.current_provenance = Some(
@@ -660,6 +664,7 @@ mod tests {
         );
 
         let run = state
+            .model
             .simulation
             .retained
             .run_by_sequence(run_sequence)
@@ -668,7 +673,7 @@ mod tests {
         assert_eq!(run.analyses.len(), 1);
         assert!(run.analyses[0].success, "its results stay available");
         assert_eq!(
-            state.diagnostics.published_run_failures(run_sequence),
+            state.model.diagnostics.published_run_failures(run_sequence),
             [(
                 format!("Transient · run {run_sequence}"),
                 "Testbench reported 2 errors: out stuck low".to_owned()

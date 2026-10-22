@@ -83,7 +83,7 @@ impl PlanParticipation {
     /// whole app could not be called from a place holding only the state.
     pub(super) fn resolve(app: &AppState) -> Self {
         let points: Vec<RunSetPoint<'_>> =
-            run_set::resolve(&app.sim_setup.run_set).unwrap_or_default();
+            run_set::resolve(&app.model.sim_setup.run_set).unwrap_or_default();
         Self::from_points(app, &points)
     }
 
@@ -94,8 +94,8 @@ impl PlanParticipation {
     /// composes once for its point table and hands the retained half here;
     /// [`Self::resolve`] is this with that expansion done for the caller.
     pub(super) fn from_points(app: &AppState, points: &[RunSetPoint<'_>]) -> Self {
-        let state = &app.sim_setup.run_set;
-        let reference = app.sim_setup.reference_pvt;
+        let state = &app.model.sim_setup.run_set;
+        let reference = app.model.sim_setup.reference_pvt;
         let has_axes = state.enabled_dimensions().next().is_some();
         let point_keys: Vec<String> = points.iter().map(RunSetPoint::point_key).collect();
         let nominal_key = run_set::nominal_point_key(points, reference);
@@ -116,6 +116,7 @@ impl PlanParticipation {
             })
             .collect();
         let instances = app
+            .model
             .sim_setup
             .enabled_analysis_instances()
             .map(|instance| {
@@ -330,7 +331,7 @@ pub(super) fn commit_run_at(
     id: AnalysisInstanceId,
     run_at: AnalysisRunAt,
 ) -> Result<(), String> {
-    let result = match app.state.sim_setup.stable_analysis_plan_mut() {
+    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .set_run_at(id, run_at)
             .map_err(|error| error.to_string()),
@@ -403,6 +404,7 @@ pub(super) fn analysis_run_points_dialog(
     let over_limit = points.len() > POINT_PICKER_LIMIT;
     let name = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -416,6 +418,7 @@ pub(super) fn analysis_run_points_dialog(
     // a queue rather than equating the two counts.
     let task_rate = app
         .state
+        .model
         .sim_setup
         .analysis_plan
         .as_ref()
@@ -568,7 +571,7 @@ fn point_grid(
 
 /// The authored label of every resolved point, in declared order.
 fn point_labels(app: &RSpiceApp) -> Vec<String> {
-    run_set::resolve(&app.state.sim_setup.run_set)
+    run_set::resolve(&app.state.model.sim_setup.run_set)
         .unwrap_or_default()
         .iter()
         .map(RunSetPoint::label)
@@ -834,7 +837,7 @@ fn dropped_point_names(state: &run_set::RunSetState, keys: &[String]) -> String 
 }
 
 pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, String> {
-    let Some(points) = run_set::resolve(&app.sim_setup.run_set) else {
+    let Some(points) = run_set::resolve(&app.model.sim_setup.run_set) else {
         // A space that does not expand exactly names no points, so there is
         // nothing to judge a selection against. The Run Set page already
         // refuses such a declaration on its own terms.
@@ -843,7 +846,7 @@ pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, 
     let declared: HashSet<String> = points.iter().map(RunSetPoint::point_key).collect();
 
     let mut prunes = Vec::new();
-    for instance in app.sim_setup.enabled_analysis_instances() {
+    for instance in app.model.sim_setup.enabled_analysis_instances() {
         let AnalysisRunAt::SelectedPoints(keys) = instance.run_at() else {
             continue;
         };
@@ -852,7 +855,7 @@ pub(super) fn reconcile_selections(app: &AppState) -> Result<Vec<PendingPrune>, 
         if dropped.is_empty() {
             continue;
         }
-        let named = dropped_point_names(&app.sim_setup.run_set, &dropped);
+        let named = dropped_point_names(&app.model.sim_setup.run_set, &dropped);
         if kept.is_empty() {
             return Err(format!(
                 "This edit removes every run-set point \"{}\" is scoped to ({named}). It would \
@@ -965,7 +968,7 @@ mod tests {
         use super::{reconcile_selections, run_set};
 
         let mut app = app_with(&[AnalysisKind::OperatingPoint]);
-        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
             dimension.enabled = matches!(
                 dimension.kind,
                 RunSetDimensionKind::Temperature | RunSetDimensionKind::ProcessSection
@@ -973,14 +976,14 @@ mod tests {
         }
         let keys = scope_to_points(&mut app.state, AnalysisKind::OperatingPoint, &[0]);
         let key = keys.first().expect("one point is selected").clone();
-        let label = run_set::point_key_label(&app.state.sim_setup.run_set, &key);
+        let label = run_set::point_key_label(&app.state.model.sim_setup.run_set, &key);
         assert_ne!(label, key, "the fixture's point has a name of its own");
 
         // Switch one axis off. Every key the selection holds names a point of
         // the two-axis space and none of them survives, while every value it
         // was built from is still declared — which is exactly the edit whose
         // refusal was unreadable.
-        for dimension in &mut app.state.sim_setup.run_set.dimensions {
+        for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
             if dimension.kind == RunSetDimensionKind::ProcessSection {
                 dimension.enabled = false;
             }

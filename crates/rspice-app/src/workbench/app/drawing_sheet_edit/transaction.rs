@@ -26,7 +26,7 @@ pub(crate) fn drawing_sheet_editable(state: &AppState) -> bool {
         && state.workbench.current_route().surface_id() == SurfaceId::Design
         && !state.schematic_edit_read_only()
         && matches!(
-            state.workspace.content.active_view_type(),
+            state.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
 }
@@ -123,9 +123,9 @@ struct SheetTransaction {
 impl SheetTransaction {
     /// The active sheet's transaction, drafted from what the sheet draws.
     fn open(state: &AppState) -> Self {
-        let cell_view_key = state.workspace.content.active_key();
+        let cell_view_key = state.model.workspace.content.active_key();
         let resolved = resolve_active_drawing_sheet(state);
-        let designs = &state.workspace.content.design_management;
+        let designs = &state.model.workspace.content.design_management;
         let governed = designs
             .sheet_catalog(&cell_view_key)
             .and_then(|catalog| catalog.active())
@@ -292,6 +292,7 @@ impl SheetTransaction {
                 // not being edited are staged as they stand, including a
                 // value an older build left on the sheet itself.
                 let mut values = state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -331,6 +332,7 @@ impl SheetTransaction {
         change: impl FnOnce(&mut DrawingSheetDocumentControl),
     ) {
         let mut control = state
+            .model
             .workspace
             .content
             .design_management
@@ -376,13 +378,13 @@ fn refuse_organization_locked(
 /// The paper every other sheet of the active schematic is drawn on: a sheet
 /// that follows the project default is drawn on the default's.
 fn other_sheet_sizes(state: &AppState) -> Vec<AuthoredDrawingSheetSize> {
-    let designs = &state.workspace.content.design_management;
+    let designs = &state.model.workspace.content.design_management;
     let default_size = &designs
         .drawing_sheet_settings()
         .default_format
         .authored_size;
     designs
-        .sheet_catalog(&state.workspace.content.active_key())
+        .sheet_catalog(&state.model.workspace.content.active_key())
         .map(|catalog| {
             let active = catalog.active_sheet_id();
             catalog
@@ -468,7 +470,7 @@ fn apply_governed_sheet_edit(
     governed: &GovernedSheet,
     format: SchematicSheetFormat,
 ) -> Result<String, String> {
-    let before = (*state.workspace.content.design_management).clone();
+    let before = (*state.model.workspace.content.design_management).clone();
     let target_authority = before
         .sheet_catalog(&governed.cell_view_key)
         .and_then(|catalog| catalog.find(governed.sheet_id))
@@ -527,16 +529,16 @@ fn apply_first_sheet_edit(
     transaction: &SheetTransaction,
     format: SchematicSheetFormat,
 ) -> Result<String, String> {
-    let before = (*state.workspace.content.design_management).clone();
+    let before = (*state.model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     let personal_before = state.ui.preferences.drawing_sheet_personal_preferences();
     let mut personal = personal_before.clone();
-    let owner_key = state.workspace.content.active_key();
+    let owner_key = state.model.workspace.content.active_key();
     let sheet_id = candidate
         .bootstrap_for_cell_view(
             &owner_key,
             transaction.sheet_name.clone(),
-            all_stable_object_ids(&state.schematic),
+            all_stable_object_ids(&state.model.schematic),
         )
         .map_err(|error| error.to_string())?;
     let sheet_format =
@@ -618,14 +620,15 @@ fn commit_sheet_candidate(
     }
     candidate.validate().map_err(|error| error.to_string())?;
     let schematic_tx = state.prepare_design_management_schematic_transaction(&candidate)?;
-    let owner = state.workspace.content.active_schematic_reference();
+    let owner = state.model.workspace.content.active_schematic_reference();
     let committed_revision = state
+        .model
         .workspace
         .content
         .replace_design_management(candidate)
         .map_err(|error| error.to_string())?;
     state.apply_design_management_schematic_transaction(&schematic_tx);
-    let after = (*state.workspace.content.design_management).clone();
+    let after = (*state.model.workspace.content.design_management).clone();
     state.record_design_management_transaction(DesignManagementHistoryEntry {
         description: "Sheet format".to_owned(),
         owner,

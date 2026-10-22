@@ -15,7 +15,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         Ok(selected) => code_workspace::show_veriloga_inspector(
             ui,
             &app.state.ui.code_workspace.veriloga,
-            app.state.workspace.content.project.id(),
+            app.state.model.workspace.content.project.id(),
             &selected,
             app.state.ui.messages(),
         ),

@@ -85,7 +85,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // The status bar reads the cursor from here; a frame with no canvas
     // under the pointer has none.
     app.state.ui.canvas_hover = None;
-    let owner = app.state.workspace.content.active_view.clone();
+    let owner = app.state.model.workspace.content.active_view.clone();
     let session_id = ui.id().with(("physical-layout-editor", owner.key()));
     let mut session = ui.ctx().data_mut(|data| {
         data.get_temp::<LayoutEditorSession>(session_id)
@@ -94,6 +94,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let Some(document) = app
         .state
+        .model
         .workspace
         .content
         .physical_layout_document(&owner)
@@ -233,6 +234,7 @@ fn resolve_display_contract(
     }
     let active = app
         .state
+        .model
         .pdk_config
         .display_profile_registry
         .active_for_package(package.metadata());
@@ -928,6 +930,7 @@ mod tests {
         app.state.provision_test_project_technology_contract();
         let owner = CellViewRef::new("user", "top", "layout");
         app.state
+            .model
             .library_manager
             .get_library_mut("user")
             .expect("default project library")
@@ -937,6 +940,7 @@ mod tests {
                 crate::state::ViewType::Layout,
             ));
         app.state
+            .model
             .workspace
             .open_view(owner.clone(), crate::state::ViewType::Layout);
         app.state

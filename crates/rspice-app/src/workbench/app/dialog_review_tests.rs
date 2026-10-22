@@ -163,8 +163,8 @@ impl Reader {
                     report.blockers
                 );
             }
-            if !state.simulation.retained.runs.is_empty()
-                && !state.simulation.execution.has_active_execution()
+            if !state.model.simulation.retained.runs.is_empty()
+                && !state.model.simulation.execution.has_active_execution()
             {
                 break;
             }
@@ -176,6 +176,7 @@ impl Reader {
         let run = self
             .app
             .state
+            .model
             .simulation
             .retained
             .runs
@@ -227,7 +228,7 @@ fn open_symbol_view(state: &mut AppState) {
     .expect("the symbol stores");
     cell.add_view(view);
     library.add_cell(cell);
-    state.library_manager.add_library(library);
+    state.model.library_manager.add_library(library);
     state.open_workspace_view(CellViewRef::new("analog", "amp", "symbol"));
     state.workbench.activate(Workspace::Design);
 }
@@ -254,11 +255,11 @@ fn seeded(seed: Seed) -> (Reader, Observation) {
     }
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
-    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.schematic);
+    crate::workbench::examples::load_example("RC Lowpass Filter", &mut app.state.model.schematic);
     // The default plan steps a millisecond at 10 ns: a hundred thousand
     // points, which an unoptimized engine takes seconds over per seed. A
     // microsecond still resolves the filter's 159 us time constant.
-    app.state.sim_setup.tran.step = "1u".to_owned();
+    app.state.model.sim_setup.tran.step = "1u".to_owned();
     reader.run_transient(&ctx);
     let app = &mut reader.app;
     // The run leaves the reader on Simulate with its notice up; they return
@@ -278,6 +279,7 @@ fn seeded(seed: Seed) -> (Reader, Observation) {
     Command::CheckCellview.execute(app);
     let resistor = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -286,6 +288,7 @@ fn seeded(seed: Seed) -> (Reader, Observation) {
         .map(|component| component.id)
         .expect("the example draws R1");
     app.state
+        .model
         .schematic
         .session
         .editor

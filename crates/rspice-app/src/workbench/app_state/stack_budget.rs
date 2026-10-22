@@ -24,6 +24,12 @@ use std::mem::size_of;
 /// growth, not for the next inline dialog aggregate.
 const APP_STATE_INLINE_BUDGET: usize = 32 * 1024;
 
+/// The model is held inline in the state, so its size is spent from the
+/// state's budget. The headroom is for ordinary field growth: a model that
+/// needs more boxes the field that grew rather than taking the rest of the
+/// state's headroom.
+const MODEL_INLINE_BUDGET: usize = 24 * 1024;
+
 /// The inline fields only. The boxed sub-states (`dialogs`, `ui`,
 /// `workbench`, `project_lifecycle`) contribute pointer size by construction
 /// and can never explain inline growth, so listing them would only add the
@@ -31,21 +37,7 @@ const APP_STATE_INLINE_BUDGET: usize = 32 * 1024;
 fn field_sizes() -> Vec<(&'static str, usize)> {
     use crate::workbench::app_state as a;
     vec![
-        ("schematic", size_of::<crate::state::SchematicState>()),
-        ("simulation", size_of::<crate::state::SimulationState>()),
-        (
-            "project_design_history",
-            size_of::<a::design_history::ProjectDesignHistory>(),
-        ),
-        ("design_checks", size_of::<a::DesignCheckRuntime>()),
-        ("sim_setup", size_of::<a::SimSetupState>()),
-        ("log_buffer", size_of::<crate::diagnostics::LogBuffer>()),
-        ("library_manager", size_of::<crate::state::LibraryManager>()),
-        (
-            "library_edit_locks",
-            size_of::<crate::state::ProjectLibraryLockAuthority>(),
-        ),
-        ("workspace", size_of::<crate::state::ProjectWorkspace>()),
+        ("model", size_of::<a::Model>()),
         (
             "tabbed_property_dialog",
             size_of::<crate::properties::TabbedPropertyDialogState>(),
@@ -61,14 +53,6 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
         (
             "pdk_settings_dialog",
             size_of::<a::session::pdk_settings::PdkSettingsDialogState>(),
-        ),
-        (
-            "pdk_config",
-            size_of::<crate::state::pdk_config::PdkConfig>(),
-        ),
-        (
-            "model_library_manager",
-            size_of::<crate::state::model_library::ModelLibraryManager>(),
         ),
         (
             "model_browser_state",
@@ -89,8 +73,38 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
     ]
 }
 
-fn weight_table() -> String {
-    let mut rows = field_sizes();
+/// The model's inline fields, listed the same way: its one boxed field
+/// (`netlist_artifacts`) is pointer size by construction.
+fn model_field_sizes() -> Vec<(&'static str, usize)> {
+    use crate::workbench::app_state as a;
+    vec![
+        ("schematic", size_of::<crate::state::SchematicState>()),
+        ("simulation", size_of::<crate::state::SimulationState>()),
+        (
+            "project_design_history",
+            size_of::<a::design_history::ProjectDesignHistory>(),
+        ),
+        ("design_checks", size_of::<a::DesignCheckRuntime>()),
+        ("sim_setup", size_of::<a::SimSetupState>()),
+        ("log_buffer", size_of::<crate::diagnostics::LogBuffer>()),
+        ("library_manager", size_of::<crate::state::LibraryManager>()),
+        (
+            "library_edit_locks",
+            size_of::<crate::state::ProjectLibraryLockAuthority>(),
+        ),
+        ("workspace", size_of::<crate::state::ProjectWorkspace>()),
+        (
+            "pdk_config",
+            size_of::<crate::state::pdk_config::PdkConfig>(),
+        ),
+        (
+            "model_library_manager",
+            size_of::<crate::state::model_library::ModelLibraryManager>(),
+        ),
+    ]
+}
+
+fn weight_table(mut rows: Vec<(&'static str, usize)>) -> String {
     rows.sort_by_key(|&(_, size)| std::cmp::Reverse(size));
     rows.iter()
         .map(|(name, size)| format!("{size:>9}  {name}"))
@@ -110,6 +124,19 @@ fn app_state_stays_inside_its_inline_stack_budget() {
         "AppState is {state} bytes inline (budget {APP_STATE_INLINE_BUDGET}); every by-value \
          move carries this on the stack, and debug fixture chains hold ten of them on a 2 MiB \
          Windows test thread. Box the field that grew:\n{}",
-        weight_table()
+        weight_table(field_sizes())
+    );
+}
+
+/// The model rides inline in every by-value move of the state, so it is
+/// held to its own share of the state's budget.
+#[test]
+fn the_model_stays_inside_its_inline_stack_budget() {
+    let model = size_of::<crate::workbench::app_state::Model>();
+    assert!(
+        model <= MODEL_INLINE_BUDGET,
+        "Model is {model} bytes inline (budget {MODEL_INLINE_BUDGET}); it moves inline with \
+         every AppState. Box the field that grew:\n{}",
+        weight_table(model_field_sizes())
     );
 }

@@ -447,6 +447,7 @@ fn preflight_mutation(app: &RSpiceApp) -> Result<(), String> {
 fn current_context(app: &RSpiceApp) -> Result<CorrelationContext, String> {
     let library_name = app
         .state
+        .model
         .model_library_manager
         .selected_library
         .clone()
@@ -458,7 +459,7 @@ fn current_context(app: &RSpiceApp) -> Result<CorrelationContext, String> {
         .clone()
         .ok_or_else(|| "Select a project-owned model family first".to_owned())?;
     let resolved = resolve_project_model_for_editor(
-        &app.state.model_library_manager,
+        &app.state.model.model_library_manager,
         &library_name,
         &requested_model,
     )?;
@@ -472,6 +473,7 @@ fn current_context(app: &RSpiceApp) -> Result<CorrelationContext, String> {
     .map_err(|error| format!("Current model source identity is invalid: {error}"))?;
     let correlation = app
         .state
+        .model
         .model_library_manager
         .get_library(&library_name)
         .and_then(|library| library.model_correlation.get(&model_name))
@@ -623,6 +625,7 @@ fn retained_simulation_dataset(
         .map_err(|error| format!("Select a valid retained simulation run: {error}"))?;
     let run = app
         .state
+        .model
         .simulation
         .retained
         .run_by_stable_id(run_id)
@@ -816,7 +819,7 @@ fn publish_correlation(
     selection: PublicationSelection,
     description: String,
 ) -> Result<(), String> {
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let commit = candidate.replace_project_model_correlation(
         &context.library_name,
         context.source_id,

@@ -31,8 +31,8 @@ fn install_retained_results(state: &mut AppState) -> AnalysisPresentationKey {
     run.finish_lifecycle(crate::state::SimulationRunLifecycle::Completed)
         .unwrap();
     let key = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    state.simulation.retained.runs.push(run);
-    assert!(state.simulation.select_run(0));
+    state.model.simulation.retained.runs.push(run);
+    assert!(state.model.simulation.select_run(0));
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
@@ -88,6 +88,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
                 state.ui.results.session.remove_marker(first);
             }
             state
+                .model
                 .schematic
                 .with_undo("Unrelated drawing edit", |schematic| {
                     schematic.add_component(ComponentType::Resistor, Point::new(2, 3));
@@ -103,7 +104,8 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
             let written = crate::io::load_project_file(&path).unwrap();
             let expected_components = usize::from(scope == SaveScope::AllDocuments);
             assert_eq!(
-                written.file.workspace.schematic_buffers[&state.workspace.content.active_key()]
+                written.file.workspace.schematic_buffers
+                    [&state.model.workspace.content.active_key()]
                     .document()
                     .components
                     .len(),
@@ -192,9 +194,12 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
-    state.schematic.with_undo("Drawing edit", |schematic| {
-        schematic.add_component(ComponentType::Resistor, Point::new(2, 3));
-    });
+    state
+        .model
+        .schematic
+        .with_undo("Drawing edit", |schematic| {
+            schematic.add_component(ComponentType::Resistor, Point::new(2, 3));
+        });
     save_native(
         &mut state,
         SaveScope::ActiveDocument,
@@ -236,7 +241,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         let path = unique_path("marker-history-design-reset");
         let (mut state, analysis) = retained_results();
         let published = add_marker(&mut state, analysis);
-        let project_id = state.workspace.content.project.id();
+        let project_id = state.model.workspace.content.project.id();
         save_native(
             &mut state,
             SaveScope::AllDocuments,
@@ -247,7 +252,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         state
             .ui
             .results
-            .reconcile_retained_datasets(&state.simulation);
+            .reconcile_retained_datasets(&state.model.simulation);
         // Opening a schematic file inside a project imports it beside the
         // drawing rather than replacing it, so the drawing is replaced here
         // by a new document in place.
@@ -259,8 +264,8 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         state
             .ui
             .results
-            .reconcile_retained_datasets(&state.simulation);
-        assert_eq!(state.workspace.content.project.id(), project_id);
+            .reconcile_retained_datasets(&state.model.simulation);
+        assert_eq!(state.model.workspace.content.project.id(), project_id);
         assert!(state.ui.results.session.markers.is_empty());
         save_native(
             &mut state,
@@ -276,7 +281,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         assert!(add_marker(&mut reopened, analysis) > published);
 
         create_new_project(&mut reopened);
-        assert_ne!(reopened.workspace.content.project.id(), project_id);
+        assert_ne!(reopened.model.workspace.content.project.id(), project_id);
         let analysis = install_retained_results(&mut reopened);
         assert_eq!(add_marker(&mut reopened, analysis), 1);
         remove_project_artifacts(&path);

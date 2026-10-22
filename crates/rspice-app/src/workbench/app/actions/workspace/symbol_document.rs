@@ -49,12 +49,12 @@ const SYMBOL_PIN_PRODUCER: &str = "rspice.design.symbol.pins";
 impl AppState {
     pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
         SymbolRequestSource {
-            project: self.workspace.content.project.id(),
-            document: self.workspace.content.active_view.clone(),
-            occurrence: self.workspace.content.active_occurrence().cloned(),
-            design_epoch: self.design_execution_epoch,
-            document_epoch: self.active_schematic_epoch,
-            library_revision: self.library_manager.revision(),
+            project: self.model.workspace.content.project.id(),
+            document: self.model.workspace.content.active_view.clone(),
+            occurrence: self.model.workspace.content.active_occurrence().cloned(),
+            design_epoch: self.model.design_execution_epoch,
+            document_epoch: self.model.active_schematic_epoch,
+            library_revision: self.model.library_manager.revision(),
             window: self.workbench.window_session.current().value(),
         }
     }
@@ -73,14 +73,15 @@ impl AppState {
             .symbol
             .in_place
             .as_ref()
-            .is_some_and(|session| session.symbol != self.workspace.content.active_view)
+            .is_some_and(|session| session.symbol != self.model.workspace.content.active_view)
         {
             self.ui.symbol.in_place = None;
         }
         let source = self.symbol_editor_request_source();
-        let is_symbol = self.workspace.content.active_view_type() == crate::state::ViewType::Symbol;
-        let open_views = &self.workspace.content.open_views;
-        let retained = &mut self.workspace.session.symbol_sessions;
+        let is_symbol =
+            self.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol;
+        let open_views = &self.model.workspace.content.open_views;
+        let retained = &mut self.model.workspace.session.symbol_sessions;
         let still_open = |previous: &SymbolRequestSource| {
             previous.project == source.project
                 && previous.design_epoch == source.design_epoch
@@ -136,7 +137,7 @@ impl AppState {
     }
 
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
-        self.symbol_ports(&self.workspace.content.active_view)
+        self.symbol_ports(&self.model.workspace.content.active_view)
     }
 
     /// The interface contract one cell's symbol is checked against.
@@ -147,10 +148,11 @@ impl AppState {
     /// a symbol does not change that symbol's contract.
     pub(crate) fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
-        if self.workspace.content.active_view == schematic_ref {
-            return self.schematic.document().interface_ports();
+        if self.model.workspace.content.active_view == schematic_ref {
+            return self.model.schematic.document().interface_ports();
         }
         if let Some(schematic) = self
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -163,6 +165,7 @@ impl AppState {
         }
 
         let cell = self
+            .model
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell));
@@ -192,10 +195,11 @@ impl AppState {
         reference: &CellViewRef,
     ) -> Option<u64> {
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
-        if self.workspace.content.active_view == schematic_ref {
-            return Some(self.schematic.content_stamp());
+        if self.model.workspace.content.active_view == schematic_ref {
+            return Some(self.model.schematic.content_stamp());
         }
-        self.workspace
+        self.model
+            .workspace
             .content
             .schematic_buffers
             .get(&schematic_ref.key())
@@ -203,7 +207,7 @@ impl AppState {
     }
 
     pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
-        self.load_symbol_document(&self.workspace.content.active_view)
+        self.load_symbol_document(&self.model.workspace.content.active_view)
     }
 
     /// One cell's symbol artwork, as published in the library.
@@ -212,6 +216,7 @@ impl AppState {
         reference: &CellViewRef,
     ) -> Result<SymbolDocument, String> {
         let Some(view) = self
+            .model
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -235,7 +240,7 @@ impl AppState {
         &self,
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
-        self.load_symbol_editor_metadata(&self.workspace.content.active_view, document)
+        self.load_symbol_editor_metadata(&self.model.workspace.content.active_view, document)
     }
 
     /// One cell's symbol authoring metadata, which is where its published
@@ -246,6 +251,7 @@ impl AppState {
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
         let Some(view) = self
+            .model
             .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
@@ -257,9 +263,10 @@ impl AppState {
     }
 
     fn active_symbol_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
-        let reference = &self.workspace.content.active_view;
+        let reference = &self.model.workspace.content.active_view;
         let current_document = self.load_active_symbol_document().ok();
-        self.library_manager
+        self.model
+            .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
@@ -275,8 +282,9 @@ impl AppState {
     }
 
     fn active_symbol_metadata_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
-        let reference = &self.workspace.content.active_view;
-        self.library_manager
+        let reference = &self.model.workspace.content.active_view;
+        self.model
+            .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
@@ -288,12 +296,13 @@ impl AppState {
         &mut self,
         snapshot: &SymbolDocumentSnapshot,
     ) -> Result<(), String> {
-        let reference = self.workspace.content.active_view.clone();
+        let reference = self.model.workspace.content.active_view.clone();
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
         self.with_symbol_parent_edit(|state| {
             let Some(()) = state
+                .model
                 .library_manager
                 .edit_library(&reference.library)
                 .and_then(|mut library| {
@@ -306,7 +315,7 @@ impl AppState {
             state.apply_symbol_pin_renames(&reference, &snapshot.renames);
             Ok(())
         })?;
-        self.workspace.content.set_active_dirty(true);
+        self.model.workspace.content.set_active_dirty(true);
         Ok(())
     }
 
@@ -314,12 +323,13 @@ impl AppState {
         &mut self,
         document: &SymbolDocument,
     ) -> Result<(), String> {
-        let reference = self.workspace.content.active_view.clone();
+        let reference = self.model.workspace.content.active_view.clone();
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
         self.with_symbol_parent_edit(|state| {
             let Some(result) = state
+                .model
                 .library_manager
                 .edit_library(&reference.library)
                 .and_then(|mut library| {
@@ -332,7 +342,7 @@ impl AppState {
             state.apply_symbol_parent_edit(document, &BTreeMap::new());
             Ok(())
         })?;
-        self.workspace.content.set_active_dirty(true);
+        self.model.workspace.content.set_active_dirty(true);
         Ok(())
     }
 
@@ -355,7 +365,7 @@ impl AppState {
         let Ok(base) = self.load_active_symbol_document() else {
             return;
         };
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         // Edited in place, the parent's wires are in view and a pin is moved
         // against them: one left behind is the open-pin mark's to show, not
         // a wire the edit drags along unseen.
@@ -367,8 +377,8 @@ impl AppState {
                 .begin_parent_edit(key, SymbolParentEdit { base, parents });
             return;
         }
-        let reference = self.workspace.content.active_view.clone();
-        let content = &self.workspace.content;
+        let reference = self.model.workspace.content.active_view.clone();
+        let content = &self.model.workspace.content;
         let mut parents: Vec<SymbolParentWiring> = content
             .schematic_buffers
             .iter()
@@ -385,7 +395,7 @@ impl AppState {
         let active_key = content.active_schematic_reference().key();
         parents.extend(parent_wiring(
             None,
-            self.schematic.document(),
+            self.model.schematic.document(),
             content.design_management.sheet_catalog(&active_key),
             &reference,
             &base,
@@ -402,7 +412,7 @@ impl AppState {
         document: &SymbolDocument,
         renames: &BTreeMap<String, String>,
     ) {
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         let Some(edit) = self.ui.symbol.history.parent_edit(&key) else {
             return;
         };
@@ -410,7 +420,8 @@ impl AppState {
         for parent in &edit.parents {
             match &parent.buffer {
                 Some(buffer) => {
-                    self.workspace
+                    self.model
+                        .workspace
                         .for_each_schematic_editor_mut(|key, schematic| {
                             if key == buffer {
                                 schematic.apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
@@ -418,7 +429,8 @@ impl AppState {
                         });
                 }
                 None => {
-                    self.schematic
+                    self.model
+                        .schematic
                         .apply_symbol_instance_wiring(&parent.wiring, &pin_remaps);
                 }
             }
@@ -436,7 +448,8 @@ impl AppState {
             match parent.buffer {
                 Some(buffer) => {
                     let mut before = Some(parent.before);
-                    self.workspace
+                    self.model
+                        .workspace
                         .for_each_schematic_editor_mut(|key, schematic| {
                             if key == buffer
                                 && let Some(before) = before.take()
@@ -446,7 +459,9 @@ impl AppState {
                         });
                 }
                 None => {
-                    self.schematic.commit_undo_from(parent.before, DESCRIPTION);
+                    self.model
+                        .schematic
+                        .commit_undo_from(parent.before, DESCRIPTION);
                 }
             }
         }
@@ -495,7 +510,7 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         if self.ui.symbol.history.parent_edit(&key).is_none() {
             self.begin_symbol_parent_edit();
         }
@@ -508,9 +523,10 @@ impl AppState {
         metadata: &SymbolEditorMetadata,
         intent: &SymbolCommitIntent,
     ) -> Result<(), String> {
-        let reference = self.workspace.content.active_view.clone();
+        let reference = self.model.workspace.content.active_view.clone();
         let bundle = EncodedSymbolEditorBundle::encode(document, metadata)?;
         let Some(()) = self
+            .model
             .library_manager
             .edit_library(&reference.library)
             .and_then(|mut library| {
@@ -532,20 +548,21 @@ impl AppState {
         // The undo entry this edit sits on top of has to be able to put the
         // names back, so it carries the reverse of what was just applied.
         if !intent.renames.is_empty() {
-            let key = self.workspace.content.active_key();
+            let key = self.model.workspace.content.active_key();
             self.ui
                 .symbol
                 .history
                 .record_inverse_renames(&key, &intent.renames);
         }
-        self.workspace.content.set_active_dirty(true);
+        self.model.workspace.content.set_active_dirty(true);
         Ok(())
     }
 
     /// The model definition the active symbol view is bound to, if any.
     fn active_model_bound_symbol_definition(&self) -> Option<ModelBoundSymbolDefinition> {
-        let reference = &self.workspace.content.active_view;
-        self.library_manager
+        let reference = &self.model.workspace.content.active_view;
+        self.model
+            .library_manager
             .get_library(&reference.library)
             .and_then(|library| library.get_cell(&reference.cell))
             .and_then(|cell| cell.get_view(&reference.view))
@@ -561,7 +578,7 @@ impl AppState {
         let definition = self.active_model_bound_symbol_definition();
         symbol_save_checks(
             definition.as_ref(),
-            &self.workspace.content.active_view.cell,
+            &self.model.workspace.content.active_view.cell,
             document,
             ports,
         )
@@ -608,7 +625,7 @@ impl AppState {
         let revision = candidate.publish_revision(document, revision_note)?;
         self.store_active_symbol_editor_bundle(document, &candidate)?;
         *metadata = candidate;
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         self.ui.symbol.history.mark_save_point(key);
         Ok(revision)
     }
@@ -655,7 +672,7 @@ impl AppState {
             .workbench
             .live_write_locks
             .schematic_views
-            .get(&self.workspace.content.active_key())
+            .get(&self.model.workspace.content.active_key())
         {
             return format!("{holder} holds the write lease on this symbol");
         }
@@ -671,7 +688,7 @@ impl AppState {
     pub(crate) fn symbol_editor_copy_available(&self) -> bool {
         !self.workbench.safe_mode.project_read_only()
             && !self.workbench.live_write_locks.mirror
-            && !self.workspace.content.active_read_only_reference()
+            && !self.model.workspace.content.active_read_only_reference()
     }
 
     /// Carry a pin rename to every placement of the cellview.
@@ -694,11 +711,13 @@ impl AppState {
             .map(|(from, to)| (from.to_ascii_lowercase(), to.clone()))
             .collect();
         let mut renamed = 0;
-        self.workspace
+        self.model
+            .workspace
             .for_each_schematic_editor_mut(|_, schematic| {
                 renamed += schematic.rename_instance_terminals(reference, &lowered);
             });
         renamed += self
+            .model
             .schematic
             .rename_instance_terminals(reference, &lowered);
         renamed
@@ -706,14 +725,14 @@ impl AppState {
 
     pub(crate) fn record_symbol_edit(&mut self, before: &SymbolDocument) {
         const MAX_SYMBOL_UNDO: usize = 128;
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         let snapshot = self.active_symbol_snapshot(before);
         self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
     }
 
     pub(super) fn record_symbol_metadata_edit(&mut self, before: &SymbolDocument) {
         const MAX_SYMBOL_UNDO: usize = 128;
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         let snapshot = self.active_symbol_metadata_snapshot(before);
         self.push_symbol_undo_snapshot(key, snapshot, MAX_SYMBOL_UNDO);
     }
@@ -731,21 +750,21 @@ impl AppState {
         self.ui
             .symbol
             .history
-            .can_undo(&self.workspace.content.active_key())
+            .can_undo(&self.model.workspace.content.active_key())
     }
 
     pub(crate) fn can_redo_active_symbol_document(&self) -> bool {
         self.ui
             .symbol
             .history
-            .can_redo(&self.workspace.content.active_key())
+            .can_redo(&self.model.workspace.content.active_key())
     }
 
     pub(crate) fn undo_active_symbol_document(&mut self) -> Result<bool, String> {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         let Some(previous) = self.ui.symbol.history.pop_undo(&key) else {
             return Ok(false);
         };
@@ -761,7 +780,7 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let key = self.workspace.content.active_key();
+        let key = self.model.workspace.content.active_key();
         let Some(next) = self.ui.symbol.history.pop_redo(&key) else {
             return Ok(false);
         };
@@ -805,10 +824,10 @@ impl AppState {
         &mut self,
         result: &rspice_design::drc::DrcResult,
     ) -> Result<(), String> {
-        if self.workspace.content.active_view_type() != crate::state::ViewType::Symbol {
+        if self.model.workspace.content.active_view_type() != crate::state::ViewType::Symbol {
             return Err("symbol pin findings can only be published from a symbol view".to_owned());
         }
-        let subject = self.workspace.content.active_view.clone();
+        let subject = self.model.workspace.content.active_view.clone();
         // Derived before the batch is inserted, because resolving a route
         // reads the state the insertion takes mutably.
         let mut records = symbol_pin_records(self, &subject, result);
@@ -838,15 +857,16 @@ impl AppState {
 
     /// Withdraw the active symbol view's pin findings.
     pub(in crate::workbench) fn clear_active_symbol_pin_checks(&mut self) {
-        let subject = self.workspace.content.active_view.clone();
+        let subject = self.model.workspace.content.active_view.clone();
         self.withdraw_diagnostics(&DiagnosticInputs::SymbolPins { subject });
     }
 
     fn active_symbol_pin_records(&self) -> Option<&[DiagnosticRecord]> {
         let published = DiagnosticInputs::SymbolPins {
-            subject: self.workspace.content.active_view.clone(),
+            subject: self.model.workspace.content.active_view.clone(),
         };
-        self.diagnostics
+        self.model
+            .diagnostics
             .batch(&published)
             .map(|batch| batch.records.as_slice())
     }
@@ -883,6 +903,7 @@ impl AppState {
 
         let len = visitable.len() as isize;
         let standing = self
+            .model
             .diagnostics
             .current_finding()
             .and_then(|current| visitable.iter().position(|found| found.identity == current));
@@ -893,7 +914,9 @@ impl AppState {
             Some(current) => ((current as isize + step).rem_euclid(len)) as usize,
         };
         let found = visitable.swap_remove(index);
-        self.diagnostics.set_current_finding(Some(found.identity));
+        self.model
+            .diagnostics
+            .set_current_finding(Some(found.identity));
         self.jump_to_log_anchor(found.anchor);
         self.prompt(format!(
             "Finding {}/{} — {} · {}",
@@ -906,7 +929,7 @@ impl AppState {
     }
 
     pub(crate) fn run_active_symbol_pin_checks(&mut self) {
-        let reference = self.workspace.content.active_view.clone();
+        let reference = self.model.workspace.content.active_view.clone();
         let inputs = match self.symbol_pin_check_inputs(&reference) {
             Ok(inputs) => inputs,
             Err(error) => {
@@ -983,8 +1006,8 @@ fn symbol_pin_records(
     subject: &CellViewRef,
     result: &rspice_design::drc::DrcResult,
 ) -> Vec<DiagnosticRecord> {
-    let project = state.workspace.content.project.id();
-    let revision = state.workspace.content.project.revision().get();
+    let project = state.model.workspace.content.project.id();
+    let revision = state.model.workspace.content.project.revision().get();
     let document_id = subject.key();
     // Keyed by the pin each finding is about, through the one key the design
     // rules use, and minted by the one function every store record is minted

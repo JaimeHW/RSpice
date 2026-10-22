@@ -20,23 +20,23 @@ pub(super) fn picks_instance_to_descend(state: &AppState, target: Option<Pointer
 
 pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest) {
     if request.source != editor_request_source(state)
-        || request.selection != state.schematic.session.editor.selection
-        || state.schematic.session.editor.tool != crate::state::Tool::Select
+        || request.selection != state.model.schematic.session.editor.selection
+        || state.model.schematic.session.editor.tool != crate::state::Tool::Select
         || state.application_modal_open()
     {
         return;
     }
     match request.action {
         EditorAction::DeleteSelection => {
-            if !state.schematic.session.read_only && !state.active_view_read_only() {
+            if !state.model.schematic.session.read_only && !state.active_view_read_only() {
                 state.delete_schematic_selection();
             }
         }
         EditorAction::Focus(object) => {
-            let (document, editor) = state.schematic.document_and_editor();
+            let (document, editor) = state.model.schematic.document_and_editor();
             keyboard_navigation::focus_keyboard_object(document, &mut editor.selection, object);
             state.dialogs.interaction.schematic_keyboard_focus = Some(object);
-            state.schematic.session.editor.net_highlight.clear();
+            state.model.schematic.session.editor.net_highlight.clear();
         }
         EditorAction::SelectPointer {
             target,
@@ -44,9 +44,9 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
             alt_held,
         } => {
             let kept = (!additive && picks_instance_to_descend(state, target))
-                .then(|| state.schematic.session.editor.net_highlight.clone());
+                .then(|| state.model.schematic.session.editor.net_highlight.clone());
             if let PointerSelectionEffect::HighlightWire(id) = select_pointer_target(
-                &mut state.schematic.session.editor,
+                &mut state.model.schematic.session.editor,
                 target,
                 additive,
                 alt_held,
@@ -54,7 +54,7 @@ pub(super) fn apply_editor_request(state: &mut AppState, request: EditorRequest)
                 super::interaction::highlight_canvas_net(state, |net| net.wire_ids.contains(&id));
             }
             if let Some(kept) = kept {
-                state.schematic.session.editor.net_highlight = kept;
+                state.model.schematic.session.editor.net_highlight = kept;
             }
         }
     }

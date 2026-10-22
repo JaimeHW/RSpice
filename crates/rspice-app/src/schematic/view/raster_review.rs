@@ -77,8 +77,8 @@ fn label(ids: &mut Ids, at: (i32, i32), name: &str) -> NetLabel {
 /// Finish a fixture the way a load does: runtime state, topology, and the
 /// workspace's copy of the active schematic.
 fn settle(state: &mut AppState) {
-    state.schematic.recalculate_runtime_state();
-    state.schematic.bump_topology_version();
+    state.model.schematic.recalculate_runtime_state();
+    state.model.schematic.bump_topology_version();
     state.sync_active_schematic_to_workspace();
 }
 
@@ -240,7 +240,7 @@ pub(super) fn analog_sheet() -> AppState {
     .expect("note");
 
     let mut state = AppState::default();
-    let document = state.schematic.document_mut_for_test();
+    let document = state.model.schematic.document_mut_for_test();
     document.components = components;
     document.wires = wires;
     document.junctions = junctions;
@@ -251,7 +251,7 @@ pub(super) fn analog_sheet() -> AppState {
     document.design_notes = vec![note];
     settle(&mut state);
     state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
-    let selection = &mut state.schematic.session.editor.selection;
+    let selection = &mut state.model.schematic.session.editor.selection;
     selection.select_component(selected_part);
     selection.select_wire(selected_wire);
     state
@@ -356,9 +356,10 @@ pub(super) fn hierarchy_sheet() -> AppState {
 
     let mut state = AppState::default();
     state
+        .model
         .library_manager
         .add_library(super::frame_cost::master_library());
-    let document = state.schematic.document_mut_for_test();
+    let document = state.model.schematic.document_mut_for_test();
     document.components = components;
     document.wires = wires;
     document.junctions = junctions;
@@ -392,11 +393,12 @@ pub(super) fn hierarchy_sheet() -> AppState {
             power_dissipation: Vec::new(),
         }),
     );
-    state.simulation.retained.runs.insert(0, run);
-    state.simulation.view.active_run_idx = Some(0);
-    state.simulation.view.active_analysis_idx = Some(0);
+    state.model.simulation.retained.runs.insert(0, run);
+    state.model.simulation.view.active_run_idx = Some(0);
+    state.model.simulation.view.active_analysis_idx = Some(0);
     state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
     state
+        .model
         .schematic
         .session
         .editor
@@ -492,7 +494,7 @@ pub(super) fn render_pointing(
     let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
     let mut output = None;
     for _ in 0..3 {
-        let editor = &mut state.schematic.session.editor;
+        let editor = &mut state.model.schematic.session.editor;
         editor.needs_fit = false;
         editor.needs_drawing_sheet_fit = false;
         editor.zoom = zoom;
@@ -867,6 +869,7 @@ fn a_transistor_letters_its_value_away_from_its_gate() {
         .filter(|text| text.text.contains("W="))
         .collect::<Vec<_>>();
     let transistors = state
+        .model
         .schematic
         .document()
         .components
@@ -1015,6 +1018,7 @@ fn a_named_net_badge_is_centred_on_its_label_name() {
 /// The hierarchy sheet's ports: each one's name and position.
 fn ports(state: &AppState) -> Vec<(String, Point)> {
     state
+        .model
         .schematic
         .document()
         .components
@@ -1135,8 +1139,8 @@ fn no_canvas_text_is_painted_below_the_legibility_floor() {
 #[test]
 fn a_selected_note_keeps_its_ink_inside_the_canvas_selection() {
     let mut state = analog_sheet();
-    let note = state.schematic.document().design_notes[0].id;
-    let selection = &mut state.schematic.session.editor.selection;
+    let note = state.model.schematic.document().design_notes[0].id;
+    let selection = &mut state.model.schematic.session.editor.selection;
     selection.clear();
     selection.design_notes.insert(note);
     let render = render(&mut state, themes()[0].1, at_zoom(1.0, ANALOG_CENTRE), 1.0);
@@ -1170,7 +1174,7 @@ fn a_pin_name_stands_clear_of_an_artwork_lead() {
     let framing = at_zoom(2.0, HIERARCHY_CENTRE);
     let render = render(&mut state, themes()[0].1, framing, 1.0);
     let mut leads = Vec::new();
-    for instance in &state.schematic.document().components {
+    for instance in &state.model.schematic.document().components {
         let Some(binding) = &instance.library_cell else {
             continue;
         };
@@ -1235,6 +1239,7 @@ fn a_transistor_value_stands_clear_of_every_pin_line() {
         .filter(|text| text.text.contains("W="))
         .collect::<Vec<_>>();
     let transistors = state
+        .model
         .schematic
         .document()
         .components
@@ -1274,7 +1279,7 @@ fn a_transistor_value_stands_clear_of_every_pin_line() {
             .into_iter()
             .map(|(_, at)| at)
             .collect::<Vec<_>>();
-        for wire in &state.schematic.document().wires {
+        for wire in &state.model.schematic.document().wires {
             if !wire.points.iter().any(|point| terminals.contains(point)) {
                 continue;
             }

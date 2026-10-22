@@ -35,7 +35,7 @@ fn last_run_of(
     app: &RSpiceApp,
     instance: crate::product::AnalysisInstanceId,
 ) -> Option<&SimulationRun> {
-    app.state.simulation.retained.runs.iter().find(|run| {
+    app.state.model.simulation.retained.runs.iter().find(|run| {
         run.analyses.iter().any(|analysis| {
             analysis
                 .provenance()
@@ -87,6 +87,7 @@ fn run_outcome(
 pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -123,7 +124,11 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     app.state.workbench.active_analysis_instance = Some(id);
     app.state.workbench.active_analysis = kind.legacy_index();
 
-    let validation_error = app.state.sim_setup.analysis_draft_validation_error(&draft);
+    let validation_error = app
+        .state
+        .model
+        .sim_setup
+        .analysis_draft_validation_error(&draft);
     let last_run = last_run_of(app, id).map(|run| {
         let (status, problem, message) = run_outcome(run, id);
         LastRun {
@@ -158,7 +163,7 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     if !has_results {
         section_header(ui, &name, None);
     } else if section_header_action(ui, &name, "Open results", true).clicked()
-        && app.state.simulation.select_run_by_sequence(sequence)
+        && app.state.model.simulation.select_run_by_sequence(sequence)
     {
         Command::OpenWorkspace(Workspace::Results).execute(app);
     }

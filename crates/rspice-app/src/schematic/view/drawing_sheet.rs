@@ -14,8 +14,14 @@ pub(crate) use rspice_schematic_editor::view::drawing_sheet::{
 use std::sync::Arc;
 
 pub(crate) fn resolve_active_drawing_sheet(state: &AppState) -> ActiveDrawingSheet {
-    let key = state.workspace.content.active_schematic_reference().key();
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
     if let Some(catalog) = state
+        .model
         .workspace
         .content
         .design_management
@@ -27,6 +33,7 @@ pub(crate) fn resolve_active_drawing_sheet(state: &AppState) -> ActiveDrawingShe
             .unwrap_or((1, u32::try_from(catalog.sheets().len()).unwrap_or(1)));
         let format = match sheet.page_format().inheritance {
             crate::state::DrawingSheetInheritance::ProjectDefault => state
+                .model
                 .workspace
                 .content
                 .design_management
@@ -45,6 +52,7 @@ pub(crate) fn resolve_active_drawing_sheet(state: &AppState) -> ActiveDrawingShe
     }
 
     let format = state
+        .model
         .workspace
         .content
         .design_management
@@ -54,7 +62,7 @@ pub(crate) fn resolve_active_drawing_sheet(state: &AppState) -> ActiveDrawingShe
     ActiveDrawingSheet {
         geometry: DrawingSheetGeometry::from_format(&format),
         format,
-        sheet_name: state.workspace.content.active_view.cell.clone(),
+        sheet_name: state.model.workspace.content.active_view.cell.clone(),
         page_label: "1 of 1".to_owned(),
     }
 }
@@ -76,8 +84,11 @@ fn default_title_field_value(
     sheet: &ActiveDrawingSheet,
 ) -> String {
     match field {
-        DrawingSheetTitleFieldId::Project => state.workspace.content.project.name().to_owned(),
+        DrawingSheetTitleFieldId::Project => {
+            state.model.workspace.content.project.name().to_owned()
+        }
         DrawingSheetTitleFieldId::CellView => state
+            .model
             .workspace
             .content
             .active_view
@@ -86,6 +97,7 @@ fn default_title_field_value(
         DrawingSheetTitleFieldId::SheetTitle => sheet.sheet_name.clone(),
         DrawingSheetTitleFieldId::Page => sheet.page_label.clone(),
         DrawingSheetTitleFieldId::Revision => state
+            .model
             .workspace
             .content
             .design_management
@@ -99,6 +111,7 @@ fn default_title_field_value(
         // The approval date reads the document's date of issue while the
         // sheet gives none of its own.
         DrawingSheetTitleFieldId::Date | DrawingSheetTitleFieldId::ApprovedDate => state
+            .model
             .workspace
             .content
             .design_management
@@ -107,6 +120,7 @@ fn default_title_field_value(
             .revision_date_utc
             .clone(),
         DrawingSheetTitleFieldId::DocumentStatus => state
+            .model
             .workspace
             .content
             .design_management
@@ -121,6 +135,7 @@ fn default_title_field_value(
         | DrawingSheetTitleFieldId::Language
         | DrawingSheetTitleFieldId::CageCode
         | DrawingSheetTitleFieldId::ContractNumber => state
+            .model
             .workspace
             .content
             .design_management
@@ -154,7 +169,7 @@ pub(super) fn draw_base(
         DrawingSheetCanvas {
             layers: state.ui.drawing_sheet_layers,
             grid: state.ui.grid,
-            grid_size: state.schematic.document().grid_size,
+            grid_size: state.model.schematic.document().grid_size,
         },
         sheet,
         || resolved_title_block_fields(state, sheet),
@@ -195,6 +210,7 @@ fn held_overflow_summary(
     sheet: &ActiveDrawingSheet,
 ) -> Arc<DrawingSheetOverflowSummary> {
     state
+        .model
         .schematic
         .session
         .overflow_summary
@@ -232,6 +248,7 @@ fn hold_overflow_summary(
 ) {
     let key = overflow_key(state, symbol_context, sheet);
     if state
+        .model
         .schematic
         .session
         .overflow_summary
@@ -245,7 +262,12 @@ fn hold_overflow_summary(
         symbol_context,
         sheet,
     ));
-    state.schematic.session.overflow_summary.store(key, summary);
+    state
+        .model
+        .schematic
+        .session
+        .overflow_summary
+        .store(key, summary);
 }
 
 /// The sheet's overflow advisories: the ones the canvas holds while the
@@ -299,6 +321,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
     match target {
         DrawingSheetOverflowTarget::Component(id) => {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -307,6 +330,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
         }
         DrawingSheetOverflowTarget::Wire(id) => {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -314,10 +338,17 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_wire(id);
         }
         DrawingSheetOverflowTarget::Bus(id) => {
-            state.schematic.session.editor.selection.select_only_bus(id);
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_only_bus(id);
         }
         DrawingSheetOverflowTarget::BusTap(id) => {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -326,6 +357,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
         }
         DrawingSheetOverflowTarget::Junction(id) => {
             let Some(position) = state
+                .model
                 .schematic
                 .document()
                 .junctions
@@ -336,6 +368,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 return false;
             };
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -344,6 +377,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
         }
         DrawingSheetOverflowTarget::NetLabel(id) => {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -352,6 +386,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
         }
         DrawingSheetOverflowTarget::DesignNote(id) => {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -360,6 +395,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
         }
         DrawingSheetOverflowTarget::DocumentationShape(id) => {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -367,7 +403,7 @@ pub(crate) fn show_drawing_sheet_overflow_target(
                 .select_only_documentation_shape(id);
         }
     }
-    state.schematic.session.editor.center_request = Some(center);
+    state.model.schematic.session.editor.center_request = Some(center);
     true
 }
 
@@ -417,6 +453,7 @@ mod tests {
     fn content_the_standard_margins_now_frame_out_is_reported() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -457,6 +494,7 @@ mod tests {
     fn overflow_navigation_selects_and_centers_the_exact_current_target() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -472,11 +510,11 @@ mod tests {
 
         assert!(show_first_drawing_sheet_overflow(&mut state));
         assert_eq!(
-            state.schematic.session.editor.selection.single_wire(),
+            state.model.schematic.session.editor.selection.single_wire(),
             Some(41)
         );
         assert_eq!(
-            state.schematic.session.editor.center_request,
+            state.model.schematic.session.editor.center_request,
             Some(expected_center)
         );
         assert!(!show_drawing_sheet_overflow_target(
@@ -493,6 +531,7 @@ mod tests {
         let overflowing = || {
             let mut state = AppState::default();
             state
+                .model
                 .schematic
                 .document_mut_for_test()
                 .wires
@@ -505,6 +544,7 @@ mod tests {
         let held = |state: &AppState, sheet: &ActiveDrawingSheet| {
             let symbol_context = schematic_symbol_context(state);
             state
+                .model
                 .schematic
                 .session
                 .overflow_summary
@@ -538,15 +578,19 @@ mod tests {
 
         type Change = (&'static str, fn(&mut AppState));
         let changes: [Change; 3] = [
-            ("topology", |state| state.schematic.bump_topology_version()),
+            ("topology", |state| {
+                state.model.schematic.bump_topology_version()
+            }),
             ("committed content", |state| {
-                state.schematic.init_undo_history();
-                state.schematic.begin_operation("move");
-                state.schematic.document_mut_for_test().wires[0].points[1] = Point::new(1_160, 120);
-                assert!(state.schematic.end_operation());
+                state.model.schematic.init_undo_history();
+                state.model.schematic.begin_operation("move");
+                state.model.schematic.document_mut_for_test().wires[0].points[1] =
+                    Point::new(1_160, 120);
+                assert!(state.model.schematic.end_operation());
             }),
             ("symbols", |state| {
                 state
+                    .model
                     .library_manager
                     .add_library(crate::state::Library::new("other"));
             }),

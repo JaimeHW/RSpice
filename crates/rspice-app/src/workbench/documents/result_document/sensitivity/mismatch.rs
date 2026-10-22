@@ -10,7 +10,7 @@ use std::sync::Arc;
 use viewer::{ActiveMismatch, MismatchView};
 
 pub(super) fn active_mismatch(state: &AppState) -> ActiveMismatch<'_> {
-    let Some(analysis) = state.simulation.active_analysis() else {
+    let Some(analysis) = state.model.simulation.active_analysis() else {
         return ActiveMismatch::Missing;
     };
     let Some(payload @ AnalysisResultPayload::DcMismatch { evidence }) =
@@ -27,12 +27,16 @@ pub(super) fn active_mismatch(state: &AppState) -> ActiveMismatch<'_> {
     })
 }
 pub(super) fn serves_active_analysis(state: &AppState) -> bool {
-    state.simulation.active_analysis().is_some_and(|analysis| {
-        matches!(
-            analysis.result_payload.as_ref(),
-            Some(AnalysisResultPayload::DcMismatch { .. })
-        )
-    })
+    state
+        .model
+        .simulation
+        .active_analysis()
+        .is_some_and(|analysis| {
+            matches!(
+                analysis.result_payload.as_ref(),
+                Some(AnalysisResultPayload::DcMismatch { .. })
+            )
+        })
 }
 pub(super) fn active_payload_is_valid(state: &AppState) -> bool {
     matches!(active_mismatch(state), ActiveMismatch::Ready(_))
@@ -46,12 +50,12 @@ pub(in crate::workbench::documents::result_document) struct MismatchPlan {
 }
 fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
     let source = (
-        state.simulation.retained.runs.revision(),
-        state.simulation.view.data_version,
+        state.model.simulation.retained.runs.revision(),
+        state.model.simulation.view.data_version,
     );
-    let run = state.simulation.active_run()?;
+    let run = state.model.simulation.active_run()?;
     let analysis_key =
-        AnalysisPresentationKey::new(run.dataset_id, state.simulation.active_analysis()?);
+        AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
     if let Some(plan) = state.ui.results.plans.mismatch.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
@@ -97,8 +101,8 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         state
     }
     #[test]
@@ -151,8 +155,8 @@ mod tests {
         let mut state = AppState::default();
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
 
         assert!(!serves_active_analysis(&state));
         assert!(super::super::active_payload_is_valid(&state));

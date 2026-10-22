@@ -15,16 +15,16 @@ use std::sync::Arc;
 
 pub(crate) fn checkpoint_state() -> AppState {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         if dimension.kind
             == rspice_simulation_contract::run_set::RunSetDimensionKind::ProcessSection
         {
             dimension.enabled = false;
         }
     }
-    crate::workbench::examples::load_example("Voltage Divider", &mut state.schematic);
-    for component in &mut state.schematic.document_mut_for_test().components {
+    crate::workbench::examples::load_example("Voltage Divider", &mut state.model.schematic);
+    for component in &mut state.model.schematic.document_mut_for_test().components {
         match component.name.as_str() {
             "VCC" => component.value = "1".into(),
             "R1" => component.value = "{r}".into(),
@@ -32,7 +32,7 @@ pub(crate) fn checkpoint_state() -> AppState {
             _ => {}
         }
     }
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     let ids: Vec<_> = plan
         .instances()
         .iter()
@@ -62,6 +62,7 @@ pub(crate) fn checkpoint_state() -> AppState {
     .unwrap();
     let plan_id = plan.id();
     state
+        .model
         .workspace
         .content
         .ensure_active_plan_data(plan_id)

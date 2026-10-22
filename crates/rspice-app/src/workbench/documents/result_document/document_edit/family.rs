@@ -51,6 +51,7 @@ fn scope(state: &AppState) -> Result<(Scope, &SimulationRun, &AnalysisResult), S
 fn current_policy(state: &AppState, scope: Scope) -> Option<FamilyPresentationPolicy> {
     match scope {
         Scope::Pane(document_id, pane_id) => state
+            .model
             .workspace
             .content
             .visualization_document(document_id)?
@@ -158,6 +159,7 @@ pub(super) fn choices(state: &AppState, draft: &FamilyDraft) -> FamilyChoices {
     };
     let scope = match scope {
         Scope::Pane(document_id, pane_id) => state
+            .model
             .workspace
             .content
             .visualization_document(document_id)
@@ -228,7 +230,7 @@ pub(in super::super) fn pane_selection(
         .binding
         .ok_or_else(|| "The pane shows no dataset to slice.".to_owned())?;
     let (run, analysis) = super::super::persistent_document::resolve_binding(state, binding)?;
-    let run = &state.simulation.retained.runs[run];
+    let run = &state.model.simulation.retained.runs[run];
     let analysis = &run.analyses[analysis];
     selection(run, analysis, &manifest(analysis)?, policy).map(Some)
 }
@@ -236,8 +238,8 @@ pub(in super::super) fn pane_selection(
 /// The rows the quick view's family policy shows for the active analysis.
 /// A policy the retained data no longer satisfies shows every row.
 pub(in super::super) fn quick_view_selection(state: &AppState) -> Option<SourceSampleSelection> {
-    let run = state.simulation.active_run()?;
-    let analysis = state.simulation.active_analysis()?;
+    let run = state.model.simulation.active_run()?;
+    let analysis = state.model.simulation.active_analysis()?;
     let key = super::super::AnalysisPresentationKey::new(run.dataset_id, analysis);
     let policy = state.ui.results.session.family_policies.get(&key)?;
     selection(run, analysis, &manifest(analysis).ok()?, policy).ok()

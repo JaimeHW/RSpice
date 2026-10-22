@@ -61,8 +61,8 @@ fn project_netlist_source_data(
 ) -> rspice_simulation::netlist_gen::NetlistSourceData<'_> {
     rspice_simulation::netlist_gen::NetlistSourceData {
         files: &crate::simulation::table_route::SourceFiles,
-        data_root: state.workspace.content.project.data_root(),
-        stimulus_library: Some(&state.workspace.content.stimulus_library),
+        data_root: state.model.workspace.content.project.data_root(),
+        stimulus_library: Some(&state.model.workspace.content.stimulus_library),
     }
 }
 
@@ -82,22 +82,30 @@ fn run_preparation_inputs_reading<'a>(
     files: &'a dyn rspice_simulation::netlist_gen::NetlistSourceHost,
 ) -> RunPreparationInputs<'a> {
     let schematic =
-        rspice_design::projection::ProjectionSource::projection_source(&state.schematic);
+        rspice_design::projection::ProjectionSource::projection_source(&state.model.schematic);
     RunPreparationInputs {
         analysis: analysis_inputs(state),
         technology: state.technology_inputs(),
-        libraries: state.library_manager.catalog(),
-        project_sources: &state.workspace.content.project_sources,
-        design_management: &state.workspace.content.design_management,
-        configuration_sets: &state.workspace.content.configuration_sets,
+        libraries: state.model.library_manager.catalog(),
+        project_sources: &state.model.workspace.content.project_sources,
+        design_management: &state.model.workspace.content.design_management,
+        configuration_sets: &state.model.workspace.content.configuration_sets,
         source_data: rspice_simulation::netlist_gen::NetlistSourceData {
             files,
             ..project_netlist_source_data(state)
         },
         schematic_file: schematic.current_file,
         schematic_topology_revision: schematic.schematic.topology_version(),
-        imported_checkpoints: &state.simulation.retained.imported_monte_carlo_checkpoints,
-        imported_transient_checkpoints: &state.simulation.retained.imported_transient_checkpoints,
+        imported_checkpoints: &state
+            .model
+            .simulation
+            .retained
+            .imported_monte_carlo_checkpoints,
+        imported_transient_checkpoints: &state
+            .model
+            .simulation
+            .retained
+            .imported_transient_checkpoints,
         display_waveform_cache_samples: crate::state::DEFAULT_DISPLAY_WAVEFORM_CACHE_SAMPLES,
         max_parallel_workers: state.ui.preferences.solver_worker_limit(),
         library_folders: state.library_folders(),
@@ -165,20 +173,22 @@ impl FrozenRunPreparation {
     /// does when the configured root cannot be projected.
     pub(crate) fn freeze(state: &AppState) -> Result<Self, PreparationError> {
         let projection = state
+            .model
             .workspace
             .configuration_execution_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
             })?;
         let schematic =
-            rspice_design::projection::ProjectionSource::projection_source(&state.schematic);
-        let runs = state.simulation.retained.runs.to_vec();
-        let active_run = state.simulation.active_run().and_then(|active| {
+            rspice_design::projection::ProjectionSource::projection_source(&state.model.schematic);
+        let runs = state.model.simulation.retained.runs.to_vec();
+        let active_run = state.model.simulation.active_run().and_then(|active| {
             state
+                .model
                 .simulation
                 .retained
                 .runs
@@ -188,31 +198,54 @@ impl FrozenRunPreparation {
         Ok(Self {
             projection,
             inputs: FrozenRunInputs {
-                sim_setup: SimulationSetup::clone(&state.sim_setup),
-                schematic: state.schematic.document().clone(),
+                sim_setup: SimulationSetup::clone(&state.model.sim_setup),
+                schematic: state.model.schematic.document().clone(),
                 schematic_file: schematic.current_file.map(std::path::Path::to_path_buf),
                 schematic_topology_revision: schematic.schematic.topology_version(),
-                selected_components: state.schematic.session.editor.selection.components.clone(),
-                selection_occurrence: state.workspace.content.active_occurrence().cloned(),
+                selected_components: state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection
+                    .components
+                    .clone(),
+                selection_occurrence: state.model.workspace.content.active_occurrence().cloned(),
                 runs,
                 active_run,
-                plan_payloads: state.workspace.content.simulation_plan_payloads.clone(),
-                project: state.workspace.content.project.clone(),
-                models: state.model_library_manager.catalog().clone(),
-                resolutions: state.model_library_manager.resolution_records().clone(),
-                registry: state.pdk_config.technology_registry.clone(),
-                layouts: state.workspace.content.physical_layout_documents().clone(),
-                libraries: state.library_manager.catalog().clone(),
-                project_sources: state.workspace.content.project_sources.clone(),
-                design_management: (*state.workspace.content.design_management).clone(),
-                configuration_sets: (*state.workspace.content.configuration_sets).clone(),
-                stimulus_library: state.workspace.content.stimulus_library.clone(),
+                plan_payloads: state
+                    .model
+                    .workspace
+                    .content
+                    .simulation_plan_payloads
+                    .clone(),
+                project: state.model.workspace.content.project.clone(),
+                models: state.model.model_library_manager.catalog().clone(),
+                resolutions: state
+                    .model
+                    .model_library_manager
+                    .resolution_records()
+                    .clone(),
+                registry: state.model.pdk_config.technology_registry.clone(),
+                layouts: state
+                    .model
+                    .workspace
+                    .content
+                    .physical_layout_documents()
+                    .clone(),
+                libraries: state.model.library_manager.catalog().clone(),
+                project_sources: state.model.workspace.content.project_sources.clone(),
+                design_management: (*state.model.workspace.content.design_management).clone(),
+                configuration_sets: (*state.model.workspace.content.configuration_sets).clone(),
+                stimulus_library: state.model.workspace.content.stimulus_library.clone(),
                 imported_checkpoints: state
+                    .model
                     .simulation
                     .retained
                     .imported_monte_carlo_checkpoints
                     .clone(),
                 imported_transient_checkpoints: state
+                    .model
                     .simulation
                     .retained
                     .imported_transient_checkpoints
@@ -395,11 +428,12 @@ fn activate_campaign_plan(
     state: &mut AppState,
     plan_id: crate::product::SimulationPlanId,
 ) -> Result<String, String> {
-    let current_id = state.sim_setup.stable_analysis_plan()?.id();
+    let current_id = state.model.sim_setup.stable_analysis_plan()?.id();
     let plan_name = if current_id == plan_id {
-        state.sim_setup.active_plan_name().to_string()
+        state.model.sim_setup.active_plan_name().to_string()
     } else {
         let stored = state
+            .model
             .sim_setup
             .inactive_plans()
             .iter()
@@ -414,17 +448,28 @@ fn activate_campaign_plan(
         stored.name().to_string()
     };
     if current_id != plan_id {
-        state.workspace.content.migrate_active_plan_data(current_id);
-        state.workspace.content.migrate_inactive_plan_data(plan_id);
         state
+            .model
+            .workspace
+            .content
+            .migrate_active_plan_data(current_id);
+        state
+            .model
+            .workspace
+            .content
+            .migrate_inactive_plan_data(plan_id);
+        state
+            .model
             .sim_setup
             .activate_plan(plan_id)
             .map_err(|error| error.to_string())?;
         state
+            .model
             .workspace
             .content
             .sync_legacy_specs_projection(plan_id);
         state
+            .model
             .workspace
             .content
             .validate_simulation_configuration()
@@ -452,13 +497,14 @@ impl SimulationController {
         ),
         PreparationError,
     > {
-        let selection_mode = state.sim_setup.save_policy.output_selection_mode;
+        let selection_mode = state.model.sim_setup.save_policy.output_selection_mode;
         let projection = state
+            .model
             .workspace
             .configuration_execution_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
@@ -470,18 +516,19 @@ impl SimulationController {
             )
         })?;
         let plan = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
         // Net names carry no data-file references, so the projection's own
         // extraction is the same answer as a data-root-bound generator.
         let nets = rspice_design::connectivity::summary::projection_nets(
-            state.library_manager.catalog(),
+            state.model.library_manager.catalog(),
             &projection,
             &projection.root().key(),
         );
         let occurrences =
-            projection_occurrence_nets(state.library_manager.catalog(), &projection, nets);
+            projection_occurrence_nets(state.model.library_manager.catalog(), &projection, nets);
         let (outputs, automatic_fallback, membership) = effective_plan_capture(
             selection_mode,
             explicit,
@@ -507,11 +554,12 @@ impl SimulationController {
         state: &AppState,
     ) -> Result<String, PreparationError> {
         let projection = state
+            .model
             .workspace
             .configuration_execution_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
@@ -524,23 +572,28 @@ impl SimulationController {
             )
         })?;
         validate_projected_model_binding_authority(
-            state.model_library_manager.catalog(),
-            state.model_library_manager.resolution_records(),
-            state.library_manager.catalog(),
-            state.workspace.content.project.technology_binding(),
-            state.pdk_config.technology_registry.validated_packages(),
+            state.model.model_library_manager.catalog(),
+            state.model.model_library_manager.resolution_records(),
+            state.model.library_manager.catalog(),
+            state.model.workspace.content.project.technology_binding(),
+            state
+                .model
+                .pdk_config
+                .technology_registry
+                .validated_packages(),
             &projection,
         )?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-            state.library_manager.catalog(),
+            state.model.library_manager.catalog(),
             &projection,
         );
         let source_data = project_netlist_source_data(state);
         let plan = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
-        let payload = state.workspace.content.plan_data(plan.id()).ok_or_else(|| {
+        let payload = state.model.workspace.content.plan_data(plan.id()).ok_or_else(|| {
             PreparationError::new(
                 PreparationStage::AnalysisPlan,
                 format!(
@@ -579,19 +632,21 @@ impl SimulationController {
             state.seal_project_execution_model_sources()
         } else {
             state
+                .model
                 .model_library_manager
-                .seal_execution_sources_for_plan(&state.sim_setup.model_bindings)
+                .seal_execution_sources_for_plan(&state.model.sim_setup.model_bindings)
         }
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         let model_cards = if has_project_technology {
             sealed_models
-                .reference_model_execution_plan(state.sim_setup.reference_pvt.process)
+                .reference_model_execution_plan(state.model.sim_setup.reference_pvt.process)
                 .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?
                 .model_cards()
         } else {
             Vec::new()
         };
         let generated_source = state
+            .model
             .workspace
             .content
             .bind_generated_netlist_provenance(generated.netlist);
@@ -603,7 +658,7 @@ impl SimulationController {
         let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
             .try_merge(prepared_model_library_veriloga_runtimes(
                 &sealed_models,
-                state.sim_setup.reference_pvt.process,
+                state.model.sim_setup.reference_pvt.process,
             )?)
             .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         for runtime in external_veriloga_runtimes.sources() {
@@ -615,7 +670,7 @@ impl SimulationController {
         }
         let source = rspice_simulation::analysis_preparation::apply_simulation_options_to_netlist(
             &source,
-            &state.sim_setup.options,
+            &state.model.sim_setup.options,
         );
         let (source, _) = expand_generated_dependencies_with_sealed_sources(
             &source,
@@ -634,10 +689,12 @@ impl SimulationController {
         source: &str,
     ) -> Result<String, PreparationError> {
         let plan = state
+            .model
             .sim_setup
             .stable_analysis_plan()
             .map_err(|error| PreparationError::new(PreparationStage::AnalysisPlan, error))?;
         let payload = state
+            .model
             .workspace
             .content
             .plan_data(plan.id())
@@ -814,7 +871,7 @@ impl SimulationController {
         let member_count = members.len();
         self.clear_prepared_run();
         state.workbench.preflight.invalidate();
-        self.design_execution_epoch = state.design_execution_epoch;
+        self.design_execution_epoch = state.model.design_execution_epoch;
         self.active_campaign = Some(super::ActiveSimulationCampaign {
             id: campaign_id,
             name: name.to_owned(),
@@ -868,7 +925,7 @@ impl SimulationController {
                         campaign.name, campaign.failed_count
                     ),
                 );
-                state.simulation.execution.status = format!("Campaign {outcome}");
+                state.model.simulation.execution.status = format!("Campaign {outcome}");
                 // A campaign the reader cancelled is not news to them.
                 if !campaign.cancelled {
                     state
@@ -1018,7 +1075,7 @@ impl SimulationController {
                 format!("Campaign stopped: {error}"),
             );
             self.active_campaign = None;
-            state.simulation.execution.status = "Campaign stopped".to_owned();
+            state.model.simulation.execution.status = "Campaign stopped".to_owned();
         }
     }
 
@@ -1065,7 +1122,7 @@ impl SimulationController {
         &mut self,
         state: &AppState,
     ) -> Result<AuthorizedRunDispatch, PreparationError> {
-        let intent = state.simulation.execution.run_intent;
+        let intent = state.model.simulation.execution.run_intent;
         let inputs = self.retained_run_inputs.take();
         self.run_authorization.consume(intent, |snapshot| {
             inputs
@@ -1097,11 +1154,12 @@ impl SimulationController {
         #[cfg(test)]
         thread_preparations::record(SimulationRunIntent::SimulateRunSet);
         let execution_projection = state
+            .model
             .workspace
             .configuration_execution_projection(
-                &state.library_manager,
-                &state.workspace.content.active_view,
-                &state.schematic,
+                &state.model.library_manager,
+                &state.model.workspace.content.active_view,
+                &state.model.schematic,
             )
             .map_err(|error| {
                 PreparationError::new(PreparationStage::DesignChecks, error.to_string())
@@ -1141,28 +1199,30 @@ pub(super) fn manual_source_inputs(
     let owned_active = state.ui.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         || (!state.ui.netlist.active_document_initialized
-            && state.simulation.source.netlist_content.is_empty()
-            && state.workspace.content.netlist_source.is_some());
+            && state.model.simulation.source.netlist_content.is_empty()
+            && state.model.workspace.content.netlist_source.is_some());
     let source = if owned_active {
         state
+            .model
             .workspace
             .content
             .netlist_source
             .as_deref()
-            .unwrap_or(state.simulation.source.netlist_content.as_str())
+            .unwrap_or(state.model.simulation.source.netlist_content.as_str())
     } else {
-        state.simulation.source.netlist_content.as_str()
+        state.model.simulation.source.netlist_content.as_str()
     };
     let origin = if owned_active {
-        state.workspace.content.netlist_source_path.as_deref()
+        state.model.workspace.content.netlist_source_path.as_deref()
     } else {
-        state.schematic.session.current_file.as_deref()
+        state.model.schematic.session.current_file.as_deref()
     };
     Ok(
         crate::simulation::execution::preparation::ManualSourceInputs {
             source,
-            descriptor: state.workspace.content.netlist_descriptor.as_ref(),
+            descriptor: state.model.workspace.content.netlist_descriptor.as_ref(),
             generated_artifact: state
+                .model
                 .workspace
                 .content
                 .netlist_document
@@ -1188,21 +1248,29 @@ pub(super) fn manual_source_inputs(
 /// the analysis editor paints. See that method for what the key covers and why
 /// the coverage is complete.
 pub(crate) fn design_inspection_input_digest(state: &AppState) -> crate::product::ContentDigest {
-    let plan_identity = state.sim_setup.analysis_plan.as_ref().map_or_else(
+    let plan_identity = state.model.sim_setup.analysis_plan.as_ref().map_or_else(
         || "none".to_owned(),
         |plan| format!("{}:{}", plan.id(), plan.revision().get()),
     );
-    let model_library_identity = state.model_library_manager.design_inspection_catalog_key();
+    let model_library_identity = state
+        .model
+        .model_library_manager
+        .design_inspection_catalog_key();
     let material = format!(
         "{}\0{}\0{}\0{}\0{}\0{:?}\0{}\0{}\0{}",
-        state.design_execution_epoch,
-        state.workspace.content.project.revision().get(),
-        state.workspace.content.simulation_root_reference().key(),
-        state.workspace.content.active_view.key(),
+        state.model.design_execution_epoch,
+        state.model.workspace.content.project.revision().get(),
+        state
+            .model
+            .workspace
+            .content
+            .simulation_root_reference()
+            .key(),
+        state.model.workspace.content.active_view.key(),
         plan_identity,
-        state.sim_setup.reference_pvt.process,
-        state.sim_setup.reference_pvt.temperature_celsius,
-        state.sim_setup.options.to_spice_options(),
+        state.model.sim_setup.reference_pvt.process,
+        state.model.sim_setup.reference_pvt.temperature_celsius,
+        state.model.sim_setup.options.to_spice_options(),
         model_library_identity,
     );
     content_digest(
@@ -1218,8 +1286,8 @@ fn touchstone_export_policy<'a>(
     source_path: Option<&Path>,
 ) -> Result<TouchstoneExportPolicy, PreparationError> {
     crate::simulation::execution::preparation::touchstone_export_policy(
-        &state.sim_setup.sp,
-        state.schematic.document(),
+        &state.model.sim_setup.sp,
+        state.model.schematic.document(),
         tasks,
         source_path,
     )

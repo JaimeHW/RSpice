@@ -176,14 +176,14 @@ fn active_monte_carlo_authority<'a>(
     state: &'a AppState,
     histogram_name: &str,
 ) -> Option<MonteCarloAuthority<'a>> {
-    let analysis = state.simulation.active_analysis()?;
+    let analysis = state.model.simulation.active_analysis()?;
     if !analysis.success {
         return None;
     }
     let metadata = analysis.family_metadata.as_ref()?;
     if !super::analysis_evidence_is_valid(
         state,
-        state.simulation.active_run()?.dataset_id,
+        state.model.simulation.active_run()?.dataset_id,
         analysis,
     ) {
         return None;
@@ -217,6 +217,7 @@ fn active_monte_carlo_authority<'a>(
 
 fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments> {
     if state
+        .model
         .simulation
         .active_analysis()
         .and_then(|analysis| analysis.family_metadata.as_ref())
@@ -239,7 +240,7 @@ fn exact_moments(state: &AppState, histogram_name: &str) -> Option<SampleMoments
     if !legacy_yield_is_eligible(state) {
         return None;
     }
-    let result = matching_yield_result(&state.simulation, histogram_name)
+    let result = matching_yield_result(&state.model.simulation, histogram_name)
         .filter(|result| yield_result_is_consistent(result))?;
     moments_from_samples(&result.samples)
 }
@@ -271,12 +272,16 @@ pub(super) struct HistPlan {
 /// Resolve bins and statistics together. Source tokens also cover nested edits,
 /// wholesale replacement and clones whose numeric generations happen to match.
 fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
-    let version = state.simulation.view.data_version;
-    let source = state.simulation.retained.runs.revision();
-    let yield_source = state.simulation.retained.yield_evidence.revision();
-    let dataset = state.simulation.active_run().map(|run| run.dataset_id);
+    let version = state.model.simulation.view.data_version;
+    let source = state.model.simulation.retained.runs.revision();
+    let yield_source = state.model.simulation.retained.yield_evidence.revision();
+    let dataset = state
+        .model
+        .simulation
+        .active_run()
+        .map(|run| run.dataset_id);
     let analysis = dataset
-        .zip(state.simulation.active_analysis())
+        .zip(state.model.simulation.active_analysis())
         .map(|(dataset, analysis)| super::AnalysisPresentationKey::new(dataset, analysis));
     let settings = &state.analysis.histogram_state;
     let bin_count = settings.bin_count.clamp(1, 1000);
@@ -297,29 +302,28 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
         return Arc::clone(plan);
     }
     let authority = active_monte_carlo_authority(state, histogram);
-    let yield_result = matching_yield_result(&state.simulation, histogram);
+    let yield_result = matching_yield_result(&state.model.simulation, histogram);
     let yield_is_consistent = yield_result.is_some_and(|result| {
         if !yield_result_is_consistent(result) {
             return false;
         }
         match authority {
-            Some(authority) => {
-                state
-                    .simulation
-                    .retained
-                    .yield_provenance()
-                    .is_some_and(|provenance| {
-                        provenance.seed == authority.seed
-                            && provenance.runs_requested == authority.runs_requested
-                            && provenance.runs_completed == authority.runs_completed
-                            && result.samples.len() == authority.variable.samples.len()
-                            && result
-                                .samples
-                                .iter()
-                                .zip(&authority.variable.samples)
-                                .all(|(a, b)| a.to_bits() == b.to_bits())
-                    })
-            }
+            Some(authority) => state
+                .model
+                .simulation
+                .retained
+                .yield_provenance()
+                .is_some_and(|provenance| {
+                    provenance.seed == authority.seed
+                        && provenance.runs_requested == authority.runs_requested
+                        && provenance.runs_completed == authority.runs_completed
+                        && result.samples.len() == authority.variable.samples.len()
+                        && result
+                            .samples
+                            .iter()
+                            .zip(&authority.variable.samples)
+                            .all(|(a, b)| a.to_bits() == b.to_bits())
+                }),
             None => legacy_yield_is_eligible(state),
         }
     });
@@ -370,21 +374,25 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
 }
 
 fn legacy_yield_is_eligible(state: &AppState) -> bool {
-    state.simulation.active_run().is_some()
-        && state.simulation.active_analysis().is_none_or(|analysis| {
-            analysis.success
-                && analysis.analysis_type == AnalysisType::MonteCarlo
-                && analysis.family_metadata.is_none()
-        })
+    state.model.simulation.active_run().is_some()
+        && state
+            .model
+            .simulation
+            .active_analysis()
+            .is_none_or(|analysis| {
+                analysis.success
+                    && analysis.analysis_type == AnalysisType::MonteCarlo
+                    && analysis.family_metadata.is_none()
+            })
 }
 
 /// Names come from current retained evidence, never the mutable legacy bins.
 fn histogram_names(state: &AppState) -> Vec<&str> {
-    if let Some(analysis) = state.simulation.active_analysis()
+    if let Some(analysis) = state.model.simulation.active_analysis()
         && analysis.family_metadata.is_some()
     {
         if !analysis.success
-            || !state.simulation.active_run().is_some_and(|run| {
+            || !state.model.simulation.active_run().is_some_and(|run| {
                 super::analysis_evidence_is_valid(state, run.dataset_id, analysis)
             })
         {
@@ -402,6 +410,7 @@ fn histogram_names(state: &AppState) -> Vec<&str> {
         return Vec::new();
     }
     state
+        .model
         .simulation
         .yield_results_for_active_dataset()
         .unwrap_or_default()
@@ -416,7 +425,7 @@ pub(super) fn histogram_is_available(state: &AppState) -> bool {
         active_monte_carlo_authority(state, name)
             .is_some_and(|authority| !authority.variable.samples.is_empty())
             || (legacy_yield_is_eligible(state)
-                && matching_yield_result(&state.simulation, name)
+                && matching_yield_result(&state.model.simulation, name)
                     .is_some_and(|result| !result.samples.is_empty()))
     })
 }
@@ -477,7 +486,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                     .map_err(|reason| *reason),
                 moments: plan.moments,
                 spec_limits: selected_yield_result(
-                    &state.simulation,
+                    &state.model.simulation,
                     &histogram.name,
                     plan.yield_is_consistent,
                 )
@@ -548,7 +557,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
                 }
             }),
             yield_result: selected_yield_result(
-                &state.simulation,
+                &state.model.simulation,
                 &histogram.name,
                 plan.yield_is_consistent,
             ),
@@ -697,8 +706,8 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
 
         let authority = active_monte_carlo_authority(&state, "offset")
             .expect("exact selected variable authority");
@@ -724,8 +733,8 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
 
         assert!(active_monte_carlo_authority(&state, "gain").is_none());
     }
@@ -748,8 +757,8 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
 
         assert!(exact_moments(&state, "gain").is_none());
     }
@@ -786,8 +795,8 @@ mod tests {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
 
         let first = hist_plan(&state, "gain");
         assert!(std::sync::Arc::ptr_eq(&first, &hist_plan(&state, "gain")));
@@ -806,7 +815,7 @@ mod tests {
 
         // A new generation of the population is a new answer.
         let AnalysisResultFamilyMetadata::MonteCarlo { variables, .. } =
-            state.simulation.retained.runs[0].analyses[0]
+            state.model.simulation.retained.runs[0].analyses[0]
                 .family_metadata
                 .as_mut()
                 .expect("Monte Carlo metadata")
@@ -818,7 +827,8 @@ mod tests {
         variables[0].std_dev = 10.0;
         variables[0].min = 10.0;
         variables[0].max = 30.0;
-        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
+        state.model.simulation.view.data_version =
+            state.model.simulation.view.data_version.wrapping_add(1);
 
         let after = hist_plan(&state, "gain");
         assert_eq!(

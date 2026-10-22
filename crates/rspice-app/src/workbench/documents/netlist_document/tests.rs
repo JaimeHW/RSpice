@@ -50,9 +50,9 @@ fn owned_dependency_state() -> AppState {
         .unwrap();
 
     let mut state = AppState::default();
-    state.workspace.content.netlist_source = Some(ROOT.to_owned());
-    state.workspace.content.netlist_document = Some(owned.clone());
-    state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
+    state.model.workspace.content.netlist_source = Some(ROOT.to_owned());
+    state.model.workspace.content.netlist_document = Some(owned.clone());
+    state.model.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
         deck_id: uuid::Uuid::new_v4(),
         artifact_name: "owned.cir".to_owned(),
         strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
@@ -66,13 +66,14 @@ fn owned_dependency_state() -> AppState {
         revision_history: Vec::new(),
         owned_includes: Vec::new(),
     });
-    state.netlist_artifacts.generated_source = ROOT.to_owned();
-    state.netlist_artifacts.generated_document = Some(generated);
+    state.model.netlist_artifacts.generated_source = ROOT.to_owned();
+    state.model.netlist_artifacts.generated_document = Some(generated);
     state.ui.netlist.owned_document = Some(owned);
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
-    state.simulation.source.netlist_content = ROOT.to_owned();
+    state.model.simulation.source.netlist_content = ROOT.to_owned();
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -115,22 +116,22 @@ fn reactivating_the_active_owned_root_preserves_validation_evidence() {
     let mut state = owned_dependency_state();
     state.ui.netlist.revision = 9;
     let digest = crate::state::content_digest(ROOT);
-    state.netlist_artifacts.validation = Some(NetlistValidationReceipt {
+    state.model.netlist_artifacts.validation = Some(NetlistValidationReceipt {
         visible_content_digest: digest,
         executable_source_digest: crate::product::ContentDigest::from_bytes([0x51; 32]),
         prepared_snapshot_digest: crate::product::ContentDigest::from_bytes([0x52; 32]),
-        project_revision: state.workspace.content.project.revision().get(),
+        project_revision: state.model.workspace.content.project.revision().get(),
         task_count: 1,
         advisory_count: 0,
     });
-    let validation = state.netlist_artifacts.validation.clone();
+    let validation = state.model.netlist_artifacts.validation.clone();
 
     assert!(open_owned_primary(&mut state));
     assert!(open_owned_primary(&mut state));
 
     assert_eq!(state.ui.netlist.revision, 9);
-    assert_eq!(state.netlist_artifacts.validation, validation);
-    assert_eq!(state.simulation.source.netlist_content, ROOT);
+    assert_eq!(state.model.netlist_artifacts.validation, validation);
+    assert_eq!(state.model.simulation.source.netlist_content, ROOT);
 }
 
 /// A netlist commit keeps the reference picker a specification draft is
@@ -190,7 +191,10 @@ fn netlist_commits_keep_a_specification_drafts_reference_picker() {
 fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
     let mut state = owned_dependency_state();
     open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
-    assert_eq!(state.simulation.source.netlist_content, ORIGINAL_INCLUDE);
+    assert_eq!(
+        state.model.simulation.source.netlist_content,
+        ORIGINAL_INCLUDE
+    );
     assert!(!active_dependency_is_owned(&state));
     assert!(!replace_owned_dependency_source(
         &mut state,
@@ -209,14 +213,26 @@ fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
         EDITED_INCLUDE.to_owned()
     ));
 
-    let document = state.workspace.content.netlist_document.as_ref().unwrap();
+    let document = state
+        .model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .unwrap();
     assert_eq!(
         document.source(),
         ROOT,
         "include edits never rewrite the root"
     );
     assert_eq!(document.dependencies()[0].source(), Some(EDITED_INCLUDE));
-    let descriptor = state.workspace.content.netlist_descriptor.as_ref().unwrap();
+    let descriptor = state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref()
+        .unwrap();
     let include = descriptor.owned_include(INCLUDE_IDENTITY).unwrap();
     assert_eq!(include.document_id, document_id);
     assert_eq!(include.revision, 2);
@@ -225,6 +241,7 @@ fn dependency_is_read_only_until_copy_then_edits_the_execution_closure() {
         crate::state::content_digest(EDITED_INCLUDE)
     );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -259,7 +276,10 @@ fn canonical_diagnostic_navigation_opens_the_exact_include_and_line() {
     );
     assert_eq!(state.ui.netlist.cursor_line, 17);
     assert_eq!(state.ui.netlist.requested_line, Some(18));
-    assert_eq!(state.simulation.source.netlist_content, ORIGINAL_INCLUDE);
+    assert_eq!(
+        state.model.simulation.source.netlist_content,
+        ORIGINAL_INCLUDE
+    );
 }
 
 #[test]
@@ -276,6 +296,7 @@ fn owned_include_authority_can_be_released_and_reacquired_without_losing_bytes()
     );
     assert!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -293,6 +314,7 @@ fn owned_include_authority_can_be_released_and_reacquired_without_losing_bytes()
         Some(ORIGINAL_INCLUDE)
     );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -325,6 +347,7 @@ fn owned_include_rename_is_revision_bound_and_preserves_consumer_and_bytes() {
     assert_eq!(dependency.locator().logical_identity(), identity);
     assert_eq!(dependency.source(), Some(ORIGINAL_INCLUDE));
     let include = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -335,6 +358,7 @@ fn owned_include_rename_is_revision_bound_and_preserves_consumer_and_bytes() {
     assert_eq!(include.document_id, document_id);
     assert_eq!(include.revision, 2);
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -355,10 +379,17 @@ fn editing_root_include_cards_preserves_reachable_edges_and_prunes_removed_owner
         .join("\n")
         + "\n";
     assert!(replace_owned_source(&mut state, without_include));
-    let document = state.workspace.content.netlist_document.as_ref().unwrap();
+    let document = state
+        .model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .unwrap();
     assert!(document.dependencies().is_empty());
     assert!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -369,6 +400,7 @@ fn editing_root_include_cards_preserves_reachable_edges_and_prunes_removed_owner
     );
 
     let with_new_include = state
+        .model
         .workspace
         .content
         .netlist_source
@@ -377,6 +409,7 @@ fn editing_root_include_cards_preserves_reachable_edges_and_prunes_removed_owner
         .replacen(".op", ".include \"models/new.inc\"\n.op", 1);
     assert!(replace_owned_source(&mut state, with_new_include));
     let dependency = &state
+        .model
         .workspace
         .content
         .netlist_document
@@ -386,6 +419,7 @@ fn editing_root_include_cards_preserves_reachable_edges_and_prunes_removed_owner
     assert_eq!(dependency.requested_locator(), "models/new.inc");
     assert!(dependency.source().is_none());
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -403,7 +437,7 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
             },
         );
     }
-    let before_source = state.simulation.source.netlist_content.clone();
+    let before_source = state.model.simulation.source.netlist_content.clone();
     let before_document = state.ui.netlist.active_document;
 
     let error = open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap_err();
@@ -411,7 +445,7 @@ fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
     assert_eq!(state.ui.netlist.active_document, before_document);
     assert!(state.ui.netlist.active_dependency_root.is_none());
     assert!(state.ui.netlist.active_dependency_identity.is_none());
-    assert_eq!(state.simulation.source.netlist_content, before_source);
+    assert_eq!(state.model.simulation.source.netlist_content, before_source);
 }
 
 #[test]
@@ -435,17 +469,24 @@ fn workspace_replacement_commits_root_and_owned_include_together() {
         2
     );
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(edited_root.as_str())
     );
-    let document = state.workspace.content.netlist_document.as_ref().unwrap();
+    let document = state
+        .model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .unwrap();
     assert_eq!(document.source(), edited_root);
     assert_eq!(document.dependencies()[0].source(), Some(EDITED_INCLUDE));
     assert_eq!(
-        state.simulation.source.netlist_content, EDITED_INCLUDE,
+        state.model.simulation.source.netlist_content, EDITED_INCLUDE,
         "the visible owned include follows the atomic commit"
     );
     let include = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -459,6 +500,7 @@ fn workspace_replacement_commits_root_and_owned_include_together() {
         crate::state::content_digest(EDITED_INCLUDE)
     );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -485,11 +527,12 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
 
     assert!(undo_netlist_edit(&mut state).unwrap().is_some());
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(ROOT)
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -503,11 +546,12 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
 
     assert!(redo_netlist_edit(&mut state).unwrap().is_some());
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(edited_root.as_str())
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -518,6 +562,7 @@ fn workspace_replacement_is_one_atomic_undo_and_redo_step() {
         Some(EDITED_INCLUDE)
     );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -542,17 +587,20 @@ fn workspace_replacement_rejects_stale_include_without_partial_root_edit() {
         &mut state,
         EDITED_INCLUDE.to_owned()
     ));
-    let before = serde_json::to_vec(&state.workspace).unwrap();
+    let before = serde_json::to_vec(&state.model.workspace).unwrap();
 
     let error = replace_owned_sources_atomically(&mut state, stale_edits).unwrap_err();
 
     assert!(error.contains("changed after search results"), "{error}");
-    assert_eq!(serde_json::to_vec(&state.workspace).unwrap(), before);
+    assert_eq!(serde_json::to_vec(&state.model.workspace).unwrap(), before);
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(ROOT)
     );
-    assert_eq!(state.simulation.source.netlist_content, EDITED_INCLUDE);
+    assert_eq!(
+        state.model.simulation.source.netlist_content,
+        EDITED_INCLUDE
+    );
 }
 
 #[test]
@@ -565,11 +613,18 @@ fn ordinary_root_edit_retains_authenticated_dependency_closure() {
 
     assert!(replace_owned_source(&mut state, edited_root.clone()));
 
-    let document = state.workspace.content.netlist_document.as_ref().unwrap();
+    let document = state
+        .model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .unwrap();
     assert_eq!(document.source(), edited_root);
     assert_eq!(document.dependencies()[0].source(), Some(ORIGINAL_INCLUDE));
     assert!(document.dependency_graph_is_sealed());
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -586,7 +641,13 @@ fn ordinary_root_edit_replaces_include_edge_atomically_and_requires_relink() {
 
     assert!(replace_owned_source(&mut state, changed_include.clone()));
 
-    let document = state.workspace.content.netlist_document.as_ref().unwrap();
+    let document = state
+        .model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .unwrap();
     assert_eq!(document.source(), changed_include);
     assert_eq!(document.dependencies().len(), 1);
     assert_eq!(
@@ -599,6 +660,7 @@ fn ordinary_root_edit_replaces_include_edge_atomically_and_requires_relink() {
     ));
     assert!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -607,7 +669,10 @@ fn ordinary_root_edit_replaces_include_edge_atomically_and_requires_relink() {
             .owned_includes
             .is_empty()
     );
-    assert_eq!(state.simulation.source.netlist_content, changed_include);
+    assert_eq!(
+        state.model.simulation.source.netlist_content,
+        changed_include
+    );
 }
 
 #[test]
@@ -620,7 +685,7 @@ fn owned_dependency_identity_and_bytes_survive_project_round_trip() {
         EDITED_INCLUDE.to_owned()
     ));
 
-    let bytes = serde_json::to_vec(&state.workspace).unwrap();
+    let bytes = serde_json::to_vec(&state.model.workspace).unwrap();
     let restored: crate::state::ProjectWorkspace = serde_json::from_slice(&bytes).unwrap();
     restored
         .content
@@ -652,6 +717,7 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
     let mut state = owned_dependency_state();
     let baseline_document = state.ui.netlist.owned_document.as_ref().unwrap().clone();
     state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -670,6 +736,7 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
 
     assert!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -680,6 +747,7 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -691,6 +759,7 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
     );
     assert!(state.ui.netlist.active_dependency_identity.is_none());
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -700,9 +769,9 @@ fn revision_restore_restores_include_bytes_and_ownership_as_one_snapshot() {
 #[test]
 fn dependency_transitions_fail_closed_for_stale_or_generated_ownership() {
     let mut state = owned_dependency_state();
-    let before = state.simulation.source.netlist_content.clone();
+    let before = state.model.simulation.source.netlist_content.clone();
     assert!(open_netlist_dependency(&mut state, "missing.inc").is_err());
-    assert_eq!(state.simulation.source.netlist_content, before);
+    assert_eq!(state.model.simulation.source.netlist_content, before);
     assert!(state.ui.netlist.active_dependency_identity.is_none());
 
     open_generated_primary(&mut state);
@@ -721,6 +790,7 @@ fn project_validation_rejects_owned_include_digest_drift() {
     open_netlist_dependency(&mut state, INCLUDE_IDENTITY).unwrap();
     copy_active_dependency_to_project(&mut state).unwrap();
     state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -730,6 +800,7 @@ fn project_validation_rejects_owned_include_digest_drift() {
         .content_digest = crate::product::ContentDigest::from_bytes([0x7f; 32]);
     assert!(
         state
+            .model
             .workspace
             .content
             .validate_simulation_configuration()
@@ -764,8 +835,9 @@ fn relink_reacquires_origin_and_replaces_exact_retained_bytes() {
         INCLUDE_IDENTITY,
         "relink must preserve the canonical include edge"
     );
-    assert!(state.workspace.content.netlist_source_dirty);
+    assert!(state.model.workspace.content.netlist_source_dirty);
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -795,6 +867,7 @@ fn relink_rejects_late_picker_completion_after_document_revision_changes() {
     assert!(error.contains("changed while the picker was open"));
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -825,6 +898,7 @@ fn generated_dependency_relink_updates_only_the_generated_artifact() {
     );
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_document
@@ -841,6 +915,7 @@ fn generated_dependency_relink_updates_only_the_generated_artifact() {
 fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
     let mut state = owned_dependency_state();
     let original_id = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -873,6 +948,7 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
     begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Duplicate).unwrap();
     commit_netlist_lifecycle_action(&mut state).unwrap();
     let duplicate_id = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -880,14 +956,17 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
         .unwrap()
         .deck_id;
     assert_ne!(duplicate_id, original_id);
-    assert_eq!(state.workspace.content.retained_netlist_decks.len(), 1);
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.retained_netlist_decks.len(),
+        1
+    );
+    assert_eq!(
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(ROOT),
         "duplicating retains the exact source bytes"
     );
     assert_eq!(
-        state.workspace.content.retained_netlist_decks[0]
+        state.model.workspace.content.retained_netlist_decks[0]
             .descriptor
             .artifact_name,
         "decks/renamed.cir"
@@ -896,6 +975,7 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
     select_retained_top_deck(&mut state, original_id).unwrap();
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -905,7 +985,7 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
         original_id
     );
     assert_eq!(
-        state.workspace.content.retained_netlist_decks[0]
+        state.model.workspace.content.retained_netlist_decks[0]
             .descriptor
             .deck_id,
         duplicate_id
@@ -913,18 +993,25 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
 
     begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::New).unwrap();
     commit_netlist_lifecycle_action(&mut state).unwrap();
-    assert_eq!(state.workspace.content.retained_netlist_decks.len(), 2);
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.retained_netlist_decks.len(),
+        2
+    );
+    assert_eq!(
+        state.model.workspace.content.netlist_source.as_deref(),
         Some("* New RSpice top deck\n.end\n")
     );
 
     begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Delete).unwrap();
     let message = commit_netlist_lifecycle_action(&mut state).unwrap();
     assert!(message.contains("native file was not deleted"));
-    assert_eq!(state.workspace.content.retained_netlist_decks.len(), 1);
-    assert!(state.workspace.content.netlist_document.is_some());
+    assert_eq!(
+        state.model.workspace.content.retained_netlist_decks.len(),
+        1
+    );
+    assert!(state.model.workspace.content.netlist_document.is_some());
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -935,9 +1022,9 @@ fn top_deck_lifecycle_is_atomic_and_preserves_inactive_decks() {
 fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
     let mut state = AppState::default();
     state.dialogs.drc_results = Some(rspice_design::drc::DrcResult::new());
-    state.dialogs.drc_checked_version = state.schematic.topology_version();
-    assert!(state.workspace.content.netlist_descriptor.is_none());
-    assert!(state.workspace.content.netlist_document.is_none());
+    state.dialogs.drc_checked_version = state.model.schematic.topology_version();
+    assert!(state.model.workspace.content.netlist_descriptor.is_none());
+    assert!(state.model.workspace.content.netlist_document.is_none());
 
     begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::New).unwrap();
     let transaction = state
@@ -955,7 +1042,13 @@ fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
     assert!(state.dialogs.drc_results.is_none());
     assert_eq!(state.dialogs.drc_checked_version, 0);
 
-    let document = state.workspace.content.netlist_document.as_ref().unwrap();
+    let document = state
+        .model
+        .workspace
+        .content
+        .netlist_document
+        .as_ref()
+        .unwrap();
     assert_eq!(document.source(), "* New RSpice top deck\n.end\n");
     assert!(document.generated_artifact().is_none());
     assert!(document.provenance().generated().is_none());
@@ -963,8 +1056,16 @@ fn first_top_deck_is_authored_without_a_synthetic_generated_baseline() {
         document.ownership(),
         crate::state::DocumentOwnership::Editable
     );
-    assert!(state.workspace.content.retained_netlist_decks.is_empty());
+    assert!(
+        state
+            .model
+            .workspace
+            .content
+            .retained_netlist_decks
+            .is_empty()
+    );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -978,6 +1079,7 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
     copy_active_dependency_to_project(&mut state).unwrap();
     assert!(open_owned_primary(&mut state));
     let retained_id = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -988,6 +1090,7 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
     begin_netlist_lifecycle_action(&mut state, CodeSourceFileAction::Duplicate).unwrap();
     commit_netlist_lifecycle_action(&mut state).unwrap();
     let active_id = state
+        .model
         .workspace
         .content
         .netlist_descriptor
@@ -1013,10 +1116,11 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
     );
 
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(ROOT)
     );
     let retained = state
+        .model
         .workspace
         .content
         .retained_netlist_decks
@@ -1033,6 +1137,7 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
         crate::state::content_digest(EDITED_INCLUDE)
     );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -1040,6 +1145,7 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
 
     assert!(undo_netlist_edit(&mut state).unwrap().is_some());
     let retained = state
+        .model
         .workspace
         .content
         .retained_netlist_decks
@@ -1052,6 +1158,7 @@ fn project_replace_is_atomic_across_active_and_retained_top_decks() {
         Some(ORIGINAL_INCLUDE)
     );
     state
+        .model
         .workspace
         .content
         .validate_simulation_configuration()
@@ -1071,6 +1178,7 @@ fn top_deck_lifecycle_rejects_a_stale_document_revision() {
     assert!(error.contains("changed while the lifecycle dialog was open"));
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -1083,7 +1191,7 @@ fn top_deck_lifecycle_rejects_a_stale_document_revision() {
 
 #[test]
 fn legacy_top_deck_identity_migration_is_deterministic() {
-    let mut first = owned_dependency_state().workspace;
+    let mut first = owned_dependency_state().model.workspace;
     first.content.netlist_descriptor.as_mut().unwrap().deck_id = uuid::Uuid::nil();
     let mut second = first.clone();
 
@@ -1107,8 +1215,8 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
     const EDITED: &str = "ran deck\nR1 out 0 2k\n.op\n.end\n";
 
     let mut state = owned_dependency_state();
-    state.workspace.content.netlist_source = Some(EDITED.to_owned());
-    state.simulation.source.netlist_content = EDITED.to_owned();
+    state.model.workspace.content.netlist_source = Some(EDITED.to_owned());
+    state.model.simulation.source.netlist_content = EDITED.to_owned();
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.manual_run.last_run_buffer = Some(RAN.to_owned());
@@ -1119,10 +1227,10 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
         state.ui.netlist.active_document,
         ActiveNetlistDocument::RunSnapshot
     );
-    assert_eq!(state.simulation.source.netlist_content, RAN);
+    assert_eq!(state.model.simulation.source.netlist_content, RAN);
     assert!(!active_netlist_source_is_editable(&state));
     assert_eq!(
-        state.workspace.content.netlist_source.as_deref(),
+        state.model.workspace.content.netlist_source.as_deref(),
         Some(EDITED)
     );
     assert!(state.manual_deck_run_block_reason().is_some());
@@ -1132,7 +1240,7 @@ fn run_deck_snapshot_projects_the_sealed_deck_and_leaves_the_working_deck_alone(
         state.ui.netlist.active_document,
         ActiveNetlistDocument::OwnedSource
     );
-    assert_eq!(state.simulation.source.netlist_content, EDITED);
+    assert_eq!(state.model.simulation.source.netlist_content, EDITED);
 }
 
 #[test]
@@ -1141,8 +1249,8 @@ fn run_deck_snapshot_comparison_reports_the_edits_made_since_the_run() {
     const EDITED: &str = "ran deck\nR1 out 0 2k\n.op\n.end\n";
 
     let mut state = owned_dependency_state();
-    state.workspace.content.netlist_source = Some(EDITED.to_owned());
-    state.simulation.source.netlist_content = EDITED.to_owned();
+    state.model.workspace.content.netlist_source = Some(EDITED.to_owned());
+    state.model.simulation.source.netlist_content = EDITED.to_owned();
     state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
     state.ui.netlist.active_document_initialized = true;
     state.manual_run.last_run_buffer = Some(RAN.to_owned());
@@ -1205,6 +1313,7 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
         }
     };
     state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -1218,13 +1327,14 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
         state.ui.netlist.active_document,
         ActiveNetlistDocument::RunSnapshot
     );
-    assert_eq!(state.simulation.source.netlist_content, HOT);
+    assert_eq!(state.model.simulation.source.netlist_content, HOT);
     assert!(
         !active_netlist_source_is_editable(&state),
         "an executed deck is a viewer, never a buffer"
     );
     assert_eq!(
         state
+            .model
             .simulation
             .retained
             .executed_decks
@@ -1241,7 +1351,7 @@ fn an_executed_deck_opens_read_only_at_the_point_it_was_asked_for() {
     // A point past the end resolves to one the run actually has rather than
     // to an empty document under a header naming the run.
     assert!(reveal_executed_deck(&mut state, 4, 40));
-    assert_eq!(state.simulation.source.netlist_content, HOT);
+    assert_eq!(state.model.simulation.source.netlist_content, HOT);
 
     assert!(
         !reveal_executed_deck(&mut state, 5, 0),
@@ -1314,13 +1424,14 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
             ],
         })
         .expect("prepared run receipt");
-        let run = state.simulation.start_prepared_run(receipt).unwrap();
+        let run = state.model.simulation.start_prepared_run(receipt).unwrap();
         run.id
     };
 
     let mut state = owned_dependency_state();
     let sequence = seal(&mut state, SEALED);
     state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -1356,6 +1467,7 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
     // Every retained byte rewritten: nothing this run holds reproduces what
     // its receipt sealed, and the viewer must not soften that into "unsealed".
     state
+        .model
         .simulation
         .retained
         .executed_decks
@@ -1374,8 +1486,9 @@ fn an_executed_deck_claims_verification_only_when_it_reproduces_the_sealed_diges
     legacy
         .restore_provenance(SimulationRunProvenance::LegacyUnattributed)
         .expect("legacy history is explicitly classified");
-    unsealed.simulation.retained.runs = vec![legacy].into();
+    unsealed.model.simulation.retained.runs = vec![legacy].into();
     unsealed
+        .model
         .simulation
         .retained
         .executed_decks

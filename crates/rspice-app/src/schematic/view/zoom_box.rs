@@ -31,7 +31,7 @@ pub(super) fn handle_zoom_box(
     state: &mut AppState,
     viewport: &Viewport,
 ) {
-    let zoom_box = &mut state.schematic.session.editor.zoom_box;
+    let zoom_box = &mut state.model.schematic.session.editor.zoom_box;
     if response.drag_started_by(PointerButton::Primary)
         && let Some(origin) = ui.input(|input| input.pointer.press_origin())
     {
@@ -54,7 +54,7 @@ pub(super) fn handle_zoom_box(
             });
         zoom_box.disarm();
         if let Some(rect) = framed {
-            state.schematic.session.editor.zoom_request = Some(ZoomRequest::Frame(rect));
+            state.model.schematic.session.editor.zoom_request = Some(ZoomRequest::Frame(rect));
         }
     } else if response.clicked_by(PointerButton::Primary) {
         zoom_box.disarm();
@@ -63,7 +63,8 @@ pub(super) fn handle_zoom_box(
 
 /// Outline the box being dragged.
 pub(super) fn paint_zoom_box(painter: &Painter, state: &AppState, viewport: &Viewport) {
-    let Some((min_x, min_y, max_x, max_y)) = state.schematic.session.editor.zoom_box.world_rect()
+    let Some((min_x, min_y, max_x, max_y)) =
+        state.model.schematic.session.editor.zoom_box.world_rect()
     else {
         return;
     };

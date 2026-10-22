@@ -19,7 +19,7 @@ fn deck(text: &str) -> ExecutedDeck {
 fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
     for samples in [2, 100_000] {
         let (mut state, _) = super::durable_content::retained_results();
-        state.simulation.retained.runs[0].analyses[0].waveforms =
+        state.model.simulation.retained.runs[0].analyses[0].waveforms =
             vec![crate::state::RetainedTrace::new(
                 "V(out)",
                 (0..samples).map(|n| n as f64).collect::<Vec<_>>(),
@@ -49,7 +49,8 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
             "{samples} samples: unchanged queries serialized and hashed retained results"
         );
         let mut oracle = snapshot(&state).unwrap();
-        oracle.file.simulation_results = crate::io::capture_simulation_results(&state.simulation);
+        oracle.file.simulation_results =
+            crate::io::capture_simulation_results(&state.model.simulation);
         assert_eq!(
             state
                 .project_lifecycle
@@ -69,18 +70,19 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
 #[test]
 fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_capture() {
     let (mut base, _) = super::durable_content::retained_results();
-    let mut second_analysis = base.simulation.retained.runs[0].analyses[0].clone();
+    let mut second_analysis = base.model.simulation.retained.runs[0].analyses[0].clone();
     second_analysis.id = 2;
     second_analysis.label = "Second".to_owned();
-    base.simulation.retained.runs[0]
+    base.model.simulation.retained.runs[0]
         .analyses
         .push(second_analysis);
     let (other, _) = super::durable_content::retained_results();
-    let mut second_run = other.simulation.retained.runs[0].clone();
+    let mut second_run = other.model.simulation.retained.runs[0].clone();
     second_run.id = 2;
-    base.simulation.retained.runs.push(second_run);
-    base.simulation.retained.next_run_id = 2;
-    base.simulation
+    base.model.simulation.retained.runs.push(second_run);
+    base.model.simulation.retained.next_run_id = 2;
+    base.model
+        .simulation
         .retained
         .executed_decks
         .retain(deck("original deck"));
@@ -113,6 +115,7 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
         |state| {
             state.retained.runs = super::durable_content::retained_results()
                 .0
+                .model
                 .simulation
                 .retained
                 .runs
@@ -123,14 +126,14 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
         let before = state
             .project_lifecycle
             .result_cache
-            .capture(&state.simulation);
+            .capture(&state.model.simulation);
         let frozen = serde_json::to_vec(&before).unwrap();
-        edit(&mut state.simulation);
+        edit(&mut state.model.simulation);
         let cached = state
             .project_lifecycle
             .result_cache
-            .capture(&state.simulation);
-        let fresh = crate::io::capture_simulation_results(&state.simulation);
+            .capture(&state.model.simulation);
+        let fresh = crate::io::capture_simulation_results(&state.model.simulation);
         assert!(
             !cached.shares_content_with(&before),
             "edit {index} reused an old snapshot"
@@ -151,7 +154,7 @@ fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_captu
                 &state
                     .project_lifecycle
                     .result_cache
-                    .capture(&state.simulation)
+                    .capture(&state.model.simulation)
             )
         );
     }
@@ -164,10 +167,10 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
     let retained = baseline.file.simulation_results.clone();
     state.project_lifecycle.accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
-    state.simulation.execution.progress = 0.75;
-    state.simulation.execution.status = "runtime status".to_owned();
-    state.simulation.view.data_version += 1;
-    state.simulation.source.netlist_content = "runtime preview".to_owned();
+    state.model.simulation.execution.progress = 0.75;
+    state.model.simulation.execution.status = "runtime status".to_owned();
+    state.model.simulation.view.data_version += 1;
+    state.model.simulation.source.netlist_content = "runtime preview".to_owned();
     assert!(
         snapshot(&state)
             .unwrap()
@@ -184,25 +187,27 @@ fn runtime_changes_and_clones_reuse_results_but_invalid_edits_do_not() {
             .shares_content_with(&retained)
     );
 
-    let elapsed = state.simulation.retained.runs[0].elapsed_time;
-    state.simulation.retained.runs[0].elapsed_time = -1.0;
+    let elapsed = state.model.simulation.retained.runs[0].elapsed_time;
+    state.model.simulation.retained.runs[0].elapsed_time = -1.0;
     assert!(snapshot(&state).is_err());
     assert!(has_unsaved_changes(&state));
     assert!(active_document_is_dirty(&state));
     retained.validate().unwrap();
     assert!(!has_unsaved_changes(&fork));
-    state.simulation.retained.runs[0].elapsed_time = elapsed;
+    state.model.simulation.retained.runs[0].elapsed_time = elapsed;
     assert!(
         !has_unsaved_changes(&state),
         "returning to accepted content must be clean"
     );
 
-    std::sync::Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].x)
-        [1] = f64::NAN;
+    std::sync::Arc::make_mut(
+        &mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].x,
+    )[1] = f64::NAN;
     assert!(snapshot(&state).is_err());
     assert!(has_unsaved_changes(&state));
-    std::sync::Arc::make_mut(&mut state.simulation.retained.runs[0].analyses[0].waveforms[0].x)
-        [1] = 1.0;
+    std::sync::Arc::make_mut(
+        &mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].x,
+    )[1] = 1.0;
     assert!(!has_unsaved_changes(&state));
 }
 

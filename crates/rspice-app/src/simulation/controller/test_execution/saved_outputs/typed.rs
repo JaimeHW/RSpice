@@ -10,8 +10,9 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
     let parsed = rspice_core::Netlist::parse(deck).unwrap();
     assert!(parsed.subcircuits.is_empty());
     let mut state = super::super::AppState::default();
-    state.sim_setup.run_set = rspice_simulation_contract::run_set::RunSetState::reference_only();
-    state.sim_setup.reference_pvt.temperature_celsius = 27.0;
+    state.model.sim_setup.run_set =
+        rspice_simulation_contract::run_set::RunSetState::reference_only();
+    state.model.sim_setup.reference_pvt.temperature_celsius = 27.0;
     for (index, element) in parsed.elements.iter().enumerate() {
         let (kind, value, params) = match &element.kind {
             ElementKind::Resistor {
@@ -48,9 +49,11 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
             other => panic!("unexpected typed output fixture element: {other:?}"),
         };
         let id = state
+            .model
             .schematic
             .add_component(kind, Point::new(100 + index as i32 * 200, 100));
         let component = state
+            .model
             .schematic
             .document_mut_for_test()
             .components
@@ -60,13 +63,21 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         component.name = element.name.clone();
         component.value = value;
         component.params = params;
-        connect(&mut state.schematic, id, &element.nodes);
+        connect(&mut state.model.schematic, id, &element.nodes);
     }
     let ground = state
+        .model
         .schematic
         .add_component(ComponentType::Ground, Point::new(-100, 100));
-    connect(&mut state.schematic, ground, &["0".into()]);
-    state.schematic.session.editor.selection.components.clear();
+    connect(&mut state.model.schematic, ground, &["0".into()]);
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .components
+        .clear();
     let draft = match spec {
         AnalysisSpec::DcSweep {
             source_name,
@@ -104,7 +115,7 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
             temperature,
         } => {
             assert!(data_table_name.is_none());
-            state.sim_setup.reference_pvt.temperature_celsius = temperature - 273.15;
+            state.model.sim_setup.reference_pvt.temperature_celsius = temperature - 273.15;
             AnalysisDraft::Noise(NoiseDraft {
                 output: output_node.clone(),
                 reference: reference_node.clone(),
@@ -135,7 +146,7 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         serde_json::to_value(lowered).unwrap(),
         serde_json::to_value(spec).unwrap()
     );
-    let plan = state.sim_setup.analysis_plan.as_mut().unwrap();
+    let plan = state.model.sim_setup.analysis_plan.as_mut().unwrap();
     for id in plan
         .instances()
         .iter()
@@ -152,8 +163,8 @@ pub(super) fn run(deck: &str, spec: &AnalysisSpec) -> SimulationRun {
         plan.bind_dependency(id, AnalysisKind::OperatingPoint, op)
             .unwrap();
     }
-    state.sim_setup.save_policy.output_selection_mode = OutputSelectionMode::SaveAll;
-    state.sim_setup.save_policy.maximum_storage_bytes = u64::MAX;
+    state.model.sim_setup.save_policy.output_selection_mode = OutputSelectionMode::SaveAll;
+    state.model.sim_setup.save_policy.maximum_storage_bytes = u64::MAX;
     super::super::run_generated_batch(
         state,
         rspice_results::run::SimulationRunLifecycle::Completed,

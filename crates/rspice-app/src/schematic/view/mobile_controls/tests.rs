@@ -27,11 +27,16 @@ impl Finger {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
-        app.state.schematic = SchematicState::default();
-        app.state.schematic.session.editor.needs_fit = false;
-        app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
-        app.state.schematic.clear_undo_history();
-        app.state.schematic.session.is_dirty = false;
+        app.state.model.schematic = SchematicState::default();
+        app.state.model.schematic.session.editor.needs_fit = false;
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit = false;
+        app.state.model.schematic.clear_undo_history();
+        app.state.model.schematic.session.is_dirty = false;
         app.state.sync_active_schematic_to_workspace();
         let mut finger = Self {
             ctx,
@@ -50,9 +55,10 @@ impl Finger {
         let id = self
             .app
             .state
+            .model
             .schematic
             .add_component(ComponentType::Resistor, at);
-        self.app.state.schematic.clear_undo_history();
+        self.app.state.model.schematic.clear_undo_history();
         self.app.state.sync_active_schematic_to_workspace();
         id
     }
@@ -117,7 +123,7 @@ impl Finger {
     /// The screen point over the world point `at` (the camera sits at zoom
     /// 1 and no pan until a gesture moves it).
     fn screen(&self, at: Point) -> Pos2 {
-        let editor = &self.app.state.schematic.session.editor;
+        let editor = &self.app.state.model.schematic.session.editor;
         self.canvas.min
             + egui::vec2(
                 (editor.pan.0 + f64::from(at.x) * editor.zoom) as f32,
@@ -240,11 +246,11 @@ impl Finger {
     }
 
     fn pan(&self) -> (f64, f64) {
-        self.app.state.schematic.session.editor.pan
+        self.app.state.model.schematic.session.editor.pan
     }
 
     fn selection(&self) -> &rspice_design::schematic::selection::Selection {
-        &self.app.state.schematic.session.editor.selection
+        &self.app.state.model.schematic.session.editor.selection
     }
 }
 
@@ -284,6 +290,7 @@ fn the_strip_buttons_run_the_canvas_commands() {
         finger
             .app
             .state
+            .model
             .schematic
             .session
             .editor
@@ -291,7 +298,7 @@ fn the_strip_buttons_run_the_canvas_commands() {
             .has_component(id)
     );
     let pose = |finger: &Finger| {
-        let part = &finger.app.state.schematic.document().components[0];
+        let part = &finger.app.state.model.schematic.document().components[0];
         (part.rotation, part.mirror_h, part.mirror_v)
     };
     let (before, ..) = pose(&finger);
@@ -311,11 +318,11 @@ fn the_strip_buttons_run_the_canvas_commands() {
     finger.press("Redo");
     assert_eq!(pose(&finger), mirrored, "Redo puts it back");
 
-    finger.app.state.schematic.session.editor.zoom = 6.0;
+    finger.app.state.model.schematic.session.editor.zoom = 6.0;
     finger.frame(Vec::new());
     finger.press("Fit drawing sheet");
     assert!(
-        finger.app.state.schematic.session.editor.zoom < 6.0,
+        finger.app.state.model.schematic.session.editor.zoom < 6.0,
         "Fit frames the sheet"
     );
 }
@@ -330,13 +337,14 @@ fn cancel_is_live_only_while_an_operation_is() {
     finger
         .app
         .state
+        .model
         .schematic
         .arm_tool(crate::state::Tool::Wire);
     assert!(operation_live(&finger.app), "an armed drawing tool is live");
     finger.frame(Vec::new());
     finger.press("Cancel");
     assert_eq!(
-        finger.app.state.schematic.session.editor.tool,
+        finger.app.state.model.schematic.session.editor.tool,
         crate::state::Tool::Select,
         "Cancel puts the wire tool down, as Esc does"
     );
@@ -348,7 +356,12 @@ fn touch_requests_recheck_document_route_and_modal_state() {
     for change in ["document", "route", "modal", "read-only", "none"] {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Design);
-        app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit = false;
         let request = MobileCanvasRequest {
             source: super::super::requests::editor_request_source(&app.state),
             action: MobileCanvasAction::Fit,
@@ -357,13 +370,18 @@ fn touch_requests_recheck_document_route_and_modal_state() {
             "document" => app.state.bump_active_schematic_epoch(),
             "route" => app.state.workbench.activate(Workspace::Results),
             "modal" => app.state.dialogs.preferences_open = true,
-            "read-only" => app.state.schematic.session.read_only = true,
+            "read-only" => app.state.model.schematic.session.read_only = true,
             "none" => {}
             _ => unreachable!(),
         }
         execute_action(&Context::default(), &mut app, request);
         assert_eq!(
-            app.state.schematic.session.editor.needs_drawing_sheet_fit,
+            app.state
+                .model
+                .schematic
+                .session
+                .editor
+                .needs_drawing_sheet_fit,
             matches!(change, "none" | "read-only"),
             "{change}"
         );
@@ -376,15 +394,22 @@ fn touch_requests_recheck_document_route_and_modal_state() {
 fn fit_executes_the_schematic_camera_command() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
-    app.state.schematic.session.editor.zoom = 2.0;
-    app.state.schematic.session.editor.zoom_request = Some(ZoomRequest::By(1.2));
+    app.state.model.schematic.session.editor.zoom = 2.0;
+    app.state.model.schematic.session.editor.zoom_request = Some(ZoomRequest::By(1.2));
     let request = MobileCanvasRequest {
         source: super::super::requests::editor_request_source(&app.state),
         action: MobileCanvasAction::Fit,
     };
     execute_action(&Context::default(), &mut app, request);
-    assert!(app.state.schematic.session.editor.needs_drawing_sheet_fit);
-    assert!(!app.state.schematic.session.editor.needs_fit);
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit
+    );
+    assert!(!app.state.model.schematic.session.editor.needs_fit);
 }
 
 /// E-11, R-3: a finger dragged across a part that is not selected pans the
@@ -400,14 +425,17 @@ fn a_finger_drag_on_an_unselected_part_pans_and_leaves_it() {
     finger.drag(from, from + egui::vec2(120.0, 40.0));
 
     assert_eq!(
-        finger.app.state.schematic.document().components[0].pos,
+        finger.app.state.model.schematic.document().components[0].pos,
         Point::new(200, 200),
         "the part stays put"
     );
     let after = finger.pan();
     assert_eq!((after.0 - before.0, after.1 - before.1), (120.0, 40.0));
     assert!(finger.selection().is_empty(), "a pan selects nothing");
-    assert!(!finger.app.state.schematic.can_undo(), "a pan is no edit");
+    assert!(
+        !finger.app.state.model.schematic.can_undo(),
+        "a pan is no edit"
+    );
 }
 
 /// A finger on empty canvas pans too; with the box latch on, the same drag
@@ -445,7 +473,7 @@ fn a_finger_drag_on_the_selection_moves_it() {
     let before = finger.pan();
     finger.drag(at, at + egui::vec2(60.0, 0.0));
     assert_eq!(
-        finger.app.state.schematic.document().components[0].pos,
+        finger.app.state.model.schematic.document().components[0].pos,
         Point::new(260, 200)
     );
     assert_eq!(finger.pan(), before, "a move does not pan");
@@ -491,6 +519,7 @@ fn a_long_press_on_overlapping_parts_offers_each_of_them() {
         let part = finger
             .app
             .state
+            .model
             .schematic
             .document()
             .components
@@ -524,6 +553,7 @@ fn a_long_press_on_overlapping_parts_offers_each_of_them() {
     let turned: Vec<(u64, bool)> = finger
         .app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -545,6 +575,7 @@ fn the_strip_turns_a_floating_duplicate() {
     let original = finger.resistor(Point::new(200, 200));
     let state = &mut finger.app.state;
     state
+        .model
         .schematic
         .session
         .editor
@@ -558,7 +589,7 @@ fn the_strip_turns_a_floating_duplicate() {
         "the copy still floats"
     );
     assert!(finger.app.state.place_floating_paste());
-    let components = &finger.app.state.schematic.document().components;
+    let components = &finger.app.state.model.schematic.document().components;
     let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
     let turned: Vec<_> = components
         .iter()
@@ -581,6 +612,7 @@ fn the_strip_turns_the_part_being_placed() {
     finger
         .app
         .state
+        .model
         .schematic
         .arm_tool(crate::state::Tool::Place(ComponentType::Resistor));
     finger.frame(Vec::new());
@@ -588,15 +620,32 @@ fn the_strip_turns_the_part_being_placed() {
     finger.press("Mirror");
     let quarter = rspice_design::schematic::rotation::Rotation::default().rotate_cw();
     assert_eq!(
-        finger.app.state.schematic.session.editor.preview_rotation,
+        finger
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .preview_rotation,
         quarter
     );
-    assert!(finger.app.state.schematic.session.editor.preview_mirror_h);
+    assert!(
+        finger
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .preview_mirror_h
+    );
 
     finger.tap(finger.screen(Point::new(300, 200)));
     let part = finger
         .app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -613,16 +662,36 @@ fn a_long_press_on_empty_canvas_arms_the_zoom_box() {
     finger.long_press(finger.screen(Point::new(400, 300)));
     finger.reveal("Zoom box");
     finger.press("Zoom box");
-    assert!(finger.app.state.schematic.session.editor.zoom_box.armed);
-    let zoom = finger.app.state.schematic.session.editor.zoom;
+    assert!(
+        finger
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .zoom_box
+            .armed
+    );
+    let zoom = finger.app.state.model.schematic.session.editor.zoom;
     let (from, to) = (
         finger.screen(Point::new(100, 100)),
         finger.screen(Point::new(300, 250)),
     );
     finger.drag(from, to);
-    assert!(!finger.app.state.schematic.session.editor.zoom_box.armed);
     assert!(
-        finger.app.state.schematic.session.editor.zoom > zoom * 2.0,
+        !finger
+            .app
+            .state
+            .model
+            .schematic
+            .session
+            .editor
+            .zoom_box
+            .armed
+    );
+    assert!(
+        finger.app.state.model.schematic.session.editor.zoom > zoom * 2.0,
         "the box framed the view"
     );
 }
@@ -651,6 +720,7 @@ fn the_long_press_menu_reaches_the_arrange_commands() {
     let left: Vec<i32> = finger
         .app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -658,5 +728,8 @@ fn the_long_press_menu_reaches_the_arrange_commands() {
         .map(|part| part.pos.x)
         .collect();
     assert_eq!(left[0], left[1], "both parts line up on the left: {left:?}");
-    assert!(finger.app.state.schematic.can_undo(), "one undoable edit");
+    assert!(
+        finger.app.state.model.schematic.can_undo(),
+        "one undoable edit"
+    );
 }

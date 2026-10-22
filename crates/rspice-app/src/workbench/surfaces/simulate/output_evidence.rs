@@ -47,11 +47,12 @@ pub(super) fn selected_plan_dataset(
 ) -> Option<&crate::state::SimulationRun> {
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())?;
-    app.state.simulation.active_run_for_plan(plan_id)
+    app.state.model.simulation.active_run_for_plan(plan_id)
 }
 
 /// The dataset a specification is judged against.

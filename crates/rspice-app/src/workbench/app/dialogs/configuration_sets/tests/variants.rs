@@ -10,11 +10,11 @@ fn an_omitted_missing_master_does_not_block_the_configuration_receipt() {
     let mut fixture = build();
     let receipt = |state: &AppState| {
         configuration_receipt(
-            &state.workspace,
-            &state.library_manager,
-            &state.model_library_manager,
+            &state.model.workspace,
+            &state.model.library_manager,
+            &state.model.model_library_manager,
             state.library_folders(),
-            &state.schematic,
+            &state.model.schematic,
             fixture.configuration,
             None,
         )
@@ -47,11 +47,11 @@ fn a_retained_receipt_refreshes_when_a_variant_removes_its_dut() {
     let receipt = |dialog: &mut ConfigurationSetsDialogState, state: &AppState| {
         selected_configuration_receipt(
             dialog,
-            &state.workspace,
-            &state.library_manager,
-            &state.model_library_manager,
+            &state.model.workspace,
+            &state.model.library_manager,
+            &state.model.model_library_manager,
             state.library_folders(),
-            &state.schematic,
+            &state.model.schematic,
         )
         .unwrap()
     };
@@ -62,6 +62,7 @@ fn a_retained_receipt_refreshes_when_a_variant_removes_its_dut() {
     );
     let dut = fixture
         .state
+        .model
         .schematic
         .document()
         .components
@@ -69,7 +70,7 @@ fn a_retained_receipt_refreshes_when_a_variant_removes_its_dut() {
         .find(|component| component.name == "X1")
         .unwrap()
         .id;
-    let topology = fixture.state.schematic.topology_version();
+    let topology = fixture.state.model.schematic.topology_version();
     let object = crate::state::SchematicObjectKey::new(&fixture.top.key(), dut).unwrap();
     activate_variant_override(
         &mut fixture.state,
@@ -78,7 +79,7 @@ fn a_retained_receipt_refreshes_when_a_variant_removes_its_dut() {
             approval_reference: "reviewed omission".to_owned(),
         },
     );
-    assert_eq!(fixture.state.schematic.topology_version(), topology);
+    assert_eq!(fixture.state.model.schematic.topology_version(), topology);
     let result = receipt(&mut dialog, &fixture.state);
     assert_eq!(result.netlist_digest, "generation blocked", "{result:?}");
     assert!(result.status.contains("unresolved"), "{result:?}");
@@ -106,11 +107,11 @@ fn a_retained_receipt_tracks_live_values_without_topology_counter_changes() {
     let receipt = |dialog: &mut ConfigurationSetsDialogState, state: &AppState| {
         selected_configuration_receipt(
             dialog,
-            &state.workspace,
-            &state.library_manager,
-            &state.model_library_manager,
+            &state.model.workspace,
+            &state.model.library_manager,
+            &state.model.model_library_manager,
             state.library_folders(),
-            &state.schematic,
+            &state.model.schematic,
         )
         .unwrap()
     };
@@ -119,9 +120,10 @@ fn a_retained_receipt_tracks_live_values_without_topology_counter_changes() {
         baseline.netlist_digest, "generation blocked",
         "{baseline:?}"
     );
-    let topology = fixture.state.schematic.topology_version();
+    let topology = fixture.state.model.schematic.topology_version();
     fixture
         .state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -129,7 +131,7 @@ fn a_retained_receipt_tracks_live_values_without_topology_counter_changes() {
         .find(|component| component.kind == crate::state::ComponentType::VoltageSource)
         .unwrap()
         .value = "2.5".to_owned();
-    assert_eq!(fixture.state.schematic.topology_version(), topology);
+    assert_eq!(fixture.state.model.schematic.topology_version(), topology);
     let changed = receipt(&mut dialog, &fixture.state);
     assert_ne!(
         changed.netlist_digest, baseline.netlist_digest,
@@ -143,6 +145,7 @@ fn a_failed_projection_has_no_invented_resolution_count() {
     let fixture = build();
     let mut invalid = fixture
         .state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -152,11 +155,11 @@ fn a_failed_projection_has_no_invented_resolution_count() {
         .clone();
     invalid.dut_path.clear();
     let receipt = configuration_receipt(
-        &fixture.state.workspace,
-        &fixture.state.library_manager,
-        &fixture.state.model_library_manager,
+        &fixture.state.model.workspace,
+        &fixture.state.model.library_manager,
+        &fixture.state.model.model_library_manager,
         fixture.state.library_folders(),
-        &fixture.state.schematic,
+        &fixture.state.model.schematic,
         fixture.configuration,
         Some(&invalid),
     );

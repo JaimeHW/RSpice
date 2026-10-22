@@ -172,56 +172,61 @@ impl AppState {
     /// it, then for the finding about the same thing, and a search that finds
     /// neither is not repeated until a collection changes.
     pub(in crate::workbench) fn reconcile_current_finding(&mut self) {
-        let Some(current) = self.diagnostics.current else {
+        let Some(current) = self.model.diagnostics.current else {
             return;
         };
         // A store record is re-anchored by the store as it republishes.
-        if self.diagnostics.owners.contains_key(&current) {
+        if self.model.diagnostics.owners.contains_key(&current) {
             return;
         }
-        if let Some(anchor) = self.diagnostics.source_anchor.as_ref()
+        if let Some(anchor) = self.model.diagnostics.source_anchor.as_ref()
             && records(self, anchor.segment).and_then(|records| records.id(anchor.index))
                 == Some(current)
         {
             return;
         }
         let fingerprint = fingerprint(self);
-        if self.diagnostics.unresolved == Some((current, fingerprint)) {
+        if self.model.diagnostics.unresolved == Some((current, fingerprint)) {
             return;
         }
 
         let found = find(self, |records, index| records.id(index) == Some(current));
         if let Some((segment, index)) = found {
-            self.diagnostics.source_anchor = records(self, segment)
+            self.model.diagnostics.source_anchor = records(self, segment)
                 .and_then(|records| records.key(index))
                 .map(|key| SourceAnchor {
                     segment,
                     index,
                     key,
                 });
-            self.diagnostics.unresolved = None;
+            self.model.diagnostics.unresolved = None;
             return;
         }
 
-        let reanchored = self.diagnostics.source_anchor.as_ref().and_then(|anchor| {
-            find(self, |records, index| records.matches(index, &anchor.key)).and_then(
-                |(segment, index)| {
-                    let id = records(self, segment)?.id(index)?;
-                    Some((segment, index, id, anchor.key.clone()))
-                },
-            )
-        });
+        let reanchored = self
+            .model
+            .diagnostics
+            .source_anchor
+            .as_ref()
+            .and_then(|anchor| {
+                find(self, |records, index| records.matches(index, &anchor.key)).and_then(
+                    |(segment, index)| {
+                        let id = records(self, segment)?.id(index)?;
+                        Some((segment, index, id, anchor.key.clone()))
+                    },
+                )
+            });
         match reanchored {
             Some((segment, index, id, key)) => {
-                self.diagnostics.current = Some(id);
-                self.diagnostics.source_anchor = Some(SourceAnchor {
+                self.model.diagnostics.current = Some(id);
+                self.model.diagnostics.source_anchor = Some(SourceAnchor {
                     segment,
                     index,
                     key,
                 });
-                self.diagnostics.unresolved = None;
+                self.model.diagnostics.unresolved = None;
             }
-            None => self.diagnostics.unresolved = Some((current, fingerprint)),
+            None => self.model.diagnostics.unresolved = Some((current, fingerprint)),
         }
     }
 }
@@ -261,9 +266,9 @@ mod tests {
         let other = Diagnostic::error("missing node").with_line(Some(1));
         let selected = first.canonical.diagnostic_id;
         state.ui.netlist.diagnostics = collection(vec![first, other]);
-        state.diagnostics.set_current_finding(Some(selected));
+        state.model.diagnostics.set_current_finding(Some(selected));
         state.reconcile_current_finding();
-        assert_eq!(state.diagnostics.current_finding(), Some(selected));
+        assert_eq!(state.model.diagnostics.current_finding(), Some(selected));
 
         // An edit above it moves it down a line: same finding, new identity.
         let moved = Diagnostic::error("unknown model nchh").with_line(Some(1));
@@ -275,7 +280,7 @@ mod tests {
         ]);
         state.reconcile_current_finding();
 
-        assert_eq!(state.diagnostics.current_finding(), Some(renamed));
+        assert_eq!(state.model.diagnostics.current_finding(), Some(renamed));
     }
 
     /// A finding that was fixed has nothing to follow, and the current
@@ -289,13 +294,13 @@ mod tests {
             fixed,
             Diagnostic::error("missing node").with_line(Some(1)),
         ]);
-        state.diagnostics.set_current_finding(Some(selected));
+        state.model.diagnostics.set_current_finding(Some(selected));
         state.reconcile_current_finding();
 
         state.ui.netlist.diagnostics =
             collection(vec![Diagnostic::error("missing node").with_line(Some(0))]);
         state.reconcile_current_finding();
 
-        assert_eq!(state.diagnostics.current_finding(), Some(selected));
+        assert_eq!(state.model.diagnostics.current_finding(), Some(selected));
     }
 }

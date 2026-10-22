@@ -22,11 +22,13 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             if Button::new("Add corner…").show(ui).clicked() {
                 if let Some(library) = app
                     .state
+                    .model
                     .model_library_manager
                     .selected_library
                     .clone()
                     .or_else(|| {
                         app.state
+                            .model
                             .model_library_manager
                             .libraries_sorted()
                             .first()
@@ -511,6 +513,7 @@ fn retained_section(
 ) -> Result<SectionExcerpt, String> {
     let library = app
         .state
+        .model
         .model_library_manager
         .get_library(&row.library)
         .ok_or_else(|| format!("Library '{}' no longer exists.", row.library))?;
@@ -725,7 +728,11 @@ fn statistical_and_aging_card(ui: &mut Ui, app: &ManagerRenderContext<'_>, row: 
         .section_for_domain(CornerSectionDomain::StatisticalLocal);
     let aging = row.corner.section_for_domain(CornerSectionDomain::Aging);
     let bound = global.is_some() || local.is_some() || aging.is_some();
-    let library = app.state.model_library_manager.get_library(&row.library);
+    let library = app
+        .state
+        .model
+        .model_library_manager
+        .get_library(&row.library);
     detail_pane(
         ui,
         "Statistical and aging sections",
@@ -971,9 +978,13 @@ fn validate_current_model_execution_plan(
     let sealed = if has_project_technology {
         app.state.seal_project_execution_model_sources()?
     } else {
-        app.state.model_library_manager.seal_execution_sources()?
+        app.state
+            .model
+            .model_library_manager
+            .seal_execution_sources()?
     };
-    let plan = sealed.reference_model_execution_plan(app.state.sim_setup.reference_pvt.process)?;
+    let plan =
+        sealed.reference_model_execution_plan(app.state.model.sim_setup.reference_pvt.process)?;
     let mut findings = vec![
         crate::state::model_library::ModelValidationFinding {
             code: "SOURCE_CLOSURE_AUTHENTICATED".to_owned(),
@@ -1021,23 +1032,25 @@ fn validate_current_model_execution_plan(
     }
     let receipt = app
         .state
+        .model
         .model_library_manager
         .issue_model_validation_receipt(
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
             plan.digest(),
             pdk_archive_digest,
             crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
             findings,
         )?;
     app.state
+        .model
         .model_library_manager
         .validate_model_validation_receipt(
-            app.state.workspace.content.project.revision(),
+            app.state.model.workspace.content.project.revision(),
             plan.digest(),
             pdk_archive_digest,
             crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION,
         )?;
-    app.state.workspace.content.project_metadata_dirty = true;
+    app.state.model.workspace.content.project_metadata_dirty = true;
     Ok(format!(
         "Recorded model validation {} for plan {} with {} bindings, {} provider decisions, and {veriloga_count} Verilog-A runtimes.",
         receipt.receipt_digest,
@@ -1114,10 +1127,11 @@ fn corner_rows(app: &ManagerRenderContext<'_>) -> Vec<CornerRow> {
     // Every corner on this page is one a reader is authoring, so every one is
     // compared against the run set — not only the corner that happens to be
     // active, which is the narrower question the preflight report asks.
-    let requested = app.state.sim_setup.requested_temperatures_celsius();
-    let libraries = app.state.model_library_manager.libraries_sorted();
+    let requested = app.state.model.sim_setup.requested_temperatures_celsius();
+    let libraries = app.state.model.model_library_manager.libraries_sorted();
     let active_library = app
         .state
+        .model
         .model_library_manager
         .selected_library
         .as_deref()
@@ -1446,8 +1460,13 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
                 },
                 "run expansion",
             );
-            if let Some(receipt) = app.state.model_library_manager.model_validation_receipt() {
-                let current_revision = app.state.workspace.content.project.revision();
+            if let Some(receipt) = app
+                .state
+                .model
+                .model_library_manager
+                .model_validation_receipt()
+            {
+                let current_revision = app.state.model.workspace.content.project.revision();
                 let receipt_state = if receipt.project_revision == current_revision {
                     "current revision"
                 } else {
@@ -1549,6 +1568,7 @@ fn inline_unbind(ui: &mut Ui, domain: CornerSectionDomain, section: &str, width:
 fn open_corner_binding_dialog(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
     let section = app
         .state
+        .model
         .model_library_manager
         .get_library(&row.library)
         .and_then(|library| library.section_index().into_iter().next())
@@ -1574,7 +1594,12 @@ fn open_corner_editor(app: &mut ManagerRenderContext<'_>, row: &CornerRow, dupli
         let base = format!("{}_copy", row.corner.name);
         let mut candidate = base.clone();
         let mut suffix = 2_u32;
-        if let Some(library) = app.state.model_library_manager.get_library(&row.library) {
+        if let Some(library) = app
+            .state
+            .model
+            .model_library_manager
+            .get_library(&row.library)
+        {
             while library
                 .corners
                 .keys()
@@ -1615,6 +1640,7 @@ fn open_corner_editor(app: &mut ManagerRenderContext<'_>, row: &CornerRow, dupli
 fn open_corner_source(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
     let Some(library) = app
         .state
+        .model
         .model_library_manager
         .get_library(&row.library)
         .cloned()
@@ -1680,7 +1706,7 @@ fn inspect_corner(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
 
 fn activate_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {
     app.state.select_model_library(library_name);
-    let mut candidate = app.state.model_library_manager.clone();
+    let mut candidate = app.state.model.model_library_manager.clone();
     let result = candidate
         .get_library_mut(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))

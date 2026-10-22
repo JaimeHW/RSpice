@@ -15,7 +15,7 @@ pub(in super::super) fn show(ctx: &egui::Context, state: &mut AppState) {
     let presentation = state.ui.result_presentation_policy();
     let quantity_policy = state.ui.preferences.quantity_presentation_policy();
     let models = cached_models(
-        &state.simulation,
+        &state.model.simulation,
         &mut state.ui.results,
         presentation.complex_number_display(),
         &Tokens::get(ctx),

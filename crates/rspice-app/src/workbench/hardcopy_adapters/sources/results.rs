@@ -33,7 +33,7 @@ pub(super) fn active_quick_result(
 
 #[cfg(test)]
 pub(super) fn active_terminal_run(state: &AppState) -> Result<&SimulationRun, HardcopySourceError> {
-    let run = state.simulation.active_run().ok_or_else(|| {
+    let run = state.model.simulation.active_run().ok_or_else(|| {
         HardcopySourceError::UnretainedResult("no active result dataset is selected".to_owned())
     })?;
     if !run.lifecycle.is_terminal() {

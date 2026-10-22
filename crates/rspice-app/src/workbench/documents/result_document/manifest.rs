@@ -22,17 +22,17 @@ pub(crate) struct ManifestPlan {
 }
 pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>> {
     let source = (
-        state.simulation.retained.runs.revision(),
-        state.simulation.view.data_version,
+        state.model.simulation.retained.runs.revision(),
+        state.model.simulation.view.data_version,
     );
-    let run_id = state.simulation.active_run()?.id;
+    let run_id = state.model.simulation.active_run()?.id;
     if let Some(plan) = state.ui.results.plans.manifest.as_ref()
         && plan.source == source
         && plan.run == run_id
     {
         return Some(Arc::clone(plan));
     }
-    let model = manifest_for_run(state.simulation.active_run()?);
+    let model = manifest_for_run(state.model.simulation.active_run()?);
     let built = Arc::new(ManifestPlan {
         source,
         run: run_id,
@@ -49,28 +49,31 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some(plan) = active_manifest(state) else {
         return;
     };
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return;
     };
     let run_sequence = run.id;
-    let saved_outputs = state
-        .simulation
-        .active_analysis()
-        .map(|analysis| viewer::SavedOutputs {
-            run_id: run.run_id,
-            analysis_id: analysis.id,
-            analysis_label: &analysis.label,
-            receipts: &analysis.saved_output_receipts,
-        });
+    let saved_outputs =
+        state
+            .model
+            .simulation
+            .active_analysis()
+            .map(|analysis| viewer::SavedOutputs {
+                run_id: run.run_id,
+                analysis_id: analysis.id,
+                analysis_label: &analysis.label,
+                receipts: &analysis.saved_output_receipts,
+            });
     let executed_deck_points = state
+        .model
         .simulation
         .retained
         .executed_decks
         .get(run_sequence)
         .map_or(0, |deck| deck.points.len());
     let plan_block = crate::workbench::state::plan_provenance::producing_plan_block(
-        &state.simulation,
-        state.sim_setup.stable_analysis_plan().ok(),
+        &state.model.simulation,
+        state.model.sim_setup.stable_analysis_plan().ok(),
     );
     let response = viewer::right_panel(
         ui,
@@ -88,10 +91,11 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         receipt_index,
     }) = response.materialize
     {
-        match state
-            .simulation
-            .materialize_deferred_saved_output(run_id, analysis_id, receipt_index)
-        {
+        match state.model.simulation.materialize_deferred_saved_output(
+            run_id,
+            analysis_id,
+            receipt_index,
+        ) {
             Ok(()) => {
                 state.synchronize_specialized_viewer_cache_authority();
                 state.record(
@@ -158,8 +162,8 @@ mod tests {
             ]),
         );
         let mut state = AppState::default();
-        state.simulation.retained.runs = vec![run].into();
-        assert!(state.simulation.select_run(0));
+        state.model.simulation.retained.runs = vec![run].into();
+        assert!(state.model.simulation.select_run(0));
         state
     }
     #[test]
@@ -213,7 +217,7 @@ mod tests {
     #[test]
     fn retained_view_source_manifest_tracks_restoration_and_nested_edits() {
         let mut state = AppState::default();
-        let run = state.simulation.start_run();
+        let run = state.model.simulation.start_run();
         run.add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "Transient").with_waveforms(vec![
                 RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 2.0], "#ffbd2e"),
@@ -224,25 +228,25 @@ mod tests {
         run.mark_running().unwrap();
         run.finish_lifecycle(SimulationRunLifecycle::Completed)
             .unwrap();
-        state.simulation.complete_run();
+        state.model.simulation.complete_run();
         let original = active_manifest(&mut state).unwrap();
-        let version = state.simulation.view.data_version;
-        let mut replacement = state.simulation.clone();
+        let version = state.model.simulation.view.data_version;
+        let mut replacement = state.model.simulation.clone();
         replacement.retained.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![0.0, 9.0]);
-        state.simulation = crate::io::simulation_state_from_results(
+        state.model.simulation = crate::io::simulation_state_from_results(
             crate::io::capture_simulation_results(&replacement),
         )
         .unwrap();
-        assert_eq!(state.simulation.view.data_version, version);
+        assert_eq!(state.model.simulation.view.data_version, version);
         let restored = active_manifest(&mut state).unwrap();
         assert_eq!(restored.model.dataset_id, original.model.dataset_id);
         assert_ne!(restored.model.dataset_digest, original.model.dataset_digest);
         assert_eq!(
             restored.model,
-            manifest_for_run(state.simulation.active_run().unwrap())
+            manifest_for_run(state.model.simulation.active_run().unwrap())
         );
 
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .waveforms
             .push(RetainedTrace::new(
                 "I(V1)",
@@ -253,15 +257,15 @@ mod tests {
         let edited = active_manifest(&mut state).unwrap();
         assert_eq!(
             edited.model,
-            manifest_for_run(state.simulation.active_run().unwrap())
+            manifest_for_run(state.model.simulation.active_run().unwrap())
         );
         assert_ne!(edited.model, restored.model);
-        assert_eq!(state.simulation.view.data_version, version);
+        assert_eq!(state.model.simulation.view.data_version, version);
     }
     #[test]
     fn retained_view_source_manifest_reuses_large_unchanged_history_clones() {
         let mut state = state_with_run("Transient");
-        state.simulation.retained.runs[0].analyses[0].waveforms = vec![RetainedTrace::new(
+        state.model.simulation.retained.runs[0].analyses[0].waveforms = vec![RetainedTrace::new(
             "V(out)",
             (0..100_000).map(f64::from).collect::<Vec<_>>(),
             vec![2.0; 100_000],
@@ -269,7 +273,7 @@ mod tests {
         )];
         let original = active_manifest(&mut state).unwrap();
         let mut other = AppState::default();
-        other.simulation = state.simulation.clone();
+        other.model.simulation = state.model.simulation.clone();
         other.ui.results = state.ui.results.clone();
         let work = frame_work::WorkCounts::reset();
         for _ in 0..12 {
@@ -283,7 +287,8 @@ mod tests {
             ));
         }
         assert_eq!(work.since().total(), 0);
-        other.simulation.retained.runs[0].analyses[0].waveforms[0].y = Arc::new(vec![3.0; 100_000]);
+        other.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
+            Arc::new(vec![3.0; 100_000]);
         assert_ne!(
             active_manifest(&mut other).unwrap().model.dataset_digest,
             original.model.dataset_digest
@@ -298,6 +303,7 @@ mod tests {
         let mut state = state_with_run("Transient");
         let direct = manifest_for_run(
             state
+                .model
                 .simulation
                 .active_run()
                 .expect("the fixture selects a run"),
@@ -308,6 +314,7 @@ mod tests {
         assert_eq!(
             plan.model.dataset_digest,
             state
+                .model
                 .simulation
                 .active_run()
                 .expect("the fixture selects a run")
@@ -325,9 +332,10 @@ mod tests {
         let before = active_manifest(&mut state).expect("a manifest for the active run");
         let before_digest = before.model.dataset_digest.clone();
 
-        state.simulation.retained.runs[0].analyses[0].waveforms[0].y =
+        state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y =
             std::sync::Arc::new(vec![0.0, 9.0]);
-        state.simulation.view.data_version = state.simulation.view.data_version.wrapping_add(1);
+        state.model.simulation.view.data_version =
+            state.model.simulation.view.data_version.wrapping_add(1);
 
         let after = active_manifest(&mut state).expect("a manifest for the active run");
         assert_ne!(
@@ -336,7 +344,7 @@ mod tests {
         );
         assert_eq!(
             after.model.dataset_digest,
-            state.simulation.retained.runs[0]
+            state.model.simulation.retained.runs[0]
                 .dataset_content_digest()
                 .to_string()
         );
@@ -356,8 +364,8 @@ mod tests {
                 RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![5.0, 6.0], "#ffbd2e"),
             ]),
         );
-        state.simulation.retained.runs.push(second);
-        assert!(state.simulation.select_run(1));
+        state.model.simulation.retained.runs.push(second);
+        assert!(state.model.simulation.select_run(1));
 
         let after = active_manifest(&mut state).expect("a manifest for the active run");
         assert_ne!(after.model.run_sequence, first.run_sequence);

@@ -26,15 +26,16 @@ fn device_created_from_a_schematic() -> (RSpiceApp, CellViewRef, CellViewRef) {
     bench.add_view(View::new("schematic", ViewType::Schematic));
     let mut library = Library::new(LIBRARY);
     library.add_cell(bench);
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     let origin = CellViewRef::new(LIBRARY, "bench", "schematic");
     app.state
+        .model
         .workspace
         .insert_schematic_editor(origin.key(), crate::state::SchematicState::default());
     app.state.open_workspace_view(origin.clone());
     app.state.workbench.activate(Workspace::Design);
     assert_eq!(
-        app.state.workspace.content.active_view_type(),
+        app.state.model.workspace.content.active_view_type(),
         ViewType::Schematic,
         "the form is opened from a schematic"
     );
@@ -99,14 +100,15 @@ fn a_new_devices_first_compile_with_a_port_offers_to_place_it_where_it_came_from
         .expect("the device arms");
 
     assert!(armed.contains(&origin.display_path()), "{armed}");
-    assert_eq!(app.state.workspace.content.active_view, origin);
+    assert_eq!(app.state.model.workspace.content.active_view, origin);
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(
-        app.state.schematic.session.editor.tool,
+        app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::CellInstance)
     );
     let binding = &app
         .state
+        .model
         .schematic
         .session
         .editor
@@ -151,13 +153,13 @@ fn a_closed_origin_offers_the_designs_top_schematic_and_otherwise_nothing() {
     let mut library = Library::new(LIBRARY);
     library.add_cell(bench);
     library.add_cell(Cell::new("gain"));
-    app.state.library_manager.add_library(library);
+    app.state.model.library_manager.add_library(library);
     let bench = CellViewRef::new(LIBRARY, "bench", "schematic");
     let handoff = VerilogAPlacementHandoff {
         view: CellViewRef::new(LIBRARY, "gain", "veriloga"),
         schematic: Some(bench.clone()),
     };
-    let project = &app.state.workspace.content.project;
+    let project = &app.state.model.workspace.content.project;
     let top = CellViewRef::new(&project.root_library, &project.top_cell, "schematic");
 
     assert_eq!(
@@ -171,8 +173,8 @@ fn a_closed_origin_offers_the_designs_top_schematic_and_otherwise_nothing() {
         Some(bench.clone())
     );
 
-    app.state.workspace.content.close_view(&bench);
-    app.state.workspace.content.project.top_cell = "gain".to_owned();
+    app.state.model.workspace.content.close_view(&bench);
+    app.state.model.workspace.content.project.top_cell = "gain".to_owned();
     assert_eq!(app.state.veriloga_placement_target(&handoff), None);
 }
 
@@ -209,7 +211,10 @@ fn render_the_new_device_form_and_the_placement_offer_for_review() {
     ] {
         for (suffix, size) in [("1440x900", DESKTOP), ("390x844", egui::vec2(390.0, 844.0))] {
             let mut app = open_project_app();
-            app.state.library_manager.add_library(Library::new(LIBRARY));
+            app.state
+                .model
+                .library_manager
+                .add_library(Library::new(LIBRARY));
             app.state.workbench.activate(Workspace::Design);
             app.state.workbench.coarse_pointer = size.x < 500.0;
             crate::workbench::app::open_new_veriloga_device_form(&mut app.state);

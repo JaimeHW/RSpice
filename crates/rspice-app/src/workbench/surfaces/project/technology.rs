@@ -59,7 +59,7 @@ pub(super) const fn technology_primary_state(
 
 pub(super) fn technology_candidates(app: &RSpiceApp) -> TechnologyCandidateCatalog {
     let mut catalog = TechnologyCandidateCatalog::default();
-    for library in app.state.model_library_manager.libraries_sorted() {
+    for library in app.state.model.model_library_manager.libraries_sorted() {
         match ProjectTechnologyBinding::from_model_library(library) {
             Ok(binding) => {
                 let option_label = format!(
@@ -134,6 +134,7 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
     let candidates = &catalog.candidates;
     let current_library = app
         .state
+        .model
         .workspace
         .content
         .project
@@ -152,11 +153,13 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
         });
     let packages = app
         .state
+        .model
         .pdk_config
         .technology_registry
         .validated_packages();
     let current_pin = app
         .state
+        .model
         .workspace
         .content
         .project
@@ -177,6 +180,7 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
         })
         .or_else(|| {
             app.state
+                .model
                 .pdk_config
                 .technology_registry
                 .active_package()
@@ -198,6 +202,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
     let candidates = &catalog.candidates;
     let packages = app
         .state
+        .model
         .pdk_config
         .technology_registry
         .validated_packages()
@@ -235,6 +240,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             .technology_attachment
             .selected_signed_package = app
             .state
+            .model
             .pdk_config
             .technology_registry
             .active_package()
@@ -298,6 +304,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 .with_signed_package_metadata(package.metadata())
                 .and_then(|binding| {
                     app.state
+                        .model
                         .pdk_config
                         .technology_registry
                         .validate_project_binding(&binding)?;
@@ -386,8 +393,22 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         technology_authority_fields_ready(&app.state.dialogs.technology_attachment);
     let selected_is_attached = selected_binding.as_ref().is_some_and(|binding| {
         let label = binding.display_label();
-        app.state.workspace.content.project.technology_binding() == Some(binding)
-            && app.state.workspace.content.project.technology.as_deref() == Some(label.as_str())
+        app.state
+            .model
+            .workspace
+            .content
+            .project
+            .technology_binding()
+            == Some(binding)
+            && app
+                .state
+                .model
+                .workspace
+                .content
+                .project
+                .technology
+                .as_deref()
+                == Some(label.as_str())
     });
     let primary = technology_primary_state(
         selected_binding.is_some() && authority_ready && migration_ready,
@@ -734,13 +755,28 @@ pub(super) fn attach_technology_binding(
     verify_pinned_technology_contract(&binding, app)?;
     validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
     let label = binding.display_label();
-    if app.state.workspace.content.project.technology_binding() == Some(&binding)
-        && app.state.workspace.content.project.technology.as_deref() == Some(label.as_str())
+    if app
+        .state
+        .model
+        .workspace
+        .content
+        .project
+        .technology_binding()
+        == Some(&binding)
+        && app
+            .state
+            .model
+            .workspace
+            .content
+            .project
+            .technology
+            .as_deref()
+            == Some(label.as_str())
     {
         return Ok(format!(
             "{} is already attached at project revision {}; nothing was changed.",
             label,
-            app.state.workspace.content.project.revision().get()
+            app.state.model.workspace.content.project.revision().get()
         ));
     }
 
@@ -769,9 +805,9 @@ pub(super) fn commit_technology_after_checkpoint(
 ) -> Result<String, String> {
     verify_pinned_technology_contract(&binding, app)?;
     validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
-    let previous_revision = app.state.workspace.content.project.revision();
+    let previous_revision = app.state.model.workspace.content.project.revision();
     if checkpoint.project_revision() != previous_revision.get()
-        || checkpoint.project_name() != app.state.workspace.content.project.name()
+        || checkpoint.project_name() != app.state.model.workspace.content.project.name()
         || !crate::workbench::lifecycle::project_checkpoint::matches_current_state(
             checkpoint, &app.state,
         )?
@@ -799,6 +835,7 @@ pub(super) fn commit_technology_after_checkpoint(
     }
     let (revision, audit_receipt) = app
         .state
+        .model
         .workspace
         .content
         .attach_technology_audited(binding.clone(), change_context)
@@ -842,8 +879,8 @@ pub(super) fn start_browser_technology_checkpoint(
     if app.state.dialogs.technology_attachment.checkpoint_pending {
         return Err("A project recovery checkpoint is already being written".to_owned());
     }
-    let project_id = app.state.workspace.content.project.id().to_string();
-    let expected_revision = app.state.workspace.content.project.revision().get();
+    let project_id = app.state.model.workspace.content.project.id().to_string();
+    let expected_revision = app.state.model.workspace.content.project.revision().get();
     let queued_project_id = project_id.clone();
     let queued_binding = binding.clone();
     let repaint = ctx.clone();
@@ -876,8 +913,9 @@ pub(super) fn poll_browser_technology_checkpoint(_: &Context, app: &mut RSpiceAp
     let completions = BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        if app.state.workspace.content.project.id().to_string() != completion.project_id
-            || app.state.workspace.content.project.revision().get() != completion.expected_revision
+        if app.state.model.workspace.content.project.id().to_string() != completion.project_id
+            || app.state.model.workspace.content.project.revision().get()
+                != completion.expected_revision
         {
             app.state.dialogs.technology_attachment.checkpoint_pending = false;
             app.state.dialogs.technology_attachment.validation_error = Some(
@@ -912,7 +950,7 @@ pub(super) fn poll_browser_technology_checkpoint(_: &Context, app: &mut RSpiceAp
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn poll_browser_recovery_completions(_: &Context, app: &mut RSpiceApp) {
-    let project_id = app.state.workspace.content.project.id().to_string();
+    let project_id = app.state.model.workspace.content.project.id().to_string();
     let catalog = BROWSER_RECOVERY_CATALOG_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in catalog {
@@ -988,8 +1026,9 @@ pub(super) fn verify_pinned_technology_contract(
     binding: &ProjectTechnologyBinding,
     app: &RSpiceApp,
 ) -> Result<(), String> {
-    verify_pinned_model_sources(binding, &app.state.model_library_manager)?;
+    verify_pinned_model_sources(binding, &app.state.model.model_library_manager)?;
     app.state
+        .model
         .pdk_config
         .technology_registry
         .validate_project_binding(binding)
@@ -1007,6 +1046,7 @@ fn validate_migration_evidence_for_binding(
         .ok_or_else(|| "The candidate binding has no signed PDK package pin.".to_owned())?;
     let candidate = app
         .state
+        .model
         .pdk_config
         .technology_registry
         .validated_packages()

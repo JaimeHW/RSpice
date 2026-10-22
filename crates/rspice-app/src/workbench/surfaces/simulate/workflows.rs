@@ -50,7 +50,7 @@ pub(super) fn rename_analysis_dialog(
     mut draft: RenameAnalysisDraft,
 ) {
     let (validation_error, clear_refusal, default_label, shown_as) =
-        match app.state.sim_setup.stable_analysis_plan() {
+        match app.state.model.sim_setup.stable_analysis_plan() {
             Ok(plan) => (
                 plan.instance_name_refusal(draft.instance_id, &draft.name)
                     .map(|refusal| refusal.to_string()),
@@ -169,6 +169,7 @@ fn commit_clear_analysis_name(
 ) -> Result<String, String> {
     let receipt = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .and_then(|plan| {
@@ -188,6 +189,7 @@ fn commit_rename_analysis(
 ) -> Result<String, String> {
     let receipt = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .and_then(|plan| {
@@ -211,7 +213,7 @@ pub(super) fn clone_plan_dialog(
 ) {
     draft.validation_error = validate_clone_plan_draft(app, &draft).err();
     let enabled = draft.validation_error.is_none();
-    let source = simulation_plan_catalog_entry(&app.state.sim_setup, draft.source_plan_id)
+    let source = simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.source_plan_id)
         .map_or_else(
             || format!("missing plan {}", draft.source_plan_id),
             |(name, revision, _, _)| format!("{name} · revision {}", revision.get()),
@@ -798,8 +800,8 @@ fn capture_group_from_draft(
             group.members = existing.members.clone();
         }
     }
-    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
-    if let Some(payload) = app.state.workspace.content.plan_data(plan_id)
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
+    if let Some(payload) = app.state.model.workspace.content.plan_data(plan_id)
         && let Some(holder) = payload.capture_groups.iter().find(|existing| {
             existing.id != group.id
                 && crate::state::workspace::capture_group_collation_key(&existing.name)
@@ -819,8 +821,9 @@ fn existing_capture_group(
     app: &RSpiceApp,
     id: crate::product::CaptureGroupId,
 ) -> Option<&crate::state::CaptureGroup> {
-    let plan_id = app.state.sim_setup.stable_analysis_plan().ok()?.id();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan().ok()?.id();
     app.state
+        .model
         .workspace
         .content
         .plan_data(plan_id)?
@@ -846,6 +849,7 @@ fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> St
     let rules = group.rules.len();
     let Ok(plan_id) = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .map(|plan| plan.id())
@@ -854,6 +858,7 @@ fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> St
     };
     let matched = app
         .state
+        .model
         .workspace
         .content
         .plan_data(plan_id)
@@ -898,7 +903,7 @@ pub(super) fn commit_capture_group(
     let group = capture_group_from_draft(app, draft)?;
     let name = group.name.clone();
     let editing = draft.group.is_some();
-    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
     let detail = if editing {
         format!("Updated capture group {name}.")
     } else {
@@ -933,7 +938,7 @@ pub(super) fn commit_capture_group(
     Ok(format!(
         "{} capture group {name} in plan {}.",
         if editing { "Updated" } else { "Added" },
-        app.state.sim_setup.active_plan_name()
+        app.state.model.sim_setup.active_plan_name()
     ))
 }
 
@@ -946,6 +951,7 @@ pub(super) fn validate_clone_plan_draft(
     let key = name.as_str().to_lowercase();
     if app
         .state
+        .model
         .sim_setup
         .active_plan_name()
         .as_str()
@@ -953,6 +959,7 @@ pub(super) fn validate_clone_plan_draft(
         == key
         || app
             .state
+            .model
             .sim_setup
             .inactive_plans()
             .iter()
@@ -964,7 +971,7 @@ pub(super) fn validate_clone_plan_draft(
         ));
     }
     let Some((_, _, executing, archived)) =
-        simulation_plan_catalog_entry(&app.state.sim_setup, draft.source_plan_id)
+        simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.source_plan_id)
     else {
         return Err(format!(
             "Source simulation plan {} no longer exists.",
@@ -987,8 +994,8 @@ pub(super) fn commit_clone_plan(
     draft: &ClonePlanDraft,
 ) -> Result<String, String> {
     validate_clone_plan_draft(app, draft)?;
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let current_plan_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_plan_id);
     if current_plan_id != draft.source_plan_id {
@@ -1029,8 +1036,8 @@ pub(super) fn commit_clone_plan(
         .instances()
         .first()
         .map(|instance| instance.id());
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.workspace = workspace;
     app.state.workbench.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     app.state.record_plan_receipt(format!(
@@ -1041,7 +1048,7 @@ pub(super) fn commit_clone_plan(
     ));
     Ok(format!(
         "Created and activated '{}' with independent plan identity {}.",
-        app.state.sim_setup.active_plan_name(),
+        app.state.model.sim_setup.active_plan_name(),
         outcome.cloned_plan_id
     ))
 }
@@ -1107,7 +1114,7 @@ pub(super) fn design_variable_from_draft_categorized(
         0 => DesignVariableScope::Testbench,
         1 => DesignVariableScope::Project,
         2 => DesignVariableScope::SelectedCell {
-            cell: app.state.workspace.content.active_view.clone(),
+            cell: app.state.model.workspace.content.active_view.clone(),
         },
         3 => DesignVariableScope::SelectedAnalysis {
             analysis_id: app
@@ -1172,8 +1179,8 @@ pub(super) fn validate_design_variable_draft(
     draft: &DesignVariableDraft,
 ) -> Result<(), String> {
     let variable = design_variable_from_draft(app, draft)?;
-    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
-    let mut workspace = app.state.workspace.clone();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
+    let mut workspace = app.state.model.workspace.clone();
     workspace
         .content
         .add_design_variable(plan_id, variable)
@@ -1190,8 +1197,8 @@ pub(super) fn commit_design_variable(
 ) -> Result<String, String> {
     let variable = design_variable_from_draft(app, draft)?;
     let variable_name = variable.name.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     workspace
         .content
@@ -1206,13 +1213,13 @@ pub(super) fn commit_design_variable(
             "Created design variable {variable_name}."
         ))
         .map_err(|error| error.to_string())?;
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.workspace = workspace;
     app.invalidate_simulation_preflight();
     app.state.record_plan_receipt(receipt.status_line());
     Ok(format!(
         "Created design variable {variable_name} in plan {}.",
-        app.state.sim_setup.active_plan_name()
+        app.state.model.sim_setup.active_plan_name()
     ))
 }
 
@@ -1262,8 +1269,8 @@ pub(super) fn validate_saved_output_draft(
     if let SavedOutputSemanticStatus::Invalid { reason } = report.semantic_status() {
         return Err(reason.clone());
     }
-    let plan_id = app.state.sim_setup.stable_analysis_plan()?.id();
-    let mut workspace = app.state.workspace.clone();
+    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
+    let mut workspace = app.state.model.workspace.clone();
     workspace
         .content
         .add_saved_output(plan_id, output)
@@ -1282,8 +1289,8 @@ pub(super) fn commit_saved_output(
     validate_saved_output_draft(app, draft)?;
     let output = saved_output_from_draft(app, draft)?;
     let output_name = output.name.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let mut workspace = app.state.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let mut workspace = app.state.model.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     workspace
         .content
@@ -1296,13 +1303,13 @@ pub(super) fn commit_saved_output(
     let receipt = setup
         .commit_active_plan_configuration_change(format!("Added saved output {output_name}."))
         .map_err(|error| error.to_string())?;
-    app.state.sim_setup = setup;
-    app.state.workspace = workspace;
+    app.state.model.sim_setup = setup;
+    app.state.model.workspace = workspace;
     app.invalidate_simulation_preflight();
     app.state.record_plan_receipt(receipt.status_line());
     Ok(format!(
         "Added saved output {output_name} to plan {}.",
-        app.state.sim_setup.active_plan_name()
+        app.state.model.sim_setup.active_plan_name()
     ))
 }
 
@@ -1331,9 +1338,9 @@ pub(super) fn commit_plan_change(
         crate::product::SimulationPlanId,
     ) -> Result<(), String>,
 ) -> bool {
-    let mut workspace = app.state.workspace.clone();
-    let mut setup = app.state.sim_setup.clone();
-    let before = plan_capture_state(&app.state.workspace, plan_id);
+    let mut workspace = app.state.model.workspace.clone();
+    let mut setup = app.state.model.sim_setup.clone();
+    let before = plan_capture_state(&app.state.model.workspace, plan_id);
     let outcome = change(&mut workspace, plan_id)
         .and_then(|()| {
             workspace
@@ -1349,8 +1356,8 @@ pub(super) fn commit_plan_change(
         });
     match outcome {
         Ok(receipt) => {
-            app.state.workspace = workspace;
-            app.state.sim_setup = setup;
+            app.state.model.workspace = workspace;
+            app.state.model.sim_setup = setup;
             app.invalidate_simulation_preflight();
             app.state.record_plan_receipt(receipt.status_line());
             true
@@ -1490,7 +1497,7 @@ pub(super) fn design_variable_consumers_scoped(
     app: &RSpiceApp,
     narrowed_to: Option<Option<crate::product::AnalysisInstanceId>>,
 ) -> String {
-    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+    let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
         return "plan unavailable".to_owned();
     };
     let selected_only = narrowed_to;
@@ -1557,7 +1564,7 @@ pub(super) fn saved_output_consumers_of(
     app: &RSpiceApp,
     compatibility: &SavedOutputCompatibility,
 ) -> String {
-    let Ok(plan) = app.state.sim_setup.stable_analysis_plan() else {
+    let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
         return "plan unavailable".to_owned();
     };
     let labels = plan

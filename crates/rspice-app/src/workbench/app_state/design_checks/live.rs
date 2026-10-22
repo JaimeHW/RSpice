@@ -55,16 +55,20 @@ impl AppState {
             self.withdraw_live_checks();
             return None;
         }
-        let drawing = (self.project_open.is_open()
+        let drawing = (self.model.project_open.is_open()
             && matches!(
-                self.workspace.content.active_view_type(),
+                self.model.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench
             ))
         .then(|| {
-            let subject = self.workspace.content.active_schematic_reference();
-            (owner_key(&subject), self.schematic.content_stamp(), subject)
+            let subject = self.model.workspace.content.active_schematic_reference();
+            (
+                owner_key(&subject),
+                self.model.schematic.content_stamp(),
+                subject,
+            )
         });
-        let state = &mut self.design_checks.drawing;
+        let state = &mut self.model.design_checks.drawing;
         let seen = drawing
             .as_ref()
             .map(|(key, stamp, _)| (key.clone(), *stamp));
@@ -84,21 +88,21 @@ impl AppState {
         if still_in_front && waited < SETTLE {
             return Some(SETTLE - waited);
         }
-        self.design_checks.drawing.pending = None;
+        self.model.design_checks.drawing.pending = None;
         // A failed background job is an Error, and the Console lifts it into
         // a notice. A drawing that cannot be checked — a configuration that
         // does not resolve under it — fails the same way at every edit, so
         // it is recorded when the reason changes, not each time.
         match self.run_live_check(subject) {
-            Ok(_) => self.design_checks.drawing.failed = None,
-            Err(error) if self.design_checks.drawing.failed.as_ref() == Some(&error) => {}
+            Ok(_) => self.model.design_checks.drawing.failed = None,
+            Err(error) if self.model.design_checks.drawing.failed.as_ref() == Some(&error) => {}
             Err(error) => {
                 self.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!("Live checks could not run: {error}"),
                 );
-                self.design_checks.drawing.failed = Some(error);
+                self.model.design_checks.drawing.failed = Some(error);
             }
         }
         None
@@ -111,16 +115,17 @@ impl AppState {
     ) -> Result<DrcResult, String> {
         let config = self.live_check_config(&subject);
         let projection = self
+            .model
             .workspace
             .design_projection(
-                &self.library_manager,
-                &self.workspace.content.active_view,
-                &self.schematic,
+                &self.model.library_manager,
+                &self.model.workspace.content.active_view,
+                &self.model.schematic,
             )
             .map_err(|error| error.to_string())?;
         let checked = projected_buffer(&projection, &subject)?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-            self.library_manager.catalog(),
+            self.model.library_manager.catalog(),
             &projection,
         );
         let result = rspice_design::drc::run_live_check(checked, &subject, &hierarchy, &config);
@@ -133,8 +138,13 @@ impl AppState {
     /// reach a ground is not asked, because no live rule asks it.
     fn live_check_config(&self, subject: &CellViewRef) -> DrcConfig {
         DrcConfig {
-            severity_overrides: self.workspace.content.design_rules.severity_overrides(),
-            connectivity: self.workspace.content.connectivity.policy.clone(),
+            severity_overrides: self
+                .model
+                .workspace
+                .content
+                .design_rules
+                .severity_overrides(),
+            connectivity: self.model.workspace.content.connectivity.policy.clone(),
             waivers: self.check_waivers(subject),
             ..DrcConfig::default()
         }
@@ -154,10 +164,10 @@ impl AppState {
         let records = design_rule_records(self, &subject, &result, StoredWaivers::Left);
         let coverage: RuleCoverage = check_coverage(self, &subject, CheckScope::Live, &result)?;
         self.publish_superseding(inputs, records, &coverage)?;
-        let is_active_subject =
-            owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
-        self.design_checks.insert_live(CellViewCheckReceipt {
-            project_id: self.workspace.content.project.id(),
+        let is_active_subject = owner_key(&subject)
+            == owner_key(&self.model.workspace.content.active_schematic_reference());
+        self.model.design_checks.insert_live(CellViewCheckReceipt {
+            project_id: self.model.workspace.content.project.id(),
             subject,
             input_digest,
             result,
@@ -175,8 +185,8 @@ impl AppState {
         &self,
         subject: &CellViewRef,
     ) -> Option<&CellViewCheckReceipt> {
-        let receipt = self.design_checks.live.get(&owner_key(subject))?;
-        let current = receipt.project_id == self.workspace.content.project.id()
+        let receipt = self.model.design_checks.live.get(&owner_key(subject))?;
+        let current = receipt.project_id == self.model.workspace.content.project.id()
             && self
                 .diagnostic_live_digest(&DiagnosticInputs::LiveCheck {
                     subject: subject.clone(),
@@ -207,14 +217,14 @@ impl AppState {
     /// What each had taken over from an explicit check that still describes
     /// the design is that check's again.
     fn withdraw_live_checks(&mut self) {
-        if self.design_checks.live.is_empty() {
+        if self.model.design_checks.live.is_empty() {
             return;
         }
-        let subjects = std::mem::take(&mut self.design_checks.live)
+        let subjects = std::mem::take(&mut self.model.design_checks.live)
             .into_values()
             .map(|receipt| receipt.subject)
             .collect::<Vec<_>>();
-        self.design_checks.drawing = DrawingState::default();
+        self.model.design_checks.drawing = DrawingState::default();
         for subject in subjects {
             self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck { subject });
         }
@@ -234,15 +244,16 @@ pub(in crate::workbench) fn live_check_digest(
     state: &AppState,
     subject: &CellViewRef,
 ) -> Result<ContentDigest, String> {
-    if let Some(error) = state.workspace.annotation_restoration_error() {
+    if let Some(error) = state.model.workspace.annotation_restoration_error() {
         return Err(format!("reference annotation restoration failed: {error}"));
     }
     let projection = state
+        .model
         .workspace
         .design_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let digest_of = |key: &str| -> Result<Option<ContentDigest>, String> {
@@ -264,7 +275,7 @@ pub(in crate::workbench) fn live_check_digest(
         .map(|key| Ok((digest_of(&key)?, key)))
         .collect::<Result<Vec<_>, String>>()?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     let mut globals = hierarchy
@@ -274,6 +285,7 @@ pub(in crate::workbench) fn live_check_digest(
         .collect::<Vec<_>>();
     globals.sort();
     let mut overrides = state
+        .model
         .workspace
         .content
         .design_rules
@@ -284,12 +296,12 @@ pub(in crate::workbench) fn live_check_digest(
     overrides.sort();
     let material = serde_json::to_vec(&(
         "live",
-        state.workspace.content.project.id(),
+        state.model.workspace.content.project.id(),
         owner_key(subject).to_string(),
         drawing,
         masters,
         globals,
-        state.library_manager.revision(),
+        state.model.library_manager.revision(),
         projection.connectivity(),
         overrides,
     ))

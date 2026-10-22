@@ -483,6 +483,7 @@ pub(crate) fn project_index(state: &mut AppState) -> Option<Arc<NetlistProjectIn
         },
     );
     let generated_id = state
+        .model
         .netlist_artifacts
         .generated_document
         .as_ref()
@@ -837,7 +838,7 @@ pub(crate) fn open_project_location(
 
 pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String, String> {
     let symbol = symbol_at_cursor(
-        &state.simulation.source.netlist_content,
+        &state.model.simulation.source.netlist_content,
         state.ui.netlist.cursor_char_index,
     )
     .ok_or_else(|| {
@@ -874,7 +875,7 @@ pub(crate) fn go_to_declaration_at_cursor(state: &mut AppState) -> Result<String
 }
 
 pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<String, String> {
-    let source = state.simulation.source.netlist_content.clone();
+    let source = state.model.simulation.source.netlist_content.clone();
     let cursor = state.ui.netlist.cursor_char_index;
     let (title, detail) =
         if let Some((title, detail)) = super::completion::directive_signature_at(&source, cursor) {
@@ -993,7 +994,7 @@ fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String
     if !super::active_netlist_source_is_editable(state) {
         return Err("Quick fixes cannot edit this read-only source.".to_owned());
     }
-    let source = state.simulation.source.netlist_content.clone();
+    let source = state.model.simulation.source.netlist_content.clone();
     // The revision is the binding every editor path moves; the digest is what
     // still holds against a writer that replaces the bytes without moving it.
     if state.ui.netlist.revision != bound.revision
@@ -1040,7 +1041,7 @@ fn preferred_quick_fix(state: &AppState) -> Option<BoundQuickFix> {
 
 pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, String> {
     let symbol = symbol_at_cursor(
-        &state.simulation.source.netlist_content,
+        &state.model.simulation.source.netlist_content,
         state.ui.netlist.cursor_char_index,
     )
     .ok_or_else(|| {
@@ -1060,7 +1061,7 @@ pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, 
 
 pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String> {
     let symbol = symbol_at_cursor(
-        &state.simulation.source.netlist_content,
+        &state.model.simulation.source.netlist_content,
         state.ui.netlist.cursor_char_index,
     )
     .ok_or_else(|| "Place the caret on a model or subcircuit name.".to_owned())?;
@@ -1143,7 +1144,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
         .netlist
         .owned_document
         .as_ref()
-        .or(state.workspace.content.netlist_document.as_ref())
+        .or(state.model.workspace.content.netlist_document.as_ref())
         .ok_or_else(|| "The project-owned source closure is unavailable.".to_owned())?;
     let mut replacements = Vec::new();
     let root_locations = locations
@@ -1201,6 +1202,7 @@ fn ensure_location_is_project_owned(
     }
     if let Some(identity) = location.dependency_identity.as_deref()
         && state
+            .model
             .workspace
             .content
             .netlist_descriptor
@@ -1854,7 +1856,7 @@ M1 d g s b nch W={w} L={l*2}\n\
 
     fn hover_state() -> AppState {
         let mut state = AppState::default();
-        state.simulation.source.netlist_content = HOVER_DECK.to_owned();
+        state.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
         state
     }
 
@@ -1894,7 +1896,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     fn value_hover_over_a_reader_above_a_redefinition_shows_the_final_value() {
         let deck = "hover\n.param w=1u\nM1 d g s b nch W={w}\n.param w=2u\n.end\n";
         let mut state = AppState::default();
-        state.simulation.source.netlist_content = deck.to_owned();
+        state.model.simulation.source.netlist_content = deck.to_owned();
         let mut hover = |needle: &str| {
             let index = deck.find(needle).expect("deck contains the token");
             value_hover_at(&mut state, deck, index).expect("hover")
@@ -2054,33 +2056,40 @@ M1 d g s b nch W={w} L={l*2}\n\
         let owned_include =
             crate::state::OwnedNetlistIncludeDescriptor::try_new(&owned.dependencies()[0]).unwrap();
         let mut state = AppState::default();
-        state.workspace.content.netlist_source = Some(root.to_owned());
-        state.workspace.content.netlist_document = Some(owned.clone());
-        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
-            deck_id: uuid::Uuid::new_v4(),
-            artifact_name: "root.sp".to_owned(),
-            strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
-            source_encoding: crate::state::NetlistTextEncoding::Utf8,
-            source_line_ending: crate::state::NetlistLineEnding::Lf,
-            imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
-            compatibility_reviewed: true,
-            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-            external_file_sha256: None,
-            save_history: Vec::new(),
-            revision_history: Vec::new(),
-            owned_includes: vec![owned_include],
-        });
-        state.netlist_artifacts.generated_document = Some(generated);
+        state.model.workspace.content.netlist_source = Some(root.to_owned());
+        state.model.workspace.content.netlist_document = Some(owned.clone());
+        state.model.workspace.content.netlist_descriptor =
+            Some(crate::state::OwnedNetlistDescriptor {
+                deck_id: uuid::Uuid::new_v4(),
+                artifact_name: "root.sp".to_owned(),
+                strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
+                source_encoding: crate::state::NetlistTextEncoding::Utf8,
+                source_line_ending: crate::state::NetlistLineEnding::Lf,
+                imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
+                compatibility_reviewed: true,
+                execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+                external_file_sha256: None,
+                save_history: Vec::new(),
+                revision_history: Vec::new(),
+                owned_includes: vec![owned_include],
+            });
+        state.model.netlist_artifacts.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned);
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        state.simulation.source.netlist_content = root.to_owned();
+        state.model.simulation.source.netlist_content = root.to_owned();
         state.ui.netlist.cursor_char_index = root.find("cell gain").unwrap() + 2;
 
         begin_rename_at_cursor(&mut state).unwrap();
         state.ui.netlist.rename_dialog.replacement = "amplifier".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 3);
 
-        let document = state.workspace.content.netlist_document.as_ref().unwrap();
+        let document = state
+            .model
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .unwrap();
         assert!(
             document
                 .source()
@@ -2101,11 +2110,12 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(super::super::can_undo_netlist_edit(&state));
         super::super::undo_netlist_edit(&mut state).unwrap();
         assert_eq!(
-            state.workspace.content.netlist_source.as_deref(),
+            state.model.workspace.content.netlist_source.as_deref(),
             Some(root)
         );
         assert_eq!(
             state
+                .model
                 .workspace
                 .content
                 .netlist_document
@@ -2120,7 +2130,13 @@ M1 d g s b nch W={w} L={l*2}\n\
         begin_rename_at_cursor(&mut state).unwrap();
         state.ui.netlist.rename_dialog.replacement = "drive".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 4);
-        let renamed = state.workspace.content.netlist_source.as_deref().unwrap();
+        let renamed = state
+            .model
+            .workspace
+            .content
+            .netlist_source
+            .as_deref()
+            .unwrap();
         assert!(renamed.contains(".param drive=2"));
         assert!(renamed.contains("{x*drive}"));
         assert!(renamed.contains("Rgain in 0 drive"));
@@ -2131,7 +2147,13 @@ M1 d g s b nch W={w} L={l*2}\n\
         begin_rename_at_cursor(&mut state).unwrap();
         state.ui.netlist.rename_dialog.replacement = "curve".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 2);
-        let renamed = state.workspace.content.netlist_source.as_deref().unwrap();
+        let renamed = state
+            .model
+            .workspace
+            .content
+            .netlist_source
+            .as_deref()
+            .unwrap();
         assert!(renamed.contains(".func curve(x)"));
         assert!(renamed.contains("{curve(gain)}"));
     }
@@ -2169,26 +2191,27 @@ M1 d g s b nch W={w} L={l*2}\n\
             )
             .unwrap();
         let mut state = AppState::default();
-        state.workspace.content.netlist_source = Some(FIX_DECK.to_owned());
-        state.workspace.content.netlist_document = Some(owned.clone());
-        state.workspace.content.netlist_descriptor = Some(crate::state::OwnedNetlistDescriptor {
-            deck_id: uuid::Uuid::new_v4(),
-            artifact_name: "fix.sp".to_owned(),
-            strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
-            source_encoding: crate::state::NetlistTextEncoding::Utf8,
-            source_line_ending: crate::state::NetlistLineEnding::Lf,
-            imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
-            compatibility_reviewed: true,
-            execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
-            external_file_sha256: None,
-            save_history: Vec::new(),
-            revision_history: Vec::new(),
-            owned_includes: Vec::new(),
-        });
-        state.netlist_artifacts.generated_document = Some(generated);
+        state.model.workspace.content.netlist_source = Some(FIX_DECK.to_owned());
+        state.model.workspace.content.netlist_document = Some(owned.clone());
+        state.model.workspace.content.netlist_descriptor =
+            Some(crate::state::OwnedNetlistDescriptor {
+                deck_id: uuid::Uuid::new_v4(),
+                artifact_name: "fix.sp".to_owned(),
+                strategy: crate::state::OwnedNetlistEditStrategy::OwnedSource,
+                source_encoding: crate::state::NetlistTextEncoding::Utf8,
+                source_line_ending: crate::state::NetlistLineEnding::Lf,
+                imported_dialect: Some(crate::state::NetlistSourceDialect::RSpice),
+                compatibility_reviewed: true,
+                execution_profile: Some(crate::state::NetlistExecutionProfile::RSpiceCanonicalV1),
+                external_file_sha256: None,
+                save_history: Vec::new(),
+                revision_history: Vec::new(),
+                owned_includes: Vec::new(),
+            });
+        state.model.netlist_artifacts.generated_document = Some(generated);
         state.ui.netlist.owned_document = Some(owned);
         state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        state.simulation.source.netlist_content = FIX_DECK.to_owned();
+        state.model.simulation.source.netlist_content = FIX_DECK.to_owned();
         state.ui.netlist.revision = 7;
 
         let start = FIX_DECK.find("1kk").unwrap();
@@ -2222,7 +2245,7 @@ M1 d g s b nch W={w} L={l*2}\n\
 
         apply_quick_fix_for_finding(&mut state, finding).expect("the fix applies to its own bytes");
         let fixed = FIX_DECK.replace("1kk", "1k");
-        assert_eq!(state.simulation.source.netlist_content, fixed);
+        assert_eq!(state.model.simulation.source.netlist_content, fixed);
         assert!(
             state
                 .ui
@@ -2237,7 +2260,7 @@ M1 d g s b nch W={w} L={l*2}\n\
             .expect_err("a second press has no bytes of its own left to fix");
         assert!(refused.contains("has changed"), "{refused}");
         assert_eq!(
-            state.simulation.source.netlist_content, fixed,
+            state.model.simulation.source.netlist_content, fixed,
             "the refused press leaves the source exactly as the first one left it",
         );
     }
@@ -2248,18 +2271,18 @@ M1 d g s b nch W={w} L={l*2}\n\
     fn a_quick_fix_is_refused_after_an_intervening_edit() {
         let (mut state, finding) = validated_fix_state();
         let edited = format!("* note\n{FIX_DECK}");
-        state.simulation.source.netlist_content = edited.clone();
+        state.model.simulation.source.netlist_content = edited.clone();
         state.ui.netlist.revision += 1;
         assert!(apply_quick_fix_for_finding(&mut state, finding).is_err());
-        assert_eq!(state.simulation.source.netlist_content, edited);
+        assert_eq!(state.model.simulation.source.netlist_content, edited);
 
         let (mut state, finding) = validated_fix_state();
-        state.simulation.source.netlist_content = edited.clone();
+        state.model.simulation.source.netlist_content = edited.clone();
         assert!(
             apply_quick_fix_for_finding(&mut state, finding).is_err(),
             "the digest refuses bytes a writer replaced without moving the revision",
         );
-        assert_eq!(state.simulation.source.netlist_content, edited);
+        assert_eq!(state.model.simulation.source.netlist_content, edited);
     }
 
     /// An edit that moves the revision and leaves the bytes as they were —
@@ -2272,7 +2295,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let refused = apply_quick_fix_for_finding(&mut state, finding)
             .expect_err("the finding was validated at an earlier revision");
         assert!(refused.contains("has changed"), "{refused}");
-        assert_eq!(state.simulation.source.netlist_content, FIX_DECK);
+        assert_eq!(state.model.simulation.source.netlist_content, FIX_DECK);
     }
 
     /// The caret's preferred fix is offered only for the revision it was

@@ -11,8 +11,8 @@ pub(crate) mod saved_outputs;
 
 pub(crate) fn start_manual_deck(source: &str) -> SimulationRunner {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -64,8 +64,8 @@ pub(crate) fn run_manual_batch_with_lifecycle(
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -77,7 +77,7 @@ pub(crate) fn run_generated_batch(
     mut state: AppState,
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
-    state.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
+    state.model.simulation.execution.run_intent = SimulationRunIntent::SimulateRunSet;
     state.sync_active_schematic_to_workspace();
     let checks = state
         .run_active_design_checks()
@@ -94,8 +94,8 @@ pub(crate) fn run_generated_batch(
 /// the session it ran in, for a test that reads what the run published.
 pub(crate) fn run_manual_batch_session(source: &str) -> AppState {
     let mut state = AppState::default();
-    state.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
-    state.workspace.content.netlist_source = Some(source.to_owned());
+    state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
+    state.model.workspace.content.netlist_source = Some(source.to_owned());
     let mut controller = SimulationController::new();
     controller
         .validate_manual_deck_document(&state)
@@ -118,7 +118,7 @@ fn run_batch_session(
     expected_lifecycle: SimulationRunLifecycle,
 ) -> crate::state::SimulationRun {
     let export_io = super::tests::MockExportWorkflowIo::default();
-    state.simulation.execution.trigger_simulation = true;
+    state.model.simulation.execution.trigger_simulation = true;
     controller.update(state, &export_io);
     let deadline = Instant::now() + Duration::from_secs(60);
     while controller.has_active_batch() {
@@ -127,12 +127,12 @@ fn run_batch_session(
         controller.update(state, &export_io);
     }
     assert_eq!(
-        state.simulation.retained.runs.len(),
+        state.model.simulation.retained.runs.len(),
         1,
         "{}",
-        state.simulation.execution.status
+        state.model.simulation.execution.status
     );
-    let run = state.simulation.retained.runs[0].clone();
+    let run = state.model.simulation.retained.runs[0].clone();
     assert_eq!(run.lifecycle, expected_lifecycle, "{:?}", run.analyses);
     assert!(!run.analyses.is_empty());
     if expected_lifecycle == SimulationRunLifecycle::Completed {
@@ -140,7 +140,7 @@ fn run_batch_session(
             assert!(analysis.success, "{:?}", analysis.error_message);
         }
     }
-    crate::io::capture_simulation_results(&state.simulation)
+    crate::io::capture_simulation_results(&state.model.simulation)
         .validate()
         .expect("checked batch retains valid project history");
     run

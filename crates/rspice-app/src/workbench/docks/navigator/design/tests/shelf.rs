@@ -54,9 +54,11 @@ fn shelf_match_count_drives_a_truthful_filtered_empty_state() {
 fn palette_placement_cancels_every_unfinished_conductor_route() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .schematic
         .start_wire(crate::state::Point::origin());
     app.state
+        .model
         .schematic
         .start_bus(crate::state::Point::new(2, 3), None)
         .unwrap();
@@ -64,11 +66,11 @@ fn palette_placement_cancels_every_unfinished_conductor_route() {
     arm_primitive(&mut app, ComponentType::Resistor, &egui::Context::default());
 
     assert_eq!(
-        app.state.schematic.session.editor.tool,
+        app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::Resistor)
     );
-    assert!(!app.state.schematic.session.editor.wire_drawing.active);
-    assert!(!app.state.schematic.session.editor.bus_drawing.active);
+    assert!(!app.state.model.schematic.session.editor.wire_drawing.active);
+    assert!(!app.state.model.schematic.session.editor.bus_drawing.active);
 }
 
 #[test]
@@ -78,16 +80,17 @@ fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
     arm_primitive(&mut app, ComponentType::Port, &egui::Context::default());
 
     assert!(app.state.dialogs.pin_port.open);
-    assert_eq!(app.state.schematic.session.editor.tool, Tool::Select);
+    assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
             .pending_port_sequence
             .is_none()
     );
-    assert!(app.state.schematic.document().components.is_empty());
+    assert!(app.state.model.schematic.document().components.is_empty());
 }
 
 /// A library of pinned bytes the project retained: one macromodel, one card a
@@ -128,6 +131,7 @@ fn retained_model_library(name: &str) -> ModelLibrary {
 fn a_part_the_project_retained_arms_from_the_component_shelf() {
     let mut app = RSpiceApp::test_instance();
     app.state
+        .model
         .model_library_manager
         .add_library(retained_model_library("proving_parts"));
 
@@ -702,6 +706,7 @@ fn shelf_selection_returns_to_canvas_without_hiding_desktop_dock() {
             shelf
                 .app
                 .state
+                .model
                 .model_library_manager
                 .add_library(retained_model_library("proving_parts"));
             shelf.app.state.workbench.drawer = drawer;
@@ -714,7 +719,7 @@ fn shelf_selection_returns_to_canvas_without_hiding_desktop_dock() {
             let row = run_rect(&runs, label).expect("the pinned part is rendered");
             let _ = shelf.frame(click_events(row.center()));
             assert_eq!(
-                shelf.app.state.schematic.session.editor.tool, tool,
+                shelf.app.state.model.schematic.session.editor.tool, tool,
                 "{label}"
             );
             assert_eq!(
@@ -836,8 +841,9 @@ fn stored_recent(state: &AppState) -> Vec<String> {
 /// reaches the design.
 #[cfg(not(target_arch = "wasm32"))]
 fn place(state: &mut AppState, kind: ComponentType) {
-    state.schematic.arm_tool(Tool::Place(kind));
+    state.model.schematic.arm_tool(Tool::Place(kind));
     state
+        .model
         .schematic
         .add_component(kind, crate::state::Point::new(40, 40));
 }
@@ -1177,10 +1183,11 @@ fn a_pinned_part_is_filtered_out_of_recent_but_kept_in_the_history() {
 fn a_design_that_grows_without_the_shelf_writes_no_history() {
     let mut shelf = ShelfHarness::opened().settled();
 
-    shelf.app.state.schematic.cancel_tool();
+    shelf.app.state.model.schematic.cancel_tool();
     shelf
         .app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Diode, crate::state::Point::new(40, 40));
     let (text, _) = shelf.frame(Vec::new());
@@ -1205,14 +1212,15 @@ fn switching_designs_credits_nothing_to_the_reader() {
     shelf
         .app
         .state
+        .model
         .schematic
         .arm_tool(Tool::Place(ComponentType::Diode));
     let _ = shelf.frame(Vec::new());
 
     // A design the reader opened, already holding objects someone else placed.
-    shelf.app.state.active_schematic_epoch += 1;
+    shelf.app.state.model.active_schematic_epoch += 1;
     for offset in 0..4 {
-        shelf.app.state.schematic.add_component(
+        shelf.app.state.model.schematic.add_component(
             ComponentType::Nmos,
             crate::state::Point::new(40 + offset, 40),
         );
@@ -1355,14 +1363,14 @@ fn a_band_row_arms_the_part_it_names_and_says_so() {
     let row = run_rect(&runs, "NMOS").expect("the pinned NMOS row is painted");
     let resting = tone(&runs, "NMOS");
     assert_ne!(
-        shelf.app.state.schematic.session.editor.tool,
+        shelf.app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::Nmos),
         "nothing is armed before the click"
     );
 
     let _ = shelf.frame(click_events(row.center()));
     assert_eq!(
-        shelf.app.state.schematic.session.editor.tool,
+        shelf.app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::Nmos),
         "the click armed the part the row names"
     );
@@ -1403,6 +1411,7 @@ fn a_drag_onto_the_sheet_credits_the_part_the_drop_consumed() {
     shelf
         .app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Nmos, crate::state::Point::new(40, 40));
     let (text, _) = shelf.frame(Vec::new());
@@ -1427,10 +1436,11 @@ fn a_tool_the_reader_put_away_credits_no_later_growth() {
     shelf
         .app
         .state
+        .model
         .schematic
         .arm_tool(Tool::Place(ComponentType::Diode));
     let _ = shelf.frame(Vec::new());
-    shelf.app.state.schematic.cancel_tool();
+    shelf.app.state.model.schematic.cancel_tool();
     let _ = shelf.frame(Vec::new());
     let _ = shelf.frame(Vec::new());
     assert!(
@@ -1442,6 +1452,7 @@ fn a_tool_the_reader_put_away_credits_no_later_growth() {
     shelf
         .app
         .state
+        .model
         .schematic
         .add_component(ComponentType::Diode, crate::state::Point::new(40, 40));
     let (text, _) = shelf.frame(Vec::new());
@@ -1665,6 +1676,7 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
     shelf
         .app
         .state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -1690,13 +1702,14 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
         .expect("the definition is rendered as a row");
     let _ = shelf.frame(click_events(row.center()));
     assert_eq!(
-        shelf.app.state.schematic.session.editor.tool,
+        shelf.app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::VoltageSourceSin),
         "the row's click must reach the arming action"
     );
     let armed = shelf
         .app
         .state
+        .model
         .schematic
         .session
         .editor
@@ -1718,6 +1731,7 @@ fn an_empty_stimulus_library_paints_no_section() {
         shelf
             .app
             .state
+            .model
             .workspace
             .content
             .stimulus_library

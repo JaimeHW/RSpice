@@ -42,7 +42,7 @@ pub(super) fn binned_library(short_gap: Option<(&str, &str)>) -> Vec<u8> {
 
 /// Leave enabled only the Run Set axes `kinds` names.
 pub(super) fn enable_only(state: &mut AppState, kinds: &[RunSetDimensionKind]) {
-    for dimension in &mut state.sim_setup.run_set.dimensions {
+    for dimension in &mut state.model.sim_setup.run_set.dimensions {
         dimension.enabled = kinds.contains(&dimension.kind);
     }
 }
@@ -50,6 +50,7 @@ pub(super) fn enable_only(state: &mut AppState, kinds: &[RunSetDimensionKind]) {
 pub(super) fn add_operating_point(state: &mut AppState) {
     use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
     let plan = state
+        .model
         .sim_setup
         .stable_analysis_plan_mut()
         .expect("a default state owns a stable plan");
@@ -69,11 +70,11 @@ pub(super) fn add_operating_point(state: &mut AppState) {
 pub(super) fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
-    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.schematic);
+    crate::workbench::examples::load_example("CMOS Inverter", &mut app.state.model.schematic);
     add_operating_point(&mut app.state);
     app.state
         .provision_test_project_technology_with_models(models);
-    for component in &mut app.state.schematic.document_mut_for_test().components {
+    for component in &mut app.state.model.schematic.document_mut_for_test().components {
         match component.kind {
             crate::state::ComponentType::Nmos => component.value = "nch".to_owned(),
             crate::state::ComponentType::Pmos => component.value = "pch".to_owned(),
@@ -91,9 +92,15 @@ pub(super) fn inverter_on_binned_pdk(models: Vec<u8>) -> RSpiceApp {
 #[test]
 fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_device() {
     let mut app = inverter_on_binned_pdk(binned_library(Some(("FF", "nch"))));
-    let root = app.state.workspace.content.simulation_root_reference();
+    let root = app
+        .state
+        .model
+        .workspace
+        .content
+        .simulation_root_reference();
     let pull_down = app
         .state
+        .model
         .schematic
         .document()
         .components
@@ -139,11 +146,16 @@ fn a_transistor_outside_its_bins_at_one_corner_is_refused_there_on_the_drawn_dev
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, issue.remediation.clone());
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         root
     );
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -176,6 +188,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
     rules.push_str(rule_blocks);
     let library = app
         .state
+        .model
         .model_library_manager
         .load_library_bundle(
             "connections.lib",
@@ -191,14 +204,16 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
         .expect("the connect rules import");
     let binding = app
         .state
+        .model
         .model_library_manager
         .simulation_plan_binding(&library)
         .expect("the rules bind to the plan");
-    app.state.sim_setup.model_bindings.push(binding);
+    app.state.model.sim_setup.model_bindings.push(binding);
 
     // A cell whose Verilog-A view reads a discrete input.
     let device = CellViewRef::new("behavioral", "moded", "veriloga");
     app.state
+        .model
         .library_manager
         .add_library(Library::new(&device.library));
     let mut view = View::new("veriloga", ViewType::VerilogA);
@@ -212,6 +227,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
     let mut cell = Cell::new(&device.cell);
     cell.add_view(view);
     app.state
+        .model
         .library_manager
         .get_library_mut(&device.library)
         .expect("the device library")
@@ -227,6 +243,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
     )
     .expect("a cell-view bundle");
     app.state
+        .model
         .workspace
         .content
         .project_sources
@@ -238,6 +255,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
     app.state.open_workspace_view(top.clone());
     let ports = rspice_design::library::metadata::metadata_ports(
         &app.state
+            .model
             .library_manager
             .get_library(&device.library)
             .and_then(|library| library.get_cell(&device.cell))
@@ -246,7 +264,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
             .metadata,
     )
     .expect("the view states its ports");
-    let schematic = &mut app.state.schematic;
+    let schematic = &mut app.state.model.schematic;
     let origin = Point::new(300, 0);
     let mut instance = LibraryCellInstance::new(&device.library, &device.cell, &device.view);
     instance.bind_interface(&ports);
@@ -291,6 +309,7 @@ fn app_with_a_moded_device(rule_blocks: &str) -> (RSpiceApp, crate::state::CellV
     // The configuration that executes Verilog-A views, as the library shelf
     // places a device under one.
     app.state
+        .model
         .workspace
         .content
         .configuration_sets
@@ -351,11 +370,16 @@ fn a_crossing_the_connect_rules_cannot_bridge_is_shown_on_the_device() {
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, remediation);
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         top
     );
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor
@@ -420,10 +444,11 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
 
     let options = crate::simulation::dialog::SimulationOptions {
         connect_rules: Some("High".to_owned()),
-        ..app.state.sim_setup.options.clone()
+        ..app.state.model.sim_setup.options.clone()
     };
-    app.state.sim_setup.commit_options(&options);
+    app.state.model.sim_setup.commit_options(&options);
     app.state
+        .model
         .sim_setup
         .commit_active_plan_configuration_change("Updated simulation solver options.")
         .expect("the plan takes the block");
@@ -465,18 +490,24 @@ fn app_with_an_amp_instance(
     app.state.open_project_session();
     enable_only(&mut app.state, &[]);
     add_operating_point(&mut app.state);
-    let root = app.state.workspace.content.simulation_root_reference();
+    let root = app
+        .state
+        .model
+        .workspace
+        .content
+        .simulation_root_reference();
     let amp = CellViewRef::new(&root.library, "amp", "schematic");
     let mut cell = Cell::new("amp");
     cell.add_view(View::new("schematic", ViewType::Schematic));
     app.state
+        .model
         .library_manager
         .edit_library(&root.library)
         .expect("the root's library is the project's")
         .add_cell(cell);
 
     app.state.open_workspace_view(amp.clone());
-    let schematic = &mut app.state.schematic;
+    let schematic = &mut app.state.model.schematic;
     let pending = PendingPortPlacement::new(
         "VSS",
         PortDirectionType::InOutPower,
@@ -497,6 +528,7 @@ fn app_with_an_amp_instance(
     app.state.sync_active_schematic_to_workspace();
     let ports = app
         .state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -506,7 +538,7 @@ fn app_with_an_amp_instance(
         .interface_ports();
 
     app.state.open_workspace_view(root);
-    let schematic = &mut app.state.schematic;
+    let schematic = &mut app.state.model.schematic;
     let mut binding = LibraryCellInstance::new(&amp.library, &amp.cell, &amp.view);
     binding.bind_interface(&ports);
     let instance = schematic.add_library_cell_component(Point::new(300, 0), binding);
@@ -589,11 +621,21 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, remediation);
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         amp
     );
     assert!(
-        app.state.schematic.session.editor.selection.has_wire(wire),
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_wire(wire),
         "following the finding selects the wire that draws isl in amp"
     );
 }
@@ -641,11 +683,16 @@ fn a_winding_loop_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, remediation);
     assert_eq!(
-        app.state.workspace.content.active_schematic_reference(),
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
         amp
     );
     assert!(
         app.state
+            .model
             .schematic
             .session
             .editor

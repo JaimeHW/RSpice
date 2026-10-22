@@ -47,7 +47,7 @@ fn canvas_hover(
         return chooser.focused_target();
     }
     let cycled = super::pick_chooser::cycle_hover(ctx);
-    let editor = &state.schematic.session.editor;
+    let editor = &state.model.schematic.session.editor;
     if !matches!(editor.tool, Tool::Select | Tool::Probe)
         || editor.selection_rect.is_active()
         || egui::Popup::is_any_open(ctx)
@@ -73,14 +73,14 @@ fn canvas_hover(
             symbol_context,
             ctx,
             viewport,
-            || state.workspace.content.active_view.display_path(),
+            || state.model.workspace.content.active_view.display_path(),
         ),
         ToolPointerAction::Probe(grid) => active_wire_at(state, grid)
             .map(PointerTarget::Wire)
             .or_else(|| {
                 let components = view
                     .design
-                    .visible_objects(&state.schematic.document().components, |item| item.id);
+                    .visible_objects(&state.model.schematic.document().components, |item| item.id);
                 symbol_context
                     .component_at_resolved_symbol(&components, grid)
                     .map(PointerTarget::Component)
@@ -125,7 +125,7 @@ pub(super) fn draw_scene(
         state
             .ui
             .results
-            .valid_selected_trace(&state.simulation)
+            .valid_selected_trace(&state.model.simulation)
             .map(|trace| trace.source_name())
     };
     scene::draw_content(
@@ -134,7 +134,7 @@ pub(super) fn draw_scene(
         viewport,
         &scene::SceneView {
             design: super::schematic_design_view(state),
-            editor: &state.schematic.session.editor,
+            editor: &state.model.schematic.session.editor,
             net_highlighting: state.ui.schematic_visibility.net_highlighting,
             parameter_labels: state.ui.schematic_visibility.parameter_labels,
             hover_wire_vertex: state.dialogs.interaction.hover_wire_vertex,
@@ -154,12 +154,19 @@ pub(super) fn draw_scene(
                 std::collections::HashMap::new()
             },
             operating_point: operating_point_annotations(state),
-            operating_point_layout: Some(state.schematic.session.operating_point_badges.layout()),
+            operating_point_layout: Some(
+                state
+                    .model
+                    .schematic
+                    .session
+                    .operating_point_badges
+                    .layout(),
+            ),
             probe_status: &probe_status,
             selected_trace_expression: &selected_trace_expression,
             open_pins: &open_pins(painter.ctx(), state, symbol_context),
         },
-        || state.workspace.content.active_view.display_path(),
+        || state.model.workspace.content.active_view.display_path(),
     );
 
     super::drawing_sheet::draw_overflow_advisories(
@@ -180,7 +187,7 @@ pub(super) fn draw_scene(
         painter,
         viewport,
         &super::schematic_design_view(state),
-        &state.schematic.session.editor.selection,
+        &state.model.schematic.session.editor.selection,
         state.dialogs.interaction.schematic_keyboard_focus,
         symbol_context,
     );
@@ -222,6 +229,7 @@ struct ProbeMaterializationStatuses {
 
 fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
     let hidden_waveforms = state
+        .model
         .simulation
         .view
         .waveforms
@@ -230,7 +238,7 @@ fn probe_visual_statuses(state: &AppState) -> ProbeMaterializationStatuses {
         .map(|waveform| normalized_probe_expression(&waveform.name))
         .collect::<std::collections::HashSet<_>>();
     let mut statuses = ProbeMaterializationStatuses::default();
-    let Some(run) = state.simulation.active_run() else {
+    let Some(run) = state.model.simulation.active_run() else {
         return statuses;
     };
     for receipt in run
@@ -302,7 +310,7 @@ fn open_pins(
     symbol_context: &SchematicSymbolContext,
 ) -> OpenPins {
     let key: OpenPinsKey = (
-        state.schematic.topology_version(),
+        state.model.schematic.topology_version(),
         super::symbol_context_revision(state),
         super::sheet_visibility::active_sheet_id(state),
     );
@@ -347,17 +355,17 @@ fn extract_open_pins(
 
 fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Color32> {
     let mut colors = std::collections::HashMap::new();
-    let Ok(projection) = state.workspace.design_projection(
-        &state.library_manager,
-        &state.workspace.content.active_view,
-        &state.schematic,
+    let Ok(projection) = state.model.workspace.design_projection(
+        &state.model.library_manager,
+        &state.model.workspace.content.active_view,
+        &state.model.schematic,
     ) else {
         return colors;
     };
     let nets = projection_nets(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
-        &state.workspace.content.active_view.key(),
+        &state.model.workspace.content.active_view.key(),
     );
     for net in nets.iter().filter(|net| net.authored_name) {
         // A name that declares no class is painted as a wire.
@@ -417,10 +425,13 @@ fn device_op_annotation_label(entry: &rspice_core::circuit::DeviceOpEntry) -> St
 /// retained map already is.
 fn occurrence_cross_probe_index(state: &AppState) -> Option<CrossProbeIndex> {
     state
+        .model
         .simulation
         .active_run()
         .and_then(crate::state::SimulationRun::prepared_receipt)
-        .map(|receipt| CrossProbeIndex::from_receipt(receipt, &state.simulation.source.cross_probe))
+        .map(|receipt| {
+            CrossProbeIndex::from_receipt(receipt, &state.model.simulation.source.cross_probe)
+        })
 }
 
 /// Every solved node's points on the active sheet, keyed by the engine's
@@ -447,10 +458,12 @@ fn occurrence_engine_points<'a>(
     state: &'a AppState,
     index: Option<&'a CrossProbeIndex>,
 ) -> HashMap<String, &'a Vec<Point>> {
-    let occurrence = state.workspace.content.occurrence_path();
+    let occurrence = state.model.workspace.content.occurrence_path();
     let selected = match index {
         Some(index) => index.for_occurrence(&occurrence),
-        None if occurrence.is_root() => std::slice::from_ref(&state.simulation.source.cross_probe),
+        None if occurrence.is_root() => {
+            std::slice::from_ref(&state.model.simulation.source.cross_probe)
+        }
         None => &[],
     };
     // Only the active sheet's share of the geometry, in its own coordinates:
@@ -496,15 +509,15 @@ fn annotated_operating_point(
     Option<&rspice_core::circuit::DeviceOpReport>,
 )> {
     if state.ui.schematic_visibility.annotations != SchematicAnnotationVisibility::OperatingPoint
-        || !state.simulation.source.cross_probe.is_populated()
-        || !state.simulation.source.cross_probe.is_current_for(
-            &state.workspace.content.active_view,
-            state.schematic.topology_version(),
+        || !state.model.simulation.source.cross_probe.is_populated()
+        || !state.model.simulation.source.cross_probe.is_current_for(
+            &state.model.workspace.content.active_view,
+            state.model.schematic.topology_version(),
         )
     {
         return None;
     }
-    let analysis = state.simulation.active_analysis()?;
+    let analysis = state.model.simulation.active_analysis()?;
     let dc_op = analysis.dc_op.as_ref()?;
     let retained = match analysis.result_payload.as_ref() {
         Some(crate::state::AnalysisResultPayload::OperatingPoint { annotation, .. }) => {
@@ -529,10 +542,11 @@ fn voltage_badge_fingerprint(state: &AppState, dc_op: &crate::state::DcOpResult)
     use std::hash::{Hash, Hasher};
 
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    let map = &state.simulation.source.cross_probe;
+    let map = &state.model.simulation.source.cross_probe;
     map.version.hash(&mut hasher);
     map.source_topology_version.hash(&mut hasher);
     if let Some(receipt) = state
+        .model
         .simulation
         .active_run()
         .and_then(crate::state::SimulationRun::prepared_receipt)
@@ -549,6 +563,7 @@ fn voltage_badge_fingerprint(state: &AppState, dc_op: &crate::state::DcOpResult)
         voltage.unit.hash(&mut hasher);
     }
     state
+        .model
         .workspace
         .content
         .occurrence_path()
@@ -559,17 +574,17 @@ fn voltage_badge_fingerprint(state: &AppState, dc_op: &crate::state::DcOpResult)
     catalog
         .and_then(SheetCatalog::active_sheet_id)
         .hash(&mut hasher);
-    let highlight = &state.schematic.session.editor.net_highlight;
+    let highlight = &state.model.schematic.session.editor.net_highlight;
     highlight.active.hash(&mut hasher);
     highlight
         .selected_net_name
         .as_deref()
         .map(str::to_ascii_lowercase)
         .hash(&mut hasher);
-    state.schematic.topology_version().hash(&mut hasher);
-    state.schematic.content_version().hash(&mut hasher);
+    state.model.schematic.topology_version().hash(&mut hasher);
+    state.model.schematic.content_version().hash(&mut hasher);
     let mut buffers = 0_u64;
-    for (key, buffer) in &state.workspace.content.schematic_buffers {
+    for (key, buffer) in &state.model.workspace.content.schematic_buffers {
         let mut entry = std::collections::hash_map::DefaultHasher::new();
         key.hash(&mut entry);
         buffer.topology_version().hash(&mut entry);
@@ -595,7 +610,7 @@ fn voltage_badges(
     let visible = |id: u64| {
         rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
     };
-    let document = state.schematic.document();
+    let document = state.model.schematic.document();
     let anchors = document
         .junctions
         .iter()
@@ -624,7 +639,7 @@ fn voltage_badges(
     // The engine answers for a bus bit under the deck's `DATA#3`; the canvas
     // annotates the conductor the drawing shows, so it quotes the drawing's
     // own spelling of it.
-    let notations = bus_notations(&state.workspace, &state.schematic);
+    let notations = bus_notations(&state.model.workspace, &state.model.schematic);
     let mut badges = Vec::new();
     for voltage in &dc_op.node_voltages {
         if !voltage.value.is_finite() {
@@ -683,6 +698,7 @@ pub(super) fn refresh_voltage_badges(state: &mut AppState) {
     };
     let fingerprint = voltage_badge_fingerprint(state, dc_op);
     if state
+        .model
         .schematic
         .session
         .operating_point_badges
@@ -693,6 +709,7 @@ pub(super) fn refresh_voltage_badges(state: &mut AppState) {
     }
     let badges = std::sync::Arc::new(voltage_badges(state, dc_op));
     state
+        .model
         .schematic
         .session
         .operating_point_badges
@@ -738,6 +755,7 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
         return Vec::new();
     };
     let mut annotations = state
+        .model
         .schematic
         .session
         .operating_point_badges
@@ -756,12 +774,14 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
     // One block per selected device: its current, its operating point and
     // its power, one quantity a line, placed and kept as one.
     for component in state
+        .model
         .schematic
         .document()
         .components
         .iter()
         .filter(|component| {
             state
+                .model
                 .schematic
                 .session
                 .editor
@@ -826,7 +846,7 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
 /// Whether the canvas's net highlight is on the net the engine calls
 /// `net_name`: its badge then belongs to the selection.
 fn editor_net_is_highlighted(state: &AppState, net_name: &str) -> bool {
-    let highlight = &state.schematic.session.editor.net_highlight;
+    let highlight = &state.model.schematic.session.editor.net_highlight;
     highlight.active
         && highlight
             .selected_net_name
@@ -862,21 +882,25 @@ mod tests {
     fn separated_same_name_groups() -> AppState {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::segment(11, Point::new(0, 0), Point::new(40, 0)));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
             .push(Wire::segment(12, Point::new(0, 100), Point::new(40, 100)));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
             .push(crate::state::NetLabel::new(21, Point::new(20, 0), "VDD"));
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
@@ -910,7 +934,7 @@ mod tests {
         let state = separated_same_name_groups();
         let colors = net_class_colors(&state);
         let connectivity =
-            rspice_design::connectivity::extract_with_hierarchy(&state.schematic, None);
+            rspice_design::connectivity::extract_with_hierarchy(&state.model.schematic, None);
         for net in &connectivity.nets {
             let mut painted = net.wires.iter().map(|id| colors.get(id).copied());
             let first = painted.next();
@@ -927,7 +951,7 @@ mod tests {
     #[test]
     fn an_unclassified_named_net_takes_no_class_colour() {
         let mut state = separated_same_name_groups();
-        for label in &mut state.schematic.document_mut_for_test().net_labels {
+        for label in &mut state.model.schematic.document_mut_for_test().net_labels {
             label.name = "VOUT".to_owned();
         }
         state.sync_active_schematic_to_workspace();
@@ -940,6 +964,7 @@ mod tests {
     fn an_autonamed_conductor_takes_no_class_colour() {
         let mut state = AppState::default();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .wires
@@ -991,24 +1016,32 @@ mod tests {
         let mut component = Component::new(1, ComponentType::VoltageSource, Point::new(40, 30));
         component.name = "VBIAS".to_owned();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .components
             .push(component);
-        state.schematic.session.editor.selection.select_component(1);
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_component(1);
 
         let point = Point::new(20, 10);
         state
+            .model
             .schematic
             .document_mut_for_test()
             .junctions
             .push(Junction::new(2, point));
-        state.simulation.source.cross_probe.update(
-            state.workspace.content.active_view.clone(),
+        state.model.simulation.source.cross_probe.update(
+            state.model.workspace.content.active_view.clone(),
             HashMap::from([(point, "OUT".to_owned())]),
             HashMap::from([("OUT".to_owned(), vec![Point::new(30, 10), point])]),
             HashMap::new(),
-            state.schematic.topology_version(),
+            state.model.schematic.topology_version(),
         );
         let mut run = SimulationRun::new(1);
         run.add_analysis(
@@ -1026,9 +1059,9 @@ mod tests {
                 power_dissipation: Vec::new(),
             }),
         );
-        state.simulation.retained.runs.insert(0, run);
-        state.simulation.view.active_run_idx = Some(0);
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.retained.runs.insert(0, run);
+        state.model.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         state
     }
 
@@ -1072,6 +1105,7 @@ mod tests {
     fn a_named_net_badge_shows_the_value_after_its_label() {
         let mut state = state_with_operating_point();
         state
+            .model
             .schematic
             .document_mut_for_test()
             .net_labels
@@ -1098,23 +1132,28 @@ mod tests {
         let mut state = state_with_operating_point();
         let scalar = Point::new(20, 10);
         let bit = Point::new(20, 30);
-        state.simulation.source.cross_probe.update(
-            state.workspace.content.active_view.clone(),
+        state.model.simulation.source.cross_probe.update(
+            state.model.workspace.content.active_view.clone(),
             HashMap::from([(scalar, "OUT".to_owned()), (bit, "DATA#3".to_owned())]),
             HashMap::from([
                 ("OUT".to_owned(), vec![scalar]),
                 ("DATA#3".to_owned(), vec![bit]),
             ]),
             HashMap::new(),
-            state.schematic.topology_version(),
+            state.model.schematic.topology_version(),
         );
 
         assert_eq!(
-            state.simulation.source.cross_probe.engine_name("OUT"),
+            state.model.simulation.source.cross_probe.engine_name("OUT"),
             Some("out")
         );
         assert_eq!(
-            state.simulation.source.cross_probe.engine_name("DATA#3"),
+            state
+                .model
+                .simulation
+                .source
+                .cross_probe
+                .engine_name("DATA#3"),
             Some("data#3"),
             "the deck's bus-bit spelling resolves to an engine name"
         );
@@ -1134,7 +1173,7 @@ mod tests {
     #[test]
     fn power_detail_is_rendered_only_when_the_session_requests_it() {
         let mut state = state_with_operating_point();
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_mut()
             .expect("fixture dc op")
@@ -1163,7 +1202,7 @@ mod tests {
         use crate::state::*;
 
         let mut state = state_with_operating_point();
-        let analysis = &mut state.simulation.retained.runs[0].analyses[0];
+        let analysis = &mut state.model.simulation.retained.runs[0].analyses[0];
         analysis.result_payload = Some(AnalysisResultPayload::OperatingPoint {
             temperature_mode: OperatingPointTemperatureEvidence::PvtRunSet,
             temperature_celsius: 27.0,
@@ -1256,12 +1295,12 @@ mod tests {
         let master = CellViewRef::new("user", "amp", "schematic");
         let point = Point::new(10, 20);
         let mut state = AppState::default();
-        state.simulation.source.cross_probe.update(
+        state.model.simulation.source.cross_probe.update(
             master.clone(),
             HashMap::from([(point, "n1".to_owned())]),
             HashMap::from([("n1".to_owned(), vec![point])]),
             HashMap::new(),
-            state.schematic.topology_version(),
+            state.model.schematic.topology_version(),
         );
 
         let unprepared = occurrence_cross_probe_index(&state);
@@ -1281,8 +1320,8 @@ mod tests {
         );
 
         let run = SimulationRun::new_prepared(1, receipt_for_two_occurrences(&master));
-        state.simulation.retained.runs.insert(0, run);
-        state.simulation.view.active_run_idx = Some(0);
+        state.model.simulation.retained.runs.insert(0, run);
+        state.model.simulation.view.active_run_idx = Some(0);
         let index = occurrence_cross_probe_index(&state).expect("a prepared run names its map");
         assert_eq!(index.for_occurrence(&InstancePath::root()).len(), 1);
         assert_eq!(
@@ -1304,6 +1343,7 @@ mod tests {
         );
 
         state
+            .model
             .workspace
             .descend_into("X1".to_owned(), master.clone(), ViewType::Schematic);
         assert_eq!(
@@ -1333,7 +1373,7 @@ mod tests {
     /// schematic units: the view is at 100 % with the origin at the canvas's
     /// top-left corner.
     fn open_pin_marks(ctx: &egui::Context, state: &mut AppState) -> Vec<Point> {
-        let editor = &mut state.schematic.session.editor;
+        let editor = &mut state.model.schematic.session.editor;
         (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
         (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);
         let mut canvas = Rect::NOTHING;
@@ -1390,17 +1430,23 @@ mod tests {
             points
         };
         let (first_pins, second_pins) = (terminals(&first), terminals(&second));
-        let document = state.schematic.document_mut_for_test();
+        let document = state.model.schematic.document_mut_for_test();
         document.components.extend([first, second]);
-        state.schematic.bump_topology_version();
+        state.model.schematic.bump_topology_version();
         state.sync_active_schematic_to_workspace();
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
 
         assert_eq!(open_pin_marks(&ctx, &mut state), first_pins, "Sheet 1");
 
-        let key = state.workspace.content.active_schematic_reference().key();
+        let key = state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference()
+            .key();
         let catalog = state
+            .model
             .workspace
             .content
             .design_management
@@ -1464,6 +1510,7 @@ mod tests {
         let held = |state: &AppState| {
             let (dc_op, _, _) = annotated_operating_point(state).expect("badges are shown");
             state
+                .model
                 .schematic
                 .session
                 .operating_point_badges
@@ -1478,7 +1525,7 @@ mod tests {
             "a steady frame reads nothing again"
         );
 
-        state.simulation.retained.runs[0].analyses[0]
+        state.model.simulation.retained.runs[0].analyses[0]
             .dc_op
             .as_mut()
             .expect("fixture dc op")
@@ -1509,6 +1556,7 @@ mod tests {
 
         let fingerprint = |state: &AppState| {
             let dc_op = state
+                .model
                 .simulation
                 .active_analysis()
                 .and_then(|analysis| analysis.dc_op.as_ref())
@@ -1518,7 +1566,7 @@ mod tests {
         type Change = (&'static str, fn(&mut AppState));
         let changes: [Change; 9] = [
             ("solved value", |state| {
-                state.simulation.retained.runs[0].analyses[0]
+                state.model.simulation.retained.runs[0].analyses[0]
                     .dc_op
                     .as_mut()
                     .expect("dc op")
@@ -1531,26 +1579,35 @@ mod tests {
                     HashMap::from([("VOUT".to_owned(), vec![Point::new(100, 0)])]),
                 );
             }),
-            ("topology", |state| state.schematic.bump_topology_version()),
+            ("topology", |state| {
+                state.model.schematic.bump_topology_version()
+            }),
             ("committed content", |state| {
-                state.schematic.init_undo_history();
-                state.schematic.begin_operation("label");
+                state.model.schematic.init_undo_history();
+                state.model.schematic.begin_operation("label");
                 state
+                    .model
                     .schematic
                     .document_mut_for_test()
                     .net_labels
                     .push(crate::state::NetLabel::new(9, Point::new(150, 0), "OUT"));
-                assert!(state.schematic.end_operation());
+                assert!(state.model.schematic.end_operation());
             }),
             ("another buffer", |state| {
-                state.workspace.insert_schematic_editor(
+                state.model.workspace.insert_schematic_editor(
                     "work/amp/schematic".to_owned(),
                     crate::state::SchematicState::default(),
                 );
             }),
             ("active sheet", |state| {
-                let key = state.workspace.content.active_schematic_reference().key();
+                let key = state
+                    .model
+                    .workspace
+                    .content
+                    .active_schematic_reference()
+                    .key();
                 let catalog = state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -1560,8 +1617,14 @@ mod tests {
                 catalog.set_active(second).expect("sheet 2 opens");
             }),
             ("sheet assignment", |state| {
-                let key = state.workspace.content.active_schematic_reference().key();
+                let key = state
+                    .model
+                    .workspace
+                    .content
+                    .active_schematic_reference()
+                    .key();
                 let catalog = state
+                    .model
                     .workspace
                     .content
                     .design_management
@@ -1573,14 +1636,14 @@ mod tests {
                     .expect("wire 1 moves to Sheet 2");
             }),
             ("occurrence", |state| {
-                state.workspace.descend_into(
+                state.model.workspace.descend_into(
                     "X1".to_owned(),
                     CellViewRef::new("user", "amp", "schematic"),
                     ViewType::Schematic,
                 );
             }),
             ("highlighted net", |state| {
-                let highlight = &mut state.schematic.session.editor.net_highlight;
+                let highlight = &mut state.model.schematic.session.editor.net_highlight;
                 highlight.active = true;
                 highlight.selected_net_name = Some("VOUT".to_owned());
             }),
@@ -1598,7 +1661,7 @@ mod tests {
         let mut state = state_with_operating_point();
         assert!(!operating_point_annotations(&state).is_empty());
 
-        state.schematic.bump_topology_version();
+        state.model.schematic.bump_topology_version();
 
         assert!(operating_point_annotations(&state).is_empty());
     }
@@ -1606,7 +1669,7 @@ mod tests {
     #[test]
     fn annotations_follow_only_the_explicitly_selected_operating_point() {
         let mut state = state_with_operating_point();
-        state.simulation.retained.runs[0].add_analysis(
+        state.model.simulation.retained.runs[0].add_analysis(
             AnalysisResult::new(2, AnalysisType::DcOp, "OP hot").with_dc_op(DcOpResult {
                 node_voltages: vec![OperatingPointValue {
                     name: "V(out)".to_owned(),
@@ -1622,12 +1685,12 @@ mod tests {
             }),
         );
 
-        state.simulation.view.active_analysis_idx = Some(1);
+        state.model.simulation.view.active_analysis_idx = Some(1);
         let hot = operating_point_annotations(&state);
         assert!(text(&hot[0]).contains("2.5"), "{hot:?}");
         assert!(text(&hot[1]).contains("4 mA"), "{hot:?}");
 
-        state.simulation.view.active_analysis_idx = Some(0);
+        state.model.simulation.view.active_analysis_idx = Some(0);
         let nominal = operating_point_annotations(&state);
         assert!(text(&nominal[0]).contains("1.25"));
         assert!(text(&nominal[1]).contains("2 mA"));

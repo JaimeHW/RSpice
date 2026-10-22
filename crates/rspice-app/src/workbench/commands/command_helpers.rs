@@ -43,7 +43,7 @@ pub(super) fn code_document_is_visible(state: &crate::workbench::AppState) -> bo
     state.workbench.workspace == Workspace::Netlist
         || crate::workbench::documents::code_workspace::design_hosts_veriloga(
             state.workbench.workspace,
-            &state.workspace,
+            &state.model.workspace,
         )
 }
 
@@ -59,7 +59,7 @@ pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
     matches!(
         app.state.workbench.workspace,
         Workspace::Design | Workspace::Models
-    ) && app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol
+    ) && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
 }
 
 /// Mockup-owned `G` command: cycle only the canvas presentation. Snap pitch
@@ -77,7 +77,7 @@ pub(super) fn cycle_canvas_grid(app: &mut RSpiceApp) {
 pub(super) fn active_schematic_editor(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && matches!(
-            app.state.workspace.content.active_view_type(),
+            app.state.model.workspace.content.active_view_type(),
             crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
         )
 }
@@ -222,7 +222,7 @@ pub(super) fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     if app.state.dialogs.array_selection.armed && tool != Tool::ArraySelection {
         app.state.dialogs.array_selection.close();
     }
-    app.state.schematic.arm_tool(tool);
+    app.state.model.schematic.arm_tool(tool);
 }
 
 pub(super) fn open_recent_projects(workbench: &mut WorkbenchState) {
@@ -241,7 +241,9 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             app.state.workbench.command_query.clear();
         }
         Workspace::Design => {
-            if app.state.workspace.content.active_view_type() == crate::state::ViewType::Symbol {
+            if app.state.model.workspace.content.active_view_type()
+                == crate::state::ViewType::Symbol
+            {
                 app.state.ui.symbol.editor.zoom = 1.0;
                 app.state.ui.symbol.editor.pan = (0.0, 0.0);
                 app.state.ui.symbol.editor.needs_fit = true;
@@ -249,13 +251,25 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
                 app.state.ui.symbol.editor.marquee_start = None;
                 app.state.ui.symbol.editor.marquee_current = None;
             } else {
-                app.state.schematic.session.editor.zoom = 1.0;
-                app.state.schematic.session.editor.pan = (0.0, 0.0);
-                app.state.schematic.session.editor.needs_fit = true;
-                app.state.schematic.session.editor.center_request = None;
-                app.state.schematic.session.editor.selection.clear();
-                app.state.schematic.session.editor.selection_rect.cancel();
-                app.state.schematic.session.editor.net_highlight.clear();
+                app.state.model.schematic.session.editor.zoom = 1.0;
+                app.state.model.schematic.session.editor.pan = (0.0, 0.0);
+                app.state.model.schematic.session.editor.needs_fit = true;
+                app.state.model.schematic.session.editor.center_request = None;
+                app.state.model.schematic.session.editor.selection.clear();
+                app.state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .selection_rect
+                    .cancel();
+                app.state
+                    .model
+                    .schematic
+                    .session
+                    .editor
+                    .net_highlight
+                    .clear();
             }
         }
         Workspace::Simulate => {
@@ -306,11 +320,13 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
 pub(super) fn open_new_cell_dialog(app: &mut RSpiceApp) {
     let selected = app
         .state
+        .model
         .library_manager
         .selected_library
         .as_ref()
         .and_then(|name| {
             app.state
+                .model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
@@ -318,13 +334,14 @@ pub(super) fn open_new_cell_dialog(app: &mut RSpiceApp) {
         });
     let target_library = selected.or_else(|| {
         app.state
+            .model
             .library_manager
             .libraries_sorted()
             .into_iter()
             .find(|library| !library.read_only)
             .map(|library| library.name.clone())
     });
-    let library_revision = app.state.library_manager.revision();
+    let library_revision = app.state.model.library_manager.revision();
 
     let dialogs = &mut app.state.dialogs;
     dialogs.new_cell_library = target_library.unwrap_or_default();

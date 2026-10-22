@@ -53,7 +53,7 @@ pub(crate) fn drag_selection(
         position: from,
     };
     selection_drag::dispatch(state, ctx, &symbols, begin);
-    let Some(operation_id) = state.schematic.pending_operation_id() else {
+    let Some(operation_id) = state.model.schematic.pending_operation_id() else {
         return;
     };
     let mut last = from;

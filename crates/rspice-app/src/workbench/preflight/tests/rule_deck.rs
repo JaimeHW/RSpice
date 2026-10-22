@@ -12,7 +12,7 @@ use rspice_simulation::execution::PreparationStage;
 fn runnable_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     disable_global_process_axis(&mut app.state);
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.provision_test_project_technology_contract();
     app.state.sync_active_schematic_to_workspace();
     app
@@ -23,8 +23,9 @@ fn page_levels(state: &mut AppState, rule: DrcViolationType) -> Vec<DiagnosticLe
     let result = state
         .run_active_design_checks()
         .expect("the configured design checks");
-    let subject = state.workspace.content.active_schematic_reference();
+    let subject = state.model.workspace.content.active_schematic_reference();
     let records = state
+        .model
         .diagnostics
         .batch(&DiagnosticInputs::DesignCheck { subject })
         .expect("the checks published their findings")
@@ -63,6 +64,7 @@ fn a_rule_the_deck_promotes_blocks_the_page_preflight_and_the_run_alike() {
     let mut app = runnable_app();
     // A label on nothing: a warning by default, and nothing the engine minds.
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 600), "spare".to_owned());
     app.state.sync_active_schematic_to_workspace();
@@ -83,6 +85,7 @@ fn a_rule_the_deck_promotes_blocks_the_page_preflight_and_the_run_alike() {
     );
 
     app.state
+        .model
         .workspace
         .content
         .design_rules
@@ -111,9 +114,11 @@ fn a_rule_the_deck_demotes_lets_the_page_preflight_and_the_run_through_alike() {
     let mut app = runnable_app();
     // Two labels the deck folds into one node: an error by default.
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 600), "sense".to_owned());
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 700), "SENSE".to_owned());
     app.state.sync_active_schematic_to_workspace();
@@ -127,6 +132,7 @@ fn a_rule_the_deck_demotes_lets_the_page_preflight_and_the_run_through_alike() {
     );
 
     app.state
+        .model
         .workspace
         .content
         .design_rules
@@ -159,6 +165,7 @@ fn a_rule_the_deck_demotes_lets_the_page_preflight_and_the_run_through_alike() {
 fn run_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -> RSpiceApp {
     let mut app = runnable_app();
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 600), "spare".to_owned());
     app.state.sync_active_schematic_to_workspace();
@@ -179,6 +186,7 @@ fn run_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -> RSpi
 fn rules_edited_during_a_pass_authorize_nothing() {
     let promoted = run_with_the_rules_edited_in_flight(|state| {
         state
+            .model
             .workspace
             .content
             .design_rules
@@ -195,7 +203,7 @@ fn rules_edited_during_a_pass_authorize_nothing() {
     });
     for (edit, app) in [("deck", promoted), ("waiver", waived)] {
         assert!(
-            !app.state.simulation.execution.trigger_simulation,
+            !app.state.model.simulation.execution.trigger_simulation,
             "{edit}: nothing is queued"
         );
         assert!(
@@ -217,6 +225,7 @@ fn rules_edited_during_a_pass_authorize_nothing() {
 fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
     let demoted = run_again_with_the_rules_edited_in_flight(|state| {
         state
+            .model
             .workspace
             .content
             .design_rules
@@ -234,13 +243,14 @@ fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
     for (edit, app) in [("deck", demoted), ("waiver", waived)] {
         assert!(
             app.state
+                .model
                 .log_buffer
                 .entries()
                 .any(|entry| entry.message.starts_with("Preflight restarted")),
             "{edit}: the restart is stated"
         );
         assert!(
-            app.state.simulation.execution.trigger_simulation,
+            app.state.model.simulation.execution.trigger_simulation,
             "{edit}: the press after the edit queues its run"
         );
         assert!(
@@ -256,6 +266,7 @@ fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
 fn run_again_with_the_rules_edited_in_flight(edit: impl FnOnce(&mut AppState)) -> RSpiceApp {
     let mut app = runnable_app();
     app.state
+        .model
         .schematic
         .add_net_label(Point::new(600, 600), "spare".to_owned());
     app.state.sync_active_schematic_to_workspace();

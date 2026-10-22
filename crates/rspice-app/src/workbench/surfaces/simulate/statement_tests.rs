@@ -20,7 +20,7 @@ use crate::workbench::RSpiceApp;
 #[test]
 fn the_displayed_statement_is_the_directive_the_controller_emits() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.sync_active_schematic_to_workspace();
 
     for kind in [
@@ -37,7 +37,10 @@ fn the_displayed_statement_is_the_directive_the_controller_emits() {
         // independently here. If the page ever starts spelling its own
         // statement this diverges immediately.
         let mut projected = app.state.clone();
-        projected.sim_setup.apply_analysis_draft_projection(&draft);
+        projected
+            .model
+            .sim_setup
+            .apply_analysis_draft_projection(&draft);
         let emitted = SimulationController::new().analysis_draft_directive(&projected, &draft);
 
         assert_eq!(
@@ -52,7 +55,7 @@ fn the_displayed_statement_is_the_directive_the_controller_emits() {
 #[test]
 fn a_displayed_statement_is_a_directive_the_engine_accepts() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.sync_active_schematic_to_workspace();
 
     // A deck the directive can be appended to. Deliberately the smallest thing
@@ -115,7 +118,7 @@ fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts()
     );
 
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.sync_active_schematic_to_workspace();
     const DECK: &str = "* statement fixture\nV1 in 0 DC 1\nR1 in out 1k\nR2 out 0 1k\n";
     let mut checked = 0_usize;
@@ -140,7 +143,7 @@ fn a_displayed_statement_is_spelled_in_engineering_notation_the_engine_accepts()
 #[test]
 fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.sync_active_schematic_to_workspace();
 
     // The helper projects the draft into the live setup view and restores it,
@@ -151,7 +154,7 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
     // Compared as serialized state rather than by adding a `PartialEq` derive
     // to a struct this large: the question is whether any field moved, and the
     // serialization already answers exactly that over every field.
-    let before = serde_json::to_vec(&app.state.sim_setup).expect("the setup view serializes");
+    let before = serde_json::to_vec(&app.state.model.sim_setup).expect("the setup view serializes");
     let _ = super::plan_statement_for(
         &mut app.state,
         &app.simulation_controller,
@@ -162,7 +165,7 @@ fn reading_a_statement_leaves_the_plan_exactly_as_it_found_it() {
         &app.simulation_controller,
         &AnalysisDraft::for_kind(AnalysisKind::Ac),
     );
-    let after = serde_json::to_vec(&app.state.sim_setup).expect("the setup view serializes");
+    let after = serde_json::to_vec(&app.state.model.sim_setup).expect("the setup view serializes");
 
     assert!(
         before == after,
@@ -195,12 +198,13 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
     use crate::simulation::config::NoiseSweepType;
 
     let mut app = RSpiceApp::test_instance();
-    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.schematic);
+    crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     app.state.sync_active_schematic_to_workspace();
 
     let (ac, noise) = {
         let plan = app
             .state
+            .model
             .sim_setup
             .stable_analysis_plan_mut()
             .expect("the fixture plan is migrated");
@@ -265,12 +269,13 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
 
     let frozen = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("the fixture plan is migrated")
         .freeze()
         .expect("the fixture plan freezes");
-    let setup = app.state.sim_setup.clone();
+    let setup = app.state.model.sim_setup.clone();
     // Exactly the two steps `SimulationController::build_queue_from_plan`
     // takes per instance: project that instance's own draft into the retired
     // view, then ask the controller for the card. Nothing is re-spelled here.
@@ -281,7 +286,7 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
             .find(|instance| instance.id() == id)
             .expect("the instance is in the frozen plan");
         let mut projected = app.state.clone();
-        projected.sim_setup.setup = setup
+        projected.model.sim_setup.setup = setup
             .frozen_instance_projection(&frozen, instance)
             .expect("the instance projects");
         app.simulation_controller
@@ -318,9 +323,13 @@ fn a_noise_instance_and_its_ac_sibling_each_state_their_own_frequency_axis() {
     // reads — and because the plan projection applies AC last so that those
     // slots hold the AC instance rather than the noise instance that wrote
     // them a moment earlier.
-    app.state.sim_setup.refresh_legacy_analysis_projections();
+    app.state
+        .model
+        .sim_setup
+        .refresh_legacy_analysis_projections();
     let AnalysisDraft::Noise(singleton) = app
         .state
+        .model
         .sim_setup
         .legacy_analysis_draft(AnalysisKind::Noise)
     else {

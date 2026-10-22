@@ -39,6 +39,7 @@ fn validation_resolves_an_include_only_a_library_folder_holds() {
     assert!(validate_visible_netlist_source(&mut app));
     let document = app
         .state
+        .model
         .workspace
         .content
         .netlist_document

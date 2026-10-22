@@ -41,6 +41,7 @@ fn held_definition(state: &AppState) -> Option<&str> {
         .definition
         .as_str();
     state
+        .model
         .workspace
         .content
         .stimulus_library
@@ -54,6 +55,7 @@ fn offers_readoption(state: &AppState) -> bool {
     held_definition(state).is_some()
         && clicked_source(state).is_some_and(|source| {
             state
+                .model
                 .workspace
                 .content
                 .stimulus_library
@@ -79,10 +81,14 @@ pub(super) fn shown(action: ContextAction, state: &AppState) -> bool {
 pub(super) fn availability(action: ContextAction, state: &AppState) -> (bool, &'static str) {
     let writable = !state.schematic_edit_read_only();
     match action {
-        ContextAction::AdoptStimulus if state.workspace.content.stimulus_library.is_empty() => (
-            false,
-            "This project holds no stimulus definitions yet; save this source as one first",
-        ),
+        ContextAction::AdoptStimulus
+            if state.model.workspace.content.stimulus_library.is_empty() =>
+        {
+            (
+                false,
+                "This project holds no stimulus definitions yet; save this source as one first",
+            )
+        }
         ContextAction::OpenStimulusDefinition => (true, ""),
         _ => (
             writable,

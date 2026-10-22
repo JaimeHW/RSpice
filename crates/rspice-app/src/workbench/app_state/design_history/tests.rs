@@ -16,6 +16,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
     let mut state = AppState::default();
     state.open_project_session();
     let approved = state
+        .model
         .model_library_manager
         .load_library_bytes(
             "approved.lib",
@@ -24,6 +25,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
         )
         .expect("approved source imports");
     state
+        .model
         .model_library_manager
         .load_library_bytes(
             "alternate.lib",
@@ -32,6 +34,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
         )
         .expect("alternate source imports");
     state
+        .model
         .model_library_manager
         .resolve_definition_provider(
             crate::state::model_library::ModelConsumerScope::PrimitiveModel,
@@ -41,7 +44,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
         )
         .expect("provider decision records");
 
-    let mut candidate = state.model_library_manager.clone();
+    let mut candidate = state.model.model_library_manager.clone();
     assert!(candidate.clear_definition_provider(
         crate::state::model_library::ModelConsumerScope::PrimitiveModel,
         "shared"
@@ -68,6 +71,7 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
     );
     assert!(
         state
+            .model
             .model_library_manager
             .model_resolution_record(
                 crate::state::model_library::ModelConsumerScope::PrimitiveModel,
@@ -81,8 +85,8 @@ fn library_transaction_cannot_smuggle_a_provider_ledger_change() {
 /// child rather than merely opening it, so the step spans two occurrences.
 fn state_with_descended_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
     let mut state = AppState::default();
-    let parent_ref = state.workspace.content.active_view.clone();
-    let before_parent = state.schematic.clone();
+    let parent_ref = state.model.workspace.content.active_view.clone();
+    let before_parent = state.model.schematic.clone();
     let mut after_parent = before_parent.clone();
     after_parent.add_component(ComponentType::Resistor, Point::origin());
     let target = CellViewRef::new(&parent_ref.library, "child", "schematic");
@@ -91,23 +95,27 @@ fn state_with_descended_hierarchy_record() -> (AppState, CellViewRef, CellViewRe
     let mut cell = Cell::new("child");
     cell.add_view(View::new("schematic", ViewType::Schematic));
 
-    let open_views_before = state.workspace.content.open_views.clone();
-    let hierarchy_stack_before = state.workspace.content.hierarchy_stack.clone();
-    let hierarchy_instances_before = state.workspace.content.hierarchy_instances.clone();
+    let open_views_before = state.model.workspace.content.open_views.clone();
+    let hierarchy_stack_before = state.model.workspace.content.hierarchy_stack.clone();
+    let hierarchy_instances_before = state.model.workspace.content.hierarchy_instances.clone();
 
     state
+        .model
         .library_manager
         .get_library_mut(&target.library)
         .expect("target library")
         .add_cell(cell.clone());
     state
+        .model
         .workspace
         .insert_schematic_editor(parent_ref.key(), after_parent.clone());
     state
+        .model
         .workspace
         .insert_schematic_editor(target.key(), child.clone());
-    state.schematic = child.clone();
+    state.model.schematic = child.clone();
     state
+        .model
         .workspace
         .descend_into("X1".to_owned(), target.clone(), ViewType::Schematic);
 
@@ -122,9 +130,9 @@ fn state_with_descended_hierarchy_record() -> (AppState, CellViewRef, CellViewRe
         open_views_before,
         hierarchy_stack_before,
         hierarchy_instances_before,
-        open_views_after: state.workspace.content.open_views.clone(),
-        hierarchy_stack_after: state.workspace.content.hierarchy_stack.clone(),
-        hierarchy_instances_after: state.workspace.content.hierarchy_instances.clone(),
+        open_views_after: state.model.workspace.content.open_views.clone(),
+        hierarchy_stack_after: state.model.workspace.content.hierarchy_stack.clone(),
+        hierarchy_instances_after: state.model.workspace.content.hierarchy_instances.clone(),
     });
     (state, parent_ref, target)
 }
@@ -135,7 +143,10 @@ fn state_with_descended_hierarchy_record() -> (AppState, CellViewRef, CellViewRe
 #[test]
 fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
     let (mut state, parent_ref, target) = state_with_descended_hierarchy_record();
-    assert_eq!(state.workspace.content.occurrence_path().to_string(), "/X1");
+    assert_eq!(
+        state.model.workspace.content.occurrence_path().to_string(),
+        "/X1"
+    );
 
     assert!(
         state
@@ -143,9 +154,9 @@ fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
             .expect("the recorded extraction undoes")
             .is_some()
     );
-    assert_eq!(state.workspace.content.active_view, parent_ref);
+    assert_eq!(state.model.workspace.content.active_view, parent_ref);
     assert!(
-        state.workspace.content.occurrence_path().is_root(),
+        state.model.workspace.content.occurrence_path().is_root(),
         "the parent is a design root again once the child it was reached through is gone"
     );
 
@@ -155,9 +166,9 @@ fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
             .expect("the extraction redoes")
             .is_some()
     );
-    assert_eq!(state.workspace.content.active_view, target);
+    assert_eq!(state.model.workspace.content.active_view, target);
     assert_eq!(
-        state.workspace.content.occurrence_path().to_string(),
+        state.model.workspace.content.occurrence_path().to_string(),
         "/X1",
         "redo returns to the occurrence the child was being edited at"
     );
@@ -165,8 +176,8 @@ fn undo_and_redo_restore_the_occurrence_each_document_was_edited_at() {
 
 fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
     let mut state = AppState::default();
-    let parent_ref = state.workspace.content.active_view.clone();
-    let before_parent = state.schematic.clone();
+    let parent_ref = state.model.workspace.content.active_view.clone();
+    let before_parent = state.model.schematic.clone();
     let mut after_parent = before_parent.clone();
     after_parent.add_component(ComponentType::Resistor, Point::origin());
     let target = CellViewRef::new(&parent_ref.library, "child", "schematic");
@@ -176,21 +187,24 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
     cell.add_view(View::new("schematic", ViewType::Schematic));
 
     state
+        .model
         .library_manager
         .get_library_mut(&target.library)
         .expect("target library")
         .add_cell(cell.clone());
     state
+        .model
         .workspace
         .insert_schematic_editor(parent_ref.key(), after_parent.clone());
     state
+        .model
         .workspace
         .insert_schematic_editor(target.key(), child.clone());
-    state.schematic = child.clone();
-    state.workspace.content.active_view = target.clone();
-    let open_views_after = state.workspace.content.open_views.clone();
-    let hierarchy_stack_after = state.workspace.content.hierarchy_stack.clone();
-    let hierarchy_instances_after = state.workspace.content.hierarchy_instances.clone();
+    state.model.schematic = child.clone();
+    state.model.workspace.content.active_view = target.clone();
+    let open_views_after = state.model.workspace.content.open_views.clone();
+    let hierarchy_stack_after = state.model.workspace.content.hierarchy_stack.clone();
+    let hierarchy_instances_after = state.model.workspace.content.hierarchy_instances.clone();
     state.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
         parent_ref: parent_ref.clone(),
         target_schematic_ref: target.clone(),
@@ -199,9 +213,9 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
         after_parent,
         child,
         target_cell: cell,
-        open_views_before: state.workspace.content.open_views.clone(),
-        hierarchy_stack_before: state.workspace.content.hierarchy_stack.clone(),
-        hierarchy_instances_before: state.workspace.content.hierarchy_instances.clone(),
+        open_views_before: state.model.workspace.content.open_views.clone(),
+        hierarchy_stack_before: state.model.workspace.content.hierarchy_stack.clone(),
+        hierarchy_instances_before: state.model.workspace.content.hierarchy_instances.clone(),
         open_views_after,
         hierarchy_stack_after,
         hierarchy_instances_after,
@@ -212,7 +226,7 @@ fn state_with_hierarchy_record() -> (AppState, CellViewRef, CellViewRef) {
 #[test]
 fn guarded_history_refuses_to_overwrite_a_modified_child() {
     let (mut state, _, _) = state_with_hierarchy_record();
-    state.schematic.document_mut_for_test().components[0].value = "changed".to_owned();
+    state.model.schematic.document_mut_for_test().components[0].value = "changed".to_owned();
     assert!(!state.can_undo_project_design());
     assert_eq!(state.undo_project_design().expect("guarded"), None);
 }
@@ -221,6 +235,7 @@ fn guarded_history_refuses_to_overwrite_a_modified_child() {
 fn hierarchy_history_refuses_read_only_library_without_mutation() {
     let (mut state, _, target) = state_with_hierarchy_record();
     state
+        .model
         .library_manager
         .get_library_mut(&target.library)
         .expect("target library")
@@ -230,6 +245,7 @@ fn hierarchy_history_refuses_read_only_library_without_mutation() {
     assert!(state.undo_project_design().is_err());
     assert!(
         state
+            .model
             .library_manager
             .get_library(&target.library)
             .and_then(|library| library.get_cell(&target.cell))
@@ -252,6 +268,7 @@ fn hierarchy_history_refuses_project_read_only_safe_mode() {
     assert!(state.undo_project_design().is_err());
     assert!(
         state
+            .model
             .library_manager
             .get_library(&target.library)
             .and_then(|library| library.get_cell(&target.cell))
@@ -277,6 +294,7 @@ fn hierarchy_history_refuses_dangling_external_master_reference() {
         "symbol",
     ));
     state
+        .model
         .workspace
         .insert_schematic_editor(unrelated.key(), schematic);
 
@@ -284,6 +302,7 @@ fn hierarchy_history_refuses_dangling_external_master_reference() {
     assert!(state.undo_project_design().is_err());
     assert!(
         state
+            .model
             .library_manager
             .get_library(&target.library)
             .and_then(|library| library.get_cell(&target.cell))
@@ -296,9 +315,11 @@ fn new_hierarchy_target_refuses_to_resolve_an_existing_dangling_instance() {
     let mut state = AppState::default();
     let target = CellViewRef::new("work", "child", "schematic");
     let id = state
+        .model
         .schematic
         .add_component(ComponentType::CellInstance, Point::origin());
     state
+        .model
         .schematic
         .document_mut_for_test()
         .components
@@ -310,6 +331,7 @@ fn new_hierarchy_target_refuses_to_resolve_an_existing_dangling_instance() {
     assert!(validate_hierarchy_target_unreferenced(&state, &target).is_err());
     assert!(
         state
+            .model
             .library_manager
             .get_library("work")
             .and_then(|library| library.get_cell("child"))
@@ -321,6 +343,7 @@ fn new_hierarchy_target_refuses_to_resolve_an_existing_dangling_instance() {
 fn project_undo_and_redo_preserve_parent_view_runtime() {
     let (mut state, parent, _) = state_with_hierarchy_record();
     let mut stored_parent_buffer = state
+        .model
         .workspace
         .schematic_editor_mut(&parent.key())
         .expect("parent");
@@ -330,14 +353,15 @@ fn project_undo_and_redo_preserve_parent_view_runtime() {
     drop(stored_parent_buffer);
 
     assert!(state.undo_project_design().expect("undo").is_some());
-    assert_eq!(state.schematic.session.editor.zoom, 2.75);
-    assert_eq!(state.schematic.session.editor.pan, (140.0, -35.0));
+    assert_eq!(state.model.schematic.session.editor.zoom, 2.75);
+    assert_eq!(state.model.schematic.session.editor.pan, (140.0, -35.0));
 
-    state.schematic.session.editor.zoom = 1.5;
-    state.schematic.session.editor.pan = (-20.0, 85.0);
+    state.model.schematic.session.editor.zoom = 1.5;
+    state.model.schematic.session.editor.pan = (-20.0, 85.0);
     state.sync_active_schematic_to_workspace();
     assert!(state.redo_project_design().expect("redo").is_some());
     let parent_buffer = state
+        .model
         .workspace
         .session
         .schematic_sessions
@@ -350,13 +374,13 @@ fn project_undo_and_redo_preserve_parent_view_runtime() {
 #[test]
 fn project_undo_and_redo_preserve_child_view_runtime() {
     let (mut state, _, _) = state_with_hierarchy_record();
-    state.schematic.session.editor.zoom = 3.25;
-    state.schematic.session.editor.pan = (75.0, -120.0);
+    state.model.schematic.session.editor.zoom = 3.25;
+    state.model.schematic.session.editor.pan = (75.0, -120.0);
 
     assert!(state.undo_project_design().expect("undo").is_some());
     assert!(state.redo_project_design().expect("redo").is_some());
-    assert_eq!(state.schematic.session.editor.zoom, 3.25);
-    assert_eq!(state.schematic.session.editor.pan, (75.0, -120.0));
+    assert_eq!(state.model.schematic.session.editor.zoom, 3.25);
+    assert_eq!(state.model.schematic.session.editor.pan, (75.0, -120.0));
 }
 
 #[test]
@@ -366,8 +390,14 @@ fn project_history_preserves_unrelated_tab_dirty_state() {
         CellViewRef::new("work", "other", "schematic"),
         ViewType::Schematic,
     );
-    state.workspace.content.open_views.push(unrelated.clone());
+    state
+        .model
+        .workspace
+        .content
+        .open_views
+        .push(unrelated.clone());
     let record = state
+        .model
         .project_design_history
         .undo
         .last_mut()
@@ -378,6 +408,7 @@ fn project_history_preserves_unrelated_tab_dirty_state() {
     record.open_views_before.push(unrelated.clone());
     record.open_views_after.push(unrelated);
     state
+        .model
         .workspace
         .content
         .open_views
@@ -388,6 +419,7 @@ fn project_history_preserves_unrelated_tab_dirty_state() {
     assert!(state.undo_project_design().expect("undo").is_some());
     assert!(
         state
+            .model
             .workspace
             .content
             .open_views
@@ -405,12 +437,12 @@ fn project_history_preserves_unrelated_tab_dirty_state() {
 #[test]
 fn undo_activates_the_document_its_compensation_names_and_says_so() {
     let (mut state, parent, _) = state_with_hierarchy_record();
-    assert_ne!(state.workspace.content.active_view, parent);
+    assert_ne!(state.model.workspace.content.active_view, parent);
 
     assert!(state.can_undo_project_design());
     assert!(state.undo_project_design().expect("undo").is_some());
 
-    assert_eq!(state.workspace.content.active_view, parent);
+    assert_eq!(state.model.workspace.content.active_view, parent);
     let announcement = format!("Undo switched to {}", parent.display_path());
     assert!(
         state
@@ -427,6 +459,7 @@ fn undo_activates_the_document_its_compensation_names_and_says_so() {
 fn an_extraction_names_both_documents_it_restores() {
     let (state, parent, target) = state_with_hierarchy_record();
     let record = state
+        .model
         .project_design_history
         .undo
         .last()
@@ -472,21 +505,25 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
 
     let mut state = AppState::default();
     state.open_project_session();
-    let parent_ref = state.workspace.content.active_view.clone();
+    let parent_ref = state.model.workspace.content.active_view.clone();
     let kept = state
+        .model
         .schematic
         .add_component(ComponentType::Resistor, Point::origin());
     let extracted = state
+        .model
         .schematic
         .add_component(ComponentType::Capacitor, Point::new(40, 0));
     let key = parent_ref.key();
     let first = state
+        .model
         .workspace
         .content
         .design_management
         .bootstrap_for_cell_view(&key, "Sheet 1", [kept, extracted])
         .expect("first sheet");
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -507,7 +544,7 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
         .assign_objects(catalog.revision(), second, [extracted])
         .expect("the extracted object is drawn on the second sheet");
 
-    let before_parent = state.schematic.clone();
+    let before_parent = state.model.schematic.clone();
     let mut after_parent = before_parent.clone();
     after_parent
         .document_mut_for_test()
@@ -519,18 +556,21 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
     let mut cell = Cell::new("child");
     cell.add_view(View::new("schematic", ViewType::Schematic));
     state
+        .model
         .library_manager
         .get_library_mut(&target.library)
         .expect("target library")
         .add_cell(cell.clone());
     state
+        .model
         .workspace
         .insert_schematic_editor(parent_ref.key(), after_parent.clone());
     state
+        .model
         .workspace
         .insert_schematic_editor(target.key(), child.clone());
-    state.schematic = child.clone();
-    state.workspace.content.active_view = target.clone();
+    state.model.schematic = child.clone();
+    state.model.workspace.content.active_view = target.clone();
     state.record_hierarchy_extraction(HierarchyExtractionHistoryEntry {
         parent_ref: parent_ref.clone(),
         target_schematic_ref: target.clone(),
@@ -539,16 +579,17 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
         after_parent,
         child,
         target_cell: cell,
-        open_views_before: state.workspace.content.open_views.clone(),
-        hierarchy_stack_before: state.workspace.content.hierarchy_stack.clone(),
-        hierarchy_instances_before: state.workspace.content.hierarchy_instances.clone(),
-        open_views_after: state.workspace.content.open_views.clone(),
-        hierarchy_stack_after: state.workspace.content.hierarchy_stack.clone(),
-        hierarchy_instances_after: state.workspace.content.hierarchy_instances.clone(),
+        open_views_before: state.model.workspace.content.open_views.clone(),
+        hierarchy_stack_before: state.model.workspace.content.hierarchy_stack.clone(),
+        hierarchy_instances_before: state.model.workspace.content.hierarchy_instances.clone(),
+        open_views_after: state.model.workspace.content.open_views.clone(),
+        hierarchy_stack_after: state.model.workspace.content.hierarchy_stack.clone(),
+        hierarchy_instances_after: state.model.workspace.content.hierarchy_instances.clone(),
     });
 
     // Extraction leaves the catalog holding only what the parent still draws.
     let catalog = state
+        .model
         .workspace
         .content
         .design_management
@@ -559,6 +600,7 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
         .expect("the extracted object leaves the catalog with the design");
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .design_management
@@ -572,6 +614,7 @@ fn undo_restores_objects_to_the_sheet_they_were_recorded_on() {
 
     assert_eq!(
         state
+            .model
             .workspace
             .content
             .design_management
@@ -587,18 +630,19 @@ fn state_with_design_management_record()
 -> (AppState, DesignManagementCatalog, DesignManagementCatalog) {
     let mut state = AppState::default();
     state.open_project_session();
-    let owner = state.workspace.content.active_schematic_reference();
-    let before = (*state.workspace.content.design_management).clone();
+    let owner = state.model.workspace.content.active_schematic_reference();
+    let before = (*state.model.workspace.content.design_management).clone();
     let mut candidate = before.clone();
     candidate
         .bootstrap_for_cell_view(&owner.key(), "Main", [1])
         .expect("bootstrap reviewed sheet catalog");
     let committed_revision = state
+        .model
         .workspace
         .content
         .replace_design_management(candidate)
         .expect("publish reviewed catalog");
-    let after = (*state.workspace.content.design_management).clone();
+    let after = (*state.model.workspace.content.design_management).clone();
     state.record_design_management_transaction(DesignManagementHistoryEntry {
         description: "apply reviewed design-management changes".to_owned(),
         owner,
@@ -615,8 +659,8 @@ fn state_with_design_management_record()
 #[test]
 fn design_management_history_round_trips_semantics_with_monotonic_revisions() {
     let (mut state, before, after) = state_with_design_management_record();
-    let committed_revision = state.workspace.content.project.revision();
-    let initial_epoch = state.design_execution_epoch;
+    let committed_revision = state.model.workspace.content.project.revision();
+    let initial_epoch = state.model.design_execution_epoch;
     assert!(state.can_undo_project_design());
 
     assert_eq!(
@@ -624,27 +668,34 @@ fn design_management_history_round_trips_semantics_with_monotonic_revisions() {
         Some("apply reviewed design-management changes".to_owned())
     );
     assert!(design_management_semantics_match(
-        &state.workspace.content.design_management,
+        &state.model.workspace.content.design_management,
         &before
     ));
-    assert!(state.workspace.content.project.revision() > committed_revision);
-    let undo_revision = state.workspace.content.project.revision();
-    assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(1));
+    assert!(state.model.workspace.content.project.revision() > committed_revision);
+    let undo_revision = state.model.workspace.content.project.revision();
+    assert_eq!(
+        state.model.design_execution_epoch,
+        initial_epoch.wrapping_add(1)
+    );
     assert!(state.can_redo_project_design());
 
     assert!(state.redo_project_design().expect("redo").is_some());
     assert!(design_management_semantics_match(
-        &state.workspace.content.design_management,
+        &state.model.workspace.content.design_management,
         &after
     ));
-    assert!(state.workspace.content.project.revision() > undo_revision);
-    assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(2));
+    assert!(state.model.workspace.content.project.revision() > undo_revision);
+    assert_eq!(
+        state.model.design_execution_epoch,
+        initial_epoch.wrapping_add(2)
+    );
 }
 
 #[test]
 fn design_management_history_fails_closed_after_external_project_revision_change() {
     let (mut state, _before, after) = state_with_design_management_record();
     state
+        .model
         .workspace
         .content
         .project
@@ -654,7 +705,7 @@ fn design_management_history_fails_closed_after_external_project_revision_change
     assert!(!state.can_undo_project_design());
     assert_eq!(state.undo_project_design().expect("guarded"), None);
     assert!(design_management_semantics_match(
-        &state.workspace.content.design_management,
+        &state.model.workspace.content.design_management,
         &after
     ));
 }
@@ -673,7 +724,7 @@ fn design_management_history_refuses_read_only_project_without_mutation() {
     assert!(!state.can_undo_project_design());
     assert!(state.undo_project_design().is_err());
     assert!(design_management_semantics_match(
-        &state.workspace.content.design_management,
+        &state.model.workspace.content.design_management,
         &after
     ));
 }
@@ -682,8 +733,8 @@ fn design_management_history_refuses_read_only_project_without_mutation() {
 fn symbol_definition_candidate_is_atomic_and_globally_undoable() {
     let mut state = AppState::default();
     state.open_project_session();
-    let library_name = state.workspace.content.active_view.library.clone();
-    let mut candidate = state.library_manager.clone();
+    let library_name = state.model.workspace.content.active_view.library.clone();
+    let mut candidate = state.model.library_manager.clone();
     let mut cell = Cell::new("imported_symbol");
     let mut view = View::new("symbol", ViewType::Symbol);
     view.metadata
@@ -703,12 +754,13 @@ fn symbol_definition_candidate_is_atomic_and_globally_undoable() {
     )
     .expect("publish");
 
-    assert_eq!(state.workspace.content.project.revision(), committed);
-    assert!(state.workspace.content.project_metadata_dirty);
+    assert_eq!(state.model.workspace.content.project.revision(), committed);
+    assert!(state.model.workspace.content.project_metadata_dirty);
     assert!(state.can_undo_project_design());
     assert!(state.undo_project_design().expect("undo").is_some());
     assert!(
         state
+            .model
             .library_manager
             .get_library(&library_name)
             .and_then(|library| library.get_cell("imported_symbol"))
@@ -717,6 +769,7 @@ fn symbol_definition_candidate_is_atomic_and_globally_undoable() {
     assert!(state.redo_project_design().expect("redo").is_some());
     assert!(
         state
+            .model
             .library_manager
             .get_library(&library_name)
             .and_then(|library| library.get_cell("imported_symbol"))
@@ -731,6 +784,7 @@ fn placed_binding<'a>(
     object: u64,
 ) -> &'a LibraryCellInstance {
     state
+        .model
         .workspace
         .content
         .schematic_buffers
@@ -755,8 +809,8 @@ fn placed_binding<'a>(
 fn undoing_a_publish_unresolves_the_placements_it_leaves_behind() {
     let mut state = AppState::default();
     state.open_project_session();
-    let library_name = state.workspace.content.active_view.library.clone();
-    let mut candidate = state.library_manager.clone();
+    let library_name = state.model.workspace.content.active_view.library.clone();
+    let mut candidate = state.model.library_manager.clone();
     let mut cell = Cell::new("published_symbol");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     candidate
@@ -781,10 +835,11 @@ fn undoing_a_publish_unresolves_the_placements_it_leaves_behind() {
     binding.parameter_order = vec!["w".to_owned()];
     let placed = buffer.add_library_cell_component(Point::origin(), binding);
     state
+        .model
         .workspace
         .insert_schematic_editor(elsewhere.key(), buffer);
     assert_ne!(
-        state.workspace.content.active_schematic_reference(),
+        state.model.workspace.content.active_schematic_reference(),
         elsewhere
     );
 
@@ -832,10 +887,10 @@ fn owned_model_definition(vth0: f64) -> ProjectModelDefinition {
 fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
     let mut state = AppState::default();
     state.open_project_session();
-    state.model_library_manager.filter_text = "nch".to_owned();
-    let initial_revision = state.workspace.content.project.revision();
-    let initial_epoch = state.design_execution_epoch;
-    let mut candidate = state.model_library_manager.clone();
+    state.model.model_library_manager.filter_text = "nch".to_owned();
+    let initial_revision = state.model.workspace.content.project.revision();
+    let initial_epoch = state.model.design_execution_epoch;
+    let mut candidate = state.model.model_library_manager.clone();
     let commit = candidate
         .create_project_model("history-models", &owned_model_definition(0.48))
         .expect("candidate model validates");
@@ -844,11 +899,15 @@ fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
         .publish_project_model_candidate(candidate, commit, "create project model history_nch")
         .expect("candidate publishes");
     assert!(committed_revision > initial_revision);
-    assert!(state.workspace.content.project_metadata_dirty);
-    assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(1));
-    assert_eq!(state.model_library_manager.filter_text, "nch");
+    assert!(state.model.workspace.content.project_metadata_dirty);
+    assert_eq!(
+        state.model.design_execution_epoch,
+        initial_epoch.wrapping_add(1)
+    );
+    assert_eq!(state.model.model_library_manager.filter_text, "nch");
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("history-models")
             .is_some()
@@ -861,12 +920,16 @@ fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
     );
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("history-models")
             .is_none()
     );
-    assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(2));
-    let undo_revision = state.workspace.content.project.revision();
+    assert_eq!(
+        state.model.design_execution_epoch,
+        initial_epoch.wrapping_add(2)
+    );
+    let undo_revision = state.model.workspace.content.project.revision();
     assert!(undo_revision > committed_revision);
     assert!(state.can_redo_project_design());
 
@@ -876,20 +939,24 @@ fn project_model_publication_is_atomic_dirty_and_globally_undoable() {
     );
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("history-models")
             .is_some()
     );
-    assert_eq!(state.design_execution_epoch, initial_epoch.wrapping_add(3));
-    assert!(state.workspace.content.project.revision() > undo_revision);
-    assert_eq!(state.model_library_manager.filter_text, "nch");
+    assert_eq!(
+        state.model.design_execution_epoch,
+        initial_epoch.wrapping_add(3)
+    );
+    assert!(state.model.workspace.content.project.revision() > undo_revision);
+    assert_eq!(state.model.model_library_manager.filter_text, "nch");
 }
 
 #[test]
 fn project_model_correlation_publication_is_history_guarded() {
     let mut state = AppState::default();
     state.open_project_session();
-    let mut model_candidate = state.model_library_manager.clone();
+    let mut model_candidate = state.model.model_library_manager.clone();
     let model_commit = model_candidate
         .create_project_model("history-models", &owned_model_definition(0.48))
         .expect("candidate model validates");
@@ -902,6 +969,7 @@ fn project_model_correlation_publication_is_history_guarded() {
         .expect("model publishes");
 
     let library = state
+        .model
         .model_library_manager
         .get_library("history-models")
         .expect("project model library");
@@ -956,7 +1024,7 @@ fn project_model_correlation_publication_is_history_guarded() {
     .expect("valid correlation suite");
     let correlation =
         ModelCorrelationState::try_new(vec![suite], Vec::new()).expect("valid correlation");
-    let mut correlation_candidate = state.model_library_manager.clone();
+    let mut correlation_candidate = state.model.model_library_manager.clone();
     let correlation_commit = correlation_candidate
         .replace_project_model_correlation(
             "history-models",
@@ -984,6 +1052,7 @@ fn project_model_correlation_publication_is_history_guarded() {
     );
     assert!(
         !state
+            .model
             .model_library_manager
             .get_library("history-models")
             .expect("library remains after correlation undo")
@@ -996,6 +1065,7 @@ fn project_model_correlation_publication_is_history_guarded() {
     );
 
     state
+        .model
         .model_library_manager
         .get_library_mut("history-models")
         .expect("project model library")
@@ -1009,18 +1079,19 @@ fn project_model_correlation_publication_is_history_guarded() {
 fn project_model_publication_rejects_closed_or_read_only_projects_without_mutation() {
     let mut state = AppState::default();
     state.close_project_session();
-    let mut candidate = state.model_library_manager.clone();
+    let mut candidate = state.model.model_library_manager.clone();
     let commit = candidate
         .create_project_model("history-models", &owned_model_definition(0.48))
         .expect("candidate model validates");
-    let revision = state.workspace.content.project.revision();
+    let revision = state.model.workspace.content.project.revision();
     let error = state
         .publish_project_model_candidate(candidate.clone(), commit.clone(), "create project model")
         .expect_err("closed project must reject publication");
     assert!(error.contains("open project"));
-    assert_eq!(state.workspace.content.project.revision(), revision);
+    assert_eq!(state.model.workspace.content.project.revision(), revision);
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("history-models")
             .is_none()
@@ -1038,9 +1109,10 @@ fn project_model_publication_rejects_closed_or_read_only_projects_without_mutati
         .publish_project_model_candidate(candidate, commit, "create project model")
         .expect_err("read-only project must reject publication");
     assert!(error.contains("read-only"));
-    assert_eq!(state.workspace.content.project.revision(), revision);
+    assert_eq!(state.model.workspace.content.project.revision(), revision);
     assert!(
         state
+            .model
             .model_library_manager
             .get_library("history-models")
             .is_none()
@@ -1051,8 +1123,8 @@ fn project_model_publication_rejects_closed_or_read_only_projects_without_mutati
 fn symbol_definition_history_fails_closed_after_external_cell_edit() {
     let mut state = AppState::default();
     state.open_project_session();
-    let library_name = state.workspace.content.active_view.library.clone();
-    let mut candidate = state.library_manager.clone();
+    let library_name = state.model.workspace.content.active_view.library.clone();
+    let mut candidate = state.model.library_manager.clone();
     let mut cell = Cell::new("imported_symbol");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     candidate
@@ -1069,6 +1141,7 @@ fn symbol_definition_history_fails_closed_after_external_cell_edit() {
     .expect("publish");
 
     state
+        .model
         .library_manager
         .get_library_mut(&library_name)
         .and_then(|library| library.get_cell_mut("imported_symbol"))
@@ -1079,6 +1152,7 @@ fn symbol_definition_history_fails_closed_after_external_cell_edit() {
     assert_eq!(state.undo_project_design().expect("guarded"), None);
     assert_eq!(
         state
+            .model
             .library_manager
             .get_library(&library_name)
             .and_then(|library| library.get_cell("imported_symbol"))
@@ -1092,11 +1166,11 @@ fn symbol_definition_history_fails_closed_after_external_cell_edit() {
 fn symbol_definition_and_generated_fixture_share_one_history_record() {
     let mut state = AppState::default();
     state.open_project_session();
-    let library_name = state.workspace.content.active_view.library.clone();
+    let library_name = state.model.workspace.content.active_view.library.clone();
     let fixture_ref = CellViewRef::new(&library_name, "fixture_symbol", "testbench");
     let mut fixture = SchematicState::default();
     fixture.add_component(ComponentType::Resistor, Point::origin());
-    let mut candidate = state.library_manager.clone();
+    let mut candidate = state.model.library_manager.clone();
     let mut cell = Cell::new("fixture_symbol");
     cell.add_view(View::new("symbol", ViewType::Symbol));
     cell.add_view(View::new("testbench", ViewType::Testbench));
@@ -1120,6 +1194,7 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
     .expect("publish symbol and fixture");
     assert!(
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -1131,6 +1206,7 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
     assert!(state.undo_project_design().expect("undo").is_some());
     assert!(
         !state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -1138,6 +1214,7 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
     );
     assert!(
         state
+            .model
             .library_manager
             .get_library(&library_name)
             .and_then(|library| library.get_cell("fixture_symbol"))
@@ -1147,6 +1224,7 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
     assert!(state.redo_project_design().expect("redo").is_some());
     assert!(
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -1154,6 +1232,7 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
     );
     assert!(
         state
+            .model
             .library_manager
             .get_library(&library_name)
             .and_then(|library| library.get_cell("fixture_symbol"))
@@ -1165,15 +1244,16 @@ fn symbol_definition_and_generated_fixture_share_one_history_record() {
 fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
     let mut state = AppState::default();
     state.open_project_session();
-    let library_name = state.workspace.content.active_view.library.clone();
+    let library_name = state.model.workspace.content.active_view.library.clone();
     let fixture_ref = CellViewRef::new(&library_name, "existing_symbol", "testbench");
     state
+        .model
         .library_manager
         .get_library_mut(&library_name)
         .expect("writable project library")
         .add_cell(Cell::new("existing_symbol"));
 
-    let mut candidate = state.library_manager.clone();
+    let mut candidate = state.model.library_manager.clone();
     candidate
         .get_library_mut(&library_name)
         .and_then(|library| library.get_cell_mut("existing_symbol"))
@@ -1195,6 +1275,7 @@ fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
     )
     .expect("publish fixture");
     state
+        .model
         .workspace
         .content
         .open_views
@@ -1207,6 +1288,7 @@ fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
     assert!(error.contains("cannot be undone while it is open"));
     assert!(
         state
+            .model
             .workspace
             .content
             .schematic_buffers
@@ -1214,6 +1296,7 @@ fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
     );
     assert!(
         state
+            .model
             .library_manager
             .get_library(&library_name)
             .and_then(|library| library.get_cell("existing_symbol"))
@@ -1226,15 +1309,16 @@ fn symbol_history_refuses_to_remove_an_open_generated_fixture() {
 fn symbol_history_refuses_to_remove_the_active_generated_fixture() {
     let mut state = AppState::default();
     state.open_project_session();
-    let library_name = state.workspace.content.active_view.library.clone();
+    let library_name = state.model.workspace.content.active_view.library.clone();
     let fixture_ref = CellViewRef::new(&library_name, "active_fixture", "testbench");
     state
+        .model
         .library_manager
         .get_library_mut(&library_name)
         .expect("writable project library")
         .add_cell(Cell::new("active_fixture"));
 
-    let mut candidate = state.library_manager.clone();
+    let mut candidate = state.model.library_manager.clone();
     candidate
         .get_library_mut(&library_name)
         .and_then(|library| library.get_cell_mut("active_fixture"))
@@ -1255,8 +1339,8 @@ fn symbol_history_refuses_to_remove_the_active_generated_fixture() {
         }),
     )
     .expect("publish fixture");
-    state.workspace.content.active_view = fixture_ref.clone();
-    state.schematic = fixture;
+    state.model.workspace.content.active_view = fixture_ref.clone();
+    state.model.schematic = fixture;
 
     assert!(!state.can_undo_project_design());
     let error = state
@@ -1265,6 +1349,7 @@ fn symbol_history_refuses_to_remove_the_active_generated_fixture() {
     assert!(error.contains("cannot be undone while it is open"));
     assert!(
         state
+            .model
             .workspace
             .content
             .schematic_buffers

@@ -29,10 +29,15 @@ impl Finger {
         app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
         app.state.open_project_session();
         app.state.workbench.activate(Workspace::Design);
-        app.state.schematic = SchematicState::default();
-        app.state.schematic.session.editor.needs_fit = false;
-        app.state.schematic.session.editor.needs_drawing_sheet_fit = false;
-        app.state.schematic.clear_undo_history();
+        app.state.model.schematic = SchematicState::default();
+        app.state.model.schematic.session.editor.needs_fit = false;
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .needs_drawing_sheet_fit = false;
+        app.state.model.schematic.clear_undo_history();
         app.state.sync_active_schematic_to_workspace();
         let mut finger = Self {
             ctx,
@@ -202,7 +207,7 @@ impl Finger {
     /// The screen point over the world point `at`, through the canvas's
     /// camera.
     fn screen(&self, at: Point) -> Pos2 {
-        let editor = &self.app.state.schematic.session.editor;
+        let editor = &self.app.state.model.schematic.session.editor;
         self.expect("Schematic canvas").min
             + egui::vec2(
                 (editor.pan.0 + f64::from(at.x) * editor.zoom) as f32,
@@ -282,7 +287,7 @@ impl Finger {
             SymbolDocument, SymbolPin, View, ViewType,
         };
         let state = &mut self.app.state;
-        let top = state.workspace.content.active_schematic_reference();
+        let top = state.model.workspace.content.active_schematic_reference();
         let master = CellViewRef::new(&top.library, "amp", "schematic");
         let mut cell = Cell::new(&master.cell);
         cell.add_view(View::new(&master.view, ViewType::Schematic));
@@ -299,16 +304,19 @@ impl Finger {
         .expect("the symbol stores");
         cell.add_view(symbol);
         state
+            .model
             .library_manager
             .get_library_mut(&master.library)
             .expect("the top schematic's library")
             .add_cell(cell);
         state
+            .model
             .workspace
             .content
             .open_views
             .push(OpenCellView::new(master.clone(), ViewType::Schematic));
         state
+            .model
             .workspace
             .insert_schematic_editor(master.key(), SchematicState::default());
         let mut binding = LibraryCellInstance::new(&master.library, &master.cell, &master.view);
@@ -316,8 +324,11 @@ impl Finger {
             name: "OUT".to_owned(),
             direction: PortDirection::Out,
         }]);
-        state.schematic.add_library_cell_component(at, binding);
-        state.schematic.clear_undo_history();
+        state
+            .model
+            .schematic
+            .add_library_cell_component(at, binding);
+        state.model.schematic.clear_undo_history();
         state.sync_active_schematic_to_workspace();
         self.frame(Vec::new());
     }
@@ -351,7 +362,10 @@ fn a_phone_reaches_draw_wire_and_undo_from_the_tool_row() {
     );
     phone.press("More tools");
     phone.press("Draw wire");
-    assert_eq!(phone.app.state.schematic.session.editor.tool, Tool::Wire);
+    assert_eq!(
+        phone.app.state.model.schematic.session.editor.tool,
+        Tool::Wire
+    );
 
     phone.press("More tools");
     let undo = phone.expect("Undo");
@@ -387,14 +401,23 @@ fn a_tablet_edits_a_schematic_by_finger_alone() {
     let subcircuit = Point::new(600, 400);
     tablet.place_subcircuit(subcircuit);
     tablet.wake();
-    let components = |tablet: &Finger| tablet.app.state.schematic.document().components.clone();
-    let wires = |tablet: &Finger| tablet.app.state.schematic.document().wires.len();
+    let components = |tablet: &Finger| {
+        tablet
+            .app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .clone()
+    };
+    let wires = |tablet: &Finger| tablet.app.state.model.schematic.document().wires.len();
 
     // Place R1 from the shelf.
     tablet.press_starting("Place instance");
     tablet.press_starting("Resistor");
     assert_eq!(
-        tablet.app.state.schematic.session.editor.tool,
+        tablet.app.state.model.schematic.session.editor.tool,
         Tool::Place(ComponentType::Resistor)
     );
     tablet.tap(tablet.screen(Point::new(200, 200)));
@@ -404,7 +427,10 @@ fn a_tablet_edits_a_schematic_by_finger_alone() {
         .expect("the tap placed a resistor");
     assert_eq!(r1.pos, Point::new(200, 200));
     tablet.press("Cancel");
-    assert_eq!(tablet.app.state.schematic.session.editor.tool, Tool::Select);
+    assert_eq!(
+        tablet.app.state.model.schematic.session.editor.tool,
+        Tool::Select
+    );
 
     // Draw a wire, ended with a double tap.
     tablet.press_starting("Draw wire");
@@ -413,6 +439,7 @@ fn a_tablet_edits_a_schematic_by_finger_alone() {
         tablet
             .app
             .state
+            .model
             .schematic
             .session
             .editor
@@ -436,7 +463,7 @@ fn a_tablet_edits_a_schematic_by_finger_alone() {
     tablet.press("Add to selection");
     tablet.tap(tablet.screen(Point::new(360, 100)));
     tablet.press("Add to selection");
-    let selection = &tablet.app.state.schematic.session.editor.selection;
+    let selection = &tablet.app.state.model.schematic.session.editor.selection;
     assert!(selection.has_component(r1.id) && selection.wires.len() == 1);
 
     // Delete both from the long-press menu.
@@ -459,6 +486,7 @@ fn a_tablet_edits_a_schematic_by_finger_alone() {
         tablet
             .app
             .state
+            .model
             .workspace
             .content
             .active_schematic_reference()

@@ -9,7 +9,7 @@ impl AppState {
     fn conductor_source(&self, ctx: &egui::Context) -> ConductorSource {
         ConductorSource {
             document: schematic_editor_request_source(self),
-            view: self.workspace.content.active_view.clone(),
+            view: self.model.workspace.content.active_view.clone(),
             window: self.workbench.window_session.current().value(),
             viewport: ctx.viewport_id(),
         }
@@ -20,8 +20,12 @@ impl AppState {
             return;
         }
         let source = self.conductor_source(ctx);
-        self.schematic.start_wire(position);
-        self.schematic.session.editor.bind_conductor_source(source);
+        self.model.schematic.start_wire(position);
+        self.model
+            .schematic
+            .session
+            .editor
+            .bind_conductor_source(source);
     }
 
     pub(crate) fn start_canvas_bus(
@@ -34,19 +38,24 @@ impl AppState {
             return Err(BusParseError::ReadOnly);
         }
         let source = self.conductor_source(ctx);
-        self.schematic.start_bus(position, declaration)?;
-        self.schematic.session.editor.bind_conductor_source(source);
+        self.model.schematic.start_bus(position, declaration)?;
+        self.model
+            .schematic
+            .session
+            .editor
+            .bind_conductor_source(source);
         Ok(())
     }
 
     pub(crate) fn reconcile_conductor_route(&mut self, ctx: &egui::Context) -> bool {
-        let editor = &self.schematic.session.editor;
+        let editor = &self.model.schematic.session.editor;
         if !editor.wire_drawing.active && !editor.bus_drawing.active {
             return false;
         }
         let source = self.conductor_source(ctx);
         let can_edit = !self.schematic_edit_read_only();
-        self.schematic
+        self.model
+            .schematic
             .session
             .editor
             .reconcile_conductor_source(&source, can_edit)

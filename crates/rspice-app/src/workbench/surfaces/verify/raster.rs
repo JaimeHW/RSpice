@@ -340,6 +340,7 @@ pub(super) fn tuning_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan")
@@ -359,6 +360,7 @@ pub(super) fn tuning_app() -> RSpiceApp {
     )
     .expect("valid tuning variable");
     app.state
+        .model
         .workspace
         .content
         .add_design_variable(plan_id, variable)
@@ -385,10 +387,10 @@ pub(super) fn tuning_app() -> RSpiceApp {
         TRANSIENT_TASK_TAG,
         step_analysis(0.65, 3.22e6, &[("tsettle", 1.91e-6), ("overshoot", 6.8)]),
     );
-    app.state.simulation.retained.runs = vec![baseline, candidate].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![baseline, candidate].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
     super::tuning::sync_tuning_session(&mut app);
-    app.state.simulation.view.active_run_idx = Some(1);
+    app.state.model.simulation.view.active_run_idx = Some(1);
     app
 }
 
@@ -404,6 +406,7 @@ pub(super) fn regression_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     let plan_id = app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .expect("default plan")
@@ -458,11 +461,16 @@ pub(super) fn regression_app() -> RSpiceApp {
         .map(|pair| pair.target.clone())
         .expect("both runs hold V(out)");
     rules.push(rule(waveform.clone(), 0.02, 0.02));
-    let payload = app.state.workspace.content.ensure_active_plan_data(plan_id);
+    let payload = app
+        .state
+        .model
+        .workspace
+        .content
+        .ensure_active_plan_data(plan_id);
     payload.regression_tolerances = rules;
     payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
-    app.state.simulation.retained.runs = vec![baseline, candidate].into();
-    assert!(app.state.simulation.select_run(1));
+    app.state.model.simulation.retained.runs = vec![baseline, candidate].into();
+    assert!(app.state.model.simulation.select_run(1));
     super::commit_regression_baseline(&mut app, baseline_id).expect("the baseline commits");
     app.state.workbench.verification.regression_selected_target = Some(waveform);
     app
@@ -486,8 +494,8 @@ fn app_with_run(analysis: AnalysisResult) -> RSpiceApp {
     run.restore_lifecycle(SimulationRunLifecycle::Completed, 12.4)
         .expect("a finite elapsed time");
     run.add_analysis(attributed(analysis));
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
     app
 }
 
@@ -529,9 +537,10 @@ pub(super) fn monte_carlo_app() -> RSpiceApp {
         runs_completed: 40,
         sampling_mode: MonteCarloSamplingMode::PseudoRandom,
     };
-    app.state.simulation.retained.runs = vec![run].into();
-    app.state.simulation.view.active_run_idx = Some(0);
+    app.state.model.simulation.retained.runs = vec![run].into();
+    app.state.model.simulation.view.active_run_idx = Some(0);
     app.state
+        .model
         .simulation
         .replace_yield_evidence(vec![result], Some(provenance));
     app
@@ -636,6 +645,7 @@ pub(super) fn corner_app() -> RSpiceApp {
 fn set_limits(app: &mut RSpiceApp, specs: Vec<SpecEntry>) {
     match app
         .state
+        .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -643,10 +653,11 @@ fn set_limits(app: &mut RSpiceApp, specs: Vec<SpecEntry>) {
     {
         Some(plan_id) => app
             .state
+            .model
             .workspace
             .content
             .replace_active_specs(plan_id, specs),
-        None => app.state.workspace.content.specs = specs,
+        None => app.state.model.workspace.content.specs = specs,
     }
 }
 

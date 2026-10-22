@@ -349,8 +349,8 @@ impl RSpiceApp {
                     .as_ref()
                     .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
                 let request = renumber_request(
-                    &self.state.workspace,
-                    &self.state.schematic,
+                    &self.state.model.workspace,
+                    &self.state.model.schematic,
                     design_management,
                     &owner_key,
                     &inputs,
@@ -403,15 +403,16 @@ impl RSpiceApp {
                 (DesignManagementTab::Annotation, None)
             }
             DesignManagementPage::HierarchyAudit => {
-                let resolution = self.state.workspace.resolve_hierarchy_with_active(
-                    &self.state.library_manager,
-                    &self.state.workspace.content.active_view,
-                    &self.state.schematic,
+                let resolution = self.state.model.workspace.resolve_hierarchy_with_active(
+                    &self.state.model.library_manager,
+                    &self.state.model.workspace.content.active_view,
+                    &self.state.model.schematic,
                 );
                 let configuration = match inputs.audit_configuration {
                     Some(id) => {
                         let configuration = self
                             .state
+                            .model
                             .workspace
                             .content
                             .configuration_sets
@@ -430,7 +431,7 @@ impl RSpiceApp {
                 let subjects = hierarchy_audit_subjects(
                     &resolution,
                     inputs.audit_view_checks,
-                    &self.state.workspace.content.occurrence_path(),
+                    &self.state.model.workspace.content.occurrence_path(),
                 );
                 let request = HierarchyAuditRequest {
                     configuration,
@@ -593,7 +594,7 @@ pub(super) fn variant_connectivity_signature(
     state: &AppState,
     variant_id: AssemblyVariantId,
 ) -> Result<BTreeSet<Vec<String>>, String> {
-    let mut workspace = state.workspace.clone();
+    let mut workspace = state.model.workspace.clone();
     workspace
         .content
         .design_management
@@ -602,13 +603,13 @@ pub(super) fn variant_connectivity_signature(
         .map_err(|error| error.to_string())?;
     let projection = workspace
         .configuration_execution_projection(
-            &state.library_manager,
-            &state.workspace.content.active_view,
-            &state.schematic,
+            &state.model.library_manager,
+            &state.model.workspace.content.active_view,
+            &state.model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-        state.library_manager.catalog(),
+        state.model.library_manager.catalog(),
         &projection,
     );
     let mut groups = BTreeMap::<(String, String), Vec<String>>::new();

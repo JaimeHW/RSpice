@@ -113,7 +113,7 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     app.state.workbench.models_view.selected_symbol =
                         Some(symbol_key(&row.reference));
                     if !row.read_only() {
-                        app.state.library_manager.select_view(
+                        app.state.model.library_manager.select_view(
                             &row.reference.library,
                             &row.reference.cell,
                             &row.reference.view,
@@ -558,7 +558,7 @@ fn symbol_detail(
                             )
                             .clicked()
                         {
-                            app.state.library_manager.select_view(
+                            app.state.model.library_manager.select_view(
                                 &row.reference.library,
                                 &row.reference.cell,
                                 &row.reference.view,
@@ -1070,11 +1070,13 @@ fn detail_table_row(ui: &mut Ui, columns: &[(&str, f32, bool)], announced: Strin
 fn open_author_symbol_variant_dialog(app: &mut ManagerRenderContext<'_>, row: &SymbolRow) {
     let Some(target_library) = app
         .state
+        .model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
             app.state
+                .model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
@@ -1082,6 +1084,7 @@ fn open_author_symbol_variant_dialog(app: &mut ManagerRenderContext<'_>, row: &S
         })
         .or_else(|| {
             app.state
+                .model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()

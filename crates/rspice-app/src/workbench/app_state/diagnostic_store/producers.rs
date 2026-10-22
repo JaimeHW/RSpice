@@ -77,10 +77,14 @@ impl AppState {
         // failed is its own record with its own identity; a later failure in
         // the same run is added to the batch rather than replacing it. Both
         // are decided against the design as it was dispatched.
-        let opened = self.diagnostics.batch(&inputs);
-        let dispatched = opened
-            .map(|batch| batch.input_digest)
-            .or_else(|| self.diagnostics.run_baselines.get(&run_sequence).copied());
+        let opened = self.model.diagnostics.batch(&inputs);
+        let dispatched = opened.map(|batch| batch.input_digest).or_else(|| {
+            self.model
+                .diagnostics
+                .run_baselines
+                .get(&run_sequence)
+                .copied()
+        });
         let mut records: Vec<DiagnosticRecord> = opened
             .map(|batch| batch.records.clone())
             .unwrap_or_default();
@@ -105,7 +109,7 @@ impl AppState {
             canonical,
             DiagnosticLevel::Error,
             DiagnosticSubject::new(
-                self.workspace.content.project.id(),
+                self.model.workspace.content.project.id(),
                 format!("{analysis} · run {run_sequence}"),
             ),
             message,
@@ -115,7 +119,7 @@ impl AppState {
         .with_route(route);
         records.push(record);
         let published = match dispatched {
-            Some(digest) => self.diagnostics.insert(digest, inputs, records, None),
+            Some(digest) => self.model.diagnostics.insert(digest, inputs, records, None),
             None => self.publish_diagnostics(inputs, records),
         };
         self.state_refusal(published);
@@ -152,7 +156,7 @@ impl AppState {
             ),
         };
         let key = FindingKey::new(RUN_PRODUCER, code, member_scope(member_index), member);
-        let revision = self.workspace.content.project.revision().get();
+        let revision = self.model.workspace.content.project.revision().get();
         let Some(canonical) = mint_canonical(
             std::slice::from_ref(&key),
             revision,
@@ -165,7 +169,7 @@ impl AppState {
             canonical,
             DiagnosticLevel::Error,
             DiagnosticSubject::new(
-                self.workspace.content.project.id(),
+                self.model.workspace.content.project.id(),
                 format!("{member} · campaign member {member_index}"),
             ),
             message,
@@ -192,11 +196,15 @@ impl AppState {
     pub(crate) fn open_run_outcome(&mut self, run_sequence: u64) {
         match (DiagnosticInputs::Run { run_sequence }).digest(&super::DigestScope::new(self)) {
             Ok(digest) => {
-                let retained = &self.simulation.retained.runs;
-                self.diagnostics
+                let retained = &self.model.simulation.retained.runs;
+                self.model
+                    .diagnostics
                     .run_baselines
                     .retain(|run, _| retained.iter().any(|kept| kept.id == *run));
-                self.diagnostics.run_baselines.insert(run_sequence, digest);
+                self.model
+                    .diagnostics
+                    .run_baselines
+                    .insert(run_sequence, digest);
             }
             Err(error) => self.state_refusal(Err(error)),
         }
@@ -223,14 +231,17 @@ impl AppState {
         inputs_at_press: crate::product::ContentDigest,
     ) {
         let records = self.dispatch_records(report);
-        let published =
-            self.diagnostics
-                .insert(inputs_at_press, DiagnosticInputs::Dispatch, records, None);
+        let published = self.model.diagnostics.insert(
+            inputs_at_press,
+            DiagnosticInputs::Dispatch,
+            records,
+            None,
+        );
         self.state_refusal(published);
     }
 
     fn dispatch_records(&self, report: &PreflightReport) -> Vec<DiagnosticRecord> {
-        let project = self.workspace.content.project.id();
+        let project = self.model.workspace.content.project.id();
         let revision = report.project_revision;
         // A blocker is keyed by what it names as the thing to change, which
         // is the nearest a dispatch check comes to an object; two blockers
@@ -313,6 +324,7 @@ impl AppState {
 /// superseded by the next run's, so every plain run is the same place.
 pub(super) fn run_scope(state: &AppState, run_sequence: u64) -> String {
     state
+        .model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -601,11 +613,11 @@ mod tests {
         let before = identities(&state);
         assert_eq!(before.len(), 2);
         let selected = before[&warning.message];
-        state.diagnostics.set_current_finding(Some(selected));
+        state.model.diagnostics.set_current_finding(Some(selected));
 
         state.publish_dispatch_diagnostics(&report(vec![warning.clone(), fallback.clone()]));
         assert_eq!(identities(&state), before);
-        assert_eq!(state.diagnostics.current_finding(), Some(selected));
+        assert_eq!(state.model.diagnostics.current_finding(), Some(selected));
 
         // One of them gone: the other keeps its identity rather than taking
         // over the place the first one held.
@@ -615,7 +627,7 @@ mod tests {
             Some(&selected),
             "the remaining advisory keeps its identity"
         );
-        assert_eq!(state.diagnostics.current_finding(), Some(selected));
+        assert_eq!(state.model.diagnostics.current_finding(), Some(selected));
     }
 
     /// An attribution recorded for a solve that was later rescued must not be

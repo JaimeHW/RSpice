@@ -619,7 +619,7 @@ fn netlist_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) 
 /// store's digest memo. A surface drawn every frame reads
 /// [`listing_in_pass`] instead, which decides them once per pass.
 pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
-    if !state.project_open.is_open() {
+    if !state.model.project_open.is_open() {
         return closed_listing();
     }
     // One scope for the whole list, so the configured hierarchy two owners'
@@ -653,11 +653,11 @@ pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
 /// store's [digest memo](super::digest_memo) while the stamps and revisions
 /// it read stand, so a pass in which nothing was edited digests nothing.
 pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> DiagnosticListing<'_> {
-    if !state.project_open.is_open() {
+    if !state.model.project_open.is_open() {
         return closed_listing();
     }
-    let generation = state.diagnostics.generation();
-    if let Some(memo) = state.diagnostics.pass_memo(pass, generation) {
+    let generation = state.model.diagnostics.generation();
+    if let Some(memo) = state.model.diagnostics.pass_memo(pass, generation) {
         let segments = segments(state, |batch| {
             memo.standings
                 .get(&batch.inputs.key())
@@ -671,7 +671,7 @@ pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> Diag
         };
     }
     let listed = listing(state);
-    state.diagnostics.remember_pass(PassMemo {
+    state.model.diagnostics.remember_pass(PassMemo {
         pass,
         generation,
         standings: listed
@@ -714,7 +714,7 @@ fn segments<'a>(
     mut standing_of: impl FnMut(&DiagnosticBatch) -> BatchStanding,
 ) -> Vec<Segment<'a>> {
     let mut segments = Vec::new();
-    let mut stored: Vec<&DiagnosticBatch> = state.diagnostics.batches().collect();
+    let mut stored: Vec<&DiagnosticBatch> = state.model.diagnostics.batches().collect();
     stored.sort_by_key(|batch| batch.inputs.owner());
     for batch in stored {
         let standing = standing_of(batch);
@@ -824,8 +824,8 @@ fn code_collections(
     bool,
 )> {
     let code = &state.ui.code_workspace;
-    let project = state.workspace.content.project.id();
-    let sources = &state.workspace.content.project_sources;
+    let project = state.model.workspace.content.project.id();
+    let sources = &state.model.workspace.content.project_sources;
     let veriloga_current =
         |token: &rspice_simulation::project_veriloga::VerilogASourceOperationToken| {
             token.project_id == project
@@ -853,6 +853,7 @@ fn code_collections(
     }
     if !code.automation.diagnostics.is_empty() || code.automation.receipt.is_some() {
         let bundle = state
+            .model
             .workspace
             .active_source_bundle(crate::state::ProjectSourceLanguage::RSpiceAutomation);
         let token = code
@@ -899,7 +900,7 @@ mod tests {
                 code,
             ),
             level,
-            DiagnosticSubject::new(state.workspace.content.project.id(), "Node 'n1'"),
+            DiagnosticSubject::new(state.model.workspace.content.project.id(), "Node 'n1'"),
             format!("{code} stands"),
         )
     }
@@ -938,15 +939,20 @@ mod tests {
     #[test]
     fn an_empty_batch_whose_inputs_moved_reads_as_out_of_date() {
         let mut state = open_state();
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         let inputs = DiagnosticInputs::DesignCheck { subject };
         state
             .publish_diagnostics(inputs.clone(), Vec::new())
             .expect("the design-check digest is available");
         assert_eq!(*listing(&state).empty_reason(), EmptyReason::NoFindings);
 
-        state.workspace.content.connectivity.policy.width_mismatch =
-            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        state
+            .model
+            .workspace
+            .content
+            .connectivity
+            .policy
+            .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
         let listed = listing(&state);
         assert_eq!(listed.len(), 0);
@@ -981,7 +987,7 @@ mod tests {
         let dispatch = empty(DiagnosticInputs::Dispatch);
         let run = empty(DiagnosticInputs::Run { run_sequence: 4 });
         let design = empty(DiagnosticInputs::DesignCheck {
-            subject: state.workspace.content.active_schematic_reference(),
+            subject: state.model.workspace.content.active_schematic_reference(),
         });
         let stored = |batch, standing| Segment::Stored { batch, standing };
 
@@ -1076,7 +1082,7 @@ mod tests {
     #[test]
     fn a_stale_batch_offers_no_route() {
         let mut state = open_state();
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         let anchored = record(&state, "T-ERROR", DiagnosticLevel::Error).with_route(Some(
             DiagnosticRoute::Anchor(crate::diagnostics::LogAnchor::Schematic {
                 cell_view: subject.clone(),
@@ -1095,8 +1101,13 @@ mod tests {
             .expect("the design-check digest is available");
         assert!(listing(&state).row(0).expect("listed").route.is_some());
 
-        state.workspace.content.connectivity.policy.width_mismatch =
-            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        state
+            .model
+            .workspace
+            .content
+            .connectivity
+            .policy
+            .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
 
         let listing = listing(&state);
         assert_eq!(listing.len(), 1);
@@ -1120,10 +1131,10 @@ mod tests {
     #[test]
     fn a_rule_finding_separates_its_object_from_the_view_it_is_drawn_in() {
         let mut state = open_state();
-        let reference = state.workspace.content.active_schematic_reference();
+        let reference = state.model.workspace.content.active_schematic_reference();
         let mut record = record(&state, "T-ERROR", DiagnosticLevel::Error);
         record.subject = DiagnosticSubject::new(
-            state.workspace.content.project.id(),
+            state.model.workspace.content.project.id(),
             format!("{} pin A", reference.display_path()),
         )
         .in_cell_view(reference.clone());
@@ -1329,6 +1340,7 @@ mod tests {
             AutomationValidationReceipt, SourceOperationToken,
         };
         let bundle = state
+            .model
             .workspace
             .active_source_bundle(crate::state::ProjectSourceLanguage::RSpiceAutomation)
             .expect("a project holds its automation bundle");
@@ -1336,7 +1348,7 @@ mod tests {
         let root_content = bundle.root().content().to_owned();
         state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
             token: SourceOperationToken {
-                project_id: state.workspace.content.project.id(),
+                project_id: state.model.workspace.content.project.id(),
                 revision: bundle.revision().get(),
                 content_digest: bundle.closure_digest(),
             },
@@ -1349,6 +1361,7 @@ mod tests {
         // An edit the page did not see: the clean validation is of older
         // source than the bundle holds now.
         state
+            .model
             .workspace
             .content
             .project_sources
@@ -1387,7 +1400,7 @@ mod tests {
     #[test]
     fn one_pass_decides_each_standing_once_and_a_publication_invalidates_it() {
         let mut state = open_state();
-        let subject = state.workspace.content.active_schematic_reference();
+        let subject = state.model.workspace.content.active_schematic_reference();
         state
             .publish_diagnostics(
                 DiagnosticInputs::DesignCheck {
@@ -1400,8 +1413,13 @@ mod tests {
         assert_eq!(listing_in_pass(&state, 7).counts().errors, 1);
         // Moved under the batch mid-pass: the pass keeps the answer it
         // already gave, and the next pass sees the move.
-        state.workspace.content.connectivity.policy.width_mismatch =
-            crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
+        state
+            .model
+            .workspace
+            .content
+            .connectivity
+            .policy
+            .width_mismatch = crate::state::BundleWidthMismatchPolicy::ExplicitSliceOrExtend;
         assert_eq!(listing_in_pass(&state, 7).counts().errors, 1);
         assert_eq!(listing_in_pass(&state, 8).counts().stale, 1);
         assert_eq!(

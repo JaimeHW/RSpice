@@ -48,13 +48,13 @@ fn seeded_app() -> RSpiceApp {
         .set_toggle(TogglePreference::ReducedMotion, true);
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Design);
-    load_ungrounded_rc(&mut app.state.schematic);
+    load_ungrounded_rc(&mut app.state.model.schematic);
 
     // The checks log their own summary (Info) and one row per finding
     // (Error for the missing ground, Warning for each open pin).
     Command::CheckCellview.execute(&mut app);
     // What the harmonic-balance solver logs per Krylov solve, at Debug.
-    app.state.log_buffer.log(
+    app.state.model.log_buffer.log(
         LogSeverity::Debug,
         LogSource::Engine,
         "HB Krylov solve: 12 iterations, relative residual 3.40e-09",
@@ -64,7 +64,7 @@ fn seeded_app() -> RSpiceApp {
         rspice_core::analysis::transient::resolve_transient_maximum_step(0.0, 1.0e-3, None, None)
             .expect_err("a zero TSTEP is refused")
             .to_string();
-    let failed = app.state.simulation.start_run();
+    let failed = app.state.model.simulation.start_run();
     failed.add_analysis(AnalysisResult::failed(
         1,
         AnalysisType::Transient,
@@ -81,12 +81,12 @@ fn seeded_app() -> RSpiceApp {
         error,
     );
 
-    let live = app.state.simulation.start_run();
+    let live = app.state.model.simulation.start_run();
     live.mark_running().expect("the live run started");
     let identity = live.execution_identity();
-    app.state.simulation.execution.active_execution = identity;
-    app.state.simulation.execution.is_running = true;
-    app.state.simulation.execution.progress = 0.42;
+    app.state.model.simulation.execution.active_execution = identity;
+    app.state.model.simulation.execution.is_running = true;
+    app.state.model.simulation.execution.progress = 0.42;
 
     Command::OpenConsole.execute(&mut app);
     app

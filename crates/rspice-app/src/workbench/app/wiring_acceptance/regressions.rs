@@ -268,7 +268,7 @@ fn a_wire_edited_on_one_sheet_leaves_another_sheets_tap_where_it_was() {
         let tap = bench.place_tap(bus, p(160, 40), p(160, 100), "DATA[3]");
         assert_ne!(tap, 0, "no tap on Sheet 2\n{}", bench.describe());
         bench.activate_sheet(0);
-        let document = bench.state().schematic.document();
+        let document = bench.state().model.schematic.document();
         let wire = document
             .wires
             .iter()
@@ -290,7 +290,7 @@ fn a_wire_edited_on_one_sheet_leaves_another_sheets_tap_where_it_was() {
                 bench.stretch_selection(p(0, 40));
             }
         }
-        let document = bench.state().schematic.document();
+        let document = bench.state().model.schematic.document();
         let moved = document.wires.iter().find(|candidate| candidate.id == wire);
         if moved.map(|wire| wire.points.as_slice()) != Some(&[p(100, 140), p(240, 140)][..]) {
             wrong.push(format!("the {edit} left Sheet 1's wire at {moved:?}"));
@@ -376,7 +376,15 @@ fn undo_steps_back_past_a_sheet_switch_once_the_new_sheet_is_edited() {
     bench.place(ComponentType::Resistor, Point::new(100, 100), Rotation::R0);
 
     bench.undo();
-    assert!(bench.state().schematic.document().components.is_empty());
+    assert!(
+        bench
+            .state()
+            .model
+            .schematic
+            .document()
+            .components
+            .is_empty()
+    );
     bench.undo();
     assert_eq!(
         bench.active_sheet(),
@@ -386,7 +394,7 @@ fn undo_steps_back_past_a_sheet_switch_once_the_new_sheet_is_edited() {
     );
     bench.undo();
     assert!(
-        bench.state().schematic.document().wires.is_empty(),
+        bench.state().model.schematic.document().wires.is_empty(),
         "the wire drawn before the switch was not undone: {:?}",
         bench.state().prompt_text()
     );
@@ -395,7 +403,7 @@ fn undo_steps_back_past_a_sheet_switch_once_the_new_sheet_is_edited() {
     bench.redo();
     assert_eq!(bench.active_sheet(), 1, "{:?}", bench.state().prompt_text());
     bench.redo();
-    let document = bench.state().schematic.document();
+    let document = bench.state().model.schematic.document();
     assert_eq!(document.wires.len(), 1);
     assert_eq!(document.components.len(), 1);
     let part = document.components[0].id;

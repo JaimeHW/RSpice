@@ -49,7 +49,12 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
         state.ui.code_workspace.source_document_dialog = true;
         return Ok(());
     };
-    if state.workspace.active_source_bundle(language).is_none() {
+    if state
+        .model
+        .workspace
+        .active_source_bundle(language)
+        .is_none()
+    {
         return Err(format!(
             "This project owns no {} source workspace yet.",
             language.label()
@@ -63,7 +68,11 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
     match visible_language(state) {
         None => state.project_lifecycle.is_open(),
-        Some(language) => state.workspace.active_source_bundle(language).is_some(),
+        Some(language) => state
+            .model
+            .workspace
+            .active_source_bundle(language)
+            .is_some(),
     }
 }
 
@@ -73,7 +82,7 @@ pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
 fn visible_language(state: &AppState) -> Option<ProjectSourceLanguage> {
     code_workspace::active_source_language(
         state.workbench.workspace,
-        &state.workspace,
+        &state.model.workspace,
         state.ui.code_workspace.page,
     )
 }
@@ -128,13 +137,24 @@ fn netlist_lifecycle_facts(
     app: &RSpiceApp,
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleFacts> {
-    let descriptor = app.state.workspace.content.netlist_descriptor.as_ref();
-    let document = app.state.workspace.content.netlist_document.as_ref();
+    let descriptor = app
+        .state
+        .model
+        .workspace
+        .content
+        .netlist_descriptor
+        .as_ref();
+    let document = app.state.model.workspace.content.netlist_document.as_ref();
     if descriptor.is_some() != document.is_some() {
         return None;
     }
     let mut decks = Vec::with_capacity(
-        app.state.workspace.content.retained_netlist_decks.len()
+        app.state
+            .model
+            .workspace
+            .content
+            .retained_netlist_decks
+            .len()
             + usize::from(descriptor.is_some()),
     );
     if let Some(descriptor) = descriptor {
@@ -142,6 +162,7 @@ fn netlist_lifecycle_facts(
     }
     decks.extend(
         app.state
+            .model
             .workspace
             .content
             .retained_netlist_decks
@@ -186,6 +207,7 @@ fn netlist_lifecycle_facts(
     let published_origin = active_dependency.map_or_else(
         || {
             app.state
+                .model
                 .workspace
                 .content
                 .netlist_source_path
@@ -305,11 +327,11 @@ fn line_ending_summary(content: &str) -> MessageId {
 fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentFacts> {
     let language = visible_language(&app.state)?;
     let logical_path = code_workspace::active_bundle_path(
-        &app.state.workspace,
+        &app.state.model.workspace,
         &app.state.ui.code_workspace,
         language,
     )?;
-    let bundle = app.state.workspace.active_source_bundle(language)?;
+    let bundle = app.state.model.workspace.active_source_bundle(language)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
     let identity = bundle.document_id(&logical_path).map_or_else(
         || messages.text(MessageId::CodeSourceIdentityNotRetained),
@@ -812,14 +834,14 @@ impl RSpiceApp {
             NetlistLifecycleAction::SetIncludeSearchPaths(paths) => {
                 if let Err(error) = self
                     .state
-                    .workspace
+                    .model.workspace
                     .content.project
                     .set_include_search_paths(paths)
                     .map_err(|error| error.to_string())
                 {
                     self.state.prompt(error);
                 } else {
-                    self.state.workspace.content.project_metadata_dirty = true;
+                    self.state.model.workspace.content.project_metadata_dirty = true;
                     // The chain decides which file every relative include
                     // resolves to, so the deck's diagnostics are no longer
                     // evidence about the chain that is now in force.
@@ -1194,16 +1216,17 @@ fn include_search_paths(
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
     let chain = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-        state.workspace.content.project.include_search_paths(),
-        state.workspace.content.project.data_root(),
+        state.model.workspace.content.project.include_search_paths(),
+        state.model.workspace.content.project.data_root(),
     );
     let authored = state
+        .model
         .workspace
         .content
         .project
         .include_search_paths()
         .to_vec();
-    let unsaved = state.workspace.content.project.data_root().is_none();
+    let unsaved = state.model.workspace.content.project.data_root().is_none();
     let mut action = None;
     code_inspector_section(
         ui,
@@ -2183,6 +2206,7 @@ mod tests {
         let owner = ProjectSourceOwner::code_workspace(language);
         let original = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -2214,6 +2238,7 @@ mod tests {
         );
         let renamed = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -2235,6 +2260,7 @@ mod tests {
         let owner = ProjectSourceOwner::code_workspace(language);
         let locked = app
             .state
+            .model
             .workspace
             .content
             .project_sources
@@ -2326,9 +2352,10 @@ mod include_search_raster {
 
     fn chain_state(entries: &[&str], root: Option<&str>) -> AppState {
         let mut state = AppState::default();
-        state.workspace.content.project.path =
+        state.model.workspace.content.project.path =
             root.map(|root| std::path::PathBuf::from(root).join("x.rspiceproj"));
         state
+            .model
             .workspace
             .content
             .project
