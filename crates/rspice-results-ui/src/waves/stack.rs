@@ -72,6 +72,14 @@ pub trait StackHost {
     /// Draw the strip's logic and bus lanes ([`super::logic::show_lanes`])
     /// on the panes' own time axis.
     fn show_event_lanes(&mut self, _ui: &mut Ui, _model: &StripModel, _frame: EventLaneFrame) {}
+    /// Height of the event-marker strip above this strip's lanes and panes;
+    /// zero when the run has no marker, so the strip takes no room.
+    fn event_marker_height(&self, _model: &StripModel) -> f32 {
+        0.0
+    }
+    /// Draw the strip's HDL records and assertion violations
+    /// ([`super::logic::show_marker_strip`]) on the panes' time axis.
+    fn show_event_markers(&mut self, _ui: &mut Ui, _model: &StripModel, _frame: EventLaneFrame) {}
     /// The real event lanes (`E()`) placed in `pane`, as step traces
     /// ([`super::logic::real_step_trace`]) that share its unit axis.
     fn real_step_traces(
@@ -599,7 +607,9 @@ fn show_strip_plot(
     let mut exprs = Some(host.resolve_expressions(model, &t));
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
-    let lane_height = event_lane_band(ui, host, model, x_domain, count, wanted_lanes, &t);
+    let marker_height = event_marker_band(ui, host, model, x_domain, count);
+    let lane_height =
+        marker_height + event_lane_band(ui, host, model, x_domain, count, wanted_lanes, &t);
     let geometry = wave_stack_geometry(available.height() - lane_height, count);
     let frame = StripFrame {
         model,
@@ -649,6 +659,46 @@ fn show_strip_plot(
 /// more lanes than fit scroll within it.
 const EVENT_LANE_SHARE: f32 = 0.5;
 
+/// The time axis the strip's panes are drawn on, for the bands above them.
+fn event_frame(
+    host: &impl StackHost,
+    model: &StripModel,
+    x_domain: (f64, f64),
+    pane_count: usize,
+) -> EventLaneFrame {
+    EventLaneFrame {
+        x_range: shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(x_domain),
+        left_margin: wave_left_margin(host.session()),
+        right_margin: navigation::WAVE_SHARED_RIGHT_MARGIN,
+    }
+}
+
+/// Draw the strip's event-marker strip at its top, when the run has any
+/// marker, and return the height it took.
+fn event_marker_band(
+    ui: &mut Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    x_domain: (f64, f64),
+    pane_count: usize,
+) -> f32 {
+    let available = ui.available_rect_before_wrap().height().max(0.0);
+    let height = host.event_marker_height(model).max(0.0).min(available);
+    if height <= 0.0 {
+        return 0.0;
+    }
+    let frame = event_frame(host, model, x_domain, pane_count);
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.set_height(height);
+            host.show_event_markers(ui, model, frame);
+        },
+    );
+    height
+}
+
 /// Draw the strip's logic and bus lanes above its panes, on their time axis,
 /// and return the height they took, seam included.
 fn event_lane_band(
@@ -673,11 +723,7 @@ fn event_lane_band(
     if height <= 0.0 {
         return 0.0;
     }
-    let frame = EventLaneFrame {
-        x_range: shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(x_domain),
-        left_margin: wave_left_margin(host.session()),
-        right_margin: navigation::WAVE_SHARED_RIGHT_MARGIN,
-    };
+    let frame = event_frame(host, model, x_domain, pane_count);
     ui.allocate_ui_with_layout(
         egui::vec2(ui.available_width(), height),
         egui::Layout::top_down(egui::Align::Min),

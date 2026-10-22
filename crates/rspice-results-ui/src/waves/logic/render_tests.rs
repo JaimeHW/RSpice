@@ -27,6 +27,7 @@ struct Render {
     lane_color: Color32,
     step_color: Color32,
     unknown: Color32,
+    error: Color32,
     real: RealLane,
 }
 
@@ -60,7 +61,35 @@ fn scene() -> (EventLanes, LogicLane, LogicLane, RealLane) {
     (lanes, r, z, w)
 }
 
+/// A warning, an error and the end of the run, one of each glyph.
+fn hdl_markers() -> Vec<HdlMarker> {
+    let marker = |time: f64, severity, text: &str, line| HdlMarker {
+        time,
+        severity,
+        text: text.to_owned(),
+        scope: "tb".to_owned(),
+        source: Some(SourceLine {
+            file: "tb.v".to_owned(),
+            line,
+        }),
+    };
+    vec![
+        marker(25.0 * NS, MarkerSeverity::Warning, "slow edge", 31),
+        marker(65.0 * NS, MarkerSeverity::Error, "count mismatch", 40),
+        marker(85.0 * NS, MarkerSeverity::Fatal, "abort", 44),
+        marker(95.0 * NS, MarkerSeverity::Finish, "", 52),
+    ]
+}
+
 fn render() -> Render {
+    // An error-level violation on q, clear of the edges measured below.
+    let violations = [AssertionSpan {
+        start: 42.0 * NS,
+        end: 48.0 * NS,
+        operand: "D(q)".to_owned(),
+        label: "q_settled".to_owned(),
+        error: true,
+    }];
     let (lanes, r, z, w) = scene();
     let q = lanes.logic("q").unwrap();
     let bus = lanes.bus("b").unwrap();
@@ -104,7 +133,19 @@ fn render() -> Render {
             selected: &[],
             cursor: Some(55.0 * NS),
             significant_digits: 4,
+            violations: &violations,
         };
+        show_marker_strip(
+            ui,
+            &MarkerStripInput {
+                hdl: &hdl_markers(),
+                assertions: &violations,
+                x_range: (0.0, END),
+                left_margin: LEFT,
+                right_margin: RIGHT,
+            },
+            &|t| format!("{:.0} ns", t / NS),
+        );
         let lanes_top = ui.cursor().top();
         let lanes_rect = Rect::from_min_size(
             pos2(ui.max_rect().left(), lanes_top),
@@ -132,10 +173,10 @@ fn render() -> Render {
             response.axes,
             lane_color,
             step_color,
-            tokens.color.warn,
+            (tokens.color.warn, tokens.color.err),
         ));
     });
-    let (lanes_top, map, plot_rect, axes, lane_color, step_color, unknown) =
+    let (lanes_top, map, plot_rect, axes, lane_color, step_color, (unknown, error)) =
         measured.expect("the pass ran");
     Render {
         canvas,
@@ -146,6 +187,7 @@ fn render() -> Render {
         lane_color,
         step_color,
         unknown,
+        error,
         real: w,
     }
 }
@@ -190,6 +232,12 @@ fn coverage(canvas: &Canvas, x: usize, y: usize, ink: Color32, base: [f32; 3]) -
 /// pixel-centre convention the mapping uses. The surface is read just left
 /// of the window, so a plot well or a grid line under the row cancels out.
 fn centroid(canvas: &Canvas, y: f32, around: f32, half: i32, ink: Color32) -> f32 {
+    inked_centroid(canvas, y, around, half, ink)
+        .unwrap_or_else(|| panic!("no ink near x={around} on row {y}"))
+}
+
+/// [`centroid`], or `None` where the row carries no ink there (a dash gap).
+fn inked_centroid(canvas: &Canvas, y: f32, around: f32, half: i32, ink: Color32) -> Option<f32> {
     let row = y as usize;
     let centre = around.floor() as i32;
     let base = pixel(canvas, (centre - half - 2) as usize, row);
@@ -199,8 +247,7 @@ fn centroid(canvas: &Canvas, y: f32, around: f32, half: i32, ink: Color32) -> f3
         weight += w;
         moment += w * (x as f32 + 0.5);
     }
-    assert!(weight > 0.5, "no ink near x={around} on row {row}");
-    moment / weight
+    (weight > 0.5).then(|| moment / weight)
 }
 
 /// The ink a one-pixel horizontal line at `y` leaves in column `x`, summed
@@ -226,6 +273,17 @@ fn lanes_and_the_value_pane_render_on_one_measured_time_axis() {
     let render = render();
     let canvas = &render.canvas;
     let map = render.map;
+
+    // The marker strip sits above the lanes, and q's violation is shaded
+    // on q's own lane in the error token.
+    assert!(render.lanes_top >= markers::MARKER_STRIP_HEIGHT);
+    let shade = over(render.error.gamma_multiply(0.28), canvas.background());
+    let shaded = pixel(
+        canvas,
+        map.x(45.0 * NS) as usize,
+        lane_levels(&render, 0).mid() as usize,
+    );
+    assert!(distance(shaded, shade) <= 2.0, "{shaded:?} vs {shade:?}");
 
     // The pane's plot rectangle and the lanes' mapping are one axis.
     assert!((render.plot_rect.left() - map.left).abs() <= 0.5);
@@ -291,13 +349,20 @@ fn lanes_and_the_value_pane_render_on_one_measured_time_axis() {
     let (y0, y1) = render.y_range;
     let y_of = |value: f64| rect.bottom() - ((value - y0) / (y1 - y0)) as f32 * rect.height();
     let step_time = render.real.times()[2];
-    let between = (y_of(0.25) + y_of(0.75)) * 0.5;
-    let measured = centroid(canvas, between, map.x(step_time), 3, render.step_color);
-    assert!(
-        (measured - map.x(step_time)).abs() <= 0.5,
-        "E() step at {step_time}: measured x {measured}, mapped {}",
-        map.x(step_time)
-    );
+    // The plot draws this trace in its second dash style, so the rows
+    // between the two levels are read where a dash lands on them.
+    let mapped = map.x(step_time);
+    let rows = (y_of(0.75) + 3.0) as usize..(y_of(0.25) - 3.0) as usize;
+    let measured: Vec<f32> = rows
+        .filter_map(|row| inked_centroid(canvas, row as f32, mapped, 3, render.step_color))
+        .collect();
+    assert!(measured.len() >= 5, "the vertical is drawn: {measured:?}");
+    for x in measured {
+        assert!(
+            (x - mapped).abs() <= 0.5,
+            "E() step at {step_time}: measured x {x}, mapped {mapped}"
+        );
+    }
 }
 
 /// Writes the render for review. Set `RSPICE_REVIEW_DIR` to choose where.

@@ -355,6 +355,7 @@ fn lane_frame(
                 selected: &[0],
                 cursor,
                 significant_digits: 4,
+                violations: &[],
             },
         ));
     });
@@ -427,4 +428,189 @@ fn a_lane_names_the_digital_quantity_of_its_net_for_cross_probing() {
     assert_eq!(lane_signal(&bus, None).as_deref(), Some("D(b)"));
     assert_eq!(lane_signal(&bus, Some(1)).as_deref(), Some("D(b[2])"));
     assert_eq!(lane_signal(&bus, Some(9)), None);
+}
+
+fn hdl_record(
+    seconds: f64,
+    stream: rspice_core::config::HdlStream,
+    text: &str,
+) -> rspice_core::config::HdlOutputRecord {
+    rspice_core::config::HdlOutputRecord {
+        point: rspice_core::config::HdlPoint::Transient { time: seconds },
+        tick: 0,
+        seconds,
+        stream,
+        text: text.to_owned(),
+        origin: rspice_core::config::HdlOrigin {
+            scope: "tb".to_owned(),
+            file: "tb_ldo_full.vams".to_owned(),
+            line: 40,
+        },
+    }
+}
+
+/// Severity records and the end of the run are markers; `$display` and
+/// `$info` stay in the Console.
+#[test]
+fn hdl_severity_and_end_of_run_records_make_markers_and_console_output_does_not() {
+    use rspice_core::config::{HdlSeverity, HdlStream};
+    let diagnostic = |severity| HdlStream::Diagnostic { severity };
+    let cases = [
+        (diagnostic(HdlSeverity::Fatal), Some(MarkerSeverity::Fatal)),
+        (diagnostic(HdlSeverity::Error), Some(MarkerSeverity::Error)),
+        (
+            diagnostic(HdlSeverity::Warning),
+            Some(MarkerSeverity::Warning),
+        ),
+        (diagnostic(HdlSeverity::Info), None),
+        (HdlStream::Stdout, None),
+        (
+            HdlStream::Finish {
+                stop: false,
+                level: 1,
+            },
+            Some(MarkerSeverity::Finish),
+        ),
+        (
+            HdlStream::Finish {
+                stop: true,
+                level: 1,
+            },
+            Some(MarkerSeverity::Stop),
+        ),
+    ];
+    for (stream, expected) in cases {
+        let marker = HdlMarker::from_record(&hdl_record(99.0e-6, stream.clone(), "mismatch\n"));
+        assert_eq!(
+            marker.as_ref().map(|marker| marker.severity),
+            expected,
+            "{stream:?}"
+        );
+    }
+    let marker = HdlMarker::from_record(&hdl_record(
+        99.0e-6,
+        diagnostic(HdlSeverity::Error),
+        "mismatch\n",
+    ))
+    .unwrap();
+    assert_eq!(marker.time, 99.0e-6);
+    assert_eq!(marker.text, "mismatch");
+    assert_eq!(
+        marker.source,
+        Some(SourceLine {
+            file: "tb_ldo_full.vams".to_owned(),
+            line: 40
+        })
+    );
+    let described = marker.describe("99 µs");
+    assert!(
+        described.contains("Error at 99 µs: mismatch"),
+        "{described}"
+    );
+    assert!(described.contains("tb_ldo_full.vams:40"), "{described}");
+}
+
+#[test]
+fn records_sharing_a_pixel_column_draw_one_glyph_the_most_severe() {
+    let map = TimeMapping {
+        t0: 0.0,
+        t1: 100.0,
+        left: 0.0,
+        right: 100.0,
+    };
+    let marker = |time, severity| HdlMarker {
+        time,
+        severity,
+        text: String::new(),
+        scope: String::new(),
+        source: None,
+    };
+    let mut markers: Vec<_> = (0..1000)
+        .map(|k| marker(50.0 + f64::from(k) * 1.0e-4, MarkerSeverity::Warning))
+        .collect();
+    markers[700].severity = MarkerSeverity::Fatal;
+    markers.push(marker(80.0, MarkerSeverity::Finish));
+    let glyphs = markers::marker_glyphs(&markers, &map);
+    assert_eq!(glyphs.len(), 2, "{glyphs:?}");
+    assert_eq!(glyphs[0].1, 700);
+    assert_eq!(glyphs[1].1, 1000);
+    assert!((glyphs[1].0 - 80.0).abs() < 1.0e-3);
+    let none = MarkerStripInput {
+        hdl: &[],
+        assertions: &[],
+        x_range: (0.0, 1.0),
+        left_margin: 64.0,
+        right_margin: 14.0,
+    };
+    assert_eq!(marker_strip_height(&none), 0.0, "no markers, no strip");
+}
+
+#[test]
+fn clicking_a_marker_moves_the_cursor_and_asks_for_its_source_line() {
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let hdl = [HdlMarker {
+        time: 50.0 * NS,
+        severity: MarkerSeverity::Error,
+        text: "mismatch".to_owned(),
+        scope: "tb".to_owned(),
+        source: Some(SourceLine {
+            file: "tb.v".to_owned(),
+            line: 40,
+        }),
+    }];
+    let assertions = [AssertionSpan {
+        start: 70.0 * NS,
+        end: 90.0 * NS,
+        operand: "D(q)".to_owned(),
+        label: "q_settled".to_owned(),
+        error: true,
+    }];
+    let frame = |events: Vec<egui::Event>| {
+        let mut response = None;
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 40.0))),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            response = Some(show_marker_strip(
+                ui,
+                &MarkerStripInput {
+                    hdl: &hdl,
+                    assertions: &assertions,
+                    x_range: (0.0, 100.0 * NS),
+                    left_margin: 64.0,
+                    right_margin: 14.0,
+                },
+                &|t| format!("{t}"),
+            ));
+        });
+        response.unwrap()
+    };
+    let click = |x: f32| {
+        let at = egui::pos2(x, 7.0);
+        let button = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        frame(vec![egui::Event::PointerMoved(at)]);
+        frame(vec![button(true)]);
+        frame(vec![button(false)])
+    };
+    // The plot area spans 64..386, so 50 ns is at x = 225 and 80 ns at 321.6.
+    let marker = click(225.0);
+    assert_eq!(marker.cursor_to, Some(50.0 * NS));
+    assert_eq!(
+        marker.open_source,
+        Some(SourceLine {
+            file: "tb.v".to_owned(),
+            line: 40
+        })
+    );
+    let span = click(321.6);
+    assert_eq!(span.select_assertion, Some(0));
+    assert_eq!(span.cursor_to, Some(70.0 * NS));
 }

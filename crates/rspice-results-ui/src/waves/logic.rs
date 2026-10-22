@@ -11,12 +11,17 @@
 //! in [`LaneStackResponse`] and the host applies it.
 
 pub mod cursor;
+pub mod markers;
 pub mod model;
 pub mod paint;
 pub mod plan;
 pub mod real;
 
 pub use cursor::{EdgeStep, EventLane, LaneReadout};
+pub use markers::{
+    AssertionSpan, HdlMarker, MarkerSeverity, MarkerStripInput, MarkerStripResponse, SourceLine,
+    marker_strip_height, show_marker_strip,
+};
 pub use model::{BusLane, BusOrigin, EventLanes, LogicLane, LogicLevel, RealLane};
 pub use paint::{LaneLevels, LaneStyle, paint_bus_lane, paint_logic_lane};
 pub use plan::{LaneStroke, TimeMapping, plan_lane};
@@ -113,6 +118,8 @@ pub struct LaneStackInput<'a> {
     pub cursor: Option<f64>,
     /// Significant digits a real value is read out to.
     pub significant_digits: usize,
+    /// Assertion violations, each shaded on its operand's lane.
+    pub violations: &'a [AssertionSpan],
 }
 
 /// What the reader asked of the lane stack this frame.
@@ -281,6 +288,12 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
             ui.painter()
                 .rect_filled(row_rect, 0.0, tokens.color.accent_dim);
         }
+        let signal = lane_signal(row, None);
+        for span in input.violations.iter().filter(|span| {
+            span.operand == row.name() || signal.as_deref() == Some(span.operand.as_str())
+        }) {
+            markers::paint_violation_span(&lane_painter, row_rect, span, &map, &tokens);
+        }
         match row {
             LaneRow::Logic { lane, color } => {
                 let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, row_rect.y_range());
@@ -323,7 +336,14 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                 paint_gutter(
                     ui,
                     gutter,
-                    gutter.left() + GUTTER_PAD + CHEVRON_WIDTH,
+                    // Only a bus with member lanes to show has the control.
+                    gutter.left()
+                        + GUTTER_PAD
+                        + if members.is_empty() {
+                            0.0
+                        } else {
+                            CHEVRON_WIDTH
+                        },
                     lane.name(),
                     readout(EventLane::Bus(lane, *radix)).as_deref(),
                     &tokens,
@@ -378,7 +398,10 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
         && let Some((pointer, (index, member))) = pointer_row
     {
         let on_chevron = pointer.x < rect.left() + GUTTER_PAD + CHEVRON_WIDTH;
-        if member.is_none() && on_chevron && matches!(input.rows[index], LaneRow::Bus { .. }) {
+        if member.is_none()
+            && on_chevron
+            && matches!(&input.rows[index], LaneRow::Bus { members, .. } if !members.is_empty())
+        {
             output.toggle_expanded = Some(index);
         } else {
             let extend = ui.input(|i| i.modifiers.command || i.modifiers.shift);
