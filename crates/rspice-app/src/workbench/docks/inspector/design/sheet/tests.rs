@@ -465,7 +465,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
     assert_eq!(policy.net_naming, NetNamingPolicy::SpiceCompatibleRelaxed);
     assert_eq!(schematic.document().grid_size, 5);
     assert_eq!(schematic.session.editor.snap_engine.grid_size, 5);
-    assert_eq!(app.state.ui.schematic_snap.grid_size, 5);
+    assert_eq!(app.state.design.schematic_snap.grid_size, 5);
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(
         painted.ends_with("Grid\n1.25 mm\nNet names\nAny printable but spaces\n"),

@@ -65,7 +65,7 @@ pub(super) enum MenuContext {
 
 impl MenuContext {
     fn holds(self, app: &RSpiceApp, platform: CommandPlatform) -> bool {
-        let editor = app.state.ui.active_source_editor;
+        let editor = app.state.workbench.active_source_editor;
         match self {
             Self::SourceEditor => editor.is_some(),
             Self::NavigableSourceEditor => editor.is_some_and(|editor| editor.navigable),

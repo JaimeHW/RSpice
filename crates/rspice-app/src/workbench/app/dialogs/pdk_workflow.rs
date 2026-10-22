@@ -747,7 +747,7 @@ impl RSpiceApp {
                 ),
             );
         }
-        self.state.ui.toasts.warn_with_title(
+        self.state.workbench.toasts.warn_with_title(
             ctx,
             "Recalled model release",
             format!(
@@ -1130,7 +1130,7 @@ fn poll_native_model_imports(
             state.workbench.models_view.action_receipt = Some(Err(error.clone()));
             state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
             state
-                .ui
+                .workbench
                 .toasts
                 .warn_with_title(ctx, "Stale model import discarded", error);
             continue;
@@ -1182,10 +1182,11 @@ fn poll_native_model_imports(
                     state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
                     state.workbench.models_view.action_receipt = Some(Err(error.clone()));
                     state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
-                    state
-                        .ui
-                        .toasts
-                        .warn_with_title(ctx, "Stale PDK settings discarded", error);
+                    state.workbench.toasts.warn_with_title(
+                        ctx,
+                        "Stale PDK settings discarded",
+                        error,
+                    );
                     continue;
                 }
                 let result = publish_prepared_pdk_configuration_with_persistence(
@@ -1679,10 +1680,11 @@ fn poll_browser_model_hub_operations(
                     state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
                     state.workbench.models_view.action_receipt = Some(Err(error.clone()));
                     state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
-                    state
-                        .ui
-                        .toasts
-                        .warn_with_title(ctx, "Stale model-hub result discarded", error);
+                    state.workbench.toasts.warn_with_title(
+                        ctx,
+                        "Stale model-hub result discarded",
+                        error,
+                    );
                     continue;
                 }
                 publish_model_hub_output(ctx, state, model_hub, &completion.request, output);

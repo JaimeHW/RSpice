@@ -73,7 +73,7 @@ enum FindAction {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_source_find_dialog(&mut self, ctx: &Context) {
-        if self.state.ui.code_workspace.source_search.is_none() {
+        if self.state.code.code_workspace.source_search.is_none() {
             crate::ui::input::InputScope::discard(ctx, code_workspace::source_search_query_id());
             return;
         }
@@ -81,7 +81,7 @@ impl RSpiceApp {
             crate::ui::input::InputScope::enter(ctx, code_workspace::source_search_query_id());
         // Read the search once, run it once, and render from that. Re-running
         // per section would let two parts of one dialog state different counts.
-        let Some(search) = self.state.ui.code_workspace.source_search.clone() else {
+        let Some(search) = self.state.code.code_workspace.source_search.clone() else {
             return;
         };
         let results = code_workspace::source_search_results(self, &search);
@@ -94,7 +94,7 @@ impl RSpiceApp {
                 &search.active_path,
             );
 
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let mut dialog = Dialog::new(
             messages.text(MessageId::CodeSearchTitle),
             messages.text(MessageId::CommonClose),
@@ -135,7 +135,7 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            self.state.ui.code_workspace.source_search = None;
+            self.state.code.code_workspace.source_search = None;
         }
     }
 
@@ -144,7 +144,7 @@ impl RSpiceApp {
             FindAction::None => {}
             FindAction::Replace => {
                 if let Err(error) = code_workspace::commit_source_search_replace(self) {
-                    if let Some(search) = self.state.ui.code_workspace.source_search.as_mut() {
+                    if let Some(search) = self.state.code.code_workspace.source_search.as_mut() {
                         search.error = Some(error);
                     } else {
                         self.state.prompt(error);
@@ -154,20 +154,20 @@ impl RSpiceApp {
             // A result row is a document plus an exact line, so following one
             // has to select that document before revealing the line in it.
             FindAction::Reveal(logical_path, line) => {
-                let Some(search) = self.state.ui.code_workspace.source_search.as_ref() else {
+                let Some(search) = self.state.code.code_workspace.source_search.as_ref() else {
                     return;
                 };
                 let (language, bundle_id) = (search.language, search.bundle_id);
                 match language {
                     ProjectSourceLanguage::VerilogA => {
-                        self.state.ui.code_workspace.veriloga.selected_file =
+                        self.state.code.code_workspace.veriloga.selected_file =
                             Some(code_workspace::VerilogAFileSelection {
                                 bundle_id,
                                 logical_path: logical_path.clone(),
                             });
                     }
                     ProjectSourceLanguage::RSpiceAutomation => {
-                        self.state.ui.code_workspace.automation.selected_file =
+                        self.state.code.code_workspace.automation.selected_file =
                             Some(logical_path.clone());
                     }
                 }
@@ -176,7 +176,7 @@ impl RSpiceApp {
                     code_workspace::source_editor_id(language, bundle_id, &logical_path),
                     line,
                 );
-                if let Some(search) = self.state.ui.code_workspace.source_search.as_mut() {
+                if let Some(search) = self.state.code.code_workspace.source_search.as_mut() {
                     search.active_path = logical_path;
                 }
             }
@@ -191,14 +191,14 @@ fn find_body(
     replaceable: bool,
 ) -> FindAction {
     let t = Tokens::get(ui.ctx());
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let mut action = FindAction::None;
     ScrollArea::vertical()
         .id_salt("source-find")
         .auto_shrink([false, false])
         .show(ui, |ui| {
             panel_body(ui, |ui| {
-                let Some(search) = state.ui.code_workspace.source_search.as_mut() else {
+                let Some(search) = state.code.code_workspace.source_search.as_mut() else {
                     return;
                 };
                 let has_selection = search.selection_char_range.is_some();
@@ -440,7 +440,7 @@ mod tests {
             ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
             let mut app = RSpiceApp::test_instance();
             app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-            app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+            app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
             if read_only {
                 app.state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
@@ -477,7 +477,13 @@ mod tests {
                 }]);
                 render(vec![egui::Event::Paste("replacement".to_owned())]);
             }
-            let search = app.state.ui.code_workspace.source_search.as_ref().unwrap();
+            let search = app
+                .state
+                .code
+                .code_workspace
+                .source_search
+                .as_ref()
+                .unwrap();
             assert_eq!(search.query, "import");
             assert_eq!(
                 search.replacement,
@@ -540,10 +546,10 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
         code_workspace::open_active_source_search(&mut app)
             .expect("the Automation page owns a searchable bundle");
-        let Some(search) = app.state.ui.code_workspace.source_search.as_mut() else {
+        let Some(search) = app.state.code.code_workspace.source_search.as_mut() else {
             panic!("the search opened");
         };
         search.query = "import".to_owned();
@@ -584,13 +590,13 @@ mod tests {
     #[test]
     fn a_bundle_search_finds_and_replaces_through_the_dialog_entry_points() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
         code_workspace::open_active_source_search(&mut app)
             .expect("the Automation page owns a searchable bundle");
 
         let search = app
             .state
-            .ui
+            .code
             .code_workspace
             .source_search
             .as_mut()

@@ -48,10 +48,10 @@ impl eframe::Storage for MemoryStorage {
 
 /// Move every setting the file holds off its default.
 fn customize(state: &mut AppState) {
-    state.ui.theme.mode = Mode::Light;
-    state.ui.theme.canvas_contrast = 40;
-    state.ui.autosave_minutes = 10;
-    state.ui.browser_spoken_feedback = true;
+    state.workbench.theme.mode = Mode::Light;
+    state.workbench.theme.canvas_contrast = 40;
+    state.platform.autosave_minutes = 10;
+    state.settings.browser_spoken_feedback = true;
     state
         .model
         .preferences
@@ -87,9 +87,9 @@ fn settings_of(state: &AppState) -> Value {
         .expect("preferences object")
         .remove(SHORTCUTS);
     json!({
-        "theme": serde_json::to_value(state.ui.theme).expect("theme"),
-        "autosave": state.ui.autosave_minutes,
-        "spoken": state.ui.browser_spoken_feedback,
+        "theme": serde_json::to_value(state.workbench.theme).expect("theme"),
+        "autosave": state.platform.autosave_minutes,
+        "spoken": state.settings.browser_spoken_feedback,
         "preferences": preferences,
     })
 }
@@ -130,9 +130,9 @@ fn settings_round_trip_with_unknown_keys_and_domains_kept() {
     std::fs::write(&path, &newer).unwrap();
 
     let mut second = bound(&store);
-    assert_eq!(second.ui.theme, first.ui.theme);
-    assert_eq!(second.ui.autosave_minutes, 10);
-    assert!(second.ui.browser_spoken_feedback);
+    assert_eq!(second.workbench.theme, first.workbench.theme);
+    assert_eq!(second.platform.autosave_minutes, 10);
+    assert!(second.settings.browser_spoken_feedback);
     assert_eq!(
         second
             .model
@@ -147,7 +147,7 @@ fn settings_round_trip_with_unknown_keys_and_domains_kept() {
         "nothing changed, so the newer build's file is left byte for byte"
     );
 
-    second.ui.theme.mode = Mode::Dark;
+    second.workbench.theme.mode = Mode::Dark;
     second.flush_preferences_file();
     let rewritten = read_json(&path);
     assert_eq!(rewritten["version"], 7);
@@ -179,8 +179,12 @@ fn a_setting_a_newer_build_wrote_is_kept_until_it_is_changed_here() {
     std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
 
     let mut state = bound(&store);
-    assert_eq!(state.ui.theme, Theme::default(), "the theme falls back");
-    assert_eq!(state.ui.autosave_minutes, 10, "the rest still loads");
+    assert_eq!(
+        state.workbench.theme,
+        Theme::default(),
+        "the theme falls back"
+    );
+    assert_eq!(state.platform.autosave_minutes, 10, "the rest still loads");
     assert!(
         state
             .model
@@ -199,7 +203,7 @@ fn a_setting_a_newer_build_wrote_is_kept_until_it_is_changed_here() {
         "another change leaves the theme it could not read as it was"
     );
 
-    state.ui.theme.mode = Mode::Light;
+    state.workbench.theme.mode = Mode::Light;
     state.flush_preferences_file();
     let written = read_json(&path);
     assert_eq!(
@@ -258,7 +262,7 @@ fn library_folders_decode_from_files_that_predate_or_garble_them() {
         2,
         "every other preference still loads"
     );
-    state.ui.theme.mode = Mode::Dark;
+    state.workbench.theme.mode = Mode::Dark;
     state.flush_preferences_file();
     assert_eq!(
         read_json(&path)[PREFERENCES]["folders"]["library-folders"],
@@ -435,7 +439,12 @@ fn pointer_movement_alone_never_hashes_the_settings() {
 
     // The shortcut library is not in the file, so it is not in the hash, and
     // it comes back from the hash exactly as it went in.
-    let before = fingerprint(&state.ui, &mut state.model.preferences);
+    let before = fingerprint(
+        &state.workbench,
+        &state.platform,
+        &state.settings,
+        &mut state.model.preferences,
+    );
     state
         .model
         .preferences
@@ -445,7 +454,15 @@ fn pointer_movement_alone_never_hashes_the_settings() {
         .policies_mut()
         .set_chord_timeout(crate::state::shortcuts::ChordTimeoutPolicy::ThreeSeconds);
     let edited = state.model.preferences.shortcut_profiles().clone();
-    assert_eq!(fingerprint(&state.ui, &mut state.model.preferences), before);
+    assert_eq!(
+        fingerprint(
+            &state.workbench,
+            &state.platform,
+            &state.settings,
+            &mut state.model.preferences,
+        ),
+        before
+    );
     assert_eq!(state.model.preferences.shortcut_profiles(), &edited);
 }
 
@@ -459,7 +476,7 @@ fn a_failed_write_is_reported_once_and_retried_on_the_next_change() {
     let start = Instant::now();
 
     for (step, minutes) in [2_u8, 10, 2].into_iter().enumerate() {
-        state.ui.autosave_minutes = minutes;
+        state.platform.autosave_minutes = minutes;
         let base = u64::try_from(step).unwrap() * 2_000;
         let _ = state.persist_preferences_file_at(start + Duration::from_millis(base), true);
         let _ = state.persist_preferences_file_at(start + Duration::from_millis(base + 600), false);
@@ -476,7 +493,7 @@ fn a_failed_write_is_reported_once_and_retried_on_the_next_change() {
     );
 
     std::fs::remove_dir(&path).unwrap();
-    state.ui.autosave_minutes = 10;
+    state.platform.autosave_minutes = 10;
     let _ = state.persist_preferences_file_at(start + Duration::from_secs(10), true);
     let _ = state.persist_preferences_file_at(start + Duration::from_secs(11), false);
     assert_eq!(read_json(&path)[AUTOSAVE], 10, "the next change is written");

@@ -14,10 +14,10 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let action = match code_workspace::selected_veriloga_source(app) {
         Ok(selected) => code_workspace::show_veriloga_inspector(
             ui,
-            &app.state.ui.code_workspace.veriloga,
+            &app.state.code.code_workspace.veriloga,
             app.state.model.workspace.content.project.id(),
             &selected,
-            app.state.ui.messages(),
+            app.state.workbench.messages(),
         ),
         // The editor states the same refusal in full; the inspector has no
         // module to describe and says why rather than drawing empty rows.

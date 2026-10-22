@@ -22,7 +22,7 @@ pub(crate) fn save_owned_netlist_source(
     save_as_encoding: crate::state::NetlistTextEncoding,
     commit_message: &str,
 ) -> bool {
-    if state.ui.netlist.active_dependency_identity.is_some() {
+    if state.code.netlist.active_dependency_identity.is_some() {
         state.prompt(
             "Include files are saved with the project. Return to the top-level deck to save it \
              as a file.",
@@ -154,7 +154,7 @@ pub(crate) fn save_owned_netlist_source(
 
     let canonical_publication = io.saved_paths_are_reopenable();
     let next_owned_document = if canonical_publication
-        && let Some(document) = state.ui.netlist.owned_document.as_ref()
+        && let Some(document) = state.code.netlist.owned_document.as_ref()
     {
         let display_name = path
             .file_name()
@@ -237,10 +237,10 @@ pub(crate) fn save_owned_netlist_source(
             }
             if let Some(document) = next_owned_document {
                 state.model.workspace.content.netlist_document = Some(document.clone());
-                state.ui.netlist.owned_document = Some(document);
+                state.code.netlist.owned_document = Some(document);
             }
             if canonical_publication {
-                state.ui.netlist.externally_saved_content_digest = Some(visible_digest);
+                state.code.netlist.externally_saved_content_digest = Some(visible_digest);
                 state.record(
                     LogSeverity::Info,
                     LogSource::Studio,

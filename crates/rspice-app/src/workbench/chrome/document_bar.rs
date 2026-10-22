@@ -558,7 +558,7 @@ fn available_documents_for_workspace(
 fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
-    if state.ui.code_workspace.page != CodeWorkspacePage::Netlist {
+    if state.code.code_workspace.page != CodeWorkspacePage::Netlist {
         return vec![code_workspace_document(state)];
     }
     let mut documents = Vec::new();
@@ -587,7 +587,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
         }));
     }
 
-    if let Some(owned) = state.ui.netlist.owned_document.as_ref() {
+    if let Some(owned) = state.code.netlist.owned_document.as_ref() {
         let owned_label = state
             .model
             .workspace
@@ -634,7 +634,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
         }));
     }
 
-    if !state.ui.netlist.generated_diff_source.is_empty() {
+    if !state.code.netlist.generated_diff_source.is_empty() {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistComparison,
             label: "Netlist comparison".to_owned(),
@@ -645,7 +645,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
     if let Some(run_id) = run_deck_snapshot_run_id(state) {
         documents.push(WorkspaceDocument {
             id: WorkspaceDocumentId::NetlistRunSnapshot,
-            label: state.ui.messages().format(
+            label: state.workbench.messages().format(
                 crate::workbench::MessageId::NetlistRunSnapshotDocument,
                 &[("id", &run_id.to_string())],
             ),
@@ -698,13 +698,13 @@ fn document_is_closable(state: &AppState, document: &WorkspaceDocumentId) -> boo
 fn code_workspace_document(state: &AppState) -> WorkspaceDocument {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
-    let page = state.ui.code_workspace.page;
+    let page = state.code.code_workspace.page;
     WorkspaceDocument {
         id: WorkspaceDocumentId::NetlistSource,
         label: crate::workbench::documents::code_workspace::active_document_label(
             &state.model.workspace,
-            &state.ui.code_workspace,
-            state.ui.messages(),
+            &state.code.code_workspace,
+            state.workbench.messages(),
         ),
         icon: match page {
             CodeWorkspacePage::Netlist => WorkbenchIcon::Netlist,
@@ -767,10 +767,10 @@ fn active_netlist_document_id(state: &AppState) -> Option<WorkspaceDocumentId> {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
     use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 
-    if state.ui.code_workspace.page != CodeWorkspacePage::Netlist {
+    if state.code.code_workspace.page != CodeWorkspacePage::Netlist {
         return Some(WorkspaceDocumentId::NetlistSource);
     }
-    let netlist = &state.ui.netlist;
+    let netlist = &state.code.netlist;
     if netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         return Some(WorkspaceDocumentId::NetlistComparison);
     }
@@ -1020,14 +1020,14 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
                 .as_ref()
                 .is_some_and(|document| document.id() == *document_id);
             available
-                && ((state.ui.netlist.active_document
+                && ((state.code.netlist.active_document
                     == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
-                    && state.ui.netlist.active_dependency_identity.is_none())
+                    && state.code.netlist.active_dependency_identity.is_none())
                     || crate::workbench::documents::netlist_document::open_generated_primary(state))
         }
         WorkspaceDocumentId::NetlistOwned(document_id) => {
             let available = state
-                .ui
+                .code
                 .netlist
                 .owned_document
                 .as_ref()
@@ -1048,7 +1048,7 @@ fn activate_document(state: &mut AppState, document: &WorkspaceDocumentId) -> bo
             {
                 Some(ActiveNetlistDocument::Generated)
             } else if state
-                .ui
+                .code
                 .netlist
                 .owned_document
                 .as_ref()
@@ -1470,11 +1470,11 @@ mod tests {
             .unwrap();
         let mut state = AppState::default();
         state.workbench.workspace = Workspace::Netlist;
-        state.ui.code_workspace.page =
+        state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         state.model.netlist_artifacts.generated_source = ROOT.to_owned();
         state.model.netlist_artifacts.generated_document = Some(generated);
-        state.ui.netlist.owned_document = Some(owned.clone());
+        state.code.netlist.owned_document = Some(owned.clone());
         state.model.workspace.content.netlist_source = Some(ROOT.to_owned());
         state.model.workspace.content.netlist_document = Some(owned);
         state.model.simulation.source.netlist_content = ROOT.to_owned();
@@ -1571,11 +1571,11 @@ mod tests {
         let owned_dependency = descriptors[3].id.clone();
         assert!(activate_document(&mut state, &owned_dependency));
         assert_eq!(
-            state.ui.netlist.active_document,
+            state.code.netlist.active_document,
             crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         );
         assert_eq!(
-            state.ui.netlist.active_dependency_identity.as_deref(),
+            state.code.netlist.active_dependency_identity.as_deref(),
             Some("models/resistor.inc")
         );
         assert_eq!(active_document_id(&state), Some(owned_dependency.clone()));

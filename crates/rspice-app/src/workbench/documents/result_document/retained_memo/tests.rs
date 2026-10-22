@@ -36,7 +36,7 @@ fn retained_state(kind: AnalysisType, samples: usize) -> AppState {
         crate::io::capture_simulation_results(&state.model.simulation),
     )
     .unwrap();
-    state.ui.results.session.viewer = ResultViewer::Waves;
+    state.results.results.session.viewer = ResultViewer::Waves;
     state
         .workbench
         .documents
@@ -218,7 +218,7 @@ fn retained_memo_unchanged_clones_reuse_their_evidence_without_dataset_walks() {
         read_all(&state);
         let mut clone = AppState::default();
         clone.model.simulation = state.model.simulation.clone();
-        clone.ui.results = state.ui.results.clone();
+        clone.results.results = state.results.results.clone();
         let work = frame_work::WorkCounts::reset();
         for _ in 0..12 {
             read_all(&state);

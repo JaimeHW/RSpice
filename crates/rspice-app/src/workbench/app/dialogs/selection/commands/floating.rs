@@ -96,7 +96,7 @@ impl AppState {
             objects,
             start: on_grid(anchor, grid),
             grab: self
-                .ui
+                .design
                 .canvas_hover
                 .map(|_| on_grid(self.schematic_paste_anchor(), grid)),
             delta: Point::origin(),

@@ -60,7 +60,13 @@ fn current_policy(state: &AppState, scope: Scope) -> Option<FamilyPresentationPo
             .find(|pane| pane.id == pane_id)?
             .family_policy
             .clone(),
-        Scope::QuickView(key) => state.ui.results.session.family_policies.get(&key).cloned(),
+        Scope::QuickView(key) => state
+            .results
+            .results
+            .session
+            .family_policies
+            .get(&key)
+            .cloned(),
     }
 }
 
@@ -142,7 +148,7 @@ pub(super) fn choices(state: &AppState, draft: &FamilyDraft) -> FamilyChoices {
             }
             points
         });
-    let refusal = if state.ui.results.session.viewer == ResultViewer::Waves {
+    let refusal = if state.results.results.session.viewer == ResultViewer::Waves {
         policy(&manifest, draft)
             .and_then(|policy| {
                 selection(run, analysis, &manifest, &policy)?;
@@ -207,7 +213,12 @@ pub(super) fn commit(
             )?;
         }
         Scope::QuickView(key) => {
-            state.ui.results.session.family_policies.insert(key, policy);
+            state
+                .results
+                .results
+                .session
+                .family_policies
+                .insert(key, policy);
         }
     }
     Ok(None)
@@ -241,7 +252,7 @@ pub(in super::super) fn quick_view_selection(state: &AppState) -> Option<SourceS
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let key = super::super::AnalysisPresentationKey::new(run.dataset_id, analysis);
-    let policy = state.ui.results.session.family_policies.get(&key)?;
+    let policy = state.results.results.session.family_policies.get(&key)?;
     selection(run, analysis, &manifest(analysis).ok()?, policy).ok()
 }
 

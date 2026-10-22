@@ -106,7 +106,7 @@ fn vendor_admitted_decks_have_explicit_preparation_outcomes() {
         let ready = validate_visible_netlist_source(&mut app);
         let error = app
             .state
-            .ui
+            .code
             .netlist
             .validation_error
             .as_deref()

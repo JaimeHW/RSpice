@@ -41,7 +41,7 @@ fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis = state.model.simulation.active_analysis()?;
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-    if let Some(plan) = state.ui.results.plans.optimization.borrow().as_ref()
+    if let Some(plan) = state.results.results.plans.optimization.borrow().as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
     {
@@ -53,7 +53,7 @@ fn optimization_plan(state: &AppState) -> Option<Arc<OptimizationPlan>> {
         analysis: analysis_key,
         located: locate_optimization(analysis, evidence_is_valid),
     });
-    *state.ui.results.plans.optimization.borrow_mut() = Some(Arc::clone(&built));
+    *state.results.results.plans.optimization.borrow_mut() = Some(Arc::clone(&built));
     Some(built)
 }
 
@@ -106,7 +106,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     };
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let plot_view = state
-        .ui
+        .results
         .results
         .session
         .plot_view(super::ResultViewer::Optimization, 0);
@@ -120,7 +120,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         hasher.finish()
     };
     let (cost_min, cost_max) = state
-        .ui
+        .results
         .results
         .session
         .derived
@@ -132,7 +132,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             analysis_id: analysis.id,
             label: &analysis.label,
             selected: state
-                .ui
+                .results
                 .results
                 .session
                 .selected_optimization
@@ -142,25 +142,25 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plot_view,
             cost_range: (cost_min, cost_max),
         },
-        &mut state.ui.results.session.cache,
+        &mut state.results.results.session.cache,
     );
     if response.fit {
         state
-            .ui
+            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Optimization, 0);
     }
     if response.view.any() {
         state
-            .ui
+            .results
             .results
             .session
             .plot_view_mut(super::ResultViewer::Optimization, 0)
             .apply(&response.view);
     }
     if let Some(index) = response.selected {
-        state.ui.results.session.selected_optimization = Some(OptimizationSelection {
+        state.results.results.session.selected_optimization = Some(OptimizationSelection {
             analysis: analysis_key,
             iteration_index: index,
         });
@@ -174,14 +174,14 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     if paint_selected_candidate(ui, state) {
         return;
     }
-    state.ui.results.session.selected_optimization = None;
+    state.results.results.session.selected_optimization = None;
     section_header(ui, "Candidate selection", None);
     panel_note(ui, "Select an iteration.");
 }
 
 /// Paint the selected candidate, or report that there is none to paint.
 fn paint_selected_candidate(ui: &mut Ui, state: &AppState) -> bool {
-    let Some(selection) = state.ui.results.session.selected_optimization else {
+    let Some(selection) = state.results.results.session.selected_optimization else {
         return false;
     };
     let Some(run) = state.model.simulation.active_run() else {

@@ -193,10 +193,10 @@ fn netlist_search_documents(
         {
             NetlistSearchDocument {
                 active_document: state
-                    .ui
+                    .code
                     .netlist
                     .active_dependency_root
-                    .unwrap_or(state.ui.netlist.active_document),
+                    .unwrap_or(state.code.netlist.active_document),
                 deck_id: None,
                 dependency_identity: Some(dependency.locator().logical_identity()),
                 editable: crate::workbench::documents::netlist_document::active_dependency_is_owned(
@@ -207,7 +207,7 @@ fn netlist_search_documents(
                 search_byte_range: None,
             }
         } else {
-            match state.ui.netlist.active_document {
+            match state.code.netlist.active_document {
                 ActiveNetlistDocument::Generated => generated(),
                 ActiveNetlistDocument::OwnedSource => owned(),
                 ActiveNetlistDocument::GeneratedDiff => NetlistSearchDocument {
@@ -216,7 +216,7 @@ fn netlist_search_documents(
                     dependency_identity: None,
                     editable: false,
                     label: "generated.diff".to_owned(),
-                    source: state.ui.netlist.generated_diff_source.as_str(),
+                    source: state.code.netlist.generated_diff_source.as_str(),
                     search_byte_range: None,
                 },
                 ActiveNetlistDocument::RunSnapshot => NetlistSearchDocument {
@@ -242,8 +242,12 @@ fn netlist_search_documents(
         NetlistFindScope::CurrentDocument => vec![current()],
         NetlistFindScope::Selection => {
             let mut document = current();
-            document.search_byte_range =
-                state.ui.netlist.selected_byte_range.clone().or(Some(0..0));
+            document.search_byte_range = state
+                .code
+                .netlist
+                .selected_byte_range
+                .clone()
+                .or(Some(0..0));
             vec![document]
         }
         NetlistFindScope::OpenDocuments => open_netlist_search_documents(state),
@@ -262,7 +266,7 @@ fn netlist_search_documents(
                 false,
             ));
             documents.extend(retained_deck_search_documents(state));
-            if state.ui.netlist.find.include_generated_references {
+            if state.code.netlist.find.include_generated_references {
                 documents.push(generated());
                 documents.extend(dependency_search_documents(
                     state,
@@ -274,7 +278,7 @@ fn netlist_search_documents(
         }
         NetlistFindScope::ProjectReferences => {
             let mut documents = Vec::new();
-            if state.ui.netlist.find.include_generated_references
+            if state.code.netlist.find.include_generated_references
                 && !state.model.netlist_artifacts.generated_source.is_empty()
             {
                 documents.push(generated());
@@ -315,7 +319,7 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
             source: state.model.netlist_artifacts.generated_source.as_str(),
             search_byte_range: None,
         });
-        if state.ui.netlist.find.include_generated_references {
+        if state.code.netlist.find.include_generated_references {
             documents.extend(
                 dependency_search_documents(state, ActiveNetlistDocument::Generated, false)
                     .into_iter()
@@ -333,7 +337,7 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
             );
         }
     }
-    if let Some(owned) = state.ui.netlist.owned_document.as_ref() {
+    if let Some(owned) = state.code.netlist.owned_document.as_ref() {
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::OwnedSource,
             deck_id: None,
@@ -372,14 +376,14 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
                 }),
         );
     }
-    if !state.ui.netlist.generated_diff_source.is_empty() {
+    if !state.code.netlist.generated_diff_source.is_empty() {
         documents.push(NetlistSearchDocument {
             active_document: ActiveNetlistDocument::GeneratedDiff,
             deck_id: None,
             dependency_identity: None,
             editable: false,
             label: "generated.diff".to_owned(),
-            source: state.ui.netlist.generated_diff_source.as_str(),
+            source: state.code.netlist.generated_diff_source.as_str(),
             search_byte_range: None,
         });
     }
@@ -395,7 +399,7 @@ fn dependency_search_documents(
         ActiveNetlistDocument::Generated => {
             state.model.netlist_artifacts.generated_document.as_ref()
         }
-        ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
+        ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     };
     let owned = state.model.workspace.content.netlist_descriptor.as_ref();
@@ -584,15 +588,15 @@ fn source_offset_is_comment(source: &str, offset: usize) -> bool {
 }
 
 pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.ui.netlist.find.open {
+    if !app.state.code.netlist.find.open {
         return;
     }
 
     use crate::state::{FindDirection, FindOptions, replace_source_ranges};
     use crate::workbench::documents::netlist_document::NetlistFindScope;
 
-    let messages = app.state.ui.messages();
-    let mut find = app.state.ui.netlist.find.clone();
+    let messages = app.state.workbench.messages();
+    let mut find = app.state.code.netlist.find.clone();
     let options = FindOptions {
         direction: FindDirection::Forward,
         match_case: find.match_case,
@@ -602,7 +606,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     let documents = netlist_search_documents(&app.state, find.scope);
     let found = scan_documents(&documents, &find.find, options, find.include_comments);
     find.error = if find.scope == NetlistFindScope::Selection
-        && app.state.ui.netlist.selected_byte_range.is_none()
+        && app.state.code.netlist.selected_byte_range.is_none()
     {
         Some(messages.text(MessageId::NetlistFindSelectionRequired))
     } else {
@@ -874,7 +878,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     }
     drop(matches);
     drop(documents);
-    app.state.ui.netlist.find = find;
+    app.state.code.netlist.find = find;
 
     if let Some(replacements) = scoped_replacements {
         match crate::workbench::documents::netlist_document::replace_owned_sources_atomically(
@@ -882,7 +886,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             replacements,
         ) {
             Ok(count) if count > 0 => {
-                app.state.ui.netlist.find.selected_match = 0;
+                app.state.code.netlist.find.selected_match = 0;
                 let count_text = count.to_string();
                 app.state.prompt(messages.format(
                     if count == 1 {
@@ -895,7 +899,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             }
             Ok(_) => {}
             // The find window states the refusal in place.
-            Err(error) => app.state.ui.netlist.find.error = Some(error),
+            Err(error) => app.state.code.netlist.find.error = Some(error),
         }
         return;
     }
@@ -936,7 +940,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 app.state.prompt(error);
                 return;
             }
-            app.state.ui.netlist.requested_line = Some(target.line);
+            app.state.code.netlist.requested_line = Some(target.line);
         }
         Some(FindWindowAction::ReplaceNext) => {
             let Some(source) = target.source.as_deref().filter(|_| target.editable) else {
@@ -944,7 +948,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             };
             if target.deck_id.is_none()
                 && target.active_document == ActiveNetlistDocument::OwnedSource
-                && app.state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
+                && app.state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
             {
                 let _ = open_owned_source(&mut app.state);
             }
@@ -961,8 +965,8 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             }
             match replace_source_ranges(
                 source,
-                &app.state.ui.netlist.find.find,
-                &app.state.ui.netlist.find.replacement,
+                &app.state.code.netlist.find.find,
+                &app.state.code.netlist.find.replacement,
                 options,
                 std::slice::from_ref(&target.byte_range),
                 false,
@@ -1005,7 +1009,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         ) {
                             Ok(_) => true,
                             Err(error) => {
-                                app.state.ui.netlist.find.error = Some(error);
+                                app.state.code.netlist.find.error = Some(error);
                                 false
                             }
                         }
@@ -1029,8 +1033,8 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                             app.state.prompt(error);
                             return;
                         }
-                        app.state.ui.netlist.requested_line = Some(target.line);
-                        app.state.ui.netlist.find.selected_match = 0;
+                        app.state.code.netlist.requested_line = Some(target.line);
+                        app.state.code.netlist.find.selected_match = 0;
                         let count_text = count.to_string();
                         app.state.prompt(messages.format(
                             if count == 1 {
@@ -1042,7 +1046,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                         ));
                     }
                 }
-                Err(error) => app.state.ui.netlist.find.error = Some(error.to_string()),
+                Err(error) => app.state.code.netlist.find.error = Some(error.to_string()),
             }
         }
         Some(FindWindowAction::ReplaceAll) => {}

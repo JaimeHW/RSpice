@@ -60,8 +60,13 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
     let ActiveStudy::Ready(view) = active_study(state) else {
         return None;
     };
-    let index = state.ui.results.session.study.read_index(view.evidence);
-    if let Some(plan) = state.ui.results.plans.study.as_ref()
+    let index = state
+        .results
+        .results
+        .session
+        .study
+        .read_index(view.evidence);
+    if let Some(plan) = state.results.results.plans.study.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
         && plan.display.index() == index
@@ -74,7 +79,7 @@ fn study_plan(state: &mut AppState) -> Option<Arc<StudyPlan>> {
         analysis: analysis_key,
         display: viewer::StudyPlan::new(view.evidence, index),
     });
-    state.ui.results.plans.study = Some(Arc::clone(&built));
+    state.results.results.plans.study = Some(Arc::clone(&built));
     Some(built)
 }
 pub(in crate::workbench::documents::result_document) fn domain_bar(
@@ -154,7 +159,7 @@ mod tests {
         assert_eq!(study_plan(&mut state).unwrap().display.order(), [1, 0]);
 
         // At the middle frequency PARAM:GAIN dominates the band.
-        state.ui.results.session.study.frequency_index = 1;
+        state.results.results.session.study.frequency_index = 1;
         let middle = study_plan(&mut state).expect("the ranking follows the reader");
         assert_eq!(middle.display.index(), 1);
         assert_eq!(middle.display.order(), [0, 1]);
@@ -162,10 +167,10 @@ mod tests {
 
         // A selection past the end of a shorter study is clamped on read, and
         // the stored index is left exactly as the reader set it.
-        state.ui.results.session.study.frequency_index = 97;
+        state.results.results.session.study.frequency_index = 97;
         let clamped = study_plan(&mut state).expect("a clamped selection still ranks");
         assert_eq!(clamped.display.index(), 2);
-        assert_eq!(state.ui.results.session.study.frequency_index, 97);
+        assert_eq!(state.results.results.session.study.frequency_index, 97);
     }
     #[test]
     fn only_the_active_analysis_and_only_a_valid_payload_is_drawn() {

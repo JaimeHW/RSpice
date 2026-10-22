@@ -23,7 +23,7 @@ pub(super) fn open_ownership_dialog(
         state.prompt("Generate the netlist before making an editable copy.");
         return;
     }
-    let dialog = &mut state.ui.netlist.ownership_dialog;
+    let dialog = &mut state.code.netlist.ownership_dialog;
     dialog.open = true;
     dialog.strategy = strategy;
     dialog.artifact_name = default_owned_artifact_name(strategy).to_owned();
@@ -80,7 +80,7 @@ fn owned_strategy_description(
 }
 
 pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.ui.netlist.ownership_dialog.open {
+    if !app.state.code.netlist.ownership_dialog.open {
         return;
     }
     let Some(generated) = app
@@ -90,12 +90,12 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
         .generated_document
         .as_ref()
     else {
-        app.state.ui.netlist.ownership_dialog.open = false;
+        app.state.code.netlist.ownership_dialog.open = false;
         return;
     };
     let base_revision = generated.revision().get();
-    let mut dialog = app.state.ui.netlist.ownership_dialog.clone();
-    let messages = app.state.ui.messages();
+    let mut dialog = app.state.code.netlist.ownership_dialog.clone();
+    let messages = app.state.workbench.messages();
     let owned_deck = dialog.strategy == crate::state::OwnedNetlistEditStrategy::OwnedSource;
     let title = if owned_deck {
         messages.text(MessageId::NetlistOwnershipCreateSourceTitle)
@@ -163,7 +163,7 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
         DialogChoice::None | DialogChoice::Secondary => {}
     }
-    app.state.ui.netlist.ownership_dialog = dialog;
+    app.state.code.netlist.ownership_dialog = dialog;
 }
 
 pub(super) fn create_owned_source(
@@ -217,12 +217,12 @@ pub(super) fn create_owned_source(
     };
     descriptor.retain_revision(&owned, "Created editable source baseline")?;
     state.model.workspace.content.netlist_descriptor = Some(descriptor);
-    state.ui.netlist.owned_document = Some(owned);
-    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_document_initialized = true;
-    state.ui.netlist.externally_saved_content_digest = None;
+    state.code.netlist.owned_document = Some(owned);
+    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_document_initialized = true;
+    state.code.netlist.externally_saved_content_digest = None;
     state.model.simulation.source.netlist_content = source;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
     Ok(())
 }
@@ -314,7 +314,7 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
     if state.model.workspace.content.netlist_source.is_none() {
         return false;
     }
-    if state.ui.netlist.owned_document.is_none() {
+    if state.code.netlist.owned_document.is_none() {
         let Some(generated) = state.model.netlist_artifacts.generated_document.as_ref() else {
             return false;
         };
@@ -362,10 +362,10 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
             );
             return false;
         }
-        state.ui.netlist.owned_document = Some(owned);
+        state.code.netlist.owned_document = Some(owned);
     }
     let Some(source) = state
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
@@ -374,7 +374,7 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
         return false;
     };
     state.model.workspace.content.netlist_source = Some(source.clone());
-    state.model.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
+    state.model.workspace.content.netlist_document = state.code.netlist.owned_document.clone();
     if state.model.workspace.content.netlist_descriptor.is_none() {
         let artifact_name = state
             .model
@@ -401,14 +401,14 @@ pub(super) fn open_owned_source(state: &mut AppState) -> bool {
                 owned_includes: Vec::new(),
             });
     }
-    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document_initialized = true;
     state.model.simulation.source.netlist_content = source;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
+    state.code.netlist.completion_open = false;
+    state.code.netlist.completion_dismissed_at = None;
     crate::workbench::documents::netlist_document::invalidate_source_evidence(state);
     true
 }

@@ -57,7 +57,7 @@ impl AppState {
         &self,
     ) -> Option<(VerilogAPlacementHandoff, CellViewRef)> {
         let handoff = self
-            .ui
+            .code
             .code_workspace
             .veriloga
             .receipt
@@ -92,7 +92,7 @@ impl AppState {
                 candidate.unavailable_reason
             ));
         }
-        if let Some(receipt) = self.ui.code_workspace.veriloga.receipt.as_mut() {
+        if let Some(receipt) = self.code.code_workspace.veriloga.receipt.as_mut() {
             receipt.placement = None;
         }
         self.open_workspace_view(target.clone());

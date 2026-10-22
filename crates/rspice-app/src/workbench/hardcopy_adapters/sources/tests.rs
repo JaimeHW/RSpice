@@ -49,7 +49,7 @@ fn quick_view_state(analysis: AnalysisResult, viewer: ResultViewer) -> AppState 
     state.model.simulation.retained.runs.push(run);
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.results.session.viewer = viewer;
+    state.results.results.session.viewer = viewer;
     state
 }
 
@@ -1122,7 +1122,7 @@ fn waves_quick_view_selects_retained_transient_when_another_analysis_is_active()
     state.model.simulation.retained.runs.push(run);
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.results.session.viewer = ResultViewer::Waves;
+    state.results.results.session.viewer = ResultViewer::Waves;
 
     let resolved = resolve_quick_view(&state).expect("transient Waves semantic hardcopy");
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
@@ -1161,7 +1161,7 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
     state.model.simulation.retained.runs = vec![displayed, background].into();
     state.model.simulation.view.active_run_idx = Some(1);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.results.session.viewer = ResultViewer::Waves;
+    state.results.results.session.viewer = ResultViewer::Waves;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1227,7 +1227,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
     state.model.simulation.retained.runs = vec![displayed, background].into();
     state.model.simulation.view.active_run_idx = Some(1);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.results.session.viewer = ResultViewer::Manifest;
+    state.results.results.session.viewer = ResultViewer::Manifest;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1281,7 +1281,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.results.session.viewer = ResultViewer::Waves;
+    state.results.results.session.viewer = ResultViewer::Waves;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1370,7 +1370,7 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
             scope: crate::state::SpecPointScope::AllPoints,
         },
     ];
-    state.ui.results.session.viewer = ResultViewer::Specs;
+    state.results.results.session.viewer = ResultViewer::Specs;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1474,7 +1474,7 @@ fn signed_off_specification_workspace() -> (AppState, String) {
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.results.session.viewer = ResultViewer::Specs;
+    state.results.results.session.viewer = ResultViewer::Specs;
     state.workbench.workspace = Workspace::Results;
     state
         .workbench
@@ -1567,7 +1567,7 @@ fn quick_view_reads_exact_active_retained_waveform_without_report_reference() {
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
     state.model.simulation.view.data_version = 9;
-    state.ui.results.session.viewer = ResultViewer::Waves;
+    state.results.results.session.viewer = ResultViewer::Waves;
 
     let resolved = resolve_results_quick_view_source(ResultsQuickViewHardcopySource {
         source_key: "results-quick-view".to_owned(),
@@ -1750,7 +1750,7 @@ fn project_visualization_hardcopy_uses_the_selected_pane_not_the_first_pane() {
     let project = &mut state.model.workspace.content;
     project.visualization_documents.push(document);
     state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_pane(document_id, second_pane);

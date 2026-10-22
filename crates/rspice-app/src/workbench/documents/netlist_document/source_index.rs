@@ -16,10 +16,10 @@ use crate::state::NetlistSourceIndex;
 /// to bump it.
 pub(crate) fn visible_source_index(state: &mut AppState) -> Arc<NetlistSourceIndex> {
     let source = state.model.simulation.source.netlist_content.as_str();
-    if !state.ui.netlist.source_index.describes(source) {
-        state.ui.netlist.source_index = Arc::new(NetlistSourceIndex::parse(source));
+    if !state.code.netlist.source_index.describes(source) {
+        state.code.netlist.source_index = Arc::new(NetlistSourceIndex::parse(source));
     }
-    Arc::clone(&state.ui.netlist.source_index)
+    Arc::clone(&state.code.netlist.source_index)
 }
 
 /// [`visible_source_index`] for the project's own top-level deck, whatever
@@ -30,11 +30,11 @@ pub(crate) fn root_deck_source_index(state: &mut AppState) -> Arc<NetlistSourceI
     let Some(deck) = state.model.workspace.content.netlist_source.as_deref() else {
         return visible_source_index(state);
     };
-    if state.ui.netlist.source_index.describes(deck) {
-        return Arc::clone(&state.ui.netlist.source_index);
+    if state.code.netlist.source_index.describes(deck) {
+        return Arc::clone(&state.code.netlist.source_index);
     }
-    if !state.ui.netlist.root_deck_index.describes(deck) {
-        state.ui.netlist.root_deck_index = Arc::new(NetlistSourceIndex::parse(deck));
+    if !state.code.netlist.root_deck_index.describes(deck) {
+        state.code.netlist.root_deck_index = Arc::new(NetlistSourceIndex::parse(deck));
     }
-    Arc::clone(&state.ui.netlist.root_deck_index)
+    Arc::clone(&state.code.netlist.root_deck_index)
 }

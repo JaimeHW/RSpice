@@ -464,18 +464,18 @@ pub(super) struct CachedProjectIndex {
 
 pub(crate) fn project_index(state: &mut AppState) -> Option<Arc<NetlistProjectIndex>> {
     let root = state
-        .ui
+        .code
         .netlist
         .active_dependency_root
-        .unwrap_or(state.ui.netlist.active_document);
+        .unwrap_or(state.code.netlist.active_document);
     let document = canonical_root_document(state, root)?.clone();
-    if let Some(cached) = state.ui.netlist.project_indexes.get(&document.id())
+    if let Some(cached) = state.code.netlist.project_indexes.get(&document.id())
         && cached.revision == document.revision()
     {
         return Some(Arc::clone(&cached.index));
     }
     let index = Arc::new(NetlistProjectIndex::build(root, &document));
-    state.ui.netlist.project_indexes.insert(
+    state.code.netlist.project_indexes.insert(
         document.id(),
         CachedProjectIndex {
             revision: document.revision(),
@@ -489,12 +489,12 @@ pub(crate) fn project_index(state: &mut AppState) -> Option<Arc<NetlistProjectIn
         .as_ref()
         .map(crate::state::NetlistDocument::id);
     let owned_id = state
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
         .map(crate::state::NetlistDocument::id);
-    state.ui.netlist.project_indexes.retain(|document_id, _| {
+    state.code.netlist.project_indexes.retain(|document_id, _| {
         Some(*document_id) == generated_id || Some(*document_id) == owned_id
     });
     Some(index)
@@ -743,13 +743,13 @@ pub(crate) fn value_hover_at(
     buffer: &str,
     char_index: usize,
 ) -> Option<NetlistValueHover> {
-    if state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+    if state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         return None;
     }
-    let revision = state.ui.netlist.revision;
-    let messages = state.ui.messages();
-    let unread = state.ui.netlist.unread_source_at(revision);
-    let index = match &mut state.ui.netlist.value_index {
+    let revision = state.code.netlist.revision;
+    let messages = state.workbench.messages();
+    let unread = state.code.netlist.unread_source_at(revision);
+    let index = match &mut state.code.netlist.value_index {
         Some(index) if index.revision == revision && index.read_by_parse == unread.is_some() => {
             index
         }
@@ -810,8 +810,8 @@ pub(crate) fn open_project_location(
     } else {
         match location.root {
             ActiveNetlistDocument::Generated => {
-                if state.ui.netlist.active_document != ActiveNetlistDocument::Generated
-                    || state.ui.netlist.active_dependency_identity.is_some()
+                if state.code.netlist.active_document != ActiveNetlistDocument::Generated
+                    || state.code.netlist.active_dependency_identity.is_some()
                 {
                     super::open_generated_primary(state);
                 }
@@ -831,15 +831,15 @@ pub(crate) fn open_project_location(
             }
         }
     }
-    state.ui.netlist.cursor_line = location.line.saturating_sub(1);
-    state.ui.netlist.requested_line = Some(location.line);
+    state.code.netlist.cursor_line = location.line.saturating_sub(1);
+    state.code.netlist.requested_line = Some(location.line);
     Ok(())
 }
 
 pub(crate) fn go_to_definition_at_cursor(state: &mut AppState) -> Result<String, String> {
     let symbol = symbol_at_cursor(
         &state.model.simulation.source.netlist_content,
-        state.ui.netlist.cursor_char_index,
+        state.code.netlist.cursor_char_index,
     )
     .ok_or_else(|| {
         "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
@@ -876,7 +876,7 @@ pub(crate) fn go_to_declaration_at_cursor(state: &mut AppState) -> Result<String
 
 pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<String, String> {
     let source = state.model.simulation.source.netlist_content.clone();
-    let cursor = state.ui.netlist.cursor_char_index;
+    let cursor = state.code.netlist.cursor_char_index;
     let (title, detail) =
         if let Some((title, detail)) = super::completion::directive_signature_at(&source, cursor) {
             (title, detail)
@@ -911,9 +911,9 @@ pub(crate) fn show_signature_help_at_cursor(state: &mut AppState) -> Result<Stri
                 }
             }
         };
-    state.ui.netlist.signature_help = NetlistSignatureHelpState {
+    state.code.netlist.signature_help = NetlistSignatureHelpState {
         open: true,
-        revision: state.ui.netlist.revision,
+        revision: state.code.netlist.revision,
         cursor_char_index: cursor,
         title: title.clone(),
         detail,
@@ -952,7 +952,7 @@ pub(crate) fn apply_quick_fix_for_finding(
     finding: uuid::Uuid,
 ) -> Result<String, String> {
     let fix = state
-        .ui
+        .code
         .netlist
         .diagnostics
         .iter()
@@ -997,7 +997,7 @@ fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String
     let source = state.model.simulation.source.netlist_content.clone();
     // The revision is the binding every editor path moves; the digest is what
     // still holds against a writer that replaces the bytes without moving it.
-    if state.ui.netlist.revision != bound.revision
+    if state.code.netlist.revision != bound.revision
         || crate::state::content_digest(&source).to_string() != *bound.validation_id
     {
         return Err(
@@ -1015,7 +1015,7 @@ fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String
     }
     let mut replacement = source.clone();
     replacement.replace_range(fix.span.clone(), &fix.replacement);
-    let edit = if let Some(identity) = state.ui.netlist.active_dependency_identity.as_deref() {
+    let edit = if let Some(identity) = state.code.netlist.active_dependency_identity.as_deref() {
         super::OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)
     } else {
         super::OwnedNetlistReplacement::root(&source, replacement, 1)
@@ -1026,15 +1026,15 @@ fn apply_quick_fix(state: &mut AppState, bound: &BoundQuickFix) -> Result<String
 
 fn preferred_quick_fix(state: &AppState) -> Option<BoundQuickFix> {
     state
-        .ui
+        .code
         .netlist
         .diagnostics
         .iter()
         .filter(|diagnostic| {
-            diagnostic.is_current() && diagnostic.canonical.revision == state.ui.netlist.revision
+            diagnostic.is_current() && diagnostic.canonical.revision == state.code.netlist.revision
         })
         .filter(|diagnostic| {
-            diagnostic.line.or(diagnostic.source_line) == Some(state.ui.netlist.cursor_line)
+            diagnostic.line.or(diagnostic.source_line) == Some(state.code.netlist.cursor_line)
         })
         .find_map(BoundQuickFix::of)
 }
@@ -1042,7 +1042,7 @@ fn preferred_quick_fix(state: &AppState) -> Option<BoundQuickFix> {
 pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, String> {
     let symbol = symbol_at_cursor(
         &state.model.simulation.source.netlist_content,
-        state.ui.netlist.cursor_char_index,
+        state.code.netlist.cursor_char_index,
     )
     .ok_or_else(|| {
         "Place the caret on a model, subcircuit, parameter, or function name.".to_owned()
@@ -1062,7 +1062,7 @@ pub(crate) fn find_references_at_cursor(state: &mut AppState) -> Result<String, 
 pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String> {
     let symbol = symbol_at_cursor(
         &state.model.simulation.source.netlist_content,
-        state.ui.netlist.cursor_char_index,
+        state.code.netlist.cursor_char_index,
     )
     .ok_or_else(|| "Place the caret on a model or subcircuit name.".to_owned())?;
     let index =
@@ -1090,7 +1090,7 @@ pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String>
     {
         ensure_location_is_project_owned(state, &reference.location)?;
     }
-    state.ui.netlist.rename_dialog = NetlistRenameDialogState {
+    state.code.netlist.rename_dialog = NetlistRenameDialogState {
         open: true,
         original: definition.name.clone(),
         replacement: definition.name.clone(),
@@ -1100,8 +1100,14 @@ pub(crate) fn begin_rename_at_cursor(state: &mut AppState) -> Result<(), String>
 }
 
 pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
-    let original = state.ui.netlist.rename_dialog.original.trim().to_owned();
-    let replacement = state.ui.netlist.rename_dialog.replacement.trim().to_owned();
+    let original = state.code.netlist.rename_dialog.original.trim().to_owned();
+    let replacement = state
+        .code
+        .netlist
+        .rename_dialog
+        .replacement
+        .trim()
+        .to_owned();
     if !valid_symbol_name(&replacement) {
         return Err(
             "Enter a non-empty SPICE identifier containing only letters, digits, _, or $."
@@ -1140,7 +1146,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
     }
 
     let document = state
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
@@ -1186,7 +1192,7 @@ pub(crate) fn commit_rename(state: &mut AppState) -> Result<usize, String> {
         ));
     }
     let count = super::replace_owned_sources_atomically(state, replacements)?;
-    state.ui.netlist.rename_dialog = NetlistRenameDialogState::default();
+    state.code.netlist.rename_dialog = NetlistRenameDialogState::default();
     Ok(count)
 }
 
@@ -1977,7 +1983,7 @@ M1 d g s b nch W={w} L={l*2}\n\
 
         // Blank the retained span index. A pointer that has not moved must
         // still answer, which it can only do without consulting it.
-        state.ui.netlist.value_index.as_mut().unwrap().map =
+        state.code.netlist.value_index.as_mut().unwrap().map =
             Arc::new(rspice_core::netlist::NetlistSourceMap::default());
         assert_eq!(
             value_hover_at(&mut state, HOVER_DECK, definition).as_ref(),
@@ -1990,7 +1996,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         );
 
         // An edit bumps the revision, which is the only thing that rebuilds it.
-        state.ui.netlist.revision += 1;
+        state.code.netlist.revision += 1;
         assert_eq!(
             value_hover_at(&mut state, HOVER_DECK, expression)
                 .and_then(|hover| hover.value)
@@ -2002,7 +2008,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn value_hover_declines_a_unified_comparison_document() {
         let mut state = hover_state();
-        state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+        state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
 
         assert_eq!(hover_at(&mut state, ".param l=", 7), None);
     }
@@ -2074,13 +2080,13 @@ M1 d g s b nch W={w} L={l*2}\n\
                 owned_includes: vec![owned_include],
             });
         state.model.netlist_artifacts.generated_document = Some(generated);
-        state.ui.netlist.owned_document = Some(owned);
-        state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        state.code.netlist.owned_document = Some(owned);
+        state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.model.simulation.source.netlist_content = root.to_owned();
-        state.ui.netlist.cursor_char_index = root.find("cell gain").unwrap() + 2;
+        state.code.netlist.cursor_char_index = root.find("cell gain").unwrap() + 2;
 
         begin_rename_at_cursor(&mut state).unwrap();
-        state.ui.netlist.rename_dialog.replacement = "amplifier".to_owned();
+        state.code.netlist.rename_dialog.replacement = "amplifier".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 3);
 
         let document = state
@@ -2126,9 +2132,9 @@ M1 d g s b nch W={w} L={l*2}\n\
             Some(include)
         );
 
-        state.ui.netlist.cursor_char_index = root.find(".param gain").unwrap() + 9;
+        state.code.netlist.cursor_char_index = root.find(".param gain").unwrap() + 9;
         begin_rename_at_cursor(&mut state).unwrap();
-        state.ui.netlist.rename_dialog.replacement = "drive".to_owned();
+        state.code.netlist.rename_dialog.replacement = "drive".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 4);
         let renamed = state
             .model
@@ -2143,9 +2149,9 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert!(renamed.contains("{shape(drive)}"));
         super::super::undo_netlist_edit(&mut state).unwrap();
 
-        state.ui.netlist.cursor_char_index = root.find("shape(x)").unwrap() + 2;
+        state.code.netlist.cursor_char_index = root.find("shape(x)").unwrap() + 2;
         begin_rename_at_cursor(&mut state).unwrap();
-        state.ui.netlist.rename_dialog.replacement = "curve".to_owned();
+        state.code.netlist.rename_dialog.replacement = "curve".to_owned();
         assert_eq!(commit_rename(&mut state).unwrap(), 2);
         let renamed = state
             .model
@@ -2209,10 +2215,10 @@ M1 d g s b nch W={w} L={l*2}\n\
                 owned_includes: Vec::new(),
             });
         state.model.netlist_artifacts.generated_document = Some(generated);
-        state.ui.netlist.owned_document = Some(owned);
-        state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        state.code.netlist.owned_document = Some(owned);
+        state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
         state.model.simulation.source.netlist_content = FIX_DECK.to_owned();
-        state.ui.netlist.revision = 7;
+        state.code.netlist.revision = 7;
 
         let start = FIX_DECK.find("1kk").unwrap();
         let mut diagnostic =
@@ -2225,7 +2231,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let mut diagnostic = diagnostic.with_line(Some(2));
         diagnostic.bind_validation(7, &crate::state::content_digest(FIX_DECK).to_string());
         let finding = diagnostic.canonical.diagnostic_id;
-        state.ui.netlist.diagnostics = Arc::new(
+        state.code.netlist.diagnostics = Arc::new(
             crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
                 vec![diagnostic],
                 FIX_DECK,
@@ -2248,7 +2254,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         assert_eq!(state.model.simulation.source.netlist_content, fixed);
         assert!(
             state
-                .ui
+                .code
                 .netlist
                 .diagnostics
                 .iter()
@@ -2272,7 +2278,7 @@ M1 d g s b nch W={w} L={l*2}\n\
         let (mut state, finding) = validated_fix_state();
         let edited = format!("* note\n{FIX_DECK}");
         state.model.simulation.source.netlist_content = edited.clone();
-        state.ui.netlist.revision += 1;
+        state.code.netlist.revision += 1;
         assert!(apply_quick_fix_for_finding(&mut state, finding).is_err());
         assert_eq!(state.model.simulation.source.netlist_content, edited);
 
@@ -2291,7 +2297,7 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn a_quick_fix_is_refused_when_only_the_revision_moved() {
         let (mut state, finding) = validated_fix_state();
-        state.ui.netlist.revision += 1;
+        state.code.netlist.revision += 1;
         let refused = apply_quick_fix_for_finding(&mut state, finding)
             .expect_err("the finding was validated at an earlier revision");
         assert!(refused.contains("has changed"), "{refused}");
@@ -2304,12 +2310,12 @@ M1 d g s b nch W={w} L={l*2}\n\
     #[test]
     fn the_preferred_fix_is_withdrawn_when_only_the_revision_moved() {
         let (mut state, _) = validated_fix_state();
-        state.ui.netlist.cursor_line = 2;
+        state.code.netlist.cursor_line = 2;
         assert!(
             preferred_quick_fix_available(&state),
             "precondition: the caret is on the finding's line",
         );
-        state.ui.netlist.revision += 1;
+        state.code.netlist.revision += 1;
         assert!(!preferred_quick_fix_available(&state));
     }
 }

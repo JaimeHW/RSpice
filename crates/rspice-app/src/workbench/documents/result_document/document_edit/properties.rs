@@ -33,7 +33,7 @@ pub(crate) fn open_properties(state: &mut AppState) {
                 .result_presentation_policy()
                 .displayed_significant_digits()
                 .get(),
-            phase_continuous: state.ui.results.session.phase_continuous,
+            phase_continuous: state.results.results.session.phase_continuous,
         },
     };
     state.workbench.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
@@ -81,7 +81,7 @@ pub(super) fn commit(
                 u32::from(draft.significant_digits),
             )
             .map_err(str::to_owned)?;
-        state.ui.results.session.phase_continuous = draft.phase_continuous;
+        state.results.results.session.phase_continuous = draft.phase_continuous;
     }
     Ok(None)
 }

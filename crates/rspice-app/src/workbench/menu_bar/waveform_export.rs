@@ -57,7 +57,7 @@ const ANALYSIS_STACK_TOUCHSTONE_REFUSAL: &str = "Touchstone export requires one 
 
 fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
     let data_version = state.model.simulation.view.data_version;
-    state.ui.results.record_runtime_condition(
+    state.results.results.record_runtime_condition(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         detail,
         data_version,
@@ -68,7 +68,7 @@ fn note_result_export_failure(state: &mut AppState, detail: impl Into<String>) {
 /// it to the reader who just chose the file.
 fn note_result_export_success(state: &mut AppState, format: &str, message: String) {
     let data_version = state.model.simulation.view.data_version;
-    state.ui.results.record_runtime_recovery_if(
+    state.results.results.record_runtime_recovery_if(
         crate::workbench::documents::result_document::operational_state::ResultRuntimeConditionKind::Failed,
         format!("{format} publication succeeded after the recorded export failure."),
         data_version,
@@ -1129,7 +1129,7 @@ fn exported_waveforms<'a>(
         .waveforms
         .iter()
         .filter(|waveform| {
-            state.ui.results.session.waveform_visibility(
+            state.results.results.session.waveform_visibility(
                 &SourceWaveformPresentationKey::new(analysis_key, &waveform.name),
                 waveform.visible,
             )

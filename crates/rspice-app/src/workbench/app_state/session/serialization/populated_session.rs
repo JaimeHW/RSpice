@@ -159,21 +159,24 @@ pub(super) fn populated_session() -> AppState {
 
 /// Every field `UiSessionWire` writes.
 fn populate_ui_session(state: &mut AppState) {
-    let ui = &mut state.ui;
-    ui.theme.density = crate::ui::Density::Relaxed;
+    state.workbench.theme.density = crate::ui::Density::Relaxed;
     // Grid off, with lines the style a toggle brings back.
-    ui.set_grid_style(crate::state::GridStyle::Lines);
-    ui.set_grid_style(crate::state::GridStyle::Off);
-    ui.schematic_selection_filter.instances = false;
-    ui.schematic_bulk_edit_filters.active.query = "OPA*".to_owned();
-    ui.schematic_visibility.review_markers = crate::state::SchematicReviewMarkerVisibility::All;
-    ui.drawing_sheet_layers.zones = false;
-    ui.schematic_snap.enabled = false;
-    ui.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
-    ui.duplicate_external_nets = crate::state::DuplicateExternalNets::PreserveNamedNetAttachment;
+    state.design.set_grid_style(crate::state::GridStyle::Lines);
+    state.design.set_grid_style(crate::state::GridStyle::Off);
+    state.design.schematic_selection_filter.instances = false;
+    state.design.schematic_bulk_edit_filters.active.query = "OPA*".to_owned();
+    state.design.schematic_visibility.review_markers =
+        crate::state::SchematicReviewMarkerVisibility::All;
+    state.design.drawing_sheet_layers.zones = false;
+    state.design.schematic_snap.enabled = false;
+    state.design.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
+    state.design.duplicate_external_nets =
+        crate::state::DuplicateExternalNets::PreserveNamedNetAttachment;
     let dataset = crate::state::engineering_table::active_schematic_dataset(&Default::default());
     let view = crate::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
-    ui.engineering_table_views
+    state
+        .design
+        .engineering_table_views
         .save(
             "My device view",
             crate::state::engineering_table::EngineeringViewScope::Personal,
@@ -182,7 +185,7 @@ fn populate_ui_session(state: &mut AppState) {
             &dataset,
         )
         .expect("valid personal view");
-    ui.autosave_minutes = 10;
+    state.platform.autosave_minutes = 10;
     let wheel = crate::workbench::preferences::TogglePreference::InvertWheelZoom;
     let inverted = !state.model.preferences.toggle(wheel);
     state.model.preferences.set_toggle(wheel, inverted);
@@ -202,10 +205,10 @@ fn populate_ui_session(state: &mut AppState) {
         .shortcut_profiles_mut()
         .replace_active(customized_shortcuts())
         .expect("the shipped shortcut library is compatible");
-    ui.browser_spoken_feedback = true;
-    ui.text_locale = crate::workbench::UiTextLocale::PseudoExpanded;
-    ui.results.session.viewer = rspice_results::result_presentation::ResultViewer::Bode;
-    ui.results.session.eye_timebase.insert(
+    state.settings.browser_spoken_feedback = true;
+    state.workbench.text_locale = crate::workbench::UiTextLocale::PseudoExpanded;
+    state.results.results.session.viewer = rspice_results::result_presentation::ResultViewer::Bode;
+    state.results.results.session.eye_timebase.insert(
         rspice_results_ui::eye_diagram::EyeTimebaseKey::Prepared(
             crate::product::AnalysisInstanceId::new(),
         ),

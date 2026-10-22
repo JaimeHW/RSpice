@@ -129,10 +129,10 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
     // Loaded document data owns the grid pitch; the active device session owns
     // snap targets and radius. Install both authorities before publishing the
     // new active buffer, then mirror the derived pitch back into the session.
-    schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
+    schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
     state.model.schematic = schematic;
-    state.ui.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
+    state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
     state.bump_active_schematic_epoch();
     match state.model.workspace.content.active_view_type() {
         ViewType::Schematic | ViewType::Testbench => {
@@ -297,7 +297,7 @@ pub(crate) fn import_loaded_schematic_as_cell_view(
 
     schematic.session.current_file = None;
     schematic.session.is_dirty = true;
-    schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
+    schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
     state.model.library_manager = candidate_libraries;
     let reference = CellViewRef::new(&library, &name, "schematic");
@@ -678,10 +678,10 @@ mod tests {
     #[test]
     fn replacing_the_active_document_reconciles_document_pitch_and_session_snap_preferences() {
         let mut state = AppState::default();
-        state.ui.schematic_snap.snap_radius = 8;
-        state.ui.schematic_snap.snap_to_grid = false;
-        state.ui.schematic_snap.snap_to_wire_segments = false;
-        state.ui.schematic_snap.grid_size = 999;
+        state.design.schematic_snap.snap_radius = 8;
+        state.design.schematic_snap.snap_to_grid = false;
+        state.design.schematic_snap.snap_to_wire_segments = false;
+        state.design.schematic_snap.grid_size = 999;
         let mut loaded = SchematicState::default();
         loaded.document_mut_for_test().document_policy.grid_pitch =
             crate::state::SchematicGridPitch::Metric;
@@ -723,7 +723,7 @@ mod tests {
                 .snap_to_wire_segments
         );
         assert_eq!(
-            state.ui.schematic_snap,
+            state.design.schematic_snap,
             state.model.schematic.session.editor.snap_engine
         );
     }
@@ -818,7 +818,7 @@ mod tests {
         state.manual_run.last_run_buffer = Some("last manual run\n.end\n".to_owned());
         state.manual_run.pending_run_buffer = Some("pending manual run\n.end\n".to_owned());
         state.manual_run.pending_manual_run_id = Some(1);
-        state.ui.netlist.rerun_queued = true;
+        state.code.netlist.rerun_queued = true;
         state.manual_run.edited_lines.insert(3);
         state.analysis.histogram_state.selected = Some("old measurement".to_owned());
     }
@@ -830,7 +830,7 @@ mod tests {
         assert!(state.manual_run.last_run_buffer.is_none());
         assert!(state.manual_run.pending_run_buffer.is_none());
         assert!(state.manual_run.pending_manual_run_id.is_none());
-        assert!(!state.ui.netlist.rerun_queued);
+        assert!(!state.code.netlist.rerun_queued);
         assert!(state.manual_run.edited_lines.is_empty());
         assert_eq!(state.analysis.histogram_state.selected, None);
     }

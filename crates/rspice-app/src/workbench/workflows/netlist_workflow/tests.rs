@@ -66,7 +66,7 @@ fn launcher_drop_stages_a_new_netlist_project_review() {
     ));
 
     let review = state
-        .ui
+        .code
         .netlist
         .import_review
         .as_ref()
@@ -84,7 +84,7 @@ fn launcher_drop_stages_a_new_netlist_project_review() {
 fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
     let mut state = AppState::default();
     state.workbench.workspace = crate::workbench::state::Workspace::Models;
-    state.ui.code_workspace.page =
+    state.code.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
 
     assert!(!route_started_netlist_import(&mut state, false));
@@ -93,7 +93,7 @@ fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
         crate::workbench::state::Workspace::Models
     );
     assert_eq!(
-        state.ui.code_workspace.page,
+        state.code.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation
     );
 
@@ -103,7 +103,7 @@ fn started_netlist_import_routes_every_calling_page_to_its_completion_owner() {
         crate::workbench::state::Workspace::Netlist
     );
     assert_eq!(
-        state.ui.code_workspace.page,
+        state.code.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
 }
@@ -205,7 +205,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
         )
     );
     assert!(app.state.model.netlist_artifacts.validation.is_none());
-    let imported_digest = app.state.ui.netlist.externally_saved_content_digest;
+    let imported_digest = app.state.code.netlist.externally_saved_content_digest;
     let bytes = Rc::new(RefCell::new(Vec::new()));
     let io = CaptureIo {
         bytes: Rc::clone(&bytes),
@@ -233,7 +233,7 @@ fn save_as_preserves_unvalidated_work_and_can_convert_legacy_source_to_utf8() {
         crate::state::NetlistTextEncoding::Latin1,
     );
     assert_eq!(
-        app.state.ui.netlist.externally_saved_content_digest, imported_digest,
+        app.state.code.netlist.externally_saved_content_digest, imported_digest,
         "a browser download is an independent copy, not a canonical save acknowledgement"
     );
 }
@@ -323,7 +323,7 @@ fn authenticated_generated_bundle_stages_and_commits_retained_closure() {
         None,
         "portable-run.zip".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_ref().unwrap();
+    let review = state.code.netlist.import_review.as_ref().unwrap();
     assert!(review.archive_import);
     assert_eq!(review.display_name, "portable-run.spice");
     assert!(review.source_path.is_none());
@@ -414,14 +414,14 @@ fn staged_import_is_cancel_safe_and_commits_only_the_reviewed_snapshot() {
         state.model.workspace.content.netlist_source,
         original_source
     );
-    assert!(state.ui.netlist.import_review.is_some());
+    assert!(state.code.netlist.import_review.is_some());
 
     assert!(commit_staged_netlist_import(&mut state));
     assert_eq!(
         state.model.workspace.content.netlist_source.as_deref(),
         std::str::from_utf8(&source).ok()
     );
-    assert!(state.ui.netlist.import_review.is_none());
+    assert!(state.code.netlist.import_review.is_none());
     assert_eq!(
         state
             .model
@@ -570,7 +570,7 @@ fn a_deck_naming_no_dialect_starts_from_the_preferred_one() {
             None,
             "deck.cir".to_owned(),
         ));
-        let review = state.ui.netlist.import_review.as_ref().unwrap();
+        let review = state.code.netlist.import_review.as_ref().unwrap();
         assert_eq!(review.selected_dialect, expected);
     }
 }
@@ -592,7 +592,7 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
         None,
         "foreign.sp".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_ref().unwrap();
+    let review = state.code.netlist.import_review.as_ref().unwrap();
     assert_eq!(
         review.detected_dialect,
         crate::state::NetlistSourceDialect::Hspice
@@ -600,7 +600,7 @@ fn detected_foreign_dialect_requires_explicit_acceptance() {
     assert!(!review.can_commit());
     assert_eq!(review.blocking_issue_count(), 0);
 
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.compatibility_accepted = true;
     assert!(review.dialect_qualification().is_ok());
     assert!(review.can_commit());
@@ -649,45 +649,45 @@ fn only_source_authenticated_import_dialects_can_commit_after_acceptance() {
     ));
 
     {
-        let review = state.ui.netlist.import_review.as_mut().unwrap();
+        let review = state.code.netlist.import_review.as_mut().unwrap();
         review.selected_dialect = NetlistSourceDialect::Spice3Ngspice;
         review.compatibility_accepted = true;
         assert!(review.dialect_qualification().is_ok());
         assert!(review.can_commit());
     }
 
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = NetlistSourceDialect::Hspice;
     review.compatibility_accepted = true;
     assert!(review.dialect_qualification().is_err());
     assert!(!review.can_commit());
 
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = NetlistSourceDialect::Spectre;
     review.compatibility_accepted = true;
     assert!(review.dialect_qualification().is_err());
     assert!(!review.can_commit());
 
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = NetlistSourceDialect::Ads;
     review.compatibility_accepted = true;
     assert!(review.dialect_qualification().is_err());
     assert!(!review.can_commit());
 
     let dialect = NetlistSourceDialect::Unknown;
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = dialect;
     review.compatibility_accepted = true;
     assert!(review.dialect_qualification().is_err(), "{dialect:?}");
     assert!(!review.can_commit(), "{dialect:?}");
 
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = NetlistSourceDialect::Pspice;
     review.compatibility_accepted = true;
     assert!(review.dialect_qualification().is_err());
     assert!(!review.can_commit());
 
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = NetlistSourceDialect::RSpice;
     review.compatibility_accepted = false;
     assert!(review.dialect_qualification().is_ok());
@@ -712,7 +712,7 @@ fn spectre_spice_interoperability_import_preserves_source_and_profile() {
         None,
         "spectre-spice.scs".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
         crate::state::NetlistSourceDialect::Spectre
@@ -759,7 +759,7 @@ fn ads_spice_export_import_preserves_source_and_profile() {
         None,
         "ads-spice-export.net".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
         crate::state::NetlistSourceDialect::Ads
@@ -804,7 +804,7 @@ fn qualified_spice3_ngspice_import_persists_exact_versioned_profile() {
         None,
         "declarative-spice3.cir".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
         crate::state::NetlistSourceDialect::Spice3Ngspice
@@ -859,7 +859,7 @@ fn qualified_pspice_import_persists_exact_versioned_profile() {
         None,
         "declarative-pspice.cir".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.detected_dialect,
         crate::state::NetlistSourceDialect::Pspice
@@ -953,7 +953,7 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
         .clone();
 
     assert!(begin_owned_netlist_profile_review(&mut state));
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     assert_eq!(
         review.operation,
         crate::workbench::documents::netlist_document::NetlistImportOperation::RequalifyOwnedSource
@@ -980,7 +980,7 @@ fn quarantined_owned_source_requalifies_without_external_file_or_source_replacem
     assert_eq!(descriptor.revision_history, history);
     assert_eq!(state.model.workspace.content.netlist_source, source);
     assert!(state.model.workspace.content.project_metadata_dirty);
-    assert!(state.ui.netlist.import_review.is_none());
+    assert!(state.code.netlist.import_review.is_none());
 }
 
 #[test]
@@ -988,7 +988,7 @@ fn owned_profile_review_rejects_source_revision_change_transactionally() {
     let mut state = quarantined_owned_ngspice_state();
     assert!(begin_owned_netlist_profile_review(&mut state));
     state
-        .ui
+        .code
         .netlist
         .import_review
         .as_mut()
@@ -1013,7 +1013,7 @@ fn owned_profile_review_rejects_source_revision_change_transactionally() {
     assert!(!descriptor.compatibility_reviewed);
     assert!(
         state
-            .ui
+            .code
             .netlist
             .import_review
             .as_ref()
@@ -1039,7 +1039,7 @@ fn imperative_ngspice_control_command_cannot_use_declarative_profile() {
         None,
         "imperative-ngspice.cir".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_mut().unwrap();
+    let review = state.code.netlist.import_review.as_mut().unwrap();
     review.selected_dialect = crate::state::NetlistSourceDialect::Spice3Ngspice;
     review.compatibility_accepted = true;
     let error = review.dialect_qualification().unwrap_err();
@@ -1064,7 +1064,7 @@ fn semantic_loss_parser_diagnostics_block_import() {
         None,
         "unknown-option.cir".to_owned(),
     ));
-    let review = state.ui.netlist.import_review.as_ref().unwrap();
+    let review = state.code.netlist.import_review.as_ref().unwrap();
     assert!(review.blocking_issue_count() > 0);
     assert!(review.issues.iter().any(|issue| {
         issue.severity
@@ -1555,7 +1555,7 @@ fn text_first_import_validates_and_runs_without_claiming_a_native_save_binding()
     assert!(app.state.model.netlist_artifacts.validation.is_some());
     assert!(
         app.state
-            .ui
+            .code
             .netlist
             .externally_saved_content_digest
             .is_none()
@@ -1590,7 +1590,7 @@ fn validated_owned_source_can_run_before_external_source_synchronization() {
     );
     let edited_digest = crate::state::content_digest(edited);
     assert_ne!(
-        app.state.ui.netlist.externally_saved_content_digest,
+        app.state.code.netlist.externally_saved_content_digest,
         Some(edited_digest)
     );
 
@@ -1727,11 +1727,11 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
         crate::state::OwnedNetlistEditStrategy::ParameterOptionOverride,
     );
     app.state.model.workspace.content.netlist_source_path = Some(root.clone());
-    app.state.ui.netlist.owned_document =
+    app.state.code.netlist.owned_document =
         app.state.model.workspace.content.netlist_document.clone();
-    app.state.ui.netlist.active_document =
+    app.state.code.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    app.state.ui.netlist.active_document_initialized = true;
+    app.state.code.netlist.active_document_initialized = true;
     app.state.model.simulation.source.netlist_content = parameter_source.to_owned();
 
     assert!(validate_visible_netlist_source(&mut app));
@@ -1768,11 +1768,11 @@ fn narrow_strategy_dependencies_attach_to_the_source_that_owns_the_directives() 
         crate::state::OwnedNetlistEditStrategy::IncludeOrderOverride,
     );
     app.state.model.workspace.content.netlist_source_path = Some(root);
-    app.state.ui.netlist.owned_document =
+    app.state.code.netlist.owned_document =
         app.state.model.workspace.content.netlist_document.clone();
-    app.state.ui.netlist.active_document =
+    app.state.code.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    app.state.ui.netlist.active_document_initialized = true;
+    app.state.code.netlist.active_document_initialized = true;
     app.state.model.simulation.source.netlist_content = include_source.to_owned();
 
     assert!(validate_visible_netlist_source(&mut app));
@@ -1851,9 +1851,9 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
         "Attempt conflicting save",
     ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), external);
-    assert!(app.state.ui.netlist.external_change.is_some());
+    assert!(app.state.code.netlist.external_change.is_some());
     app.state
-            .ui
+            .code
             .netlist
             .external_change
             .as_mut()
@@ -1865,9 +1865,9 @@ fn ordinary_source_save_refuses_to_overwrite_external_changes() {
         app.state.model.workspace.content.netlist_source.as_deref(),
         Some(external)
     );
-    assert!(app.state.ui.netlist.external_change.is_none());
+    assert!(app.state.code.netlist.external_change.is_none());
     assert_eq!(
-        app.state.ui.netlist.externally_saved_content_digest,
+        app.state.code.netlist.externally_saved_content_digest,
         Some(crate::state::content_digest(external))
     );
     assert!(

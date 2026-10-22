@@ -2001,7 +2001,7 @@ class CiConfigurationTests(unittest.TestCase):
             "crates/rspice-app/src/workbench/app/dialogs/preferences/preference_pages.rs"
         )
         self.assertIn(
-            "options.screen_reader = self.state.ui.browser_spoken_feedback",
+            "options.screen_reader = self.state.settings.browser_spoken_feedback",
             app,
         )
         self.assertIn("Speak control changes (browser)", preferences)

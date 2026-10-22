@@ -614,7 +614,7 @@ fn release_current_focus(ctx: &Context) {
 fn card_meta(command: Command, app: &RSpiceApp) -> Option<String> {
     match command {
         Command::OpenNotifications => {
-            let unread = app.state.ui.toasts.unread_count();
+            let unread = app.state.workbench.toasts.unread_count();
             (unread > 0).then(|| format!("{unread} unread"))
         }
         _ => None,
@@ -947,8 +947,8 @@ mod tests {
             None,
             "nothing unread says nothing"
         );
-        app.state.ui.toasts.info(&ctx, "Recovery copy saved");
-        app.state.ui.toasts.info(&ctx, "Library reloaded");
+        app.state.workbench.toasts.info(&ctx, "Recovery copy saved");
+        app.state.workbench.toasts.info(&ctx, "Library reloaded");
         assert_eq!(
             card_meta(Command::OpenNotifications, &app).as_deref(),
             Some("2 unread")

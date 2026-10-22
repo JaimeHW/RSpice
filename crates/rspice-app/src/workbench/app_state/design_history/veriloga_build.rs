@@ -226,7 +226,7 @@ fn restore_bundle(
         .map_err(|error| format!("Build settings could not be restored: {error}"))?;
     let restored = bundle_revision(state, bundle)
         .ok_or_else(|| "The Verilog-A source no longer exists.".to_owned())?;
-    state.ui.code_workspace.veriloga.void_evidence();
+    state.code.code_workspace.veriloga.void_evidence();
     let owner = state
         .model
         .workspace

@@ -11,7 +11,9 @@ use super::*;
 fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    app.state.ui.set_grid_style(crate::state::GridStyle::Dots);
+    app.state
+        .design
+        .set_grid_style(crate::state::GridStyle::Dots);
     app.state.model.schematic.session.editor.snap_engine.enabled = true;
     app.state
         .model
@@ -20,15 +22,15 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
         .editor
         .snap_engine
         .snap_to_wire_segments = false;
-    app.state.ui.schematic_snap = app.state.model.schematic.session.editor.snap_engine.clone();
+    app.state.design.schematic_snap = app.state.model.schematic.session.editor.snap_engine.clone();
 
     assert_eq!(Command::CycleGrid.stable_id(), "cycle-grid");
     assert_eq!(Command::CycleGrid.spec().label, "Cycle grid display");
 
     Command::CycleGrid.execute(&mut app);
-    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Lines);
+    assert_eq!(app.state.design.grid, crate::state::GridStyle::Lines);
     assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
-    assert!(app.state.ui.schematic_snap.enabled);
+    assert!(app.state.design.schematic_snap.enabled);
     assert!(
         !app.state
             .model
@@ -41,11 +43,11 @@ fn canvas_grid_command_cycles_display_without_mutating_snap_configuration() {
     );
 
     Command::CycleGrid.execute(&mut app);
-    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Off);
+    assert_eq!(app.state.design.grid, crate::state::GridStyle::Off);
     assert!(app.state.model.schematic.session.editor.snap_engine.enabled);
 
     Command::CycleGrid.execute(&mut app);
-    assert_eq!(app.state.ui.grid, crate::state::GridStyle::Dots);
+    assert_eq!(app.state.design.grid, crate::state::GridStyle::Dots);
 }
 
 #[test]
@@ -58,16 +60,16 @@ fn canvas_grid_command_does_not_reinterpret_symbol_snap_policy() {
             "symbol",
         ));
     assert!(active_symbol_editor(&app));
-    app.state.ui.symbol.editor.show_grid = true;
-    app.state.ui.symbol.editor.snap_to_grid = false;
+    app.state.design.symbol.editor.show_grid = true;
+    app.state.design.symbol.editor.snap_to_grid = false;
 
     Command::CycleGrid.execute(&mut app);
-    assert!(!app.state.ui.symbol.editor.show_grid);
-    assert!(!app.state.ui.symbol.editor.snap_to_grid);
+    assert!(!app.state.design.symbol.editor.show_grid);
+    assert!(!app.state.design.symbol.editor.snap_to_grid);
 
     Command::CycleGrid.execute(&mut app);
-    assert!(app.state.ui.symbol.editor.show_grid);
-    assert!(!app.state.ui.symbol.editor.snap_to_grid);
+    assert!(app.state.design.symbol.editor.show_grid);
+    assert!(!app.state.design.symbol.editor.snap_to_grid);
 }
 
 #[test]
@@ -446,20 +448,20 @@ fn every_workspace_exposes_the_mockup_reset_active_view_workflow() {
 fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
     let mut app = RSpiceApp::test_instance();
     assert!(!app.state.workbench.full_screen_presentation);
-    assert_eq!(app.state.ui.take_full_screen_request(), None);
+    assert_eq!(app.state.workbench.take_full_screen_request(), None);
 
     Command::ToggleFullScreen.execute(&mut app);
 
     assert!(!app.state.dialog_modal_open());
     assert!(app.state.workbench.full_screen_presentation);
     assert!(app.state.workbench.full_screen);
-    assert_eq!(app.state.ui.take_full_screen_request(), Some(true));
+    assert_eq!(app.state.workbench.take_full_screen_request(), Some(true));
 
     Command::ToggleFullScreen.execute(&mut app);
 
     assert!(!app.state.workbench.full_screen_presentation);
     assert!(!app.state.workbench.full_screen);
-    assert_eq!(app.state.ui.take_full_screen_request(), Some(false));
+    assert_eq!(app.state.workbench.take_full_screen_request(), Some(false));
 }
 
 #[test]

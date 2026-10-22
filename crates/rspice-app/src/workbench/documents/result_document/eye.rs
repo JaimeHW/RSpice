@@ -40,23 +40,27 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .selected_source
         .as_deref()
         .unwrap_or("the active trace");
-    let plot_view = state.ui.results.session.plot_view(ResultViewer::Eye, 0);
+    let plot_view = state
+        .results
+        .results
+        .session
+        .plot_view(ResultViewer::Eye, 0);
     let out = view::show(
         ui,
         &state.analysis.eye_diagram_state,
         source,
         plot_view,
-        &mut state.ui.results.session.eye_texture,
-        &mut state.ui.results.session.cache,
+        &mut state.results.results.session.eye_texture,
+        &mut state.results.results.session.cache,
     );
     if out.density_baked {
         frame_work::note(DatasetWalk::EyeRaster);
     }
     if let Some(response) = out.plot {
-        super::record_drawn_axes(&mut state.ui.results, ResultViewer::Eye, &response);
+        super::record_drawn_axes(&mut state.results.results, ResultViewer::Eye, &response);
         if response.view.any() {
             state
-                .ui
+                .results
                 .results
                 .session
                 .plot_view_mut(ResultViewer::Eye, 0)
@@ -115,7 +119,7 @@ mod tests {
         // The reader zooms into the middle of the eye, then pans.
         for window in [(0.4, 1.2, 0.1, 0.8), (0.6, 1.4, 0.2, 0.9)] {
             let view = state
-                .ui
+                .results
                 .results
                 .session
                 .plot_view_mut(super::super::ResultViewer::Eye, 0);

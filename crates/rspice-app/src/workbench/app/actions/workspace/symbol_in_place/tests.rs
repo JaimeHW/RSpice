@@ -307,7 +307,13 @@ fn in_place_pins_land_on_the_instance_pins_in_every_orientation() {
             for name in ["A", "B", "C"] {
                 selection.toggle_pin(name);
             }
-            fixture.app.state.ui.symbol.editor.set_selection(selection);
+            fixture
+                .app
+                .state
+                .design
+                .symbol
+                .editor
+                .set_selection(selection);
             fixture.frame(vec![]);
             let output = fixture.frame(vec![]);
             let accent = crate::ui::tokens::Tokens::get(&fixture.ctx).color.accent;
@@ -414,7 +420,7 @@ fn saving_in_place_updates_every_instance_of_the_symbol() {
     assert!(fixture.leaving(), "Escape with an edit asks first");
     // Save, then the save dialog's own Save.
     fixture.key(egui::Key::Enter);
-    assert!(fixture.app.state.ui.symbol.editor.save_dialog_open);
+    assert!(fixture.app.state.design.symbol.editor.save_dialog_open);
     // The revision note the save dialog asks for, typed into its field.
     fixture.frame(vec![egui::Event::Text("Move pin A".into())]);
     fixture.key(egui::Key::Enter);

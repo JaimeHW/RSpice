@@ -124,7 +124,7 @@ pub(crate) fn dispatch_file_menu_action(
             // The picked file becomes cells of its own, which the import form
             // names before any is created, whatever view is open. Replacing a
             // view's source is the editor's own, confirmed, transaction.
-            let veriloga = &mut state.ui.code_workspace.veriloga;
+            let veriloga = &mut state.code.code_workspace.veriloga;
             veriloga.import_target = None;
             veriloga.replace_target = None;
             veriloga.import_requested = true;

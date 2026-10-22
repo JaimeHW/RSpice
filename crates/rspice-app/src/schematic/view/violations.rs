@@ -199,7 +199,7 @@ pub(crate) fn location_anchor_in(
                 .content
                 .design_management
                 .sheet_catalog(&key),
-            review_markers: state.ui.schematic_visibility.review_markers,
+            review_markers: state.design.schematic_visibility.review_markers,
         };
         markers::placement(&view, location)?
     };
@@ -255,6 +255,6 @@ pub(super) fn draw_violation_markers(painter: &Painter, viewport: &Viewport, sta
         viewport,
         &super::schematic_design_view(state),
         result.violations(),
-        state.ui.canvas_hover,
+        state.design.canvas_hover,
     );
 }

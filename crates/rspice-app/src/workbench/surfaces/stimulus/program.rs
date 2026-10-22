@@ -360,7 +360,7 @@ fn bias_column(
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     section_header(ui, &messages.text(MessageId::StimulusBiasColumn), None);
     ui.add_space(HEAD_GAP);
     let fields = bias_fields(sheet);
@@ -389,7 +389,10 @@ fn bias_height(ui: &Ui, state: &AppState, sheet: &PropertySheet, width: f32) -> 
         + if fields.is_empty() {
             note_height(
                 ui,
-                &state.ui.messages().text(MessageId::StimulusNoBiasFields),
+                &state
+                    .workbench
+                    .messages()
+                    .text(MessageId::StimulusNoBiasFields),
                 width,
             )
         } else {
@@ -410,7 +413,10 @@ fn shape_height(
         + match stage.working.family() {
             StimulusFamily::Dc | StimulusFamily::Ac => note_height(
                 ui,
-                &state.ui.messages().text(MessageId::StimulusDcShapeNote),
+                &state
+                    .workbench
+                    .messages()
+                    .text(MessageId::StimulusDcShapeNote),
                 width,
             ),
             StimulusFamily::Pwl => pwl::points_height(ui, stage, sheet, width),
@@ -427,7 +433,7 @@ fn shape_column(
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let family = stage.working.family();
     section_header(
         ui,
@@ -667,7 +673,7 @@ fn boolean_row(
     label: &RowLabel,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let field = definition.name.as_str();
     let authored = read_field(&stage.working, field);
     let default_on = matches!(definition.default_value, PropertyValue::Boolean(true));

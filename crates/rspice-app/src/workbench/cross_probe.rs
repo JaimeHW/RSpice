@@ -93,13 +93,13 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
         topology_version: state.model.schematic.topology_version(),
         selection: state.model.schematic.session.editor.selection.clone(),
     };
-    let target = if state.ui.schematic_cross_probe.selection.as_ref() == Some(&selection) {
-        state.ui.schematic_cross_probe.target.clone()
+    let target = if state.design.schematic_cross_probe.selection.as_ref() == Some(&selection) {
+        state.design.schematic_cross_probe.target.clone()
     } else {
         selected_target(state)
     };
-    state.ui.schematic_cross_probe.selection = Some(selection);
-    state.ui.schematic_cross_probe.target = target.clone();
+    state.design.schematic_cross_probe.selection = Some(selection);
+    state.design.schematic_cross_probe.target = target.clone();
     let generated_input_digest =
         current_generated_artifact(state).map(|artifact| artifact.provenance().input().digest());
     let key = SynchronizationKey {
@@ -115,10 +115,10 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
             .active_run()
             .map(|run| run.dataset_id),
         active_analysis_index: state.model.simulation.view.active_analysis_idx,
-        active_netlist_document: state.ui.netlist.active_document,
+        active_netlist_document: state.code.netlist.active_document,
         generated_input_digest,
     };
-    if state.ui.schematic_cross_probe.key.as_ref() == Some(&key) {
+    if state.design.schematic_cross_probe.key.as_ref() == Some(&key) {
         return;
     }
 
@@ -129,48 +129,48 @@ pub(crate) fn synchronize_schematic_cross_probe(state: &mut AppState) {
         .as_ref()
         .and_then(|target| compatible_result_trace(state, target));
     if let Some(selected) = selected_trace.clone() {
-        state.ui.results.session.selected_trace = Some(selected);
+        state.results.results.session.selected_trace = Some(selected);
     }
 
     let source_line = target
         .as_ref()
         .and_then(|target| compatible_generated_source_line(state, target));
-    state.ui.netlist.cross_probe_line = source_line;
+    state.code.netlist.cross_probe_line = source_line;
     if source_line.is_some()
-        && state.ui.netlist.active_document
+        && state.code.netlist.active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
     {
-        state.ui.netlist.requested_line = source_line;
+        state.code.netlist.requested_line = source_line;
     }
 
-    state.ui.schematic_cross_probe.key = Some(key);
-    state.ui.schematic_cross_probe.selected_trace = selected_trace;
-    state.ui.schematic_cross_probe.source_line = source_line;
+    state.design.schematic_cross_probe.key = Some(key);
+    state.design.schematic_cross_probe.selected_trace = selected_trace;
+    state.design.schematic_cross_probe.source_line = source_line;
 }
 
 fn clear_synchronized_projection(state: &mut AppState) {
     clear_synchronized_result_trace(state);
     clear_synchronized_source_line(state);
-    state.ui.schematic_cross_probe.key = None;
-    state.ui.schematic_cross_probe.selection = None;
-    state.ui.schematic_cross_probe.target = None;
+    state.design.schematic_cross_probe.key = None;
+    state.design.schematic_cross_probe.selection = None;
+    state.design.schematic_cross_probe.target = None;
 }
 
 fn clear_synchronized_result_trace(state: &mut AppState) {
-    let synchronized = state.ui.schematic_cross_probe.selected_trace.take();
+    let synchronized = state.design.schematic_cross_probe.selected_trace.take();
     if synchronized.is_some()
-        && state.ui.results.session.selected_trace.as_ref() == synchronized.as_ref()
+        && state.results.results.session.selected_trace.as_ref() == synchronized.as_ref()
     {
-        state.ui.results.session.selected_trace = None;
+        state.results.results.session.selected_trace = None;
     }
 }
 
 fn clear_synchronized_source_line(state: &mut AppState) {
-    let synchronized = state.ui.schematic_cross_probe.source_line.take();
-    if synchronized.is_some() && state.ui.netlist.requested_line == synchronized {
-        state.ui.netlist.requested_line = None;
+    let synchronized = state.design.schematic_cross_probe.source_line.take();
+    if synchronized.is_some() && state.code.netlist.requested_line == synchronized {
+        state.code.netlist.requested_line = None;
     }
-    state.ui.netlist.cross_probe_line = None;
+    state.code.netlist.cross_probe_line = None;
 }
 
 fn selected_target(state: &AppState) -> Option<SchematicCrossProbeTarget> {
@@ -742,7 +742,7 @@ mod tests {
 
         assert_eq!(
             state
-                .ui
+                .results
                 .results
                 .session
                 .selected_trace
@@ -753,7 +753,7 @@ mod tests {
 
         state.model.schematic.bump_topology_version();
         synchronize_schematic_cross_probe(&mut state);
-        assert!(state.ui.results.session.selected_trace.is_none());
+        assert!(state.results.results.session.selected_trace.is_none());
     }
 
     #[test]
@@ -799,7 +799,7 @@ mod tests {
 
         assert_eq!(
             state
-                .ui
+                .results
                 .results
                 .session
                 .selected_trace
@@ -846,8 +846,8 @@ mod tests {
 
         synchronize_schematic_cross_probe(&mut state);
 
-        assert!(state.ui.results.session.selected_trace.is_none());
-        assert!(state.ui.netlist.cross_probe_line.is_none());
+        assert!(state.results.results.session.selected_trace.is_none());
+        assert!(state.code.netlist.cross_probe_line.is_none());
     }
 
     #[test]
@@ -888,7 +888,7 @@ mod tests {
 
         assert_eq!(
             state
-                .ui
+                .results
                 .results
                 .session
                 .selected_trace
@@ -938,7 +938,7 @@ mod tests {
 
         assert_eq!(
             state
-                .ui
+                .results
                 .results
                 .session
                 .selected_trace

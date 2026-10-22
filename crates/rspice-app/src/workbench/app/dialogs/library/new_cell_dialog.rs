@@ -307,7 +307,7 @@ impl RSpiceApp {
                 self.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Design);
-                self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
+                self.state.code.code_workspace.veriloga.receipt = Some(receipt);
             }
             self.state.project.new_cell_error = None;
             outcome.close = true;
@@ -532,7 +532,7 @@ mod tests {
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Design
         );
-        assert!(app.state.ui.code_workspace.veriloga.receipt.is_some());
+        assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
     }
 
     #[test]

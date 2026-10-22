@@ -114,7 +114,7 @@ pub(super) fn source_waveform_anchor(
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -138,38 +138,43 @@ pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         t,
     );
-    if active_pane(&models, &state.ui.results.session).is_some() {
+    if active_pane(&models, &state.results.results.session).is_some() {
         return;
     }
 
     let preferred_analysis = state
-        .ui
+        .results
         .results
         .valid_selected_trace(&state.model.simulation)
         .map(SelectedResultTrace::analysis_key)
         .or_else(|| {
-            state.ui.results.session.cursor_strip.and_then(|index| {
-                models
-                    .iter()
-                    .find(|model| model.analysis_index == index)
-                    .map(|model| model.analysis_key)
-            })
+            state
+                .results
+                .results
+                .session
+                .cursor_strip
+                .and_then(|index| {
+                    models
+                        .iter()
+                        .find(|model| model.analysis_index == index)
+                        .map(|model| model.analysis_key)
+                })
         });
     let next = preferred_analysis
         .and_then(|analysis| {
             models.iter().find(|model| {
                 model.analysis_key == analysis
-                    && model_is_visible(model, &models, &state.ui.results.session)
+                    && model_is_visible(model, &models, &state.results.results.session)
             })
         })
         .or_else(|| {
             models
                 .iter()
-                .find(|model| model_is_visible(model, &models, &state.ui.results.session))
+                .find(|model| model_is_visible(model, &models, &state.results.results.session))
         })
         .and_then(|model| {
             model
@@ -180,7 +185,7 @@ pub(super) fn reconcile_active_pane(state: &mut AppState, t: &Tokens) {
                     unit: pane.unit.to_owned(),
                 })
         });
-    state.ui.results.session.active_wave_pane = next;
+    state.results.results.session.active_wave_pane = next;
 }
 
 fn matching_spec_limits(
@@ -252,11 +257,11 @@ pub(super) fn spec_limits_available(state: &mut AppState, t: &Tokens) -> bool {
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         t,
     );
-    active_pane(&models, &state.ui.results.session)
+    active_pane(&models, &state.results.results.session)
         .is_some_and(|(model, _, pane)| !matching_spec_limits(state, model, &pane, t).is_empty())
 }
 
@@ -264,16 +269,16 @@ pub(super) fn family_envelope_available(state: &mut AppState, t: &Tokens) -> boo
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         t,
     );
-    let generation = state.ui.results.models.generation();
-    let Some((model, _, pane)) = active_pane(&models, &state.ui.results.session) else {
+    let generation = state.results.results.models.generation();
+    let Some((model, _, pane)) = active_pane(&models, &state.results.results.session) else {
         return false;
     };
     !extent::family_envelopes(
-        &mut state.ui.results.plans.envelopes,
+        &mut state.results.results.plans.envelopes,
         generation,
         model,
         &pane,
@@ -297,13 +302,13 @@ type CursorMarkerTarget = (
 
 fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<CursorMarkerTarget> {
     let cursor_x = state
-        .ui
+        .results
         .results
         .session
         .cursors
         .a
         .filter(|value| value.is_finite())?;
-    let (model, _, pane) = active_pane(models, &state.ui.results.session)?;
+    let (model, _, pane) = active_pane(models, &state.results.results.session)?;
     let pane_traces = pane
         .traces
         .iter()
@@ -311,13 +316,13 @@ fn cursor_marker_target(state: &AppState, models: &[StripModel]) -> Option<Curso
         .filter(|trace| trace.visible && !trace.overlay)
         .collect::<Vec<_>>();
     let selected_source = state
-        .ui
+        .results
         .results
         .valid_selected_trace(&state.model.simulation)
         .filter(|selected| selected.analysis_key() == model.analysis_key)
         .map(SelectedResultTrace::source_name);
     let trace = state
-        .ui
+        .results
         .results
         .session
         .cursor_a_anchor
@@ -369,7 +374,7 @@ pub(super) fn marker_at_cursor_a_available(state: &mut AppState, t: &Tokens) -> 
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         t,
     );
@@ -380,7 +385,7 @@ pub(super) fn drop_marker_at_cursor_a(state: &mut AppState, t: &Tokens) {
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         t,
     );
@@ -439,7 +444,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut AppState, pane_chrome: bool) {
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &t,
     );
@@ -509,13 +514,13 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
     let x_unit = active_pane_x_unit(tokens, state);
     let (x_extent, y_extent) = active_pane_extents(tokens, state);
     let analysis = active_pane_analysis(tokens, state);
-    let key = state.ui.results.session.active_wave_pane.as_ref();
+    let key = state.results.results.session.active_wave_pane.as_ref();
     let scale = key.map(|key| {
         // One owner: the pane’s own log-Y flag on ResultsState. This read
         // used to reach into egui’s persisted memory with a hand-built id,
         // which is a second copy of a fact and drifts the moment either side
         // changes its key.
-        if state.ui.results.session.log_y_panes.contains(key) {
+        if state.results.results.session.log_y_panes.contains(key) {
             "logarithmic"
         } else {
             "linear"
@@ -526,7 +531,7 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut AppState) -> Active
         x_unit,
         analysis,
         scale,
-        limit_mask: if state.ui.results.session.show_spec_limits {
+        limit_mask: if state.results.results.session.show_spec_limits {
             "project specification limits"
         } else {
             "none bound"
@@ -557,7 +562,7 @@ pub(crate) fn active_shared_x_status(
     let presentation = state.result_presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let active = state
-        .ui
+        .results
         .results
         .session
         .active_wave_pane
@@ -565,7 +570,7 @@ pub(crate) fn active_shared_x_status(
         .map(|key| key.analysis);
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -575,7 +580,8 @@ pub(crate) fn active_shared_x_status(
     }?;
     let full = model.x_range?;
     let panes = model.unit_panes().len();
-    let view = shared_x_view(&state.ui.results.session, model.analysis_key, panes).unwrap_or(full);
+    let view =
+        shared_x_view(&state.results.results.session, model.analysis_key, panes).unwrap_or(full);
     let (start, end) = shared_axis_viewport_fraction(model.x_scale, full, view);
     let width = end - start;
     Some(SharedXStatus {
@@ -606,11 +612,11 @@ fn x_range_text(
 /// A sheet that is not the waveform stack picks its own analysis, so the
 /// run's analysis selector is not the authority here: the pane is.
 fn active_pane_analysis(tokens: &Tokens, state: &mut AppState) -> Option<String> {
-    let key = state.ui.results.session.active_wave_pane.clone()?;
+    let key = state.results.results.session.active_wave_pane.clone()?;
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -635,13 +641,13 @@ fn active_pane_extents(
     tokens: &Tokens,
     state: &mut AppState,
 ) -> (Option<super::AxisExtent>, Option<super::AxisExtent>) {
-    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
+    let Some(key) = state.results.results.session.active_wave_pane.clone() else {
         return (None, None);
     };
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -660,10 +666,10 @@ fn active_pane_extents(
         return (None, None);
     };
     let x = model.x_range.map(|full| {
-        shared_x_view(&state.ui.results.session, key.analysis, panes.len()).unwrap_or(full)
+        shared_x_view(&state.results.results.session, key.analysis, panes.len()).unwrap_or(full)
     });
     let pinned = state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane(super::ResultViewer::Waves, key.analysis, ordinal)
@@ -701,13 +707,13 @@ pub(crate) fn set_active_pane_axis_range(
     axis: super::PaneAxis,
     range: Option<(f64, f64)>,
 ) -> bool {
-    let Some(key) = state.ui.results.session.active_wave_pane.clone() else {
+    let Some(key) = state.results.results.session.active_wave_pane.clone() else {
         return false;
     };
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -724,7 +730,7 @@ pub(crate) fn set_active_pane_axis_range(
     match axis {
         super::PaneAxis::X => {
             set_shared_x_view(
-                &mut state.ui.results.session,
+                &mut state.results.results.session,
                 key.analysis,
                 panes.len(),
                 range,
@@ -732,7 +738,7 @@ pub(crate) fn set_active_pane_axis_range(
         }
         super::PaneAxis::Y => {
             state
-                .ui
+                .results
                 .results
                 .session
                 .analysis_plot_view_pane_mut(super::ResultViewer::Waves, key.analysis, ordinal)
@@ -744,11 +750,11 @@ pub(crate) fn set_active_pane_axis_range(
 
 /// The unit the active pane's shared X axis is measured in.
 fn active_pane_x_unit(tokens: &Tokens, state: &mut AppState) -> Option<String> {
-    let key = state.ui.results.session.active_wave_pane.clone()?;
+    let key = state.results.results.session.active_wave_pane.clone()?;
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         tokens,
     );
@@ -776,8 +782,12 @@ pub(super) fn displayed_pane_auto_y(
     ordinal: usize,
     t: &Tokens,
 ) -> Option<(f64, f64)> {
-    let pane_range = pane_y_range(&mut state.ui.results.session.derived, model, &pane.traces);
-    let limits = if state.ui.results.session.show_spec_limits {
+    let pane_range = pane_y_range(
+        &mut state.results.results.session.derived,
+        model,
+        &pane.traces,
+    );
+    let limits = if state.results.results.session.show_spec_limits {
         matching_spec_limits(state, model, pane, t)
     } else {
         Vec::new()

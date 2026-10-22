@@ -17,7 +17,11 @@ impl RSpiceApp {
         let document = (tool == SymbolTool::PlacePin)
             .then(|| self.state.load_active_symbol_document().ok())
             .flatten();
-        commands::activate_tool(&mut self.state.ui.symbol.editor, tool, document.as_ref());
+        commands::activate_tool(
+            &mut self.state.design.symbol.editor,
+            tool,
+            document.as_ref(),
+        );
     }
 
     pub(crate) fn select_all_symbol_items(&mut self) {
@@ -29,7 +33,7 @@ impl RSpiceApp {
             }
         };
         self.state
-            .ui
+            .design
             .symbol
             .editor
             .set_selection(SymbolSelection::all_in(&document));
@@ -37,12 +41,12 @@ impl RSpiceApp {
 
     pub(crate) fn copy_selected_symbol_shape(&mut self) {
         if let Some(clipboard) = self.selected_symbol_items() {
-            self.state.ui.symbol.editor.clipboard = clipboard;
+            self.state.design.symbol.editor.clipboard = clipboard;
         }
     }
 
     pub(crate) fn paste_symbol_shape(&mut self) {
-        let clipboard = self.state.ui.symbol.editor.clipboard.clone();
+        let clipboard = self.state.design.symbol.editor.clipboard.clone();
         if let Some(request) = self.symbol_paste_request(clipboard) {
             apply_edit_request(&mut self.state, request);
         }
@@ -66,7 +70,7 @@ impl RSpiceApp {
                 return None;
             }
         };
-        let selection = self.state.ui.symbol.editor.effective_selection();
+        let selection = self.state.design.symbol.editor.effective_selection();
         Some(commands::clipboard_from_selection(&document, &selection))
     }
 
@@ -77,9 +81,9 @@ impl RSpiceApp {
         }
         let target = self
             .state
-            .ui
+            .design
             .canvas_hover
-            .or(self.state.ui.canvas_view_center)
+            .or(self.state.design.canvas_view_center)
             .map(|(x, y)| Point::new(x.round() as i32, y.round() as i32))
             .unwrap_or_else(|| Point::new(10, 10));
         let action = SymbolEditAction::Paste {
@@ -90,7 +94,13 @@ impl RSpiceApp {
     }
 
     pub(crate) fn delete_selected_symbol_item(&mut self, cut: bool) {
-        if self.state.ui.symbol.editor.effective_selection().is_empty()
+        if self
+            .state
+            .design
+            .symbol
+            .editor
+            .effective_selection()
+            .is_empty()
             || self.state.deny_read_only_edit()
         {
             return;
@@ -103,7 +113,13 @@ impl RSpiceApp {
         &mut self,
         transform: SymbolTransform,
     ) {
-        if self.state.ui.symbol.editor.effective_selection().is_empty()
+        if self
+            .state
+            .design
+            .symbol
+            .editor
+            .effective_selection()
+            .is_empty()
             || self.state.deny_read_only_edit()
         {
             return;
@@ -113,7 +129,15 @@ impl RSpiceApp {
     }
 
     pub(crate) fn transform_selected_symbol_pin(&mut self, transform: SymbolPinTransform) {
-        if self.state.ui.symbol.editor.effective_selection().pins.len() != 1
+        if self
+            .state
+            .design
+            .symbol
+            .editor
+            .effective_selection()
+            .pins
+            .len()
+            != 1
             || self.state.deny_read_only_edit()
         {
             return;
@@ -125,14 +149,14 @@ impl RSpiceApp {
     pub(in crate::workbench) fn finish_pending_symbol_polyline(&mut self) {
         // A command can arrive after navigation and before the new canvas has rendered.
         let source = self.state.symbol_editor_request_source();
-        bind_canvas_source(&mut self.state.ui.symbol.editor, source);
-        if self.state.ui.symbol.editor.pending_polyline.len() < 2
+        bind_canvas_source(&mut self.state.design.symbol.editor, source);
+        if self.state.design.symbol.editor.pending_polyline.len() < 2
             || self.state.deny_read_only_edit()
         {
-            self.state.ui.symbol.editor.pending_polyline.clear();
+            self.state.design.symbol.editor.pending_polyline.clear();
             return;
         }
-        let points = self.state.ui.symbol.editor.pending_polyline.clone();
+        let points = self.state.design.symbol.editor.pending_polyline.clone();
         let request = edit_request(&self.state, SymbolEditAction::FinishPolyline { points });
         apply_edit_request(&mut self.state, request);
     }
@@ -141,15 +165,15 @@ impl RSpiceApp {
 fn edit_request(state: &AppState, action: SymbolEditAction) -> SymbolEditRequest {
     SymbolEditRequest {
         source: state.symbol_editor_request_source(),
-        selection: state.ui.symbol.editor.effective_selection(),
-        tool: state.ui.symbol.editor.tool,
+        selection: state.design.symbol.editor.effective_selection(),
+        tool: state.design.symbol.editor.tool,
         action,
     }
 }
 
 fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
     if let SymbolEditAction::Paste { clipboard, .. } = &request.action
-        && clipboard != &state.ui.symbol.editor.clipboard
+        && clipboard != &state.design.symbol.editor.clipboard
     {
         return;
     }
@@ -161,14 +185,14 @@ fn apply_edit_request(state: &mut AppState, request: SymbolEditRequest) {
 /// for rather than the clipboard, so the selection check alone guards it.
 fn apply_current_edit_request(state: &mut AppState, request: SymbolEditRequest) {
     if request.source != state.symbol_editor_request_source()
-        || request.selection != state.ui.symbol.editor.effective_selection()
-        || request.tool != state.ui.symbol.editor.tool
+        || request.selection != state.design.symbol.editor.effective_selection()
+        || request.tool != state.design.symbol.editor.tool
         || state.application_modal_open()
     {
         return;
     }
     if let SymbolEditAction::FinishPolyline { points } = &request.action
-        && points != &state.ui.symbol.editor.pending_polyline
+        && points != &state.design.symbol.editor.pending_polyline
     {
         return;
     }
@@ -198,7 +222,7 @@ fn apply_current_edit_request(state: &mut AppState, request: SymbolEditRequest) 
         edit: !state.schematic_edit_read_only(),
     };
     let outcome = commands::apply_edit(
-        &mut state.ui.symbol.editor,
+        &mut state.design.symbol.editor,
         &mut document,
         metadata.as_mut(),
         request.action,

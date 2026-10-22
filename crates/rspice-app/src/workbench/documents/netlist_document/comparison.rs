@@ -14,24 +14,25 @@ use super::{ActiveNetlistDocument, AppState, invalidate_source_evidence};
 /// comparison remains an explicit revision workflow; a tab switch is only a
 /// presentation transition.
 pub(crate) fn open_netlist_comparison(state: &mut AppState) -> bool {
-    if state.ui.netlist.generated_diff_source.is_empty() {
+    if state.code.netlist.generated_diff_source.is_empty() {
         return false;
     }
-    state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document_initialized = true;
+    state.model.simulation.source.netlist_content =
+        state.code.netlist.generated_diff_source.clone();
+    state.code.netlist.completion_open = false;
+    state.code.netlist.completion_dismissed_at = None;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(state);
     true
 }
 
 pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<(), String> {
     let previous = state
-        .ui
+        .code
         .netlist
         .generated_history
         .get(index)
@@ -50,19 +51,20 @@ pub fn compare_generated_revision(state: &mut AppState, index: usize) -> Result<
         .context_radius(3)
         .header(&previous_label, &current_label)
         .to_string();
-    state.ui.netlist.generated_diff_source = if diff.is_empty() {
+    state.code.netlist.generated_diff_source = if diff.is_empty() {
         format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
     } else {
         diff
     };
-    state.ui.netlist.comparison_return_document = ActiveNetlistDocument::Generated;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.ui.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    state.ui.netlist.completion_open = false;
+    state.code.netlist.comparison_return_document = ActiveNetlistDocument::Generated;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    state.code.netlist.active_document_initialized = true;
+    state.model.simulation.source.netlist_content =
+        state.code.netlist.generated_diff_source.clone();
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
+    state.code.netlist.completion_open = false;
     invalidate_source_evidence(state);
     Ok(())
 }
@@ -77,7 +79,7 @@ pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         .and_then(|descriptor| descriptor.revision_history.get(index))
         .ok_or_else(|| "The selected owned-source revision is no longer retained.".to_owned())?;
     let current = state
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
@@ -97,19 +99,20 @@ pub fn compare_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         .context_radius(3)
         .header(&previous_label, &current_label)
         .to_string();
-    state.ui.netlist.generated_diff_source = if diff.is_empty() {
+    state.code.netlist.generated_diff_source = if diff.is_empty() {
         format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
     } else {
         diff
     };
-    state.ui.netlist.comparison_return_document = ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.ui.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    state.ui.netlist.completion_open = false;
+    state.code.netlist.comparison_return_document = ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    state.code.netlist.active_document_initialized = true;
+    state.model.simulation.source.netlist_content =
+        state.code.netlist.generated_diff_source.clone();
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
+    state.code.netlist.completion_open = false;
     invalidate_source_evidence(state);
     Ok(())
 }
@@ -125,7 +128,7 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
         .cloned()
         .ok_or_else(|| "The selected owned-source revision is no longer retained.".to_owned())?;
     let current = state
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
@@ -173,14 +176,14 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
     candidate.model.workspace.content.netlist_source_dirty = true;
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.netlist_descriptor = Some(descriptor);
-    candidate.ui.netlist.owned_document = Some(next_document);
-    candidate.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    candidate.ui.netlist.active_dependency_identity = None;
-    candidate.ui.netlist.active_dependency_root = None;
-    candidate.ui.netlist.active_document_initialized = true;
+    candidate.code.netlist.owned_document = Some(next_document);
+    candidate.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    candidate.code.netlist.active_dependency_identity = None;
+    candidate.code.netlist.active_dependency_root = None;
+    candidate.code.netlist.active_document_initialized = true;
     candidate.model.simulation.source.netlist_content = snapshot.source;
-    candidate.ui.netlist.generated_diff_source.clear();
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.generated_diff_source.clear();
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate);
     candidate
         .model
@@ -198,28 +201,28 @@ pub fn restore_owned_revision(state: &mut AppState, index: usize) -> Result<(), 
 /// on screen: leaving a viewer must never overwrite an edit the engineer has
 /// not saved yet.
 fn return_to_working_deck(state: &mut AppState, root: ActiveNetlistDocument) {
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
     match (root, state.model.workspace.content.netlist_source.clone()) {
         (ActiveNetlistDocument::OwnedSource, Some(source)) => {
-            state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+            state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
             state.model.simulation.source.netlist_content = source;
         }
         _ => {
-            state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+            state.code.netlist.active_document = ActiveNetlistDocument::Generated;
             state.model.simulation.source.netlist_content =
                 state.model.netlist_artifacts.generated_source.clone();
         }
     }
-    state.ui.netlist.active_document_initialized = true;
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.active_document_initialized = true;
+    state.code.netlist.completion_open = false;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(state);
 }
 
 pub fn close_revision_comparison(state: &mut AppState) -> bool {
-    return_to_working_deck(state, state.ui.netlist.comparison_return_document);
-    state.ui.netlist.generated_diff_source.clear();
+    return_to_working_deck(state, state.code.netlist.comparison_return_document);
+    state.code.netlist.generated_diff_source.clear();
     true
 }
 
@@ -233,7 +236,7 @@ fn short_digest(digest: crate::product::ContentDigest) -> String {
 /// snapshot that cannot show a deck, and text without a run is a deck that
 /// cannot name what executed it.
 pub(crate) fn run_deck_snapshot_run_id(state: &AppState) -> Option<u64> {
-    let run_id = state.ui.netlist.last_run_id?;
+    let run_id = state.code.netlist.last_run_id?;
     state
         .manual_run
         .last_run_buffer
@@ -248,7 +251,7 @@ pub(crate) fn run_deck_snapshot_run_id(state: &AppState) -> Option<u64> {
 pub(crate) fn run_deck_snapshot_artifact_name(state: &AppState) -> String {
     format!(
         "run-{}.sp",
-        state.ui.netlist.last_run_id.unwrap_or_default()
+        state.code.netlist.last_run_id.unwrap_or_default()
     )
 }
 
@@ -260,7 +263,7 @@ pub fn open_run_deck_snapshot(state: &mut AppState) -> bool {
     if run_deck_snapshot_run_id(state).is_none() {
         return false;
     }
-    state.ui.netlist.executed_deck_view = None;
+    state.code.netlist.executed_deck_view = None;
     project_run_snapshot(state);
     true
 }
@@ -292,7 +295,7 @@ pub fn open_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> bo
     else {
         return false;
     };
-    state.ui.netlist.executed_deck_view = Some(
+    state.code.netlist.executed_deck_view = Some(
         crate::workbench::documents::netlist_document::ExecutedDeckSelection {
             run_id,
             point,
@@ -341,36 +344,36 @@ pub fn reveal_executed_deck(state: &mut AppState, run_id: u64, point: usize) -> 
 
 /// Projects whatever the run-snapshot document is currently bound to.
 fn project_run_snapshot(state: &mut AppState) {
-    if state.ui.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
-        state.ui.netlist.run_snapshot_return_document = state.ui.netlist.active_document;
+    if state.code.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
+        state.code.netlist.run_snapshot_return_document = state.code.netlist.active_document;
     }
     let source = super::run_snapshot_source(state);
-    state.ui.netlist.active_document = ActiveNetlistDocument::RunSnapshot;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_document = ActiveNetlistDocument::RunSnapshot;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document_initialized = true;
     state.model.simulation.source.netlist_content = source;
-    state.ui.netlist.requested_line = None;
-    state.ui.netlist.cursor_line = 0;
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.requested_line = None;
+    state.code.netlist.cursor_line = 0;
+    state.code.netlist.completion_open = false;
+    state.code.netlist.completion_dismissed_at = None;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(state);
 }
 
 /// Leave the run snapshot for the working deck it was opened from.
 pub(crate) fn close_run_deck_snapshot(state: &mut AppState) -> bool {
-    if state.ui.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
+    if state.code.netlist.active_document != ActiveNetlistDocument::RunSnapshot {
         return false;
     }
-    state.ui.netlist.executed_deck_view = None;
-    return_to_working_deck(state, state.ui.netlist.run_snapshot_return_document);
+    state.code.netlist.executed_deck_view = None;
+    return_to_working_deck(state, state.code.netlist.run_snapshot_return_document);
     true
 }
 
 /// Diff the run's sealed deck against the working revision it was opened from.
 pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
-    if state.ui.netlist.executed_deck_view.is_some() {
+    if state.code.netlist.executed_deck_view.is_some() {
         // Not a refusal to be worked around: an executed deck is the source a
         // point was handed after expansion, corner materialization and
         // per-point overrides. Diffing it against the deck somebody is editing
@@ -382,7 +385,7 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
         );
     }
     let run_id = state
-        .ui
+        .code
         .netlist
         .last_run_id
         .ok_or_else(|| "No completed manual run owns a deck snapshot.".to_owned())?;
@@ -391,12 +394,12 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
         .last_run_buffer
         .clone()
         .ok_or_else(|| "The deck this run used is no longer retained.".to_owned())?;
-    let root = state.ui.netlist.run_snapshot_return_document;
+    let root = state.code.netlist.run_snapshot_return_document;
     let (working, current_label) =
         match root {
             ActiveNetlistDocument::OwnedSource => {
                 let document =
-                    state.ui.netlist.owned_document.as_ref().ok_or_else(|| {
+                    state.code.netlist.owned_document.as_ref().ok_or_else(|| {
                         "No current owned source document is available.".to_owned()
                     })?;
                 (
@@ -433,19 +436,20 @@ pub fn compare_run_deck_snapshot(state: &mut AppState) -> Result<(), String> {
         .context_radius(3)
         .header(&previous_label, &current_label)
         .to_string();
-    state.ui.netlist.generated_diff_source = if diff.is_empty() {
+    state.code.netlist.generated_diff_source = if diff.is_empty() {
         format!("--- {previous_label}\n+++ {current_label}\n No source changes\n")
     } else {
         diff
     };
-    state.ui.netlist.comparison_return_document = root;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
-    state.ui.netlist.active_document_initialized = true;
-    state.model.simulation.source.netlist_content = state.ui.netlist.generated_diff_source.clone();
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
-    state.ui.netlist.completion_open = false;
+    state.code.netlist.comparison_return_document = root;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document = ActiveNetlistDocument::GeneratedDiff;
+    state.code.netlist.active_document_initialized = true;
+    state.model.simulation.source.netlist_content =
+        state.code.netlist.generated_diff_source.clone();
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
+    state.code.netlist.completion_open = false;
     invalidate_source_evidence(state);
     Ok(())
 }

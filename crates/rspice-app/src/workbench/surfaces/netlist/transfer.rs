@@ -28,10 +28,10 @@ fn external_resolution_label(
 pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     use crate::workbench::documents::netlist_document::NetlistExternalChangeResolution;
 
-    let Some(mut review) = app.state.ui.netlist.external_change.clone() else {
+    let Some(mut review) = app.state.code.netlist.external_change.clone() else {
         return;
     };
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let digest = |bytes: &[u8; 32]| {
         bytes
             .iter()
@@ -146,7 +146,7 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
         Some(resolution.response.id)
     });
 
-    app.state.ui.netlist.external_change = Some(review);
+    app.state.code.netlist.external_change = Some(review);
     match choice {
         DialogChoice::Primary => {
             match crate::workbench::workflows::netlist_workflow::apply_staged_external_netlist_change(
@@ -160,14 +160,14 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
                     );
                 }
                 Err(error) => {
-                    if let Some(current) = app.state.ui.netlist.external_change.as_mut() {
+                    if let Some(current) = app.state.code.netlist.external_change.as_mut() {
                         current.error = Some(error);
                     }
                 }
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.ui.netlist.external_change = None;
+            app.state.code.netlist.external_change = None;
         }
         DialogChoice::None | DialogChoice::Secondary => {}
     }
@@ -194,10 +194,10 @@ fn dependency_status_label(
 }
 
 pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.ui.netlist.export_dialog.open {
+    if !app.state.code.netlist.export_dialog.open {
         return;
     }
-    let mut dialog = app.state.ui.netlist.export_dialog.clone();
+    let mut dialog = app.state.code.netlist.export_dialog.clone();
     let current = app.state.model.netlist_artifacts.generation_error.is_none()
         && app
             .state
@@ -228,7 +228,7 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
     if requires_bundle {
         dialog.bundle_dependencies = true;
     }
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let bundle_ready = !dialog.bundle_dependencies || dependencies_sealed;
     let primary = if dialog.bundle_dependencies {
         messages.text(MessageId::NetlistExportBundle)
@@ -349,7 +349,7 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
         DialogChoice::None | DialogChoice::Secondary => {}
     }
-    app.state.ui.netlist.export_dialog = dialog;
+    app.state.code.netlist.export_dialog = dialog;
 }
 
 fn import_operation_text(
@@ -379,10 +379,10 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
         NetlistImportIssueSeverity, NetlistImportOperation,
     };
 
-    let Some(mut review) = app.state.ui.netlist.import_review.clone() else {
+    let Some(mut review) = app.state.code.netlist.import_review.clone() else {
         return;
     };
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let blocking = review.blocking_issue_count();
     let dialect_qualification_error = review.dialect_qualification().err();
     let qualified_execution_profile = dialect_qualification_error
@@ -604,7 +604,7 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
 
     // Persist review choices before a commit attempt revalidates the exact
     // lifecycle transaction and candidate snapshot.
-    app.state.ui.netlist.import_review = Some(review);
+    app.state.code.netlist.import_review = Some(review);
     match choice {
         DialogChoice::Primary => {
             crate::workbench::workflows::netlist_workflow::commit_staged_netlist_import(

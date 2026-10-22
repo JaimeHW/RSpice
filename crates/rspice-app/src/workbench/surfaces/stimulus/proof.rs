@@ -75,7 +75,7 @@ fn strip_row(
     hover: Option<TraceReading>,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let tokens = Tokens::get(ui.ctx());
     // The strip reads from both ends: spans and derived readouts from the
     // left, the transient the substitutions were made under and the hover
@@ -453,7 +453,7 @@ impl Projector {
 /// cannot see this surface most needs from it is whether the shape it states is
 /// one curve or the extremes of five hundred of them.
 fn accessible_label(state: &AppState, stage: &Stage) -> String {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     match stage.realization.defect.as_deref() {
         Some(defect) => defect.to_owned(),
         None => {
@@ -477,7 +477,7 @@ fn accessible_label(state: &AppState, stage: &Stage) -> String {
 
 /// Why there is no curve, stated where the curve would have been.
 fn statement(ui: &mut Ui, plot: Rect, state: &AppState, stage: &Stage) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let tokens = Tokens::get(ui.ctx());
     let text = stage
         .realization

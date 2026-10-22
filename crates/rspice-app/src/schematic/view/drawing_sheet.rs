@@ -167,8 +167,8 @@ pub(super) fn draw_base(
         available,
         viewport,
         DrawingSheetCanvas {
-            layers: state.ui.drawing_sheet_layers,
-            grid: state.ui.grid,
+            layers: state.design.drawing_sheet_layers,
+            grid: state.design.grid,
             grid_size: state.model.schematic.document().grid_size,
         },
         sheet,

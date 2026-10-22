@@ -9,6 +9,9 @@ use std::collections::{BTreeSet, HashSet};
 
 use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
+use super::bulk_filter::{
+    SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind,
+};
 pub(crate) use crate::state::bulk_edit::{SelectionBulkProperty, SelectionBulkUnsetBehavior};
 use crate::state::bulk_edit::{
     apply_bulk_edit, mutate_component, parameter_key_from_filter, validate_bulk_value,
@@ -24,7 +27,6 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app::dialogs::review_primitives::{DIALOG_BODY_INSET, band_header};
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::{SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
@@ -274,7 +276,7 @@ enum SelectionBulkBodyAction {
 }
 
 pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
-    let filter = state.ui.schematic_bulk_edit_filters.active.clone();
+    let filter = state.design.schematic_bulk_edit_filters.active.clone();
     let authority = SelectionBulkEditAuthority::capture(state);
     let property = SelectionBulkProperty::default();
     let rows = build_rows(state, &filter, property);
@@ -382,7 +384,7 @@ impl RSpiceApp {
 
         let saved = self
             .state
-            .ui
+            .design
             .schematic_bulk_edit_filters
             .saved()
             .iter()
@@ -424,7 +426,7 @@ impl RSpiceApp {
             SelectionBulkBodyAction::None => {}
             SelectionBulkBodyAction::FilterChanged => {
                 let filter = self.state.design.selection_bulk_edit.filter.clone();
-                self.state.ui.schematic_bulk_edit_filters.active = filter.clone();
+                self.state.design.schematic_bulk_edit_filters.active = filter.clone();
                 let property = self.state.design.selection_bulk_edit.property;
                 let rows = build_rows(&self.state, &filter, property);
                 self.state.design.selection_bulk_edit.bound_sections =
@@ -445,9 +447,14 @@ impl RSpiceApp {
                     .selection_bulk_edit
                     .save_filter_name
                     .clone();
-                self.state.ui.schematic_bulk_edit_filters.active =
+                self.state.design.schematic_bulk_edit_filters.active =
                     self.state.design.selection_bulk_edit.filter.clone();
-                match self.state.ui.schematic_bulk_edit_filters.save_active(&name) {
+                match self
+                    .state
+                    .design
+                    .schematic_bulk_edit_filters
+                    .save_active(&name)
+                {
                     Ok(()) => {
                         self.state.design.selection_bulk_edit.selected_saved_filter =
                             Some(name.trim().to_owned());
@@ -470,9 +477,9 @@ impl RSpiceApp {
                     .selected_saved_filter
                     .clone();
                 if let Some(name) = name
-                    && self.state.ui.schematic_bulk_edit_filters.load(&name)
+                    && self.state.design.schematic_bulk_edit_filters.load(&name)
                 {
-                    let filter = self.state.ui.schematic_bulk_edit_filters.active.clone();
+                    let filter = self.state.design.schematic_bulk_edit_filters.active.clone();
                     self.state.design.selection_bulk_edit.filter = filter.clone();
                     let property = self.state.design.selection_bulk_edit.property;
                     self.state.design.selection_bulk_edit.selected =
@@ -494,7 +501,7 @@ impl RSpiceApp {
                     .selected_saved_filter
                     .clone();
                 if let Some(name) = name
-                    && self.state.ui.schematic_bulk_edit_filters.remove(&name)
+                    && self.state.design.schematic_bulk_edit_filters.remove(&name)
                 {
                     self.state.design.selection_bulk_edit.selected_saved_filter = None;
                     self.state.design.selection_bulk_edit.error = None;

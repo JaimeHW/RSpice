@@ -41,7 +41,7 @@ use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::{Notice, NoticeKind};
 use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, PlatformState, ProjectState, ResultsState,
-    SettingsState, SheetsState, ShellState, SimulateState,
+    RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
 
 pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
@@ -95,6 +95,8 @@ pub struct AppState {
     pub(crate) settings: Box<SettingsState>,
     pub(crate) cloud: Box<CloudState>,
     pub(crate) sheets: Box<SheetsState>,
+    /// What watching the simulations in flight keeps between frames.
+    pub(crate) runs: Box<RunsState>,
     /// The deck a manual-deck run started from and the baseline the last one
     /// left. Runtime only, and boxed so a moved state stays the same size.
     pub(crate) manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
@@ -139,9 +141,6 @@ pub struct AppState {
     pub(crate) license: Option<crate::services::license::LicenseInfo>,
     /// Specialized analysis viewer state grouped by analysis workspace.
     pub(crate) analysis: viewer_capabilities::AnalysisWorkspaceState,
-    /// Document-engine and interaction session state (theme, canvas, result
-    /// viewers, symbol editor, and netlist editor).
-    pub(crate) ui: Box<crate::workbench::UiSessionState>,
     /// Canonical workbench navigation and responsive layout state.
     pub(crate) workbench: Box<crate::workbench::WorkbenchState>,
     /// Runtime-only chord/prefix authority. Partial sequences are never
@@ -184,7 +183,7 @@ impl AppState {
         &self,
     ) -> crate::workbench::preferences::ResultPresentationPolicy {
         let policy = self.model.preferences.result_presentation_policy();
-        self.ui
+        self.results
             .results
             .session
             .document_presentation
@@ -817,7 +816,7 @@ impl AppState {
         self.workbench.application_modal_open()
             || self.dialog_modal_open()
             || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
-                && self.ui.netlist.application_modal_open())
+                && self.code.netlist.application_modal_open())
             || self.model.sim_setup.session.palette_open
             || self.tabbed_property_dialog.open
             || self.pdk_settings_dialog.open
@@ -879,9 +878,9 @@ impl AppState {
         }
         let active_document =
             crate::workbench::documents::netlist_document::effective_active_document(self);
-        if self.ui.netlist.active_dependency_identity.is_some() {
+        if self.code.netlist.active_dependency_identity.is_some() {
             return Some(
-                self.ui
+                self.workbench
                     .messages()
                     .text(crate::workbench::MessageId::NetlistDependencyCannotRun),
             );
@@ -936,7 +935,7 @@ impl AppState {
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
         self.model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
         if self.model.simulation.execution.has_active_execution() {
-            self.ui.netlist.rerun_queued = true;
+            self.code.netlist.rerun_queued = true;
         } else {
             self.model.simulation.execution.request_manual_deck_run();
         }
@@ -990,7 +989,7 @@ impl AppState {
 
     /// Request a run from the Simulate workspace run set.
     pub fn request_run_set_simulation(&mut self) {
-        self.ui.netlist.rerun_queued = false;
+        self.code.netlist.rerun_queued = false;
         self.model.simulation.execution.request_simulate_run_set();
     }
 
@@ -1095,7 +1094,7 @@ impl AppState {
                 NoticeKind::Error => ToastKind::Error,
                 NoticeKind::Warning => ToastKind::Warn,
             };
-            self.ui.toasts.notify_with_action(
+            self.workbench.toasts.notify_with_action(
                 ctx,
                 NotificationCategory::System,
                 kind,
@@ -1251,9 +1250,9 @@ impl AppState {
     pub(crate) fn schematic_paste_anchor(&self) -> crate::state::Point {
         let grid = self.model.schematic.document().grid_size.max(1);
         let (x, y) = self
-            .ui
+            .design
             .canvas_hover
-            .or(self.ui.canvas_view_center)
+            .or(self.design.canvas_view_center)
             .unwrap_or((20.0, 20.0));
         crate::state::Point::new((x.round() as i32) * grid, (y.round() as i32) * grid)
     }

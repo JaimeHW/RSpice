@@ -189,7 +189,7 @@ fn a_campaign_reports_its_refused_members_and_its_end_to_the_shell() {
         )
         .expect("the campaign freezes; its members are refused one by one");
 
-    let outcomes = state.ui.run_watch.take_campaign_outcomes();
+    let outcomes = state.runs.run_watch.take_campaign_outcomes();
     assert_eq!(outcomes.len(), 3, "{outcomes:?}");
     let console_line = |log_id: u64| {
         state
@@ -276,7 +276,7 @@ fn a_cancelled_campaign_reports_nothing_to_the_shell() {
             == "Campaign 'Nightly characterization' cancelled: 0 completed, 1 failed"),
         "the Console still sums it up"
     );
-    assert!(state.ui.run_watch.take_campaign_outcomes().is_empty());
+    assert!(state.runs.run_watch.take_campaign_outcomes().is_empty());
 
     controller.abort();
 }

@@ -650,7 +650,7 @@ fn export_support_bundle(app: &mut RSpiceApp, include_session_log: bool) {
             "workspace": app.state.workbench.workspace.label(),
             "open_documents": documents.iter().filter(|document| document.open).count(),
             "dirty_documents": documents.iter().filter(|document| document.dirty).count(),
-            "autosave_minutes": app.state.ui.autosave_minutes,
+            "autosave_minutes": app.state.platform.autosave_minutes,
         },
         "schemas": {
             "project_descriptor": crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION,
@@ -1056,14 +1056,14 @@ mod tests {
             "{:?}",
             app.state.prompt_text()
         );
-        assert!(app.state.ui.toasts.activity().is_empty());
+        assert!(app.state.workbench.toasts.activity().is_empty());
 
         app.export_workflow_io = Box::new(BundleIo {
             write_error: Some("disk full"),
         });
         export_support_bundle(&mut app, false);
         app.state.drain_notices(&ctx);
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "Support bundle failed");
     }

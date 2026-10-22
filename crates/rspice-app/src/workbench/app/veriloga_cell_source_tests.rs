@@ -607,7 +607,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     .expect("the file is read");
     let form = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .import_form
@@ -656,7 +656,7 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(app.state.model.workspace.content.active_view, first);
-    assert!(app.state.ui.code_workspace.veriloga.import_form.is_none());
+    assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
 }
 
 /// A file the front end cannot read is refused in the form, and committing
@@ -680,7 +680,7 @@ fn import_of_an_unparseable_file_creates_nothing() {
     .expect("the file is read");
     let form = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .import_form
@@ -747,12 +747,12 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     let text = root_text(&app, &reference);
 
     Command::ImportVerilogA.execute(&mut app);
-    assert!(app.state.ui.code_workspace.veriloga.import_requested);
+    assert!(app.state.code.code_workspace.veriloga.import_requested);
     code_workspace::complete_veriloga_file_pick(&mut app, "pair.va", TWO_TOP_MODULES);
 
     let form = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .import_form
@@ -761,7 +761,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     assert_eq!(form.file_name, "pair.va");
     assert!(
         app.state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .replace_review
@@ -813,7 +813,7 @@ fn a_file_dropped_on_the_veriloga_editor_opens_the_import_form() {
 
     assert_eq!(
         app.state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .import_form
@@ -840,15 +840,15 @@ fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
         .expect("Manage source document offers Replace from file");
     click(ctx, app, replace);
     assert!(
-        app.state.ui.code_workspace.veriloga.import_requested,
+        app.state.code.code_workspace.veriloga.import_requested,
         "Replace from file asks for a file"
     );
     assert!(
-        !app.state.ui.code_workspace.source_document_dialog,
+        !app.state.code.code_workspace.source_document_dialog,
         "the picker and the confirmation take over from the dialog"
     );
     code_workspace::complete_veriloga_file_pick(app, "replacement.va", REPLACEMENT);
-    assert!(app.state.ui.code_workspace.veriloga.import_form.is_none());
+    assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
 }
 
 /// The confirmation, settled: a few frames so it has faded in.
@@ -880,7 +880,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     );
     let review = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .replace_review
@@ -905,7 +905,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
     click(&ctx, &mut app, cancel);
     assert!(
         app.state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .replace_review
@@ -935,7 +935,7 @@ fn replace_source_from_file_replaces_only_after_its_confirmation() {
 
     assert!(
         app.state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .replace_review
@@ -1135,7 +1135,7 @@ fn render_the_veriloga_import_and_netlist_dependency_for_review() {
 
     let mut automation = open_project_app();
     automation.state.workbench.activate(Workspace::Netlist);
-    automation.state.ui.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
+    automation.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
     let canvas = crate::ui::raster::render(DESKTOP, |ui, _| automation.render_frame_chrome(ui));
     write(
         "netlist-workspace-automation-page-1440x900",

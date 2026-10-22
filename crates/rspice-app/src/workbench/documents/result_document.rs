@@ -72,7 +72,7 @@ pub(crate) fn open_specification_editor(state: &mut AppState) {
     // the draft rows so those projections cannot erase the requested editor
     // before the Results destination gets its first frame.
     state.workbench.specification_editor_route_pending = true;
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Specs;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
     state
         .workbench
@@ -88,7 +88,7 @@ pub(crate) fn consume_pending_specification_editor(state: &mut AppState) -> bool
     if !std::mem::take(&mut state.workbench.specification_editor_route_pending) {
         return false;
     }
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Specs;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
     true
 }
@@ -206,7 +206,7 @@ pub(crate) fn open_dataset_browser(app: &mut RSpiceApp) {
     app.state.workbench.navigator_visible = true;
     app.state.workbench.inspector_visible = true;
     app.state.workbench.focus_navigator_search = true;
-    app.state.ui.results.session.viewer = ResultViewer::Manifest;
+    app.state.results.results.session.viewer = ResultViewer::Manifest;
 }
 
 /// Open a fresh immutable-dataset-bound result-document transaction.
@@ -560,7 +560,7 @@ pub(crate) use rspice_results::result_presentation::viewer_uses_wave_stack;
 
 /// Queue a viewport gesture for the active result sheet.
 pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
-    state.ui.results.session.pending_view_gesture = Some(gesture);
+    state.results.results.session.pending_view_gesture = Some(gesture);
 }
 
 /// Whether the active sheet has a viewport that fitting can release.
@@ -569,7 +569,7 @@ pub(crate) fn request_view_gesture(state: &mut AppState, gesture: ViewGesture) {
 /// manifest) have no viewport at all and must not offer the gesture.
 pub(crate) fn fit_gesture_available(state: &AppState) -> bool {
     state.model.simulation.retained.has_results()
-        && viewer_draws_a_pane(state.ui.results.session.viewer)
+        && viewer_draws_a_pane(state.results.results.session.viewer)
 }
 
 /// Whether this sheet draws a plot pane at all.
@@ -595,23 +595,27 @@ pub(crate) const fn viewer_draws_a_pane(viewer: ResultViewer) -> bool {
 /// be computed against; the single-canvas viewers own their own gestures.
 pub(crate) fn zoom_gesture_available(state: &AppState) -> bool {
     state.model.simulation.retained.has_results()
-        && viewer_uses_wave_stack(state.ui.results.session.viewer)
+        && viewer_uses_wave_stack(state.results.results.session.viewer)
 }
 
 /// Apply any queued viewport gesture, now that the sheet's models and theme
 /// tokens exist.
 pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut AppState) {
-    let Some(gesture) = state.ui.results.session.pending_view_gesture.take() else {
+    let Some(gesture) = state.results.results.session.pending_view_gesture.take() else {
         return;
     };
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     if !viewer_uses_wave_stack(viewer) {
         // Single-canvas viewers keep their views under plot ordinals, and
         // only fit is expressible without their renderer's own extents.
         match gesture {
-            ViewGesture::Fit => state.ui.results.session.reset_viewer_plot_views(viewer),
+            ViewGesture::Fit => state
+                .results
+                .results
+                .session
+                .reset_viewer_plot_views(viewer),
             ViewGesture::SetRanges { x, y } => {
-                let view = state.ui.results.session.plot_view_pane_mut_for(
+                let view = state.results.results.session.plot_view_pane_mut_for(
                     viewer,
                     PlotPresentationKey::Global(0),
                     0,
@@ -685,7 +689,7 @@ impl<'a> SheetContext<'a> {
             policy: state.model.preferences.quantity_presentation_policy(),
             simulation: &state.model.simulation,
             workspace: &state.model.workspace,
-            results: &mut state.ui.results,
+            results: &mut state.results.results,
         }
     }
 }
@@ -783,7 +787,7 @@ pub(super) fn place_marker(
         ..
     } = placement;
     let retained = state
-        .ui
+        .results
         .results
         .session
         .persistent_pane_context
@@ -800,7 +804,7 @@ pub(super) fn place_marker(
             Some((context, document.revision(), trace.id))
         });
     let quick_fallback = |state: &mut AppState, reason: Option<String>| match state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, anchor.clone(), trace_name.clone(), x)
@@ -818,7 +822,7 @@ pub(super) fn place_marker(
     };
 
     let Some((context, revision, trace_id)) = retained else {
-        let reason = state.ui.results.session.persistent_pane_context.is_some().then(|| {
+        let reason = state.results.results.session.persistent_pane_context.is_some().then(|| {
             format!(
                 "'{trace_name}' is not a retained trace of this result document, so the marker was placed on the dataset instead of the document."
             )
@@ -867,7 +871,7 @@ pub(super) fn place_marker(
     // The overlay is rebuilt by the next projection, but the marker has to be
     // on screen and addressable in the frame the reader placed it.
     state
-        .ui
+        .results
         .results
         .session
         .document_markers
@@ -892,7 +896,7 @@ pub(super) fn place_marker(
 /// Remove one marker from whichever store owns it.
 pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
     match selector {
-        MarkerSelector::Quick(id) => state.ui.results.session.remove_marker(id),
+        MarkerSelector::Quick(id) => state.results.results.session.remove_marker(id),
         MarkerSelector::Document {
             document_id,
             marker_id,
@@ -925,20 +929,20 @@ pub(super) fn remove_marker(state: &mut AppState, selector: MarkerSelector) {
                 return;
             }
             state
-                .ui
+                .results
                 .results
                 .session
                 .document_markers
                 .retain(|marker| marker.retained_id != marker_id);
             if state
-                .ui
+                .results
                 .results
                 .session
                 .marker_edit
                 .as_ref()
                 .is_some_and(|draft| draft.selector == selector)
             {
-                state.ui.results.session.marker_edit = None;
+                state.results.results.session.marker_edit = None;
             }
         }
     }
@@ -957,10 +961,12 @@ pub(super) fn commit_marker_edit(
 ) -> Result<(), String> {
     match selector {
         MarkerSelector::Quick(id) => {
-            let marker =
-                state.ui.results.session.marker_mut(id).ok_or_else(|| {
-                    "The quick marker is no longer part of this project.".to_owned()
-                })?;
+            let marker = state
+                .results
+                .results
+                .session
+                .marker_mut(id)
+                .ok_or_else(|| "The quick marker is no longer part of this project.".to_owned())?;
             marker.note = note.to_owned();
             marker.kind = kind;
             Ok(())
@@ -971,7 +977,7 @@ pub(super) fn commit_marker_edit(
             ..
         } => {
             let trace_name = state
-                .ui
+                .results
                 .results
                 .session
                 .document_marker(marker_id)
@@ -1023,7 +1029,7 @@ pub(super) fn commit_marker_edit(
             // typed: those are the same thing only when the typed label was
             // one the document would accept.
             if let Some(marker) = state
-                .ui
+                .results
                 .results
                 .session
                 .document_markers
@@ -1110,7 +1116,11 @@ pub(crate) fn restore_markers(
                 .any(|run| marker.analysis.resolve(run).is_some())
         })
         .collect();
-    state.ui.results.session.adopt_markers(retained, highest);
+    state
+        .results
+        .results
+        .session
+        .adopt_markers(retained, highest);
 }
 
 /// Whether one loaded quick marker restates a marker a project-owned
@@ -1163,7 +1173,7 @@ fn is_document_marker_projection(state: &AppState, marker: &ResultMarker) -> boo
 /// Same rule as the markers above: a presentation decision that cannot find
 /// the dataset it was made about is not a decision about anything.
 pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePresentationKey>) {
-    state.ui.results.session.log_y_panes = panes
+    state.results.results.session.log_y_panes = panes
         .into_iter()
         .filter(|pane| {
             state
@@ -1181,10 +1191,10 @@ pub(crate) fn restore_log_y_panes(state: &mut AppState, panes: Vec<WavePanePrese
 /// datasets have been loaded. Stale groups fail closed instead of attaching
 /// their text to whichever analysis happens to occupy an old ordinal.
 pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<ResultExpressionGroup>) {
-    state.ui.results.session.analysis_exprs.clear();
-    state.ui.results.session.exprs.clear();
-    state.ui.results.session.expr_projection_keys.clear();
-    state.ui.results.analysis_expr_cache.clear();
+    state.results.results.session.analysis_exprs.clear();
+    state.results.results.session.exprs.clear();
+    state.results.results.session.expr_projection_keys.clear();
+    state.results.results.analysis_expr_cache.clear();
     for group in groups {
         let retained = state
             .model
@@ -1195,7 +1205,7 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
             .any(|run| group.analysis.resolve(run).is_some());
         if retained && !group.traces.is_empty() {
             state
-                .ui
+                .results
                 .results
                 .session
                 .analysis_exprs
@@ -1203,7 +1213,7 @@ pub(crate) fn restore_expression_groups(state: &mut AppState, groups: Vec<Result
         }
     }
     state
-        .ui
+        .results
         .results
         .reconcile_expression_projection(&state.model.simulation);
 }
@@ -1224,7 +1234,7 @@ pub(crate) fn retained_evidence_is_valid(
     analysis: AnalysisPresentationKey,
 ) -> bool {
     state
-        .ui
+        .results
         .results
         .retained_evidence_validity
         .get_or_insert_with(&state.model.simulation, analysis, || {
@@ -1314,7 +1324,7 @@ pub(crate) fn analysis_answers_structural_gate(
     }
     let key = (AnalysisPresentationKey::new(dataset_id, analysis), gate);
     state
-        .ui
+        .results
         .results
         .structural_gates
         .get_or_insert_with(&state.model.simulation, key, || {
@@ -1337,7 +1347,7 @@ pub(crate) fn retained_dataset_digest(
     state: &AppState,
     run: &SimulationRun,
 ) -> crate::product::ContentDigest {
-    state.ui.results.dataset_digests.get_or_insert_with(
+    state.results.results.dataset_digests.get_or_insert_with(
         &state.model.simulation,
         run.dataset_id,
         || {
@@ -1369,16 +1379,16 @@ pub(crate) fn captured_viewport(
     state: &AppState,
     analysis: AnalysisPresentationKey,
 ) -> Option<CapturedViewport> {
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     let analysis_pane = state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane(viewer, analysis, 0);
     let view = if analysis_pane.is_zoomed() {
         analysis_pane
     } else {
-        state.ui.results.session.plot_view(viewer, 0)
+        state.results.results.session.plot_view(viewer, 0)
     };
     let y = captured_ordinate(viewer, view);
     (view.x.is_some() || y.is_some()).then_some((view.x, y))
@@ -1588,7 +1598,7 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
         return;
     }
     // Nor may the map fire underneath a dialog.
-    if app.state.ui.results.session.marker_edit.is_some() {
+    if app.state.results.results.session.marker_edit.is_some() {
         return;
     }
     if !app.state.model.simulation.retained.has_results() {
@@ -1629,25 +1639,25 @@ fn results_keymap(ui: &Ui, app: &mut RSpiceApp) {
             request_view_gesture(&mut app.state, gesture);
         }
     }
-    if viewer_uses_wave_stack(app.state.ui.results.session.viewer)
+    if viewer_uses_wave_stack(app.state.results.results.session.viewer)
         && consume_command_key(
             ctx,
             &app.state,
             crate::workbench::commands::vocabulary::Command::CycleGrid,
         )
     {
-        app.state.ui.results.session.show_minor_grid =
-            !app.state.ui.results.session.show_minor_grid;
+        app.state.results.results.session.show_minor_grid =
+            !app.state.results.results.session.show_minor_grid;
     }
 
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::C)) {
-        app.state.ui.results.session.toggle_cursor_tool();
+        app.state.results.results.session.toggle_cursor_tool();
     }
     if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
         hide_selected_trace(&mut app.state);
     }
     // Arrow nudging is a cursor gesture, so it only exists while cursors do.
-    if app.state.ui.results.session.cursor_readout_active() {
+    if app.state.results.results.session.cursor_readout_active() {
         let shift = ctx.input(|input| input.modifiers.shift);
         let modifiers = if shift {
             egui::Modifiers::SHIFT
@@ -1712,7 +1722,7 @@ fn consume_command_key(
 /// from the pane's add-signal menu.
 fn hide_selected_trace(state: &mut AppState) {
     let Some(selected) = state
-        .ui
+        .results
         .results
         .valid_selected_trace(&state.model.simulation)
     else {
@@ -1738,7 +1748,7 @@ fn hide_selected_trace(state: &mut AppState) {
         });
     if let Some((analysis_index, waveform_index)) = located {
         waves::toggle_visibility(state, analysis_index, waveform_index);
-        state.ui.results.session.selected_trace = None;
+        state.results.results.session.selected_trace = None;
     }
 }
 
@@ -1791,9 +1801,13 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     // projection here, not just the full one: the compact split renders the
     // same strips, and a pane context left over from a project-owned document
     // would scope its plot views, cursors and marker edits onto them.
-    app.state.ui.results.session.leave_persistent_document();
+    app.state
+        .results
+        .results
+        .session
+        .leave_persistent_document();
     let family = document_edit::family::quick_view_selection(&app.state);
-    app.state.ui.results.set_sample_selection(family);
+    app.state.results.results.set_sample_selection(family);
     prepare_viewer_state(app);
     let plan_before_docbar = app
         .state
@@ -1813,7 +1827,12 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     }
     crate::ui::plot::set_interaction_mode(
         ui.ctx(),
-        app.state.ui.results.session.plot_tool.interaction_mode(),
+        app.state
+            .results
+            .results
+            .session
+            .plot_tool
+            .interaction_mode(),
     );
     let plan_after_docbar = app
         .state
@@ -1850,14 +1869,14 @@ fn show_with_chrome(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
 /// Specs, and Table use the mockup's 40 px structured-document strip. XF and
 /// Manifest own no controls there and therefore collapse the row completely.
 fn result_stage_bar_visible(state: &AppState) -> bool {
-    (state.ui.results.session.viewer == ResultViewer::Specs
-        && state.ui.results.session.spec_drafts.is_some())
+    (state.results.results.session.viewer == ResultViewer::Specs
+        && state.results.results.session.spec_drafts.is_some())
         || (state
             .model
             .simulation
             .active_run()
             .is_some_and(|run| !run.analyses.is_empty())
-            && viewer_has_sheet_bar(state.ui.results.session.viewer))
+            && viewer_has_sheet_bar(state.results.results.session.viewer))
 }
 
 /// Height of the stage's readout strip for the active viewer, or zero.
@@ -1865,7 +1884,7 @@ fn result_stage_bar_visible(state: &AppState) -> bool {
 /// Only the cursor-bearing waveform viewers carry a readout; structured
 /// documents (OP, specs, tables) have no cursor to report.
 fn readout_strip_height(state: &mut AppState) -> f32 {
-    match state.ui.results.session.viewer {
+    match state.results.results.session.viewer {
         ResultViewer::Waves
         | ResultViewer::DcSweep
         | ResultViewer::Bode
@@ -1934,14 +1953,14 @@ pub(super) fn show_persistent_pane_viewer(
     viewer: ResultViewer,
     family: Option<SourceSampleSelection>,
 ) {
-    let session = &app.state.ui.results.session;
+    let session = &app.state.results.results.session;
     let cursors = (
         session.cursors,
         session.cursor_strip,
         session.cursor_a_anchor.clone(),
     );
     let hidden = session.hidden_family_traces.clone();
-    let results = &mut app.state.ui.results;
+    let results = &mut app.state.results.results;
     results.set_sample_selection(family);
     (
         results.session.cursors,
@@ -1950,18 +1969,18 @@ pub(super) fn show_persistent_pane_viewer(
     ) = cursors;
     results.session.hidden_family_traces = hidden;
     prepare_viewer_state(app);
-    app.state.ui.results.session.viewer = viewer;
+    app.state.results.results.session.viewer = viewer;
     show_viewer_well(ui, app, ResultChrome::Full);
 }
 
 pub(crate) fn prepare_viewer_state(app: &mut RSpiceApp) {
     synchronize_quick_view_dataset_authority(&mut app.state);
     app.state
-        .ui
+        .results
         .results
         .reconcile_retained_datasets(&app.state.model.simulation);
     let data_version = app.state.model.simulation.view.data_version;
-    let results = &mut app.state.ui.results;
+    let results = &mut app.state.results.results;
     results.synchronize_wave_caches(&app.state.model.simulation);
     if results.seen_version != data_version {
         results.seen_version = data_version;
@@ -2035,15 +2054,21 @@ pub(crate) fn active_axis_range(
     facts: &waves::ActivePaneFacts,
     axis: PaneAxis,
 ) -> Option<(f64, f64)> {
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return match axis {
             PaneAxis::X => facts.x_extent,
             PaneAxis::Y => facts.y_extent,
         };
     }
-    let drawn = state.ui.results.session.drawn_axes.get(&viewer).copied();
-    let pinned = state.ui.results.session.plot_view(viewer, 0);
+    let drawn = state
+        .results
+        .results
+        .session
+        .drawn_axes
+        .get(&viewer)
+        .copied();
+    let pinned = state.results.results.session.plot_view(viewer, 0);
     match axis {
         PaneAxis::X => pinned.x.or_else(|| drawn.map(|(x, _)| x)),
         PaneAxis::Y => pinned.y.or_else(|| drawn.map(|(_, y)| y)),
@@ -2053,11 +2078,11 @@ pub(crate) fn active_axis_range(
 /// Whether the active sheet's axis is pinned to an explicit interval rather
 /// than fitting its data.
 pub(crate) fn active_axis_is_pinned(state: &AppState, axis: PaneAxis) -> bool {
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
-        return waves::active_pane_axis_is_pinned(&state.ui.results, axis);
+        return waves::active_pane_axis_is_pinned(&state.results.results, axis);
     }
-    let pinned = state.ui.results.session.plot_view(viewer, 0);
+    let pinned = state.results.results.session.plot_view(viewer, 0);
     match axis {
         PaneAxis::X => pinned.x.is_some(),
         PaneAxis::Y => pinned.y.is_some(),
@@ -2076,16 +2101,15 @@ pub(crate) fn set_active_axis_range(
     axis: PaneAxis,
     range: Option<(f64, f64)>,
 ) -> bool {
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return waves::set_active_pane_axis_range(tokens, state, axis, range);
     }
-    let view =
-        state
-            .ui
-            .results
-            .session
-            .plot_view_pane_mut_for(viewer, PlotPresentationKey::Global(0), 0);
+    let view = state.results.results.session.plot_view_pane_mut_for(
+        viewer,
+        PlotPresentationKey::Global(0),
+        0,
+    );
     match axis {
         PaneAxis::X => view.x = range,
         PaneAxis::Y => view.y = range,
@@ -2100,8 +2124,8 @@ fn show_viewer_well(ui: &mut Ui, app: &mut RSpiceApp, chrome: ResultChrome) {
     // as the crop window for viewer PNG export.
     let well = ui.available_rect_before_wrap();
     ui.painter().rect_filled(well, 0.0, t.color.canvas_bg);
-    app.state.ui.results.session.well_rect = Some(well);
-    let viewer = app.state.ui.results.session.viewer;
+    app.state.results.results.session.well_rect = Some(well);
+    let viewer = app.state.results.results.session.viewer;
     let panel = ui.interact(
         well,
         ui.id().with(("result-viewer-panel", viewer)),
@@ -2195,9 +2219,9 @@ fn show_compact_docbar(ui: &mut Ui, state: &mut AppState) {
     let available =
         ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
     if let Some(viewer) =
-        chrome::bars::compact_document_bar(ui, state.ui.results.session.viewer, available)
+        chrome::bars::compact_document_bar(ui, state.results.results.session.viewer, available)
     {
-        state.ui.results.session.viewer = viewer;
+        state.results.results.session.viewer = viewer;
     }
 }
 
@@ -2232,10 +2256,14 @@ fn show_docbar_for_family(
         family_label.is_none_or(|family| family_allows_viewer(family, viewer))
             && viewer_availability(&app.state, viewer).available
     });
-    let actions =
-        chrome::bars::document_bar(ui, app.state.ui.results.session.viewer, available, source);
+    let actions = chrome::bars::document_bar(
+        ui,
+        app.state.results.results.session.viewer,
+        available,
+        source,
+    );
     if let Some(viewer) = actions.viewer {
-        app.state.ui.results.session.viewer = viewer;
+        app.state.results.results.session.viewer = viewer;
     }
     if actions.create_document {
         create_document::open(app);
@@ -2255,7 +2283,7 @@ fn show_docbar_for_family(
 /// which network term, which two columns, which normalization — and the sheet
 /// is the only place that knows what the retained result can offer.
 fn sheet_domain_controls(ui: &mut Ui, state: &mut AppState) -> bool {
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     let mut context = SheetContext::of(state);
     match viewer {
         ResultViewer::Polar => polar::domain_bar(ui, &mut context),
@@ -2272,7 +2300,7 @@ fn hidden_wave_strip_count(state: &AppState) -> usize {
         return 0;
     };
     state
-        .ui
+        .results
         .results
         .session
         .hidden_strips
@@ -2320,7 +2348,7 @@ fn memoized_incomplete_evidence_reason(
 /// The same question for whichever analysis the active sheet is speaking for.
 fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
     let run = state.model.simulation.active_run()?;
-    if viewer_uses_wave_stack(state.ui.results.session.viewer) {
+    if viewer_uses_wave_stack(state.results.results.session.viewer) {
         // The stack draws every analysis of the run at once, so the bar
         // speaks for the run: one failed strip makes the sheet's evidence
         // incomplete even when the strip beside it converged.
@@ -2336,7 +2364,7 @@ fn active_incomplete_evidence_reason(state: &AppState) -> Option<&'static str> {
 }
 
 fn sheet_purpose(state: &AppState) -> String {
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     let detail = viewer_availability(state, viewer).reason;
     match active_incomplete_evidence_reason(state) {
         Some(caution) => format!("{} · {detail} · {caution}", viewer.tab_label()),
@@ -2348,9 +2376,10 @@ fn sheet_purpose(state: &AppState) -> String {
 fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
     let available =
         ResultViewer::all().filter(|&viewer| viewer_availability(state, viewer).available);
-    if let Some(viewer) = chrome::bars::viewer_tabs(ui, state.ui.results.session.viewer, available)
+    if let Some(viewer) =
+        chrome::bars::viewer_tabs(ui, state.results.results.session.viewer, available)
     {
-        state.ui.results.session.viewer = viewer;
+        state.results.results.session.viewer = viewer;
     }
 }
 
@@ -2371,7 +2400,7 @@ fn family_allows_viewer(family_label: &str, viewer: ResultViewer) -> bool {
 }
 
 fn reconcile_active_viewer(state: &mut AppState) {
-    if viewer_availability(state, state.ui.results.session.viewer).available {
+    if viewer_availability(state, state.results.results.session.viewer).available {
         return;
     }
     if state.model.simulation.active_run().is_none() {
@@ -2380,7 +2409,7 @@ fn reconcile_active_viewer(state: &mut AppState) {
     if let Some(viewer) =
         ResultViewer::all().find(|viewer| viewer_availability(state, *viewer).available)
     {
-        state.ui.results.session.viewer = viewer;
+        state.results.results.session.viewer = viewer;
     }
 }
 
@@ -2701,14 +2730,14 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
         .ensure_transient_viewer_data(&mut app.state, viewer)
     {
         DerivedViewerLoadState::Ready => {
-            app.state.ui.results.clear_runtime_condition(
+            app.state.results.results.clear_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
             );
             true
         }
         DerivedViewerLoadState::Loading => {
             let data_version = app.state.model.simulation.view.data_version;
-            app.state.ui.results.record_runtime_condition(
+            app.state.results.results.record_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
                 "Preparing and validating derived data from the active transient.",
                 data_version,
@@ -2718,7 +2747,7 @@ fn ensure_derived(ui: &mut Ui, app: &mut RSpiceApp, viewer: ActiveViewer) -> boo
             false
         }
         DerivedViewerLoadState::Unavailable => {
-            app.state.ui.results.clear_runtime_condition(
+            app.state.results.results.clear_runtime_condition(
                 operational_state::ResultRuntimeConditionKind::IntegrityVerifying,
             );
             // Derived viewers can be unavailable for reasons the reader can
@@ -2764,7 +2793,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
             return;
         }
     }
-    match state.ui.results.session.viewer {
+    match state.results.results.session.viewer {
         ResultViewer::Waves | ResultViewer::DcSweep => waves::right_panel(ui, state),
         ResultViewer::Bode => bode::right_panel(ui, state),
         ResultViewer::Fft => fft::right_panel(ui, state),

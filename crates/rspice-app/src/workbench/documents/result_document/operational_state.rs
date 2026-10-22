@@ -268,7 +268,7 @@ pub(crate) fn run_currentness(
         ResultCurrentness::Unresolved
     } else if currentness_rank(currentness) <= currentness_rank(ResultCurrentness::Unresolved)
         && state
-            .ui
+            .results
             .results
             .operational_condition
             .as_ref()
@@ -352,7 +352,7 @@ pub(crate) fn classify_viewer(
 
     // Specifications owns an authoring route before any result exists.
     let authoring_without_dataset = viewer == ResultViewer::Specs
-        && (state.ui.results.session.spec_drafts.is_some()
+        && (state.results.results.session.spec_drafts.is_some()
             || !state.model.workspace.content.specs.is_empty());
     let Some(run_index) = state
         .model
@@ -387,7 +387,7 @@ pub(crate) fn classify_viewer(
 
     let run = &state.model.simulation.retained.runs[run_index];
 
-    if let Some(condition) = state.ui.results.operational_condition.clone()
+    if let Some(condition) = state.results.results.operational_condition.clone()
         && condition.data_version == state.model.simulation.view.data_version
     {
         let operational_state = condition.kind.operational_state();
@@ -648,9 +648,9 @@ pub(super) fn show_result_operational_status(
         highlight,
     } = operational::show(ui, status, || {
         offer = failure_site_offer(state);
-        marked = offer
-            .as_ref()
-            .is_some_and(|offer| state.ui.results.marked_failure_run == Some(offer.run_sequence));
+        marked = offer.as_ref().is_some_and(|offer| {
+            state.results.results.marked_failure_run == Some(offer.run_sequence)
+        });
         offer.as_ref().map(|offer| operational::FailureSiteControl {
             named: offer.named,
             elided: offer.elided,
@@ -659,14 +659,15 @@ pub(super) fn show_result_operational_status(
         })
     });
     if dismiss {
-        state.ui.results.dismiss_runtime_condition();
+        state.results.results.dismiss_runtime_condition();
     }
     if highlight {
         if marked {
             state.clear_failure_site_marking();
-            state.ui.results.marked_failure_run = None;
+            state.results.results.marked_failure_run = None;
         } else if state.highlight_active_failure_sites() {
-            state.ui.results.marked_failure_run = offer.as_ref().map(|offer| offer.run_sequence);
+            state.results.results.marked_failure_run =
+                offer.as_ref().map(|offer| offer.run_sequence);
         }
     }
     blocks_visuals

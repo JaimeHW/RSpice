@@ -1302,7 +1302,7 @@ fn action_availability(action: ContextAction, state: &AppState) -> (bool, &'stat
             "Select at least one component, wire, bus, tap, junction, net label, probe, design note, or documentation shape",
         ),
         ContextAction::Paste => (
-            writable && !state.ui.schematic_clipboard.is_empty(),
+            writable && !state.design.schematic_clipboard.is_empty(),
             "Copy or cut something to paste first",
         ),
         ContextAction::Duplicate => (
@@ -1523,12 +1523,12 @@ fn open_operating_point(state: &mut AppState) {
     // selected report does not hold used to leave the *previous* device's
     // filter in place, so the hop opened on some other instance's row and read
     // as if it had worked.
-    state.ui.results.session.op_filter = clicked
+    state.results.results.session.op_filter = clicked
         .filter(|name| {
             target.is_some_and(|index| analysis_reports_device(state, index, name.as_str()))
         })
         .unwrap_or_default();
-    state.ui.results.session.viewer = ResultViewer::Op;
+    state.results.results.session.viewer = ResultViewer::Op;
     state.workbench.activate(Workspace::Results);
 }
 

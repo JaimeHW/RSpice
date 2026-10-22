@@ -549,13 +549,13 @@ fn the_problem_badge_counts_records_and_not_log_entries() {
     app.state
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
-    app.state.ui.code_workspace.page =
+    app.state.code.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     app.state
         .model
         .log_buffer
         .warning(LogSource::Run, "unrelated retained log warning");
-    app.state.ui.netlist.diagnostics = std::sync::Arc::new(
+    app.state.code.netlist.diagnostics = std::sync::Arc::new(
         crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
             vec![crate::state::netlist_diagnostics::Diagnostic::error(
                 "bad netlist card",
@@ -1099,7 +1099,7 @@ fn the_open_tabs_underline_spans_its_tab_on_the_strips_foot() {
 fn a_pages_toolbar_stands_on_the_panel_fill_above_the_well() {
     let mut app = busy_console();
     app.state.open_project_session();
-    app.state.ui.netlist.diagnostics = std::sync::Arc::new(
+    app.state.code.netlist.diagnostics = std::sync::Arc::new(
         crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
             vec![crate::state::netlist_diagnostics::Diagnostic::error(
                 "bad netlist card",

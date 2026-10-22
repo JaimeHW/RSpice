@@ -30,7 +30,7 @@ pub(super) fn transform_preview_style<'a>(
     TransformPreviewStyle {
         symbol_library,
         symbol_context,
-        parameter_labels: state.ui.schematic_visibility.parameter_labels,
+        parameter_labels: state.design.schematic_visibility.parameter_labels,
         hover_wire_vertex: state.workbench.interaction.hover_wire_vertex,
     }
 }

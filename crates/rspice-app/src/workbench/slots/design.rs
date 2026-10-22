@@ -1,6 +1,8 @@
 //! The design feature's dialogs and canvas transactions: placement, selection
-//! edits, hierarchy, display options, rule setup and the symbol workflows.
+//! edits, hierarchy, display options, rule setup and the symbol workflows; and
+//! the schematic and symbol editors' interaction session.
 
+use crate::state::{GridStyle, SchematicVisibilityPolicy};
 use crate::workbench::app::{
     ConnectivityManagerDialogState, CreateModelBoundSymbolDialogState,
     DesignReviewCommentsDialogState, SelectionBulkEditDialogState, SymbolImportDialogState,
@@ -119,4 +121,80 @@ pub(crate) struct DesignState {
     /// One property form over several selected instances.
     pub(crate) shared_properties:
         crate::workbench::app::dialogs::selection::shared_properties::SharedPropertiesDialogState,
+
+    /// Schematic-space cursor position, reported by the canvas each frame the
+    /// pointer hovers it; consumed by the status bar.
+    pub canvas_hover: Option<(f64, f64)>,
+    /// Schematic-space center of the visible canvas, reported each frame the
+    /// canvas renders; paste targets fall back to it when the cursor is not
+    /// over the canvas (menu-driven paste).
+    pub canvas_view_center: Option<(f64, f64)>,
+    /// Canvas grid style (dots / lines / off).
+    pub grid: GridStyle,
+    /// Last non-Off display style retained for backward-compatible session
+    /// restoration. The current `G` command cycles dots, lines, and off.
+    pub grid_restore_style: GridStyle,
+    /// Schematic editor selection classes. This is restored with the UI
+    /// session but never written into project-owned schematic data.
+    pub schematic_selection_filter: crate::state::SchematicSelectionFilter,
+    /// What Copy and Cut last took from a schematic. It belongs to the app,
+    /// not to one cell view's editor, so a copy made in one cell view pastes
+    /// into another. Never persisted: a session restored later must not
+    /// reopen with design objects nobody committed to a drawing.
+    pub schematic_clipboard: rspice_design::schematic::clipboard::ClipboardData,
+    /// Active and named filters for exact schematic bulk-edit queries.
+    pub schematic_bulk_edit_filters:
+        crate::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession,
+    /// Device-local schematic display policy. Presentation choices are
+    /// restored with the session and are never written to project data.
+    pub schematic_visibility: SchematicVisibilityPolicy,
+    /// Optional drawing-sheet construction detail shown around the permanent
+    /// authored paper boundary. Output inclusion remains independently owned
+    /// by Print and Export.
+    pub drawing_sheet_layers: crate::state::DrawingSheetLayerVisibility,
+    /// Exact runtime snap-target configuration used by the Grid & snap
+    /// popover. The document grid pitch remains project-owned.
+    pub schematic_snap: crate::state::SnapEngine,
+    /// Exact runtime conductor routing mode. This retains the horizontal- or
+    /// vertical-first orthogonal preference that the display policy's
+    /// user-facing three-way style intentionally abstracts.
+    pub schematic_routing_mode: crate::state::WireRoutingMode,
+    /// What Duplicate does with a terminal whose net keeps existing outside
+    /// the copied set. Restored with the UI session; never project data.
+    pub duplicate_external_nets: crate::state::DuplicateExternalNets,
+    /// Last visibility-policy presentation snapshot for the active view.
+    pub(crate) schematic_visibility_recovery: Option<
+        crate::workbench::app::dialogs::visibility_options::SchematicVisibilityRecovery,
+    >,
+    /// Device-local edge-triggered schematic selection synchronization.
+    /// This is deliberately excluded from the session wire: source-map
+    /// and retained-result highlights are presentation state, not project
+    /// data or a durable preference value.
+    pub(crate) schematic_cross_probe: crate::workbench::cross_probe::SchematicCrossProbeRuntime,
+    /// Device-local working and named engineering-table views. Project-owned
+    /// named views live in `ProjectWorkspace`; this store is the personal
+    /// preference authority restored on desktop, web, and tablet hosts.
+    pub engineering_table_views: crate::state::engineering_table::EngineeringTableViewStore,
+    /// Runtime state for the Schematic-family symbol editor surface.
+    pub symbol: crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
+}
+
+impl DesignState {
+    pub(crate) fn set_grid_style(&mut self, style: GridStyle) {
+        if style.visible() {
+            self.grid_restore_style = style;
+        }
+        self.grid = style;
+    }
+
+    /// Cycle the upgraded toolbar's exact presentation order.
+    pub(crate) fn cycle_grid_style(&mut self) -> GridStyle {
+        let next = match self.grid {
+            GridStyle::Dots => GridStyle::Lines,
+            GridStyle::Lines => GridStyle::Off,
+            GridStyle::Off => GridStyle::Dots,
+        };
+        self.set_grid_style(next);
+        next
+    }
 }

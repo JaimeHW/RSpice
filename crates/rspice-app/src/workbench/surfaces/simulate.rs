@@ -2354,7 +2354,7 @@ fn analysis_form_body(
                     ui,
                     draft,
                     app.state.model.preferences.quantity_presentation_policy(),
-                    app.state.ui.number_locale,
+                    app.state.workbench.number_locale,
                     envelope_sources.map_or(&[], |catalog| catalog.names.as_slice()),
                     &placed_loop_probes,
                     &placed_rf_ports,

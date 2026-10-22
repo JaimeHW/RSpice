@@ -763,7 +763,7 @@ fn render_session_page(
             ui.label(dirty_count.to_string());
             ui.end_row();
             ui.label("Autosave checkpoint");
-            ui.label(match app.state.ui.autosave_minutes {
+            ui.label(match app.state.platform.autosave_minutes {
                 0 => "Disabled".to_owned(),
                 minutes => format!("Every {minutes} minutes while modified"),
             });

@@ -159,7 +159,7 @@ pub(crate) fn request_dependency_relink(state: &mut AppState, logical_identity: 
 
 fn record_relink_success(state: &mut AppState) {
     let message = state
-        .ui
+        .workbench
         .messages()
         .text(crate::workbench::MessageId::NetlistRelinkSucceeded);
     state.record(LogSeverity::Info, LogSource::Netlist, message);
@@ -207,7 +207,7 @@ pub(crate) fn import_netlist(state: &mut AppState) -> bool {
 pub(super) fn route_started_netlist_import(state: &mut AppState, started: bool) -> bool {
     if started {
         state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        state.ui.code_workspace.page =
+        state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
     }
     started

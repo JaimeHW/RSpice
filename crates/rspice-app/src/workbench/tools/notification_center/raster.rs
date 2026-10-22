@@ -116,7 +116,7 @@ fn raster(case: &Case) -> Canvas {
         ui.ctx()
             .global_style_mut(|style| style.animation_time = 0.0);
         if !seeded {
-            super::tests::seed_session(ui.ctx(), &mut app.state.ui.toasts);
+            super::tests::seed_session(ui.ctx(), &mut app.state.workbench.toasts);
             seeded = true;
         }
         let layout = LayoutSpec::resolve(size.x, size.y, &app.state.workbench);
@@ -127,7 +127,7 @@ fn raster(case: &Case) -> Canvas {
         super::show(ui.ctx(), &mut app, layout.title_bar_height);
         if scene == Scene::Toasts {
             let large = super::large_targets(ui.ctx(), &app.state);
-            let _ = app.state.ui.toasts.show(
+            let _ = app.state.workbench.toasts.show(
                 ui.ctx(),
                 layout.title_bar_height,
                 layout.toolbar_height,

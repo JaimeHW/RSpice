@@ -32,7 +32,7 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
 /// the thing on screen.
 pub(super) fn netlist_page_is_visible(state: &crate::workbench::AppState) -> bool {
     state.workbench.workspace == Workspace::Netlist
-        && state.ui.code_workspace.page
+        && state.code.code_workspace.page
             == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
 }
 
@@ -66,12 +66,12 @@ pub(super) fn active_symbol_editor(app: &RSpiceApp) -> bool {
 /// and target classes remain independent in Grid, snap and wire routing.
 pub(super) fn cycle_canvas_grid(app: &mut RSpiceApp) {
     if active_symbol_editor(app) {
-        let enabled = !app.state.ui.symbol.editor.show_grid;
-        app.state.ui.symbol.editor.show_grid = enabled;
+        let enabled = !app.state.design.symbol.editor.show_grid;
+        app.state.design.symbol.editor.show_grid = enabled;
         return;
     }
 
-    app.state.ui.cycle_grid_style();
+    app.state.design.cycle_grid_style();
 }
 
 pub(super) fn active_schematic_editor(app: &RSpiceApp) -> bool {
@@ -244,12 +244,12 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             if app.state.model.workspace.content.active_view_type()
                 == crate::state::ViewType::Symbol
             {
-                app.state.ui.symbol.editor.zoom = 1.0;
-                app.state.ui.symbol.editor.pan = (0.0, 0.0);
-                app.state.ui.symbol.editor.needs_fit = true;
-                app.state.ui.symbol.editor.clear_selection();
-                app.state.ui.symbol.editor.marquee_start = None;
-                app.state.ui.symbol.editor.marquee_current = None;
+                app.state.design.symbol.editor.zoom = 1.0;
+                app.state.design.symbol.editor.pan = (0.0, 0.0);
+                app.state.design.symbol.editor.needs_fit = true;
+                app.state.design.symbol.editor.clear_selection();
+                app.state.design.symbol.editor.marquee_start = None;
+                app.state.design.symbol.editor.marquee_current = None;
             } else {
                 app.state.model.schematic.session.editor.zoom = 1.0;
                 app.state.model.schematic.session.editor.pan = (0.0, 0.0);
@@ -289,18 +289,18 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             app.state.workbench.stimulus_browser.clear();
         }
         Workspace::Results => {
-            let viewer = app.state.ui.results.session.viewer;
+            let viewer = app.state.results.results.session.viewer;
             app.state
-                .ui
+                .results
                 .results
                 .session
                 .views
                 .retain(|(candidate, _, _), _| *candidate != viewer);
-            app.state.ui.results.session.clear_cursors();
-            app.state.ui.results.session.rf_pin.remove(&viewer);
+            app.state.results.results.session.clear_cursors();
+            app.state.results.results.session.rf_pin.remove(&viewer);
             if viewer == crate::workbench::ResultViewer::Waves {
-                app.state.ui.results.session.hidden_strips.clear();
-                app.state.ui.results.session.maximized_strip = None;
+                app.state.results.results.session.hidden_strips.clear();
+                app.state.results.results.session.maximized_strip = None;
             }
         }
         Workspace::Verify => {
@@ -310,9 +310,9 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             app.state.workbench.selected_model = None;
         }
         Workspace::Netlist => {
-            app.state.ui.netlist.cursor_line = 0;
-            app.state.ui.netlist.completion_open = false;
-            app.state.ui.netlist.completion_index = 0;
+            app.state.code.netlist.cursor_line = 0;
+            app.state.code.netlist.completion_open = false;
+            app.state.code.netlist.completion_index = 0;
         }
     }
 }

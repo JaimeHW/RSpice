@@ -38,7 +38,7 @@ const CHIP_MARK_GAP: f32 = 5.0;
 const VERB_WIDTH: f32 = 250.0;
 
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let tokens = Tokens::get(ui.ctx());
     let mut trailing = Vec::new();
     super::split_row(
@@ -144,7 +144,7 @@ pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut V
 /// Apply rather than being refused keystroke by keystroke, because a name is
 /// typed through states that are not yet valid.
 fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let label = messages.text(MessageId::StimulusFieldName);
     let editing = stage.editing_field.as_deref() == Some(NAME_FIELD);
     let mut text = if editing {
@@ -246,7 +246,7 @@ fn kind_combo(ui: &mut Ui, label: &str, stage: &Stage, actions: &mut Vec<StageAc
 
 /// Where this definition stands: published, edited, or edited and refused.
 fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let errors = stage.errors();
     // Each state's fact, then the same fact at the length a narrow band can
     // give it. The short form is the lifecycle word alone, because the detail
@@ -317,7 +317,7 @@ fn lifecycle_chip(ui: &mut Ui, state: &AppState, stage: &Stage) {
 /// never missing from the instrument — the realization band heads its list
 /// with the same count.
 fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let tokens = Tokens::get(ui.ctx());
     let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let named = if stage.adopters.is_empty() {
@@ -378,7 +378,7 @@ fn adopter_summary(ui: &mut Ui, state: &AppState, stage: &Stage) {
 
 /// Apply, and the reason it is unavailable when it is.
 fn apply_button(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let label = messages.text(MessageId::StimulusApply);
     let block = stage.apply_block();
     let response = ui

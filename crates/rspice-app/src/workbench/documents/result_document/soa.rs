@@ -89,8 +89,8 @@ fn soa_plan(
     }
     let source = state.model.simulation.retained.runs.revision();
     let version = state.model.simulation.view.data_version;
-    state.ui.results.session.cache.ensure_source(&source);
-    if let Some(plan) = state.ui.results.plans.soa.as_ref()
+    state.results.results.session.cache.ensure_source(&source);
+    if let Some(plan) = state.results.results.plans.soa.as_ref()
         && plan.source == source
         && plan.version == version
         && plan.analysis == analysis_key
@@ -109,7 +109,7 @@ fn soa_plan(
             || frame_work::note(DatasetWalk::SoaStressScan),
         ),
     });
-    state.ui.results.plans.soa = Some(std::sync::Arc::clone(&built));
+    state.results.results.plans.soa = Some(std::sync::Arc::clone(&built));
     Some(built)
 }
 
@@ -155,16 +155,16 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             plan: &plan.presentation,
         },
         viewer::SoaControls {
-            selected: state.ui.results.session.selected_soa_rule.as_ref(),
-            filter: state.ui.results.session.soa_rule_filter,
-            trace_open: state.ui.results.session.soa_stress_trace_open,
+            selected: state.results.results.session.selected_soa_rule.as_ref(),
+            filter: state.results.results.session.soa_rule_filter,
+            trace_open: state.results.results.session.soa_stress_trace_open,
             stress_view: state
-                .ui
+                .results
                 .results
                 .session
                 .plot_view(super::ResultViewer::Soa, 0),
         },
-        &mut state.ui.results.session.cache,
+        &mut state.results.results.session.cache,
         |key, device| {
             soa_device_target(
                 &state.model.simulation,
@@ -178,30 +178,30 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     );
     if response.fit_clicked {
         state
-            .ui
+            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Soa, 0);
     }
     if let Some(change) = response.stress_view_change {
         state
-            .ui
+            .results
             .results
             .session
             .plot_view_mut(super::ResultViewer::Soa, 0)
             .apply(&change);
     }
-    state.ui.results.session.soa_rule_filter = response.filter;
-    state.ui.results.session.soa_stress_trace_open = response.trace_open;
-    if response.selection != state.ui.results.session.selected_soa_rule {
+    state.results.results.session.soa_rule_filter = response.filter;
+    state.results.results.session.soa_stress_trace_open = response.trace_open;
+    if response.selection != state.results.results.session.selected_soa_rule {
         if response.selection.is_some() && response.trace_open {
             state
-                .ui
+                .results
                 .results
                 .session
                 .reset_plot_view(super::ResultViewer::Soa, 0);
         }
-        state.ui.results.session.selected_soa_rule = response.selection;
+        state.results.results.session.selected_soa_rule = response.selection;
     }
     if let Some(selection) = response.cross_probe {
         apply_schematic_cross_probe(state, &selection);
@@ -209,7 +209,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 }
 
 pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
-    let Some(selection) = state.ui.results.session.selected_soa_rule.clone() else {
+    let Some(selection) = state.results.results.session.selected_soa_rule.clone() else {
         viewer::selection_note(ui, viewer::SoaSelectionAbsence::Unselected);
         return;
     };
@@ -234,7 +234,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let Some((rule, evaluation)) = evaluations.iter().enumerate().find(|(_, evaluation)| {
         evaluation.device_id == selection.device_id && evaluation.parameter == selection.parameter
     }) else {
-        state.ui.results.session.selected_soa_rule = None;
+        state.results.results.session.selected_soa_rule = None;
         viewer::selection_note(ui, viewer::SoaSelectionAbsence::Removed);
         return;
     };
@@ -262,7 +262,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         },
     );
     if response.open_trace {
-        state.ui.results.session.soa_stress_trace_open = true;
+        state.results.results.session.soa_stress_trace_open = true;
     }
     if response.locate_device {
         apply_schematic_cross_probe(state, &selection);
@@ -328,7 +328,7 @@ fn apply_schematic_cross_probe(state: &mut AppState, selection: &SoaRuleSelectio
         .selection
         .select_only_component(component_id);
     state.model.schematic.session.editor.center_request = Some(position);
-    state.ui.schematic_visibility.annotations =
+    state.design.schematic_visibility.annotations =
         crate::state::SchematicAnnotationVisibility::ViolationsOnly;
     state
         .workbench
@@ -423,7 +423,7 @@ mod tests {
             "a plan was served for an analysis whose evidence the build never read"
         );
         assert!(
-            state.ui.results.plans.soa.is_none(),
+            state.results.results.plans.soa.is_none(),
             "the memo kept an entry stamped with an analysis it did not read"
         );
 

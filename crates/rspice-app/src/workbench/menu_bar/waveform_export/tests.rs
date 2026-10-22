@@ -220,7 +220,7 @@ fn activate_result_document(state: &mut AppState, viewer: crate::workbench::Resu
     state.workbench.documents.activate(
         crate::workbench::state::WorkspaceDocumentId::ResultDataset(dataset_id),
     );
-    state.ui.results.session.viewer = viewer;
+    state.results.results.session.viewer = viewer;
 }
 
 fn bind_active_fft_authority(state: &mut AppState) {
@@ -344,7 +344,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
             SpectrumNormalization::Peak,
         ));
     bind_active_fft_authority(&mut state);
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Fft;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Fft;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -397,7 +397,7 @@ fn csv_export_from_a_derived_sheet_publishes_what_that_sheet_draws() {
         crate::io::capture_simulation_results(&state.model.simulation),
     )
     .unwrap();
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Hist;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Hist;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -453,7 +453,7 @@ fn unavailable_fft_export_never_falls_through_to_the_source_transient() {
         SpectrumNormalization::Peak,
     ));
     bind_active_fft_authority(&mut state);
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Fft;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Fft;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -489,7 +489,7 @@ fn fft_export_rejects_complete_but_unbound_or_stale_cache_evidence() {
                 crate::state::SpecializedViewerCacheProvenance::for_analysis(dataset_id, &foreign);
             state.bind_specialized_viewer_cache(crate::state::ActiveViewer::Fft, authority);
         }
-        state.ui.results.session.viewer = crate::workbench::ResultViewer::Fft;
+        state.results.results.session.viewer = crate::workbench::ResultViewer::Fft;
         let io = MockExportWorkflowIo::default();
 
         action_export_csv_with_io(&mut state, &io);
@@ -512,7 +512,7 @@ fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
             vec![0.0, 2.0],
         )]),
     );
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -535,7 +535,7 @@ fn a_result_export_names_its_file_on_the_status_bar() {
             vec![0.0, 2.0],
         )]),
     );
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
     let io = MockExportWorkflowIo::default();
 
     action_export_csv_with_io(&mut state, &io);
@@ -544,7 +544,7 @@ fn a_result_export_names_its_file_on_the_status_bar() {
     let line = last_log_message(&state);
     assert!(line.contains("waveforms.csv"), "{line}");
     assert_eq!(state.prompt_text(), Some(line.as_str()));
-    assert!(state.ui.toasts.activity().is_empty());
+    assert!(state.workbench.toasts.activity().is_empty());
 }
 
 /// An export the user asked for that did not happen is said now, with the
@@ -558,7 +558,7 @@ fn a_result_export_that_fails_is_toasted() {
             vec![0.0, 2.0],
         )]),
     );
-    state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+    state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
     let io = MockExportWorkflowIo {
         dialog_error: Some("the file picker is unavailable".to_owned()),
         ..MockExportWorkflowIo::default()
@@ -571,7 +571,7 @@ fn a_result_export_that_fails_is_toasted() {
         last_log_message(&state),
         "CSV export failed: the file picker is unavailable"
     );
-    let activity = state.ui.toasts.activity();
+    let activity = state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), "CSV export failed");
     assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
@@ -1778,7 +1778,7 @@ fn assert_stacked_binary_export_is_not_silently_truncated(preferences: &[usize])
             "{message}"
         );
         let run = state.model.simulation.active_run().unwrap();
-        state.ui.results.session.maximized_strip = Some(
+        state.results.results.session.maximized_strip = Some(
             crate::workbench::documents::result_document::AnalysisPresentationKey::new(
                 run.dataset_id,
                 &run.analyses[1],

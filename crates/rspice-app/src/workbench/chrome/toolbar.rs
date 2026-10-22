@@ -678,7 +678,7 @@ fn design_toolbar_command_selected(tool: Tool, command: Command) -> bool {
 }
 
 fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
+    let grid_visible = app.state.design.grid != crate::state::GridStyle::Off;
     if !take_projected_tool_slot(ui, layout) {
         let presentation = ToolbarCommandPresentation::Icon {
             icon: WorkbenchIcon::Grid,
@@ -694,7 +694,7 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
     if response.clicked() {
         Command::CycleGrid.execute(app);
     }
-    let grid_visible = app.state.ui.grid != crate::state::GridStyle::Off;
+    let grid_visible = app.state.design.grid != crate::state::GridStyle::Off;
     let t = Tokens::get(ui.ctx());
     WorkbenchIcon::Grid.paint(
         ui.painter(),
@@ -717,7 +717,7 @@ fn design_grid_and_snap_menu(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: Lay
 /// Symbol geometry has its own undo stack, so undo and redo route through
 /// the symbol document rather than the schematic's.
 fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let active = app.state.ui.symbol.editor.tool;
+    let active = app.state.design.symbol.editor.tool;
     for (command, icon, tool) in SYMBOL_DIRECT_TOOLBAR_COMMANDS {
         toolbar_icon_command_selected(ui, app, command, icon, active == tool, layout);
     }
@@ -755,14 +755,14 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     toolbar_icon_command(ui, app, Command::ZoomFit, WorkbenchIcon::ZoomFit, layout);
     symbol_toggle(
         ui,
-        &mut app.state.ui.symbol.editor.show_grid,
+        &mut app.state.design.symbol.editor.show_grid,
         WorkbenchIcon::Grid,
         "Show grid",
         layout,
     );
     symbol_toggle(
         ui,
-        &mut app.state.ui.symbol.editor.snap_to_grid,
+        &mut app.state.design.symbol.editor.snap_to_grid,
         WorkbenchIcon::Check,
         "Snap to grid",
         layout,
@@ -771,7 +771,7 @@ fn symbol_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     context_separator(ui, layout);
     symbol_toggle(
         ui,
-        &mut app.state.ui.symbol.editor.preview_as_placed,
+        &mut app.state.design.symbol.editor.preview_as_placed,
         WorkbenchIcon::Focus,
         "Preview as placed on a sheet",
         layout,
@@ -846,7 +846,7 @@ fn veriloga_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 fn generated_netlist_tool(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     let label = app
         .state
-        .ui
+        .workbench
         .messages()
         .text(crate::workbench::MessageId::CodeGeneratedNetlist);
     if !take_projected_tool_slot(ui, layout) {
@@ -953,12 +953,12 @@ fn symbol_grid_spacing(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpe
         return;
     }
     egui::ComboBox::from_id_salt("symbol-editor.grid-spacing")
-        .selected_text(app.state.ui.symbol.editor.grid_spacing.label())
+        .selected_text(app.state.design.symbol.editor.grid_spacing.label())
         .width(72.0)
         .show_ui(ui, |ui| {
             for spacing in crate::workbench::SymbolGridSpacing::ALL {
                 ui.selectable_value(
-                    &mut app.state.ui.symbol.editor.grid_spacing,
+                    &mut app.state.design.symbol.editor.grid_spacing,
                     spacing,
                     spacing.label(),
                 );
@@ -1365,7 +1365,7 @@ fn models_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
 fn netlist_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
-    match app.state.ui.code_workspace.page {
+    match app.state.code.code_workspace.page {
         CodeWorkspacePage::Netlist => netlist_page_tools(ui, app, layout),
         CodeWorkspacePage::Automation => {
             toolbar_text_command(
@@ -1412,7 +1412,7 @@ fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec)
 /// The netlist page's set follows the document it is showing: a generated
 /// primary is exported and compared, an owned deck is saved and run.
 fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
-    let generated = app.state.ui.netlist.active_document
+    let generated = app.state.code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
     if generated {
         toolbar_text_command(

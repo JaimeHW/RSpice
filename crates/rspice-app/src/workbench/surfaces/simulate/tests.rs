@@ -1419,7 +1419,7 @@ fn a_committed_simulation_workflow_answers_on_the_status_bar() {
 
     assert!(app.state.workbench.simulation_workflow.is_none());
     assert!(app.state.prompt_text().is_some());
-    assert!(app.state.ui.toasts.activity().is_empty());
+    assert!(app.state.workbench.toasts.activity().is_empty());
 }
 
 #[test]
@@ -1987,7 +1987,7 @@ fn a_render_path_refusal_restated_every_frame_is_one_event() {
     let outcome = &app.state.workbench.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
     assert!(
-        app.state.ui.toasts.activity().is_empty(),
+        app.state.workbench.toasts.activity().is_empty(),
         "a refusal raises no notice"
     );
     assert_eq!(

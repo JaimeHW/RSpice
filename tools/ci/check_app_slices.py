@@ -45,7 +45,7 @@ FEATURES = (
     "project", "design", "simulate", "results", "models",
     "code", "sheets", "hardcopy", "cloud", "settings",
 )
-SESSION = "session"  # the AppState/WorkbenchState/UiSessionState aggregate
+SESSION = "session"  # the AppState/WorkbenchState aggregate
 SHELL = "shell"
 SLICES = (*LOWER, SESSION, *FEATURES, SHELL)
 GROUPS = ("feature->feature", "lower->upper", "whole-app")
@@ -93,6 +93,7 @@ SLICE_RULES = [
     (W + r"slots/platform\.rs$", "services"),
     (W + r"slots/project\.rs$", "project"),
     (W + r"slots/results\.rs$", "results"),
+    (W + r"slots/runs\.rs$", "run"),
     (W + r"slots/settings\.rs$", "settings"),
     (W + r"slots/sheets\.rs$", "sheets"),
     (W + r"slots/shell\.rs$", "shell"),

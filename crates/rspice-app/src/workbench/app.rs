@@ -14,8 +14,10 @@
 //! Application state is managed in a centralized `AppState` struct:
 //! - SchematicState: circuit topology, components, wires
 //! - SimulationState: simulation results, waveforms, run history
-//! - WorkbenchState: canonical workspace navigation and responsive layout
-//! - UiSessionState: theme and document-engine interaction state
+//! - WorkbenchState: canonical workspace navigation, responsive layout, theme
+//!   and locale
+//! - Feature slots: each feature's dialogs and document-engine interaction
+//!   state
 //!
 //! This follows the commercial EDA pattern where state is:
 //! 1. Centralized for consistency
@@ -330,7 +332,7 @@ impl RSpiceApp {
         }
         let _ = self.automation_runtime.terminate();
         self.automation_runtime_project_id = project_id;
-        self.state.ui.code_workspace = Default::default();
+        self.state.code.code_workspace = Default::default();
         self.simulation_controller.clear_prepared_run();
     }
 
@@ -460,12 +462,12 @@ impl RSpiceApp {
 
         state.initialize_shortcut_library_persistence(&cc.egui_ctx);
         state
-            .ui
+            .workbench
             .set_number_locale(crate::quantity::platform_number_locale());
 
         // Apply the design-system theme (canvas painters read the active
         // palette directly).
-        state.ui.theme.apply(&cc.egui_ctx);
+        state.workbench.theme.apply(&cc.egui_ctx);
         dialogs::help::report_problem::record_graphics_adapter(cc.wgpu_render_state.as_ref());
 
         // Persisted sessions may still carry the legacy seeded
@@ -596,14 +598,15 @@ impl RSpiceApp {
         }
         // (Re)apply the theme when it changes — this maps the design tokens
         // onto the egui style and republishes the active palette.
-        let system_mode_changed = self.state.ui.theme.mode == crate::ui::Mode::System
-            && crate::ui::tokens::Tokens::get(ctx).mode != self.state.ui.theme.mode.effective(ctx);
+        let system_mode_changed = self.state.workbench.theme.mode == crate::ui::Mode::System
+            && crate::ui::tokens::Tokens::get(ctx).mode
+                != self.state.workbench.theme.mode.effective(ctx);
         if self.first_frame
-            || self.applied_theme != Some(self.state.ui.theme)
+            || self.applied_theme != Some(self.state.workbench.theme)
             || system_mode_changed
         {
-            self.state.ui.theme.apply(ctx);
-            self.applied_theme = Some(self.state.ui.theme);
+            self.state.workbench.theme.apply(ctx);
+            self.applied_theme = Some(self.state.workbench.theme);
             self.first_frame = false;
         }
         // The first egui pass establishes font metrics and persistent panel
@@ -629,7 +632,7 @@ impl RSpiceApp {
         // Where the open module's symbol stands is measured here, once per
         // library revision, so neither the editor nor the inspector parses it.
         crate::workbench::documents::code_workspace::refresh_symbol_standing(
-            &mut self.state.ui.code_workspace.veriloga,
+            &mut self.state.code.code_workspace.veriloga,
             &self.state.model.library_manager,
             &self.state.model.workspace.content.active_view,
             self.state.model.workspace.content.active_view_type(),
@@ -638,7 +641,7 @@ impl RSpiceApp {
         crate::workbench::documents::code_workspace::poll_automation_workflow(self);
         crate::workbench::documents::code_workspace::settle_pending_python_execute(self);
         crate::workbench::documents::code_workspace::poll_managed_automation_runtime(self);
-        let automation = &self.state.ui.code_workspace.automation;
+        let automation = &self.state.code.code_workspace.automation;
         if automation.pending_runtime_validation.is_some()
             || automation.runtime_execution.is_some()
             || automation.execution.is_active()
@@ -1099,10 +1102,10 @@ impl eframe::App for RSpiceApp {
             if let Some(enabled) =
                 crate::workbench::browser::accessibility::spoken_feedback_override()
             {
-                self.state.ui.browser_spoken_feedback = enabled;
+                self.state.settings.browser_spoken_feedback = enabled;
             }
             ctx.options_mut(|options| {
-                options.screen_reader = self.state.ui.browser_spoken_feedback;
+                options.screen_reader = self.state.settings.browser_spoken_feedback;
             });
         }
         self.prepare_frame(&ctx);
@@ -1138,7 +1141,7 @@ impl eframe::App for RSpiceApp {
         self.record_publish_receipt();
         self.live_session
             .pump(&mut self.state, &mut self.cloud_account);
-        if let Some(text) = self.state.ui.clipboard_text_request.take() {
+        if let Some(text) = self.state.workbench.clipboard_text_request.take() {
             ctx.copy_text(text);
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -1202,7 +1205,7 @@ impl eframe::App for RSpiceApp {
     /// path-bound exact-byte checkpoint; browser/mobile builds use eframe's
     /// durable application storage as their device-local recovery owner.
     fn auto_save_interval(&self) -> std::time::Duration {
-        configured_autosave_interval(self.state.ui.autosave_minutes)
+        configured_autosave_interval(self.state.platform.autosave_minutes)
     }
 }
 
@@ -1831,7 +1834,7 @@ mod tests {
                 .iter_bundles()
                 .any(|bundle| bundle.language() == crate::state::ProjectSourceLanguage::VerilogA)
         );
-        state.ui.code_workspace.veriloga.receipt = None;
+        state.code.code_workspace.veriloga.receipt = None;
 
         assert!(
             schematic_readiness(&state).is_none(),
@@ -1961,14 +1964,14 @@ mod tests {
             crate::state::SimulationRunIntent::ManualDeck
         );
         assert!(!state.model.simulation.execution.trigger_simulation);
-        assert!(state.ui.netlist.rerun_queued);
+        assert!(state.code.netlist.rerun_queued);
 
         state.model.simulation.execution.active_execution = None;
-        state.ui.netlist.rerun_queued = false;
+        state.code.netlist.rerun_queued = false;
         state.request_netlist_manual_deck_run();
 
         assert!(state.model.simulation.execution.trigger_simulation);
-        assert!(!state.ui.netlist.rerun_queued);
+        assert!(!state.code.netlist.rerun_queued);
     }
 
     #[test]
@@ -2039,25 +2042,25 @@ mod tests {
         state.model_browser_state.open = false;
 
         state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        state.ui.netlist.find.open = true;
+        state.code.netlist.find.open = true;
         assert!(state.application_modal_open());
-        state.ui.netlist.find.open = false;
+        state.code.netlist.find.open = false;
 
-        state.ui.netlist.ownership_dialog.open = true;
+        state.code.netlist.ownership_dialog.open = true;
         assert!(state.application_modal_open());
-        state.ui.netlist.ownership_dialog.open = false;
+        state.code.netlist.ownership_dialog.open = false;
 
-        state.ui.netlist.comparison_dialog.open = true;
+        state.code.netlist.comparison_dialog.open = true;
         assert!(state.application_modal_open());
-        state.ui.netlist.comparison_dialog.open = false;
+        state.code.netlist.comparison_dialog.open = false;
 
-        state.ui.netlist.save_dialog.open = true;
+        state.code.netlist.save_dialog.open = true;
         assert!(state.application_modal_open());
-        state.ui.netlist.save_dialog.open = false;
+        state.code.netlist.save_dialog.open = false;
 
-        state.ui.netlist.export_dialog.open = true;
+        state.code.netlist.export_dialog.open = true;
         assert!(state.application_modal_open());
-        state.ui.netlist.export_dialog.open = false;
+        state.code.netlist.export_dialog.open = false;
 
         state.workbench.open_project_launcher();
         assert!(state.application_modal_open());

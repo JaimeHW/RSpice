@@ -808,10 +808,13 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("hardcopy_adapters/sources", "app_state", 2),
     ("lifecycle/project_checkpoint", "app_state", 1),
     // Upward: fields whose types live in the feature that renders them, plus
-    // gating methods that query a module above. `-> slots` is the feature
-    // slots the state holds; they rank with the dialog types they name.
-    ("app_state", "app", 2),
-    ("app_state", "slots", 1),
+    // gating methods that query a module above; `-> app` also counts the
+    // session wire naming the bulk-edit filters it keeps, which live with the
+    // dialog that edits them. `-> slots` is the feature slots the state
+    // holds, and the session wire and preferences file reading what they
+    // keep of them; slots rank with the dialog types they name.
+    ("app_state", "app", 4),
+    ("app_state", "slots", 3),
     ("app_state", "workflows/file_workflow", 1),
     ("app_state", "workflows/project_workflow", 1),
     // What still reaches the application root rather than the session data.
@@ -848,11 +851,13 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // and the session aggregate.
     ("state", "app", 4),
     ("state", "app_state", 1),
-    // The interaction session reaching into the engines that hang off it.
-    ("lifecycle/session", "documents/result_document", 3),
-    ("lifecycle/session", "cross_probe", 1),
-    ("lifecycle/session", "documents/code_workspace", 1),
-    ("lifecycle/session", "documents/netlist_document", 1),
+    // The text locale and the source-editor requests the workbench holds:
+    // their types live with the message catalog and the text editor commands.
+    ("state", "localization", 1),
+    ("state", "documents/text_editor_commands", 1),
+    // The design slot holds the schematic cross-probe runtime, whose type
+    // lives with the frame pass that synchronizes it.
+    ("slots", "cross_probe", 1),
     // Browser import/download sitting above what needs it.
     //
     // `app -> browser/download` is retired. Its one reference was the custom

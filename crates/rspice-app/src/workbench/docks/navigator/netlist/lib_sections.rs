@@ -28,10 +28,10 @@ use crate::workbench::documents::netlist_document::{
 /// map to the dependencies the document actually has.
 pub(super) fn refresh(state: &mut AppState) {
     let Some(document) = super::active_canonical_netlist_document(state) else {
-        state.ui.code_workspace.include_lib_sections.clear();
+        state.code.code_workspace.include_lib_sections.clear();
         return;
     };
-    let cache = &state.ui.code_workspace.include_lib_sections;
+    let cache = &state.code.code_workspace.include_lib_sections;
     let mut live = std::collections::BTreeSet::new();
     let mut computed = Vec::new();
     for dependency in document.dependencies() {
@@ -56,7 +56,7 @@ pub(super) fn refresh(state: &mut AppState) {
     if computed.is_empty() && live.len() == cache.len() {
         return;
     }
-    let cache = &mut state.ui.code_workspace.include_lib_sections;
+    let cache = &mut state.code.code_workspace.include_lib_sections;
     cache.retain(|locator, _| live.contains(locator));
     cache.extend(computed);
 }
@@ -66,7 +66,7 @@ pub(super) fn refresh(state: &mut AppState) {
 /// none, offers nothing.
 pub(super) fn declared(state: &AppState, locator: &str) -> Vec<LibSectionSummary> {
     state
-        .ui
+        .code
         .code_workspace
         .include_lib_sections
         .get(locator)
@@ -105,7 +105,7 @@ pub(super) fn use_section(
     }
     let mut replacement = source.clone();
     replacement.replace_range(span, section);
-    let edit = if let Some(identity) = state.ui.netlist.active_dependency_identity.as_deref() {
+    let edit = if let Some(identity) = state.code.netlist.active_dependency_identity.as_deref() {
         OwnedNetlistReplacement::dependency(identity, &source, replacement, 1)
     } else {
         OwnedNetlistReplacement::root(&source, replacement, 1)
@@ -223,9 +223,9 @@ mod tests {
             });
         state.model.netlist_artifacts.generated_source = root.to_owned();
         state.model.netlist_artifacts.generated_document = Some(generated);
-        state.ui.netlist.owned_document = Some(owned);
-        state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        state.ui.netlist.active_document_initialized = true;
+        state.code.netlist.owned_document = Some(owned);
+        state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        state.code.netlist.active_document_initialized = true;
         state.model.simulation.source.netlist_content = root.to_owned();
         state
             .model
@@ -252,23 +252,23 @@ mod tests {
             ["tt", "ff"],
             "the row's alternatives come from the bytes the closure retained"
         );
-        let first = state.ui.code_workspace.include_lib_sections[LOCATOR]
+        let first = state.code.code_workspace.include_lib_sections[LOCATOR]
             .1
             .clone();
         refresh(&mut state);
         assert!(
             std::sync::Arc::ptr_eq(
                 &first,
-                &state.ui.code_workspace.include_lib_sections[LOCATOR].1
+                &state.code.code_workspace.include_lib_sections[LOCATOR].1
             ),
             "unchanged bytes must not be parsed a second time"
         );
 
         // A locator that leaves the closure leaves the cache with it.
-        state.ui.netlist.owned_document = None;
+        state.code.netlist.owned_document = None;
         state.model.workspace.content.netlist_document = None;
         refresh(&mut state);
-        assert!(state.ui.code_workspace.include_lib_sections.is_empty());
+        assert!(state.code.code_workspace.include_lib_sections.is_empty());
     }
 
     #[test]
@@ -309,7 +309,7 @@ mod tests {
             "only a library card has a section token to move"
         );
 
-        state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
+        state.code.netlist.active_document = ActiveNetlistDocument::Generated;
         assert_eq!(
             use_section(&mut state, 2, "ff").unwrap_err(),
             "This netlist source is read-only; its .lib section cannot be changed.",

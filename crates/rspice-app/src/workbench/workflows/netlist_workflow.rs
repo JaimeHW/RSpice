@@ -43,21 +43,21 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
     use crate::state::NetlistValidationReceipt;
     use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 
-    if app.state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+    if app.state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         app.state
             .prompt("A revision comparison is read-only and cannot be validated.");
         return false;
     }
-    if app.state.ui.netlist.active_dependency_identity.is_some() {
+    if app.state.code.netlist.active_dependency_identity.is_some() {
         let message = app
             .state
-            .ui
+            .workbench
             .messages()
             .text(crate::workbench::MessageId::NetlistRootValidationRequired);
         app.state.prompt(message);
         return false;
     }
-    if app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated
+    if app.state.code.netlist.active_document == ActiveNetlistDocument::Generated
         && (app.state.model.netlist_artifacts.generation_error.is_some()
             || app.state.model.netlist_artifacts.generated_input_digest
                 != app
@@ -75,7 +75,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             .unwrap_or_else(|| "Generated netlist is stale.".to_owned());
         app.state.model.netlist_artifacts.validation = None;
         record_validation_failure(&mut app.state, &error);
-        app.state.ui.netlist.validation_error = Some(error);
+        app.state.code.netlist.validation_error = Some(error);
         return false;
     }
 
@@ -93,14 +93,14 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 app.invalidate_simulation_preflight();
                 app.state.model.netlist_artifacts.validation = None;
                 record_validation_failure(&mut app.state, &error);
-                app.state.ui.netlist.validation_error = Some(error);
+                app.state.code.netlist.validation_error = Some(error);
                 return false;
             }
             if let Err(error) = acknowledge_canonical_validation(&mut app.state) {
                 app.invalidate_simulation_preflight();
                 app.state.model.netlist_artifacts.validation = None;
                 record_validation_failure(&mut app.state, &error);
-                app.state.ui.netlist.validation_error = Some(error);
+                app.state.code.netlist.validation_error = Some(error);
                 return false;
             }
             app.state.model.netlist_artifacts.validation = Some(NetlistValidationReceipt {
@@ -111,7 +111,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
                 task_count: metadata.task_count,
                 advisory_count: metadata.advisories.len(),
             });
-            app.state.ui.netlist.validation_error = None;
+            app.state.code.netlist.validation_error = None;
             app.state.record(
                 LogSeverity::Info,
                 LogSource::Netlist,
@@ -128,7 +128,7 @@ pub(crate) fn validate_visible_netlist_source(app: &mut RSpiceApp) -> bool {
             invalidate_canonical_validation(&mut app.state);
             app.state.model.netlist_artifacts.validation = None;
             record_validation_failure(&mut app.state, &message);
-            app.state.ui.netlist.validation_error = Some(message);
+            app.state.code.netlist.validation_error = Some(message);
             false
         }
     }
@@ -149,7 +149,7 @@ fn record_include_resolutions(
     state: &mut AppState,
     sealed: &[rspice_core::netlist::ResolvedIncludeDependency],
 ) {
-    let resolutions = &mut state.ui.code_workspace.include_resolutions;
+    let resolutions = &mut state.code.code_workspace.include_resolutions;
     resolutions.clear();
     for dependency in sealed {
         resolutions.insert(
@@ -165,7 +165,7 @@ fn acknowledge_canonical_dependencies(
 ) -> Result<(), String> {
     record_include_resolutions(state, sealed);
     let authority_paths = dependency_authority_paths(state);
-    let dependencies_belong_to_generated_base = state.ui.netlist.active_document
+    let dependencies_belong_to_generated_base = state.code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         && state
             .model
@@ -180,12 +180,12 @@ fn acknowledge_canonical_dependencies(
                         | crate::state::OwnedNetlistEditStrategy::AnalysisOnlyDeck
                 )
             });
-    let document = match state.ui.netlist.active_document {
+    let document = match state.code.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.model.netlist_artifacts.generated_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            state.ui.netlist.owned_document.as_mut()
+            state.code.netlist.owned_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
@@ -194,7 +194,7 @@ fn acknowledge_canonical_dependencies(
 
     use std::collections::HashSet;
 
-    let source_origin = match state.ui.netlist.active_document {
+    let source_origin = match state.code.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.model.schematic.session.current_file.as_deref()
         }
@@ -324,10 +324,10 @@ fn acknowledge_canonical_dependencies(
         }
     }
 
-    if state.ui.netlist.active_document
+    if state.code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     {
-        state.model.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
+        state.model.workspace.content.netlist_document = state.code.netlist.owned_document.clone();
     }
     Ok(())
 }
@@ -480,7 +480,7 @@ fn dependency_source_authority(
 }
 
 fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> {
-    let owned = state.ui.netlist.active_document
+    let owned = state.code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
     let narrow_owned = owned
         && state
@@ -500,7 +500,7 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
         Vec::new()
     } else {
         state
-            .ui
+            .code
             .netlist
             .diagnostics
             .iter()
@@ -528,12 +528,12 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
             .collect::<Result<Vec<_>, _>>()
             .map_err(|error| error.to_string())?
     };
-    let document = match state.ui.netlist.active_document {
+    let document = match state.code.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.model.netlist_artifacts.generated_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            state.ui.netlist.owned_document.as_mut()
+            state.code.netlist.owned_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
@@ -543,18 +543,18 @@ fn acknowledge_canonical_validation(state: &mut AppState) -> Result<(), String> 
         .acknowledge_validation(document.content_digest(), diagnostics)
         .map_err(|error| error.to_string())?;
     if owned {
-        state.model.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
+        state.model.workspace.content.netlist_document = state.code.netlist.owned_document.clone();
     }
     Ok(())
 }
 
 fn invalidate_canonical_validation(state: &mut AppState) {
-    let document = match state.ui.netlist.active_document {
+    let document = match state.code.netlist.active_document {
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated => {
             state.model.netlist_artifacts.generated_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource => {
-            state.ui.netlist.owned_document.as_mut()
+            state.code.netlist.owned_document.as_mut()
         }
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
         | crate::workbench::documents::netlist_document::ActiveNetlistDocument::RunSnapshot => None,
@@ -562,9 +562,9 @@ fn invalidate_canonical_validation(state: &mut AppState) {
     if let Some(document) = document {
         let _ = document.invalidate_validation(document.content_digest());
     }
-    if state.ui.netlist.active_document
+    if state.code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
     {
-        state.model.workspace.content.netlist_document = state.ui.netlist.owned_document.clone();
+        state.model.workspace.content.netlist_document = state.code.netlist.owned_document.clone();
     }
 }

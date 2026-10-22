@@ -487,7 +487,7 @@ fn refuse_label_on_unmarked_crossing(ui: &Ui, state: &mut AppState, anchor: Poin
     // The toast is the answer: the label the user dropped is not there, and
     // the reason is longer than the status bar holds.
     state
-        .ui
+        .workbench
         .toasts
         .warn_with_title(ui.ctx(), "Label not placed", message);
 }
@@ -1096,7 +1096,7 @@ fn select_materialized_probe_trace(state: &mut AppState, probe_name: &str) {
         })
     };
     if let Some(selected) = selected {
-        state.ui.results.session.selected_trace = Some(selected);
+        state.results.results.session.selected_trace = Some(selected);
     }
 }
 

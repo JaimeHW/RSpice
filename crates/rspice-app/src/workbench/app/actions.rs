@@ -67,7 +67,7 @@ impl RSpiceApp {
         // The editor the page drew last frame, as the menus also see it.
         let source_editor_focus = self
             .state
-            .ui
+            .workbench
             .active_source_editor
             .is_some_and(|editor| ctx.memory(|memory| memory.has_focus(editor.id)));
         let environment = ShortcutEnvironment {
@@ -193,7 +193,7 @@ impl RSpiceApp {
             return false;
         }
         if self.state.model.schematic.undo() {
-            self.state.ui.schematic_snap = self
+            self.state.design.schematic_snap = self
                 .state
                 .model
                 .schematic
@@ -221,7 +221,7 @@ impl RSpiceApp {
             return false;
         }
         if self.state.model.schematic.redo() {
-            self.state.ui.schematic_snap = self
+            self.state.design.schematic_snap = self
                 .state
                 .model
                 .schematic
@@ -291,7 +291,7 @@ impl RSpiceApp {
             return;
         }
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && self.state.ui.code_workspace.page
+            && self.state.code.code_workspace.page
                 == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
         {
             match crate::workbench::documents::netlist_document::undo_netlist_edit(&mut self.state)
@@ -325,7 +325,7 @@ impl RSpiceApp {
             return;
         }
         if self.state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && self.state.ui.code_workspace.page
+            && self.state.code.code_workspace.page
                 == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
         {
             match crate::workbench::documents::netlist_document::redo_netlist_edit(&mut self.state)
@@ -410,7 +410,7 @@ mod shortcut_ownership_tests {
                 .grid_size,
             expected
         );
-        assert_eq!(app.state.ui.schematic_snap.grid_size, expected);
+        assert_eq!(app.state.design.schematic_snap.grid_size, expected);
     }
 
     #[test]
@@ -433,7 +433,8 @@ mod shortcut_ownership_tests {
                         SchematicGridPitch::Mil25.canvas_grid_size();
                 })
         );
-        app.state.ui.schematic_snap = app.state.model.schematic.session.editor.snap_engine.clone();
+        app.state.design.schematic_snap =
+            app.state.model.schematic.session.editor.snap_engine.clone();
         assert_grid_pitch_contract(&app, SchematicGridPitch::Mil25);
 
         app.action_edit_undo();
@@ -665,11 +666,11 @@ mod shortcut_ownership_tests {
     #[test]
     fn linked_cursor_command_toggles_real_results_state() {
         let mut app = RSpiceApp::test_instance();
-        assert!(!app.state.ui.results.session.linked_cursors);
+        assert!(!app.state.results.results.session.linked_cursors);
         app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
-        assert!(app.state.ui.results.session.linked_cursors);
+        assert!(app.state.results.results.session.linked_cursors);
         app.execute_shortcut_command(ShortcutCommand::ToggleLinkedCursors);
-        assert!(!app.state.ui.results.session.linked_cursors);
+        assert!(!app.state.results.results.session.linked_cursors);
     }
 
     #[test]
@@ -690,14 +691,14 @@ mod shortcut_ownership_tests {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Results);
-        app.state.ui.results.session.cursors.a = Some(0.5);
-        app.state.ui.results.session.cursor_strip = Some(0);
+        app.state.results.results.session.cursors.a = Some(0.5);
+        app.state.results.results.session.cursor_strip = Some(0);
 
         app.execute_shortcut_command(ShortcutCommand::Copy);
 
         let copied = app
             .state
-            .ui
+            .workbench
             .clipboard_text_request
             .as_deref()
             .expect("cursor readout copied");
@@ -892,21 +893,21 @@ mod symbol_action_tests {
 
         app.execute_shortcut_command(ShortcutCommand::SymbolPinTool);
         assert_eq!(
-            app.state.ui.symbol.editor.tool,
+            app.state.design.symbol.editor.tool,
             crate::workbench::SymbolTool::PlacePin
         );
         assert_eq!(
-            app.state.ui.symbol.editor.selected_pin.as_deref(),
+            app.state.design.symbol.editor.selected_pin.as_deref(),
             Some("NEXT")
         );
 
-        app.state.ui.symbol.editor.pending_polyline = vec![Point::new(0, 0)];
+        app.state.design.symbol.editor.pending_polyline = vec![Point::new(0, 0)];
         app.execute_shortcut_command(ShortcutCommand::SymbolPolylineTool);
         assert_eq!(
-            app.state.ui.symbol.editor.tool,
+            app.state.design.symbol.editor.tool,
             crate::workbench::SymbolTool::Line
         );
-        assert!(app.state.ui.symbol.editor.pending_polyline.is_empty());
+        assert!(app.state.design.symbol.editor.pending_polyline.is_empty());
 
         for (command, expected) in [
             (
@@ -934,21 +935,21 @@ mod symbol_action_tests {
                 crate::workbench::SymbolTool::Select,
             ),
         ] {
-            app.state.ui.symbol.editor.shape_start = Some(Point::new(10, 10));
+            app.state.design.symbol.editor.shape_start = Some(Point::new(10, 10));
             app.execute_shortcut_command(command);
-            assert_eq!(app.state.ui.symbol.editor.tool, expected);
+            assert_eq!(app.state.design.symbol.editor.tool, expected);
             if matches!(
                 command,
                 ShortcutCommand::SymbolRectangleTool
                     | ShortcutCommand::SymbolCircleTool
                     | ShortcutCommand::SymbolArcTool
             ) {
-                assert!(app.state.ui.symbol.editor.shape_start.is_none());
+                assert!(app.state.design.symbol.editor.shape_start.is_none());
             }
         }
 
-        app.state.ui.symbol.editor.needs_fit = false;
+        app.state.design.symbol.editor.needs_fit = false;
         app.execute_shortcut_command(ShortcutCommand::ZoomFit);
-        assert!(app.state.ui.symbol.editor.needs_fit);
+        assert!(app.state.design.symbol.editor.needs_fit);
     }
 }

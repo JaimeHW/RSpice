@@ -50,8 +50,8 @@ fn viewport() -> SymbolViewport {
 fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
     SymbolCanvasRequest {
         source: state.symbol_editor_request_source(),
-        tool: state.ui.symbol.editor.tool,
-        selection: state.ui.symbol.editor.effective_selection(),
+        tool: state.design.symbol.editor.tool,
+        selection: state.design.symbol.editor.effective_selection(),
         viewport: viewport(),
         input,
     }
@@ -67,7 +67,7 @@ fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
 fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
     let mut state = open_symbol();
     let before = state.load_active_symbol_document().unwrap();
-    state.ui.symbol.editor.dragging_origin = true;
+    state.design.symbol.editor.dragging_origin = true;
     for point in [Point::new(10, 20), Point::new(20, 30)] {
         bind_active_canvas(&mut state);
         let request = request(
@@ -84,13 +84,13 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
     assert_eq!(after.origin, Point::new(20, 30));
     assert_eq!(
         state
-            .ui
+            .design
             .symbol
             .history
             .undo_depth(&state.model.workspace.content.active_key()),
         1
     );
-    assert!(state.ui.symbol.editor.drag_undo_recorded);
+    assert!(state.design.symbol.editor.drag_undo_recorded);
     let request = request(
         &state,
         SymbolCanvasInput {
@@ -99,7 +99,7 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
         },
     );
     apply(&mut state, request);
-    assert!(!state.ui.symbol.editor.drag_undo_recorded);
+    assert!(!state.design.symbol.editor.drag_undo_recorded);
     assert!(state.undo_active_symbol_document().unwrap());
     assert_eq!(state.load_active_symbol_document().unwrap(), before);
     assert!(state.redo_active_symbol_document().unwrap());
@@ -112,7 +112,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
     let before = state.load_active_symbol_document().unwrap();
     let mut selection = SymbolSelection::single_pin("IN");
     selection.toggle_shape(0);
-    state.ui.symbol.editor.set_selection(selection);
+    state.design.symbol.editor.set_selection(selection);
     let ctx = egui::Context::default();
     let pointer = |point| viewport().world_to_screen(point);
     let button = |pos, pressed| egui::Event::PointerButton {
@@ -160,7 +160,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
             },
         );
         if frame == 2 {
-            assert!(state.ui.symbol.editor.dragging_group.is_some());
+            assert!(state.design.symbol.editor.dragging_group.is_some());
         }
     }
     let after = state.load_active_symbol_document().unwrap();
@@ -173,13 +173,13 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
     );
     assert_eq!(
         state
-            .ui
+            .design
             .symbol
             .history
             .undo_depth(&state.model.workspace.content.active_key()),
         1
     );
-    assert!(!state.ui.symbol.editor.drag_undo_recorded);
+    assert!(!state.design.symbol.editor.drag_undo_recorded);
     assert!(state.undo_active_symbol_document().unwrap());
     assert_eq!(state.load_active_symbol_document().unwrap(), before);
 }
@@ -187,7 +187,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
 #[test]
 fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
     let mut state = open_symbol();
-    state.ui.symbol.editor.tool = SymbolTool::Text;
+    state.design.symbol.editor.tool = SymbolTool::Text;
     let pending = request(
         &state,
         SymbolCanvasInput {
@@ -224,23 +224,23 @@ fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
 #[test]
 fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
     let mut state = open_symbol();
-    state.ui.symbol.editor.pending_polyline = vec![Point::origin(), Point::new(10, 20)];
-    state.ui.symbol.editor.shape_start = Some(Point::origin());
-    state.ui.symbol.editor.marquee_start = Some(Point::origin());
-    state.ui.symbol.editor.dragging_origin = true;
+    state.design.symbol.editor.pending_polyline = vec![Point::origin(), Point::new(10, 20)];
+    state.design.symbol.editor.shape_start = Some(Point::origin());
+    state.design.symbol.editor.marquee_start = Some(Point::origin());
+    state.design.symbol.editor.dragging_origin = true;
     state.model.active_schematic_epoch += 1;
     bind_active_canvas(&mut state);
-    assert!(state.ui.symbol.editor.pending_polyline.is_empty());
-    assert!(state.ui.symbol.editor.shape_start.is_none());
-    assert!(state.ui.symbol.editor.marquee_start.is_none());
-    assert!(!state.ui.symbol.editor.dragging_origin);
+    assert!(state.design.symbol.editor.pending_polyline.is_empty());
+    assert!(state.design.symbol.editor.shape_start.is_none());
+    assert!(state.design.symbol.editor.marquee_start.is_none());
+    assert!(!state.design.symbol.editor.dragging_origin);
 
     state
         .model
         .workspace
         .content
         .set_active_read_only_reference(true);
-    state.ui.symbol.editor.tool = SymbolTool::Text;
+    state.design.symbol.editor.tool = SymbolTool::Text;
     let before = state.load_active_symbol_document().unwrap();
     let request = request(
         &state,
@@ -288,7 +288,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
         .content
         .set_active_occurrence(occurrence("X1"));
     bind_active_canvas(&mut state);
-    state.ui.symbol.editor.dragging_origin = true;
+    state.design.symbol.editor.dragging_origin = true;
     let pending = request(
         &state,
         SymbolCanvasInput {
@@ -305,7 +305,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
         .set_active_occurrence(occurrence("X2"));
     apply(&mut state, pending);
     bind_active_canvas(&mut state);
-    assert!(!state.ui.symbol.editor.dragging_origin);
+    assert!(!state.design.symbol.editor.dragging_origin);
     assert_eq!(state.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 }
@@ -445,7 +445,7 @@ fn parent_nets(state: &AppState) -> std::collections::BTreeMap<String, Vec<u64>>
 
 /// Drag INP through `points`, one frame each, then release.
 fn drag_inp(state: &mut AppState, points: &[Point]) {
-    state.ui.symbol.editor.dragging_pin = Some("INP".to_owned());
+    state.design.symbol.editor.dragging_pin = Some("INP".to_owned());
     for point in points {
         bind_active_canvas(state);
         let request = request(
@@ -576,10 +576,10 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
         let symbol = state.model.workspace.content.active_view.clone();
         let before = state.load_active_symbol_document().unwrap();
         let points = vec![Point::origin(), Point::new(20, 10)];
-        state.ui.symbol.editor.tool = SymbolTool::Line;
-        state.ui.symbol.editor.pending_polyline = points.clone();
-        state.ui.symbol.editor.dragging_origin = true;
-        state.ui.symbol.editor.marquee_start = Some(Point::origin());
+        state.design.symbol.editor.tool = SymbolTool::Line;
+        state.design.symbol.editor.pending_polyline = points.clone();
+        state.design.symbol.editor.dragging_origin = true;
+        state.design.symbol.editor.marquee_start = Some(Point::origin());
         let pending = request(
             &state,
             SymbolCanvasInput {
@@ -627,13 +627,16 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
         }
         state.open_workspace_view(symbol);
         bind_active_canvas(&mut state);
-        assert!(!state.ui.symbol.editor.dragging_origin, "{change}");
-        assert!(state.ui.symbol.editor.marquee_start.is_none(), "{change}");
+        assert!(!state.design.symbol.editor.dragging_origin, "{change}");
+        assert!(
+            state.design.symbol.editor.marquee_start.is_none(),
+            "{change}"
+        );
         if change == "navigation" {
-            assert_eq!(state.ui.symbol.editor.pending_polyline, points);
+            assert_eq!(state.design.symbol.editor.pending_polyline, points);
         } else {
             assert!(
-                state.ui.symbol.editor.pending_polyline.is_empty(),
+                state.design.symbol.editor.pending_polyline.is_empty(),
                 "{change}"
             );
         }

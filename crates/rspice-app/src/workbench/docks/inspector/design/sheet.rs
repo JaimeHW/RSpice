@@ -187,7 +187,7 @@ fn apply_schematic_edit(state: &mut AppState, edit: SchematicEdit) {
             let changed = state.model.schematic.change_grid_pitch(pitch);
             if changed {
                 state.model.schematic.reconcile_grid_pitch_runtime();
-                state.ui.schematic_snap.grid_size =
+                state.design.schematic_snap.grid_size =
                     state.model.schematic.session.editor.snap_engine.grid_size;
             }
             changed

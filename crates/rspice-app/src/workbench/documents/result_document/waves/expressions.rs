@@ -22,7 +22,7 @@ pub(super) fn expr_editor_row(
     analysis_index: usize,
 ) {
     let scope_note = state
-        .ui
+        .results
         .results
         .session
         .sample_selection
@@ -42,7 +42,7 @@ pub(super) fn expr_editor_row(
                 })
         });
     let Some(editor) = state
-        .ui
+        .results
         .results
         .session
         .expr_editor
@@ -56,10 +56,10 @@ pub(super) fn expr_editor_row(
 
     match action {
         Action::None => {}
-        Action::Cancel => state.ui.results.session.expr_editor = None,
+        Action::Cancel => state.results.results.session.expr_editor = None,
         Action::Commit => {
             let text = state
-                .ui
+                .results
                 .results
                 .session
                 .expr_editor
@@ -67,10 +67,10 @@ pub(super) fn expr_editor_row(
                 .map(|e| e.text.trim().to_owned())
                 .unwrap_or_default();
             if text.is_empty() {
-                state.ui.results.session.expr_editor = None;
+                state.results.results.session.expr_editor = None;
                 return;
             }
-            let sample_selection = state.ui.results.session.sample_selection.clone();
+            let sample_selection = state.results.results.session.sample_selection.clone();
             let series = evaluate_expression(
                 &state.model.simulation,
                 analysis_index,
@@ -79,7 +79,7 @@ pub(super) fn expr_editor_row(
             );
             match series {
                 Ok(series) => {
-                    state.ui.results.analysis_expr_cache.insert(
+                    state.results.results.analysis_expr_cache.insert(
                         (analysis_key, text.clone()),
                         ExprSeries {
                             version: expression_version(
@@ -91,17 +91,17 @@ pub(super) fn expr_editor_row(
                         },
                     );
                     let added = state
-                        .ui
+                        .results
                         .results
                         .add_expression_trace(&state.model.simulation, analysis_key, text)
                         .expect("the expression editor is bound to a retained analysis");
                     if added {
                         state.model.workspace.content.visualization_documents_dirty = true;
                     }
-                    state.ui.results.session.expr_editor = None;
+                    state.results.results.session.expr_editor = None;
                 }
                 Err(error) => {
-                    if let Some(editor) = state.ui.results.session.expr_editor.as_mut() {
+                    if let Some(editor) = state.results.results.session.expr_editor.as_mut() {
                         editor.error = Some(error);
                         editor.want_focus = true;
                     }
@@ -138,7 +138,7 @@ pub(super) fn resolve_strip_exprs(
     tokens: &Tokens,
 ) -> Vec<ResolvedExpr> {
     let exprs: Vec<(usize, ExprTrace)> = state
-        .ui
+        .results
         .results
         .session
         .analysis_exprs
@@ -149,7 +149,7 @@ pub(super) fn resolve_strip_exprs(
         return Vec::new();
     }
 
-    let sample_selection = state.ui.results.session.sample_selection.clone();
+    let sample_selection = state.results.results.session.sample_selection.clone();
     let mut resolved = Vec::new();
     for (slot, expr) in exprs {
         let version = expression_version(
@@ -159,7 +159,7 @@ pub(super) fn resolve_strip_exprs(
         );
         let key = (model.analysis_key, expr.text.clone());
         let fresh = state
-            .ui
+            .results
             .results
             .analysis_expr_cache
             .get(&key)
@@ -180,7 +180,7 @@ pub(super) fn resolve_strip_exprs(
                 );
             }
             state
-                .ui
+                .results
                 .results
                 .analysis_expr_cache
                 .insert(key.clone(), ExprSeries { version, series });
@@ -189,7 +189,7 @@ pub(super) fn resolve_strip_exprs(
             continue;
         }
         let cached = state
-            .ui
+            .results
             .results
             .analysis_expr_cache
             .get(&key)
@@ -230,7 +230,7 @@ pub(super) fn resolve_strip_exprs(
             // the previous selection would route the reduction by a sweep that
             // is no longer there.
             let shape = state
-                .ui
+                .results
                 .results
                 .session
                 .derived
@@ -240,7 +240,7 @@ pub(super) fn resolve_strip_exprs(
             // resolving a strip happens twice per frame, so scanning for them
             // here cost two full passes over the evaluated series each time.
             let y_extremes = state
-                .ui
+                .results
                 .results
                 .session
                 .derived
@@ -294,7 +294,7 @@ pub(crate) fn toggle_visibility(
         name.clone(),
     );
     if let Some(context) = state
-        .ui
+        .results
         .results
         .session
         .persistent_pane_context
@@ -340,40 +340,40 @@ pub(crate) fn toggle_visibility(
                 return;
             }
             if now_visible {
-                state.ui.results.session.note_recent_signal(key);
+                state.results.results.session.note_recent_signal(key);
             }
             return;
         }
     }
     let now_visible = state
-        .ui
+        .results
         .results
         .toggle_waveform_visibility(key.clone(), dataset_default);
     // Revealing a trace is a deliberate act; feed the browser's Recent scope.
     if now_visible {
-        state.ui.results.session.note_recent_signal(key);
+        state.results.results.session.note_recent_signal(key);
     }
 }
 
 /// Serialize the active Waves cursor readout for the platform clipboard.
 /// This is the Edit → Copy consumer for the Units copied-value policy.
 pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
-    let x = state.ui.results.session.cursors.a?;
+    let x = state.results.results.session.cursors.a?;
     state
-        .ui
+        .results
         .results
         .synchronize_wave_caches(&state.model.simulation);
     let presentation = state.result_presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let interpolation = cursor_interpolation(presentation.cursor_interpolation());
-    let sample_selection = state.ui.results.session.sample_selection.clone();
-    let hidden_family_traces = state.ui.results.session.hidden_family_traces.clone();
-    let waveform_visibility = state.ui.results.session.waveform_visibility.clone();
-    let phase_continuous = state.ui.results.session.presented_phase_continuous();
-    let ac = state.ui.results.session.ac_display;
+    let sample_selection = state.results.results.session.sample_selection.clone();
+    let hidden_family_traces = state.results.results.session.hidden_family_traces.clone();
+    let waveform_visibility = state.results.results.session.waveform_visibility.clone();
+    let phase_continuous = state.results.results.session.presented_phase_continuous();
+    let ac = state.results.results.session.ac_display;
     let mut models = build_models(
         &state.model.simulation,
-        &mut state.ui.results.session.derived,
+        &mut state.results.results.session.derived,
         &Tokens::default(),
         phase_continuous,
         presentation.complex_number_display(),
@@ -391,7 +391,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
     // strip draws, and the overrides above decide which those are.
     super::extent::resolve_x_ranges(&mut models);
     let model = state
-        .ui
+        .results
         .results
         .session
         .cursor_strip
@@ -399,7 +399,7 @@ pub(crate) fn copy_cursor_text(state: &mut AppState) -> Option<String> {
 
     let mut text = String::new();
     append_copied_cursor(&mut text, "A", x, model, interpolation, quantity_policy);
-    if let Some(b) = state.ui.results.session.cursors.b {
+    if let Some(b) = state.results.results.session.cursors.b {
         text.push('\n');
         append_copied_cursor(&mut text, "B", b, model, interpolation, quantity_policy);
     }
@@ -424,7 +424,7 @@ mod tests {
                 ]),
         );
         state.model.simulation.complete_run();
-        state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
+        state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
         let digest = state
             .model
             .simulation
@@ -434,7 +434,7 @@ mod tests {
         let policy = state.result_presentation_policy();
         let models = cached_models(
             &state.model.simulation,
-            &mut state.ui.results,
+            &mut state.results.results,
             policy.complex_number_display(),
             &Tokens::default(),
         );
@@ -449,13 +449,13 @@ mod tests {
                 .is_none()
         );
         state
-            .ui
+            .results
             .results
             .session
             .analysis_exprs
             .insert(model.analysis_key, vec![legacy]);
         state
-            .ui
+            .results
             .results
             .session
             .sync_expression_projection(model.analysis_key, 0);
@@ -464,7 +464,7 @@ mod tests {
         assert!(old[0].label.starts_with("legacy magnitude"));
         assert!(
             state
-                .ui
+                .results
                 .results
                 .add_expression_trace(
                     &state.model.simulation,
@@ -488,7 +488,7 @@ mod tests {
         );
         assert!(
             !state
-                .ui
+                .results
                 .results
                 .add_expression_trace(
                     &state.model.simulation,

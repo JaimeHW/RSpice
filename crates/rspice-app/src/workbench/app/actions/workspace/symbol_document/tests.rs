@@ -149,7 +149,7 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
     let mut metadata = SymbolEditorMetadata::for_document(&document);
 
     assert!(
-        !state.ui.symbol.history.is_dirty(&key),
+        !state.design.symbol.history.is_dirty(&key),
         "an untouched symbol is not dirty"
     );
 
@@ -160,7 +160,7 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
         .expect("edit stores");
 
     assert!(
-        state.ui.symbol.history.is_dirty(&key),
+        state.design.symbol.history.is_dirty(&key),
         "an edit that was never published is unpublished work, however \
          faithfully the project library was written"
     );
@@ -171,7 +171,7 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
 
     assert_eq!(metadata.revision, 1);
     assert!(
-        !state.ui.symbol.history.is_dirty(&key),
+        !state.design.symbol.history.is_dirty(&key),
         "publication is the save point"
     );
 
@@ -186,14 +186,14 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
         .store_active_symbol_editor_bundle(&edited, &metadata)
         .expect("second edit stores");
 
-    assert!(state.ui.symbol.history.is_dirty(&key));
+    assert!(state.design.symbol.history.is_dirty(&key));
 
     state
         .undo_active_symbol_document()
         .expect("undo runs on a writable view");
 
     assert!(
-        !state.ui.symbol.history.is_dirty(&key),
+        !state.design.symbol.history.is_dirty(&key),
         "undoing back to the save point is as clean as never having edited"
     );
 }

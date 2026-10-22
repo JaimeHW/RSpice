@@ -216,7 +216,7 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
     use crate::workbench::documents::result_document::marker_anchor_for;
     let (mut state, key) = super::durable_content::retained_results();
     state
-        .ui
+        .results
         .results
         .session
         .add_marker(
@@ -229,7 +229,7 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
     let baseline = snapshot(&state).unwrap();
     state.project_lifecycle.accept_project(baseline, None);
     assert!(!has_unsaved_changes(&state));
-    state.ui.results.session.markers[0].x = -0.0;
+    state.results.results.session.markers[0].x = -0.0;
     assert!(has_unsaved_changes(&state));
     let current = snapshot(&state).unwrap();
     assert_eq!(
@@ -245,6 +245,6 @@ fn result_fingerprint_cache_preserves_signed_zero_in_annotation_edits() {
             .content_digest(),
         registry::content_digest(&current.file).unwrap()
     );
-    state.ui.results.session.markers[0].x = 0.0;
+    state.results.results.session.markers[0].x = 0.0;
     assert!(!has_unsaved_changes(&state));
 }

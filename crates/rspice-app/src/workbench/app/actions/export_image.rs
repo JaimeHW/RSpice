@@ -26,7 +26,7 @@ use crate::workbench::app::RSpiceApp;
 impl RSpiceApp {
     /// Pump a pending figure-export request.
     pub(in crate::workbench) fn handle_image_export(&mut self) {
-        if !std::mem::take(&mut self.state.ui.export_figure_requested) {
+        if !std::mem::take(&mut self.state.hardcopy.export_figure_requested) {
             return;
         }
         crate::workbench::app::open_hardcopy_workflow(
@@ -60,12 +60,12 @@ mod tests {
     #[test]
     fn a_figure_request_opens_the_publication_workflow() {
         let mut app = app_with_an_exportable_document();
-        app.state.ui.export_figure_requested = true;
+        app.state.hardcopy.export_figure_requested = true;
 
         app.handle_image_export();
 
         assert!(
-            !app.state.ui.export_figure_requested,
+            !app.state.hardcopy.export_figure_requested,
             "the request must be consumed exactly once"
         );
         assert!(

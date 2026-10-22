@@ -46,7 +46,7 @@ impl Editor {
                 &SymbolEditorMetadata::for_document(&document),
             )
             .unwrap();
-        state.ui.symbol.editor.select_shape(0);
+        state.design.symbol.editor.select_shape(0);
         Self {
             ctx,
             state,
@@ -57,7 +57,7 @@ impl Editor {
     fn frame(&mut self, events: Vec<egui::Event>) -> SymbolInspectorRequest {
         let source = self.state.symbol_editor_request_source();
         rspice_schematic_editor::symbol_editor::interaction::bind_canvas_source(
-            &mut self.state.ui.symbol.editor,
+            &mut self.state.design.symbol.editor,
             source,
         );
         let mut request = None;
@@ -84,7 +84,7 @@ impl Editor {
                             document,
                             metadata,
                             &[],
-                            &self.state.ui.symbol.editor,
+                            &self.state.design.symbol.editor,
                             SymbolEditCapabilities {
                                 edit: !self.state.schematic_edit_read_only(),
                             },
@@ -188,7 +188,10 @@ fn symbol_field_typing_survives_passive_window_projection() {
     editor.pass(vec![egui::Event::Text("2".into())]);
     let after = editor.state.load_active_symbol_document().unwrap();
     assert!(matches!(&after.body[0], SymbolShape::Circle { center, .. } if center.x == 12));
-    assert_eq!(editor.state.ui.symbol.history.undo_depth(&symbol.key()), 1);
+    assert_eq!(
+        editor.state.design.symbol.history.undo_depth(&symbol.key()),
+        1
+    );
     assert!(editor.state.undo_active_symbol_document().unwrap());
     assert_eq!(editor.state.load_active_symbol_document().unwrap(), before);
 }
@@ -214,15 +217,18 @@ fn symbol_field_focus_and_unfinished_text_do_not_leak_to_another_document() {
         .store_active_symbol_editor_bundle(&before, &SymbolEditorMetadata::for_document(&before))
         .unwrap();
     editor.state.open_workspace_view(symbol);
-    editor.state.ui.symbol.editor.select_shape(0);
+    editor.state.design.symbol.editor.select_shape(0);
     editor.pass(Vec::new());
     editor.click("Center X");
     editor.replace("-");
     editor.state.open_workspace_view(other.clone());
-    editor.state.ui.symbol.editor.select_shape(0);
+    editor.state.design.symbol.editor.select_shape(0);
     editor.pass(vec![egui::Event::Text("5".into())]);
     assert_eq!(editor.state.load_active_symbol_document().unwrap(), before);
-    assert_eq!(editor.state.ui.symbol.history.undo_depth(&other.key()), 0);
+    assert_eq!(
+        editor.state.design.symbol.history.undo_depth(&other.key()),
+        0
+    );
     editor.click("Center X");
     editor.replace("25");
     let after = editor.state.load_active_symbol_document().unwrap();
@@ -240,12 +246,12 @@ fn symbol_coordinate_typing_is_one_undo_group_until_focus_changes() {
     editor.replace("1");
     editor.replace("12");
     let key = editor.state.model.workspace.content.active_key();
-    assert_eq!(editor.state.ui.symbol.history.undo_depth(&key), 1);
+    assert_eq!(editor.state.design.symbol.history.undo_depth(&key), 1);
     let after = editor.state.load_active_symbol_document().unwrap();
     assert!(matches!(&after.body[0], SymbolShape::Circle { center, .. } if center.x == 12));
     editor.click("Center Y");
     editor.replace("30");
-    assert_eq!(editor.state.ui.symbol.history.undo_depth(&key), 2);
+    assert_eq!(editor.state.design.symbol.history.undo_depth(&key), 2);
     let after_y = editor.state.load_active_symbol_document().unwrap();
     editor
         .state
@@ -256,7 +262,7 @@ fn symbol_coordinate_typing_is_one_undo_group_until_focus_changes() {
     editor.pass(Vec::new());
     editor.click("Center Y");
     editor.replace("40");
-    assert_eq!(editor.state.ui.symbol.history.undo_depth(&key), 3);
+    assert_eq!(editor.state.design.symbol.history.undo_depth(&key), 3);
     assert!(editor.state.undo_active_symbol_document().unwrap());
     assert_eq!(editor.state.load_active_symbol_document().unwrap(), after_y);
     assert!(editor.state.undo_active_symbol_document().unwrap());
@@ -272,7 +278,7 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
     editor.click("Center X");
     editor.replace("-");
     assert!(!editor.state.can_undo_active_symbol_document());
-    editor.state.ui.symbol.editor.select_shape(1);
+    editor.state.design.symbol.editor.select_shape(1);
     editor.pass(Vec::new());
     editor.click("Center X");
     editor.replace("140");
@@ -282,7 +288,7 @@ fn unfinished_symbol_field_does_not_follow_a_different_selection_or_view() {
     assert_eq!(
         editor
             .state
-            .ui
+            .design
             .symbol
             .history
             .undo_depth(&editor.state.model.workspace.content.active_key()),
@@ -305,13 +311,13 @@ fn queued_symbol_inspector_edits_revalidate_source_selection_and_authority() {
     let mut editor = Editor::new();
     let before = editor.state.load_active_symbol_document().unwrap();
     for changed in 0..4 {
-        editor.state.ui.symbol.editor.select_shape(0);
+        editor.state.design.symbol.editor.select_shape(0);
         let mut request = editor.frame(Vec::new());
         request.undo_before.push(before.clone());
         request.document.origin = Point::new(20, 30);
         request.changed = true;
         match changed {
-            0 => editor.state.ui.symbol.editor.select_shape(1),
+            0 => editor.state.design.symbol.editor.select_shape(1),
             1 => editor.state.model.active_schematic_epoch += 1,
             2 => {
                 editor

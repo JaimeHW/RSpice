@@ -155,7 +155,7 @@ mod tests {
         use crate::state::WireJunctionPolicy;
 
         let mut state = AppState::default();
-        state.ui.schematic_routing_mode = WireRoutingMode::Diagonal;
+        state.design.schematic_routing_mode = WireRoutingMode::Diagonal;
         let created = state.new_schematic_document();
         assert_eq!(
             created.session.editor.wire_drawing.routing_mode,
@@ -171,7 +171,7 @@ mod tests {
             .preferences
             .set_choice(ChoicePreference::WireJunctionBehavior, ANY_ANGLE_ROUTING)
             .expect("a stored routing choice");
-        state.ui.schematic_routing_mode = WireRoutingMode::HorizontalFirst;
+        state.design.schematic_routing_mode = WireRoutingMode::HorizontalFirst;
         let created = state.new_schematic_document();
         assert_eq!(
             created.session.editor.wire_drawing.routing_mode,

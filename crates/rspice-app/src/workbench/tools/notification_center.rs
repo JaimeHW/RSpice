@@ -226,7 +226,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
         unread_only: app.state.workbench.notification_unread_only,
     };
     let mut intents = Vec::new();
-    let records = app.state.ui.toasts.activity();
+    let records = app.state.workbench.toasts.activity();
     let alerts = background_alerts::background_alerts();
 
     let area = Area::new(panel_id())
@@ -269,7 +269,7 @@ pub(in crate::workbench) fn show(ctx: &egui::Context, app: &mut RSpiceApp, chrom
 
     let mut followed = None;
     for intent in intents {
-        let toasts = &mut app.state.ui.toasts;
+        let toasts = &mut app.state.workbench.toasts;
         match intent {
             Intent::MarkRead(id) => {
                 toasts.mark_read(id);

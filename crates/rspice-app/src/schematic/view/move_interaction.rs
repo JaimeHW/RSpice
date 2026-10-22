@@ -42,7 +42,7 @@ pub(super) fn handle_armed_move_selection(
             design: super::schematic_design_view(state),
             canvas: &state.design.move_selection.canvas,
             selection: &state.model.schematic.session.editor.selection,
-            filter: state.ui.schematic_selection_filter,
+            filter: state.design.schematic_selection_filter,
             snap_engine: &state.model.schematic.session.editor.snap_engine,
         },
         || state.model.workspace.content.active_view.display_path(),

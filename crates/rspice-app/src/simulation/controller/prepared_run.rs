@@ -110,7 +110,7 @@ fn run_preparation_inputs_reading<'a>(
         max_parallel_workers: state.model.preferences.solver_worker_limit(),
         library_folders: state.library_folders(),
         compilation: state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .receipt
@@ -253,7 +253,7 @@ impl FrozenRunPreparation {
                 max_parallel_workers: state.model.preferences.solver_worker_limit(),
                 library_folders: state.library_folders().to_vec(),
                 compilation: state
-                    .ui
+                    .code
                     .code_workspace
                     .veriloga
                     .receipt
@@ -929,7 +929,7 @@ impl SimulationController {
                 // A campaign the reader cancelled is not news to them.
                 if !campaign.cancelled {
                     state
-                        .ui
+                        .runs
                         .run_watch
                         .campaign_outcome(CampaignOutcome::Finished {
                             name: campaign.name,
@@ -1050,7 +1050,7 @@ impl SimulationController {
             error,
         );
         state
-            .ui
+            .runs
             .run_watch
             .campaign_outcome(CampaignOutcome::MemberRefused {
                 campaign: campaign.name.clone(),
@@ -1187,8 +1187,8 @@ impl SimulationController {
 pub(super) fn manual_source_inputs(
     state: &AppState,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
-    if state.ui.netlist.active_document_initialized
-        && state.ui.netlist.active_document
+    if state.code.netlist.active_document_initialized
+        && state.code.netlist.active_document
             == crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
     {
         return Err(PreparationError::new(
@@ -1196,9 +1196,9 @@ pub(super) fn manual_source_inputs(
             "Generated comparison documents cannot be executed",
         ));
     }
-    let owned_active = state.ui.netlist.active_document
+    let owned_active = state.code.netlist.active_document
         == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
-        || (!state.ui.netlist.active_document_initialized
+        || (!state.code.netlist.active_document_initialized
             && state.model.simulation.source.netlist_content.is_empty()
             && state.model.workspace.content.netlist_source.is_some());
     let source = if owned_active {

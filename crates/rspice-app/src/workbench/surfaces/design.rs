@@ -236,7 +236,11 @@ fn breadcrumb(ctx: &Context, state: &mut AppState, content_rect: Rect) {
         // A level of the parent is a way out of the in-place edit, which
         // asks first when it holds unsaved edits.
         Some(level) if leaves_in_place => {
-            state.request_symbol_in_place_exit(crate::workbench::SymbolInPlaceExit::Level(level));
+            state.request_symbol_in_place_exit(
+                crate::workbench::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Level(
+                    level,
+                ),
+            );
         }
         Some(level) => state.focus_workspace_breadcrumb(level),
         None => {}

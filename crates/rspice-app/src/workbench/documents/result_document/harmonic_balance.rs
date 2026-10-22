@@ -167,7 +167,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     let viewport = state
-        .ui
+        .results
         .results
         .session
         .plot_view(super::ResultViewer::HarmonicBalance, 0);
@@ -177,24 +177,24 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         viewport,
         &quantity_policy,
         presentation,
-        &mut state.ui.results.session.cache,
+        &mut state.results.results.session.cache,
     );
     if response.fit {
         state
-            .ui
+            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::HarmonicBalance, 0);
     }
     if let Some(response) = response.plot {
         super::record_drawn_axes(
-            &mut state.ui.results,
+            &mut state.results.results,
             super::ResultViewer::HarmonicBalance,
             &response,
         );
         if response.view.any() {
             state
-                .ui
+                .results
                 .results
                 .session
                 .plot_view_mut(super::ResultViewer::HarmonicBalance, 0)

@@ -7,7 +7,7 @@ use crate::workbench::FolderListPreference;
 /// The errors the editor last published.
 fn errors(state: &AppState) -> Vec<String> {
     state
-        .ui
+        .code
         .netlist
         .diagnostics
         .iter()
@@ -38,9 +38,9 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
 
     let mut state = AppState::default();
     state.model.workspace.content.netlist_source_path = Some(path);
-    state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.model.simulation.source.netlist_content = source.to_owned();
-    let revision = state.ui.netlist.revision;
+    let revision = state.code.netlist.revision;
     validate_visible_source(&mut state, revision);
     assert!(
         !errors(&state).is_empty(),
@@ -54,7 +54,7 @@ fn the_editor_resolves_an_include_only_a_library_folder_holds() {
         .preferences
         .set_folders(FolderListPreference::LibraryFolders, vec![shared])
         .expect("a full path");
-    state.ui.netlist.last_edit_time = f64::NEG_INFINITY;
+    state.code.netlist.last_edit_time = f64::NEG_INFINITY;
     let ctx = egui::Context::default();
     let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
         refresh_diagnostics(ui, &mut state);

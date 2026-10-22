@@ -196,7 +196,7 @@ pub(crate) fn open_add_pane(state: &mut AppState) {
             .simulation
             .active_analysis()
             .map(|analysis| analysis.id),
-        viewer: Some(state.ui.results.session.viewer),
+        viewer: Some(state.results.results.session.viewer),
     };
     state.workbench.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
 }
@@ -364,11 +364,11 @@ fn add_pane(state: &mut AppState, draft: &AddPaneDraft) -> Result<(), String> {
         _ => None,
     }) {
         state
-            .ui
+            .results
             .results
             .session
             .select_persistent_document_pane(document_id, pane_id);
-        state.ui.results.session.viewer = viewer;
+        state.results.results.session.viewer = viewer;
     }
     Ok(())
 }
@@ -413,7 +413,7 @@ pub(super) fn toggle_pane_x_link(
 /// quick view the session's toggle links the viewer's own cursor rows.
 pub(crate) fn toggle_linked_cursors(state: &mut AppState) {
     let Some(document_id) = active_document_id(state) else {
-        state.ui.results.session.toggle_linked_cursors();
+        state.results.results.session.toggle_linked_cursors();
         return;
     };
     let result = project_document(state, document_id)
@@ -427,7 +427,7 @@ pub(crate) fn toggle_linked_cursors(state: &mut AppState) {
 /// session's toggle over a quick view.
 pub(crate) fn linked_cursors(state: &AppState) -> bool {
     match active_document_id(state) {
-        None => state.ui.results.session.linked_cursors,
+        None => state.results.results.session.linked_cursors,
         Some(document_id) => project_document(state, document_id).is_ok_and(links::cursors_linked),
     }
 }

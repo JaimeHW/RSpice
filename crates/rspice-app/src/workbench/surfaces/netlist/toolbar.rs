@@ -144,7 +144,7 @@ struct ActionSetContext {
 }
 
 pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayout {
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let save_source_label = messages.text(if cfg!(target_arch = "wasm32") {
         MessageId::NetlistDownloadSourceCopy
     } else {
@@ -165,8 +165,8 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
     );
 
     let content = rect.shrink2(vec2(CODE_TOOLBAR_PADDING_X, 0.0));
-    let active = app.state.ui.netlist.active_document;
-    let dependency_visible = app.state.ui.netlist.active_dependency_identity.is_some();
+    let active = app.state.code.netlist.active_document;
+    let dependency_visible = app.state.code.netlist.active_dependency_identity.is_some();
     let dependency_owned =
         crate::workbench::documents::netlist_document::active_dependency_is_owned(&app.state);
     let dependency_authority =
@@ -264,7 +264,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
     let advisory_candidate = (!compact)
         .then(|| {
             app.state
-                .ui
+                .code
                 .netlist
                 .diagnostics
                 .iter()
@@ -280,7 +280,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
                     .validation
                     .as_ref()
                     .map_or(0, |receipt| receipt.advisory_count)
-                + usize::from(app.state.ui.netlist.validation_error.is_some())
+                + usize::from(app.state.code.netlist.validation_error.is_some())
         })
         .filter(|count| *count > 0);
     let mut action = None;
@@ -775,7 +775,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             }
         }
         Some(NetlistToolbarAction::RelinkDependency) => {
-            if let Some(identity) = app.state.ui.netlist.active_dependency_identity.clone() {
+            if let Some(identity) = app.state.code.netlist.active_dependency_identity.clone() {
                 crate::workbench::workflows::netlist_workflow::request_dependency_relink(
                     &mut app.state,
                     &identity,
@@ -1168,8 +1168,8 @@ mod tests {
         app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
         app.state.model.workspace.content.netlist_source = Some(DECK.to_owned());
         app.state.model.simulation.source.netlist_content = DECK.to_owned();
-        app.state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        app.state.ui.netlist.active_document_initialized = true;
+        app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+        app.state.code.netlist.active_document_initialized = true;
         app
     }
 
@@ -1183,8 +1183,8 @@ mod tests {
         );
         app.state.model.simulation.source.netlist_content =
             app.state.model.netlist_artifacts.generated_source.clone();
-        app.state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-        app.state.ui.netlist.active_document_initialized = true;
+        app.state.code.netlist.active_document = ActiveNetlistDocument::Generated;
+        app.state.code.netlist.active_document_initialized = true;
         app
     }
 

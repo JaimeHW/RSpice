@@ -16,7 +16,7 @@ impl Command {
             return false;
         }
         if let Some(request) = self.source_editor_request()
-            && let Some(editor) = state.ui.active_source_editor
+            && let Some(editor) = state.workbench.active_source_editor
         {
             return editor.editable || !request.mutates_source();
         }
@@ -143,7 +143,7 @@ impl Command {
             Self::Cut => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
-                        && !state.ui.symbol.editor.effective_selection().is_empty()
+                        && !state.design.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -153,7 +153,7 @@ impl Command {
             Self::Delete => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
-                        && !state.ui.symbol.editor.effective_selection().is_empty()
+                        && !state.design.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -163,7 +163,7 @@ impl Command {
             Self::Duplicate => {
                 if active_symbol_editor(app) {
                     !state.active_view_read_only()
-                        && !state.ui.symbol.editor.effective_selection().is_empty()
+                        && !state.design.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -172,9 +172,9 @@ impl Command {
             }
             Self::Copy => {
                 if state.workbench.workspace == Workspace::Results {
-                    state.ui.results.session.cursors.a.is_some()
+                    state.results.results.session.cursors.a.is_some()
                 } else if active_symbol_editor(app) {
-                    !state.ui.symbol.editor.effective_selection().is_empty()
+                    !state.design.symbol.editor.effective_selection().is_empty()
                 } else {
                     active_schematic_editor(app)
                         && schematic_selection_has_live_object(&state.model.schematic)
@@ -182,11 +182,11 @@ impl Command {
             }
             Self::Paste => {
                 if active_symbol_editor(app) {
-                    !state.active_view_read_only() && !state.ui.symbol.editor.clipboard.is_empty()
+                    !state.active_view_read_only() && !state.design.symbol.editor.clipboard.is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
-                        && !state.ui.schematic_clipboard.is_empty()
+                        && !state.design.schematic_clipboard.is_empty()
                 }
             }
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
@@ -200,7 +200,7 @@ impl Command {
                 if active_symbol_editor(app) =>
             {
                 !state.active_view_read_only()
-                    && !state.ui.symbol.editor.effective_selection().is_empty()
+                    && !state.design.symbol.editor.effective_selection().is_empty()
             }
             Self::RotateSelection
             | Self::RotateSelectionCounterClockwise
@@ -295,7 +295,7 @@ impl Command {
             Self::RevisionHistory => state.project_lifecycle.is_open(),
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
-                    let selection = state.ui.symbol.editor.effective_selection();
+                    let selection = state.design.symbol.editor.effective_selection();
                     selection.pins.len() + selection.shapes.len() == 1
                 } else {
                     active_schematic_editor(app)
@@ -425,9 +425,9 @@ impl Command {
             Self::SymbolRotatePin | Self::SymbolMirrorPin => {
                 active_symbol_editor(app)
                     && !state.active_view_read_only()
-                    && state.ui.symbol.editor.effective_selection().pins.len() == 1
-                    && state.ui.symbol.editor.effective_selection().shapes.is_empty()
-                    && state.ui.symbol.editor.effective_selection().attributes.is_empty()
+                    && state.design.symbol.editor.effective_selection().pins.len() == 1
+                    && state.design.symbol.editor.effective_selection().shapes.is_empty()
+                    && state.design.symbol.editor.effective_selection().attributes.is_empty()
             }
             // Nothing to reconcile against without a declared interface, and
             // the command must say so by reporting unavailable rather than
@@ -513,7 +513,7 @@ impl Command {
             Self::FindCodeDocument => code_document_is_visible(state),
             Self::ValidateCodeDocument => {
                 netlist_page_is_visible(state)
-                    && state.ui.netlist.active_document
+                    && state.code.netlist.active_document
                         != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
                     && !state.model.simulation.source.netlist_content.trim().is_empty()
             }
@@ -544,11 +544,11 @@ impl Command {
             | Self::FoldAll
             | Self::UnfoldAll => false,
             Self::GoToDefinition | Self::FindReferences => state
-                .ui
+                .workbench
                 .active_source_editor
                 .is_some_and(|editor| editor.navigable),
             Self::RenameSymbol => state
-                .ui
+                .workbench
                 .active_source_editor
                 .is_some_and(|editor| editor.navigable && editor.editable),
             // This gate was written for the compile command and never
@@ -564,7 +564,7 @@ impl Command {
             }
             Self::CompareGeneratedRevisions => {
                 netlist_page_is_visible(state)
-                    && !state.ui.netlist.generated_history.is_empty()
+                    && !state.code.netlist.generated_history.is_empty()
                     && state.model.netlist_artifacts.generated_document.is_some()
             }
             Self::StopSimulation => {

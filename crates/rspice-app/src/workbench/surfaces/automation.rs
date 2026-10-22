@@ -60,7 +60,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .cloned();
     let runtime_stale = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .receipt
@@ -73,14 +73,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             })
         });
     if runtime_stale {
-        app.state.ui.code_workspace.automation = Default::default();
+        app.state.code.code_workspace.automation = Default::default();
     }
     egui::Frame::new().fill(t.color.bg_app).show(ui, |ui| {
         ui.set_min_size(ui.available_size());
         ui.spacing_mut().item_spacing = Vec2::ZERO;
         title_row(ui, app);
         let Some(bundle) = bundle else {
-            let messages = app.state.ui.messages();
+            let messages = app.state.workbench.messages();
             super::super::design_system::empty_state_with_actions(
                 ui,
                 WorkbenchIcon::Terminal,
@@ -99,16 +99,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
             return;
         };
-        let selected_path = match app.state.ui.code_workspace.automation.selected_file.clone() {
+        let selected_path = match app.state.code.code_workspace.automation.selected_file.clone() {
             Some(path) if bundle.contains_file(&path) => path,
             Some(_) => {
-                app.state.ui.code_workspace.automation.selected_file = None;
+                app.state.code.code_workspace.automation.selected_file = None;
                 bundle.root().logical_path().to_owned()
             }
             None => bundle.root().logical_path().to_owned(),
         };
         let Some(mut source) = bundle.file_content(&selected_path).map(str::to_owned) else {
-            let messages = app.state.ui.messages();
+            let messages = app.state.workbench.messages();
             super::super::design_system::empty_state(
                 ui,
                 WorkbenchIcon::File,
@@ -117,7 +117,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             );
             return;
         };
-        let runtime = &app.state.ui.code_workspace.automation;
+        let runtime = &app.state.code.code_workspace.automation;
         let diagnostics = runtime
             .diagnostic_token
             .filter(|token| {
@@ -232,7 +232,7 @@ fn handle_automation_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
     if dropped.len() != 1 {
         let message = app
             .state
-            .ui
+            .workbench
             .messages()
             .text(MessageId::AutomationDropOneSource);
         app.state.prompt(message);
@@ -288,7 +288,7 @@ fn handle_automation_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
 }
 
 fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let title = messages.text(MessageId::AutomationHeadingTitle);
     let generated_netlist = messages.text(MessageId::CodeGeneratedNetlist);
     let validate = messages.text(MessageId::AutomationValidate);
@@ -339,7 +339,7 @@ fn title_row(ui: &mut Ui, app: &mut RSpiceApp) {
 fn validate_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
     let busy = automation_busy(app);
     let workspace_available = automation_workspace_available(app);
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let label = messages.text(MessageId::AutomationValidate);
     let unavailable = messages.text(MessageId::AutomationWorkspaceRequired);
     let mut button = Button::new(&label).enabled(!busy && workspace_available);
@@ -360,7 +360,7 @@ fn validate_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
 fn dry_run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
     let busy = automation_busy(app);
     let workspace_available = automation_workspace_available(app);
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let label = messages.text(MessageId::AutomationDryRun);
     let unavailable = messages.text(MessageId::AutomationWorkspaceRequired);
     let mut button = Button::new(&label).enabled(!busy && workspace_available);
@@ -381,7 +381,7 @@ fn dry_run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
 fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
     let label = app
         .state
-        .ui
+        .workbench
         .messages()
         .text(MessageId::CodeGeneratedNetlist);
     let mut button = Button::new(&label);
@@ -391,15 +391,21 @@ fn generated_netlist_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
     if button.show(ui).clicked() {
         let _ =
             crate::workbench::documents::netlist_document::open_generated_primary(&mut app.state);
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     }
 }
 
 fn run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
-    let active = app.state.ui.code_workspace.automation.execution.is_active();
+    let active = app
+        .state
+        .code
+        .code_workspace
+        .automation
+        .execution
+        .is_active();
     let validating = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .pending_runtime_validation
@@ -408,7 +414,7 @@ fn run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
     let workspace_available = automation_workspace_available(app);
     let unavailable = app
         .state
-        .ui
+        .workbench
         .messages()
         .text(MessageId::AutomationWorkspaceRequired);
     let mut button = Button::new(&label)
@@ -433,18 +439,25 @@ fn run_button(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
 }
 
 fn run_button_label(app: &RSpiceApp) -> String {
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     if app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .pending_runtime_validation
         .is_some()
     {
         messages.text(MessageId::AutomationValidating)
-    } else if app.state.ui.code_workspace.automation.execution.is_active() {
-        if app.state.ui.code_workspace.automation.cancel_requested {
+    } else if app
+        .state
+        .code
+        .code_workspace
+        .automation
+        .execution
+        .is_active()
+    {
+        if app.state.code.code_workspace.automation.cancel_requested {
             messages.text(MessageId::AutomationStopping)
         } else {
             messages.text(MessageId::AutomationStopWorkflow)
@@ -455,7 +468,7 @@ fn run_button_label(app: &RSpiceApp) -> String {
 }
 
 fn automation_busy(app: &RSpiceApp) -> bool {
-    let runtime = &app.state.ui.code_workspace.automation;
+    let runtime = &app.state.code.code_workspace.automation;
     runtime.execution.is_active()
         || runtime.pending_runtime_validation.is_some()
         || runtime.runtime_execution.is_some()
@@ -591,7 +604,7 @@ fn code_pane(
     let editable = !automation_busy(app)
         && app
             .state
-            .ui
+            .code
             .code_workspace
             .automation
             .manifest
@@ -621,13 +634,13 @@ fn code_pane(
         egui::pos2(toolbar.left() + 8.0, toolbar.top()),
         egui::pos2(toolbar.right() - 8.0, toolbar.bottom()),
     );
-    let runtime = &app.state.ui.code_workspace.automation;
+    let runtime = &app.state.code.code_workspace.automation;
     let validated = runtime.receipt.as_ref().is_some_and(|receipt| {
         receipt.token.project_id == app.state.model.workspace.content.project.id()
             && receipt.token.revision == bundle.revision().get()
             && receipt.token.content_digest == bundle.closure_digest()
     });
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     // One live dot while the runtime is working, one mark when a workflow
     // came back failed, and the words themselves the rest of the time. A
     // validated script is the ordinary case and says nothing.
@@ -718,7 +731,7 @@ fn code_pane(
             let selected_document_id = bundle.document_id(selected_path).map(|id| id.as_uuid());
             let breakpoints = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -731,14 +744,14 @@ fn code_pane(
                 .collect::<Vec<_>>();
             let current_line = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
                 .selected_frame_id
                 .and_then(|frame_id| {
                     app.state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .debug
@@ -798,20 +811,20 @@ fn code_pane(
         }
         interaction
     }).inner;
-    app.state.ui.code_workspace.source_carets.insert(
+    app.state.code.code_workspace.source_carets.insert(
         (bundle.id(), selected_path.to_owned()),
         interaction.cursor_char_index,
     );
     let selection_key = (bundle.id(), selected_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
         app.state
-            .ui
+            .code
             .code_workspace
             .source_selections
             .insert(selection_key, range);
     } else {
         app.state
-            .ui
+            .code
             .code_workspace
             .source_selections
             .remove(&selection_key);
@@ -829,7 +842,7 @@ fn code_pane(
             interaction.cursor_char_index,
         ) {
             Ok(()) => {
-                if let Some(tools) = app.state.ui.code_workspace.language_tools.as_mut() {
+                if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
                     tools.view =
                         crate::workbench::documents::code_workspace::LanguageToolView::CodeActions;
                 }
@@ -860,8 +873,8 @@ fn inspector(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
-    let messages = app.state.ui.messages();
-    let manifest = app.state.ui.code_workspace.automation.manifest.clone();
+    let messages = app.state.workbench.messages();
+    let manifest = app.state.code.code_workspace.automation.manifest.clone();
     let preview = execution_preview(app);
     let runtime_status = app
         .automation_runtime_unavailable_reason()
@@ -971,7 +984,7 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
         },
     );
 
-    let diagnostic_count = app.state.ui.code_workspace.automation.diagnostics.len();
+    let diagnostic_count = app.state.code.code_workspace.automation.diagnostics.len();
     code_inspector_section(
         ui,
         &messages.text(MessageId::AutomationDiagnostics),
@@ -987,7 +1000,7 @@ fn inspector_sections(ui: &mut Ui, app: &mut RSpiceApp) {
                 &diagnostic_count.to_string(),
             );
             let validation_status = messages.text(
-                if app.state.ui.code_workspace.automation.receipt.is_some() {
+                if app.state.code.code_workspace.automation.receipt.is_some() {
                     MessageId::AutomationExactRevisionRetained
                 } else {
                     MessageId::AutomationRequired
@@ -1090,9 +1103,9 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
     };
 
     let t = Tokens::get(ui.ctx());
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let redacted = messages.text(MessageId::AutomationRedacted);
-    let phase = app.state.ui.code_workspace.automation.debug.phase;
+    let phase = app.state.code.code_workspace.automation.debug.phase;
     // Paused, running and stopped are where the session is, not something
     // wrong with it; only a failed session is marked.
     let problem = match phase {
@@ -1130,7 +1143,14 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     crate::workbench::documents::code_workspace::continue_automation_debugger(app);
                 }
                 let pause = messages.text(
-                    if app.state.ui.code_workspace.automation.debug.pause_requested {
+                    if app
+                        .state
+                        .code
+                        .code_workspace
+                        .automation
+                        .debug
+                        .pause_requested
+                    {
                         MessageId::AutomationDebugPausePending
                     } else {
                         MessageId::AutomationDebugPause
@@ -1165,7 +1185,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         phase == AutomationDebugPhase::Paused
                             && app
                                 .state
-                                .ui
+                                .code
                                 .code_workspace
                                 .automation
                                 .debug
@@ -1203,7 +1223,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui,
                 &messages.text(MessageId::AutomationDebugCurrentLine),
                 &app.state
-                    .ui
+                    .code
                     .code_workspace
                     .automation
                     .debug
@@ -1215,7 +1235,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 &messages.text(MessageId::AutomationDebugExceptionPolicy),
                 &automation_exception_policy_label(
                     app.state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .debug
@@ -1226,7 +1246,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
 
             let mut policy = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -1252,7 +1272,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     );
                 });
             app.state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -1260,7 +1280,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
 
             let breakpoints = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -1279,7 +1299,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     if ui.checkbox(&mut enabled, "").changed()
                         && let Some(current) = app
                             .state
-                            .ui
+                            .code
                             .code_workspace
                             .automation
                             .debug
@@ -1353,7 +1373,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         if kind != breakpoint.kind
                             && let Some(current) = app
                                 .state
-                                .ui
+                                .code
                                 .code_workspace
                                 .automation
                                 .debug
@@ -1375,7 +1395,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 });
                 let active = app
                     .state
-                    .ui
+                    .code
                     .code_workspace
                     .automation
                     .debug
@@ -1405,7 +1425,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                             .changed()
                             && let Some(current) = app
                                 .state
-                                .ui
+                                .code
                                 .code_workspace
                                 .automation
                                 .debug
@@ -1429,7 +1449,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                                 .changed()
                                 && let Some(current) = app
                                     .state
-                                    .ui
+                                    .code
                                     .code_workspace
                                     .automation
                                     .debug
@@ -1466,7 +1486,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
 
             let frames = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -1476,7 +1496,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 subsection_header(ui, &messages.text(MessageId::AutomationCallStack));
                 let selected = app
                     .state
-                    .ui
+                    .code
                     .code_workspace
                     .automation
                     .debug
@@ -1497,7 +1517,14 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
 
-            let values = app.state.ui.code_workspace.automation.debug.locals.clone();
+            let values = app
+                .state
+                .code
+                .code_workspace
+                .automation
+                .debug
+                .locals
+                .clone();
             if !values.is_empty() {
                 subsection_header(ui, &messages.text(MessageId::AutomationLocals));
                 for value in values {
@@ -1513,7 +1540,14 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
 
-            let globals = app.state.ui.code_workspace.automation.debug.globals.clone();
+            let globals = app
+                .state
+                .code
+                .code_workspace
+                .automation
+                .debug
+                .globals
+                .clone();
             if !globals.is_empty() {
                 subsection_header(ui, &messages.text(MessageId::AutomationGlobals));
                 for value in globals {
@@ -1536,7 +1570,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 ui.spacing_mut().item_spacing.x = WATCH_ROW_GAP;
                 let response = ui.add(
                     egui::TextEdit::singleline(
-                        &mut app.state.ui.code_workspace.automation.debug.watch_input,
+                        &mut app.state.code.code_workspace.automation.debug.watch_input,
                     )
                     .hint_text(messages.text(MessageId::AutomationExpression))
                     .desired_width((ui.available_width() - WATCH_ADD_W - WATCH_ROW_GAP).max(60.0)),
@@ -1548,7 +1582,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 if submit {
                     let expression = app
                         .state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .debug
@@ -1558,7 +1592,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     let valid = valid_automation_watch_expression(&expression);
                     let duplicate = app
                         .state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .debug
@@ -1566,7 +1600,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                         .iter()
                         .any(|watch| watch.expression == expression);
                     if valid && !duplicate {
-                        app.state.ui.code_workspace.automation.debug.watches.push(
+                        app.state.code.code_workspace.automation.debug.watches.push(
                             AutomationWatch {
                                 expression,
                                 value: String::new(),
@@ -1574,7 +1608,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                             },
                         );
                         app.state
-                            .ui
+                            .code
                             .code_workspace
                             .automation
                             .debug
@@ -1586,7 +1620,15 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 }
             });
-            for watch in app.state.ui.code_workspace.automation.debug.watches.clone() {
+            for watch in app
+                .state
+                .code
+                .code_workspace
+                .automation
+                .debug
+                .watches
+                .clone()
+            {
                 property_row(
                     ui,
                     &watch.expression,
@@ -1596,7 +1638,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
 
             let output = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -1711,7 +1753,7 @@ fn artifact_row(ui: &mut Ui, app: &mut RSpiceApp, kind: ArtifactKind, meta: &str
     let t = Tokens::get(ui.ctx());
     let available = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .artifacts
@@ -1810,7 +1852,7 @@ mod tests {
             .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
         for width in [INTERNAL_INSPECTOR_WIDTH, INTERNAL_INSPECTOR_MIN_WIDTH] {
             let mut app = RSpiceApp::test_instance();
-            app.state.ui.code_workspace.page =
+            app.state.code.code_workspace.page =
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
             crate::ui::raster::write_panel_review(
                 &directory,

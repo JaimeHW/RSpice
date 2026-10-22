@@ -187,7 +187,7 @@ fn capture_snapshot(
         },
         || {
             state
-                .ui
+                .results
                 .results
                 .project_presentation(&state.model.simulation)
         },
@@ -1518,7 +1518,7 @@ fn revert_document_in_place(
                 .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
             state.model.workspace.content.netlist_source_dirty = false;
             state.model.workspace.content.project_sources_dirty = false;
-            state.ui.netlist = Default::default();
+            state.code.netlist = Default::default();
             *state.model.netlist_artifacts = Default::default();
             *state.manual_run = Default::default();
             state.workbench.netlist_open_documents.clear();
@@ -1530,7 +1530,7 @@ fn revert_document_in_place(
                 .clone()
                 .unwrap_or_default();
             state.model.simulation.execution.trigger_simulation = false;
-            state.ui.netlist.rerun_queued = false;
+            state.code.netlist.rerun_queued = false;
             state.model.design_execution_epoch = state.model.design_execution_epoch.wrapping_add(1);
         }
     }
@@ -1658,7 +1658,7 @@ fn revert_cell_view(
             &reference.view,
         );
         if source_changed {
-            state.ui.code_workspace.veriloga = Default::default();
+            state.code.code_workspace.veriloga = Default::default();
         }
         return Ok(());
     };
@@ -1696,7 +1696,7 @@ fn revert_cell_view(
         .synchronize_cell_view_bundle_from(reference, &baseline.file.workspace.project_sources)
         .map_err(|error| ProjectLifecycleError::InvalidState(error.to_string()))?;
     if source_changed {
-        state.ui.code_workspace.veriloga = Default::default();
+        state.code.code_workspace.veriloga = Default::default();
     }
     Ok(())
 }
@@ -1756,21 +1756,21 @@ fn restore_project_structure_preserving_documents(
         .project_sources
         .retain_cell_view_bundles_for(retained);
     if state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .receipt
         .as_ref()
         .is_some_and(|receipt| removed.contains(&receipt.compilation.token().bundle_id))
         || state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .pending
             .as_ref()
             .is_some_and(|pending| removed.contains(&pending.token.bundle_id))
     {
-        state.ui.code_workspace.veriloga = Default::default();
+        state.code.code_workspace.veriloga = Default::default();
     }
     state
         .model

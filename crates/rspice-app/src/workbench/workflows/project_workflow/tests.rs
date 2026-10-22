@@ -44,7 +44,7 @@ fn assert_active_grid_pitch_contract(state: &AppState, pitch: crate::state::Sche
         state.model.schematic.session.editor.snap_engine.grid_size,
         expected
     );
-    assert_eq!(state.ui.schematic_snap.grid_size, expected);
+    assert_eq!(state.design.schematic_snap.grid_size, expected);
 }
 
 #[test]
@@ -52,9 +52,9 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
     use crate::workbench::ChoicePreference;
 
     let mut state = AppState::default();
-    state.ui.schematic_snap.snap_radius = 8;
-    state.ui.schematic_snap.snap_to_grid = false;
-    state.ui.schematic_snap.grid_size = 555;
+    state.design.schematic_snap.snap_radius = 8;
+    state.design.schematic_snap.snap_to_grid = false;
+    state.design.schematic_snap.grid_size = 555;
     state
         .model
         .preferences
@@ -84,7 +84,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
         .preferences
         .set_choice(ChoicePreference::SchematicGrid, 2)
         .unwrap();
-    state.ui.schematic_snap.grid_size = 777;
+    state.design.schematic_snap.grid_size = 777;
     state
         .workbench
         .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
@@ -1258,16 +1258,16 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
         .node_to_waveform
         .insert("stale".to_string(), 99);
     state.model.simulation.view.ground_node = Some("OLD_GND".to_string());
-    state.ui.code_workspace.page =
+    state.code.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
-    state.ui.code_workspace.automation.debug.watches.push(
+    state.code.code_workspace.automation.debug.watches.push(
         crate::workbench::documents::code_workspace::AutomationWatch {
             expression: "old_project.signal".to_owned(),
             value: "1.25".to_owned(),
             error: None,
         },
     );
-    state.ui.netlist.diagnostics = std::sync::Arc::new(
+    state.code.netlist.diagnostics = std::sync::Arc::new(
         crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
             vec![crate::state::netlist_diagnostics::Diagnostic::error(
                 "old project diagnostic",
@@ -1301,11 +1301,19 @@ fn project_import_resets_non_persisted_simulation_runtime_state() {
     assert_eq!(state.model.simulation.view.ground_node, None);
     assert_eq!(state.model.simulation.view.waveforms[0].name, "V(out)");
     assert_eq!(
-        state.ui.code_workspace.page,
+        state.code.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
-    assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
-    assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
+    assert!(
+        state
+            .code
+            .code_workspace
+            .automation
+            .debug
+            .watches
+            .is_empty()
+    );
+    assert_eq!(state.code.netlist.diagnostics.summary().total(), 0);
     // The Console is the session's record: the old project's history stays,
     // and the replacement states itself once after it.
     let messages: Vec<_> = state
@@ -1403,7 +1411,7 @@ fn save_project_to_path_round_trips_result_markers() {
         .expect("active retained run");
     let analysis = AnalysisPresentationKey::new(active.dataset_id, &active.analyses[0]);
     let anchor = state
-        .ui
+        .results
         .results
         .session
         .markers
@@ -1414,13 +1422,13 @@ fn save_project_to_path_round_trips_result_markers() {
         let waveform_anchor =
             crate::workbench::documents::result_document::marker_anchor_for(analysis, "V(out)");
         state
-            .ui
+            .results
             .results
             .session
             .add_marker(analysis, waveform_anchor, "V(out)".to_owned(), 1.0)
             .unwrap()
     };
-    if let Some(marker) = state.ui.results.session.marker_mut(id) {
+    if let Some(marker) = state.results.results.session.marker_mut(id) {
         marker.note = "settling point".to_owned();
     }
 
@@ -1450,9 +1458,9 @@ fn save_project_to_path_round_trips_result_markers() {
         &mut reopened,
         loaded.file.result_presentation,
     );
-    assert_eq!(reopened.ui.results.session.markers.len(), 1);
+    assert_eq!(reopened.results.results.session.markers.len(), 1);
     assert_eq!(
-        reopened.ui.results.session.markers[0].note,
+        reopened.results.results.session.markers[0].note,
         "settling point"
     );
 }
@@ -1508,8 +1516,18 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         ),
         unit: "A".to_owned(),
     };
-    state.ui.results.session.log_y_panes.insert(pane.clone());
-    state.ui.results.session.log_y_panes.insert(orphan.clone());
+    state
+        .results
+        .results
+        .session
+        .log_y_panes
+        .insert(pane.clone());
+    state
+        .results
+        .results
+        .session
+        .log_y_panes
+        .insert(orphan.clone());
 
     let unique = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1539,7 +1557,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
     crate::workbench::documents::result_document::restore_log_y_panes(&mut reopened, older_file);
     assert_eq!(
         reopened
-            .ui
+            .results
             .results
             .session
             .log_y_panes
@@ -1576,7 +1594,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
         );
     assert!(
         state
-            .ui
+            .results
             .results
             .add_expression_trace(
                 &state.model.simulation,
@@ -1619,7 +1637,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
     );
     assert_eq!(
         reopened
-            .ui
+            .results
             .results
             .project_expression_groups(&reopened.model.simulation)[0]
             .traces[0]
@@ -1823,7 +1841,7 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
     // A save the user asked for that did not happen is said now, not left
     // for the reader to find under the bell.
     state.drain_notices(&egui::Context::default());
-    let activity = state.ui.toasts.activity();
+    let activity = state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), "Project save failed");
     assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
@@ -1846,7 +1864,7 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
     assert!(!load_project_from_path(&mut state, &path));
 
     state.drain_notices(&egui::Context::default());
-    let activity = state.ui.toasts.activity();
+    let activity = state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1, "an open that failed is said now");
     assert_eq!(activity[0].title(), "Project open failed");
     assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);

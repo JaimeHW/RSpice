@@ -56,7 +56,7 @@ fn remove_project_artifacts(path: &std::path::Path) {
 
 fn add_marker(state: &mut AppState, analysis: AnalysisPresentationKey) -> u32 {
     state
-        .ui
+        .results
         .results
         .session
         .add_marker(
@@ -83,9 +83,9 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
                 DestinationAuthority::UserSelected,
             )
             .unwrap();
-            state.ui.results.session.remove_marker(highest);
+            state.results.results.session.remove_marker(highest);
             if remove_all {
-                state.ui.results.session.remove_marker(first);
+                state.results.results.session.remove_marker(first);
             }
             state
                 .model
@@ -120,7 +120,7 @@ fn removed_marker_id_is_not_reused_after_scoped_save_and_reopen() {
                 "a published marker label was reused after deletion and reopen"
             );
             assert_eq!(
-                reopened.ui.results.session.markers.len(),
+                reopened.results.results.session.markers.len(),
                 if remove_all { 1 } else { 2 }
             );
             remove_project_artifacts(&path);
@@ -143,7 +143,7 @@ fn allocator_only_edits_are_dirty_and_revert_does_not_reuse_live_ids() {
     let saved_document = active_document(&state);
     let solver_input = generated_netlist_input_digest(&state).unwrap();
     let abandoned = add_marker(&mut state, analysis);
-    state.ui.results.session.remove_marker(abandoned);
+    state.results.results.session.remove_marker(abandoned);
     assert!(
         active_document_is_dirty(&state),
         "allocation history needs a durable Results owner"
@@ -169,7 +169,7 @@ fn allocator_only_edits_are_dirty_and_revert_does_not_reuse_live_ids() {
         !has_unsaved_changes(&state),
         "revert restores the accepted allocation history"
     );
-    assert_eq!(state.ui.results.session.markers[0].id, published);
+    assert_eq!(state.results.results.session.markers[0].id, published);
     assert!(
         add_marker(&mut state, analysis) > abandoned,
         "an abandoned live ID cannot retarget an open editor"
@@ -190,7 +190,7 @@ fn saving_another_document_does_not_publish_results_allocation_history() {
     )
     .unwrap();
     let pending = add_marker(&mut state, analysis);
-    state.ui.results.session.remove_marker(pending);
+    state.results.results.session.remove_marker(pending);
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Design);
@@ -250,7 +250,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         )
         .unwrap();
         state
-            .ui
+            .results
             .results
             .reconcile_retained_datasets(&state.model.simulation);
         // Opening a schematic file inside a project imports it beside the
@@ -262,11 +262,11 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
             state.clear_simulation_results();
         }
         state
-            .ui
+            .results
             .results
             .reconcile_retained_datasets(&state.model.simulation);
         assert_eq!(state.model.workspace.content.project.id(), project_id);
-        assert!(state.ui.results.session.markers.is_empty());
+        assert!(state.results.results.session.markers.is_empty());
         save_native(
             &mut state,
             SaveScope::AllDocuments,
@@ -325,7 +325,7 @@ fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
     let path = unique_path("marker-history-exhausted");
     let (mut state, analysis) = retained_results();
     add_marker(&mut state, analysis);
-    state.ui.results.session.markers[0].id = u32::MAX;
+    state.results.results.session.markers[0].id = u32::MAX;
     save_native(
         &mut state,
         SaveScope::AllDocuments,
@@ -335,7 +335,7 @@ fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
     .unwrap();
     // Install the published maximum through the real restoration path.
     assert!(load_project_from_path(&mut state, &path));
-    state.ui.results.session.remove_marker(u32::MAX);
+    state.results.results.session.remove_marker(u32::MAX);
     save_native(
         &mut state,
         SaveScope::AllDocuments,
@@ -348,7 +348,7 @@ fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
     assert!(!has_unsaved_changes(&reopened));
     assert!(
         reopened
-            .ui
+            .results
             .results
             .session
             .add_marker(
@@ -360,7 +360,7 @@ fn removing_the_last_possible_marker_does_not_reset_exhaustion_after_reopen() {
             .unwrap_err()
             .contains("exhausted")
     );
-    assert!(reopened.ui.results.session.markers.is_empty());
+    assert!(reopened.results.results.session.markers.is_empty());
     assert!(!has_unsaved_changes(&reopened));
     remove_project_artifacts(&path);
 }

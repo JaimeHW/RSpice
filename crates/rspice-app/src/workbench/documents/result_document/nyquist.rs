@@ -29,7 +29,7 @@ pub struct NyquistDerived {
 
 fn derived(state: &mut AppState) -> Option<NyquistDerived> {
     let version = state.model.simulation.view.data_version;
-    if let Some(cached) = state.ui.results.nyquist
+    if let Some(cached) = state.results.results.nyquist
         && cached.version == version
     {
         return Some(cached);
@@ -44,7 +44,7 @@ fn derived(state: &mut AppState) -> Option<NyquistDerived> {
             phase_margin: curve.phase_margin(),
         },
     };
-    state.ui.results.nyquist = Some(computed);
+    state.results.results.nyquist = Some(computed);
     Some(computed)
 }
 
@@ -63,7 +63,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             .curve()
             .map(|curve| curve.points.as_slice())
             .unwrap_or_default();
-        let series = &mut state.ui.results.session.derived;
+        let series = &mut state.results.results.session.derived;
         let re = series.get_or(
             plot::trace_cache_key(NYQUIST_CACHE_BASE, REAL_SERIES),
             || std::sync::Arc::new(points.iter().map(|p| p.real).collect::<Vec<_>>()),
@@ -89,7 +89,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
                 stability: *stats,
             })
     });
-    let results = &mut state.ui.results;
+    let results = &mut state.results.results;
     let viewer = super::ResultViewer::Nyquist;
     let mut view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();

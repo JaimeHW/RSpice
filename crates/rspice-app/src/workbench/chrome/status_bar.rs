@@ -546,7 +546,7 @@ fn engineering_context_summary(
     match app.state.workbench.workspace {
         Workspace::Design => {
             let view_type = app.state.model.workspace.content.active_view_type();
-            app.state.ui.canvas_hover.map_or_else(
+            app.state.design.canvas_hover.map_or_else(
                 || match view_type {
                     crate::state::ViewType::Schematic | crate::state::ViewType::Testbench => {
                         empty_schematic_cursor_summary(&app.state)
@@ -716,7 +716,7 @@ fn zoom_factor(app: &RSpiceApp) -> f64 {
     if app.state.workbench.workspace == Workspace::Design
         && app.state.model.workspace.content.active_view_type() == crate::state::ViewType::Symbol
     {
-        f64::from(app.state.ui.symbol.editor.zoom)
+        f64::from(app.state.design.symbol.editor.zoom)
     } else {
         app.state.model.schematic.session.editor.zoom
     }
@@ -1103,7 +1103,7 @@ mod tests {
                 "implicit option",
             ),
         ];
-        app.state.ui.netlist.diagnostics = std::sync::Arc::new(
+        app.state.code.netlist.diagnostics = std::sync::Arc::new(
             crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
                 diagnostics,
                 "",

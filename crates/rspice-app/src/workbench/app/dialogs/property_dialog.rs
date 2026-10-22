@@ -27,7 +27,7 @@ pub fn render_property_dialog(
         refresh_source_contract_advisories(state);
     }
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
-    let number_locale = state.ui.number_locale;
+    let number_locale = state.workbench.number_locale;
     let editor_context = component_editor_context(state);
     let result = render_tabbed_property_dialog(
         ctx,

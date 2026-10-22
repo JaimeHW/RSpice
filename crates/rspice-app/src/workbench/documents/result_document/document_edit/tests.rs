@@ -108,7 +108,7 @@ fn adding_a_pane_binds_it_after_the_selected_pane_and_selects_it() {
     );
     assert_eq!(
         app.state
-            .ui
+            .results
             .results
             .session
             .persistent_document_pane(document_id),
@@ -265,7 +265,7 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
         .find(|pane| pane.page_id == second_page)
         .expect("the second page holds a pane")
         .id;
-    let session = &app.state.ui.results.session;
+    let session = &app.state.results.results.session;
     assert_ne!(
         session.persistent_document_page(document_id),
         Some(second_page)
@@ -274,7 +274,7 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
     super::super::persistent_document::select_page(&mut app.state, document_id, 1);
     show_document(&mut app, document_id);
 
-    let session = &app.state.ui.results.session;
+    let session = &app.state.results.results.session;
     assert_eq!(
         session.persistent_document_page(document_id),
         Some(second_page)
@@ -514,7 +514,7 @@ fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
     show_document(&mut app, document_id);
     let panes = ordered_panes(&app, document_id);
     app.state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_pane(document_id, panes[1].id);
@@ -631,7 +631,7 @@ fn soa_run(id: u64) -> SimulationRun {
 /// Open Family slicing, narrow it to `filter`, and apply it.
 fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
     app.state.workbench.workspace = Workspace::Results;
-    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    app.state.results.results.session.viewer = ResultViewer::Waves;
     assert!(family_available(&app.state));
     open_family(&mut app.state);
     let Some(ResultDocumentDialog::Family(mut draft)) =
@@ -654,7 +654,7 @@ fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
 /// The family rows the drawn sheet shows, when it shows a slice.
 fn drawn_rows(app: &RSpiceApp) -> Option<Vec<usize>> {
     app.state
-        .ui
+        .results
         .results
         .session
         .sample_selection
@@ -672,7 +672,7 @@ fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
     assert!(app.state.model.simulation.select_analysis(0));
 
     apply_family_slice(&mut app, "time <= 0.5");
-    assert_eq!(app.state.ui.results.session.family_policies.len(), 1);
+    assert_eq!(app.state.results.results.session.family_policies.len(), 1);
     drive_frame(|ui| super::super::show(ui, &mut app));
     assert_eq!(drawn_rows(&app), Some(vec![0, 1, 2]));
 }
@@ -772,7 +772,7 @@ fn a_saved_pane_family_slice_is_drawn_as_saved() {
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
     let document_id = family_document(&mut app);
-    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    app.state.results.results.session.viewer = ResultViewer::Waves;
     show_document(&mut app, document_id);
     assert_eq!(drawn_rows(&app), None);
 
@@ -784,7 +784,7 @@ fn a_saved_pane_family_slice_is_drawn_as_saved() {
             .is_some(),
         "the slice is kept with the pane"
     );
-    assert!(app.state.ui.results.session.family_policies.is_empty());
+    assert!(app.state.results.results.session.family_policies.is_empty());
     show_document(&mut app, document_id);
     assert_eq!(drawn_rows(&app), Some(vec![0, 1, 2]));
 }
@@ -807,7 +807,7 @@ fn drawing_a_pane_family_slice_keeps_the_pane_cursors() {
     )
     .expect("the pane keeps cursors on its X axis");
     transact(&mut app.state, document_id, edits).expect("the cursors are kept");
-    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    app.state.results.results.session.viewer = ResultViewer::Waves;
     show_document(&mut app, document_id);
 
     apply_family_slice(&mut app, "time <= 0.5");
@@ -846,7 +846,7 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
     let document_id = family_document(&mut app);
-    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    app.state.results.results.session.viewer = ResultViewer::Waves;
     show_document(&mut app, document_id);
     open_family(&mut app.state);
     let Some(ResultDocumentDialog::Family(mut draft)) =
@@ -915,15 +915,27 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
     );
     show_document(&mut app, document_id);
     assert_eq!(shown_digits(&app), 4);
-    assert!(app.state.ui.results.session.presented_phase_continuous());
     assert!(
-        !app.state.ui.results.session.phase_continuous,
+        app.state
+            .results
+            .results
+            .session
+            .presented_phase_continuous()
+    );
+    assert!(
+        !app.state.results.results.session.phase_continuous,
         "the reader's own phase setting is left alone"
     );
 
     drive_frame(|ui| super::super::show(ui, &mut app));
     assert_eq!(shown_digits(&app), own_digits);
-    assert!(!app.state.ui.results.session.presented_phase_continuous());
+    assert!(
+        !app.state
+            .results
+            .results
+            .session
+            .presented_phase_continuous()
+    );
 }
 
 /// Over a quick view the properties are the reader's own: the digits
@@ -938,7 +950,7 @@ fn quick_view_properties_are_the_reader_s_own() {
 
     apply_properties(&mut app, 5, true);
     assert_eq!(shown_digits(&app), 5);
-    assert!(app.state.ui.results.session.phase_continuous);
+    assert!(app.state.results.results.session.phase_continuous);
     assert!(
         app.state
             .model
@@ -986,7 +998,7 @@ fn render_the_result_document_forms_for_review() {
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
     app.state.workbench.workspace = Workspace::Results;
-    app.state.ui.results.session.viewer = ResultViewer::Waves;
+    app.state.results.results.session.viewer = ResultViewer::Waves;
     open_family(&mut app.state);
     review("family", form, |ui| show(ui.ctx(), &mut app));
 

@@ -71,7 +71,7 @@ fn drawing_objects(state: &AppState) -> usize {
 /// moves of one grid step each, and the drop.
 fn drag_work(columns: usize, rows: usize) -> DragWork {
     let mut fixture = scale_fixture_of(columns, rows);
-    fixture.state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
+    fixture.state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
     // The drag never reaches the other sheet, so it keeps what it was built
     // with.
     let other_sheet = fixture.objects[1];

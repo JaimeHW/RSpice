@@ -1133,7 +1133,7 @@ fn step_and_check(
         return Err(format!("panic: {message}"));
     }
     if let Some((at, sheet)) = paste
-        && let Some(lands) = dot_paste_lands(sheet, &bench.state().ui.schematic_clipboard, at)
+        && let Some(lands) = dot_paste_lands(sheet, &bench.state().design.schematic_clipboard, at)
     {
         let pasted = bench
             .state()

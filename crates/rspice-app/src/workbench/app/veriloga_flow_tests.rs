@@ -273,22 +273,30 @@ fn wired_device() -> (User, Device) {
     assert!(Command::CompileVerilogA.is_enabled(&user.app));
     Command::CompileVerilogA.execute(&mut user.app);
     user.wait_for("the compile result", |app| {
-        let veriloga = &app.state.ui.code_workspace.veriloga;
+        let veriloga = &app.state.code.code_workspace.veriloga;
         veriloga.compile_request.is_none() && veriloga.pending.is_none()
     });
     assert!(!user.app.state.application_modal_open());
     assert!(
         user.app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .last_failure
             .is_empty(),
         "{:?}",
-        user.app.state.ui.code_workspace.veriloga.last_failure
+        user.app.state.code.code_workspace.veriloga.last_failure
     );
-    assert!(user.app.state.ui.code_workspace.veriloga.receipt.is_some());
+    assert!(
+        user.app
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .receipt
+            .is_some()
+    );
     user.settle();
 
     // 5. The cell's interface, symbol and parameters, and the offer.

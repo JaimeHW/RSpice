@@ -32,19 +32,19 @@ use super::state::Workspace;
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // The page that draws a source editor publishes it again below; whatever
     // else is on screen has none for the Edit menu to act on.
-    app.state.ui.active_source_editor = None;
+    app.state.workbench.active_source_editor = None;
     if split_results_is_visible(app) {
         show_split_with_results(ui, app);
     } else {
         show_primary(ui, app);
     }
-    if app.state.ui.source_editor_request.is_some() {
-        if app.state.ui.active_source_editor.is_some() {
+    if app.state.workbench.source_editor_request.is_some() {
+        if app.state.workbench.active_source_editor.is_some() {
             // Asked after the editor was drawn: it takes it next frame.
             ui.ctx().request_repaint();
         } else {
             // No editor is on screen to take it.
-            app.state.ui.source_editor_request = None;
+            app.state.workbench.source_editor_request = None;
         }
     }
 }
@@ -57,8 +57,8 @@ fn publish_source_editor(
     app: &mut RSpiceApp,
     editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
 ) {
-    app.state.ui.active_source_editor = Some(editor);
-    if let Some(request) = app.state.ui.source_editor_request.take() {
+    app.state.workbench.active_source_editor = Some(editor);
+    if let Some(request) = app.state.workbench.source_editor_request.take() {
         crate::workbench::documents::text_editor_commands::queue_source_editor_request(
             ctx, editor.id, request,
         );
@@ -97,7 +97,7 @@ fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
         Workspace::Models => models::show(ui, app),
         Workspace::Netlist => {
             netlist::prepare_workspace(app);
-            match app.state.ui.code_workspace.page {
+            match app.state.code.code_workspace.page {
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     netlist::show_prepared(ui, app)
                 }
@@ -224,7 +224,7 @@ mod tests {
                 app.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Netlist);
-                app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+                app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
                 crate::state::ProjectSourceOwner::code_workspace(language)
             }
             ProjectSourceLanguage::VerilogA => {
@@ -336,7 +336,7 @@ mod tests {
         }
         let search = app
             .state
-            .ui
+            .code
             .code_workspace
             .source_search
             .as_ref()

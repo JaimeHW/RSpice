@@ -94,7 +94,7 @@ pub(crate) fn owned_netlist_publication_state(
     state: &AppState,
     digest: crate::product::ContentDigest,
 ) -> OwnedNetlistPublicationState {
-    let saved_digest = state.ui.netlist.externally_saved_content_digest;
+    let saved_digest = state.code.netlist.externally_saved_content_digest;
     let saved = saved_digest == Some(digest);
     let validated = state
         .model
@@ -112,7 +112,7 @@ pub(crate) fn owned_netlist_publication_state(
         published_before: saved_digest.is_some(),
         saved,
         validated,
-        external_change_pending: state.ui.netlist.external_change.is_some(),
+        external_change_pending: state.code.netlist.external_change.is_some(),
         // Execution consumes the exact validated in-memory snapshot. External
         // synchronization is deliberately independent from run readiness.
         run_eligible: validated,
@@ -122,7 +122,7 @@ pub(crate) fn owned_netlist_publication_state(
 /// Invalidate byte-bound review evidence after any ownership or source edit.
 pub fn invalidate_source_evidence(state: &mut AppState) {
     state.model.netlist_artifacts.validation = None;
-    state.ui.netlist.validation_error = None;
+    state.code.netlist.validation_error = None;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -287,7 +287,7 @@ fn replace_owned_sources_atomically_impl(
         .as_ref()
         .ok_or_else(|| "The project-owned root deck is no longer available.".to_owned())?;
     let current_document = state
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
@@ -555,10 +555,10 @@ fn replace_owned_sources_atomically_impl(
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.retained_netlist_decks = next_retained_decks;
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.ui.netlist.owned_document = Some(next_document.clone());
-    if candidate.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource {
+    candidate.code.netlist.owned_document = Some(next_document.clone());
+    if candidate.code.netlist.active_document == ActiveNetlistDocument::OwnedSource {
         candidate.model.simulation.source.netlist_content = candidate
-            .ui
+            .code
             .netlist
             .active_dependency_identity
             .as_deref()
@@ -572,7 +572,7 @@ fn replace_owned_sources_atomically_impl(
             })
             .unwrap_or(next_root_source);
     }
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate);
     candidate
         .model
@@ -587,7 +587,7 @@ fn replace_owned_sources_atomically_impl(
             .map(OwnedNetlistReplacement::reversed)
             .collect();
         record_netlist_edit(
-            &mut candidate.ui.netlist,
+            &mut candidate.code.netlist,
             NetlistEditJournalEntry {
                 description: format!("replace {changed_count} netlist match(es)"),
                 forward: applied_replacements,
@@ -601,37 +601,37 @@ fn replace_owned_sources_atomically_impl(
 
 #[must_use]
 pub(crate) fn can_undo_netlist_edit(state: &AppState) -> bool {
-    !state.ui.netlist.edit_undo.is_empty()
+    !state.code.netlist.edit_undo.is_empty()
 }
 
 #[must_use]
 pub(crate) fn can_redo_netlist_edit(state: &AppState) -> bool {
-    !state.ui.netlist.edit_redo.is_empty()
+    !state.code.netlist.edit_redo.is_empty()
 }
 
 pub(crate) fn undo_netlist_edit(state: &mut AppState) -> Result<Option<String>, String> {
-    let Some(entry) = state.ui.netlist.edit_undo.pop() else {
+    let Some(entry) = state.code.netlist.edit_undo.pop() else {
         return Ok(None);
     };
     if let Err(error) = replace_owned_sources_atomically_impl(state, entry.reverse.clone(), false) {
-        state.ui.netlist.edit_undo.push(entry);
+        state.code.netlist.edit_undo.push(entry);
         return Err(error);
     }
     let description = entry.description.clone();
-    state.ui.netlist.edit_redo.push(entry);
+    state.code.netlist.edit_redo.push(entry);
     Ok(Some(description))
 }
 
 pub(crate) fn redo_netlist_edit(state: &mut AppState) -> Result<Option<String>, String> {
-    let Some(entry) = state.ui.netlist.edit_redo.pop() else {
+    let Some(entry) = state.code.netlist.edit_redo.pop() else {
         return Ok(None);
     };
     if let Err(error) = replace_owned_sources_atomically_impl(state, entry.forward.clone(), false) {
-        state.ui.netlist.edit_redo.push(entry);
+        state.code.netlist.edit_redo.push(entry);
         return Err(error);
     }
     let description = entry.description.clone();
-    state.ui.netlist.edit_undo.push(entry);
+    state.code.netlist.edit_undo.push(entry);
     Ok(Some(description))
 }
 
@@ -771,8 +771,8 @@ pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> b
     {
         return false;
     }
-    if candidate.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource
-        && candidate.ui.netlist.active_dependency_identity.is_none()
+    if candidate.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
+        && candidate.code.netlist.active_dependency_identity.is_none()
     {
         candidate.model.simulation.source.netlist_content = source;
     }
@@ -787,11 +787,11 @@ pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> b
             prune_owned_include_authority(descriptor, &document);
         }
         candidate.model.workspace.content.netlist_document = Some(document.clone());
-        candidate.ui.netlist.owned_document = Some(document);
+        candidate.code.netlist.owned_document = Some(document);
     }
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate);
-    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.code.netlist);
     if candidate
         .model
         .workspace
@@ -806,12 +806,12 @@ pub(crate) fn apply_live_owned_source(state: &mut AppState, source: String) -> b
 }
 
 fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
-    if state.ui.netlist.active_document != ActiveNetlistDocument::OwnedSource
-        || state.ui.netlist.active_dependency_identity.is_some()
+    if state.code.netlist.active_document != ActiveNetlistDocument::OwnedSource
+        || state.code.netlist.active_dependency_identity.is_some()
     {
         return false;
     }
-    let next_document = if let Some(document) = &state.ui.netlist.owned_document {
+    let next_document = if let Some(document) = &state.code.netlist.owned_document {
         let Ok(next) = replace_root_document_preserving_dependencies(document, &source) else {
             return false;
         };
@@ -840,11 +840,11 @@ fn replace_owned_source_unlocked(state: &mut AppState, source: String) -> bool {
             prune_owned_include_authority(descriptor, &document);
         }
         candidate.model.workspace.content.netlist_document = Some(document.clone());
-        candidate.ui.netlist.owned_document = Some(document);
+        candidate.code.netlist.owned_document = Some(document);
     }
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate);
-    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.code.netlist);
     let Err(error) = candidate
         .model
         .workspace
@@ -868,7 +868,7 @@ fn canonical_root_document(
         ActiveNetlistDocument::Generated => {
             state.model.netlist_artifacts.generated_document.as_ref()
         }
-        ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
+        ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
 }
@@ -877,8 +877,8 @@ fn canonical_root_document(
 /// document. The dependency source remains canonical inside its root
 /// `NetlistDocument`; this function never synthesizes a second source store.
 pub fn active_dependency(state: &AppState) -> Option<&crate::state::DependencyMetadata> {
-    let identity = state.ui.netlist.active_dependency_identity.as_deref()?;
-    let root = state.ui.netlist.active_dependency_root?;
+    let identity = state.code.netlist.active_dependency_identity.as_deref()?;
+    let root = state.code.netlist.active_dependency_root?;
     canonical_root_document(state, root)?
         .dependencies()
         .iter()
@@ -889,10 +889,10 @@ pub fn active_dependency(state: &AppState) -> Option<&crate::state::DependencyMe
 /// project and is therefore an editable project document.
 #[must_use]
 pub fn active_dependency_is_owned(state: &AppState) -> bool {
-    let Some(identity) = state.ui.netlist.active_dependency_identity.as_deref() else {
+    let Some(identity) = state.code.netlist.active_dependency_identity.as_deref() else {
         return false;
     };
-    state.ui.netlist.active_dependency_root == Some(ActiveNetlistDocument::OwnedSource)
+    state.code.netlist.active_dependency_root == Some(ActiveNetlistDocument::OwnedSource)
         && state
             .model
             .workspace
@@ -906,10 +906,10 @@ pub fn active_dependency_is_owned(state: &AppState) -> bool {
 /// Whether editor mutations are authorized for the exact visible source.
 #[must_use]
 pub fn active_netlist_source_is_editable(state: &AppState) -> bool {
-    if state.ui.netlist.active_dependency_identity.is_some() {
+    if state.code.netlist.active_dependency_identity.is_some() {
         active_dependency_is_owned(state)
     } else {
-        state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource
+        state.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
             && state.model.workspace.content.has_editable_netlist_source()
     }
 }
@@ -920,8 +920,8 @@ pub fn active_netlist_source_is_editable(state: &AppState) -> bool {
 /// source outranks the generated primary; afterwards the active document is
 /// the answer and nothing infers one from the visible buffer.
 pub(crate) fn effective_active_document(state: &AppState) -> ActiveNetlistDocument {
-    if state.ui.netlist.active_document_initialized {
-        state.ui.netlist.active_document
+    if state.code.netlist.active_document_initialized {
+        state.code.netlist.active_document
     } else if state.model.workspace.content.netlist_source.is_some() {
         ActiveNetlistDocument::OwnedSource
     } else {
@@ -953,10 +953,10 @@ pub(crate) fn working_deck_source(state: &AppState) -> &str {
 /// closed and leave the current buffer unchanged.
 pub fn open_netlist_dependency(state: &mut AppState, logical_identity: &str) -> Result<(), String> {
     let root = state
-        .ui
+        .code
         .netlist
         .active_dependency_root
-        .unwrap_or(state.ui.netlist.active_document);
+        .unwrap_or(state.code.netlist.active_document);
     open_netlist_dependency_from_root(state, root, logical_identity)
 }
 
@@ -994,46 +994,46 @@ pub(crate) fn open_netlist_dependency_from_root(
             "Close an include tab before opening another; the workspace retains at most {MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS} secondary netlist documents."
         ));
     }
-    state.ui.netlist.active_document = root;
-    state.ui.netlist.active_dependency_root = Some(root);
-    state.ui.netlist.active_dependency_identity = Some(logical_identity.to_owned());
+    state.code.netlist.active_document = root;
+    state.code.netlist.active_dependency_root = Some(root);
+    state.code.netlist.active_dependency_identity = Some(logical_identity.to_owned());
     state.workbench.netlist_open_documents.insert(tab);
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_document_initialized = true;
     state.model.simulation.source.netlist_content = source;
-    state.ui.netlist.requested_line = None;
-    state.ui.netlist.cursor_line = 0;
+    state.code.netlist.requested_line = None;
+    state.code.netlist.cursor_line = 0;
     state.manual_run.edited_lines.clear();
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.completion_open = false;
+    state.code.netlist.completion_dismissed_at = None;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(state);
     Ok(())
 }
 
 /// Return from an include document to its exact generated or owned root.
 pub fn close_active_dependency(state: &mut AppState) -> bool {
-    let Some(root) = state.ui.netlist.active_dependency_root.take() else {
+    let Some(root) = state.code.netlist.active_dependency_root.take() else {
         return false;
     };
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_document = root;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_document = root;
     state.model.simulation.source.netlist_content = match root {
         ActiveNetlistDocument::Generated => state.model.netlist_artifacts.generated_source.clone(),
         ActiveNetlistDocument::OwnedSource => state
-            .ui
+            .code
             .netlist
             .owned_document
             .as_ref()
             .map(|document| document.source().to_owned())
             .or_else(|| state.model.workspace.content.netlist_source.clone())
             .unwrap_or_default(),
-        ActiveNetlistDocument::GeneratedDiff => state.ui.netlist.generated_diff_source.clone(),
+        ActiveNetlistDocument::GeneratedDiff => state.code.netlist.generated_diff_source.clone(),
         ActiveNetlistDocument::RunSnapshot => run_snapshot_source(state),
     };
-    state.ui.netlist.requested_line = None;
-    state.ui.netlist.cursor_line = 0;
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.requested_line = None;
+    state.code.netlist.cursor_line = 0;
+    state.code.netlist.completion_open = false;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(state);
     refresh_diff_pips_from_baseline(state);
     true
@@ -1043,7 +1043,7 @@ pub fn close_active_dependency(state: &mut AppState) -> bool {
 /// Its stable project identity is persisted, while its exact source bytes stay
 /// in the canonical dependency closure used by execution and export.
 pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::Uuid, String> {
-    if state.ui.netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
+    if state.code.netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
         return Err(
             "Open the dependency from a project-owned root before copying it into the project."
                 .to_owned(),
@@ -1083,8 +1083,8 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    candidate.ui.netlist.completion_open = false;
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.completion_open = false;
     invalidate_source_evidence(&mut candidate);
     state.commit_candidate(candidate);
     Ok(document_id)
@@ -1095,14 +1095,14 @@ pub fn copy_active_dependency_to_project(state: &mut AppState) -> Result<uuid::U
 /// reversible counterpart to copy-to-project: the document becomes read-only
 /// again, and no source text or external artifact is deleted.
 pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<(), String> {
-    if state.ui.netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
+    if state.code.netlist.active_dependency_root != Some(ActiveNetlistDocument::OwnedSource) {
         return Err(
             "Only an include opened from the owned top deck can release project ownership."
                 .to_owned(),
         );
     }
     let identity = state
-        .ui
+        .code
         .netlist
         .active_dependency_identity
         .clone()
@@ -1123,10 +1123,10 @@ pub fn release_active_dependency_from_project(state: &mut AppState) -> Result<()
         return Err("The active include is not project-owned.".to_owned());
     }
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    candidate.ui.netlist.completion_open = false;
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.completion_open = false;
     invalidate_source_evidence(&mut candidate);
-    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
         .workspace
@@ -1145,10 +1145,10 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     if !active_dependency_is_owned(state) {
         return false;
     }
-    let Some(identity) = state.ui.netlist.active_dependency_identity.clone() else {
+    let Some(identity) = state.code.netlist.active_dependency_identity.clone() else {
         return false;
     };
-    let Some(current_document) = state.ui.netlist.owned_document.as_ref().cloned() else {
+    let Some(current_document) = state.code.netlist.owned_document.as_ref().cloned() else {
         return false;
     };
     let Some(index) = current_document
@@ -1202,11 +1202,11 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
     include.content_digest = crate::state::content_digest(&source);
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.ui.netlist.owned_document = Some(next_document);
+    candidate.code.netlist.owned_document = Some(next_document);
     candidate.model.simulation.source.netlist_content = source;
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate);
-    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.code.netlist);
     if candidate
         .model
         .workspace
@@ -1227,7 +1227,7 @@ pub fn replace_owned_dependency_source(state: &mut AppState, source: String) -> 
 /// the Netlist workspace, with the generated primary in front.
 pub(crate) fn show_generated_deck(state: &mut AppState) {
     let _ = open_generated_primary(state);
-    state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+    state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     if state.workbench.workspace != crate::workbench::state::Workspace::Netlist {
         state
             .workbench
@@ -1246,20 +1246,20 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
     {
         return false;
     }
-    if state.ui.netlist.active_document == ActiveNetlistDocument::Generated
-        && state.ui.netlist.active_dependency_identity.is_none()
+    if state.code.netlist.active_document == ActiveNetlistDocument::Generated
+        && state.code.netlist.active_dependency_identity.is_none()
     {
         return false;
     }
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document = ActiveNetlistDocument::Generated;
+    state.code.netlist.active_document_initialized = true;
     state.model.simulation.source.netlist_content =
         state.model.netlist_artifacts.generated_source.clone();
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.completion_open = false;
+    state.code.netlist.completion_dismissed_at = None;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(state);
     true
 }
@@ -1268,7 +1268,7 @@ pub fn open_generated_primary(state: &mut AppState) -> bool {
 /// document. Document tabs use this exact transition so switching tabs never
 /// changes source ownership.
 pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
-    let Some(document) = state.ui.netlist.owned_document.as_ref().or(state
+    let Some(document) = state.code.netlist.owned_document.as_ref().or(state
         .model
         .workspace
         .content
@@ -1282,21 +1282,21 @@ pub(crate) fn open_owned_primary(state: &mut AppState) -> bool {
     // advancing the editor revision and discarding the exact validation
     // receipt here also destroys the controller's one-shot authorization and
     // leaves a visibly validated manual deck unable to run.
-    if state.ui.netlist.active_document == ActiveNetlistDocument::OwnedSource
-        && state.ui.netlist.active_dependency_identity.is_none()
+    if state.code.netlist.active_document == ActiveNetlistDocument::OwnedSource
+        && state.code.netlist.active_dependency_identity.is_none()
         && state.model.simulation.source.netlist_content == document.source()
     {
         return true;
     }
     let source = document.source().to_owned();
-    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document_initialized = true;
     state.model.simulation.source.netlist_content = source;
-    state.ui.netlist.completion_open = false;
-    state.ui.netlist.completion_dismissed_at = None;
-    state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+    state.code.netlist.completion_open = false;
+    state.code.netlist.completion_dismissed_at = None;
+    state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(state);
     true
 }
@@ -1421,7 +1421,7 @@ pub(crate) fn begin_owned_include_lifecycle_action(
         );
     }
     let logical_identity = state
-        .ui
+        .code
         .netlist
         .active_dependency_identity
         .clone()
@@ -1433,7 +1433,7 @@ pub(crate) fn begin_owned_include_lifecycle_action(
         .netlist_document
         .as_ref()
         .ok_or_else(|| "The owned root document is unavailable.".to_owned())?;
-    state.ui.netlist.lifecycle_dialog.include_transaction =
+    state.code.netlist.lifecycle_dialog.include_transaction =
         Some(NetlistIncludeLifecycleTransaction {
             action,
             project_id: state.model.workspace.content.project.id(),
@@ -1450,7 +1450,7 @@ pub(crate) fn commit_owned_include_lifecycle_action(
     state: &mut AppState,
 ) -> Result<String, String> {
     let transaction = state
-        .ui
+        .code
         .netlist
         .lifecycle_dialog
         .include_transaction
@@ -1466,7 +1466,7 @@ pub(crate) fn commit_owned_include_lifecycle_action(
     if state.model.workspace.content.project.id() != transaction.project_id
         || document.id() != transaction.root_document_id
         || document.revision() != transaction.root_revision
-        || state.ui.netlist.active_dependency_identity.as_deref()
+        || state.code.netlist.active_dependency_identity.as_deref()
             != Some(transaction.logical_identity.as_str())
     {
         return Err(
@@ -1532,12 +1532,12 @@ pub(crate) fn commit_owned_include_lifecycle_action(
     }
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.ui.netlist.owned_document = Some(next_document);
-    candidate.ui.netlist.active_dependency_identity = Some(proposed.clone());
-    candidate.ui.netlist.lifecycle_dialog.include_transaction = None;
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.owned_document = Some(next_document);
+    candidate.code.netlist.active_dependency_identity = Some(proposed.clone());
+    candidate.code.netlist.lifecycle_dialog.include_transaction = None;
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate);
-    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
         .workspace
@@ -1559,7 +1559,7 @@ pub(crate) fn begin_netlist_lifecycle_action(
     state: &mut AppState,
     action: CodeSourceFileAction,
 ) -> Result<(), String> {
-    if state.ui.netlist.active_dependency_identity.is_some() {
+    if state.code.netlist.active_dependency_identity.is_some() {
         return Err(
             "Return to the owned root deck before changing a top-level deck lifecycle.".to_owned(),
         );
@@ -1586,7 +1586,7 @@ pub(crate) fn begin_netlist_lifecycle_action(
         }
         CodeSourceFileAction::Delete => String::new(),
     };
-    state.ui.netlist.lifecycle_dialog.transaction = Some(NetlistLifecycleTransaction {
+    state.code.netlist.lifecycle_dialog.transaction = Some(NetlistLifecycleTransaction {
         action,
         project_id: state.model.workspace.content.project.id(),
         deck_id: descriptor.map(|descriptor| descriptor.deck_id),
@@ -1603,7 +1603,7 @@ pub(crate) fn begin_netlist_lifecycle_action(
 
 pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<String, String> {
     let transaction = state
-        .ui
+        .code
         .netlist
         .lifecycle_dialog
         .transaction
@@ -1772,31 +1772,31 @@ pub(crate) fn commit_netlist_lifecycle_action(state: &mut AppState) -> Result<St
                     .workspace
                     .content
                     .return_to_generated_netlist();
-                candidate.ui.netlist.owned_document = None;
+                candidate.code.netlist.owned_document = None;
                 candidate.model.netlist_artifacts.generated_source = candidate
                     .model
                     .netlist_artifacts
                     .generated_document
                     .as_ref()
                     .map_or_else(String::new, |generated| generated.source().to_owned());
-                candidate.ui.netlist.active_document = ActiveNetlistDocument::Generated;
-                candidate.ui.netlist.active_dependency_identity = None;
-                candidate.ui.netlist.active_dependency_root = None;
+                candidate.code.netlist.active_document = ActiveNetlistDocument::Generated;
+                candidate.code.netlist.active_dependency_identity = None;
+                candidate.code.netlist.active_dependency_root = None;
                 candidate.model.simulation.source.netlist_content =
                     candidate.model.netlist_artifacts.generated_source.clone();
-                candidate.ui.netlist.externally_saved_content_digest = None;
+                candidate.code.netlist.externally_saved_content_digest = None;
             }
             format!(
                 "Removed project top deck {removed}. Any separately published native file was not deleted."
             )
         }
     };
-    candidate.ui.netlist.lifecycle_dialog.transaction = None;
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
-    candidate.ui.netlist.completion_open = false;
-    candidate.ui.netlist.selected_byte_range = None;
+    candidate.code.netlist.lifecycle_dialog.transaction = None;
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.completion_open = false;
+    candidate.code.netlist.selected_byte_range = None;
     invalidate_source_evidence(&mut candidate);
-    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
         .workspace
@@ -1834,10 +1834,10 @@ pub(crate) fn select_retained_top_deck(
         next.source_path,
     );
     candidate.model.workspace.content.netlist_source_dirty = true;
-    candidate.ui.netlist.lifecycle_dialog.transaction = None;
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.lifecycle_dialog.transaction = None;
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     invalidate_source_evidence(&mut candidate);
-    clear_netlist_edit_journal(&mut candidate.ui.netlist);
+    clear_netlist_edit_journal(&mut candidate.code.netlist);
     candidate
         .model
         .workspace
@@ -1889,12 +1889,12 @@ pub(crate) fn install_active_top_deck(
     state.model.workspace.content.netlist_descriptor = Some(descriptor);
     state.model.workspace.content.netlist_source_path = source_path;
     state.model.workspace.content.netlist_source_dirty = true;
-    state.ui.netlist.externally_saved_content_digest = document.saved_digest();
-    state.ui.netlist.owned_document = Some(document);
-    state.ui.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_dependency_identity = None;
-    state.ui.netlist.active_dependency_root = None;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.externally_saved_content_digest = document.saved_digest();
+    state.code.netlist.owned_document = Some(document);
+    state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_dependency_identity = None;
+    state.code.netlist.active_dependency_root = None;
+    state.code.netlist.active_document_initialized = true;
     state.model.simulation.source.netlist_content = source;
     if state.is_netlist_first_without_schematic() {
         // The bootstrap schematic is an implementation detail, not a second
@@ -2089,10 +2089,10 @@ pub(crate) fn open_netlist_save_dialog(state: &mut AppState, save_as: bool) {
         .map_or(crate::state::NetlistTextEncoding::Utf8, |descriptor| {
             descriptor.source_encoding
         });
-    state.ui.netlist.save_dialog.open = true;
-    state.ui.netlist.save_dialog.save_as = save_as;
-    state.ui.netlist.save_dialog.encoding = encoding;
-    state.ui.netlist.save_dialog.error = None;
+    state.code.netlist.save_dialog.open = true;
+    state.code.netlist.save_dialog.save_as = save_as;
+    state.code.netlist.save_dialog.encoding = encoding;
+    state.code.netlist.save_dialog.error = None;
 }
 
 #[derive(Debug, Clone)]
@@ -2310,8 +2310,8 @@ impl NetlistDocumentState {
 
 /// Reconcile queued execution and diff state before rendering the document.
 pub fn prepare(state: &mut AppState) {
-    if state.ui.netlist.rerun_queued && !state.model.simulation.execution.has_active_execution() {
-        state.ui.netlist.rerun_queued = false;
+    if state.code.netlist.rerun_queued && !state.model.simulation.execution.has_active_execution() {
+        state.code.netlist.rerun_queued = false;
         if let Some(reason) = state.manual_deck_run_block_reason() {
             state.record(
                 crate::diagnostics::LogSeverity::Warning,
@@ -2324,10 +2324,10 @@ pub fn prepare(state: &mut AppState) {
     }
 
     let data_version = state.model.simulation.view.data_version;
-    if state.ui.netlist.seen_data_version == data_version {
+    if state.code.netlist.seen_data_version == data_version {
         return;
     }
-    state.ui.netlist.seen_data_version = data_version;
+    state.code.netlist.seen_data_version = data_version;
     if let Some(baseline) = state.manual_run.last_run_buffer.as_deref() {
         state.manual_run.edited_lines = baseline::changed_lines_against_baseline(
             &state.model.simulation.source.netlist_content,

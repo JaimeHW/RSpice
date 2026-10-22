@@ -107,7 +107,7 @@ fn adopters_section(
     definition: &StimulusDefinition,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     section_header(
         ui,
         &messages.text(MessageId::StimulusAdoptersSection),
@@ -159,7 +159,7 @@ fn adopter_entry(
     index: usize,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let palette = Tokens::get(ui.ctx()).color;
     // The chip is the decision to re-adopt: an instance in step with the
     // library states nothing, and a drift is a fact rather than a tone — the
@@ -265,7 +265,7 @@ fn adopter_verbs(
     index: usize,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     ui.add_space(ACTION_GAP_Y);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = ACTION_GAP;
@@ -302,7 +302,7 @@ fn adopter_verbs(
 /// Studio's own Excitations rail takes — this dock states which analyses read a
 /// definition, and the plan is where one is changed.
 fn consumers_section(ui: &mut Ui, state: &AppState, adopters: &[StimulusAdopter]) -> bool {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let rows: Vec<(&str, &SourceConsumer)> = adopters
         .iter()
         .flat_map(|adopter| {
@@ -355,7 +355,7 @@ fn definition_section(
     definition: &StimulusDefinition,
     verbs: &mut Vec<Verb>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let editor = &state.workbench.stimulus_editor;
     let dirty = editor.is_dirty(definition.name());
     // No name in the header's metadata: the browser's selected row and the

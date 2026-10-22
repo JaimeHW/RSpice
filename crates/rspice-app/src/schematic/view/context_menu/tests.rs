@@ -1167,9 +1167,9 @@ fn operating_point_hop_carries_the_clicked_device_into_the_op_inspector() {
     open_operating_point(&mut state);
 
     assert_eq!(state.workbench.workspace, Workspace::Results);
-    assert_eq!(state.ui.results.session.viewer, ResultViewer::Op);
+    assert_eq!(state.results.results.session.viewer, ResultViewer::Op);
     assert_eq!(
-        state.ui.results.session.op_filter, "M1",
+        state.results.results.session.op_filter, "M1",
         "the Op inspector must arrive selected on the device the menu named"
     );
 }
@@ -1198,13 +1198,13 @@ fn operating_point_hop_leaves_the_report_unfiltered_when_the_device_is_unreporte
     // A stale filter is the failure this guards: the previous device's name
     // was left in place, so the inspector opened on another instance's row
     // and read as a hop that had worked.
-    state.ui.results.session.op_filter = "M1".to_owned();
+    state.results.results.session.op_filter = "M1".to_owned();
 
     open_operating_point(&mut state);
 
     assert_eq!(state.workbench.workspace, Workspace::Results);
-    assert_eq!(state.ui.results.session.viewer, ResultViewer::Op);
-    assert!(state.ui.results.session.op_filter.is_empty());
+    assert_eq!(state.results.results.session.viewer, ResultViewer::Op);
+    assert!(state.results.results.session.op_filter.is_empty());
 }
 
 /// The hop selects the operating point, not just the workspace and viewer.
@@ -1252,7 +1252,7 @@ fn operating_point_hop_selects_the_operating_point_analysis() {
         AnalysisType::DcOp,
         "the hop must select the result its viewer can render"
     );
-    assert_eq!(state.ui.results.session.op_filter, "M1");
+    assert_eq!(state.results.results.session.op_filter, "M1");
 }
 
 fn render_context_contents(
@@ -1476,7 +1476,7 @@ fn copy_takes_no_wire_or_junction_from_another_sheet() {
         &symbol_context,
     );
 
-    let clipboard = &state.ui.schematic_clipboard;
+    let clipboard = &state.design.schematic_clipboard;
     assert_eq!(clipboard.components.len(), 2);
     let mut copied: Vec<u64> = clipboard.wires.iter().map(|wire| wire.id).collect();
     copied.sort_unstable();
@@ -1502,7 +1502,7 @@ fn a_paste_joins_wiring_on_its_own_sheet_only() {
     state.model.schematic.document_mut_for_test().wires = vec![here.clone(), there.clone()];
     state.model.schematic.init_undo_history();
     let stub = Wire::segment(9, Point::new(0, 0), Point::new(0, 50));
-    state.ui.schematic_clipboard =
+    state.design.schematic_clipboard =
         ClipboardData::from_selection(Vec::new(), vec![stub], Vec::new());
 
     assert_eq!(
@@ -1671,11 +1671,11 @@ fn cut_paste_and_mirror_vertically_rows_run_their_commands() {
         &symbol_context,
     );
     assert!(state.model.schematic.document().components.is_empty());
-    assert_eq!(state.ui.schematic_clipboard.components.len(), 1);
+    assert_eq!(state.design.schematic_clipboard.components.len(), 1);
     assert!(action_availability(ContextAction::Paste, &state).0);
 
     let click = Point::new(200, 100);
-    let offset = click - state.ui.schematic_clipboard.origin;
+    let offset = click - state.design.schematic_clipboard.origin;
     execute_context_action(ContextAction::Paste, &mut state, click, &symbol_context);
     assert!(state.place_floating_paste());
     let pasted = state.model.schematic.document().components.clone();
@@ -1814,7 +1814,7 @@ fn picking_an_instance_to_descend_keeps_the_net_highlight_it_carries() {
     let reference = hierarchy_reference::build();
     let mut state = reference.state;
     state.open_workspace_view(reference.top.clone());
-    state.ui.schematic_visibility.net_highlighting =
+    state.design.schematic_visibility.net_highlighting =
         SchematicNetHighlighting::SelectedNetAcrossHierarchy;
     let component_named = |state: &AppState, name: &str| {
         state

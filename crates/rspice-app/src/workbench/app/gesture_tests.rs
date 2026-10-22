@@ -70,12 +70,12 @@ fn symbol_draft_survives_passive_window_projection() {
         fixture.app.state.open_workspace_view(primary_view.clone());
         fixture.frame(vec![], true);
         let points = vec![Point::origin(), Point::new(20, 10)];
-        fixture.app.state.ui.symbol.editor.tool = SymbolTool::Line;
-        fixture.app.state.ui.symbol.editor.pending_polyline = points.clone();
-        fixture.app.state.ui.symbol.editor.select_shape(0);
-        fixture.app.state.ui.symbol.editor.dragging_origin = true;
-        fixture.app.state.ui.symbol.editor.save_revision_note = "Owner draft".into();
-        fixture.app.state.ui.symbol.editor.clipboard.shapes = document.body.clone();
+        fixture.app.state.design.symbol.editor.tool = SymbolTool::Line;
+        fixture.app.state.design.symbol.editor.pending_polyline = points.clone();
+        fixture.app.state.design.symbol.editor.select_shape(0);
+        fixture.app.state.design.symbol.editor.dragging_origin = true;
+        fixture.app.state.design.symbol.editor.save_revision_note = "Owner draft".into();
+        fixture.app.state.design.symbol.editor.clipboard.shapes = document.body.clone();
         let primary = fixture.app.state.workbench.window_session.primary();
         let layout = fixture.app.state.workbench.current_workspace_layout();
         let secondary = fixture
@@ -93,7 +93,7 @@ fn symbol_draft_survives_passive_window_projection() {
                 fixture
                     .app
                     .state
-                    .ui
+                    .design
                     .symbol
                     .editor
                     .pending_polyline
@@ -103,25 +103,25 @@ fn symbol_draft_survives_passive_window_projection() {
                 fixture
                     .app
                     .state
-                    .ui
+                    .design
                     .symbol
                     .editor
                     .save_revision_note
                     .is_empty()
             );
             assert_eq!(
-                fixture.app.state.ui.symbol.editor.clipboard.shapes,
+                fixture.app.state.design.symbol.editor.clipboard.shapes,
                 document.body
             );
-            fixture.app.state.ui.symbol.editor.shape_start = Some(Point::new(30, 40));
+            fixture.app.state.design.symbol.editor.shape_start = Some(Point::new(30, 40));
         }
         assert!(fixture.app.project_application_window(primary, layout));
         fixture.frame(vec![], true);
-        if fixture.app.state.ui.symbol.editor.pending_polyline != points
+        if fixture.app.state.design.symbol.editor.pending_polyline != points
             || !fixture
                 .app
                 .state
-                .ui
+                .design
                 .symbol
                 .editor
                 .effective_selection()
@@ -146,22 +146,22 @@ fn symbol_draft_survives_passive_window_projection() {
             fixture
                 .app
                 .state
-                .ui
+                .design
                 .symbol
                 .history
                 .undo_depth(&primary_view.key()),
             0
         );
         assert_eq!(
-            fixture.app.state.ui.symbol.editor.save_revision_note,
+            fixture.app.state.design.symbol.editor.save_revision_note,
             "Owner draft"
         );
-        assert!(fixture.app.state.ui.symbol.editor.dragging_origin);
+        assert!(fixture.app.state.design.symbol.editor.dragging_origin);
         if other_is_symbol {
             assert!(fixture.app.project_application_window(secondary, layout));
             fixture.frame(vec![], true);
             assert_eq!(
-                fixture.app.state.ui.symbol.editor.shape_start,
+                fixture.app.state.design.symbol.editor.shape_start,
                 Some(Point::new(30, 40))
             );
             assert!(fixture.app.project_application_window(primary, layout));
@@ -176,7 +176,7 @@ fn symbol_draft_survives_passive_window_projection() {
             fixture
                 .app
                 .state
-                .ui
+                .design
                 .symbol
                 .history
                 .undo_depth(&primary_view.key()),

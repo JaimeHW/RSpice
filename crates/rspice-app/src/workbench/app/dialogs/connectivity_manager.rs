@@ -1227,7 +1227,7 @@ impl RSpiceApp {
                 self.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
                 self.state.workbench.navigator_visible = true;
                 self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
-                self.state.ui.netlist.active_document =
+                self.state.code.netlist.active_document =
                     crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated;
                 self.state.workbench.set_navigator_filter("source mapping");
                 if let Some(line) = self
@@ -1240,8 +1240,8 @@ impl RSpiceApp {
                     .and_then(|artifact| artifact.source_map().first())
                     .map(|entry| entry.generated_line())
                 {
-                    self.state.ui.netlist.cursor_line = line.saturating_sub(1);
-                    self.state.ui.netlist.requested_line = Some(line);
+                    self.state.code.netlist.cursor_line = line.saturating_sub(1);
+                    self.state.code.netlist.requested_line = Some(line);
                 }
             }
         }

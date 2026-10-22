@@ -46,6 +46,14 @@ use rspice_design::symbol::generated::{GENERATED_PORTS_KEY, decode_ports};
 /// Producer identity every symbol pin finding carries.
 const SYMBOL_PIN_PRODUCER: &str = "rspice.design.symbol.pins";
 
+#[derive(Debug, Clone, Default)]
+pub struct SymbolUiState {
+    pub editor: rspice_schematic_editor::symbol_editor::session::SymbolEditorSession,
+    pub history: rspice_design::symbol::edit::SymbolHistory,
+    /// The symbol being edited in place on a parent schematic, if any.
+    pub in_place: Option<Box<super::symbol_in_place::SymbolInPlace>>,
+}
+
 impl AppState {
     pub(crate) fn symbol_editor_request_source(&self) -> SymbolRequestSource {
         SymbolRequestSource {
@@ -69,13 +77,13 @@ impl AppState {
         // Leaving the symbol by any route but the session's own exit ends an
         // in-place edit; what it changed stays, as any symbol edit does.
         if self
-            .ui
+            .design
             .symbol
             .in_place
             .as_ref()
             .is_some_and(|session| session.symbol != self.model.workspace.content.active_view)
         {
-            self.ui.symbol.in_place = None;
+            self.design.symbol.in_place = None;
         }
         let source = self.symbol_editor_request_source();
         let is_symbol =
@@ -91,7 +99,7 @@ impl AppState {
         };
         retained.retain(|_, session| session.canvas_source.as_ref().is_some_and(still_open));
         let same_document = self
-            .ui
+            .design
             .symbol
             .editor
             .canvas_source
@@ -103,7 +111,7 @@ impl AppState {
             });
         if !is_symbol || !same_document {
             if self
-                .ui
+                .design
                 .symbol
                 .editor
                 .canvas_source
@@ -112,14 +120,14 @@ impl AppState {
             {
                 // User navigation ends active input. Projecting a different
                 // window keeps it with the window that still owns it.
-                self.ui.symbol.editor.clear_drag_state();
-                self.ui.symbol.editor.marquee_start = None;
-                self.ui.symbol.editor.marquee_current = None;
-                self.ui.symbol.editor.inspector.end_field_edit();
+                self.design.symbol.editor.clear_drag_state();
+                self.design.symbol.editor.marquee_start = None;
+                self.design.symbol.editor.marquee_current = None;
+                self.design.symbol.editor.inspector.end_field_edit();
             }
             // Clipboard contents travel across views; every other field is view-local.
-            let clipboard = std::mem::take(&mut self.ui.symbol.editor.clipboard);
-            let previous = std::mem::take(&mut self.ui.symbol.editor);
+            let clipboard = std::mem::take(&mut self.design.symbol.editor.clipboard);
+            let previous = std::mem::take(&mut self.design.symbol.editor);
             if let Some(previous_source) = &previous.canvas_source
                 && still_open(previous_source)
             {
@@ -127,12 +135,12 @@ impl AppState {
             }
             if is_symbol && let Some(mut session) = retained.remove(&source.document.key()) {
                 resume_canvas_source(&mut session, source.clone());
-                self.ui.symbol.editor = session;
+                self.design.symbol.editor = session;
             }
-            self.ui.symbol.editor.clipboard = clipboard;
+            self.design.symbol.editor.clipboard = clipboard;
         }
         if is_symbol {
-            bind_canvas_source(&mut self.ui.symbol.editor, source);
+            bind_canvas_source(&mut self.design.symbol.editor, source);
         }
     }
 
@@ -371,7 +379,7 @@ impl AppState {
         // a wire the edit drags along unseen.
         if self.symbol_in_place().is_some() {
             let parents = Vec::new();
-            self.ui
+            self.design
                 .symbol
                 .history
                 .begin_parent_edit(key, SymbolParentEdit { base, parents });
@@ -400,7 +408,7 @@ impl AppState {
             &reference,
             &base,
         ));
-        self.ui
+        self.design
             .symbol
             .history
             .begin_parent_edit(key, SymbolParentEdit { base, parents });
@@ -413,7 +421,7 @@ impl AppState {
         renames: &BTreeMap<String, String>,
     ) {
         let key = self.model.workspace.content.active_key();
-        let Some(edit) = self.ui.symbol.history.parent_edit(&key) else {
+        let Some(edit) = self.design.symbol.history.parent_edit(&key) else {
             return;
         };
         let pin_remaps = symbol_pin_position_remaps(&edit.base, document, renames);
@@ -441,7 +449,7 @@ impl AppState {
     /// spanning the whole edit.
     pub(crate) fn finish_symbol_parent_edit(&mut self) {
         const DESCRIPTION: &str = "move wires with symbol pins";
-        let Some(edit) = self.ui.symbol.history.take_parent_edit() else {
+        let Some(edit) = self.design.symbol.history.take_parent_edit() else {
             return;
         };
         for parent in edit.parents {
@@ -511,7 +519,7 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let key = self.model.workspace.content.active_key();
-        if self.ui.symbol.history.parent_edit(&key).is_none() {
+        if self.design.symbol.history.parent_edit(&key).is_none() {
             self.begin_symbol_parent_edit();
         }
         self.publish_active_symbol_edit(document, metadata, &SymbolCommitIntent::default())
@@ -549,7 +557,7 @@ impl AppState {
         // names back, so it carries the reverse of what was just applied.
         if !intent.renames.is_empty() {
             let key = self.model.workspace.content.active_key();
-            self.ui
+            self.design
                 .symbol
                 .history
                 .record_inverse_renames(&key, &intent.renames);
@@ -626,7 +634,7 @@ impl AppState {
         self.store_active_symbol_editor_bundle(document, &candidate)?;
         *metadata = candidate;
         let key = self.model.workspace.content.active_key();
-        self.ui.symbol.history.mark_save_point(key);
+        self.design.symbol.history.mark_save_point(key);
         Ok(revision)
     }
 
@@ -743,18 +751,21 @@ impl AppState {
         snapshot: SymbolDocumentSnapshot,
         max_len: usize,
     ) {
-        self.ui.symbol.history.record_edit(key, snapshot, max_len);
+        self.design
+            .symbol
+            .history
+            .record_edit(key, snapshot, max_len);
     }
 
     pub(crate) fn can_undo_active_symbol_document(&self) -> bool {
-        self.ui
+        self.design
             .symbol
             .history
             .can_undo(&self.model.workspace.content.active_key())
     }
 
     pub(crate) fn can_redo_active_symbol_document(&self) -> bool {
-        self.ui
+        self.design
             .symbol
             .history
             .can_redo(&self.model.workspace.content.active_key())
@@ -765,13 +776,16 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let key = self.model.workspace.content.active_key();
-        let Some(previous) = self.ui.symbol.history.pop_undo(&key) else {
+        let Some(previous) = self.design.symbol.history.pop_undo(&key) else {
             return Ok(false);
         };
         let current = self.load_active_symbol_document()?;
         let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
         current_snapshot.renames = previous.inverted_renames();
-        self.ui.symbol.history.finish_undo(key, current_snapshot);
+        self.design
+            .symbol
+            .history
+            .finish_undo(key, current_snapshot);
         self.restore_active_symbol_snapshot(&previous)?;
         Ok(true)
     }
@@ -781,13 +795,16 @@ impl AppState {
             return Err(self.read_only_master_message());
         }
         let key = self.model.workspace.content.active_key();
-        let Some(next) = self.ui.symbol.history.pop_redo(&key) else {
+        let Some(next) = self.design.symbol.history.pop_redo(&key) else {
             return Ok(false);
         };
         let current = self.load_active_symbol_document()?;
         let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
         current_snapshot.renames = next.inverted_renames();
-        self.ui.symbol.history.finish_redo(key, current_snapshot);
+        self.design
+            .symbol
+            .history
+            .finish_redo(key, current_snapshot);
         self.restore_active_symbol_snapshot(&next)?;
         Ok(true)
     }

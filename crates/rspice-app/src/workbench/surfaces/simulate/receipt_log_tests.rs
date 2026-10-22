@@ -76,7 +76,7 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
         entries[0].1
     );
     assert!(
-        app.state.ui.toasts.activity().is_empty(),
+        app.state.workbench.toasts.activity().is_empty(),
         "a committed edit is not an event the reader has to be chased with"
     );
 }
@@ -115,7 +115,7 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
         "the refusal answers the gesture on the status bar, wherever the user is"
     );
     assert!(
-        app.state.ui.toasts.activity().is_empty(),
+        app.state.workbench.toasts.activity().is_empty(),
         "a refusal raises no toast and no notice"
     );
 }

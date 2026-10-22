@@ -409,7 +409,7 @@ fn scope_strip(ui: &mut Ui, scope: StimulusScope, counts: &ScopeCounts) -> Stimu
 /// step and a clean audit is the normal state, and a permanent band spelling
 /// it "no adopters · 0 E · 0 W" reported the absence of a problem.
 fn footer_report(state: &AppState, counts: &ScopeCounts) -> Option<(String, Problem)> {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let behind = (counts.total.behind > 0).then(|| {
         messages.format(
             if counts.total.behind == 1 {
@@ -480,7 +480,7 @@ fn footer(ui: &mut Ui, report: &(String, Problem)) {
 
 /// A library nobody has authored into, and the one verb that resolves it.
 fn show_empty(ui: &mut Ui, state: &mut AppState) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     empty_navigator_row(ui, &messages.text(MessageId::StimulusBrowserEmpty));
     let label = messages.text(MessageId::StimulusNewDefinition);
     let mut create = false;
@@ -496,7 +496,7 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
 /// A filter and a scope that between them left nothing, and the one press that
 /// undoes both.
 fn no_match(ui: &mut Ui, state: &mut AppState, scope: &mut StimulusScope) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     empty_navigator_row(ui, &messages.text(MessageId::StimulusBrowserNoMatch));
     let label = messages.text(MessageId::StimulusBrowserClearFilters);
     let mut cleared = false;

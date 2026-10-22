@@ -222,7 +222,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
             value_column(ui, |ui| {
                 let mut selected = Mode::ALL
                     .iter()
-                    .position(|mode| *mode == state.ui.theme.mode)
+                    .position(|mode| *mode == state.workbench.theme.mode)
                     .unwrap_or_default();
                 if segmented(
                     ui,
@@ -230,7 +230,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
                     &COLOR_MODES,
                     &mut selected,
                 ) {
-                    state.ui.theme.mode = Mode::ALL[selected];
+                    state.workbench.theme.mode = Mode::ALL[selected];
                 }
             });
         },
@@ -243,14 +243,14 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
         &["Compact", "Comfortable", "spacing", "padding"],
         |ui| {
             value_column(ui, |ui| {
-                let mut selected = usize::from(state.ui.theme.density == Density::Relaxed);
+                let mut selected = usize::from(state.workbench.theme.density == Density::Relaxed);
                 if segmented(
                     ui,
                     "preferences.appearance.density",
                     &DENSITIES,
                     &mut selected,
                 ) {
-                    state.ui.theme.density = if selected == 0 {
+                    state.workbench.theme.density = if selected == 0 {
                         Density::Compact
                     } else {
                         Density::Relaxed
@@ -284,7 +284,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
                 .collect::<Vec<_>>();
             let active = themes
                 .iter()
-                .position(|theme| *theme == state.ui.theme.canvas_theme)
+                .position(|theme| *theme == state.workbench.theme.canvas_theme)
                 .unwrap_or_default();
             value_column(ui, |ui| {
                 if let Some(selected) = select(
@@ -295,7 +295,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
                     &labels,
                     control_width(ui),
                 ) {
-                    state.ui.theme.canvas_theme = themes[selected];
+                    state.workbench.theme.canvas_theme = themes[selected];
                 }
             });
         },
@@ -315,7 +315,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
                 ui.spacing_mut().slider_width = width;
                 let response = ui.add_sized(
                     [width, Tokens::get(ui.ctx()).metrics.ctl_h],
-                    egui::Slider::new(&mut state.ui.theme.canvas_contrast, 0..=100)
+                    egui::Slider::new(&mut state.workbench.theme.canvas_contrast, 0..=100)
                         .show_value(false),
                 );
                 response.widget_info(|| {
@@ -334,7 +334,7 @@ fn appearance(ui: &mut Ui, state: &mut AppState) {
                     ui,
                     "result-document.settingspagecontent.enable-color-safe-traces.425c2b40",
                     "Enable color-safe traces",
-                    &mut state.ui.theme.colorblind_traces,
+                    &mut state.workbench.theme.colorblind_traces,
                 );
             });
         },
@@ -773,7 +773,7 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
         let labels = ["5 minutes", "2 minutes", "10 minutes"]
             .map(str::to_owned)
             .to_vec();
-        let normalized = super::normalize_autosave_minutes(state.ui.autosave_minutes);
+        let normalized = super::normalize_autosave_minutes(state.platform.autosave_minutes);
         let active = values
             .iter()
             .position(|minutes| *minutes == normalized)
@@ -787,7 +787,7 @@ fn projects(ui: &mut Ui, state: &mut AppState, actions: &mut PreferencePageActio
                 &labels,
                 control_width(ui),
             ) {
-                state.ui.autosave_minutes = values[selected];
+                state.platform.autosave_minutes = values[selected];
             }
         });
     });
@@ -860,7 +860,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
         "Uses the browser speech fallback while a semantic accessibility tree is unavailable.",
         |ui| {
             value_column(ui, |ui| {
-                let mut value = state.ui.browser_spoken_feedback;
+                let mut value = state.settings.browser_spoken_feedback;
                 if preference_switch(
                     ui,
                     "preferences.accessibility.browser-spoken-feedback",
@@ -885,7 +885,7 @@ fn accessibility(ui: &mut Ui, state: &mut AppState) {
 /// Store the browser speech opt-in and hand it to the browser in the same
 /// step, so the row and Restore defaults cannot disagree about either.
 fn set_browser_spoken_feedback(state: &mut AppState, enabled: bool) {
-    state.ui.browser_spoken_feedback = enabled;
+    state.settings.browser_spoken_feedback = enabled;
     #[cfg(target_arch = "wasm32")]
     crate::workbench::browser::accessibility::set_spoken_feedback(enabled);
 }
@@ -909,7 +909,7 @@ pub(super) fn restore_defaults(
     let preferences = &mut state.model.preferences;
     match category {
         PreferenceCategory::Appearance => {
-            state.ui.theme = crate::ui::Theme::default();
+            state.workbench.theme = crate::ui::Theme::default();
             preferences.restore_defaults(&[ChoicePreference::InterfaceScale], &[], &[]);
         }
         PreferenceCategory::Accessibility => {
@@ -998,7 +998,7 @@ pub(super) fn restore_defaults(
             ],
         ),
         PreferenceCategory::Projects => {
-            state.ui.autosave_minutes = crate::services::session::DEFAULT_AUTOSAVE_MINUTES;
+            state.platform.autosave_minutes = crate::services::session::DEFAULT_AUTOSAVE_MINUTES;
             preferences.restore_defaults(
                 &[ChoicePreference::StartupProject],
                 &[
@@ -1303,18 +1303,18 @@ mod tests {
                 category.label()
             );
             assert!(
-                !app.state.ui.browser_spoken_feedback,
+                !app.state.settings.browser_spoken_feedback,
                 "{} left the browser speaking control changes",
                 category.label()
             );
             assert_eq!(
-                app.state.ui.theme,
+                app.state.workbench.theme,
                 crate::ui::Theme::default(),
                 "{} left the theme changed",
                 category.label()
             );
             assert_eq!(
-                app.state.ui.autosave_minutes,
+                app.state.platform.autosave_minutes,
                 crate::services::session::DEFAULT_AUTOSAVE_MINUTES,
                 "{} left the autosave interval changed",
                 category.label()
@@ -1515,14 +1515,14 @@ mod tests {
             }
         }
         if category == PreferenceCategory::Appearance {
-            state.ui.theme.mode = crate::ui::Mode::Light;
-            state.ui.theme.canvas_contrast = 12;
+            state.workbench.theme.mode = crate::ui::Mode::Light;
+            state.workbench.theme.canvas_contrast = 12;
         }
         if category == PreferenceCategory::Projects {
-            state.ui.autosave_minutes = 10;
+            state.platform.autosave_minutes = 10;
         }
         if category == PreferenceCategory::Accessibility {
-            state.ui.browser_spoken_feedback = true;
+            state.settings.browser_spoken_feedback = true;
         }
         if category == PreferenceCategory::Workspace
             && let Ok(workspace) = state.model.preferences.workspace_mut()
@@ -1575,15 +1575,15 @@ mod tests {
             .set_toggle(TogglePreference::WaveMinorGrid, true);
         app.state
             .replace_project_execution_context("Opened project.");
-        assert!(app.state.ui.results.session.show_minor_grid);
+        assert!(app.state.results.results.session.show_minor_grid);
 
-        app.state.ui.results.session.phase_continuous = true;
+        app.state.results.results.session.phase_continuous = true;
         restore_defaults(
             PreferenceCategory::Results,
             &mut app.state,
             &mut PreferencePageActions::default(),
         );
-        assert!(!app.state.ui.results.session.phase_continuous);
-        assert!(!app.state.ui.results.session.show_minor_grid);
+        assert!(!app.state.results.results.session.phase_continuous);
+        assert!(!app.state.results.results.session.show_minor_grid);
     }
 }

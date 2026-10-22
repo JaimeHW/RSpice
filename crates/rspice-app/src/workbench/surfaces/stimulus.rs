@@ -257,7 +257,7 @@ fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
 
 /// The empty state, which offers the one verb that resolves it.
 fn show_empty(ui: &mut Ui, state: &mut AppState) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let title = messages.text(MessageId::StimulusLibraryEmpty);
     let detail = messages.text(MessageId::StimulusLibraryEmptyDetail);
     let label = messages.text(MessageId::StimulusNewDefinition);
@@ -591,7 +591,7 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
             }
         }
         StageAction::ImportDataFile => stimulus::import_data_file(state),
-        StageAction::Copy(text) => state.ui.clipboard_text_request = Some(text),
+        StageAction::Copy(text) => state.workbench.clipboard_text_request = Some(text),
         StageAction::Place => stimulus::place_selected_definition(state),
     }
 }

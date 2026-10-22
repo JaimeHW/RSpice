@@ -197,10 +197,7 @@ impl AppState {
         };
         state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.model.library_manager)?;
-        state.serialize_field(
-            "ui_session",
-            &UiSessionWire::capture(&self.ui, &self.model.preferences),
-        )?;
+        state.serialize_field("ui_session", &UiSessionWire::capture(self))?;
         state.serialize_field("workbench", &WorkbenchWireRef::capture(&self.workbench))?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
@@ -366,9 +363,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
             de.browser_project_binding_receipt,
             "browser project binding receipt",
         );
-        let (ui, preferences) = de.ui.restore();
         let mut state = Self {
-            ui: Box::new(ui),
             recent_files: de.recent_files,
             license_key: de.license_key,
             license,
@@ -376,10 +371,13 @@ impl<'de> serde::Deserialize<'de> for AppState {
             browser_project_binding_receipt,
             ..Default::default()
         };
+        // The code workspace `Default` prepared belongs to the bootstrapped
+        // project it compiled; the restored project's starts empty.
+        state.code.code_workspace = Default::default();
+        de.ui.scatter(&mut state);
         state.model.schematic = schematic;
         state.model.workspace = project_workspace;
         state.model.library_manager = library_manager;
-        state.model.preferences = Box::new(preferences);
         de.workbench.scatter(&mut state.workbench);
         if de.no_project_open {
             state
@@ -408,23 +406,23 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // editor presentation. Schematic documents deliberately skip them,
         // so restore the exact device-local settings after loading the active
         // document buffer and keep wire and bus gestures coherent.
-        state.model.schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
+        state.model.schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
         state.model.schematic.reconcile_grid_pitch_runtime();
-        state.ui.schematic_snap.grid_size = state.model.schematic.document().grid_size;
+        state.design.schematic_snap.grid_size = state.model.schematic.document().grid_size;
         state
             .model
             .schematic
             .session
             .editor
             .wire_drawing
-            .routing_mode = state.ui.schematic_routing_mode;
+            .routing_mode = state.design.schematic_routing_mode;
         state
             .model
             .schematic
             .session
             .editor
             .bus_drawing
-            .routing_mode = state.ui.schematic_routing_mode;
+            .routing_mode = state.design.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
         let execution_warnings = match (de.execution_context_json, de.execution_context) {
@@ -616,9 +614,9 @@ mod tests {
     #[test]
     fn session_restore_rehydrates_snap_and_routing_into_both_conductor_tools() {
         let mut state = AppState::default();
-        state.ui.schematic_snap.enabled = false;
-        state.ui.schematic_snap.snap_to_wire_segments = false;
-        state.ui.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
+        state.design.schematic_snap.enabled = false;
+        state.design.schematic_snap.snap_to_wire_segments = false;
+        state.design.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
@@ -1127,9 +1125,9 @@ mod tests {
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.instances()[0].id());
-        state.ui.schematic_snap.enabled = false;
-        state.ui.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
-        state.ui.theme.density = crate::ui::Density::Relaxed;
+        state.design.schematic_snap.enabled = false;
+        state.design.schematic_routing_mode = crate::state::WireRoutingMode::FortyFiveDegree;
+        state.workbench.theme.density = crate::ui::Density::Relaxed;
         state
             .recent_files
             .push(crate::services::recent_files::RecentFile {
@@ -1166,12 +1164,15 @@ mod tests {
             "the workbench restores as it was saved"
         );
         assert_eq!(restored.recent_files, state.recent_files);
-        assert!(!restored.ui.schematic_snap.enabled);
+        assert!(!restored.design.schematic_snap.enabled);
         assert_eq!(
-            restored.ui.schematic_routing_mode,
+            restored.design.schematic_routing_mode,
             crate::state::WireRoutingMode::FortyFiveDegree
         );
-        assert_eq!(restored.ui.theme.density, crate::ui::Density::Relaxed);
+        assert_eq!(
+            restored.workbench.theme.density,
+            crate::ui::Density::Relaxed
+        );
     }
 
     /// The builds of 10-18 wrote a title block's anchor, rotation, offsets
@@ -1236,7 +1237,7 @@ mod tests {
         assert_eq!(restored.model.simulation.retained.run_count(), 0);
         assert!(restored.model.simulation.view.waveforms.is_empty());
         assert!(!restored.model.simulation.execution.is_running);
-        assert!(!restored.ui.browser_spoken_feedback);
+        assert!(!restored.settings.browser_spoken_feedback);
         assert!(restored.model.log_buffer.entries().any(|entry| {
             entry
                 .message
@@ -1451,32 +1452,35 @@ mod tests {
     #[test]
     fn browser_spoken_feedback_preference_round_trips() {
         let mut state = AppState::default();
-        state.ui.browser_spoken_feedback = true;
+        state.settings.browser_spoken_feedback = true;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert!(restored.ui.browser_spoken_feedback);
+        assert!(restored.settings.browser_spoken_feedback);
     }
 
     #[test]
     fn appearance_preferences_round_trip_through_the_application_session() {
         let mut state = AppState::default();
-        state.ui.theme.mode = crate::ui::Mode::System;
-        state.ui.theme.density = crate::ui::Density::Relaxed;
-        state.ui.theme.colorblind_traces = true;
-        state.ui.theme.canvas_contrast = 84;
-        state.ui.theme.canvas_theme = crate::ui::EngineeringCanvasTheme::Light;
+        state.workbench.theme.mode = crate::ui::Mode::System;
+        state.workbench.theme.density = crate::ui::Density::Relaxed;
+        state.workbench.theme.colorblind_traces = true;
+        state.workbench.theme.canvas_contrast = 84;
+        state.workbench.theme.canvas_theme = crate::ui::EngineeringCanvasTheme::Light;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert_eq!(restored.ui.theme.mode, crate::ui::Mode::System);
-        assert_eq!(restored.ui.theme.density, crate::ui::Density::Relaxed);
-        assert!(restored.ui.theme.colorblind_traces);
-        assert_eq!(restored.ui.theme.canvas_contrast, 84);
+        assert_eq!(restored.workbench.theme.mode, crate::ui::Mode::System);
         assert_eq!(
-            restored.ui.theme.canvas_theme,
+            restored.workbench.theme.density,
+            crate::ui::Density::Relaxed
+        );
+        assert!(restored.workbench.theme.colorblind_traces);
+        assert_eq!(restored.workbench.theme.canvas_contrast, 84);
+        assert_eq!(
+            restored.workbench.theme.canvas_theme,
             crate::ui::EngineeringCanvasTheme::Light
         );
     }
@@ -1525,12 +1529,12 @@ mod tests {
     #[test]
     fn legacy_autosave_interval_is_migrated_before_the_session_is_rewritten() {
         let mut state = AppState::default();
-        state.ui.autosave_minutes = 15;
+        state.platform.autosave_minutes = 15;
 
         let json = serde_json::to_string(&state).expect("session serializes");
         let restored: AppState = serde_json::from_str(&json).expect("session deserializes");
 
-        assert_eq!(restored.ui.autosave_minutes, 10);
+        assert_eq!(restored.platform.autosave_minutes, 10);
     }
 
     #[test]
@@ -1711,7 +1715,7 @@ mod tests {
     #[test]
     fn app_state_session_does_not_persist_waves_expr_traces() {
         let mut state = AppState::default();
-        state.ui.results.session.exprs.insert(
+        state.results.results.session.exprs.insert(
             0,
             vec![crate::workbench::documents::result_document::ExprTrace {
                 text: "V(out)/V(in)".to_string(),
@@ -1744,7 +1748,7 @@ mod tests {
         let restored: AppState = serde_json::from_str(json).expect("legacy session loads");
 
         assert!(
-            restored.ui.results.session.exprs.is_empty(),
+            restored.results.results.session.exprs.is_empty(),
             "legacy project-scoped Waves traces must not be restored into a new session"
         );
     }

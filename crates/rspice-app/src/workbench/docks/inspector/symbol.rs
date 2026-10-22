@@ -28,7 +28,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
         document,
         metadata,
         &ports,
-        &state.ui.symbol.editor,
+        &state.design.symbol.editor,
         SymbolEditCapabilities {
             edit: !state.schematic_edit_read_only() && !state.application_modal_open(),
         },
@@ -38,7 +38,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
 
 fn apply_request(state: &mut AppState, mut request: SymbolInspectorRequest) {
     if request.source != state.symbol_editor_request_source()
-        || request.expected_selection != state.ui.symbol.editor.effective_selection()
+        || request.expected_selection != state.design.symbol.editor.effective_selection()
         || state.application_modal_open()
     {
         return;
@@ -49,7 +49,7 @@ fn apply_request(state: &mut AppState, mut request: SymbolInspectorRequest) {
     for before in request.undo_before {
         state.record_symbol_edit(&before);
     }
-    state.ui.symbol.editor.set_selection(request.selection);
+    state.design.symbol.editor.set_selection(request.selection);
     if request.open_parameter_form {
         crate::workbench::app::open_symbol_parameter_form_dialog(state);
     }
@@ -62,7 +62,7 @@ fn apply_request(state: &mut AppState, mut request: SymbolInspectorRequest) {
             Err(error) => state.prompt(error),
         }
     }
-    state.ui.symbol.editor.inspector = request.session;
+    state.design.symbol.editor.inspector = request.session;
 }
 
 #[cfg(test)]

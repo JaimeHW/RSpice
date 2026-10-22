@@ -88,7 +88,7 @@ pub(crate) fn open_source_search_in_bundle(
         .to_owned();
     let selection_char_range = app
         .state
-        .ui
+        .code
         .code_workspace
         .source_selections
         .get(&(bundle.id(), active_path.clone()))
@@ -96,7 +96,7 @@ pub(crate) fn open_source_search_in_bundle(
         .filter(|(start, end)| start < end);
     if app
         .state
-        .ui
+        .code
         .code_workspace
         .source_search
         .as_ref()
@@ -107,7 +107,7 @@ pub(crate) fn open_source_search_in_bundle(
                 && search.closure_digest == bundle.closure_digest()
         })
     {
-        if let Some(search) = app.state.ui.code_workspace.source_search.as_mut() {
+        if let Some(search) = app.state.code.code_workspace.source_search.as_mut() {
             search.active_path.clone_from(&active_path);
             search.selection_char_range = selection_char_range;
             if search.scope == CodeSourceSearchScope::Selection
@@ -118,12 +118,12 @@ pub(crate) fn open_source_search_in_bundle(
         }
         return Ok(());
     }
-    app.state.ui.code_workspace.source_search = Some(CodeSourceSearchState {
+    app.state.code.code_workspace.source_search = Some(CodeSourceSearchState {
         project_id: app.state.model.workspace.content.project.id(),
         bundle_id: bundle.id(),
         bundle_revision: bundle.revision().get(),
         closure_digest: bundle.closure_digest(),
-        generated_reference_revision: app.state.ui.netlist.revision,
+        generated_reference_revision: app.state.code.netlist.revision,
         generated_reference_digest: ContentDigest::from_bytes(
             Sha256::digest(
                 app.state
@@ -155,10 +155,10 @@ pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), Strin
     match super::active_source_language(
         app.state.workbench.workspace,
         &app.state.model.workspace,
-        app.state.ui.code_workspace.page,
+        app.state.code.code_workspace.page,
     ) {
         None => {
-            app.state.ui.netlist.find.open = true;
+            app.state.code.netlist.find.open = true;
             Ok(())
         }
         Some(ProjectSourceLanguage::VerilogA) => {
@@ -185,7 +185,7 @@ pub(crate) fn open_active_source_search(app: &mut RSpiceApp) -> Result<(), Strin
                 .ok_or_else(|| "The Automation source bundle no longer exists.".to_owned())?;
             let active_path = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .selected_file
@@ -267,7 +267,7 @@ pub(crate) fn source_search_results(
 pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String, String> {
     let search = app
         .state
-        .ui
+        .code
         .code_workspace
         .source_search
         .clone()
@@ -366,7 +366,7 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
             super::automation::invalidate_automation_evidence(app);
         }
     }
-    app.state.ui.code_workspace.source_search = None;
+    app.state.code.code_workspace.source_search = None;
     let message = format!(
         "Replaced {} in {}{}.",
         counted(replacement_count, "match", "matches"),
@@ -413,7 +413,7 @@ fn current_bundle<'a>(
         );
     }
     if search.include_generated_references
-        && (app.state.ui.netlist.revision != search.generated_reference_revision
+        && (app.state.code.netlist.revision != search.generated_reference_revision
             || ContentDigest::from_bytes(
                 Sha256::digest(
                     app.state
@@ -456,31 +456,30 @@ fn search_documents<'a>(
     bundle: &'a ProjectSourceBundle,
     search: &'a CodeSourceSearchState,
 ) -> Result<Vec<SearchDocument<'a>>, String> {
-    let mut documents =
-        bundle_documents(bundle)
-            .filter(|(logical_path, _)| match search.scope {
-                CodeSourceSearchScope::ActiveLanguageProject => true,
-                CodeSourceSearchScope::OpenDocuments => {
-                    crate::state::project_source_paths_equal(logical_path, &search.active_path)
-                        || app.state.ui.code_workspace.source_carets.keys().any(
-                            |(bundle_id, path)| {
-                                *bundle_id == search.bundle_id
-                                    && crate::state::project_source_paths_equal(path, logical_path)
-                            },
-                        )
-                }
-                CodeSourceSearchScope::Selection | CodeSourceSearchScope::CurrentDocument => {
-                    crate::state::project_source_paths_equal(logical_path, &search.active_path)
-                }
-            })
-            .map(|(logical_path, source)| SearchDocument {
-                logical_path,
-                searchable_source: source,
-                complete_source: source,
-                base_byte: 0,
-                editable: true,
-            })
-            .collect::<Vec<_>>();
+    let mut documents = bundle_documents(bundle)
+        .filter(|(logical_path, _)| match search.scope {
+            CodeSourceSearchScope::ActiveLanguageProject => true,
+            CodeSourceSearchScope::OpenDocuments => {
+                crate::state::project_source_paths_equal(logical_path, &search.active_path)
+                    || app.state.code.code_workspace.source_carets.keys().any(
+                        |(bundle_id, path)| {
+                            *bundle_id == search.bundle_id
+                                && crate::state::project_source_paths_equal(path, logical_path)
+                        },
+                    )
+            }
+            CodeSourceSearchScope::Selection | CodeSourceSearchScope::CurrentDocument => {
+                crate::state::project_source_paths_equal(logical_path, &search.active_path)
+            }
+        })
+        .map(|(logical_path, source)| SearchDocument {
+            logical_path,
+            searchable_source: source,
+            complete_source: source,
+            base_byte: 0,
+            editable: true,
+        })
+        .collect::<Vec<_>>();
     if search.include_generated_references
         && search.scope == CodeSourceSearchScope::ActiveLanguageProject
         && !app
@@ -934,18 +933,24 @@ mod tests {
             )
             .unwrap();
         app.state
-            .ui
+            .code
             .code_workspace
             .source_selections
             .insert((bundle_id, root.clone()), (6, 10));
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
         {
-            let search = app.state.ui.code_workspace.source_search.as_mut().unwrap();
+            let search = app
+                .state
+                .code
+                .code_workspace
+                .source_search
+                .as_mut()
+                .unwrap();
             search.scope = CodeSourceSearchScope::Selection;
             search.query = "gain".to_owned();
             search.replacement = "stage".to_owned();
         }
-        let search = app.state.ui.code_workspace.source_search.clone().unwrap();
+        let search = app.state.code.code_workspace.source_search.clone().unwrap();
         let results = source_search_results(&app, &search).unwrap();
         assert_eq!(results.total_matches, 1);
         assert_eq!(results.matches[0].byte_start, 6);
@@ -1001,7 +1006,13 @@ mod tests {
             .unwrap();
 
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, "MODELS/ÉTAGE.VA").unwrap();
-        let search = app.state.ui.code_workspace.source_search.as_mut().unwrap();
+        let search = app
+            .state
+            .code
+            .code_workspace
+            .source_search
+            .as_mut()
+            .unwrap();
         assert_eq!(search.active_path, retained_path);
         search.scope = CodeSourceSearchScope::CurrentDocument;
         search.query = "gain".to_owned();
@@ -1029,11 +1040,17 @@ mod tests {
             .to_owned();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
         {
-            let search = app.state.ui.code_workspace.source_search.as_mut().unwrap();
+            let search = app
+                .state
+                .code
+                .code_workspace
+                .source_search
+                .as_mut()
+                .unwrap();
             search.query = "gain".to_owned();
             search.replacement = "stage_gain".to_owned();
         }
-        let search = app.state.ui.code_workspace.source_search.clone().unwrap();
+        let search = app.state.code.code_workspace.source_search.clone().unwrap();
         let results = source_search_results(&app, &search).unwrap();
         assert!(!results.matches.is_empty());
         commit_source_search_replace(&mut app).unwrap();
@@ -1052,7 +1069,7 @@ mod tests {
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
         let bundle_id = app
             .state
-            .ui
+            .code
             .code_workspace
             .source_search
             .as_ref()
@@ -1096,14 +1113,25 @@ mod tests {
             .unwrap();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
         {
-            let search = app.state.ui.code_workspace.source_search.as_mut().unwrap();
+            let search = app
+                .state
+                .code
+                .code_workspace
+                .source_search
+                .as_mut()
+                .unwrap();
             search.query = "gain".to_owned();
             search.replacement = "stage".to_owned();
             search.include_comments = false;
         }
         let results = source_search_results(
             &app,
-            app.state.ui.code_workspace.source_search.as_ref().unwrap(),
+            app.state
+                .code
+                .code_workspace
+                .source_search
+                .as_ref()
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(results.total_matches, 2);
@@ -1127,7 +1155,7 @@ mod tests {
         let mut app = veriloga_view_app();
         app.state.model.netlist_artifacts.generated_source =
             "XMODEL generated_reference\n".to_owned();
-        app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
+        app.state.code.netlist.revision = app.state.code.netlist.revision.wrapping_add(1);
         let active_path = app
             .state
             .model
@@ -1141,11 +1169,17 @@ mod tests {
             .to_owned();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &active_path).unwrap();
         {
-            let search = app.state.ui.code_workspace.source_search.as_mut().unwrap();
+            let search = app
+                .state
+                .code
+                .code_workspace
+                .source_search
+                .as_mut()
+                .unwrap();
             search.query = "generated_reference".to_owned();
             search.include_generated_references = true;
         }
-        let search = app.state.ui.code_workspace.source_search.clone().unwrap();
+        let search = app.state.code.code_workspace.source_search.clone().unwrap();
         let results = source_search_results(&app, &search).unwrap();
         assert_eq!(results.total_matches, 1);
         assert_eq!(results.read_only_matches, 1);
@@ -1157,7 +1191,7 @@ mod tests {
             .netlist_artifacts
             .generated_source
             .push_str("* changed\n");
-        app.state.ui.netlist.revision = app.state.ui.netlist.revision.wrapping_add(1);
+        app.state.code.netlist.revision = app.state.code.netlist.revision.wrapping_add(1);
         assert!(
             source_search_results(&app, &search)
                 .unwrap_err()
@@ -1188,13 +1222,13 @@ mod tests {
             .unwrap();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
         app.state
-            .ui
+            .code
             .code_workspace
             .source_search
             .as_mut()
             .unwrap()
             .query = "gain".to_owned();
-        let search = app.state.ui.code_workspace.source_search.clone().unwrap();
+        let search = app.state.code.code_workspace.source_search.clone().unwrap();
         let results = source_search_results(&app, &search).unwrap();
         assert_eq!(results.total_matches, 600);
         assert_eq!(results.matches.len(), SOURCE_SEARCH_RESULT_LIMIT);
@@ -1229,13 +1263,13 @@ mod tests {
             .unwrap();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
         app.state
-            .ui
+            .code
             .code_workspace
             .source_search
             .as_mut()
             .unwrap()
             .query = "scale_token".to_owned();
-        let exact = app.state.ui.code_workspace.source_search.clone().unwrap();
+        let exact = app.state.code.code_workspace.source_search.clone().unwrap();
         let exact_results = source_search_results(&app, &exact).unwrap();
         assert_eq!(exact_results.total_matches, SOURCE_SEARCH_STREAM_LIMIT);
         assert!(!exact_results.truncated);
@@ -1252,13 +1286,13 @@ mod tests {
             .unwrap();
         open_source_search(&mut app, ProjectSourceLanguage::VerilogA, &root).unwrap();
         app.state
-            .ui
+            .code
             .code_workspace
             .source_search
             .as_mut()
             .unwrap()
             .query = "scale_token".to_owned();
-        let over = app.state.ui.code_workspace.source_search.clone().unwrap();
+        let over = app.state.code.code_workspace.source_search.clone().unwrap();
         let over_results = source_search_results(&app, &over).unwrap();
         assert_eq!(over_results.total_matches, SOURCE_SEARCH_STREAM_LIMIT);
         assert!(over_results.truncated);
@@ -1268,18 +1302,24 @@ mod tests {
     #[test]
     fn active_search_command_routes_to_the_visible_code_document_kind() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page =
+        app.state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
         open_active_source_search(&mut app).unwrap();
-        let search = app.state.ui.code_workspace.source_search.as_ref().unwrap();
+        let search = app
+            .state
+            .code
+            .code_workspace
+            .source_search
+            .as_ref()
+            .unwrap();
         assert_eq!(search.language, ProjectSourceLanguage::RSpiceAutomation);
         assert!(!search.active_path.is_empty());
 
-        app.state.ui.code_workspace.source_search = None;
-        app.state.ui.code_workspace.page =
+        app.state.code.code_workspace.source_search = None;
+        app.state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         open_active_source_search(&mut app).unwrap();
-        assert!(app.state.ui.netlist.find.open);
-        assert!(app.state.ui.code_workspace.source_search.is_none());
+        assert!(app.state.code.netlist.find.open);
+        assert!(app.state.code.code_workspace.source_search.is_none());
     }
 }

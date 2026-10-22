@@ -21,4 +21,8 @@ pub(crate) struct SettingsState {
     /// Browser-only persist-before-live policy candidate. Native publication
     /// completes in the initiating frame, while browser storage is async.
     pub(crate) shortcut_policy_candidate: Option<crate::state::shortcuts::ShortcutPreferences>,
+
+    /// Browser-only opt-in for egui's Web Speech interaction feedback.
+    /// Native assistive technology is negotiated automatically by AccessKit.
+    pub browser_spoken_feedback: bool,
 }

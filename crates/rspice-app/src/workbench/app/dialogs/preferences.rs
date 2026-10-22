@@ -947,7 +947,7 @@ mod tests {
         let _ = take_pickers_opened();
 
         let mut source = test_app();
-        source.state.ui.autosave_minutes = 10;
+        source.state.platform.autosave_minutes = 10;
         script_next_choice(ScriptedChoice::Chose(path.clone()));
         source.execute_preference_page_actions(
             &ctx,
@@ -973,7 +973,7 @@ mod tests {
             },
         );
         target.poll_settings_file_transfer(&ctx);
-        assert_eq!(target.state.ui.autosave_minutes, 10);
+        assert_eq!(target.state.platform.autosave_minutes, 10);
         assert_eq!(
             target.state.prompt_text(),
             Some("Settings imported from rspice-settings.json.")
@@ -1113,13 +1113,13 @@ mod tests {
             .navigate(preferences_route(), RouteTransitionSource::User)
             .unwrap();
         app.state.settings.preferences_open = true;
-        app.state.ui.theme.mode = crate::ui::Mode::Light;
+        app.state.workbench.theme.mode = crate::ui::Mode::Light;
         set_pending_restore(&ctx, Some(PreferenceCategory::Appearance));
 
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             app.render_preferences_dialog(ctx);
         });
-        assert_eq!(app.state.ui.theme.mode, crate::ui::Mode::Light);
+        assert_eq!(app.state.workbench.theme.mode, crate::ui::Mode::Light);
         assert!(
             output
                 .platform_output
@@ -1146,7 +1146,7 @@ mod tests {
             |ctx| app.render_preferences_dialog(ctx),
         );
         assert!(pending_restore(&ctx).is_none());
-        assert_eq!(app.state.ui.theme.mode, crate::ui::Mode::Light);
+        assert_eq!(app.state.workbench.theme.mode, crate::ui::Mode::Light);
         assert!(
             app.state.settings.preferences_open,
             "Escape answers the question; it does not also close Preferences"

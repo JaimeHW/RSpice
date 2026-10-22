@@ -104,17 +104,17 @@ pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
             (**receipt.compilation.report()).clone(),
         )))
         .expect("the channel is open");
-    app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
         token: receipt.compilation.token(),
         receiver: Arc::new(Mutex::new(receiver)),
     });
     code_workspace::poll_veriloga_compile(app);
     assert!(
-        app.state.ui.code_workspace.veriloga.receipt.is_some(),
+        app.state.code.code_workspace.veriloga.receipt.is_some(),
         "the compile was published"
     );
     code_workspace::refresh_symbol_standing(
-        &mut app.state.ui.code_workspace.veriloga,
+        &mut app.state.code.code_workspace.veriloga,
         &app.state.model.library_manager,
         &app.state.model.workspace.content.active_view,
         app.state.model.workspace.content.active_view_type(),
@@ -389,7 +389,7 @@ fn a_continuous_vector_is_one_bus_pin_whose_conductors_are_the_modules_terminals
     assert_eq!(ports[0].domain, PortDomain::Continuous);
     let abi = &app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .receipt
@@ -559,7 +559,7 @@ fn a_discrete_vector_is_one_logic_pin_on_one_terminal() {
         .sum::<usize>();
     let lanes = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .receipt
@@ -623,7 +623,7 @@ fn a_module_that_differs_from_its_cells_schematic_is_refused_and_writes_nothing(
 
     let receipt = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .receipt
@@ -703,7 +703,7 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
     assert_eq!(symbol(&app, &reference), drawn, "a compile leaves it alone");
     let Some(VerilogACellSymbol::Drifted(drift)) = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .symbol_standing
@@ -715,7 +715,7 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
     assert_eq!(drift.missing, ["ctl"]);
     assert_eq!(drift.extra, ["n"]);
     assert_eq!(
-        code_workspace::symbol_drift_text(&drift, app.state.ui.messages()),
+        code_workspace::symbol_drift_text(&drift, app.state.workbench.messages()),
         "1 pin missing, 1 extra"
     );
     assert!(!app.state.can_undo_project_design());
@@ -811,7 +811,7 @@ fn a_read_only_library_is_not_written_and_the_compile_says_so() {
     assert!(view(&app, &reference, GENERATED_SYMBOL_VIEW).is_none());
     assert!(matches!(
         app.state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .receipt

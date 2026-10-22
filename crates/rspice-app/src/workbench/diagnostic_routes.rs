@@ -109,7 +109,7 @@ fn open_code_document(
         }
         ProjectSourceOwner::CodeWorkspace { language } => {
             Command::OpenWorkspace(Workspace::Netlist).execute(app);
-            app.state.ui.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
+            app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
             *language
         }
     };
@@ -131,7 +131,7 @@ fn open_code_document(
     }
     if code_workspace::select_source_document(
         &app.state.model.workspace,
-        &mut app.state.ui.code_workspace,
+        &mut app.state.code.code_workspace,
         language,
         logical_path,
     )

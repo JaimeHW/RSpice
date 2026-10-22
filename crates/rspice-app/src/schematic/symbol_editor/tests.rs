@@ -77,8 +77,8 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
 #[test]
 fn symbol_canvas_accessibility_label_reports_editing_contract() {
     let mut state = AppState::default();
-    state.ui.symbol.editor.tool = SymbolTool::Circle;
-    state.ui.symbol.editor.select_shape(0);
+    state.design.symbol.editor.tool = SymbolTool::Circle;
+    state.design.symbol.editor.select_shape(0);
     let document = SymbolDocument {
         pins: vec![SymbolPin::new(
             "OUT",

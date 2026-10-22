@@ -1077,7 +1077,7 @@ fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
 #[cfg(not(target_arch = "wasm32"))]
 fn source_editor_app() -> RSpiceApp {
     let mut app = title_test_app();
-    app.state.ui.active_source_editor = Some(
+    app.state.workbench.active_source_editor = Some(
         crate::workbench::documents::text_editor_commands::ActiveSourceEditor {
             id: Id::new("menu-pin-source"),
             editable: true,
@@ -1234,7 +1234,7 @@ fn switching_rows_are_checked_while_their_state_is_on() {
     for on in [true, false] {
         app.state.workbench.split_with_results = on;
         app.state.workbench.full_screen_presentation = on;
-        app.state.ui.results.session.linked_cursors = on;
+        app.state.results.results.session.linked_cursors = on;
         for command in [
             Command::ToggleResultsSplit,
             Command::ToggleFullScreen,

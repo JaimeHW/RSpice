@@ -106,7 +106,7 @@ enum Draft {
 
 fn draft(state: &AppState) -> Draft {
     let form = &state.code.new_veriloga_device;
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     if !writable_libraries(&state.model.library_manager).contains(&form.library) {
         return Draft::Refused(messages.text(MessageId::VerilogADeviceNoLibrary));
     }
@@ -310,7 +310,7 @@ impl RSpiceApp {
         if !self.state.code.new_veriloga_device.open {
             return;
         }
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let libraries = writable_libraries(&self.state.model.library_manager);
         let current = draft(&self.state);
         let form = &self.state.code.new_veriloga_device;
@@ -399,7 +399,7 @@ impl RSpiceApp {
             Draft::Empty => {
                 return Err(self
                     .state
-                    .ui
+                    .workbench
                     .messages()
                     .text(MessageId::VerilogADeviceCellInvalid));
             }
@@ -434,7 +434,7 @@ impl RSpiceApp {
         let form = std::mem::take(&mut self.state.code.new_veriloga_device);
         // The starter compile above is not the reader's: the device is offered
         // for placement after the first compile they start leaves it a port.
-        let handoffs = &mut self.state.ui.code_workspace.veriloga.placement_handoffs;
+        let handoffs = &mut self.state.code.code_workspace.veriloga.placement_handoffs;
         handoffs.retain(|handoff| handoff.view != reference);
         handoffs.push(VerilogAPlacementHandoff {
             view: reference.clone(),
@@ -448,7 +448,7 @@ impl RSpiceApp {
         self.state
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
-        self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
+        self.state.code.code_workspace.veriloga.receipt = Some(receipt);
         self.state.record(
             LogSeverity::Info,
             LogSource::Studio,

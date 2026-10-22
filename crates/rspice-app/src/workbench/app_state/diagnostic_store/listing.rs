@@ -726,12 +726,12 @@ fn segments<'a>(
     // segment, so the page says "No findings" rather than "Nothing has been
     // checked" — or, once the buffer has moved past it, that the finding of
     // nothing is out of date.
-    let netlist = state.ui.netlist.diagnostics.as_ref();
-    let validated = state.ui.netlist.validated_revision();
+    let netlist = state.code.netlist.diagnostics.as_ref();
+    let validated = state.code.netlist.validated_revision();
     if !netlist.is_empty() || validated.is_some() {
         segments.push(Segment::Netlist {
             collection: netlist,
-            revision: state.ui.netlist.revision,
+            revision: state.code.netlist.revision,
             validated,
         });
     }
@@ -823,7 +823,7 @@ fn code_collections(
     &CodeDiagnosticCollection,
     bool,
 )> {
-    let code = &state.ui.code_workspace;
+    let code = &state.code.code_workspace;
     let project = state.model.workspace.content.project.id();
     let sources = &state.model.workspace.content.project_sources;
     let veriloga_current =
@@ -1183,7 +1183,7 @@ mod tests {
             .canonical
             .mark_currentness(DiagnosticCurrentness::StaleSource);
         let standing = Diagnostic::current("rspice.test", "T-ERROR", NetlistSeverity::Error, "c");
-        state.ui.netlist.diagnostics = Arc::new(
+        state.code.netlist.diagnostics = Arc::new(
             NetlistDiagnosticCollection::try_new(vec![waived, stale, standing], "")
                 .expect("the fixture collection is well formed"),
         );
@@ -1208,7 +1208,7 @@ mod tests {
             .mark_currentness(DiagnosticCurrentness::StaleSource);
         let mut waived_code = code("T-WAIVED-CODE");
         waived_code.canonical.suppression = Some(waiver());
-        state.ui.code_workspace.automation.diagnostics = Arc::new(
+        state.code.code_workspace.automation.diagnostics = Arc::new(
             CodeDiagnosticCollection::try_new(vec![stale_code, waived_code, code("T-CODE")])
                 .expect("the fixture collection is well formed"),
         );
@@ -1285,8 +1285,8 @@ mod tests {
 
         let mut state = open_state();
         let finding = Diagnostic::error("unknown model nchh").with_line(Some(0));
-        state.ui.netlist.revision = finding.canonical.revision;
-        state.ui.netlist.diagnostics = Arc::new(
+        state.code.netlist.revision = finding.canonical.revision;
+        state.code.netlist.diagnostics = Arc::new(
             NetlistDiagnosticCollection::try_new(vec![finding], "nchh\n")
                 .expect("the fixture collection is well formed"),
         );
@@ -1295,7 +1295,7 @@ mod tests {
         assert!(listed.row(0).expect("listed").current());
 
         // An edit made with the editor off screen: nothing re-parsed.
-        state.ui.netlist.revision = state.ui.netlist.revision.wrapping_add(1);
+        state.code.netlist.revision = state.code.netlist.revision.wrapping_add(1);
 
         let listed = listing(&state);
         assert_eq!(listed.counts().errors, 0);
@@ -1346,7 +1346,7 @@ mod tests {
             .expect("a project holds its automation bundle");
         let (bundle_id, root) = (bundle.id(), bundle.root().logical_path().to_owned());
         let root_content = bundle.root().content().to_owned();
-        state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
+        state.code.code_workspace.automation.receipt = Some(AutomationValidationReceipt {
             token: SourceOperationToken {
                 project_id: state.model.workspace.content.project.id(),
                 revision: bundle.revision().get(),
@@ -1379,13 +1379,13 @@ mod tests {
         let mut state = open_state();
         assert_eq!(*listing(&state).empty_reason(), EmptyReason::NothingRan);
 
-        let revision = state.ui.netlist.revision;
-        state.ui.netlist.mark_validated_for_test(revision);
+        let revision = state.code.netlist.revision;
+        state.code.netlist.mark_validated_for_test(revision);
         let listed = listing(&state);
         assert_eq!(listed.len(), 0);
         assert_eq!(*listed.empty_reason(), EmptyReason::NoFindings);
 
-        state.ui.netlist.revision = revision.wrapping_add(1);
+        state.code.netlist.revision = revision.wrapping_add(1);
         assert_eq!(*listing(&state).empty_reason(), EmptyReason::OutOfDate);
         assert_eq!(
             *listing_in_pass(&state, 5).empty_reason(),

@@ -100,7 +100,7 @@ impl AppState {
             return false;
         }
         // The clipboard changes only once the cut has landed.
-        state.ui.schematic_clipboard = copy;
+        state.design.schematic_clipboard = copy;
         state.sync_active_schematic_to_workspace();
 
         state.prompt(match open_nets {
@@ -162,7 +162,7 @@ impl AppState {
         // on exactly the designs a reader is trying to repair. It copies anyway and
         // says the connections were not carried.
         let mut unresolved_nets = false;
-        let kept = if state.ui.duplicate_external_nets
+        let kept = if state.design.duplicate_external_nets
             == DuplicateExternalNets::PreserveNamedNetAttachment
         {
             match named_external_attachments(state, &copy) {
@@ -192,10 +192,10 @@ impl AppState {
     /// Float the app's clipboard at `anchor`, whichever cell view it was
     /// copied from, until a click places it. Returns whether anything floats.
     pub(crate) fn paste_schematic_clipboard_at(&mut self, anchor: Point) -> Result<bool, String> {
-        if self.schematic_edit_read_only() || !self.ui.schematic_clipboard.has_content() {
+        if self.schematic_edit_read_only() || !self.design.schematic_clipboard.has_content() {
             return Ok(false);
         }
-        let clipboard = self.ui.schematic_clipboard.clone();
+        let clipboard = self.design.schematic_clipboard.clone();
         self.float_schematic_objects(&clipboard, anchor, FloatingPasteOrigin::Paste)?;
         Ok(true)
     }

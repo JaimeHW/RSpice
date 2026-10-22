@@ -63,7 +63,7 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
         return None;
     }
     match app.state.workbench.workspace {
-        Workspace::Netlist => match app.state.ui.code_workspace.page {
+        Workspace::Netlist => match app.state.code.code_workspace.page {
             CodeWorkspacePage::Netlist => resolve_netlist(app),
             CodeWorkspacePage::Automation => {
                 resolve_project_source(app, ProjectSourceLanguage::RSpiceAutomation)
@@ -92,7 +92,7 @@ pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandCon
     if app.state.model.safe_mode.project_read_only()
         || !app.state.project_lifecycle.is_open()
         || app.state.model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA
-        || app.state.ui.code_workspace.veriloga.pending.is_some()
+        || app.state.code.code_workspace.veriloga.pending.is_some()
     {
         return None;
     }
@@ -121,7 +121,7 @@ pub(crate) fn veriloga_compile_refusal(app: &RSpiceApp) -> &'static str {
         != crate::state::ViewType::VerilogA
     {
         "open a Verilog-A cell view in Design"
-    } else if app.state.ui.code_workspace.veriloga.pending.is_some() {
+    } else if app.state.code.code_workspace.veriloga.pending.is_some() {
         "a Verilog-A compile is already running"
     } else {
         "the Verilog-A cell view has no source to compile"
@@ -135,11 +135,11 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
 
     let state = &app.state;
     let project_id = state.model.workspace.content.project.id();
-    let active = state.ui.netlist.active_document;
+    let active = state.code.netlist.active_document;
     if let Some(dependency) = active_dependency(state) {
         let source = dependency.source()?;
         let owned = active_dependency_is_owned(state);
-        let root = state.ui.netlist.active_dependency_root?;
+        let root = state.code.netlist.active_dependency_root?;
         if root != active || state.model.simulation.source.netlist_content != source {
             return None;
         }
@@ -147,7 +147,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             ActiveNetlistDocument::Generated => {
                 state.model.netlist_artifacts.generated_document.as_ref()
             }
-            ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
+            ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
             ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
         }?;
         let owned_descriptor = owned.then(|| {
@@ -208,11 +208,11 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     "generated.sp".to_owned(),
                     document.revision().get(),
                     document.source(),
-                    !state.ui.netlist.generated_history.is_empty(),
+                    !state.code.netlist.generated_history.is_empty(),
                 )
             }
             ActiveNetlistDocument::OwnedSource => {
-                let document = state.ui.netlist.owned_document.as_ref()?;
+                let document = state.code.netlist.owned_document.as_ref()?;
                 let descriptor = state.model.workspace.content.netlist_descriptor.as_ref()?;
                 let canonical = state.model.workspace.content.netlist_document.as_ref()?;
                 if state.model.workspace.content.netlist_source.as_deref()
@@ -236,11 +236,11 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
             }
             ActiveNetlistDocument::GeneratedDiff => {
                 let document = state.model.netlist_artifacts.generated_document.as_ref()?;
-                if state.ui.netlist.generated_diff_source.is_empty() {
+                if state.code.netlist.generated_diff_source.is_empty() {
                     return None;
                 }
                 if state.model.simulation.source.netlist_content
-                    != state.ui.netlist.generated_diff_source
+                    != state.code.netlist.generated_diff_source
                 {
                     return None;
                 }
@@ -250,7 +250,7 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
                     format!("{}:comparison", document.id()),
                     "generated.diff".to_owned(),
                     document.revision().get(),
-                    state.ui.netlist.generated_diff_source.as_str(),
+                    state.code.netlist.generated_diff_source.as_str(),
                     false,
                 )
             }
@@ -357,7 +357,13 @@ fn resolve_project_source(
     let selected_path = match language {
         ProjectSourceLanguage::VerilogA => selected_veriloga.as_ref()?.active_path().to_owned(),
         ProjectSourceLanguage::RSpiceAutomation => {
-            match state.ui.code_workspace.automation.selected_file.as_deref() {
+            match state
+                .code
+                .code_workspace
+                .automation
+                .selected_file
+                .as_deref()
+            {
                 Some(path) if bundle.contains_file(path) => path.to_owned(),
                 Some(_) => return None,
                 None => bundle.root().logical_path().to_owned(),
@@ -376,9 +382,9 @@ fn resolve_project_source(
         CodeDocumentOwnership::ProjectOwned
     };
     let busy = match language {
-        ProjectSourceLanguage::VerilogA => state.ui.code_workspace.veriloga.pending.is_some(),
+        ProjectSourceLanguage::VerilogA => state.code.code_workspace.veriloga.pending.is_some(),
         ProjectSourceLanguage::RSpiceAutomation => {
-            let automation = &state.ui.code_workspace.automation;
+            let automation = &state.code.code_workspace.automation;
             automation.pending_runtime_validation.is_some()
                 || automation.runtime_execution.is_some()
                 || automation.execution.is_active()

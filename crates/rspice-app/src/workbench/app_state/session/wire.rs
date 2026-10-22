@@ -1,7 +1,7 @@
 //! What a session keeps of the workbench and of the document engines'
 //! session state.
 //!
-//! [`WorkbenchState`] and [`UiSessionState`] hold runtime state beside what a
+//! [`WorkbenchState`] and the feature slots hold runtime state beside what a
 //! session keeps. The kept part of each is declared here, field for field,
 //! with the names, serde attributes and order sessions have always been
 //! written with. A saved session is read back by those names, so a field that
@@ -21,12 +21,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
 use crate::ui::Theme;
+use crate::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
+use crate::workbench::app_state::AppState;
 use crate::workbench::documents::model_editor::ModelEditorRecoveryDraft;
-use crate::workbench::lifecycle::session::{
-    SelectionBulkFilterSession, normalize_autosave_minutes,
-};
+use crate::workbench::lifecycle::session::normalize_autosave_minutes;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
 use crate::workbench::preferences::UserPreferences;
+use crate::workbench::slots::{DesignState, PlatformState, ResultsState, SettingsState};
 use crate::workbench::state::{
     ConsolePage, DesignPanel, LibraryCellviewPage, ModelsWorkbenchViewState,
     PdkTechnologyAuthoringRecovery, ProjectPage, SimulationPage, SpecialistToolBrowserState,
@@ -34,10 +35,12 @@ use crate::workbench::state::{
     WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
     default_console_height, default_inspector_width, default_navigator_width,
 };
-use crate::workbench::{SurfaceNavigation, UiSessionState, WorkspacePreset};
+use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 
-/// Serialized subset of [`UiSessionState`]. Responsive layout is persisted by
-/// the workbench wire; transient document interaction signals are not.
+/// What a session keeps of the document engines' session state, which the
+/// workbench and the design, results, platform and settings slots hold.
+/// Responsive layout is persisted by the workbench wire; transient document
+/// interaction signals are not.
 ///
 /// The serde name is the one sessions were first written under, so a reader
 /// that checks struct names reads them.
@@ -104,26 +107,37 @@ fn default_true() -> bool {
 }
 
 impl Default for UiSessionWire {
+    /// What a session without this part reads as: a fresh session, every
+    /// owner at its default.
     fn default() -> Self {
-        Self::capture(&UiSessionState::new(), &UserPreferences::default())
+        Self::capture_owners(
+            &WorkbenchState::default(),
+            &PlatformState::default(),
+            &SettingsState::default(),
+            &DesignState::default(),
+            &ResultsState::default(),
+            &UserPreferences::default(),
+        )
     }
 }
 
-/// A test that round-trips only the session's own fields writes default
-/// preferences beside them.
+/// A test that round-trips the session's own fields captures them from a
+/// whole state.
 #[cfg(test)]
-impl From<&UiSessionState> for UiSessionWire {
-    fn from(session: &UiSessionState) -> Self {
-        Self::capture(session, &UserPreferences::default())
+impl From<&AppState> for UiSessionWire {
+    fn from(state: &AppState) -> Self {
+        Self::capture(state)
     }
 }
 
-/// A test that round-trips only the session's own fields leaves the
-/// preferences the wire carries unread.
+/// A test that round-trips the session's own fields restores them onto a
+/// default state.
 #[cfg(test)]
-impl From<UiSessionWire> for UiSessionState {
+impl From<UiSessionWire> for AppState {
     fn from(ser: UiSessionWire) -> Self {
-        ser.restore().0
+        let mut state = AppState::default();
+        ser.scatter(&mut state);
+        state
     }
 }
 
@@ -131,35 +145,50 @@ impl UiSessionWire {
     /// The kept part of the document engines' session, with the reader's
     /// preferences in the place sessions have always written them, though the
     /// model holds them now.
-    pub(in crate::workbench) fn capture(
-        session: &UiSessionState,
+    pub(in crate::workbench) fn capture(state: &AppState) -> Self {
+        Self::capture_owners(
+            &state.workbench,
+            &state.platform,
+            &state.settings,
+            &state.design,
+            &state.results,
+            &state.model.preferences,
+        )
+    }
+
+    fn capture_owners(
+        workbench: &WorkbenchState,
+        platform: &PlatformState,
+        settings: &SettingsState,
+        design: &DesignState,
+        results: &ResultsState,
         preferences: &UserPreferences,
     ) -> Self {
         Self {
-            theme: session.theme,
-            show_grid: session.grid.visible(),
-            grid_style: Some(session.grid),
-            grid_restore_style: Some(if session.grid_restore_style.visible() {
-                session.grid_restore_style
-            } else if session.grid.visible() {
-                session.grid
+            theme: workbench.theme,
+            show_grid: design.grid.visible(),
+            grid_style: Some(design.grid),
+            grid_restore_style: Some(if design.grid_restore_style.visible() {
+                design.grid_restore_style
+            } else if design.grid.visible() {
+                design.grid
             } else {
                 GridStyle::Dots
             }),
-            schematic_selection_filter: session.schematic_selection_filter,
-            schematic_bulk_edit_filters: session.schematic_bulk_edit_filters.clone(),
-            schematic_visibility: session.schematic_visibility,
-            drawing_sheet_layers: session.drawing_sheet_layers,
-            schematic_snap: session.schematic_snap.clone(),
-            schematic_routing_mode: Some(session.schematic_routing_mode),
-            duplicate_external_nets: session.duplicate_external_nets,
-            engineering_table_views: session.engineering_table_views.clone(),
-            autosave_minutes: normalize_autosave_minutes(session.autosave_minutes),
+            schematic_selection_filter: design.schematic_selection_filter,
+            schematic_bulk_edit_filters: design.schematic_bulk_edit_filters.clone(),
+            schematic_visibility: design.schematic_visibility,
+            drawing_sheet_layers: design.drawing_sheet_layers,
+            schematic_snap: design.schematic_snap.clone(),
+            schematic_routing_mode: Some(design.schematic_routing_mode),
+            duplicate_external_nets: design.duplicate_external_nets,
+            engineering_table_views: design.engineering_table_views.clone(),
+            autosave_minutes: normalize_autosave_minutes(platform.autosave_minutes),
             preferences: preferences.clone(),
-            browser_spoken_feedback: session.browser_spoken_feedback,
-            text_locale: session.text_locale,
-            result_viewer: session.results.session.viewer,
-            eye_timebase: session
+            browser_spoken_feedback: settings.browser_spoken_feedback,
+            text_locale: workbench.text_locale,
+            result_viewer: results.results.session.viewer,
+            eye_timebase: results
                 .results
                 .session
                 .eye_timebase
@@ -170,9 +199,10 @@ impl UiSessionWire {
         }
     }
 
-    /// The document engines' session this wire restores, and the preferences
-    /// it carries for the model.
-    pub(in crate::workbench) fn restore(self) -> (UiSessionState, UserPreferences) {
+    /// Restore what the session kept onto the owners in `state`, and the
+    /// preferences it carries onto the model. Everything else the owners
+    /// hold keeps what `state` holds.
+    pub(in crate::workbench) fn scatter(self, state: &mut AppState) {
         let ser = self;
         let grid = ser.grid_style.unwrap_or(if ser.show_grid {
             GridStyle::Dots
@@ -200,30 +230,27 @@ impl UiSessionWire {
                     }
                     SchematicWireRoutingStyle::FreeAngle => crate::state::WireRoutingMode::Diagonal,
                 });
-        let mut session = UiSessionState {
-            theme: ser.theme,
-            grid,
-            grid_restore_style,
-            schematic_selection_filter: ser.schematic_selection_filter,
-            schematic_bulk_edit_filters: ser.schematic_bulk_edit_filters,
-            schematic_visibility: ser.schematic_visibility,
-            drawing_sheet_layers: ser.drawing_sheet_layers,
-            schematic_snap: ser.schematic_snap,
-            schematic_routing_mode,
-            duplicate_external_nets: ser.duplicate_external_nets,
-            engineering_table_views: ser.engineering_table_views,
-            autosave_minutes: normalize_autosave_minutes(ser.autosave_minutes),
-            browser_spoken_feedback: ser.browser_spoken_feedback,
-            text_locale: ser.text_locale,
-            ..UiSessionState::new()
-        };
-        session.results.session.viewer = ser.result_viewer;
-        session.results.session.eye_timebase = ser
+        state.workbench.theme = ser.theme;
+        state.design.grid = grid;
+        state.design.grid_restore_style = grid_restore_style;
+        state.design.schematic_selection_filter = ser.schematic_selection_filter;
+        state.design.schematic_bulk_edit_filters = ser.schematic_bulk_edit_filters;
+        state.design.schematic_visibility = ser.schematic_visibility;
+        state.design.drawing_sheet_layers = ser.drawing_sheet_layers;
+        state.design.schematic_snap = ser.schematic_snap;
+        state.design.schematic_routing_mode = schematic_routing_mode;
+        state.design.duplicate_external_nets = ser.duplicate_external_nets;
+        state.design.engineering_table_views = ser.engineering_table_views;
+        state.platform.autosave_minutes = normalize_autosave_minutes(ser.autosave_minutes);
+        state.settings.browser_spoken_feedback = ser.browser_spoken_feedback;
+        state.workbench.text_locale = ser.text_locale;
+        state.results.results.session.viewer = ser.result_viewer;
+        state.results.results.session.eye_timebase = ser
             .eye_timebase
             .into_iter()
             .filter(|(key, _)| key.is_persistable())
             .collect();
-        (session, preferences)
+        state.model.preferences = Box::new(preferences);
     }
 }
 
@@ -548,6 +575,16 @@ impl<'a> WorkbenchWireRef<'a> {
             interaction: _,
             confirmation_dialog: _,
             project_review_dialog: _,
+            // The UI session wire keeps the theme and the text locale; the
+            // rest are runtime-only.
+            theme: _,
+            number_locale: _,
+            text_locale: _,
+            toasts: _,
+            clipboard_text_request: _,
+            active_source_editor: _,
+            source_editor_request: _,
+            full_screen_request: _,
         } = state;
         Self {
             workspace,
@@ -830,6 +867,16 @@ impl WorkbenchWire {
             interaction: _,
             confirmation_dialog: _,
             project_review_dialog: _,
+            // The UI session wire restores the theme and the text locale; the
+            // rest are runtime-only.
+            theme: _,
+            number_locale: _,
+            text_locale: _,
+            toasts: _,
+            clipboard_text_request: _,
+            active_source_editor: _,
+            source_editor_request: _,
+            full_screen_request: _,
         } = state;
         *workspace = self.workspace;
         *window_session = self.window_session;
@@ -888,45 +935,45 @@ mod ui_session_tests {
         SchematicAnnotationVisibility, SchematicBackAnnotationContent, SchematicNetHighlighting,
         SchematicParameterLabelVisibility, SchematicReviewMarkerVisibility,
     };
-    use crate::workbench::{
+    use crate::workbench::app::dialogs::selection::bulk_filter::{
         SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind,
     };
 
     #[test]
     fn schematic_selection_filter_round_trips_with_the_ui_session() {
-        let mut session = UiSessionState::new();
-        session.schematic_selection_filter.instances = false;
-        session.schematic_selection_filter.annotations = false;
+        let mut session = AppState::default();
+        session.design.schematic_selection_filter.instances = false;
+        session.design.schematic_selection_filter.annotations = false;
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
         let wire: UiSessionWire = serde_json::from_value(serialized).expect("deserialize session");
-        let restored = UiSessionState::from(wire);
+        let restored = AppState::from(wire);
 
         assert_eq!(
-            restored.schematic_selection_filter,
-            session.schematic_selection_filter
+            restored.design.schematic_selection_filter,
+            session.design.schematic_selection_filter
         );
     }
 
     #[test]
     fn ui_text_locale_round_trips_and_legacy_sessions_default_to_english() {
-        let mut session = UiSessionState::new();
-        session.text_locale = crate::workbench::UiTextLocale::PseudoExpanded;
+        let mut session = AppState::default();
+        session.workbench.text_locale = crate::workbench::UiTextLocale::PseudoExpanded;
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serialized).expect("deserialize session"),
         );
         assert_eq!(
-            restored.text_locale,
+            restored.workbench.text_locale,
             crate::workbench::UiTextLocale::PseudoExpanded
         );
 
-        let legacy = UiSessionState::from(
+        let legacy = AppState::from(
             serde_json::from_value::<UiSessionWire>(serde_json::json!({})).expect("legacy session"),
         );
         assert_eq!(
-            legacy.text_locale,
+            legacy.workbench.text_locale,
             crate::workbench::UiTextLocale::EnglishUnitedStates
         );
     }
@@ -935,20 +982,20 @@ mod ui_session_tests {
     fn legacy_ui_session_defaults_to_all_selection_classes() {
         let wire: UiSessionWire =
             serde_json::from_value(serde_json::json!({})).expect("legacy session without a filter");
-        let restored = UiSessionState::from(wire);
+        let restored = AppState::from(wire);
 
         assert!(
-            restored.schematic_selection_filter.instances
-                && restored.schematic_selection_filter.wires
-                && restored.schematic_selection_filter.labels
-                && restored.schematic_selection_filter.annotations
+            restored.design.schematic_selection_filter.instances
+                && restored.design.schematic_selection_filter.wires
+                && restored.design.schematic_selection_filter.labels
+                && restored.design.schematic_selection_filter.annotations
         );
     }
 
     #[test]
     fn schematic_bulk_edit_filters_round_trip_with_the_ui_session() {
-        let mut session = UiSessionState::new();
-        session.schematic_bulk_edit_filters.active = SelectionBulkFilter {
+        let mut session = AppState::default();
+        session.design.schematic_bulk_edit_filters.active = SelectionBulkFilter {
             query: "OPA*".to_owned(),
             object_kind: SelectionBulkObjectKind::InstancesAndParameters,
             hierarchy_scope: SelectionBulkHierarchyScope::CompleteProject,
@@ -956,29 +1003,31 @@ mod ui_session_tests {
             current_property: "section=tt".to_owned(),
         };
         session
+            .design
             .schematic_bulk_edit_filters
             .save_active("TT amplifiers")
             .expect("save filter");
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serialized).expect("deserialize session"),
         );
 
         assert_eq!(
-            restored.schematic_bulk_edit_filters,
-            session.schematic_bulk_edit_filters
+            restored.design.schematic_bulk_edit_filters,
+            session.design.schematic_bulk_edit_filters
         );
     }
 
     #[test]
     fn personal_engineering_table_views_round_trip_with_the_ui_session() {
-        let mut session = UiSessionState::new();
+        let mut session = AppState::default();
         let dataset =
             crate::state::engineering_table::active_schematic_dataset(&Default::default());
         let view = crate::state::engineering_table::EngineeringTableView::for_dataset(&dataset);
         session
+            .design
             .engineering_table_views
             .save(
                 "My device view",
@@ -991,32 +1040,32 @@ mod ui_session_tests {
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serialized).expect("deserialize session"),
         );
 
         assert_eq!(
-            restored.engineering_table_views,
-            session.engineering_table_views
+            restored.design.engineering_table_views,
+            session.design.engineering_table_views
         );
     }
 
     #[test]
     fn legacy_ui_session_defaults_bulk_edit_filters_without_project_mutation() {
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serde_json::json!({}))
                 .expect("legacy session without bulk filters"),
         );
         assert_eq!(
-            restored.schematic_bulk_edit_filters,
+            restored.design.schematic_bulk_edit_filters,
             SelectionBulkFilterSession::default()
         );
     }
 
     #[test]
     fn schematic_visibility_policy_round_trips_with_the_ui_session() {
-        let mut session = UiSessionState::new();
-        session.schematic_visibility = SchematicVisibilityPolicy {
+        let mut session = AppState::default();
+        session.design.schematic_visibility = SchematicVisibilityPolicy {
             annotations: SchematicAnnotationVisibility::ViolationsOnly,
             back_annotation: SchematicBackAnnotationContent::VoltagesCurrentsAndPower,
             parameter_labels: SchematicParameterLabelVisibility::Hidden,
@@ -1027,11 +1076,14 @@ mod ui_session_tests {
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serialized).expect("deserialize session"),
         );
 
-        assert_eq!(restored.schematic_visibility, session.schematic_visibility);
+        assert_eq!(
+            restored.design.schematic_visibility,
+            session.design.schematic_visibility
+        );
     }
 
     /// Earlier builds saved a hierarchy-context choice with the policy (C-13,
@@ -1050,13 +1102,13 @@ mod ui_session_tests {
                 "review_markers": "all"
             }
         });
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(legacy)
                 .expect("a session carrying the retired hierarchy choice loads"),
         );
 
         assert_eq!(
-            restored.schematic_visibility,
+            restored.design.schematic_visibility,
             SchematicVisibilityPolicy {
                 annotations: SchematicAnnotationVisibility::ViolationsOnly,
                 back_annotation: SchematicBackAnnotationContent::VoltagesOnly,
@@ -1074,8 +1126,8 @@ mod ui_session_tests {
     /// written then still loads, keeping the mark choice.
     #[test]
     fn a_ron_session_saved_with_retired_drawing_sheet_layers_still_loads() {
-        let session = UiSessionState::new();
-        let today = ron::to_string(&session.drawing_sheet_layers).unwrap();
+        let session = AppState::default();
+        let today = ron::to_string(&session.design.drawing_sheet_layers).unwrap();
         let written = ron::to_string(&UiSessionWire::from(&session)).unwrap();
         assert!(written.contains(&today), "the session holds its layers");
         let legacy = written.replacen(
@@ -1085,13 +1137,13 @@ mod ui_session_tests {
             1,
         );
 
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             ron::from_str::<UiSessionWire>(&legacy)
                 .expect("a session carrying the retired layers loads"),
         );
 
         assert_eq!(
-            restored.drawing_sheet_layers,
+            restored.design.drawing_sheet_layers,
             crate::state::DrawingSheetLayerVisibility {
                 zones: false,
                 title_block: true,
@@ -1103,91 +1155,97 @@ mod ui_session_tests {
 
     #[test]
     fn grid_cycle_is_dots_then_lines_then_off_and_round_trips_exactly() {
-        let mut session = UiSessionState::new();
-        session.set_grid_style(GridStyle::Dots);
-        assert_eq!(session.cycle_grid_style(), GridStyle::Lines);
-        assert_eq!(session.cycle_grid_style(), GridStyle::Off);
-        assert_eq!(session.grid, GridStyle::Off);
-        assert_eq!(session.grid_restore_style, GridStyle::Lines);
+        let mut session = AppState::default();
+        session.design.set_grid_style(GridStyle::Dots);
+        assert_eq!(session.design.cycle_grid_style(), GridStyle::Lines);
+        assert_eq!(session.design.cycle_grid_style(), GridStyle::Off);
+        assert_eq!(session.design.grid, GridStyle::Off);
+        assert_eq!(session.design.grid_restore_style, GridStyle::Lines);
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
-        let mut restored = UiSessionState::from(
+        let mut restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serialized).expect("deserialize session"),
         );
 
-        assert_eq!(restored.grid, GridStyle::Off);
-        assert_eq!(restored.grid_restore_style, GridStyle::Lines);
-        assert_eq!(restored.cycle_grid_style(), GridStyle::Dots);
-        assert_eq!(restored.cycle_grid_style(), GridStyle::Lines);
+        assert_eq!(restored.design.grid, GridStyle::Off);
+        assert_eq!(restored.design.grid_restore_style, GridStyle::Lines);
+        assert_eq!(restored.design.cycle_grid_style(), GridStyle::Dots);
+        assert_eq!(restored.design.cycle_grid_style(), GridStyle::Lines);
     }
 
     #[test]
     fn legacy_ui_session_uses_safe_visibility_defaults() {
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serde_json::json!({}))
                 .expect("legacy session without visibility policy"),
         );
 
         assert_eq!(
-            restored.schematic_visibility,
+            restored.design.schematic_visibility,
             SchematicVisibilityPolicy::default()
         );
     }
 
     #[test]
     fn schematic_snap_and_exact_routing_round_trip_with_the_ui_session() {
-        let mut session = UiSessionState::new();
-        session.schematic_snap.enabled = false;
-        session.schematic_snap.snap_to_wire_segments = false;
-        session.schematic_snap.snap_radius = 7;
-        session.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
+        let mut session = AppState::default();
+        session.design.schematic_snap.enabled = false;
+        session.design.schematic_snap.snap_to_wire_segments = false;
+        session.design.schematic_snap.snap_radius = 7;
+        session.design.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serialized).expect("deserialize session"),
         );
 
-        assert_eq!(restored.schematic_snap, session.schematic_snap);
         assert_eq!(
-            restored.schematic_routing_mode,
+            restored.design.schematic_snap,
+            session.design.schematic_snap
+        );
+        assert_eq!(
+            restored.design.schematic_routing_mode,
             crate::state::WireRoutingMode::VerticalFirst
         );
     }
 
     #[test]
     fn duplicate_external_nets_round_trips_with_the_ui_session() {
-        let mut session = UiSessionState::new();
-        session.duplicate_external_nets =
+        let mut session = AppState::default();
+        session.design.duplicate_external_nets =
             crate::state::DuplicateExternalNets::PreserveNamedNetAttachment;
 
         let serialized =
             serde_json::to_value(UiSessionWire::from(&session)).expect("serialize session");
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serialized).expect("deserialize session"),
         );
 
         assert_eq!(
-            restored.duplicate_external_nets,
+            restored.design.duplicate_external_nets,
             crate::state::DuplicateExternalNets::PreserveNamedNetAttachment
         );
     }
 
     #[test]
     fn legacy_ui_session_uses_snap_and_routing_defaults() {
-        let restored = UiSessionState::from(
+        let restored = AppState::from(
             serde_json::from_value::<UiSessionWire>(serde_json::json!({}))
                 .expect("legacy session without editor runtime settings"),
         );
 
-        assert_eq!(restored.schematic_snap, crate::state::SnapEngine::default());
         assert_eq!(
-            restored.schematic_routing_mode,
+            restored.design.schematic_snap,
+            crate::state::SnapEngine::default()
+        );
+        assert_eq!(
+            restored.design.schematic_routing_mode,
             crate::state::WireRoutingMode::HorizontalFirst
         );
         assert_eq!(
-            restored.duplicate_external_nets,
+            restored.design.duplicate_external_nets,
             crate::state::DuplicateExternalNets::LeaveUnconnected
         );
     }

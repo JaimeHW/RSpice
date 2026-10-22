@@ -495,7 +495,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
             .prompt_text()
             .is_some_and(|prompt| prompt.contains("Found 1 configured model file(s)"))
     );
-    assert!(app.state.ui.toasts.activity().is_empty());
+    assert!(app.state.workbench.toasts.activity().is_empty());
 
     // A library it could not read is worth interrupting for, with the way
     // to the Console line that lists every path.
@@ -518,7 +518,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     assert!(warning.message.contains("1 configured path error(s)"));
     assert!(warning.message.contains("Path does not exist"));
     let warning = warning.id;
-    let activity = app.state.ui.toasts.activity();
+    let activity = app.state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Warn);
     assert!(activity[0].message().contains("1 configured path error(s)"));

@@ -105,10 +105,10 @@ fn plan_line(plan: &[(DeclaredModule, CellViewRef, bool)]) -> Option<String> {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_veriloga_import_dialog(&mut self, ctx: &Context) {
-        let Some(form) = self.state.ui.code_workspace.veriloga.import_form.clone() else {
+        let Some(form) = self.state.code.code_workspace.veriloga.import_form.clone() else {
             return;
         };
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let libraries = writable_libraries(&self.state.model.library_manager);
         let plan = planned_cells(&self.state, &form);
         let refusal = match &form.modules {
@@ -157,7 +157,7 @@ impl RSpiceApp {
             });
         if let Some(index) = picked
             && let Some(library) = libraries.get(index)
-            && let Some(form) = self.state.ui.code_workspace.veriloga.import_form.as_mut()
+            && let Some(form) = self.state.code.code_workspace.veriloga.import_form.as_mut()
         {
             form.library = library.clone();
             form.error = None;
@@ -165,13 +165,13 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary if ready => {
                 if let Err(error) = self.commit_veriloga_import()
-                    && let Some(form) = self.state.ui.code_workspace.veriloga.import_form.as_mut()
+                    && let Some(form) = self.state.code.code_workspace.veriloga.import_form.as_mut()
                 {
                     form.error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.ui.code_workspace.veriloga.import_form = None;
+                self.state.code.code_workspace.veriloga.import_form = None;
             }
             DialogChoice::Primary | DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -181,10 +181,17 @@ impl RSpiceApp {
     /// picked: which file it replaces, with what, and whether the text it
     /// replaces can be restored. Nothing is replaced until it is confirmed.
     pub(in crate::workbench) fn render_veriloga_replace_dialog(&mut self, ctx: &Context) {
-        let Some(review) = self.state.ui.code_workspace.veriloga.replace_review.clone() else {
+        let Some(review) = self
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .replace_review
+            .clone()
+        else {
             return;
         };
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let title = messages.text(MessageId::VerilogAReplaceTitle);
         let primary = messages.text(MessageId::VerilogAReplacePrimary);
         let description = messages.text(MessageId::VerilogAReplaceDescription);
@@ -223,7 +230,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.ui.code_workspace.veriloga.replace_review = None;
+                self.state.code.code_workspace.veriloga.replace_review = None;
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -234,7 +241,7 @@ impl RSpiceApp {
     pub(in crate::workbench) fn commit_veriloga_import(&mut self) -> Result<CellViewRef, String> {
         let form = self
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .import_form
@@ -288,7 +295,7 @@ impl RSpiceApp {
         self.state.model.workspace.content.project_sources_dirty = true;
         self.state.model.library_manager = libraries;
         self.state.publish_project_library_mutation(prepared);
-        self.state.ui.code_workspace.veriloga.import_form = None;
+        self.state.code.code_workspace.veriloga.import_form = None;
         if form.library == VERILOGA_LIBRARY_NAME {
             self.persist_global_veriloga_library_with_feedback();
         }

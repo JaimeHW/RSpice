@@ -22,7 +22,7 @@ impl RSpiceApp {
     /// path-bearing schematic. Called once per frame; cheap when idle.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::workbench) fn autosave_tick(&mut self, ctx: &Context) {
-        let minutes = self.state.ui.autosave_minutes;
+        let minutes = self.state.platform.autosave_minutes;
         if minutes == 0
             || !self.state.model.schematic.session.is_dirty
             || self.state.model.schematic.session.read_only
@@ -57,12 +57,12 @@ impl RSpiceApp {
         // and only when it starts. A failure that persists would otherwise
         // raise an error at every interval, and an error stays until answered;
         // the recovery is recorded instead, so the Console shows the span.
-        let was_failing = self.state.ui.autosave_failing;
+        let was_failing = self.state.platform.autosave_failing;
         let written = crate::workbench::lifecycle::recovery_checkpoint::write_checkpoint(
             &path,
             &self.state.model.schematic,
         );
-        self.state.ui.autosave_failing = written.is_err();
+        self.state.platform.autosave_failing = written.is_err();
         match written {
             Err(e) if !was_failing => self.state.report_failure("Autosave failed", e.to_string()),
             Ok(_) if was_failing => {
@@ -243,7 +243,7 @@ mod tests {
         std::fs::write(&blocker, b"not a folder").expect("write the blocking file");
 
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.autosave_minutes = 1;
+        app.state.platform.autosave_minutes = 1;
         app.state.model.schematic.session.is_dirty = true;
         app.state.model.schematic.session.current_file = Some(blocker.join("design.rspice"));
         app.autosave_last =
@@ -252,7 +252,7 @@ mod tests {
         app.autosave_tick(&ctx);
         app.state.drain_notices(&ctx);
         {
-            let activity = app.state.ui.toasts.activity();
+            let activity = app.state.workbench.toasts.activity();
             assert_eq!(activity.len(), 1);
             assert_eq!(activity[0].title(), "Autosave failed");
             assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
@@ -266,7 +266,7 @@ mod tests {
         app.autosave_tick(&ctx);
         app.state.drain_notices(&ctx);
         let _ = std::fs::remove_file(&blocker);
-        assert_eq!(app.state.ui.toasts.activity().len(), 1);
-        assert!(app.state.ui.autosave_failing);
+        assert_eq!(app.state.workbench.toasts.activity().len(), 1);
+        assert!(app.state.platform.autosave_failing);
     }
 }

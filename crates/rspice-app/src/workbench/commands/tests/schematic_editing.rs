@@ -671,7 +671,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
     Command::Cut.execute(&mut app);
     assert!(!app.state.dialog_modal_open());
     assert_eq!(app.state.model.schematic.document().components.len(), 1);
-    assert_eq!(app.state.ui.schematic_clipboard.components.len(), 1);
+    assert_eq!(app.state.design.schematic_clipboard.components.len(), 1);
 
     app.state
         .model
@@ -1198,7 +1198,7 @@ fn saving_a_symbol_that_fails_its_checks_refuses_before_the_dialog_opens() {
     Command::SymbolSave.execute(&mut app);
 
     assert!(
-        !app.state.ui.symbol.editor.save_dialog_open,
+        !app.state.design.symbol.editor.save_dialog_open,
         "a refused save must not open a transaction it cannot complete"
     );
 }
@@ -1436,7 +1436,7 @@ fn app_with_copied_wire(
         .select_wire(copied);
     Command::Copy.execute(&mut app);
     app.state.model.schematic.session.editor.selection.clear();
-    app.state.ui.canvas_hover = Some(hover);
+    app.state.design.canvas_hover = Some(hover);
     app
 }
 
@@ -1511,7 +1511,7 @@ fn a_pasted_pin_landing_inside_a_wire_splits_it() {
     app.state.model.schematic.session.editor.selection.clear();
     let grid = f64::from(app.state.model.schematic.document().grid_size);
     let target = Point::new(100 - left.x, 100 - left.y);
-    app.state.ui.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
+    app.state.design.canvas_hover = Some((f64::from(target.x) / grid, f64::from(target.y) / grid));
 
     Command::Paste.execute(&mut app);
     assert!(app.state.place_floating_paste());

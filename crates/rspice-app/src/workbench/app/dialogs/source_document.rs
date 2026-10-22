@@ -46,7 +46,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
         if !state.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
-        state.ui.code_workspace.source_document_dialog = true;
+        state.code.code_workspace.source_document_dialog = true;
         return Ok(());
     };
     if state
@@ -60,7 +60,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
             language.label()
         ));
     }
-    state.ui.code_workspace.source_document_dialog = true;
+    state.code.code_workspace.source_document_dialog = true;
     Ok(())
 }
 
@@ -83,7 +83,7 @@ fn visible_language(state: &AppState) -> Option<ProjectSourceLanguage> {
     code_workspace::active_source_language(
         state.workbench.workspace,
         &state.model.workspace,
-        state.ui.code_workspace.page,
+        state.code.code_workspace.page,
     )
 }
 
@@ -328,7 +328,7 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
     let language = visible_language(&app.state)?;
     let logical_path = code_workspace::active_bundle_path(
         &app.state.model.workspace,
-        &app.state.ui.code_workspace,
+        &app.state.code.code_workspace,
         language,
     )?;
     let bundle = app.state.model.workspace.active_source_bundle(language)?;
@@ -514,7 +514,7 @@ impl RSpiceApp {
     pub(in crate::workbench) fn render_source_document_dialog(&mut self, ctx: &Context) {
         if self
             .state
-            .ui
+            .code
             .code_workspace
             .source_workspace_dialog
             .is_some()
@@ -522,17 +522,17 @@ impl RSpiceApp {
             self.render_source_workspace_dialog(ctx);
             return;
         }
-        if !self.state.ui.code_workspace.source_document_dialog {
+        if !self.state.code.code_workspace.source_document_dialog {
             return;
         }
         if visible_language(&self.state).is_none() {
             self.render_netlist_source_document_dialog(ctx);
             return;
         }
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let Some(facts) = document_facts(self, messages) else {
             // The bundle or the page went away underneath an open dialog.
-            self.state.ui.code_workspace.source_document_dialog = false;
+            self.state.code.code_workspace.source_document_dialog = false;
             return;
         };
 
@@ -572,9 +572,9 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            self.state.ui.code_workspace.source_document_dialog = false;
-            self.state.ui.code_workspace.source_file_dialog = None;
-            self.state.ui.code_workspace.source_history = None;
+            self.state.code.code_workspace.source_document_dialog = false;
+            self.state.code.code_workspace.source_file_dialog = None;
+            self.state.code.code_workspace.source_history = None;
         }
     }
 
@@ -600,7 +600,7 @@ impl RSpiceApp {
                 Report::FileTransaction,
             ),
             LifecycleAction::Cancel => {
-                self.state.ui.code_workspace.source_file_dialog = None;
+                self.state.code.code_workspace.source_file_dialog = None;
                 return;
             }
             LifecycleAction::OpenHistory => (
@@ -608,7 +608,7 @@ impl RSpiceApp {
                 Report::Console,
             ),
             LifecycleAction::SelectRevision(revision) => {
-                if let Some(history) = self.state.ui.code_workspace.source_history.as_mut() {
+                if let Some(history) = self.state.code.code_workspace.source_history.as_mut() {
                     history.selected_revision = Some(revision);
                     history.error = None;
                 }
@@ -619,7 +619,7 @@ impl RSpiceApp {
                 Report::History,
             ),
             LifecycleAction::CloseHistory => {
-                self.state.ui.code_workspace.source_history = None;
+                self.state.code.code_workspace.source_history = None;
                 return;
             }
             LifecycleAction::Import => (
@@ -632,7 +632,7 @@ impl RSpiceApp {
                 if outcome.is_ok() {
                     // The picker and then the replacement's own confirmation
                     // take over; this dialog would only sit behind them.
-                    self.state.ui.code_workspace.source_document_dialog = false;
+                    self.state.code.code_workspace.source_document_dialog = false;
                 }
                 (outcome, Report::Console)
             }
@@ -648,14 +648,14 @@ impl RSpiceApp {
         let stated = match report {
             Report::FileTransaction => self
                 .state
-                .ui
+                .code
                 .code_workspace
                 .source_file_dialog
                 .as_mut()
                 .map(|draft| draft.error = Some(error.clone())),
             Report::History => self
                 .state
-                .ui
+                .code
                 .code_workspace
                 .source_history
                 .as_mut()
@@ -671,11 +671,11 @@ impl RSpiceApp {
     }
 
     fn render_netlist_source_document_dialog(&mut self, ctx: &Context) {
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let Some(facts) = netlist_lifecycle_facts(self, messages) else {
-            self.state.ui.code_workspace.source_document_dialog = false;
-            self.state.ui.netlist.lifecycle_dialog.transaction = None;
-            self.state.ui.netlist.lifecycle_dialog.include_transaction = None;
+            self.state.code.code_workspace.source_document_dialog = false;
+            self.state.code.netlist.lifecycle_dialog.transaction = None;
+            self.state.code.netlist.lifecycle_dialog.include_transaction = None;
             return;
         };
         let mut dialog = Dialog::new(
@@ -725,7 +725,7 @@ impl RSpiceApp {
                     }
                     Err(error) => {
                         if let Some(transaction) =
-                            self.state.ui.netlist.lifecycle_dialog.transaction.as_mut()
+                            self.state.code.netlist.lifecycle_dialog.transaction.as_mut()
                         {
                             transaction.error = Some(error);
                         } else {
@@ -736,7 +736,7 @@ impl RSpiceApp {
                 }
             }
             NetlistLifecycleAction::Cancel => {
-                self.state.ui.netlist.lifecycle_dialog.transaction = None;
+                self.state.code.netlist.lifecycle_dialog.transaction = None;
             }
             NetlistLifecycleAction::SelectDeck(deck_id) => {
                 if let Err(error) =
@@ -749,13 +749,13 @@ impl RSpiceApp {
                 }
             }
             NetlistLifecycleAction::OpenHistory => {
-                self.state.ui.netlist.comparison_dialog.open = true;
+                self.state.code.netlist.comparison_dialog.open = true;
                 self.state
-                    .ui
+                    .code
                     .netlist
                     .comparison_dialog
                     .selected_history_index = facts.history_count.saturating_sub(1);
-                self.state.ui.code_workspace.source_document_dialog = false;
+                self.state.code.code_workspace.source_document_dialog = false;
             }
             NetlistLifecycleAction::CopyIncludeOwnership => {
                 match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
@@ -810,7 +810,7 @@ impl RSpiceApp {
                     Err(error) => {
                         if let Some(transaction) = self
                             .state
-                            .ui
+                            .code
                             .netlist
                             .lifecycle_dialog
                             .include_transaction
@@ -822,14 +822,14 @@ impl RSpiceApp {
                 }
             }
             NetlistLifecycleAction::CancelInclude => {
-                self.state.ui.netlist.lifecycle_dialog.include_transaction = None;
+                self.state.code.netlist.lifecycle_dialog.include_transaction = None;
             }
             NetlistLifecycleAction::SaveSourceAs => {
                 crate::workbench::documents::netlist_document::open_netlist_save_dialog(
                     &mut self.state,
                     true,
                 );
-                self.state.ui.code_workspace.source_document_dialog = false;
+                self.state.code.code_workspace.source_document_dialog = false;
             }
             NetlistLifecycleAction::SetIncludeSearchPaths(paths) => {
                 if let Err(error) = self
@@ -855,9 +855,9 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            self.state.ui.code_workspace.source_document_dialog = false;
-            self.state.ui.netlist.lifecycle_dialog.transaction = None;
-            self.state.ui.netlist.lifecycle_dialog.include_transaction = None;
+            self.state.code.code_workspace.source_document_dialog = false;
+            self.state.code.netlist.lifecycle_dialog.transaction = None;
+            self.state.code.netlist.lifecycle_dialog.include_transaction = None;
         }
     }
 
@@ -866,11 +866,17 @@ impl RSpiceApp {
     /// whenever the draft exists rather than waiting for the lifecycle dialog
     /// to be asked for.
     fn render_source_workspace_dialog(&mut self, ctx: &Context) {
-        let Some(draft) = self.state.ui.code_workspace.source_workspace_dialog.clone() else {
+        let Some(draft) = self
+            .state
+            .code
+            .code_workspace
+            .source_workspace_dialog
+            .clone()
+        else {
             return;
         };
         let language = ProjectSourceLanguage::RSpiceAutomation.label();
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let mut dialog = Dialog::new(
             messages.text(MessageId::CodeSourceWorkspaceTitle),
             messages.text(MessageId::CodeSourceWorkspacePrimary),
@@ -931,7 +937,7 @@ impl RSpiceApp {
         });
         if let Some(state) = self
             .state
-            .ui
+            .code
             .code_workspace
             .source_workspace_dialog
             .as_mut()
@@ -950,7 +956,7 @@ impl RSpiceApp {
                 Err(error) => {
                     if let Some(state) = self
                         .state
-                        .ui
+                        .code
                         .code_workspace
                         .source_workspace_dialog
                         .as_mut()
@@ -960,7 +966,7 @@ impl RSpiceApp {
                 }
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.ui.code_workspace.source_workspace_dialog = None;
+                self.state.code.code_workspace.source_workspace_dialog = None;
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -1041,7 +1047,7 @@ fn netlist_lifecycle_body(
                                 &mut selected,
                                 &choices,
                                 facts.operations_blocked.is_none()
-                                    && state.ui.netlist.lifecycle_dialog.transaction.is_none(),
+                                    && state.code.netlist.lifecycle_dialog.transaction.is_none(),
                             ) && let Some((deck_id, _)) =
                                 facts.decks.iter().find(|(_, path)| *path == selected)
                                 && Some(*deck_id) != facts.deck_id
@@ -1097,9 +1103,9 @@ fn netlist_lifecycle_body(
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                             let transaction_open =
-                                state.ui.netlist.lifecycle_dialog.transaction.is_some()
+                                state.code.netlist.lifecycle_dialog.transaction.is_some()
                                     || state
-                                        .ui
+                                        .code
                                         .netlist
                                         .lifecycle_dialog
                                         .include_transaction
@@ -1173,7 +1179,7 @@ fn netlist_lifecycle_body(
                                     .enabled(
                                         facts.history_count > 0
                                             && state
-                                                .ui
+                                                .code
                                                 .netlist
                                                 .lifecycle_dialog
                                                 .transaction
@@ -1252,7 +1258,7 @@ fn include_search_paths(
             }
             let inset = panel_inset(ui);
             for (index, entry) in chain.entries().iter().enumerate() {
-                let selected = state.ui.code_workspace.include_search_selected == Some(index);
+                let selected = state.code.code_workspace.include_search_selected == Some(index);
                 let (rect, response) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), property_row_height(ui)),
                     egui::Sense::click(),
@@ -1327,7 +1333,7 @@ fn include_search_paths(
                 theme::paint_focus_ring(ui, &response, rect);
                 let response = response.on_hover_text(entry.resolved().display().to_string());
                 if response.clicked() {
-                    state.ui.code_workspace.include_search_selected = Some(index);
+                    state.code.code_workspace.include_search_selected = Some(index);
                 }
             }
             if library_folders && !authored.is_empty() {
@@ -1344,12 +1350,12 @@ fn include_search_paths(
             }
             section_block_gap(ui);
             let selected = state
-                .ui
+                .code
                 .code_workspace
                 .include_search_selected
                 .filter(|index| *index < authored.len());
             // The field spans the body; the commands under it wrap.
-            let draft = state.ui.code_workspace.include_search_draft.clone();
+            let draft = state.code.code_workspace.include_search_draft.clone();
             let mut edited = draft.clone();
             ui.add(
                 egui::TextEdit::singleline(&mut edited)
@@ -1357,7 +1363,7 @@ fn include_search_paths(
                     .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint)),
             );
             if edited != draft {
-                state.ui.code_workspace.include_search_draft = edited.clone();
+                state.code.code_workspace.include_search_draft = edited.clone();
             }
             section_block_gap(ui);
             ui.horizontal_wrapped(|ui| {
@@ -1369,7 +1375,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.push(std::path::PathBuf::from(edited.trim()));
-                    state.ui.code_workspace.include_search_draft.clear();
+                    state.code.code_workspace.include_search_draft.clear();
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -1392,7 +1398,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.swap(index - 1, index);
-                    state.ui.code_workspace.include_search_selected = Some(index - 1);
+                    state.code.code_workspace.include_search_selected = Some(index - 1);
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
                 if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathMoveDown))
@@ -1403,7 +1409,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.swap(index, index + 1);
-                    state.ui.code_workspace.include_search_selected = Some(index + 1);
+                    state.code.code_workspace.include_search_selected = Some(index + 1);
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
                 if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathRemove))
@@ -1415,7 +1421,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.remove(index);
-                    state.ui.code_workspace.include_search_selected = None;
+                    state.code.code_workspace.include_search_selected = None;
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
             });
@@ -1430,7 +1436,7 @@ fn netlist_operation_review(
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
-    let transaction = state.ui.netlist.lifecycle_dialog.transaction.as_mut()?;
+    let transaction = state.code.netlist.lifecycle_dialog.transaction.as_mut()?;
     let (title, commit) = match transaction.action {
         CodeSourceFileAction::New => (
             MessageId::CodeSourceCreateTitle,
@@ -1519,7 +1525,7 @@ fn netlist_include_operation_review(
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
     let transaction = state
-        .ui
+        .code
         .netlist
         .lifecycle_dialog
         .include_transaction
@@ -1805,7 +1811,7 @@ fn operation_review(
     messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
     let t = Tokens::get(ui.ctx());
-    let draft = state.ui.code_workspace.source_file_dialog.as_mut()?;
+    let draft = state.code.code_workspace.source_file_dialog.as_mut()?;
     let (title, commit) = match draft.action {
         CodeSourceFileAction::New => (
             MessageId::CodeSourceCreateTitle,
@@ -1916,7 +1922,7 @@ fn revision_history(
     facts: &DocumentFacts,
     messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
-    let history = state.ui.code_workspace.source_history.as_ref()?;
+    let history = state.code.code_workspace.source_history.as_ref()?;
     let t = Tokens::get(ui.ctx());
     let selected = history.selected_revision;
     let error = history.error.clone();
@@ -2201,7 +2207,7 @@ mod tests {
     #[test]
     fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
         let language = ProjectSourceLanguage::RSpiceAutomation;
         let owner = ProjectSourceOwner::code_workspace(language);
         let original = app
@@ -2224,7 +2230,7 @@ mod tests {
         app.apply_lifecycle_action(LifecycleAction::Begin(CodeSourceFileAction::Rename), &facts);
         let draft = app
             .state
-            .ui
+            .code
             .code_workspace
             .source_file_dialog
             .as_mut()
@@ -2233,7 +2239,7 @@ mod tests {
 
         app.apply_lifecycle_action(LifecycleAction::Commit, &facts);
         assert!(
-            app.state.ui.code_workspace.source_file_dialog.is_none(),
+            app.state.code.code_workspace.source_file_dialog.is_none(),
             "a committed transaction closes"
         );
         let renamed = app
@@ -2255,7 +2261,7 @@ mod tests {
     #[test]
     fn reassigning_a_role_lifts_the_environment_lock_refusal() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
         let language = ProjectSourceLanguage::RSpiceAutomation;
         let owner = ProjectSourceOwner::code_workspace(language);
         let locked = app
@@ -2273,7 +2279,7 @@ mod tests {
             })
             .unwrap_or_default();
         assert!(!locked.is_empty(), "the fixture bundle pins an environment");
-        app.state.ui.code_workspace.automation.selected_file = Some(locked.clone());
+        app.state.code.code_workspace.automation.selected_file = Some(locked.clone());
 
         let before = document_facts(&app, english()).expect("the lock is a document");
         assert!(before.is_environment_lock);
@@ -2297,10 +2303,10 @@ mod tests {
     #[test]
     fn an_unowned_netlist_page_can_open_the_top_deck_lifecycle() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
         assert!(source_document_dialog_is_available(&app.state));
         open_source_document_dialog(&mut app.state).unwrap();
-        assert!(app.state.ui.code_workspace.source_document_dialog);
+        assert!(app.state.code.code_workspace.source_document_dialog);
         let facts = netlist_lifecycle_facts(&app, english()).unwrap();
         assert!(facts.deck_id.is_none());
         assert!(facts.decks.is_empty());
@@ -2321,7 +2327,7 @@ fn render_the_source_document_inspector_for_review() {
         crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
     for width in [312.0_f32, 278.0] {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
+        app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
         let facts = document_facts(&app, messages).expect("the page states a document");
         crate::ui::raster::write_panel_review(
             &directory,

@@ -507,10 +507,10 @@ impl Command {
             return;
         }
         if let Some(request) = self.source_editor_request()
-            && let Some(editor) = app.state.ui.active_source_editor
+            && let Some(editor) = app.state.workbench.active_source_editor
         {
             if editor.editable || !request.mutates_source() {
-                app.state.ui.source_editor_request = Some(request);
+                app.state.workbench.source_editor_request = Some(request);
             }
             return;
         }
@@ -576,9 +576,9 @@ impl Command {
             }
             Self::ExportNetlist(format) => {
                 if netlist_page_is_visible(&app.state) {
-                    app.state.ui.netlist.export_dialog.open = true;
-                    app.state.ui.netlist.export_dialog.format = format;
-                    app.state.ui.netlist.export_dialog.error = None;
+                    app.state.code.netlist.export_dialog.open = true;
+                    app.state.code.netlist.export_dialog.format = format;
+                    app.state.code.netlist.export_dialog.error = None;
                 } else {
                     crate::workbench::menu_bar::action_export_netlist_with_io(
                         &mut app.state,
@@ -627,7 +627,7 @@ impl Command {
                             &mut app.state,
                         )
                     {
-                        app.state.ui.clipboard_text_request = Some(text);
+                        app.state.workbench.clipboard_text_request = Some(text);
                     }
                 } else if active_symbol_editor(app) {
                     app.copy_selected_symbol_shape();
@@ -682,7 +682,7 @@ impl Command {
             }
             Self::FindInDesign => {
                 if netlist_page_is_visible(&app.state) {
-                    app.state.ui.netlist.find.open = true;
+                    app.state.code.netlist.find.open = true;
                 } else if crate::workbench::documents::code_workspace::design_hosts_veriloga(
                     app.state.workbench.workspace,
                     &app.state.model.workspace,
@@ -719,8 +719,9 @@ impl Command {
                 } else if let Some(session) = app.state.symbol_in_place_mut() {
                     session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
                 } else if active_symbol_editor(app) {
-                    app.state.ui.symbol.editor.zoom =
-                        (app.state.ui.symbol.editor.zoom * COMMAND_ZOOM_FACTOR as f32).min(16.0);
+                    app.state.design.symbol.editor.zoom = (app.state.design.symbol.editor.zoom
+                        * COMMAND_ZOOM_FACTOR as f32)
+                        .min(16.0);
                 } else {
                     app.state.model.schematic.session.editor.zoom_request =
                         Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR));
@@ -735,8 +736,8 @@ impl Command {
                 } else if let Some(session) = app.state.symbol_in_place_mut() {
                     session.zoom_request = Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
                 } else if active_symbol_editor(app) {
-                    app.state.ui.symbol.editor.zoom =
-                        (app.state.ui.symbol.editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
+                    app.state.design.symbol.editor.zoom =
+                        (app.state.design.symbol.editor.zoom / COMMAND_ZOOM_FACTOR as f32).max(0.1);
                 } else {
                     app.state.model.schematic.session.editor.zoom_request =
                         Some(ZoomRequest::By(COMMAND_ZOOM_FACTOR.recip()));
@@ -755,7 +756,7 @@ impl Command {
                 {
                     session.zoom_request = Some(ZoomRequest::Frame(bounds));
                 } else if active_symbol_editor(app) {
-                    app.state.ui.symbol.editor.needs_fit = true;
+                    app.state.design.symbol.editor.needs_fit = true;
                 } else {
                     app.state
                         .model
@@ -779,7 +780,7 @@ impl Command {
                 if let Some(session) = app.state.symbol_in_place_mut() {
                     session.zoom_request = Some(ZoomRequest::To(1.0));
                 } else if active_symbol_editor(app) {
-                    app.state.ui.symbol.editor.zoom = 1.0;
+                    app.state.design.symbol.editor.zoom = 1.0;
                 } else {
                     app.state.model.schematic.session.editor.zoom_request =
                         Some(ZoomRequest::To(1.0));
@@ -1129,16 +1130,16 @@ impl Command {
             Self::SymbolSave => match app.state.refuse_unsavable_active_symbol() {
                 Some(refusal) => app.state.prompt(refusal),
                 None => {
-                    app.state.ui.symbol.editor.save_dialog_open = true;
-                    app.state.ui.symbol.editor.save_error = None;
+                    app.state.design.symbol.editor.save_dialog_open = true;
+                    app.state.design.symbol.editor.save_error = None;
                 }
             },
             Self::EditSymbolInPlace => {
                 app.state.edit_selected_symbol_in_place();
             }
-            Self::ExitSymbolInPlace => app
-                .state
-                .request_symbol_in_place_exit(super::SymbolInPlaceExit::Parent),
+            Self::ExitSymbolInPlace => app.state.request_symbol_in_place_exit(
+                super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
+            ),
             Self::Place(ComponentType::Port) => Self::PlacePin.execute(app),
             Self::Place(kind) => set_tool(app, Tool::Place(kind)),
             Self::RotateSelection if active_symbol_editor(app) => {
@@ -1208,14 +1209,15 @@ impl Command {
                 if active_symbol_editor(app) && app.state.symbol_in_place_canvas_idle() {
                     // Nothing on the canvas to cancel: Escape leaves the
                     // in-place edit, as Return does.
-                    app.state
-                        .request_symbol_in_place_exit(super::SymbolInPlaceExit::Parent);
+                    app.state.request_symbol_in_place_exit(
+                        super::app::actions::workspace::symbol_in_place::SymbolInPlaceExit::Parent,
+                    );
                 } else if active_symbol_editor(app) {
                     // The symbol canvas's one interaction in flight is an
                     // open polyline; Escape keeps what has been drawn.
                     app.finish_pending_symbol_polyline();
                     rspice_schematic_editor::symbol_editor::commands::finish_cancel(
-                        &mut app.state.ui.symbol.editor,
+                        &mut app.state.design.symbol.editor,
                     );
                 } else if app.state.workbench.workspace == Workspace::Design
                     && app.state.workbench.inline_edit.session().is_some()
@@ -1242,9 +1244,9 @@ impl Command {
                 } else if app.state.tabbed_property_dialog.open {
                     app.state.tabbed_property_dialog.attempt_close();
                 } else if app.state.workbench.workspace == Workspace::Results
-                    && app.state.ui.results.session.cursors.any()
+                    && app.state.results.results.session.cursors.any()
                 {
-                    app.state.ui.results.session.clear_cursors();
+                    app.state.results.results.session.clear_cursors();
                 } else {
                     app.state.model.schematic.cancel_interaction_step();
                 }
@@ -1390,14 +1392,14 @@ impl Command {
                 }
             }
             Self::CompareGeneratedRevisions => {
-                app.state.ui.netlist.comparison_dialog.open = true;
+                app.state.code.netlist.comparison_dialog.open = true;
                 app.state
-                    .ui
+                    .code
                     .netlist
                     .comparison_dialog
                     .selected_history_index = app
                     .state
-                    .ui
+                    .code
                     .netlist
                     .generated_history
                     .len()
@@ -1431,7 +1433,7 @@ impl Command {
                         &app.state, viewer,
                     )
                 {
-                    app.state.ui.results.session.viewer = viewer;
+                    app.state.results.results.session.viewer = viewer;
                     activate_workspace(app, Workspace::Results);
                 }
             }
@@ -1594,7 +1596,7 @@ impl Command {
             }
             Self::AutomationConsole => {
                 activate_workspace(app, Workspace::Netlist);
-                app.state.ui.code_workspace.page =
+                app.state.code.code_workspace.page =
                     crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
             }
             Self::CommandPalette => open_command_palette(&mut app.state),

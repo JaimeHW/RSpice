@@ -143,7 +143,7 @@ impl Panel {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        seed(&ctx, &mut app.state.ui.toasts);
+        seed(&ctx, &mut app.state.workbench.toasts);
         app.state.workbench.notification_center_open = true;
         let mut panel = Self {
             ctx,
@@ -272,7 +272,7 @@ impl Panel {
     }
 
     fn toasts(&self) -> &Toasts {
-        &self.app.state.ui.toasts
+        &self.app.state.workbench.toasts
     }
 }
 
@@ -725,7 +725,7 @@ impl Windows {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        seed_session(&ctx, &mut app.state.ui.toasts);
+        seed_session(&ctx, &mut app.state.workbench.toasts);
         Self { ctx, app }
     }
 

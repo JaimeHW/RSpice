@@ -134,7 +134,7 @@ fn annotations(project: &ProjectSnapshot) -> serde_json::Value {
 fn result_presentation_retains_flat_project_wire_format_and_legacy_defaults() {
     let (mut state, key) = retained_results();
     for annotation in Annotation::ALL {
-        annotation.add(&mut state.ui.results, &state.model.simulation, key);
+        annotation.add(&mut state.results.results, &state.model.simulation, key);
     }
     let project = snapshot(&state).unwrap();
     let wire = serde_json::to_value(&project).unwrap();
@@ -164,7 +164,7 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
     let units: Vec<_> = (0..16).map(|index| format!("unit-{index:02}")).collect();
     for unit in units.iter().rev() {
         state
-            .ui
+            .results
             .results
             .session
             .log_y_panes
@@ -174,7 +174,7 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
             });
     }
     let presentation = state
-        .ui
+        .results
         .results
         .project_presentation(&state.model.simulation);
     assert_eq!(
@@ -190,7 +190,7 @@ fn result_log_axis_presentation_has_canonical_order_after_restore() {
     assert_eq!(
         serde_json::to_value(
             state
-                .ui
+                .results
                 .results
                 .project_presentation(&state.model.simulation)
         )
@@ -208,7 +208,7 @@ fn every_result_annotation_is_dirty_revertible_and_independent_of_solver_inputs(
         state
             .project_lifecycle
             .accept_project(baseline.clone(), None);
-        annotation.add(&mut state.ui.results, &state.model.simulation, key);
+        annotation.add(&mut state.results.results, &state.model.simulation, key);
         assert!(has_unsaved_changes(&state), "{annotation:?}");
         assert!(active_document_is_dirty(&state), "{annotation:?}");
         assert_eq!(dirty_document_count(&state), 1);
@@ -259,7 +259,7 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
             DestinationAuthority::UserSelected,
         )
         .unwrap();
-        annotation.add(&mut state.ui.results, &state.model.simulation, key);
+        annotation.add(&mut state.results.results, &state.model.simulation, key);
         state
             .model
             .schematic
@@ -289,10 +289,10 @@ fn result_annotation_save_publishes_only_results_and_retains_later_edits() {
 
         // Save acceptance compares against the actual published snapshot.
         // A later annotation must remain dirty even if an earlier write finishes.
-        annotation.add(&mut state.ui.results, &state.model.simulation, key);
-        state.ui.results.session.log_y_panes.clear();
+        annotation.add(&mut state.results.results, &state.model.simulation, key);
+        state.results.results.session.log_y_panes.clear();
         state
-            .ui
+            .results
             .results
             .session
             .add_marker(

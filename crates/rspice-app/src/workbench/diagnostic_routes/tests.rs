@@ -119,12 +119,12 @@ fn a_source_route_opens_its_document_in_the_editor_that_owns_it() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
-        app.state.ui.code_workspace.page,
+        app.state.code.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation
     );
     assert_eq!(
         app.state
-            .ui
+            .code
             .code_workspace
             .automation
             .selected_file

@@ -61,7 +61,7 @@ const COMMAND: &str = "Stretch";
 /// defaulted to orthogonal on a 45-degree sheet would refuse the first drag
 /// the reader tried.
 fn policy_for_sheet(state: &AppState) -> StretchOrthogonalPolicy {
-    match state.ui.schematic_visibility.wire_routing {
+    match state.design.schematic_visibility.wire_routing {
         SchematicWireRoutingStyle::Orthogonal => StretchOrthogonalPolicy::PreserveOrthogonal,
         SchematicWireRoutingStyle::FortyFiveDegree | SchematicWireRoutingStyle::FreeAngle => {
             StretchOrthogonalPolicy::AllowDiagonal
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn the_orthogonal_rule_starts_from_the_sheets_routing_style() {
         let mut state = selected_wire_segment();
-        state.ui.schematic_visibility.wire_routing = SchematicWireRoutingStyle::FortyFiveDegree;
+        state.design.schematic_visibility.wire_routing = SchematicWireRoutingStyle::FortyFiveDegree;
 
         arm_stretch_selection(&mut state);
 

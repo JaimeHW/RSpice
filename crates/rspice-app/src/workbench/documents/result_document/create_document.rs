@@ -1222,7 +1222,7 @@ mod tests {
             crate::workbench::SurfaceId::Results
         );
         assert_eq!(
-            app.state.ui.results.session.viewer,
+            app.state.results.results.session.viewer,
             crate::workbench::ResultViewer::Waves
         );
     }

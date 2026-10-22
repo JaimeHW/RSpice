@@ -250,7 +250,7 @@ pub(super) fn analog_sheet() -> AppState {
     document.probes = vec![probe];
     document.design_notes = vec![note];
     settle(&mut state);
-    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
+    state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
     let selection = &mut state.model.schematic.session.editor.selection;
     selection.select_component(selected_part);
     selection.select_wire(selected_wire);
@@ -396,7 +396,7 @@ pub(super) fn hierarchy_sheet() -> AppState {
     state.model.simulation.retained.runs.insert(0, run);
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
+    state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
     state
         .model
         .schematic

@@ -518,7 +518,7 @@ fn emit_browser_pdk_storage_warning(
         app.state
             .record(LogSeverity::Warning, LogSource::Studio, warning);
         app.state
-            .ui
+            .workbench
             .toasts
             .warn_with_title(ctx, "Back up browser PDK data", warning);
     }

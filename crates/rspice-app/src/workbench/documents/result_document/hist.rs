@@ -288,7 +288,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
     let range = settings
         .custom_range
         .then_some((settings.custom_min.to_bits(), settings.custom_max.to_bits()));
-    if let Some(plan) = state.ui.results.plans.hist.borrow().as_ref()
+    if let Some(plan) = state.results.results.plans.hist.borrow().as_ref()
         && plan.version == version
         && plan.source == source
         && plan.yield_source == yield_source
@@ -369,7 +369,7 @@ fn hist_plan(state: &AppState, histogram: &str) -> Arc<HistPlan> {
         moments,
         yield_is_consistent,
     });
-    *state.ui.results.plans.hist.borrow_mut() = Some(Arc::clone(&built));
+    *state.results.results.plans.hist.borrow_mut() = Some(Arc::clone(&built));
     built
 }
 
@@ -463,7 +463,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         .collect();
     if view::controls(ui, &mut state.analysis.histogram_state, &names) {
         state
-            .ui
+            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
@@ -495,23 +495,32 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             }),
     };
     let plot_view = state
-        .ui
+        .results
         .results
         .session
         .plot_view(super::ResultViewer::Hist, 0);
-    let out = view::show(ui, model, plot_view, &mut state.ui.results.session.cache);
+    let out = view::show(
+        ui,
+        model,
+        plot_view,
+        &mut state.results.results.session.cache,
+    );
     if out.fit_requested {
         state
-            .ui
+            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);
     }
     if let Some(response) = out.plot {
-        super::record_drawn_axes(&mut state.ui.results, super::ResultViewer::Hist, &response);
+        super::record_drawn_axes(
+            &mut state.results.results,
+            super::ResultViewer::Hist,
+            &response,
+        );
         if response.view.any() {
             state
-                .ui
+                .results
                 .results
                 .session
                 .plot_view_mut(super::ResultViewer::Hist, 0)
@@ -534,7 +543,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     let current_range = active_histogram(state).map(|histogram| histogram.range());
     if view::range_controls(ui, &mut state.analysis.histogram_state, current_range) {
         state
-            .ui
+            .results
             .results
             .session
             .reset_plot_view(super::ResultViewer::Hist, 0);

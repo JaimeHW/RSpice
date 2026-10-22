@@ -11,7 +11,7 @@ impl AppState {
     pub(crate) fn enter_full_screen_presentation(&mut self) {
         self.workbench.full_screen_presentation = true;
         self.workbench.full_screen = true;
-        self.ui.request_full_screen(true);
+        self.workbench.request_full_screen(true);
     }
 
     pub(crate) fn exit_full_screen_presentation(&mut self) {
@@ -23,7 +23,7 @@ impl AppState {
         self.workbench.full_screen = false;
         self.workbench.full_screen_presentation = false;
         if request_platform_exit && platform_full_screen {
-            self.ui.request_full_screen(false);
+            self.workbench.request_full_screen(false);
         }
     }
 }

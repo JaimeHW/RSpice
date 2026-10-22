@@ -72,7 +72,7 @@ pub(super) fn section(ui: &mut Ui, state: &mut AppState) {
 
 /// Start the open viewer from these defaults, as a new one would start.
 pub(super) fn apply_to_viewer(state: &mut AppState) {
-    state.ui.results.session.phase_continuous = state.model.preferences.unwrapped_phase();
+    state.results.results.session.phase_continuous = state.model.preferences.unwrapped_phase();
     state.start_waveform_view_from_preferences();
 }
 

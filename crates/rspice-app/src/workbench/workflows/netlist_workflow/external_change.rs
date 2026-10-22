@@ -260,7 +260,7 @@ pub(super) fn stage_external_netlist_change(
         .context_radius(3)
         .header("RSpice local editor", "External file")
         .to_string();
-    state.ui.netlist.external_change = Some(
+    state.code.netlist.external_change = Some(
         crate::workbench::documents::netlist_document::NetlistExternalChangeState {
             path: path.to_path_buf(),
             expected_sha256,
@@ -287,13 +287,13 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
     use crate::workbench::documents::netlist_document::NetlistExternalChangeResolution;
 
     let review = state
-        .ui
+        .code
         .netlist
         .external_change
         .clone()
         .ok_or_else(|| "No external source change is staged.".to_owned())?;
     let current = state
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
@@ -357,7 +357,7 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
         );
     }
     let next_document = candidate
-        .ui
+        .code
         .netlist
         .owned_document
         .as_ref()
@@ -383,10 +383,10 @@ pub(crate) fn apply_staged_external_netlist_change(state: &mut AppState) -> Resu
                 NetlistExternalChangeResolution::ReloadExternal => "Reloaded external source",
             },
         )?;
-    candidate.ui.netlist.externally_saved_content_digest = (review.resolution
+    candidate.code.netlist.externally_saved_content_digest = (review.resolution
         == NetlistExternalChangeResolution::ReloadExternal)
         .then(|| crate::state::content_digest(&selected_source));
-    candidate.ui.netlist.external_change = None;
+    candidate.code.netlist.external_change = None;
     candidate
         .model
         .workspace

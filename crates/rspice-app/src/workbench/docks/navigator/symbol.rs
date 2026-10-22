@@ -100,7 +100,7 @@ fn pins_section(
                 .state
                 .store_active_symbol_editor_bundle(document, metadata)
             {
-                Ok(()) => app.state.ui.symbol.editor.select_pin(name),
+                Ok(()) => app.state.design.symbol.editor.select_pin(name),
                 Err(error) => app.state.prompt(error),
             }
         }
@@ -149,7 +149,7 @@ fn pins_section(
             .problem(problem)
             .selected(
                 app.state
-                    .ui
+                    .design
                     .symbol
                     .editor
                     .selection
@@ -175,7 +175,7 @@ fn pins_section(
             .show(ui);
     }
     if let Some(name) = select {
-        app.state.ui.symbol.editor.select_pin(name);
+        app.state.design.symbol.editor.select_pin(name);
     }
 }
 
@@ -253,14 +253,22 @@ fn body_section(ui: &mut Ui, app: &mut RSpiceApp, document: &SymbolDocument) {
     for (index, shape) in document.body.iter().enumerate() {
         let row = TreeRow::new(&shape_label(shape))
             .indent(1)
-            .selected(app.state.ui.symbol.editor.selection.shapes.contains(&index))
+            .selected(
+                app.state
+                    .design
+                    .symbol
+                    .editor
+                    .selection
+                    .shapes
+                    .contains(&index),
+            )
             .show(ui);
         if row.response.clicked() {
             select = Some(index);
         }
     }
     if let Some(index) = select {
-        app.state.ui.symbol.editor.select_shape(index);
+        app.state.design.symbol.editor.select_shape(index);
     }
 }
 
@@ -286,7 +294,7 @@ fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorM
             .meta(meta)
             .selected(
                 app.state
-                    .ui
+                    .design
                     .symbol
                     .editor
                     .selection
@@ -295,7 +303,7 @@ fn attributes_section(ui: &mut Ui, app: &mut RSpiceApp, metadata: &SymbolEditorM
             )
             .show(ui);
         if row.response.clicked() {
-            app.state.ui.symbol.editor.select_attribute(kind);
+            app.state.design.symbol.editor.select_attribute(kind);
         }
     }
 }

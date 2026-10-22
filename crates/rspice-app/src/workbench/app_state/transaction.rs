@@ -32,8 +32,8 @@ impl AppState {
             .notices
             .prepend(std::mem::take(&mut self.model.notices));
         if let (Some(committed), Some(live)) = (
-            candidate.ui.results.session.spec_drafts.as_mut(),
-            self.ui.results.session.spec_drafts.as_mut(),
+            candidate.results.results.session.spec_drafts.as_mut(),
+            self.results.results.session.spec_drafts.as_mut(),
         ) && committed.len() == live.len()
         {
             for (committed, live) in committed.iter_mut().zip(live) {

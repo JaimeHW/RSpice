@@ -17,11 +17,11 @@ fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
     state.model.simulation.start_run().add_analysis(result);
-    state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
+    state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -43,11 +43,11 @@ fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
     let mut state = AppState::default();
     state.model.simulation.start_run().add_analysis(result);
-    state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
+    state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -85,7 +85,7 @@ fn swept_current_source() -> AppState {
                 model_sources: Vec::new(),
             }],
         });
-    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
+    state.results.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     state
 }
 
@@ -93,7 +93,7 @@ fn model_axis(state: &mut AppState) -> (String, String) {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -271,7 +271,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
     );
     let mut state = AppState::default();
     state.model.simulation = crate::simulation::controller::dc_history_tests::history(analysis);
-    state.ui.results.session.viewer = super::super::super::ResultViewer::DcSweep;
+    state.results.results.session.viewer = super::super::super::ResultViewer::DcSweep;
     assert_eq!(model_axis(&mut state), ("IBIAS".to_owned(), "A".to_owned()));
     let stored = crate::io::capture_simulation_results(&state.model.simulation);
     crate::io::restore_simulation_results(stored, &mut state.model.simulation).unwrap();
@@ -317,7 +317,7 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &tokens,
     );
@@ -336,14 +336,14 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
     drop(models);
 
     state
-        .ui
+        .results
         .results
         .add_expression_trace(&state.model.simulation, analysis, "V(out)*2".to_owned())
         .expect("the strip accepts an expression");
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &tokens,
     );
@@ -383,13 +383,13 @@ fn an_overlay_row_names_the_run_it_came_from() {
         .view
         .overlay_dataset_ids
         .push(earlier);
-    state.ui.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursor_strip = Some(0);
 
     let presentation = state.model.preferences.result_presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -419,12 +419,12 @@ fn an_overlay_row_names_the_run_it_came_from() {
 #[test]
 fn the_cursor_table_publishes_what_it_paints() {
     let mut state = super::branches::hysteresis_run();
-    if !state.ui.results.session.cursor_tool.is_armed() {
-        state.ui.results.session.toggle_cursor_tool();
+    if !state.results.results.session.cursor_tool.is_armed() {
+        state.results.results.session.toggle_cursor_tool();
     }
-    state.ui.results.session.cursors.place(0.25);
-    state.ui.results.session.cursors.place(0.75);
-    state.ui.results.session.readout_collapsed = false;
+    state.results.results.session.cursors.place(0.25);
+    state.results.results.session.cursors.place(0.75);
+    state.results.results.session.readout_collapsed = false;
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -481,19 +481,19 @@ fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units()
     let mut state = AppState::default();
     state.model.simulation.start_run().add_analysis(result);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.results.session.viewer = super::super::super::ResultViewer::NoiseContrib;
+    state.results.results.session.viewer = super::super::super::ResultViewer::NoiseContrib;
     assert!(super::super::super::view_context::analysis_supports_viewer(
-        state.ui.results.session.viewer,
+        state.results.results.session.viewer,
         state.model.simulation.active_analysis().unwrap()
     ));
     assert!(super::super::super::viewer_is_available(
         &state,
-        state.ui.results.session.viewer
+        state.results.results.session.viewer
     ));
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );

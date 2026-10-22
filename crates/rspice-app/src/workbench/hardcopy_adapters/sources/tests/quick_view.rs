@@ -476,7 +476,7 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0])
     };
     let marker_id = state
-        .ui
+        .results
         .results
         .session
         .add_marker(
@@ -486,8 +486,8 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
             1.0,
         )
         .unwrap();
-    state.ui.results.session.cursors.a = Some(0.0);
-    state.ui.results.session.cursors.b = Some(2.0);
+    state.results.results.session.cursors.a = Some(0.0);
+    state.results.results.session.cursors.b = Some(2.0);
 
     let resolved = resolve_quick_view(&state).expect("quick view resolves");
     let HardcopySemanticDocument::Plot(plot) = resolved.semantic_document() else {
@@ -526,9 +526,9 @@ fn a_printed_quick_view_carries_the_markers_and_cursors_the_reader_placed() {
     assert_ne!(a.start.y_um, a.end.y_um);
 
     // A page with nothing placed on it carries neither.
-    state.ui.results.session.markers.clear();
-    state.ui.results.session.cursors.a = None;
-    state.ui.results.session.cursors.b = None;
+    state.results.results.session.markers.clear();
+    state.results.results.session.cursors.a = None;
+    state.results.results.session.cursors.b = None;
     let bare = resolve_quick_view(&state).expect("quick view resolves");
     let HardcopySemanticDocument::Plot(bare) = bare.semantic_document() else {
         panic!("expected a semantic waveform plot")
@@ -899,7 +899,7 @@ fn the_specifications_page_is_offered_on_the_requirements_the_run_froze() {
         state.model.simulation.retained.runs.push(run);
         state.model.simulation.view.active_run_idx = Some(0);
         state.model.simulation.view.active_analysis_idx = Some(0);
-        state.ui.results.session.viewer = ResultViewer::Specs;
+        state.results.results.session.viewer = ResultViewer::Specs;
         state
     }
 
@@ -979,7 +979,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
     assert_eq!(point_count(&state), 5, "the whole sweep is five samples");
 
     state
-        .ui
+        .results
         .results
         .session
         .plot_view_mut(ResultViewer::Waves, 0)
@@ -999,7 +999,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
     // records is keyed to the analysis, not to a global ordinal, so a test
     // that pins only `Global(0)` covers a key the sheet never writes.
     state
-        .ui
+        .results
         .results
         .session
         .reset_plot_view(ResultViewer::Waves, 0);
@@ -1012,7 +1012,7 @@ fn a_pinned_window_is_part_of_the_page_the_reader_captured() {
         )
     };
     state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)
@@ -1096,7 +1096,7 @@ fn a_pane_ordinate_does_not_bound_a_page_that_merges_every_pane() {
     // A Ctrl+wheel zoom into the top of the volt pane. Nothing about the
     // amps pane changed.
     state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane_mut(ResultViewer::Waves, analysis_key, 0)

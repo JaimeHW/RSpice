@@ -43,7 +43,7 @@ pub(super) fn noise_spectrum_shape(
 ) -> Option<NoiseSpectrumShape> {
     let key = super::AnalysisPresentationKey::new(dataset_id, analysis);
     state
-        .ui
+        .results
         .results
         .noise_spectrum_shapes
         .get_or_insert_with(&state.model.simulation, key, || {
@@ -133,7 +133,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
     // magnitude waveform) — the crossings and folds are O(points) and both
     // panels read them every frame.
     let version = simulation.view.data_version;
-    let margins = match state.ui.results.bode {
+    let margins = match state.results.results.bode {
         Some(d)
             if d.version == version
                 && d.analysis_index == shape.analysis_index
@@ -153,7 +153,7 @@ fn build_model(state: &mut AppState) -> Result<BodeModel, NoMargins> {
                 mag_index: shape.mag_index,
                 metrics,
             };
-            state.ui.results.bode = Some(d);
+            state.results.results.bode = Some(d);
             d
         }
     };

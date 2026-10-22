@@ -60,7 +60,7 @@ impl ShortcutContext {
                 app.state.workbench.workspace,
                 Workspace::Design | Workspace::Verify
             ),
-            Self::SourceEditor => app.state.ui.active_source_editor.is_some(),
+            Self::SourceEditor => app.state.workbench.active_source_editor.is_some(),
         }
     }
 }
@@ -999,7 +999,7 @@ impl Command {
         if self.source_editor_only()
             && app
                 .state
-                .ui
+                .workbench
                 .active_source_editor
                 .is_none_or(|editor| self.navigates_source_language() && !editor.navigable)
         {
@@ -1864,7 +1864,7 @@ mod tests {
             .model
             .netlist_artifacts
             .current_generation_input_digest = Some(digest);
-        app.state.ui.netlist.active_document_initialized = true;
+        app.state.code.netlist.active_document_initialized = true;
         (app, load_id, unmapped_id)
     }
 
@@ -1978,11 +1978,11 @@ mod tests {
 
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
         assert_eq!(
-            app.state.ui.netlist.active_document,
+            app.state.code.netlist.active_document,
             crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
         );
-        assert_eq!(app.state.ui.netlist.requested_line, Some(3));
-        assert_eq!(app.state.ui.netlist.cursor_line, 2);
+        assert_eq!(app.state.code.netlist.requested_line, Some(3));
+        assert_eq!(app.state.code.netlist.cursor_line, 2);
         assert_eq!(
             app.state
                 .model

@@ -5,11 +5,11 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::{MessageId, RSpiceApp};
 
 pub(super) fn rename_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.ui.netlist.rename_dialog.open {
+    if !app.state.code.netlist.rename_dialog.open {
         return;
     }
-    let mut dialog = app.state.ui.netlist.rename_dialog.clone();
-    let messages = app.state.ui.messages();
+    let mut dialog = app.state.code.netlist.rename_dialog.clone();
+    let messages = app.state.workbench.messages();
     let replacement_valid = {
         let value = dialog.replacement.trim();
         !value.is_empty()
@@ -46,7 +46,7 @@ pub(super) fn rename_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     });
     match choice {
         DialogChoice::Primary => {
-            app.state.ui.netlist.rename_dialog = dialog;
+            app.state.code.netlist.rename_dialog = dialog;
             match crate::workbench::documents::netlist_document::language::commit_rename(
                 &mut app.state,
             ) {
@@ -54,12 +54,12 @@ pub(super) fn rename_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                     MessageId::NetlistRenameSucceeded,
                     &[("count", &count.to_string())],
                 )),
-                Err(error) => app.state.ui.netlist.rename_dialog.error = Some(error),
+                Err(error) => app.state.code.netlist.rename_dialog.error = Some(error),
             }
         }
         DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.ui.netlist.rename_dialog = Default::default();
+            app.state.code.netlist.rename_dialog = Default::default();
         }
-        DialogChoice::None => app.state.ui.netlist.rename_dialog = dialog,
+        DialogChoice::None => app.state.code.netlist.rename_dialog = dialog,
     }
 }

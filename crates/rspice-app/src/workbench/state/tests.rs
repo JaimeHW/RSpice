@@ -718,3 +718,21 @@ fn a_standing_sync_failure_is_recorded_once_and_again_after_it_clears() {
     assert!(!SyncFailures::observe(&mut slot, None));
     assert!(SyncFailures::observe(&mut slot, Some("missing")));
 }
+
+#[test]
+fn full_screen_request_is_consumed_exactly_once() {
+    let mut session = WorkbenchState::default();
+    session.request_full_screen(true);
+
+    assert_eq!(session.take_full_screen_request(), Some(true));
+    assert_eq!(session.take_full_screen_request(), None);
+}
+
+#[test]
+fn newest_full_screen_request_supersedes_an_unapplied_request() {
+    let mut session = WorkbenchState::default();
+    session.request_full_screen(true);
+    session.request_full_screen(false);
+
+    assert_eq!(session.take_full_screen_request(), Some(false));
+}

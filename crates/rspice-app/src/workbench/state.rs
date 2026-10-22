@@ -27,6 +27,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(any(test, target_arch = "wasm32"))]
 use super::BrowserHistoryEffect;
+use super::documents::text_editor_commands::{ActiveSourceEditor, SourceEditorRequest};
+use super::localization::{MessageCatalog, UiTextLocale};
 use super::{
     RouteTransition, RouteTransitionSource, SurfaceArchetype, SurfaceId, SurfaceNavigation,
     SurfaceRoute, WorkspacePreset,
@@ -1176,6 +1178,33 @@ pub struct WorkbenchState {
     /// destructive ellipsis actions intentionally do not use the generic
     /// Save/Don't save confirmation grammar.
     pub(crate) project_review_dialog: crate::workbench::app::ProjectReviewDialogState,
+
+    /// Theme selection (direction / mode / density).
+    pub theme: crate::ui::Theme,
+    /// Decimal-mark information supplied by the native/web platform edge.
+    /// `None` is deliberate: engineering code must not guess the host locale.
+    pub number_locale: crate::quantity::UiNumberLocale,
+    /// Device-local UI message locale. Engineering source, identifiers, and
+    /// portable numeric syntax never consult this presentation setting.
+    pub text_locale: UiTextLocale,
+    /// Toast queue.
+    pub toasts: crate::ui::widgets::Toasts,
+    /// One-shot platform clipboard payload emitted by commands that copy
+    /// engineering readouts. Kept transient so clipboard intent is never
+    /// serialized into a project/session.
+    pub clipboard_text_request: Option<String>,
+    /// The source editor the page on screen shows as its document, published
+    /// by that page every frame it draws one. The Edit menu, the palette and
+    /// the shortcuts act on it rather than on a schematic hidden behind it.
+    pub(crate) active_source_editor: Option<ActiveSourceEditor>,
+    /// One-shot request for [`Self::active_source_editor`], handed to the
+    /// editor by the page that draws it.
+    pub(crate) source_editor_request: Option<SourceEditorRequest>,
+    /// One-shot request to change platform fullscreen state. Keeping this
+    /// transient prevents the web backend from receiving the same viewport
+    /// command every frame and preserves the user's persisted preference in
+    /// [`Self::full_screen`].
+    pub(crate) full_screen_request: Option<bool>,
 }
 
 pub(in crate::workbench) const fn default_navigator_width() -> f32 {
@@ -1307,7 +1336,36 @@ impl Default for WorkbenchState {
             interaction: Default::default(),
             confirmation_dialog: Default::default(),
             project_review_dialog: Default::default(),
+            theme: Default::default(),
+            number_locale: Default::default(),
+            text_locale: Default::default(),
+            toasts: Default::default(),
+            clipboard_text_request: None,
+            active_source_editor: None,
+            source_editor_request: None,
+            full_screen_request: None,
         }
+    }
+}
+
+impl WorkbenchState {
+    /// Replace the platform-provided locale used by interactive UI quantity
+    /// fields. Portable project and SPICE parsers never read this value.
+    pub fn set_number_locale(&mut self, locale: crate::quantity::UiNumberLocale) {
+        self.number_locale = locale;
+    }
+
+    #[must_use]
+    pub(crate) const fn messages(&self) -> MessageCatalog {
+        MessageCatalog::new(self.text_locale)
+    }
+
+    pub(crate) fn request_full_screen(&mut self, enabled: bool) {
+        self.full_screen_request = Some(enabled);
+    }
+
+    pub(crate) fn take_full_screen_request(&mut self) -> Option<bool> {
+        self.full_screen_request.take()
     }
 }
 

@@ -112,7 +112,14 @@ fn event_source_import_readout_survives_restoration_and_source_changes() {
                 "{text}"
             );
         }
-        assert!(state.ui.results.session.selected_digital_event.is_some());
+        assert!(
+            state
+                .results
+                .results
+                .session
+                .selected_digital_event
+                .is_some()
+        );
     }
 }
 
@@ -197,7 +204,7 @@ fn pick(
         state.model.simulation.active_run().unwrap().dataset_id,
         analysis,
     );
-    let cache = state.ui.results.event_order_cache.as_ref().unwrap();
+    let cache = state.results.results.event_order_cache.as_ref().unwrap();
     let selection = cache
         .order
         .rows()
@@ -210,7 +217,7 @@ fn pick(
                 .flatten()
         })
         .expect("the event was rendered and can be selected");
-    state.ui.results.session.selected_digital_event = Some(selection.clone());
+    state.results.results.session.selected_digital_event = Some(selection.clone());
     selection
 }
 
@@ -222,7 +229,7 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
     paint(&mut state, false);
     assert_eq!(
         state
-            .ui
+            .results
             .results
             .event_order_cache
             .as_ref()
@@ -249,7 +256,7 @@ fn event_source_restoration_refreshes_bus_order_and_raw_codes() {
     .unwrap();
     assert_eq!(state.model.simulation.view.data_version, version);
     paint(&mut state, false);
-    let cache = state.ui.results.event_order_cache.as_ref().unwrap();
+    let cache = state.results.results.event_order_cache.as_ref().unwrap();
     assert_eq!(cache.order.rows().len(), 3);
     assert_eq!(cache.order.buses()[0].events()[1].1, [Some(0), Some(4)]);
 }
@@ -355,7 +362,14 @@ fn event_source_scalar_selection_rejects_changed_time_value_or_strength() {
                 "{source:?}, change_time={change_time}"
             );
             paint(&mut state, true);
-            assert!(state.ui.results.session.selected_digital_event.is_none());
+            assert!(
+                state
+                    .results
+                    .results
+                    .session
+                    .selected_digital_event
+                    .is_none()
+            );
         }
     }
 }
@@ -382,7 +396,12 @@ fn event_source_inspector_rejects_invalid_evidence_and_allows_repair() {
     assert!(!block.stale, "repair can restore the selected event");
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.session.selected_digital_event.as_ref(),
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .as_ref(),
         Some(&selection)
     );
     state.model.simulation.retained.runs[0].analyses[0]
@@ -415,7 +434,14 @@ fn event_source_bus_selection_detects_changed_members_before_a_frame() {
         "the word is still 00, but its bits now name different members"
     );
     paint(&mut state, true);
-    assert!(state.ui.results.session.selected_digital_event.is_none());
+    assert!(
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .is_none()
+    );
 }
 
 #[test]
@@ -440,7 +466,7 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
     assert!(event_selection_block(&mut state, &selection).is_none());
     assert_eq!(
         state
-            .ui
+            .results
             .results
             .event_order_cache
             .as_ref()
@@ -450,16 +476,21 @@ fn event_source_appended_history_keeps_selection_and_refreshes_inspector_order()
             .len(),
         5
     );
-    state.ui.results.session.event_bus_radix = BusRadix::Hex;
+    state.results.results.session.event_bus_radix = BusRadix::Hex;
     state
-        .ui
+        .results
         .results
         .session
         .expanded_event_buses
         .insert("count".to_owned());
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.session.selected_digital_event.as_ref(),
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .as_ref(),
         Some(&selection)
     );
 }
@@ -478,14 +509,24 @@ fn event_source_navigation_keeps_a_retained_selection() {
     assert!(state.model.simulation.select_analysis(1));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.session.selected_digital_event.as_ref(),
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .as_ref(),
         Some(&selection)
     );
     paint(&mut state, false);
     assert!(state.model.simulation.select_analysis(0));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.session.selected_digital_event.as_ref(),
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .as_ref(),
         Some(&selection)
     );
 
@@ -501,20 +542,37 @@ fn event_source_navigation_keeps_a_retained_selection() {
     assert!(state.model.simulation.select_run(1));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.session.selected_digital_event.as_ref(),
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .as_ref(),
         Some(&selection)
     );
     paint(&mut state, false);
     assert!(state.model.simulation.select_run(0));
     paint(&mut state, true);
     assert_eq!(
-        state.ui.results.session.selected_digital_event.as_ref(),
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .as_ref(),
         Some(&selection)
     );
     state.model.simulation.retained.runs.remove(0);
     assert!(state.model.simulation.select_run(0));
     paint(&mut state, true);
-    assert!(state.ui.results.session.selected_digital_event.is_none());
+    assert!(
+        state
+            .results
+            .results
+            .session
+            .selected_digital_event
+            .is_none()
+    );
 }
 
 #[test]
@@ -623,7 +681,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
     let original = event_order(&mut state).unwrap();
     let mut other = AppState::default();
     other.model.simulation = state.model.simulation.clone();
-    other.ui.results = state.ui.results.clone();
+    other.results.results = state.results.results.clone();
     let work = WorkCounts::reset();
     for _ in 0..12 {
         assert!(event_selection_block(&mut state, &selection).is_none());
@@ -656,7 +714,7 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
         .runs
         .push(crate::state::SimulationRun::new(99));
     state
-        .ui
+        .results
         .results
         .reconcile_retained_datasets(&state.model.simulation);
     state
@@ -666,14 +724,14 @@ fn event_source_large_history_reuses_clones_and_survives_unchanged_restoration()
         .runs
         .retain(|run| run.dataset_id == selection.analysis.dataset_id());
     state
-        .ui
+        .results
         .results
         .reconcile_retained_datasets(&state.model.simulation);
     assert!(cached.upgrade().is_some(), "a retained order stays cached");
-    state.ui.results.session.viewer = rspice_results::result_presentation::ResultViewer::Table;
+    state.results.results.session.viewer = rspice_results::result_presentation::ResultViewer::Table;
     state.model.simulation.retained.runs.retain(|_| false);
     state
-        .ui
+        .results
         .results
         .reconcile_retained_datasets(&state.model.simulation);
     assert_eq!(state.model.simulation.view.data_version, version);

@@ -87,9 +87,9 @@ fn located_instance_state() -> (AppState, u64, u64, u64) {
         .current_generation_input_digest = Some(digest);
     // The engineer is looking at their own deck, so the jump has a document
     // transition to make rather than a no-op reactivation to skip.
-    state.ui.netlist.active_document =
+    state.code.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_document_initialized = true;
     (state, source_id, load_id, unmapped_id)
 }
 
@@ -128,7 +128,7 @@ fn locating_an_instance_reports_the_exact_reason_it_cannot_be_located() {
         .selection
         .select_only_component(load_id);
     state.show_selected_instance_in_netlist();
-    assert_eq!(state.ui.netlist.requested_line, Some(3));
+    assert_eq!(state.code.netlist.requested_line, Some(3));
 
     state
         .model
@@ -187,15 +187,15 @@ fn showing_an_instance_opens_the_generated_primary_at_its_card() {
 
     assert_eq!(state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
-        state.ui.netlist.active_document,
+        state.code.netlist.active_document,
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::Generated
     );
-    assert!(state.ui.netlist.active_dependency_identity.is_none());
+    assert!(state.code.netlist.active_dependency_identity.is_none());
     assert_eq!(state.model.simulation.source.netlist_content, DECK);
     // The outline and the source-mapping panel both read the active line, so
     // the caret request and the cursor have to agree about which card it is.
-    assert_eq!(state.ui.netlist.requested_line, Some(3));
-    assert_eq!(state.ui.netlist.cursor_line, 2);
+    assert_eq!(state.code.netlist.requested_line, Some(3));
+    assert_eq!(state.code.netlist.cursor_line, 2);
     assert_eq!(prompt(&state), "Located instance R1 at generated line 3.");
 }
 
@@ -220,7 +220,7 @@ fn showing_an_instance_from_a_stale_deck_says_so_without_blocking_the_jump() {
     assert_eq!(state.selected_instance_netlist_block(), None);
     state.show_selected_instance_in_netlist();
 
-    assert_eq!(state.ui.netlist.requested_line, Some(2));
+    assert_eq!(state.code.netlist.requested_line, Some(2));
     assert_eq!(
         prompt(&state),
         "Located instance V1 at generated line 2 in a stale deck; regenerating it may move the card."
@@ -255,7 +255,7 @@ fn the_round_trip_through_the_generated_deck_selects_the_same_instance() {
 
     // Reading the selection back the way the navigator's source-mapping panel
     // does: the active line, its map entry, and the component it names.
-    let active_line = state.ui.netlist.cursor_line.saturating_add(1);
+    let active_line = state.code.netlist.cursor_line.saturating_add(1);
     let revealed = state
         .model
         .netlist_artifacts

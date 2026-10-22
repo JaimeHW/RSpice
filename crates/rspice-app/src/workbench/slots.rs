@@ -1,10 +1,11 @@
 //! The state each feature owns, one slot per feature.
 //!
 //! [`AppState`](crate::workbench::app_state::AppState) holds a slot for every
-//! feature that keeps state between frames: its open dialogs and the drafts
-//! they edit. A feature's slot is its own; another feature reads it through
-//! the owner and changes it by asking the owner. Slots are runtime state and
-//! never reach the session wire. Each is `Default + Clone`, because a project
+//! feature that keeps state between frames: its open dialogs, the drafts they
+//! edit, and its interaction session. A feature's slot is its own; another
+//! feature reads it through the owner and changes it by asking the owner. A
+//! slot carries no serde: what a session keeps of it is named, field for
+//! field, by the session wire. Each is `Default + Clone`, because a project
 //! transaction builds its result in a clone of the whole state.
 
 mod cloud;
@@ -14,6 +15,7 @@ mod hardcopy;
 mod platform;
 mod project;
 mod results;
+mod runs;
 mod settings;
 mod sheets;
 mod shell;
@@ -26,6 +28,7 @@ pub(crate) use hardcopy::HardcopyState;
 pub(crate) use platform::PlatformState;
 pub(crate) use project::ProjectState;
 pub(crate) use results::ResultsState;
+pub(crate) use runs::RunsState;
 pub(crate) use settings::SettingsState;
 pub(crate) use sheets::SheetsState;
 pub(crate) use shell::ShellState;

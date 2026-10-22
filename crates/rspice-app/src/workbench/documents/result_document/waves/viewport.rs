@@ -58,23 +58,27 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         t,
     );
-    let Some((model, ordinal, pane)) = active_pane(&models, &state.ui.results.session) else {
+    let Some((model, ordinal, pane)) = active_pane(&models, &state.results.results.session) else {
         return;
     };
     let pane_count = model.unit_panes().len();
-    let logarithmic_y = pane_log_y(&state.ui.results.session, model, &pane);
-    let current = state.ui.results.session.analysis_plot_view_pane(
+    let logarithmic_y = pane_log_y(&state.results.results.session, model, &pane);
+    let current = state.results.results.session.analysis_plot_view_pane(
         super::super::ResultViewer::Waves,
         model.analysis_key,
         ordinal,
     );
-    let x = shared_x_view(&state.ui.results.session, model.analysis_key, pane_count)
-        .or(model.x_range)
-        .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
+    let x = shared_x_view(
+        &state.results.results.session,
+        model.analysis_key,
+        pane_count,
+    )
+    .or(model.x_range)
+    .and_then(|range| scaled_range(range, factor, model.x_scale == XScale::Log10));
     let y = match current.y {
         Some(range) => Some(range),
         None => displayed_pane_auto_y(state, model, &pane, ordinal, t),
@@ -82,7 +86,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     .and_then(|range| scaled_range(range, factor, logarithmic_y));
     if let Some(x) = x {
         set_shared_x_view(
-            &mut state.ui.results.session,
+            &mut state.results.results.session,
             model.analysis_key,
             pane_count,
             Some(x),
@@ -90,7 +94,7 @@ pub(crate) fn zoom_active_pane(state: &mut AppState, t: &Tokens, factor: f64) {
     }
     if let Some(y) = y {
         state
-            .ui
+            .results
             .results
             .session
             .analysis_plot_view_pane_mut(
@@ -113,20 +117,20 @@ pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         t,
     );
-    let Some((model, ordinal, _)) = active_pane(&models, &state.ui.results.session) else {
+    let Some((model, ordinal, _)) = active_pane(&models, &state.results.results.session) else {
         return;
     };
-    state.ui.results.session.clear_analysis_plot_view_axis(
+    state.results.results.session.clear_analysis_plot_view_axis(
         super::super::ResultViewer::Waves,
         model.analysis_key,
         super::super::PaneAxis::X,
     );
     state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane_mut(
@@ -147,17 +151,17 @@ pub(crate) fn fit_active_pane(state: &mut AppState, t: &Tokens) {
 /// has singled one out.
 pub(crate) fn fit_active_strip(state: &mut AppState) {
     let viewer = super::super::ResultViewer::Waves;
-    match state.ui.results.session.active_wave_pane.as_ref() {
+    match state.results.results.session.active_wave_pane.as_ref() {
         Some(key) => {
             let analysis = key.analysis;
             state
-                .ui
+                .results
                 .results
                 .session
                 .reset_analysis_plot_view(viewer, analysis);
         }
         None => state
-            .ui
+            .results
             .results
             .session
             .reset_all_analysis_plot_views(viewer),
@@ -173,11 +177,11 @@ pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         tokens,
     );
-    let Some(strip) = state.ui.results.session.cursor_strip else {
+    let Some(strip) = state.results.results.session.cursor_strip else {
         return;
     };
     let Some(model) = models.iter().find(|model| model.analysis_index == strip) else {
@@ -188,11 +192,11 @@ pub(crate) fn nudge_cursor(state: &mut AppState, tokens: &Tokens, cursor_b: bool
     };
     let panes = model.unit_panes().len();
     let (x0, x1) =
-        shared_x_view(&state.ui.results.session, model.analysis_key, panes).unwrap_or(full);
+        shared_x_view(&state.results.results.session, model.analysis_key, panes).unwrap_or(full);
     let cursor = if cursor_b {
-        &mut state.ui.results.session.cursors.b
+        &mut state.results.results.session.cursors.b
     } else {
-        &mut state.ui.results.session.cursors.a
+        &mut state.results.results.session.cursors.a
     };
     let Some(position) = cursor else {
         return;

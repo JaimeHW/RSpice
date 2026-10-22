@@ -21,7 +21,7 @@ pub(super) fn handle_keyboard_object_navigation(
             design: super::schematic_design_view(state),
             editor: &state.model.schematic.session.editor,
             keyboard_focus: state.workbench.interaction.schematic_keyboard_focus,
-            filter: state.ui.schematic_selection_filter,
+            filter: state.design.schematic_selection_filter,
         },
         KeyboardCapabilities {
             modal_open: state.application_modal_open(),

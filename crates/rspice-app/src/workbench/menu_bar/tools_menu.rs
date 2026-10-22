@@ -93,7 +93,7 @@ mod tests {
             state.workbench.console_page,
             crate::workbench::state::ConsolePage::Problems
         );
-        assert!(state.ui.toasts.activity().is_empty());
+        assert!(state.workbench.toasts.activity().is_empty());
 
         let mut state = AppState::default();
         let page = state.workbench.console_page;
@@ -111,6 +111,6 @@ mod tests {
             .expect("the check is recorded");
         assert_eq!(line.severity, LogSeverity::Info);
         assert_eq!(state.workbench.console_page, page);
-        assert!(state.ui.toasts.activity().is_empty());
+        assert!(state.workbench.toasts.activity().is_empty());
     }
 }

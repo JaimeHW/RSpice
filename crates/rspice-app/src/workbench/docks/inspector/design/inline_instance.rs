@@ -170,7 +170,7 @@ fn parameter_source_value(
                 definition,
                 candidate,
                 state.model.preferences.quantity_presentation_policy(),
-                state.ui.number_locale,
+                state.workbench.number_locale,
             )
             .map(Some);
         }

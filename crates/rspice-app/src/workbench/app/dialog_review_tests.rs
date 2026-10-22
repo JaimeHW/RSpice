@@ -102,7 +102,7 @@ fn context(app: &RSpiceApp) -> egui::Context {
     // out the same on every machine.
     ctx.set_os(egui::os::OperatingSystem::Nix);
     ctx.enable_accesskit();
-    app.state.ui.theme.apply(&ctx);
+    app.state.workbench.theme.apply(&ctx);
     ctx
 }
 
@@ -196,7 +196,7 @@ impl Reader {
 
     /// The frames a fresh context draws, as a reader would first see them.
     fn look(&mut self, mode: crate::ui::Mode, size: egui::Vec2, coarse: bool) -> Shot {
-        self.app.state.ui.theme.mode = mode;
+        self.app.state.workbench.theme.mode = mode;
         self.app.state.workbench.coarse_pointer = coarse;
         // The theme is applied to a context only when it changes, and this
         // context has never had one.
@@ -245,7 +245,7 @@ fn seeded(seed: Seed) -> (Reader, Observation) {
         .model
         .preferences
         .set_toggle(TogglePreference::ReducedMotion, true);
-    app.state.ui.theme.mode = crate::ui::Mode::Light;
+    app.state.workbench.theme.mode = crate::ui::Mode::Light;
     app.symbol_library = crate::schematic::symbols::SymbolLibrary::load_embedded().ok();
     let ctx = context(app);
     if seed == Seed::NoProject {
@@ -267,14 +267,14 @@ fn seeded(seed: Seed) -> (Reader, Observation) {
     app.state.workbench.activate(Workspace::Design);
     let notices: Vec<u64> = app
         .state
-        .ui
+        .workbench
         .toasts
         .activity()
         .iter()
         .map(|record| record.id())
         .collect();
     for id in notices {
-        app.state.ui.toasts.dismiss(id);
+        app.state.workbench.toasts.dismiss(id);
     }
     Command::CheckCellview.execute(app);
     let resistor = app
@@ -412,7 +412,7 @@ fn census(command: Command, seed: Seed, suffix: &str, directory: &Path) -> (Stri
         // save picker; on it, the page asks for the format first.
         let state = &reader.app.state;
         let on_page = state.workbench.workspace == Workspace::Netlist
-            && state.ui.code_workspace.page == CodeWorkspacePage::Netlist;
+            && state.code.code_workspace.page == CodeWorkspacePage::Netlist;
         if !on_page {
             return (
                 "not run: opens the system save picker".to_owned(),

@@ -17,12 +17,12 @@ fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
-    app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     app.state.model.simulation.source.netlist_content = "deck\n.end\n".to_owned();
 
     assert!(Command::ValidateCodeDocument.is_enabled(&app));
 
-    app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
     assert!(
         !Command::ValidateCodeDocument.is_enabled(&app),
         "the Automation page does not own the netlist deck"
@@ -45,25 +45,25 @@ fn find_opens_the_window_the_visible_code_page_owns() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Netlist;
 
-    app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+    app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     assert!(Command::FindCodeDocument.is_enabled(&app));
     Command::FindCodeDocument.execute(&mut app);
-    assert!(app.state.ui.netlist.find.open, "the deck find opened");
+    assert!(app.state.code.netlist.find.open, "the deck find opened");
     assert!(
-        app.state.ui.code_workspace.source_search.is_none(),
+        app.state.code.code_workspace.source_search.is_none(),
         "the deck is not a project source bundle"
     );
 
-    app.state.ui.netlist.find.open = false;
-    app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+    app.state.code.netlist.find.open = false;
+    app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
     assert!(Command::FindCodeDocument.is_enabled(&app));
     Command::FindCodeDocument.execute(&mut app);
     assert!(
-        app.state.ui.code_workspace.source_search.is_some(),
+        app.state.code.code_workspace.source_search.is_some(),
         "the bundle search opened"
     );
     assert!(
-        !app.state.ui.netlist.find.open,
+        !app.state.code.netlist.find.open,
         "and it did not also open the deck's find window"
     );
 }
@@ -110,7 +110,7 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         .unwrap();
     app.state.open_workspace_view(reference.clone());
     app.state.workbench.activate(Workspace::Models);
-    let page_before = app.state.ui.code_workspace.page;
+    let page_before = app.state.code.code_workspace.page;
 
     assert!(
         Command::CompileVerilogA.is_enabled(&app),
@@ -124,10 +124,10 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
         crate::workbench::SurfaceId::Design
     );
     assert_eq!(app.state.model.workspace.content.active_view, reference);
-    assert_eq!(app.state.ui.code_workspace.page, page_before);
+    assert_eq!(app.state.code.code_workspace.page, page_before);
     let request = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .compile_request

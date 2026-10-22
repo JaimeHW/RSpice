@@ -102,7 +102,7 @@ fn new_document_defaults_are_resolved_once_and_existing_buffers_are_preserved() 
 #[test]
 fn new_document_preserves_the_exact_runtime_wire_and_bus_routing_mode() {
     let mut state = AppState::default();
-    state.ui.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
+    state.design.schematic_routing_mode = crate::state::WireRoutingMode::VerticalFirst;
 
     let created = state.new_schematic_document();
 
@@ -119,16 +119,16 @@ fn new_document_preserves_the_exact_runtime_wire_and_bus_routing_mode() {
 #[test]
 fn new_document_inherits_snap_targets_and_reconciles_the_preferred_pitch() {
     let mut state = AppState::default();
-    state.ui.schematic_snap.snap_radius = 9;
-    state.ui.schematic_snap.snap_to_grid = false;
-    state.ui.schematic_snap.snap_to_wire_segments = false;
-    state.ui.schematic_snap.grid_size = 777;
+    state.design.schematic_snap.snap_radius = 9;
+    state.design.schematic_snap.snap_to_grid = false;
+    state.design.schematic_snap.snap_to_wire_segments = false;
+    state.design.schematic_snap.grid_size = 777;
     state
         .model
         .preferences
         .set_choice(ChoicePreference::SchematicGrid, 1)
         .unwrap();
-    let mut expected_snap = state.ui.schematic_snap.clone();
+    let mut expected_snap = state.design.schematic_snap.clone();
     expected_snap.grid_size = crate::state::SchematicGridPitch::Mil25.canvas_grid_size();
 
     let created = state.new_schematic_document();
@@ -247,9 +247,9 @@ fn production_copy_uses_authored_symbol_terminal_geometry() {
         .select_component(2);
 
     assert!(state.copy_active_schematic_selection());
-    assert_eq!(state.ui.schematic_clipboard.components.len(), 2);
+    assert_eq!(state.design.schematic_clipboard.components.len(), 2);
     assert_eq!(
-        state.ui.schematic_clipboard.wires.len(),
+        state.design.schematic_clipboard.wires.len(),
         1,
         "the conductor between authored pins must travel with both selected instances"
     );
@@ -1052,7 +1052,10 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
     });
 
     assert_eq!(state.model.workspace.content.active_view, reference);
-    assert_eq!(state.ui.symbol.editor.selected_pin.as_deref(), Some("IN"));
+    assert_eq!(
+        state.design.symbol.editor.selected_pin.as_deref(),
+        Some("IN")
+    );
     assert_eq!(state.workbench.workspace, Workspace::Design);
 }
 
@@ -1060,7 +1063,7 @@ fn symbol_log_anchor_opens_symbol_view_and_selects_pin() {
 fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
     let mut state = state_with_amp_symbol_pin("IN", None);
     state.run_active_symbol_pin_checks();
-    state.ui.symbol.editor.clear_selection();
+    state.design.symbol.editor.clear_selection();
 
     crate::schematic::view::violations::cycle_violation(&mut state, 1);
 
@@ -1068,7 +1071,10 @@ fn symbol_violation_cycle_opens_symbol_view_and_selects_pin() {
         state.model.workspace.content.active_view,
         CellViewRef::new("work", "amp", "symbol")
     );
-    assert_eq!(state.ui.symbol.editor.selected_pin.as_deref(), Some("IN"));
+    assert_eq!(
+        state.design.symbol.editor.selected_pin.as_deref(),
+        Some("IN")
+    );
 }
 
 #[test]

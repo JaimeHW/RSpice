@@ -151,7 +151,7 @@ fn plot_expression(app: &mut RSpiceApp) {
             .prompt(format!("Expression was not plotted: {error}"));
         return;
     }
-    let added = app.state.ui.results.add_expression_trace(
+    let added = app.state.results.results.add_expression_trace(
         &app.state.model.simulation,
         analysis_key,
         expression.clone(),
@@ -170,7 +170,7 @@ fn plot_expression(app: &mut RSpiceApp) {
             .content
             .visualization_documents_dirty = true;
     }
-    app.state.ui.results.session.viewer =
+    app.state.results.results.session.viewer =
         crate::workbench::documents::result_document::ResultViewer::Waves;
     app.state
         .workbench
@@ -223,11 +223,11 @@ mod tests {
             app.state.prompt_text(),
             Some("V(out)/V(in) is already plotted")
         );
-        assert!(app.state.ui.toasts.activity().is_empty());
+        assert!(app.state.workbench.toasts.activity().is_empty());
 
         let traces = app
             .state
-            .ui
+            .results
             .results
             .session
             .exprs
@@ -255,6 +255,6 @@ mod tests {
 
         plot_expression(&mut app);
 
-        assert!(app.state.ui.results.session.exprs.is_empty());
+        assert!(app.state.results.results.session.exprs.is_empty());
     }
 }

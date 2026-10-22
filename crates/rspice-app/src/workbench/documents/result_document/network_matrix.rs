@@ -421,9 +421,9 @@ pub(crate) mod tests {
                 ]);
             }
             let _ = frame(Vec::new());
-            assert!(app.ui.results.network_matrix.open_trace);
+            assert!(app.results.results.network_matrix.open_trace);
             assert_eq!(
-                app.ui.results.session.polar.quantity.as_deref(),
+                app.results.results.session.polar.quantity.as_deref(),
                 Some("|Sdd11|")
             );
             assert_eq!(
@@ -435,10 +435,11 @@ pub(crate) mod tests {
                     .result_data_digest()
             );
 
-            let cached = Arc::downgrade(app.ui.results.network_matrix.layout.as_ref().unwrap());
+            let cached =
+                Arc::downgrade(app.results.results.network_matrix.layout.as_ref().unwrap());
             let discarded = app.model.simulation.retained.runs[0].dataset_id;
             let version = app.model.simulation.view.data_version;
-            let controls = &mut app.ui.results.network_matrix.controls;
+            let controls = &mut app.results.results.network_matrix.controls;
             controls.representation = 2;
             controls.transpose = true;
             controls.heatmap = false;
@@ -449,21 +450,21 @@ pub(crate) mod tests {
                 .retained
                 .runs
                 .push(SimulationRun::new(2));
-            app.ui
+            app.results
                 .results
                 .reconcile_retained_datasets(&app.model.simulation);
             assert!(cached.upgrade().is_some());
-            assert!(app.ui.results.network_matrix.open_trace);
+            assert!(app.results.results.network_matrix.open_trace);
 
             // Prune while another viewer is active, without revisiting the matrix.
-            app.ui.results.session.viewer =
+            app.results.results.session.viewer =
                 rspice_results::result_presentation::ResultViewer::Table;
             app.model
                 .simulation
                 .retained
                 .runs
                 .retain(|run| run.dataset_id != discarded);
-            app.ui
+            app.results
                 .results
                 .reconcile_retained_datasets(&app.model.simulation);
             assert_eq!(app.model.simulation.view.data_version, version);
@@ -471,8 +472,8 @@ pub(crate) mod tests {
                 cached.upgrade().is_none(),
                 "discarding the dataset must release its matrix layout without another matrix frame"
             );
-            assert!(!app.ui.results.network_matrix.open_trace);
-            let controls = &app.ui.results.network_matrix.controls;
+            assert!(!app.results.results.network_matrix.open_trace);
+            let controls = &app.results.results.network_matrix.controls;
             assert!(controls.diagnostic.is_none());
             assert_eq!((controls.block, controls.sample), (0, 0));
             assert_eq!(controls.representation, 2);
@@ -539,12 +540,12 @@ pub(crate) mod tests {
                 let run = app.model.simulation.active_run().unwrap();
                 let analysis = app.model.simulation.active_analysis().unwrap();
                 let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-                app.ui
+                app.results
                     .results
                     .network_matrix
                     .bind(key, &app.model.simulation);
-                app.ui.results.network_matrix.open_trace = true;
-                app.ui.results.session.polar.quantity = Some("|Sdd11|".to_owned());
+                app.results.results.network_matrix.open_trace = true;
+                app.results.results.session.polar.quantity = Some("|Sdd11|".to_owned());
             }
             let canvas =
                 crate::ui::raster::render(egui::vec2(width as f32, 640.0), |ui, background| {

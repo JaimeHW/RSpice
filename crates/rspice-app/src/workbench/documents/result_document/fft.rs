@@ -8,19 +8,23 @@ use rspice_results_ui::fft::view;
 pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.result_presentation_policy().readout();
-    let plot_view = state.ui.results.session.plot_view(ResultViewer::Fft, 0);
+    let plot_view = state
+        .results
+        .results
+        .session
+        .plot_view(ResultViewer::Fft, 0);
     let out = view::show(
         ui,
         &mut state.analysis.fft_state,
-        &mut state.ui.results.session.fft_series,
+        &mut state.results.results.session.fft_series,
         plot_view,
-        &mut state.ui.results.session.cache,
+        &mut state.results.results.session.cache,
         &quantity_policy,
         presentation,
     );
     if out.fit_requested {
         state
-            .ui
+            .results
             .results
             .session
             .reset_plot_view(ResultViewer::Fft, 0);
@@ -33,10 +37,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         out.range_samples_read,
     );
     if let Some(response) = out.plot {
-        super::record_drawn_axes(&mut state.ui.results, ResultViewer::Fft, &response);
+        super::record_drawn_axes(&mut state.results.results, ResultViewer::Fft, &response);
         if response.view.any() {
             state
-                .ui
+                .results
                 .results
                 .session
                 .plot_view_mut(ResultViewer::Fft, 0)
@@ -50,7 +54,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
     view::right_panel(
         ui,
         &state.analysis.fft_state,
-        &mut state.ui.results.session.fft_series,
+        &mut state.results.results.session.fft_series,
         &state.model.preferences.quantity_presentation_policy(),
         usize::from(presentation.displayed_significant_digits().get()),
     );

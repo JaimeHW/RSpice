@@ -197,7 +197,7 @@ fn apply_action(state: &mut AppState, action: OpAction) {
             };
             match crate::schematic::view::select_signal_conductor(state, &signal) {
                 Ok(_) => {
-                    state.ui.schematic_visibility.annotations =
+                    state.design.schematic_visibility.annotations =
                         SchematicAnnotationVisibility::OperatingPoint;
                     state
                         .workbench
@@ -227,7 +227,7 @@ fn apply_action(state: &mut AppState, action: OpAction) {
                 .selection
                 .select_only_component(component_id);
             state.model.schematic.session.editor.center_request = Some(position);
-            state.ui.schematic_visibility.annotations =
+            state.design.schematic_visibility.annotations =
                 SchematicAnnotationVisibility::OperatingPoint;
             state
                 .workbench
@@ -264,8 +264,8 @@ fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Ar
             state.model.simulation.view.data_version,
         ),
         analysis,
-        filter: state.ui.results.session.op_filter.clone(),
-        sort: state.ui.results.session.op_sort.clone(),
+        filter: state.results.results.session.op_filter.clone(),
+        sort: state.results.results.session.op_sort.clone(),
         root: state
             .model
             .workspace
@@ -273,7 +273,7 @@ fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Ar
             .simulation_root_reference()
             .cell,
     };
-    if let Some(plan) = state.ui.results.plans.op.as_ref()
+    if let Some(plan) = state.results.results.plans.op.as_ref()
         && plan.key == key
     {
         return Some(Arc::clone(plan));
@@ -288,7 +288,7 @@ fn op_plan(state: &mut AppState, analysis: AnalysisPresentationKey) -> Option<Ar
         detail.as_ref(),
     );
     let built = Arc::new(OpPlan { key, display });
-    state.ui.results.plans.op = Some(Arc::clone(&built));
+    state.results.results.plans.op = Some(Arc::clone(&built));
     Some(built)
 }
 struct OpMapping<'a> {
@@ -373,7 +373,8 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         apply_action(state, action);
     }
     if let Some(key) = clicked_sort {
-        state.ui.results.session.op_sort = match state.ui.results.session.op_sort.as_ref() {
+        state.results.results.session.op_sort = match state.results.results.session.op_sort.as_ref()
+        {
             Some((current, ascending)) if current.eq_ignore_ascii_case(&key) => {
                 Some((key, !*ascending))
             }
@@ -523,7 +524,7 @@ mod tests {
             &op_plan(&mut state, key).expect("a row plan")
         ));
 
-        state.ui.results.session.op_filter = "m1".to_owned();
+        state.results.results.session.op_filter = "m1".to_owned();
         let filtered = op_plan(&mut state, key).expect("a row plan");
         assert!(filtered.display.device_shown() < unfiltered.display.device_shown());
         assert!(
@@ -531,8 +532,8 @@ mod tests {
             "the filter matched nothing, so it proves nothing"
         );
 
-        state.ui.results.session.op_filter.clear();
-        state.ui.results.session.op_sort = Some(("gm".to_owned(), true));
+        state.results.results.session.op_filter.clear();
+        state.results.results.session.op_sort = Some(("gm".to_owned(), true));
         let sorted = op_plan(&mut state, key).expect("a row plan");
         assert_ne!(
             sorted.display.device_indices().collect::<Vec<_>>(),
@@ -579,6 +580,6 @@ mod tests {
             state.prompt_text(),
             Some("The retained device no longer resolves to the active schematic.")
         );
-        assert!(state.ui.toasts.activity().is_empty());
+        assert!(state.workbench.toasts.activity().is_empty());
     }
 }

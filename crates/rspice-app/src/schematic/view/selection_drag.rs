@@ -18,7 +18,7 @@ fn view<'a>(state: &'a AppState, ctx: &egui::Context) -> SelectionDragView<'a> {
     SelectionDragView {
         design: super::schematic_design_view(state),
         editor: &state.model.schematic.session.editor,
-        filter: state.ui.schematic_selection_filter,
+        filter: state.design.schematic_selection_filter,
         drag: state.schematic_drag_snapshot(ctx),
     }
 }

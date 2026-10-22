@@ -20,14 +20,14 @@ mod source_cache;
 fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
     let mut state = AppState::default();
     assert!(
-        state.ui.results.session.cursor_tool.is_armed(),
+        state.results.results.session.cursor_tool.is_armed(),
         "armed by default"
     );
-    assert!(!state.ui.results.session.cursor_readout_active());
+    assert!(!state.results.results.session.cursor_readout_active());
     assert_eq!(readout_strip_height(&mut state), 0.0);
 
-    state.ui.results.session.cursors.place(1.0e-3);
-    assert!(state.ui.results.session.cursor_readout_active());
+    state.results.results.session.cursors.place(1.0e-3);
+    assert!(state.results.results.session.cursor_readout_active());
     // No visible traces on an empty run: the header alone, never a band
     // of blank rows.
     assert_eq!(readout_strip_height(&mut state), READOUT_HEADER_H);
@@ -36,21 +36,21 @@ fn the_readout_strip_stands_down_until_a_cursor_is_placed() {
 #[test]
 fn disarming_the_cursor_tool_clears_the_pair_and_hides_the_strip() {
     let mut state = AppState::default();
-    state.ui.results.session.cursors.place(1.0);
-    state.ui.results.session.cursors.place(2.0);
-    state.ui.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.place(1.0);
+    state.results.results.session.cursors.place(2.0);
+    state.results.results.session.cursor_strip = Some(0);
 
-    state.ui.results.session.toggle_cursor_tool();
+    state.results.results.session.toggle_cursor_tool();
 
-    assert!(!state.ui.results.session.cursor_tool.is_armed());
-    assert!(!state.ui.results.session.cursors.any());
-    assert_eq!(state.ui.results.session.cursor_strip, None);
+    assert!(!state.results.results.session.cursor_tool.is_armed());
+    assert!(!state.results.results.session.cursors.any());
+    assert_eq!(state.results.results.session.cursor_strip, None);
     assert_eq!(readout_strip_height(&mut state), 0.0);
 
-    state.ui.results.session.toggle_cursor_tool();
-    assert!(state.ui.results.session.cursor_tool.is_armed());
+    state.results.results.session.toggle_cursor_tool();
+    assert!(state.results.results.session.cursor_tool.is_armed());
     assert!(
-        !state.ui.results.session.cursors.any(),
+        !state.results.results.session.cursors.any(),
         "re-arming must not resurrect cleared cursors"
     );
 }
@@ -199,8 +199,8 @@ fn deep_readout_fixture(trace_count: usize) -> AppState {
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(waveforms),
     );
-    state.ui.results.session.cursors.place(0.5);
-    state.ui.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.place(0.5);
+    state.results.results.session.cursor_strip = Some(0);
     state
 }
 
@@ -217,7 +217,7 @@ fn a_value_is_named_by_its_own_unit_not_the_strips() {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -256,7 +256,7 @@ fn a_readout_states_the_value_while_a_table_column_pads_it() {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -311,7 +311,7 @@ fn a_slope_is_named_by_its_own_unit_not_the_strips() {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -350,8 +350,8 @@ fn a_copied_value_is_named_by_its_own_unit_not_the_strips() {
             RetainedTrace::new("I(VDD)", vec![0.0, 1.0], vec![0.0, 1.5e-3], "#fff"),
         ]),
     );
-    state.ui.results.session.cursor_strip = Some(0);
-    state.ui.results.session.cursors.a = Some(1.0);
+    state.results.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.a = Some(1.0);
 
     let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
 
@@ -377,8 +377,8 @@ fn a_copied_noise_density_never_takes_a_second_prefix() {
             RetainedTrace::new("onoise", vec![1.0, 10.0], vec![4.0e-12, 4.0e-12], "#fff"),
         ]),
     );
-    state.ui.results.session.cursor_strip = Some(0);
-    state.ui.results.session.cursors.a = Some(10.0);
+    state.results.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.a = Some(10.0);
 
     let copied = copy_cursor_text(&mut state).expect("active cursor has copy data");
 
@@ -399,7 +399,7 @@ fn hidden_unit_signals_keep_a_pane_available_for_reactivation() {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -441,7 +441,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -455,7 +455,7 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
     );
 
     toggle_visibility(&mut state, 0, 0);
-    assert!(state.ui.results.session.waveform_visibility.is_empty());
+    assert!(state.results.results.session.waveform_visibility.is_empty());
     assert_eq!(
         state.model.simulation.retained.runs[0].analyses[0].waveforms[0].visible,
         retained_default
@@ -465,19 +465,19 @@ fn quick_view_visibility_never_mutates_retained_or_live_waveforms() {
 #[test]
 fn shared_x_frame_exposes_current_and_full_ranges_to_accessibility() {
     let mut state = marker_fixture();
-    state.ui.results.session.cursor_strip = Some(0);
-    state.ui.results.session.cursors.a = Some(0.25);
-    state.ui.results.session.cursors.b = Some(0.75);
+    state.results.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.a = Some(0.25);
+    state.results.results.session.cursors.b = Some(0.75);
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
     let model = &models[0];
     set_shared_x_view(
-        &mut state.ui.results.session,
+        &mut state.results.results.session,
         model.analysis_key,
         1,
         Some((0.25, 0.75)),
@@ -515,7 +515,7 @@ fn each_cursor_trace_reports_its_own_linear_slope() {
     let complex_display = presentation.complex_number_display();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         complex_display,
         &Tokens::default(),
     );
@@ -614,7 +614,7 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     assert_eq!(readout_strip_height(&mut state), 0.0);
 
     state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
@@ -626,7 +626,7 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
     );
 
     // A closed strip takes its markers off screen with it.
-    state.ui.results.session.hidden_strips.insert(analysis);
+    state.results.results.session.hidden_strips.insert(analysis);
     assert_eq!(readout_strip_height(&mut state), 0.0);
 }
 
@@ -634,13 +634,13 @@ fn markers_alone_keep_a_compact_readout_strip_on_screen() {
 fn the_strip_carries_cursors_and_markers_together() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
-    state.ui.results.session.cursors.place(0.5);
-    state.ui.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.place(0.5);
+    state.results.results.session.cursor_strip = Some(0);
     let cursors_only = readout_strip_height(&mut state);
     assert!(cursors_only > 0.0);
 
     state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
@@ -657,16 +657,16 @@ fn collapse_keeps_one_header_and_no_content_still_removes_the_strip() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
     state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
-    state.ui.results.session.readout_collapsed = true;
+    state.results.results.session.readout_collapsed = true;
 
     assert_eq!(readout_strip_height(&mut state), READOUT_HEADER_H);
 
-    state.ui.results.session.hidden_strips.insert(analysis);
+    state.results.results.session.hidden_strips.insert(analysis);
     assert_eq!(readout_strip_height(&mut state), 0.0);
 }
 
@@ -676,7 +676,7 @@ fn every_visible_marker_remains_in_the_scroll_owned_body() {
     let (analysis, waveform) = marker_identity(&state);
     for index in 0..12 {
         state
-            .ui
+            .results
             .results
             .session
             .add_marker(
@@ -698,25 +698,25 @@ fn markers_outlive_the_tool_that_placed_them() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
     assert!(
-        !state.ui.results.session.marker_tool.is_armed(),
+        !state.results.results.session.marker_tool.is_armed(),
         "annotating is deliberate — the tool is off until asked for"
     );
-    state.ui.results.session.toggle_marker_tool();
+    state.results.results.session.toggle_marker_tool();
     let id = state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
-    state.ui.results.session.toggle_marker_tool();
+    state.results.results.session.toggle_marker_tool();
 
-    assert!(!state.ui.results.session.marker_tool.is_armed());
-    assert_eq!(state.ui.results.session.markers.len(), 1);
+    assert!(!state.results.results.session.marker_tool.is_armed());
+    assert_eq!(state.results.results.session.markers.len(), 1);
 
     // Cursors are a readout and clear; markers are content and do not.
-    state.ui.results.session.clear_cursors();
-    assert_eq!(state.ui.results.session.markers.len(), 1);
-    assert_eq!(state.ui.results.session.markers[0].id, id);
+    state.results.results.session.clear_cursors();
+    assert_eq!(state.results.results.session.markers.len(), 1);
+    assert_eq!(state.results.results.session.markers[0].id, id);
 }
 
 #[test]
@@ -724,25 +724,25 @@ fn removing_a_marker_takes_its_open_edit_with_it() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
     let first = state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, waveform.clone(), "V(out)".to_owned(), 0.5)
         .unwrap();
     marker_dialog::open(&mut state, MarkerSelector::Quick(first));
-    assert!(state.ui.results.session.marker_edit.is_some());
+    assert!(state.results.results.session.marker_edit.is_some());
 
-    state.ui.results.session.remove_marker(first);
+    state.results.results.session.remove_marker(first);
 
-    assert!(state.ui.results.session.markers.is_empty());
+    assert!(state.results.results.session.markers.is_empty());
     assert!(
-        state.ui.results.session.marker_edit.is_none(),
+        state.results.results.session.marker_edit.is_none(),
         "an edit of a marker that no longer exists has nothing to apply to"
     );
 
     // Ids are not recycled: M1 must not come back meaning something else.
     let second = state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.9)
@@ -757,12 +757,12 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
     let mut state = marker_fixture();
     let (analysis, waveform) = marker_identity(&state);
     let id = state
-        .ui
+        .results
         .results
         .session
         .add_marker(analysis, waveform, "V(out)".to_owned(), 0.5)
         .unwrap();
-    if let Some(marker) = state.ui.results.session.marker_mut(id) {
+    if let Some(marker) = state.results.results.session.marker_mut(id) {
         marker.note = "overshoot".to_owned();
         marker.kind = MarkerKind::Peak;
     }
@@ -770,7 +770,7 @@ fn opening_a_marker_edit_seeds_the_draft_from_the_marker() {
     marker_dialog::open(&mut state, MarkerSelector::Quick(id));
 
     let draft = state
-        .ui
+        .results
         .results
         .session
         .marker_edit
@@ -1565,8 +1565,8 @@ fn cursor_copy_uses_explicit_scientific_si_policy() {
             RetainedTrace::new("onoise", vec![1.0, 10.0], vec![2.0e-18, 4.0e-18], "#fff"),
         ]),
     );
-    state.ui.results.session.cursor_strip = Some(0);
-    state.ui.results.session.cursors.a = Some(10.0);
+    state.results.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.a = Some(10.0);
     state
         .model
         .preferences
@@ -1593,25 +1593,25 @@ fn inline_readout_speaks_only_for_a_collapsed_strip() {
             RetainedTrace::new("V(out)", vec![0.0, 1.0e-3], vec![0.0, 1.0], "#fff"),
         ]),
     );
-    state.ui.results.session.cursor_strip = Some(0);
-    if !state.ui.results.session.cursor_tool.is_armed() {
-        state.ui.results.session.toggle_cursor_tool();
+    state.results.results.session.cursor_strip = Some(0);
+    if !state.results.results.session.cursor_tool.is_armed() {
+        state.results.results.session.toggle_cursor_tool();
     }
-    state.ui.results.session.cursors.a = Some(0.0);
-    state.ui.results.session.cursors.b = Some(1.0e-3);
+    state.results.results.session.cursors.a = Some(0.0);
+    state.results.results.session.cursors.b = Some(1.0e-3);
 
     // Expanded: the strip owns the readout, so the bar says nothing.
-    state.ui.results.session.readout_collapsed = false;
+    state.results.results.session.readout_collapsed = false;
     assert_eq!(inline_cursor_readout(&mut state, &t), None);
 
-    state.ui.results.session.readout_collapsed = true;
+    state.results.results.session.readout_collapsed = true;
     let readout = inline_cursor_readout(&mut state, &t).expect("collapsed strip yields a readout");
     assert!(readout.starts_with("A "), "{readout}");
     assert!(readout.contains(" · B "), "{readout}");
     assert!(readout.contains(" \u{0394} "), "{readout}");
 
     // Cursor B unplaced: report A alone rather than an empty delta.
-    state.ui.results.session.cursors.b = None;
+    state.results.results.session.cursors.b = None;
     let single = inline_cursor_readout(&mut state, &t).expect("cursor A alone still reads out");
     assert!(!single.contains('\u{0394}'), "{single}");
 }
@@ -1636,21 +1636,21 @@ fn legend_cursor_values_stay_on_the_strip_that_owns_the_cursor() {
             "#0af",
         )]),
     );
-    if !state.ui.results.session.cursor_tool.is_armed() {
-        state.ui.results.session.toggle_cursor_tool();
+    if !state.results.results.session.cursor_tool.is_armed() {
+        state.results.results.session.toggle_cursor_tool();
     }
-    state.ui.results.session.cursors.a = Some(0.5);
-    state.ui.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.a = Some(0.5);
+    state.results.results.session.cursor_strip = Some(0);
 
     let owns = |analysis_index: usize, state: &AppState| {
-        state.ui.results.session.cursor_readout_active()
-            && state.ui.results.session.cursor_strip == Some(analysis_index)
+        state.results.results.session.cursor_readout_active()
+            && state.results.results.session.cursor_strip == Some(analysis_index)
     };
     assert!(owns(0, &state), "the placed strip reports its cursor value");
     assert!(!owns(1, &state), "a sibling strip must not borrow cursor A");
 
     // Disarming the tool retires every chip value at once.
-    state.ui.results.session.toggle_cursor_tool();
+    state.results.results.session.toggle_cursor_tool();
     assert!(!owns(0, &state));
 }
 
@@ -1681,14 +1681,14 @@ fn inline_readout_finds_a_noise_strip_behind_earlier_analyses() {
             RetainedTrace::new("onoise", vec![1.0e3, 1.0e4], vec![1.0e-18, 4.0e-18], "#f80"),
         ]),
     );
-    state.ui.results.session.viewer = super::super::ResultViewer::NoiseContrib;
-    if !state.ui.results.session.cursor_tool.is_armed() {
-        state.ui.results.session.toggle_cursor_tool();
+    state.results.results.session.viewer = super::super::ResultViewer::NoiseContrib;
+    if !state.results.results.session.cursor_tool.is_armed() {
+        state.results.results.session.toggle_cursor_tool();
     }
-    state.ui.results.session.cursor_strip = Some(3);
-    state.ui.results.session.cursors.a = Some(1.0e3);
-    state.ui.results.session.cursors.b = Some(1.0e4);
-    state.ui.results.session.readout_collapsed = true;
+    state.results.results.session.cursor_strip = Some(3);
+    state.results.results.session.cursors.a = Some(1.0e3);
+    state.results.results.session.cursors.b = Some(1.0e4);
+    state.results.results.session.readout_collapsed = true;
 
     let readout = inline_cursor_readout(&mut state, &t)
         .expect("the noise strip at index 3 owns the cursor readout");
@@ -1747,11 +1747,11 @@ fn bode_models_include_pac_pxf_and_stb_but_exclude_pstb_mode_data() {
         ]),
     );
 
-    state.ui.results.session.viewer = super::super::ResultViewer::Bode;
+    state.results.results.session.viewer = super::super::ResultViewer::Bode;
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -1795,11 +1795,11 @@ fn waves_models_include_pss_and_envelope_complex_data() {
         ]),
     );
 
-    state.ui.results.session.viewer = super::super::ResultViewer::Waves;
+    state.results.results.session.viewer = super::super::ResultViewer::Waves;
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -1831,11 +1831,11 @@ fn disto_frequency_curves_preserve_raw_values_and_units() {
             .with_unit("dBc"),
         ]),
     );
-    state.ui.results.session.viewer = super::super::ResultViewer::Bode;
+    state.results.results.session.viewer = super::super::ResultViewer::Bode;
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );

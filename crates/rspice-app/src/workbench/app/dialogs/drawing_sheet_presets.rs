@@ -1471,7 +1471,7 @@ mod tests {
                         mode,
                         ..crate::ui::Theme::default()
                     };
-                    app.state.ui.theme = theme;
+                    app.state.workbench.theme = theme;
                     let canvas = crate::ui::raster::render_themed(theme, size, |ui, _| {
                         app.render_frame_chrome(ui);
                         app.render_frame_dialogs(ui.ctx());

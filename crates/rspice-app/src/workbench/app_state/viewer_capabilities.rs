@@ -79,7 +79,7 @@ impl AppState {
     /// exactly once however it was reached.
     pub(crate) fn replace_project_execution_context(&mut self, announcement: impl Into<String>) {
         self.clear_design_execution_context();
-        self.ui.results.clear_project_scoped_state();
+        self.results.results.clear_project_scoped_state();
         self.start_waveform_view_from_preferences();
         self.record(
             crate::diagnostics::LogSeverity::Info,
@@ -92,14 +92,14 @@ impl AppState {
     /// wrapped or unwrapped phase, and the minor grid. Its own toggles change
     /// both afterwards.
     pub(crate) fn start_waveform_viewer_session(&mut self) {
-        self.ui.results.session.phase_continuous = self.model.preferences.unwrapped_phase();
+        self.results.results.session.phase_continuous = self.model.preferences.unwrapped_phase();
         self.start_waveform_view_from_preferences();
     }
 
     /// Give a cleared waveform view the minor grid Results ▸ Waveform
     /// defaults asks for; clearing alone would always start it without.
     pub(crate) fn start_waveform_view_from_preferences(&mut self) {
-        self.ui.results.session.show_minor_grid = self
+        self.results.results.session.show_minor_grid = self
             .model
             .preferences
             .toggle(crate::workbench::TogglePreference::WaveMinorGrid);
@@ -123,19 +123,19 @@ impl AppState {
         // history numbers its runs from one again: kept, the offer would
         // open this design's run of the same number. The notices stay, as
         // does "Show in Console": the session's log outlives the design.
-        self.ui.toasts.retire_offers(|action| {
+        self.workbench.toasts.retire_offers(|action| {
             matches!(
                 action,
                 crate::ui::widgets::NotificationAction::OpenRunInResults { .. }
             )
         });
-        self.ui.netlist = Default::default();
+        self.code.netlist = Default::default();
         *self.model.netlist_artifacts = Default::default();
         *self.manual_run = Default::default();
-        self.ui.code_workspace = Default::default();
+        self.code.code_workspace = Default::default();
         self.workbench.netlist_open_documents.clear();
-        self.ui.results_seen_version = 0;
-        self.ui.results.clear_design_scoped_state();
+        self.results.results_seen_version = 0;
+        self.results.results.clear_design_scoped_state();
         self.start_waveform_view_from_preferences();
         self.workbench.specification_editor_route_pending = false;
         self.model.design_checks.drc_results = None;
@@ -211,7 +211,7 @@ impl AppState {
         &self,
         provenance: SpecializedViewerCacheProvenance,
     ) -> EyeTimebase {
-        self.ui
+        self.results
             .results
             .session
             .eye_timebase
@@ -233,10 +233,14 @@ impl AppState {
         let key = eye_timebase_key(provenance);
         match timebase {
             EyeTimebase::Auto => {
-                self.ui.results.session.eye_timebase.remove(&key);
+                self.results.results.session.eye_timebase.remove(&key);
             }
             explicit => {
-                self.ui.results.session.eye_timebase.insert(key, explicit);
+                self.results
+                    .results
+                    .session
+                    .eye_timebase
+                    .insert(key, explicit);
             }
         }
     }
@@ -644,7 +648,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         let mut state = AppState::default();
-        state.ui.toasts.notify_with_action(
+        state.workbench.toasts.notify_with_action(
             &ctx,
             NotificationCategory::Job,
             ToastKind::Success,
@@ -652,7 +656,7 @@ mod tests {
             "2 analyses saved with this run.",
             NotificationAction::OpenRunInResults { run_sequence: 3 },
         );
-        state.ui.toasts.notify_with_action(
+        state.workbench.toasts.notify_with_action(
             &ctx,
             NotificationCategory::System,
             ToastKind::Error,
@@ -663,7 +667,7 @@ mod tests {
 
         state.clear_design_execution_context();
 
-        let records = state.ui.toasts.activity();
+        let records = state.workbench.toasts.activity();
         assert_eq!(records.len(), 2, "what happened is still true");
         assert_eq!(records[1].title(), "Run 3 complete");
         assert_eq!(records[1].message(), "2 analyses saved with this run.");
@@ -864,16 +868,16 @@ mod tests {
     #[test]
     fn clearing_design_execution_context_clears_source_runtime_and_keeps_the_console() {
         let mut state = AppState::default();
-        state.ui.code_workspace.page =
+        state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
-        state.ui.code_workspace.automation.debug.watches.push(
+        state.code.code_workspace.automation.debug.watches.push(
             crate::workbench::documents::code_workspace::AutomationWatch {
                 expression: "project.old_value".to_owned(),
                 value: "17".to_owned(),
                 error: None,
             },
         );
-        state.ui.netlist.diagnostics = std::sync::Arc::new(
+        state.code.netlist.diagnostics = std::sync::Arc::new(
             crate::state::netlist_diagnostics::NetlistDiagnosticCollection::try_new(
                 vec![crate::state::netlist_diagnostics::Diagnostic::error(
                     "old project diagnostic",
@@ -889,11 +893,19 @@ mod tests {
         state.clear_design_execution_context();
 
         assert_eq!(
-            state.ui.code_workspace.page,
+            state.code.code_workspace.page,
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
         );
-        assert!(state.ui.code_workspace.automation.debug.watches.is_empty());
-        assert_eq!(state.ui.netlist.diagnostics.summary().total(), 0);
+        assert!(
+            state
+                .code
+                .code_workspace
+                .automation
+                .debug
+                .watches
+                .is_empty()
+        );
+        assert_eq!(state.code.netlist.diagnostics.summary().total(), 0);
         assert!(
             state
                 .model
@@ -919,8 +931,8 @@ mod tests {
         );
         let analysis_key =
             AnalysisPresentationKey::new(crate::product::DatasetId::new(), &analysis);
-        state.ui.results_seen_version = 99;
-        let results = &mut state.ui.results;
+        state.results.results_seen_version = 99;
+        let results = &mut state.results.results;
         results.session.viewer = ResultViewer::Fft;
         results.session.phase_continuous = true;
         results.session.cursors.place(1.0);
@@ -960,9 +972,9 @@ mod tests {
         state.workbench.specification_editor_route_pending = true;
 
         state.clear_design_execution_context();
-        let results = &state.ui.results;
+        let results = &state.results.results;
 
-        assert_eq!(state.ui.results_seen_version, 0);
+        assert_eq!(state.results.results_seen_version, 0);
         assert_eq!(results.session.viewer, ResultViewer::Fft);
         assert!(results.session.phase_continuous);
         assert!(!results.session.cursors.any());

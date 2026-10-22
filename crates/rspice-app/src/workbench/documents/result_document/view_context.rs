@@ -109,7 +109,7 @@ fn resolve_dataset_view(
         .position(|run| run.dataset_id == dataset_id)
         .ok_or_else(|| "The active result dataset is no longer retained.".to_owned())?;
     let run = &state.model.simulation.retained.runs[run_index];
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     let mut analysis_indices = run
         .analyses
         .iter()
@@ -122,9 +122,9 @@ fn resolve_dataset_view(
     if viewer_uses_analysis_stack(viewer) {
         analysis_indices.retain(|index| {
             let key = AnalysisPresentationKey::new(dataset_id, &run.analyses[*index]);
-            !state.ui.results.session.hidden_strips.contains(&key)
+            !state.results.results.session.hidden_strips.contains(&key)
         });
-        if let Some(maximized) = state.ui.results.session.maximized_strip
+        if let Some(maximized) = state.results.results.session.maximized_strip
             && let Some(index) = analysis_indices.iter().copied().find(|index| {
                 AnalysisPresentationKey::new(dataset_id, &run.analyses[*index]) == maximized
             })
@@ -157,7 +157,7 @@ fn selected_primary_index(
     candidates: &[usize],
 ) -> Option<usize> {
     state
-        .ui
+        .results
         .results
         .session
         .active_wave_pane
@@ -185,7 +185,7 @@ fn resolve_visualization_pane(
         .visualization_document(document_id)
         .ok_or_else(|| "The active visualization document no longer exists.".to_owned())?;
     let page_id = state
-        .ui
+        .results
         .results
         .session
         .persistent_document_page(document_id)
@@ -193,7 +193,7 @@ fn resolve_visualization_pane(
         .or_else(|| document.pages().first().map(|page| page.id))
         .ok_or_else(|| "The active visualization document has no page.".to_owned())?;
     let pane = state
-        .ui
+        .results
         .results
         .session
         .persistent_document_pane(document_id)
@@ -237,10 +237,10 @@ fn resolve_visualization_pane(
     let viewer = analysis_supports_viewer_memoized(
         state,
         run.dataset_id,
-        state.ui.results.session.viewer,
+        state.results.results.session.viewer,
         analysis,
     )
-    .then_some(state.ui.results.session.viewer)
+    .then_some(state.results.results.session.viewer)
     .or_else(|| ResultViewer::from_viewer_document_id(&pane.viewer_id))
     .ok_or_else(|| "The selected pane has no implemented viewer.".to_owned())?;
 
@@ -491,7 +491,7 @@ mod tests {
         let ac = AnalysisResult::new(2, AnalysisType::Ac, "AC")
             .with_waveforms(vec![waveform("|V(out)|")]);
         let mut state = state_with_run(vec![op, ac]);
-        state.ui.results.session.viewer = ResultViewer::Bode;
+        state.results.results.session.viewer = ResultViewer::Bode;
 
         let resolved = resolve_displayed_result_view(&state).expect("displayed Bode context");
 
@@ -507,13 +507,13 @@ mod tests {
         let tran_b = AnalysisResult::new(2, AnalysisType::Transient, "TRAN B")
             .with_waveforms(vec![waveform("V(b)")]);
         let mut state = state_with_run(vec![tran_a, tran_b]);
-        state.ui.results.session.viewer = ResultViewer::Waves;
+        state.results.results.session.viewer = ResultViewer::Waves;
 
         let all = resolve_displayed_result_view(&state).expect("wave stack context");
         assert_eq!(all.analysis_indices, vec![0, 1]);
 
         let run = state.model.simulation.active_run().unwrap();
-        state.ui.results.session.maximized_strip = Some(AnalysisPresentationKey::new(
+        state.results.results.session.maximized_strip = Some(AnalysisPresentationKey::new(
             run.dataset_id,
             &run.analyses[1],
         ));

@@ -117,7 +117,7 @@ fn no_source_page_carries_an_editor_menu_of_its_own() {
     ] {
         let mut app = open_project_app();
         app.state.workbench.activate(Workspace::Netlist);
-        app.state.ui.code_workspace.page = page;
+        app.state.code.code_workspace.page = page;
         let ctx = themed_context();
         frame(&ctx, &mut app, DESKTOP);
         let output = frame(&ctx, &mut app, DESKTOP);
@@ -210,7 +210,7 @@ fn edit_select_all_then_copy_reach_the_source_editor() {
         "Select all then Copy put the whole source on the clipboard"
     );
     assert!(
-        app.state.ui.schematic_clipboard.is_empty(),
+        app.state.design.schematic_clipboard.is_empty(),
         "Copy did not copy the schematic selection"
     );
     assert_eq!(root_text(&app, bundle_id), original);
@@ -301,7 +301,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
         code_workspace::source_editor_id(ProjectSourceLanguage::VerilogA, bundle_id, "model.va");
     ctx.memory_mut(|memory| memory.request_focus(editor));
     frame(&ctx, &mut app, DESKTOP);
-    assert!(app.state.ui.code_workspace.source_search.is_none());
+    assert!(app.state.code.code_workspace.source_search.is_none());
     frame_with(
         &ctx,
         &mut app,
@@ -313,7 +313,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     );
     frame(&ctx, &mut app, DESKTOP);
     assert!(
-        app.state.ui.code_workspace.source_search.is_some(),
+        app.state.code.code_workspace.source_search.is_some(),
         "Ctrl+F in the focused editor opened the source's find"
     );
 
@@ -562,7 +562,7 @@ fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
     let output = right_click_line(&ctx, &mut app, 6);
     let caret = |app: &RSpiceApp| {
         app.state
-            .ui
+            .code
             .code_workspace
             .source_carets
             .get(&(bundle_id, "model.va".to_owned()))
@@ -592,7 +592,7 @@ fn go_to_definition_from_the_menu_moves_the_caret_to_the_definition() {
         "the caret moved to the parameter's definition"
     );
     assert!(
-        app.state.ui.code_workspace.language_tools.is_none(),
+        app.state.code.code_workspace.language_tools.is_none(),
         "Go to definition jumps rather than opening the tools dialog"
     );
 }
@@ -621,7 +621,7 @@ fn render_the_source_editor_menus_for_review() {
     ] {
         let page = || {
             let (ctx, mut app, _) = veriloga_with_focused_editor();
-            app.state.ui.theme.mode = mode;
+            app.state.workbench.theme.mode = mode;
             let output = frame(&ctx, &mut app, DESKTOP);
             (ctx, app, output)
         };

@@ -13,7 +13,14 @@ use super::*;
 /// the versioned RSpice API; secret-bearing environment values are never
 /// materialized in the debugger model.
 pub fn start_automation_debugger(app: &mut RSpiceApp) {
-    if app.state.ui.code_workspace.automation.execution.is_active() {
+    if app
+        .state
+        .code
+        .code_workspace
+        .automation
+        .execution
+        .is_active()
+    {
         return;
     }
     if !python_automation_requires_managed_worker(app) {
@@ -54,7 +61,12 @@ pub fn restart_automation_debugger(app: &mut RSpiceApp) {
 /// call, so the pause is honored at its next safe completion boundary.
 pub fn pause_automation_debugger(app: &mut RSpiceApp) {
     if send_debug_control(app, rspice_automation_protocol::DebugControl::Pause) {
-        app.state.ui.code_workspace.automation.debug.pause_requested = true;
+        app.state
+            .code
+            .code_workspace
+            .automation
+            .debug
+            .pause_requested = true;
     }
 }
 
@@ -63,7 +75,7 @@ pub fn stop_automation_debugger(app: &mut RSpiceApp) {
         let _ = send_debug_control(app, rspice_automation_protocol::DebugControl::Stop);
         return;
     }
-    let debug = &mut app.state.ui.code_workspace.automation.debug;
+    let debug = &mut app.state.code.code_workspace.automation.debug;
     debug.phase = AutomationDebugPhase::Stopped;
     debug.current_line = None;
     debug.call_stack.clear();
@@ -84,7 +96,7 @@ pub fn toggle_automation_breakpoint(app: &mut RSpiceApp, line: usize) {
         );
         return;
     };
-    let breakpoints = &mut app.state.ui.code_workspace.automation.debug.breakpoints;
+    let breakpoints = &mut app.state.code.code_workspace.automation.debug.breakpoints;
     if let Some(index) = breakpoints
         .iter()
         .position(|breakpoint| breakpoint.document_id == document_id && breakpoint.line == line)
@@ -103,7 +115,7 @@ pub fn toggle_automation_breakpoint(app: &mut RSpiceApp, line: usize) {
 
 pub fn remove_automation_breakpoint(app: &mut RSpiceApp, document_id: uuid::Uuid, line: usize) {
     app.state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -113,12 +125,12 @@ pub fn remove_automation_breakpoint(app: &mut RSpiceApp, document_id: uuid::Uuid
 }
 
 pub fn select_automation_debug_frame(app: &mut RSpiceApp, frame_id: u64) {
-    if app.state.ui.code_workspace.automation.debug.phase != AutomationDebugPhase::Paused {
+    if app.state.code.code_workspace.automation.debug.phase != AutomationDebugPhase::Paused {
         return;
     }
     let frame = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -130,7 +142,7 @@ pub fn select_automation_debug_frame(app: &mut RSpiceApp, frame_id: u64) {
         return;
     };
     {
-        let debug = &mut app.state.ui.code_workspace.automation.debug;
+        let debug = &mut app.state.code.code_workspace.automation.debug;
         debug.selected_frame_id = Some(frame.frame_id);
         debug.current_line = Some(frame.line);
         debug.locals.clear();
@@ -150,7 +162,7 @@ pub fn select_automation_debug_frame(app: &mut RSpiceApp, frame_id: u64) {
 }
 
 pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
-    if app.state.ui.code_workspace.automation.debug.phase != AutomationDebugPhase::Paused {
+    if app.state.code.code_workspace.automation.debug.phase != AutomationDebugPhase::Paused {
         return;
     }
     let Some((session_id, _)) = active_debug_session(app) else {
@@ -159,7 +171,7 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
     };
     let Some(frame_id) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -169,7 +181,7 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
     };
     let expressions = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -187,7 +199,7 @@ pub fn refresh_automation_debugger(app: &mut RSpiceApp) {
         ) {
             Ok(request_id) => {
                 app.state
-                    .ui
+                    .code
                     .code_workspace
                     .automation
                     .debug
@@ -211,7 +223,7 @@ pub fn sync_automation_debugger(app: &mut RSpiceApp) {
 
 pub(super) fn active_debug_session(app: &RSpiceApp) -> Option<(uuid::Uuid, u64)> {
     app.state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_execution
@@ -251,7 +263,7 @@ pub(super) fn send_debug_control(
         },
     ) {
         Ok(_) => {
-            let debug = &mut app.state.ui.code_workspace.automation.debug;
+            let debug = &mut app.state.code.code_workspace.automation.debug;
             if !matches!(control, rspice_automation_protocol::DebugControl::Pause) {
                 debug.phase = AutomationDebugPhase::Running;
                 debug.pause_requested = false;
@@ -288,7 +300,7 @@ pub(super) fn active_automation_python_document(app: &RSpiceApp) -> Option<(uuid
         ))?;
     let path = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .selected_file
@@ -308,7 +320,7 @@ pub(super) fn runtime_breakpoints(
     use rspice_automation_protocol::{Breakpoint, BreakpointKind};
 
     app.state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -354,7 +366,7 @@ pub(super) fn runtime_exception_policy(
 ) -> rspice_automation_protocol::ExceptionPolicy {
     match app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -374,7 +386,7 @@ pub(super) fn synchronize_runtime_breakpoints(app: &mut RSpiceApp) {
     };
     let Some(snapshot) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot
@@ -407,7 +419,7 @@ pub(super) fn request_debug_stack(app: &mut RSpiceApp, session_id: uuid::Uuid) {
     ) {
         Ok(request_id) => {
             app.state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -428,7 +440,7 @@ pub(super) fn apply_debug_stack(
     };
     if app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -440,7 +452,7 @@ pub(super) fn apply_debug_stack(
     }
     let paths = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot
@@ -469,7 +481,7 @@ pub(super) fn apply_debug_stack(
         .collect::<Vec<_>>();
     let selected = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -478,7 +490,7 @@ pub(super) fn apply_debug_stack(
         .or_else(|| mapped.first())
         .cloned();
     {
-        let debug = &mut app.state.ui.code_workspace.automation.debug;
+        let debug = &mut app.state.code.code_workspace.automation.debug;
         debug.pending_stack_request_id = None;
         debug.call_stack = mapped;
         debug.selected_frame_id = selected.as_ref().map(|frame| frame.frame_id);
@@ -517,7 +529,7 @@ pub(super) fn request_debug_variables(
     ) {
         Ok(request_id) => {
             app.state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .debug
@@ -542,7 +554,7 @@ pub(super) fn apply_debug_variables(
     };
     let Some(scope) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -565,7 +577,7 @@ pub(super) fn apply_debug_variables(
             variables_reference: value.variables_reference,
         })
         .collect();
-    let debug = &mut app.state.ui.code_workspace.automation.debug;
+    let debug = &mut app.state.code.code_workspace.automation.debug;
     match scope {
         AutomationDebugVariableScope::Locals => debug.locals = mapped,
         AutomationDebugVariableScope::Globals => debug.globals = mapped,
@@ -584,7 +596,7 @@ pub(super) fn apply_debug_evaluation(
     };
     let expected = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -599,7 +611,7 @@ pub(super) fn apply_debug_evaluation(
     }
     if let Some(watch) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
@@ -622,7 +634,7 @@ pub(super) fn apply_debug_evaluation(
 }
 
 pub(super) fn debug_fail(app: &mut RSpiceApp, message: &str) {
-    let debug = &mut app.state.ui.code_workspace.automation.debug;
+    let debug = &mut app.state.code.code_workspace.automation.debug;
     debug.phase = AutomationDebugPhase::Failed;
     debug.last_error = Some(message.to_owned());
     let _ = push_debug_output(debug, "error", "adapter-failed", message);

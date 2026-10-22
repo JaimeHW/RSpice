@@ -47,7 +47,7 @@ fn symbol_canvas_accessibility_label(
     );
     surface::symbol_canvas_accessibility_label(
         document,
-        &state.ui.symbol.editor,
+        &state.design.symbol.editor,
         read_only,
         &shortcuts,
     )
@@ -84,7 +84,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
         apply_surface_request(state, request);
     }
     let dirty = state
-        .ui
+        .design
         .symbol
         .history
         .is_dirty(&state.model.workspace.content.active_key());
@@ -125,7 +125,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
             Some(frame) => frame.symbol,
             None => update_viewport(
                 ui,
-                &mut state.ui.symbol.editor,
+                &mut state.design.symbol.editor,
                 rect,
                 &document,
                 &response,
@@ -143,7 +143,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
                 &document,
                 &editor,
                 &ports,
-                &state.ui.symbol.editor,
+                &state.design.symbol.editor,
                 &state.model.workspace.content.active_view,
             ),
         }
@@ -190,7 +190,7 @@ fn show_save_symbol_dialog(
     editor: &mut SymbolEditorMetadata,
     ports: &[PortSpec],
 ) {
-    if !state.ui.symbol.editor.save_dialog_open {
+    if !state.design.symbol.editor.save_dialog_open {
         return;
     }
     let checks = state.active_symbol_save_checks(document, ports);
@@ -199,18 +199,18 @@ fn show_save_symbol_dialog(
         ctx,
         &checks,
         editor.revision,
-        &mut state.ui.symbol.editor.save_revision_note,
-        state.ui.symbol.editor.save_error.as_deref(),
+        &mut state.design.symbol.editor.save_revision_note,
+        state.design.symbol.editor.save_error.as_deref(),
         can_publish,
     );
     match choice {
         DialogChoice::Primary => {
-            let note = state.ui.symbol.editor.save_revision_note.clone();
+            let note = state.design.symbol.editor.save_revision_note.clone();
             match state.publish_active_symbol_revision(document, editor, &note) {
                 Ok(revision) => {
-                    state.ui.symbol.editor.save_dialog_open = false;
-                    state.ui.symbol.editor.save_revision_note.clear();
-                    state.ui.symbol.editor.save_error = None;
+                    state.design.symbol.editor.save_dialog_open = false;
+                    state.design.symbol.editor.save_revision_note.clear();
+                    state.design.symbol.editor.save_error = None;
                     state.record(
                         LogSeverity::Info,
                         LogSource::Studio,
@@ -218,12 +218,12 @@ fn show_save_symbol_dialog(
                     );
                     state.symbol_in_place_saved();
                 }
-                Err(error) => state.ui.symbol.editor.save_error = Some(error),
+                Err(error) => state.design.symbol.editor.save_error = Some(error),
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.ui.symbol.editor.save_dialog_open = false;
-            state.ui.symbol.editor.save_error = None;
+            state.design.symbol.editor.save_dialog_open = false;
+            state.design.symbol.editor.save_error = None;
             state.symbol_in_place_save_cancelled();
         }
         DialogChoice::Secondary | DialogChoice::None => {}

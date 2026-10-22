@@ -51,7 +51,7 @@ fn device_created_from_a_schematic() -> (RSpiceApp, CellViewRef, CellViewRef) {
 
 fn offered(app: &RSpiceApp) -> Option<VerilogAPlacementHandoff> {
     app.state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .receipt

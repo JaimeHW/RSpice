@@ -140,7 +140,7 @@ fn netlist_finding_with_a_fix(state: &mut AppState) {
     // The canonical quick fixes are derived when the location is bound, so the
     // fix is attached before the line is.
     let diagnostic = diagnostic.with_line(Some(1));
-    state.ui.netlist.diagnostics = Arc::new(
+    state.code.netlist.diagnostics = Arc::new(
         NetlistDiagnosticCollection::try_new(vec![diagnostic], "nchh\n")
             .expect("the fixture collection is well formed"),
     );
@@ -876,7 +876,7 @@ fn locations_order_by_line_number_not_by_spelling() {
     let mut state = open_state();
     let tenth = Diagnostic::error("on the tenth line").with_line(Some(9));
     let ninth = Diagnostic::error("on the ninth line").with_line(Some(8));
-    state.ui.netlist.diagnostics = Arc::new(
+    state.code.netlist.diagnostics = Arc::new(
         NetlistDiagnosticCollection::try_new(vec![tenth, ninth], "")
             .expect("the fixture collection is well formed"),
     );

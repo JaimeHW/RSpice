@@ -15,11 +15,11 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
 struct Host<'a>(&'a mut AppState);
 impl SheetBarHost for Host<'_> {
     fn viewer(&self) -> ResultViewer {
-        self.0.ui.results.session.viewer
+        self.0.results.results.session.viewer
     }
     fn export(&mut self, requests: ExportRequests) {
-        self.0.ui.export_csv_requested |= requests.csv;
-        self.0.ui.export_figure_requested |= requests.figure;
+        self.0.results.export_csv_requested |= requests.csv;
+        self.0.hardcopy.export_figure_requested |= requests.figure;
     }
     fn fft_summary(&self) -> Option<String> {
         self.0
@@ -30,16 +30,16 @@ impl SheetBarHost for Host<'_> {
             .map(|d| format!("{} · {}", d.window.display_name(), d.fft_size))
     }
     fn operating_point_filter(&mut self) -> &mut String {
-        &mut self.0.ui.results.session.op_filter
+        &mut self.0.results.results.session.op_filter
     }
     fn specification_editing(&self) -> bool {
-        self.0.ui.results.session.spec_drafts.is_some()
+        self.0.results.results.session.spec_drafts.is_some()
     }
     fn request(&mut self, action: SpecificationAction) {
         let state = &mut *self.0;
         match action {
             SpecificationAction::Discard => {
-                state.ui.results.session.spec_drafts = None;
+                state.results.results.session.spec_drafts = None;
                 state.workbench.specification_editor_route_pending = false;
                 // With no retained dataset there is no read-only Specs
                 // evidence sheet to fall back to. Move to the ordinary
@@ -52,7 +52,7 @@ impl SheetBarHost for Host<'_> {
                     .ok()
                     .and_then(|plan| state.model.simulation.active_run_for_plan(plan.id()));
                 if selected_plan_dataset.is_none() {
-                    state.ui.results.session.viewer = ResultViewer::Waves;
+                    state.results.results.session.viewer = ResultViewer::Waves;
                 }
             }
             SpecificationAction::Apply => {

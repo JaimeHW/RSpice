@@ -50,7 +50,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let presentation = state.result_presentation_policy();
     let digits = usize::from(presentation.displayed_significant_digits().get());
-    let results = &mut state.ui.results;
+    let results = &mut state.results.results;
     let viewer = super::ResultViewer::PoleZero;
     let mut plot_view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();

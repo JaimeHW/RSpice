@@ -52,7 +52,7 @@ fn validation_resolves_an_include_only_a_library_folder_holds() {
     assert_eq!(dependency.source(), Some(body));
     let resolution = app
         .state
-        .ui
+        .code
         .code_workspace
         .include_resolutions
         .get("device.inc")

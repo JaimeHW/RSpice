@@ -68,10 +68,10 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let large_targets = app.state.workbench.coarse_pointer;
     // How AC traces are drawn has no control but Preferences, so the viewer
     // takes it from there on every frame and never drifts from the page.
-    app.state.ui.results.session.ac_display = app.state.model.preferences.ac_display();
+    app.state.results.results.session.ac_display = app.state.model.preferences.ac_display();
     let requested_target = app.state.model.preferences.minimum_touch_target();
     app.state
-        .ui
+        .workbench
         .theme
         .apply_responsive_metrics_with_target(ctx, large_targets.then_some(requested_target));
     let reduced_motion = app
@@ -167,7 +167,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
-    if let Some(keys) = app.state.ui.export_result_quantities_requested.take() {
+    if let Some(keys) = app.state.results.export_result_quantities_requested.take() {
         crate::workbench::menu_bar::action_export_result_selection_with_io(
             &mut app.state,
             app.export_workflow_io.as_ref(),
@@ -175,13 +175,13 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
         );
     }
     run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
-    if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
+    if std::mem::take(&mut app.state.results.open_producing_plan_requested) {
         commands::vocabulary::Command::OpenProducingPlan.execute(app);
     }
 
     if app.state.workbench.workspace != Workspace::Design {
-        app.state.ui.canvas_hover = None;
-        app.state.ui.canvas_view_center = None;
+        app.state.design.canvas_hover = None;
+        app.state.design.canvas_view_center = None;
     }
     if let Some(action) = show_toasts(ctx, &mut app.state, layout) {
         commands::result_navigation::perform_notification_action(app, action);
@@ -209,7 +209,7 @@ fn show_toasts(
         return None;
     }
     let large_targets = tools::notification_center::large_targets(ctx, state);
-    state.ui.toasts.show(
+    state.workbench.toasts.show(
         ctx,
         layout.title_bar_height,
         layout.toolbar_height,
@@ -224,7 +224,7 @@ fn run_dataset_export(
     state: &mut AppState,
     io: &dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
 ) {
-    if std::mem::take(&mut state.ui.export_csv_requested) {
+    if std::mem::take(&mut state.results.export_csv_requested) {
         crate::workbench::menu_bar::open_dataset_export_picker(state);
     }
     if crate::workbench::menu_bar::show_dataset_export_picker(ctx, state) {
@@ -249,8 +249,8 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
         .runs
         .iter()
         .map(|run| (run.run_id, run.lifecycle));
-    let ended = app.state.ui.run_watch.observe(runs);
-    let campaigns = app.state.ui.run_watch.take_campaign_outcomes();
+    let ended = app.state.runs.run_watch.observe(runs);
+    let campaigns = app.state.runs.run_watch.take_campaign_outcomes();
     if ended.is_empty() && campaigns.is_empty() {
         return;
     }
@@ -289,7 +289,7 @@ fn announce_run_completion(ctx: &Context, app: &mut RSpiceApp) {
             (request, wanted) => request.or(wanted),
         };
         let category = crate::ui::widgets::NotificationCategory::Job;
-        let toasts = &mut app.state.ui.toasts;
+        let toasts = &mut app.state.workbench.toasts;
         if !attention.retains(notice.is_failure()) {
             toasts.record_quietly(
                 ctx,
@@ -628,7 +628,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         app.state.exit_full_screen_presentation();
     }
 
-    if let Some(keys) = app.state.ui.export_result_quantities_requested.take() {
+    if let Some(keys) = app.state.results.export_result_quantities_requested.take() {
         crate::workbench::menu_bar::action_export_result_selection_with_io(
             &mut app.state,
             app.export_workflow_io.as_ref(),
@@ -636,18 +636,23 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         );
     }
     run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
-    if std::mem::take(&mut app.state.ui.open_producing_plan_requested) {
+    if std::mem::take(&mut app.state.results.open_producing_plan_requested) {
         commands::vocabulary::Command::OpenProducingPlan.execute(app);
     }
     if app.state.workbench.workspace != Workspace::Design {
-        app.state.ui.canvas_hover = None;
-        app.state.ui.canvas_view_center = None;
+        app.state.design.canvas_hover = None;
+        app.state.design.canvas_view_center = None;
     }
     app.state.drain_notices(ctx);
     // A detached window with the keyboard draws the toasts instead.
     if tools::notification_center::focused_window(ctx) == ctx.viewport_id() {
         let large_targets = tools::notification_center::large_targets(ctx, &app.state);
-        if let Some(action) = app.state.ui.toasts.show(ctx, 0.0, 0.0, large_targets) {
+        if let Some(action) = app
+            .state
+            .workbench
+            .toasts
+            .show(ctx, 0.0, 0.0, large_targets)
+        {
             commands::result_navigation::perform_notification_action(app, action);
         }
     }
@@ -769,7 +774,7 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
     use crate::ui::widgets::{MirroredEntry, NotificationCategory, ToastKind};
 
     let revision = app.state.model.log_buffer.revision();
-    let observed = app.state.ui.toasts.observed_log_revision();
+    let observed = app.state.workbench.toasts.observed_log_revision();
     if revision == observed {
         return;
     }
@@ -808,7 +813,10 @@ fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
             })
         })
         .collect::<Vec<_>>();
-    app.state.ui.toasts.synchronize_activity(revision, entries);
+    app.state
+        .workbench
+        .toasts
+        .synchronize_activity(revision, entries);
 }
 
 /// Project a log entry's wall-clock timestamp onto egui's monotonic clock
@@ -864,7 +872,7 @@ fn reconcile_platform_full_screen(app: &mut RSpiceApp) {
     // Browser chrome (notably Escape) may leave fullscreen without routing a
     // command through egui. Reflect the platform truth back into retained UI
     // state so the menu checkmark and next toggle remain accurate.
-    if app.state.ui.full_screen_request.is_none()
+    if app.state.workbench.full_screen_request.is_none()
         && let Some(document) = web_sys::window().and_then(|window| window.document())
     {
         let platform_full_screen = document.fullscreen_element().is_some();
@@ -879,14 +887,14 @@ fn reconcile_platform_full_screen(app: &mut RSpiceApp) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn apply_platform_full_screen_request(ctx: &Context, app: &mut RSpiceApp) {
-    if let Some(enabled) = app.state.ui.take_full_screen_request() {
+    if let Some(enabled) = app.state.workbench.take_full_screen_request() {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(enabled));
     }
 }
 
 #[cfg(target_arch = "wasm32")]
 fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
-    let Some(enabled) = app.state.ui.take_full_screen_request() else {
+    let Some(enabled) = app.state.workbench.take_full_screen_request() else {
         return;
     };
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
@@ -947,7 +955,7 @@ mod tests {
         assert_eq!(line.severity, LogSeverity::Error);
         assert_eq!(line.message, "Project save failed: The disk is full.");
         let line = line.id;
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity.len(), 1, "the mirrored line is the same notice");
         assert_eq!(activity[0].title(), "Project save failed");
         assert_eq!(activity[0].kind(), ToastKind::Error);
@@ -1000,7 +1008,7 @@ mod tests {
             "the toast is drawn in this frame: {labels:?}"
         );
         assert_eq!(
-            app.state.ui.toasts.activity().len(),
+            app.state.workbench.toasts.activity().len(),
             1,
             "the mirrored line is the same notice"
         );
@@ -1036,7 +1044,7 @@ mod tests {
                 .unwrap();
             announce_run_completion(&ctx, &mut app);
             assert!(
-                app.state.ui.toasts.activity().is_empty(),
+                app.state.workbench.toasts.activity().is_empty(),
                 "a run the reader stopped is not news to them"
             );
         }
@@ -1077,7 +1085,7 @@ mod tests {
                 );
                 announce_run_completion(&ctx, &mut app);
                 announce_run_completion(&ctx, &mut app);
-                let activity = app.state.ui.toasts.activity();
+                let activity = app.state.workbench.toasts.activity();
                 assert_eq!(activity.len(), 1, "one terminal transition, one notice");
                 observed.push((activity[0].title().to_owned(), activity[0].kind()));
                 expected.push((title.to_owned(), kind));
@@ -1114,17 +1122,17 @@ mod tests {
 
         announce_run_completion(&ctx, &mut app);
         assert!(
-            app.state.ui.toasts.activity().is_empty(),
+            app.state.workbench.toasts.activity().is_empty(),
             "a run that was already finished when first seen did not just complete"
         );
 
         app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Running;
         announce_run_completion(&ctx, &mut app);
-        assert!(app.state.ui.toasts.activity().is_empty());
+        assert!(app.state.workbench.toasts.activity().is_empty());
 
         app.state.model.simulation.retained.runs[0].lifecycle = SimulationRunLifecycle::Completed;
         announce_run_completion(&ctx, &mut app);
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(
             activity.len(),
             1,
@@ -1145,7 +1153,7 @@ mod tests {
 
         announce_run_completion(&ctx, &mut app);
         assert_eq!(
-            app.state.ui.toasts.activity().len(),
+            app.state.workbench.toasts.activity().len(),
             1,
             "a terminal run is not announced again on every later frame"
         );
@@ -1187,7 +1195,7 @@ mod tests {
         announce_run_completion(&ctx, &mut app);
         synchronize_activity_stream(&ctx, &mut app);
 
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(
             activity.len(),
             1,
@@ -1207,7 +1215,7 @@ mod tests {
             Some(NotificationAction::OpenRunInResults { run_sequence: 1 }),
             "still offering the dataset the completion notice offers today"
         );
-        assert_eq!(app.state.ui.toasts.unread_count(), 1);
+        assert_eq!(app.state.workbench.toasts.unread_count(), 1);
     }
 
     /// A run that retained nothing is still reported, but never with a way
@@ -1242,7 +1250,7 @@ mod tests {
         announce_run_completion(&ctx, &mut app);
         synchronize_activity_stream(&ctx, &mut app);
 
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(
             activity.len(),
             1,
@@ -1259,7 +1267,7 @@ mod tests {
             "nothing was retained, so Results is not offered; the failure's account starts at \
              the run's line in the Console, so that line is"
         );
-        assert_eq!(app.state.ui.toasts.unread_count(), 1);
+        assert_eq!(app.state.workbench.toasts.unread_count(), 1);
     }
 
     /// A receipt naming `plan_id`, as a run prepared from that plan carries.
@@ -1326,7 +1334,7 @@ mod tests {
         announce_run_completion(&ctx, &mut app);
         let titles = |app: &RSpiceApp| {
             app.state
-                .ui
+                .workbench
                 .toasts
                 .activity()
                 .iter()
@@ -1360,11 +1368,11 @@ mod tests {
         let run = app.state.model.simulation.start_run();
         run.lifecycle = Lifecycle::Completed;
         let run_id = run.run_id;
-        app.state.ui.run_watch.run_started(run_id);
+        app.state.runs.run_watch.run_started(run_id);
 
         announce_run_completion(&ctx, &mut app);
 
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "Run 1 complete");
     }
@@ -1397,7 +1405,7 @@ mod tests {
 
             announce_run_completion(&ctx, &mut app);
 
-            let activity = app.state.ui.toasts.activity();
+            let activity = app.state.workbench.toasts.activity();
             assert_eq!(activity.len(), 1);
             assert_eq!(activity[0].title(), title);
             assert_eq!(activity[0].kind(), ToastKind::Warn);
@@ -1442,7 +1450,7 @@ mod tests {
 
         announce_run_completion(&ctx, &mut app);
 
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "Run 1 completed with errors");
         assert_eq!(activity[0].kind(), ToastKind::Error);
@@ -1481,7 +1489,7 @@ mod tests {
 
         announce_run_completion(&ctx, &mut app);
 
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity[0].title(), "Run 1 failed");
         assert_eq!(
             activity[0].message(),
@@ -1501,7 +1509,7 @@ mod tests {
         run.lifecycle = Lifecycle::Failed;
         announce_run_completion(&ctx, &mut app);
         assert_eq!(
-            app.state.ui.toasts.activity()[0].message(),
+            app.state.workbench.toasts.activity()[0].message(),
             NOTHING_RETAINED
         );
     }
@@ -1574,7 +1582,7 @@ mod tests {
         let second = start_member(&mut app.state.model.simulation, sweep, 2);
         announce_run_completion(&ctx, &mut app);
 
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity.len(), 1, "the failed member, as it fails");
         assert_eq!(activity[0].title(), "Campaign 'Nightly': 'Bias' failed");
         assert_eq!(activity[0].kind(), ToastKind::Error);
@@ -1602,7 +1610,7 @@ mod tests {
             "Campaign 'Nightly' completed with errors: 1 completed, 1 failed",
         );
         app.state
-            .ui
+            .runs
             .run_watch
             .campaign_outcome(CampaignOutcome::Finished {
                 name: "Nightly".to_owned(),
@@ -1614,7 +1622,7 @@ mod tests {
         announce_run_completion(&ctx, &mut app);
         announce_run_completion(&ctx, &mut app);
 
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(
             activity.len(),
             2,
@@ -1637,7 +1645,7 @@ mod tests {
 
         // A campaign nothing failed in finished as a success.
         app.state
-            .ui
+            .runs
             .run_watch
             .campaign_outcome(CampaignOutcome::Finished {
                 name: "Nightly".to_owned(),
@@ -1647,7 +1655,10 @@ mod tests {
                 log_id: summary,
             });
         announce_run_completion(&ctx, &mut app);
-        assert_eq!(app.state.ui.toasts.activity()[0].kind(), ToastKind::Success);
+        assert_eq!(
+            app.state.workbench.toasts.activity()[0].kind(),
+            ToastKind::Success
+        );
     }
 
     #[test]
@@ -1665,14 +1676,14 @@ mod tests {
 
         assert!(app.state.workbench.full_screen_presentation);
         assert!(app.state.workbench.full_screen);
-        assert_eq!(app.state.ui.take_full_screen_request(), Some(true));
-        assert_eq!(app.state.ui.take_full_screen_request(), None);
+        assert_eq!(app.state.workbench.take_full_screen_request(), Some(true));
+        assert_eq!(app.state.workbench.take_full_screen_request(), None);
 
         app.state.exit_full_screen_presentation();
         assert!(!app.state.workbench.full_screen_presentation);
         assert!(!app.state.workbench.full_screen);
-        assert_eq!(app.state.ui.take_full_screen_request(), Some(false));
-        assert_eq!(app.state.ui.take_full_screen_request(), None);
+        assert_eq!(app.state.workbench.take_full_screen_request(), Some(false));
+        assert_eq!(app.state.workbench.take_full_screen_request(), None);
     }
 
     #[test]
@@ -1817,7 +1828,7 @@ mod tests {
 
             let mut kept = app
                 .state
-                .ui
+                .workbench
                 .toasts
                 .activity()
                 .iter()
@@ -1833,8 +1844,12 @@ mod tests {
                 ],
                 "{attention:?}: every outcome is kept in the bell"
             );
-            assert_eq!(app.state.ui.toasts.unread_count(), 3, "{attention:?}");
-            let on_screen = toasts_on_screen(&ctx, &mut app.state.ui.toasts);
+            assert_eq!(
+                app.state.workbench.toasts.unread_count(),
+                3,
+                "{attention:?}"
+            );
+            let on_screen = toasts_on_screen(&ctx, &mut app.state.workbench.toasts);
             let shows = |title: &str| on_screen.iter().any(|label| label.contains(title));
             assert_eq!(shows("Run 1 complete"), clean_toasts, "{attention:?}");
             assert_eq!(shows("Run 2 failed"), failure_toasts, "{attention:?}");
@@ -1979,7 +1994,7 @@ mod tests {
         synchronize_activity_stream(&ctx, &mut app);
         let mut lifted: Vec<String> = app
             .state
-            .ui
+            .workbench
             .toasts
             .activity()
             .iter()
@@ -2014,7 +2029,7 @@ mod tests {
                 .entries()
                 .all(|entry| entry.message != "Nothing was deleted.")
         );
-        assert!(app.state.ui.toasts.activity().is_empty());
+        assert!(app.state.workbench.toasts.activity().is_empty());
         assert_eq!(
             app.state
                 .workbench

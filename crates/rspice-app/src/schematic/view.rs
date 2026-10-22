@@ -106,7 +106,7 @@ pub(super) fn schematic_design_view(
             .content
             .design_management
             .sheet_catalog(&key),
-        review_markers: state.ui.schematic_visibility.review_markers,
+        review_markers: state.design.schematic_visibility.review_markers,
     }
 }
 
@@ -190,7 +190,7 @@ fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityVie
         design: schematic_design_view(state),
         editor: &state.model.schematic.session.editor,
         keyboard_focus: state.workbench.interaction.schematic_keyboard_focus,
-        filter: state.ui.schematic_selection_filter,
+        filter: state.design.schematic_selection_filter,
         traversal_enabled: state
             .model
             .preferences
@@ -595,10 +595,10 @@ pub fn render_schematic_view(
             / grid;
         (x, y)
     };
-    state.ui.canvas_hover = shelf_drag_position
+    state.design.canvas_hover = shelf_drag_position
         .or_else(|| response.hover_pos())
         .map(|cursor| to_grid_units(cursor, state));
-    state.ui.canvas_view_center = Some(to_grid_units(available.center(), state));
+    state.design.canvas_view_center = Some(to_grid_units(available.center(), state));
 
     let shortcut_platform = crate::workbench::app_state::runtime_command_platform(ui.ctx());
     let operating_system = ui.ctx().os();
@@ -1190,7 +1190,7 @@ mod tests {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = AppState::default();
-        state.ui.grid = crate::state::GridStyle::Off;
+        state.design.grid = crate::state::GridStyle::Off;
         let editor = &mut state.model.schematic.session.editor;
         (editor.needs_fit, editor.needs_drawing_sheet_fit) = (false, false);
         (editor.pan, editor.zoom) = ((0.0, 0.0), 1.0);

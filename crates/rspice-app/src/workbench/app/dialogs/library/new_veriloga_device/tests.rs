@@ -54,7 +54,7 @@ fn root_source(app: &RSpiceApp, reference: &CellViewRef) -> String {
 
 /// The lines under Cell name and under Ports, as the form draws them.
 fn lines(app: &RSpiceApp) -> (Line, Line) {
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     (
         cell_line(&app.state, &messages),
         ports_line(&app.state.code.new_veriloga_device.ports, &messages),
@@ -240,7 +240,7 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Design
     );
-    assert!(app.state.ui.code_workspace.veriloga.receipt.is_some());
+    assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
     assert!(!app.state.code.new_veriloga_device.open);
 }
 
@@ -315,7 +315,7 @@ fn a_failure_after_the_cell_is_made_creates_nothing() {
 fn a_device_typed_without_ports_starts_a_module_that_declares_none() {
     let mut app = app_with_draft("blank", "  ");
     assert_eq!(
-        ports_line("  ", &app.state.ui.messages()),
+        ports_line("  ", &app.state.workbench.messages()),
         Line::Derived("no ports · the compiled module defines them".to_owned())
     );
 

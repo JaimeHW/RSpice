@@ -330,7 +330,7 @@ fn split_selected_trace_is_inspected(app: &RSpiceApp) -> bool {
         )
         && app
             .state
-            .ui
+            .results
             .results
             .valid_selected_trace(&app.state.model.simulation)
             .is_some()
@@ -347,7 +347,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         rect.bottom(),
         egui::Stroke::new(1.0, t.color.border),
     );
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let title = if split_selected_trace_is_inspected(app) {
         "Result details".to_owned()
     } else {
@@ -365,7 +365,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
                 "Yield details".to_owned()
             }
             Workspace::Verify => app.state.workbench.verification_page.label().to_owned(),
-            Workspace::Netlist => match app.state.ui.code_workspace.page {
+            Workspace::Netlist => match app.state.code.code_workspace.page {
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     messages.text(MessageId::CodeInspectorNetlistTitle)
                 }
@@ -378,7 +378,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
             Workspace::Results => {
                 format!(
                     "{} details",
-                    app.state.ui.results.session.viewer.tab_label()
+                    app.state.results.results.session.viewer.tab_label()
                 )
             }
             _ => app.state.workbench.workspace.inspector_title().to_owned(),
@@ -1059,13 +1059,13 @@ fn catalog_model_evidence(
 fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected_trace = app
         .state
-        .ui
+        .results
         .results
         .valid_selected_trace(&app.state.model.simulation)
         .cloned();
     let selected_artifact = app
         .state
-        .ui
+        .results
         .results
         .session
         .selected_result_artifact
@@ -1108,7 +1108,7 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
     // harmonics, eye metrics, distribution statistics, and so on). It follows
     // the trace and pane controls, matching the upgraded mockup's hierarchy
     // without creating a second result-data owner here.
-    if app.state.ui.results.session.viewer != ResultViewer::Manifest {
+    if app.state.results.results.session.viewer != ResultViewer::Manifest {
         crate::workbench::documents::result_document::right_panel(ui, &mut app.state);
     }
 
@@ -1249,7 +1249,7 @@ fn active_result_pane(
     app: &mut RSpiceApp,
     selected: Option<&rspice_results_ui::selection::SelectedResultTrace>,
 ) {
-    let viewer = app.state.ui.results.session.viewer;
+    let viewer = app.state.results.results.session.viewer;
     // A pure evidence table — OP, specs, samples, events, the manifest — has
     // no drawn pane at all. Reporting one would have the inspector state a
     // view, a fit and a limit mask for a sheet that has none of them.
@@ -1314,7 +1314,7 @@ fn axis_limit_row(
         active_axis_is_pinned, active_axis_range, set_active_axis_range,
     };
 
-    let viewer = app.state.ui.results.session.viewer;
+    let viewer = app.state.results.results.session.viewer;
     let current = active_axis_range(&app.state, facts, axis);
     let pinned = active_axis_is_pinned(&app.state, axis);
     // The unit the field writes after its numbers, and strips before reading
@@ -1329,7 +1329,7 @@ fn axis_limit_row(
     let committed = current
         .map(|range| format_axis_range(range, unit))
         .unwrap_or_default();
-    let mut text = match app.state.ui.results.session.axis_limit_draft.as_ref() {
+    let mut text = match app.state.results.results.session.axis_limit_draft.as_ref() {
         Some((draft_viewer, draft_axis, text))
             if *draft_viewer == viewer && *draft_axis == axis =>
         {
@@ -1354,7 +1354,7 @@ fn axis_limit_row(
     );
 
     if edit.changed() {
-        app.state.ui.results.session.axis_limit_draft = Some((viewer, axis, text.clone()));
+        app.state.results.results.session.axis_limit_draft = Some((viewer, axis, text.clone()));
     }
     // Commit on Enter or on leaving the field, never per keystroke: "1.2" is
     // a legal prefix of "1.2m" and three orders of magnitude away from it.
@@ -1364,19 +1364,19 @@ fn axis_limit_row(
             // The field shows the interval to six significant digits. Read
             // back unedited, that would pin an autofitting axis, or nudge a
             // pinned one, by the rounding alone.
-            app.state.ui.results.session.axis_limit_draft = None;
+            app.state.results.results.session.axis_limit_draft = None;
         } else if text.trim().is_empty() {
             set_active_axis_range(&tokens, &mut app.state, axis, None);
-            app.state.ui.results.session.axis_limit_draft = None;
+            app.state.results.results.session.axis_limit_draft = None;
         } else if let Some(range) = parse_axis_range(&text, unit) {
             set_active_axis_range(&tokens, &mut app.state, axis, Some(range));
-            app.state.ui.results.session.axis_limit_draft = None;
+            app.state.results.results.session.axis_limit_draft = None;
         }
     }
     if reset.clicked() {
         let tokens = Tokens::get(ui.ctx());
         set_active_axis_range(&tokens, &mut app.state, axis, None);
-        app.state.ui.results.session.axis_limit_draft = None;
+        app.state.results.results.session.axis_limit_draft = None;
     }
 }
 
@@ -1611,7 +1611,7 @@ fn schematic_cross_probe_unavailability(
 fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<String, String> {
     let selected = app
         .state
-        .ui
+        .results
         .results
         .valid_selected_trace(&app.state.model.simulation)
         .ok_or_else(|| "No result trace is selected.".to_owned())?;
@@ -1947,14 +1947,14 @@ fn wilson_interval_95(successes: usize, total: usize) -> Option<(f64, f64)> {
 }
 
 fn code_workspace_inspector(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.ui.code_workspace.page
+    if app.state.code.code_workspace.page
         == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     {
         netlist(ui, app);
         return;
     }
 
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let Some(context) = crate::workbench::commands::code_context::resolve(app) else {
         muted_inspector_copy(
             ui,
@@ -1995,9 +1995,9 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         ActiveNetlistDocument, DiagnosticSeverity,
     };
 
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     const DIAGNOSTIC_PREVIEW_LIMIT: usize = 20;
-    let diagnostics = std::sync::Arc::clone(&app.state.ui.netlist.diagnostics);
+    let diagnostics = std::sync::Arc::clone(&app.state.code.netlist.diagnostics);
     let summary = diagnostics.summary();
 
     if summary.current_errors > 0 {
@@ -2091,7 +2091,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     if crate::workbench::documents::netlist_document::active_dependency(&app.state).is_some() {
         dependency_provenance(ui, &app.state);
     } else {
-        match app.state.ui.netlist.active_document {
+        match app.state.code.netlist.active_document {
             ActiveNetlistDocument::OwnedSource => owned_source_provenance(ui, &app.state),
             ActiveNetlistDocument::RunSnapshot => {} // its run's, stated by the strip over the deck
             _ => generated_provenance(ui, &app.state),
@@ -2218,7 +2218,7 @@ fn owned_source_provenance(ui: &mut Ui, state: &AppState) {
         // not yet checked is where the deck is, not a verdict on it. A file
         // that changed underneath the editor is the one to act on.
         let problem = state
-            .ui
+            .code
             .netlist
             .external_change
             .is_some()
@@ -2232,7 +2232,7 @@ fn dependency_provenance(ui: &mut Ui, state: &AppState) {
     else {
         return;
     };
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     section_header(
         ui,
         &messages.text(crate::workbench::MessageId::NetlistIncludeProvenance),

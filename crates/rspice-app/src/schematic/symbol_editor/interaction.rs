@@ -9,7 +9,7 @@ use rspice_schematic_editor::symbol_editor::interaction::{
 
 pub(super) fn bind_active_canvas(state: &mut AppState) {
     let source = state.symbol_editor_request_source();
-    bind_canvas_source(&mut state.ui.symbol.editor, source);
+    bind_canvas_source(&mut state.design.symbol.editor, source);
 }
 
 pub(super) fn handle_canvas(
@@ -20,13 +20,14 @@ pub(super) fn handle_canvas(
     response: &egui::Response,
 ) {
     let center = viewport.screen_to_world(viewport.rect.center());
-    state.ui.canvas_view_center = Some((center.x as f64, center.y as f64));
-    state.ui.canvas_hover = response.hover_pos().map(|position| {
+    state.design.canvas_view_center = Some((center.x as f64, center.y as f64));
+    state.design.canvas_hover = response.hover_pos().map(|position| {
         let point = viewport.screen_to_world(position);
         (point.x as f64, point.y as f64)
     });
-    if let Some(source) = &state.ui.symbol.editor.canvas_source
-        && let Some(request) = canvas_request(source, &state.ui.symbol.editor, viewport, response)
+    if let Some(source) = &state.design.symbol.editor.canvas_source
+        && let Some(request) =
+            canvas_request(source, &state.design.symbol.editor, viewport, response)
     {
         apply_canvas_request(state, document, metadata, request);
     }
@@ -39,9 +40,9 @@ fn apply_canvas_request(
     request: SymbolCanvasRequest,
 ) {
     if request.source != state.symbol_editor_request_source()
-        || state.ui.symbol.editor.canvas_source.as_ref() != Some(&request.source)
-        || request.tool != state.ui.symbol.editor.tool
-        || request.selection != state.ui.symbol.editor.effective_selection()
+        || state.design.symbol.editor.canvas_source.as_ref() != Some(&request.source)
+        || request.tool != state.design.symbol.editor.tool
+        || request.selection != state.design.symbol.editor.effective_selection()
         || state.application_modal_open()
     {
         return;
@@ -50,7 +51,7 @@ fn apply_canvas_request(
         edit: !state.schematic_edit_read_only(),
     };
     let outcome = edit_canvas(
-        &mut state.ui.symbol.editor,
+        &mut state.design.symbol.editor,
         document,
         metadata,
         request.viewport,
@@ -73,7 +74,7 @@ fn apply_canvas_request(
             state.prompt(error);
         } else {
             // Advancing our own revision keeps every event of this drag on one undo entry.
-            state.ui.symbol.editor.canvas_source = Some(state.symbol_editor_request_source());
+            state.design.symbol.editor.canvas_source = Some(state.symbol_editor_request_source());
         }
     }
     // A drag reaches the parent schematics as one edit, closed when it ends;

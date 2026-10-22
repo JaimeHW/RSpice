@@ -1128,6 +1128,6 @@ mod tests {
 
         state.set_eye_timebase(first, EyeTimebase::Auto);
         assert_eq!(state.eye_timebase_for(first), EyeTimebase::Auto);
-        assert!(state.ui.results.session.eye_timebase.is_empty());
+        assert!(state.results.results.session.eye_timebase.is_empty());
     }
 }

@@ -49,7 +49,7 @@ pub fn show_in_design(ui: &mut Ui, app: &mut RSpiceApp) {
         // A built-in header the navigator opened is read in this same well,
         // in place of the file, and never edited.
         let header = crate::workbench::documents::code_workspace::viewed_veriloga_header(
-            &app.state.ui.code_workspace.veriloga,
+            &app.state.code.code_workspace.veriloga,
             selected.bundle().id(),
             &active_path,
         );
@@ -107,7 +107,7 @@ fn handle_veriloga_file_drop(ctx: &egui::Context, app: &mut RSpiceApp) {
     if dropped.len() != 1 {
         let message = app
             .state
-            .ui
+            .workbench
             .messages()
             .text(MessageId::VerilogADropOneSource);
         app.state.prompt(message);
@@ -195,12 +195,12 @@ fn source_editor(
         egui::pos2(toolbar.left() + 8.0, toolbar.top()),
         egui::pos2(toolbar.right() - 8.0, toolbar.bottom()),
     );
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let toolbar_content_right = toolbar.right() - EDITOR_SCROLLBAR_INSET;
     // Neutral text, and a mark only where the reader has to act. A clean
     // compile leaves the corner empty and gives the whole row to the path.
     let status_left = crate::workbench::documents::code_workspace::veriloga_compile_status(
-        &app.state.ui.code_workspace.veriloga,
+        &app.state.code.code_workspace.veriloga,
         app.state.model.workspace.content.project.id(),
         selected,
         messages,
@@ -321,20 +321,20 @@ fn source_editor(
     // language-wide default: Find, Format and the language tools must act on
     // the cell view in front of the reader.
     let bundle_id = selected.bundle().id();
-    app.state.ui.code_workspace.source_carets.insert(
+    app.state.code.code_workspace.source_carets.insert(
         (bundle_id, active_path.to_owned()),
         interaction.cursor_char_index,
     );
     let selection_key = (bundle_id, active_path.to_owned());
     if let Some(range) = interaction.selected_char_range {
         app.state
-            .ui
+            .code
             .code_workspace
             .source_selections
             .insert(selection_key, range);
     } else {
         app.state
-            .ui
+            .code
             .code_workspace
             .source_selections
             .remove(&selection_key);
@@ -350,7 +350,7 @@ fn source_editor(
             interaction.cursor_char_index,
         ) {
             Ok(()) => {
-                if let Some(tools) = app.state.ui.code_workspace.language_tools.as_mut() {
+                if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
                     tools.view =
                         crate::workbench::documents::code_workspace::LanguageToolView::CodeActions;
                 }
@@ -396,8 +396,8 @@ fn interface_strip(
         return;
     };
     let t = Tokens::get(ui.ctx());
-    let messages = state.ui.messages();
-    let veriloga = &state.ui.code_workspace.veriloga;
+    let messages = state.workbench.messages();
+    let veriloga = &state.code.code_workspace.veriloga;
     let receipt = veriloga_receipt(
         veriloga,
         state.model.workspace.content.project.id(),
@@ -546,7 +546,7 @@ fn current_diagnostics(
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) -> std::sync::Arc<CodeDiagnosticCollection> {
     crate::workbench::documents::code_workspace::veriloga_diagnostics(
-        &app.state.ui.code_workspace.veriloga,
+        &app.state.code.code_workspace.veriloga,
         app.state.model.workspace.content.project.id(),
         selected,
     )
@@ -561,7 +561,10 @@ fn missing_source(ui: &mut Ui, app: &RSpiceApp, error: &str) {
     super::super::design_system::empty_state(
         ui,
         super::super::design_system::WorkbenchIcon::VerilogA,
-        &app.state.ui.messages().text(MessageId::VerilogANoSource),
+        &app.state
+            .workbench
+            .messages()
+            .text(MessageId::VerilogANoSource),
         error,
     );
 }

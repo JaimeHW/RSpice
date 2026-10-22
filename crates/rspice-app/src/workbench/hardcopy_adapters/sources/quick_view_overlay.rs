@@ -26,7 +26,7 @@ fn capture_quick_view_overlay(
     run: &SimulationRun,
     analysis: &AnalysisResult,
 ) -> Result<RetainedQuickViewOverlay, HardcopySourceError> {
-    let results = &state.ui.results;
+    let results = &state.results.results;
     let analysis_key = AnalysisPresentationKey::new(run.dataset_id, analysis);
     let visible_traces = analysis
         .waveforms

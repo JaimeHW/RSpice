@@ -181,7 +181,7 @@ fn a_veriloga_cell_view_opens_in_design_with_its_editor() {
     );
     assert!(
         app.state
-            .ui
+            .code
             .code_workspace
             .source_carets
             .contains_key(&(bundle_id, "model.va".to_owned())),
@@ -213,7 +213,7 @@ fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
 
     let search = app
         .state
-        .ui
+        .code
         .code_workspace
         .source_search
         .as_ref()
@@ -222,7 +222,7 @@ fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
     assert_eq!(search.language, ProjectSourceLanguage::VerilogA);
     assert_eq!(search.active_path, "model.va");
     assert!(
-        !app.state.ui.netlist.find.open,
+        !app.state.code.netlist.find.open,
         "the deck's find window is not the cell view's"
     );
 }
@@ -239,7 +239,7 @@ fn language_tools_in_a_veriloga_cell_view_index_that_views_bundle() {
 
     let tools = app
         .state
-        .ui
+        .code
         .code_workspace
         .language_tools
         .as_ref()
@@ -266,7 +266,7 @@ fn format_in_a_veriloga_cell_view_acts_on_that_views_bundle() {
 
     let tools = app
         .state
-        .ui
+        .code
         .code_workspace
         .language_tools
         .as_ref()
@@ -308,7 +308,7 @@ fn two_cell_views_sharing_a_logical_path_keep_separate_carets() {
     super::open_active_language_tools(&mut app).expect("the first view is indexable");
     let tools = app
         .state
-        .ui
+        .code
         .code_workspace
         .language_tools
         .as_ref()
@@ -335,7 +335,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     let clicked = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .compile_request
@@ -345,7 +345,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     app.prepare_frame(&ctx);
     assert!(
         app.state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .compile_request
@@ -353,7 +353,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     );
     let started = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .pending
@@ -385,16 +385,16 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
             (**receipt.compilation.report()).clone(),
         )))
         .unwrap();
-    app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
         token: receipt.compilation.token(),
         receiver: Arc::new(Mutex::new(receiver)),
     });
     frame(&ctx, &mut app, DESKTOP);
 
-    assert!(app.state.ui.code_workspace.veriloga.pending.is_none());
+    assert!(app.state.code.code_workspace.veriloga.pending.is_none());
     let published = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .receipt
@@ -406,7 +406,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
 /// Frame until the compile in flight answers, as the application would.
 pub(super) fn wait_for_compile(ctx: &egui::Context, app: &mut RSpiceApp) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
-    while app.state.ui.code_workspace.veriloga.pending.is_some() {
+    while app.state.code.code_workspace.veriloga.pending.is_some() {
         assert!(
             std::time::Instant::now() < deadline,
             "the compile never answered"
@@ -449,7 +449,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     Command::CompileVerilogA.execute(&mut app);
     let clicked = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .compile_request
@@ -469,7 +469,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     frame(&ctx, &mut app, DESKTOP);
     let started = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .pending
@@ -481,13 +481,13 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     assert_ne!(started.closure_digest, edited.bundle().closure_digest());
     wait_for_compile(&ctx, &mut app);
 
-    let veriloga = &app.state.ui.code_workspace.veriloga;
+    let veriloga = &app.state.code.code_workspace.veriloga;
     assert!(
         veriloga.receipt.is_none(),
         "a result for the clicked closure is not the edited source's"
     );
     assert!(veriloga.last_failure_token.is_none());
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let (status, problem) = code_workspace::veriloga_compile_status(
         veriloga,
         app.state.model.workspace.content.project.id(),
@@ -529,7 +529,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     frame(&ctx, &mut app, DESKTOP);
     let output = frame(&ctx, &mut app, DESKTOP);
 
-    let veriloga = &app.state.ui.code_workspace.veriloga;
+    let veriloga = &app.state.code.code_workspace.veriloga;
     assert!(veriloga.receipt.is_none());
     assert!(!veriloga.last_failure.is_empty(), "the findings are kept");
     let current = code_workspace::selected_veriloga_source(&app).unwrap();
@@ -670,7 +670,7 @@ fn session_restore_reopens_the_veriloga_tab_in_design() {
     assert!(
         reopened
             .state
-            .ui
+            .code
             .code_workspace
             .source_carets
             .contains_key(&(bundle_id, "model.va".to_owned())),
@@ -714,7 +714,7 @@ fn render_the_veriloga_design_document_for_review() {
         app.state.workbench.coarse_pointer = coarse;
         if compiled {
             let selected = code_workspace::selected_veriloga_source(&app).unwrap();
-            app.state.ui.code_workspace.veriloga.receipt = Some(
+            app.state.code.code_workspace.veriloga.receipt = Some(
                 code_workspace::compile_project_bundle_receipt(
                     app.state.model.workspace.content.project.id(),
                     selected.bundle(),

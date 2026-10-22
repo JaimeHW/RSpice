@@ -117,7 +117,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         }
                         if notification_action(
                             ui,
-                            app.state.ui.toasts.unread_count(),
+                            app.state.workbench.toasts.unread_count(),
                             large_targets,
                             panel_hangs_here(ui.ctx(), &app.state.workbench),
                         ) {
@@ -716,8 +716,8 @@ fn active_title_cell(app: &RSpiceApp) -> String {
         Workspace::Models => "Models & PDKs".to_owned(),
         Workspace::Netlist => crate::workbench::documents::code_workspace::active_document_label(
             &app.state.model.workspace,
-            &app.state.ui.code_workspace,
-            app.state.ui.messages(),
+            &app.state.code.code_workspace,
+            app.state.workbench.messages(),
         ),
     }
 }

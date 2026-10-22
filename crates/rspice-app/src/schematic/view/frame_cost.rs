@@ -333,7 +333,7 @@ pub(super) fn two_sheet_operating_point(second_sheet_active: bool) -> AppState {
     state.model.simulation.retained.runs.insert(0, run);
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
-    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
+    state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
     if second_sheet_active {
         let key = state
             .model
@@ -670,7 +670,7 @@ fn time_scenario_in(
 /// scenario is timed on its own; the overlay is a scenario of its own.
 fn fixture_without_overlay() -> ScaleFixture {
     let mut fixture = scale_fixture();
-    fixture.state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
+    fixture.state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
     fixture
 }
 
@@ -754,7 +754,7 @@ fn stretch_preview() -> FrameTimes {
 
 fn operating_point_overlay() -> FrameTimes {
     let mut state = scale_fixture().state;
-    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
+    state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
     time_scenario("operating-point overlay", 8.0, state, |state| {
         assert!(
             !super::scene::operating_point_annotations(state).is_empty(),
@@ -767,7 +767,7 @@ fn operating_point_overlay() -> FrameTimes {
 /// fitted, the whole sheet is too small for them and they hide.
 fn operating_point_overlay_legible() -> FrameTimes {
     let mut state = scale_fixture().state;
-    state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
+    state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::OperatingPoint;
     time_scenario_in(
         "operating-point overlay, 100 %",
         8.0,
@@ -924,7 +924,7 @@ fn site_cost_table() -> String {
             .selection
             .select_component(*id);
     }
-    fixture.state.ui.schematic_visibility.annotations =
+    fixture.state.design.schematic_visibility.annotations =
         SchematicAnnotationVisibility::OperatingPoint;
     fixture.state.model.schematic.ensure_canvas_cache();
     let state = &fixture.state;
@@ -1062,7 +1062,7 @@ fn site_cost_table() -> String {
                     rspice_schematic_editor::view::pointer_target::pointer_target(
                         &pointer_view.design,
                         query,
-                        state.ui.schematic_selection_filter,
+                        state.design.schematic_selection_filter,
                         &symbols,
                         &pick_ctx,
                         &viewport,

@@ -321,7 +321,7 @@ impl CheckAndSaveValidationReport {
         // project is legitimate work in progress, so it advises.
         if let Some((reference, message)) =
             crate::workbench::documents::code_workspace::interface_check_finding(
-                &state.ui.code_workspace.veriloga,
+                &state.code.code_workspace.veriloga,
                 &state.model.workspace.content.project_sources,
             )
         {

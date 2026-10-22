@@ -33,7 +33,7 @@ impl AppState {
 
     fn store_session_checked(&mut self, storage: &mut dyn eframe::Storage, read_back: bool) {
         let history = self.model.simulation.retained.runs.revision();
-        if self.ui.session_kept != SessionKept::WithoutRuns(history.clone()) {
+        if self.platform.session_kept != SessionKept::WithoutRuns(history.clone()) {
             match offer(storage, ron::ser::to_string(&*self), read_back) {
                 Offer::Kept => {
                     self.settle(SessionKept::Whole);
@@ -53,8 +53,8 @@ impl AppState {
 
     /// Remember what this save kept, and say so when that changes.
     fn settle(&mut self, kept: SessionKept) {
-        let before = std::mem::replace(&mut self.ui.session_kept, kept);
-        match (&before, &self.ui.session_kept) {
+        let before = std::mem::replace(&mut self.platform.session_kept, kept);
+        match (&before, &self.platform.session_kept) {
             (SessionKept::Whole, SessionKept::Whole)
             | (SessionKept::WithoutRuns(_), SessionKept::WithoutRuns(_))
             | (SessionKept::Nothing, SessionKept::Nothing) => {}
@@ -202,7 +202,10 @@ mod tests {
             restored.model.simulation.retained.next_run_id, 7,
             "the next run is not numbered as the one left out"
         );
-        assert!(matches!(state.ui.session_kept, SessionKept::WithoutRuns(_)));
+        assert!(matches!(
+            state.platform.session_kept,
+            SessionKept::WithoutRuns(_)
+        ));
         let said = console(&state);
         assert_eq!(said.len(), 1, "{said:?}");
         assert_eq!(said[0].0, LogSeverity::Warning);
@@ -227,7 +230,7 @@ mod tests {
         state.model.simulation.clear_runs();
         state.store_session_checked(&mut storage, true);
 
-        assert_eq!(state.ui.session_kept, SessionKept::Whole);
+        assert_eq!(state.platform.session_kept, SessionKept::Whole);
         let said = console(&state);
         assert_eq!(said.len(), 2, "{said:?}");
         assert_eq!(said[1].0, LogSeverity::Info);
@@ -241,7 +244,7 @@ mod tests {
         state.store_session_checked(&mut storage, true);
         state.store_session_checked(&mut storage, true);
 
-        assert_eq!(state.ui.session_kept, SessionKept::Nothing);
+        assert_eq!(state.platform.session_kept, SessionKept::Nothing);
         assert!(storage.value.is_none());
         let said = console(&state);
         assert_eq!(said.len(), 1, "{said:?}");
@@ -266,7 +269,7 @@ mod tests {
             "{:?}",
             console(&restored)
         );
-        assert_eq!(state.ui.session_kept, SessionKept::Whole);
+        assert_eq!(state.platform.session_kept, SessionKept::Whole);
         assert!(console(&state).is_empty());
     }
 }

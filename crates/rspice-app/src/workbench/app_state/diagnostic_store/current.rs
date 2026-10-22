@@ -129,9 +129,9 @@ impl Records<'_> {
 }
 
 fn records(state: &AppState, segment: SourceSegment) -> Option<Records<'_>> {
-    let code = &state.ui.code_workspace;
+    let code = &state.code.code_workspace;
     match segment {
-        SourceSegment::Netlist => Some(Records::Netlist(state.ui.netlist.diagnostics.as_ref())),
+        SourceSegment::Netlist => Some(Records::Netlist(state.code.netlist.diagnostics.as_ref())),
         SourceSegment::VerilogA => code
             .veriloga
             .receipt
@@ -143,13 +143,13 @@ fn records(state: &AppState, segment: SourceSegment) -> Option<Records<'_>> {
 }
 
 fn fingerprint(state: &AppState) -> SourceFingerprint {
-    let code = &state.ui.code_workspace;
+    let code = &state.code.code_workspace;
     let address = |collection: Option<&Arc<CodeDiagnosticCollection>>| {
         collection.map_or(0, |collection| Arc::as_ptr(collection) as usize)
     };
     SourceFingerprint {
         collections: [
-            Arc::as_ptr(&state.ui.netlist.diagnostics) as usize,
+            Arc::as_ptr(&state.code.netlist.diagnostics) as usize,
             address(
                 code.veriloga
                     .receipt
@@ -159,7 +159,7 @@ fn fingerprint(state: &AppState) -> SourceFingerprint {
             address(Some(&code.veriloga.last_failure)),
             address(Some(&code.automation.diagnostics)),
         ],
-        netlist_revision: state.ui.netlist.revision,
+        netlist_revision: state.code.netlist.revision,
     }
 }
 
@@ -265,7 +265,7 @@ mod tests {
         let first = Diagnostic::error("unknown model nchh").with_line(Some(0));
         let other = Diagnostic::error("missing node").with_line(Some(1));
         let selected = first.canonical.diagnostic_id;
-        state.ui.netlist.diagnostics = collection(vec![first, other]);
+        state.code.netlist.diagnostics = collection(vec![first, other]);
         state.model.diagnostics.set_current_finding(Some(selected));
         state.reconcile_current_finding();
         assert_eq!(state.model.diagnostics.current_finding(), Some(selected));
@@ -274,7 +274,7 @@ mod tests {
         let moved = Diagnostic::error("unknown model nchh").with_line(Some(1));
         let renamed = moved.canonical.diagnostic_id;
         assert_ne!(renamed, selected, "the fixture re-mints the identity");
-        state.ui.netlist.diagnostics = collection(vec![
+        state.code.netlist.diagnostics = collection(vec![
             Diagnostic::error("missing node").with_line(Some(2)),
             moved,
         ]);
@@ -290,14 +290,14 @@ mod tests {
         let mut state = AppState::default();
         let fixed = Diagnostic::error("unknown model nchh").with_line(Some(0));
         let selected = fixed.canonical.diagnostic_id;
-        state.ui.netlist.diagnostics = collection(vec![
+        state.code.netlist.diagnostics = collection(vec![
             fixed,
             Diagnostic::error("missing node").with_line(Some(1)),
         ]);
         state.model.diagnostics.set_current_finding(Some(selected));
         state.reconcile_current_finding();
 
-        state.ui.netlist.diagnostics =
+        state.code.netlist.diagnostics =
             collection(vec![Diagnostic::error("missing node").with_line(Some(0))]);
         state.reconcile_current_finding();
 

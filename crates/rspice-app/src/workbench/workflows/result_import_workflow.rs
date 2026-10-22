@@ -463,7 +463,7 @@ fn commit_parsed_result_dataset(
                 .to_owned(),
         );
     }
-    state.ui.results.session.viewer = if analysis_type == AnalysisType::SParameter {
+    state.results.results.session.viewer = if analysis_type == AnalysisType::SParameter {
         crate::workbench::ResultViewer::Smith
     } else {
         crate::workbench::ResultViewer::Waves
@@ -1572,7 +1572,7 @@ mod tests {
         );
         assert!(analysis.validate_retained_evidence().is_ok());
         assert_eq!(
-            state.ui.results.session.viewer,
+            state.results.results.session.viewer,
             crate::workbench::ResultViewer::Smith
         );
         assert_eq!(

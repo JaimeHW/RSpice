@@ -21,9 +21,9 @@ fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
         .unwrap()
         .with_family_presentation(&manifest, &family_policy())
         .unwrap();
-    state.ui.results.set_sample_selection(Some(selection));
+    state.results.results.set_sample_selection(Some(selection));
     state
-        .ui
+        .results
         .results
         .add_expression_trace(&state.model.simulation, key, text.to_owned())
         .unwrap();
@@ -34,7 +34,7 @@ fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
         false,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
         Default::default(),
-        state.ui.results.session.sample_selection.as_ref(),
+        state.results.results.session.sample_selection.as_ref(),
         &HashSet::new(),
     );
     (state, models)
@@ -93,7 +93,7 @@ fn empty_family_selection_is_an_error_instead_of_a_successful_empty_trace() {
         &state.model.simulation,
         0,
         "max(V(out))",
-        state.ui.results.session.sample_selection.as_ref(),
+        state.results.results.session.sample_selection.as_ref(),
     )
     .unwrap_err();
     assert!(error.contains("no samples"), "{error}");
@@ -117,7 +117,7 @@ fn changing_scope_refreshes_calculations_while_visibility_does_not() {
         .unwrap()
         .with_family_presentation(&manifest, &family_policy())
         .unwrap();
-    state.ui.results.set_sample_selection(Some(next));
+    state.results.results.set_sample_selection(Some(next));
     let second = resolve_strip_exprs(&mut state, &models[0], &Tokens::default());
     assert_eq!(second[0].x.as_slice(), &[1.0, 2.0]);
     assert_eq!(second[0].y.as_slice(), &[10.0, 10.0]);
@@ -150,7 +150,7 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
     });
     let bytes = serde_json::to_vec(&(
         state
-            .ui
+            .results
             .results
             .project_presentation(&state.model.simulation),
         policy,
@@ -177,7 +177,10 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
         .unwrap()
         .with_family_presentation(&manifest, &policy)
         .unwrap();
-    reopened.ui.results.set_sample_selection(Some(selection));
+    reopened
+        .results
+        .results
+        .set_sample_selection(Some(selection));
     let curves = resolve_strip_exprs(&mut reopened, &models[0], &Tokens::default());
     assert_eq!(curves.len(), 1);
     assert_eq!(curves[0].x.as_slice(), &[3.0, 4.0]);
@@ -187,7 +190,7 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
 #[test]
 fn family_editor_displays_calculation_scope_inside_a_narrow_pane() {
     let (mut state, models) = fixture(vec![2, 3], "max(V(out))");
-    state.ui.results.session.expr_editor = Some(ExprEditor {
+    state.results.results.session.expr_editor = Some(ExprEditor {
         analysis: models[0].analysis_key,
         text: "max(V(out))".to_owned(),
         error: None,

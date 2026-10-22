@@ -36,8 +36,8 @@ fn hover_rasters(
     let mut state = AppState::default();
     state.model.workspace.content.netlist_source = Some(HOVER_DECK.to_owned());
     state.model.simulation.source.netlist_content = HOVER_DECK.to_owned();
-    state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_document_initialized = true;
 
     let geometry = std::cell::Cell::new((egui::Pos2::ZERO, 0.0_f32));
     let size = egui::vec2(width, 220.0);
@@ -72,7 +72,7 @@ fn hover_rasters(
             .show(ui, |ui| show(ui, &mut state));
     });
     let resolved = state
-        .ui
+        .code
         .netlist
         .value_index
         .as_ref()
@@ -170,8 +170,8 @@ fn completion_reaches_a_document_that_has_content_in_it() {
     let source = "test deck\n.tr";
     state.model.workspace.content.netlist_source = Some(source.to_owned());
     state.model.simulation.source.netlist_content = source.to_owned();
-    state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
-    state.ui.netlist.active_document_initialized = true;
+    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_document_initialized = true;
     assert!(
         super::super::active_netlist_source_is_editable(&state),
         "fixture must be an editable owned document"
@@ -205,7 +205,7 @@ fn completion_reaches_a_document_that_has_content_in_it() {
     }
 
     assert!(
-        state.ui.netlist.completion_open,
+        state.code.netlist.completion_open,
         "the dot-command popover must open for a caret trailing `.tr` in a non-empty deck"
     );
 }
@@ -558,8 +558,8 @@ fn parameter_override_state(base: &str, authored: &str) -> AppState {
         revision_history: Vec::new(),
         owned_includes: Vec::new(),
     });
-    state.ui.netlist.owned_document = Some(owned);
-    state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.owned_document = Some(owned);
+    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.model.simulation.source.netlist_content = authored.to_owned();
     state
 }
@@ -574,10 +574,10 @@ fn a_parameter_override_error_is_reported_on_its_own_line() {
     let authored = "* corner\n.temp -273.15\n";
     let mut state = parameter_override_state(base, authored);
 
-    let revision = state.ui.netlist.revision;
+    let revision = state.code.netlist.revision;
     validate_visible_source(&mut state, revision);
     let error = state
-        .ui
+        .code
         .netlist
         .diagnostics
         .iter()
@@ -595,7 +595,7 @@ fn a_parameter_override_error_is_reported_on_its_own_line() {
 fn validated(deck: &str) -> AppState {
     let mut state = AppState::default();
     state.model.simulation.source.netlist_content = deck.to_owned();
-    let revision = state.ui.netlist.revision;
+    let revision = state.code.netlist.revision;
     validate_visible_source(&mut state, revision);
     state
 }
@@ -743,7 +743,7 @@ fn value_hover_waits_for_the_parse_that_decides_the_branches() {
 
     assert_eq!(hover_on(&mut state, deck, "{vth}", 1), None);
 
-    let revision = state.ui.netlist.revision;
+    let revision = state.code.netlist.revision;
     validate_visible_source(&mut state, revision);
     assert_eq!(
         hover_on(&mut state, deck, "{vth}", 1).and_then(|hover| hover.value),
@@ -762,7 +762,7 @@ fn the_reference_lint_counts_only_the_branch_the_parser_takes() {
     let state = validated(deck);
 
     let unknown = state
-        .ui
+        .code
         .netlist
         .diagnostics
         .iter()
@@ -1181,7 +1181,7 @@ fn diagnostic_strip_text_omits_fix_and_truncates_for_phone_width() {
 fn editor_commit_rejects_generated_artifact_mutation() {
     let mut state = AppState::default();
     state.model.simulation.source.netlist_content = "generated\n.op\n.end\n".to_owned();
-    state.ui.netlist.revision = 4;
+    state.code.netlist.revision = 4;
 
     assert!(!commit_owned_source_edit(
         &mut state,
@@ -1195,7 +1195,7 @@ fn editor_commit_rejects_generated_artifact_mutation() {
         "generated\n.op\n.end\n"
     );
     assert!(!state.model.workspace.content.netlist_source_dirty);
-    assert_eq!(state.ui.netlist.revision, 4);
+    assert_eq!(state.code.netlist.revision, 4);
     assert!(state.manual_run.edited_lines.is_empty());
 }
 
@@ -1203,11 +1203,11 @@ fn editor_commit_rejects_generated_artifact_mutation() {
 fn editor_commit_updates_only_an_existing_owned_source() {
     let mut state = AppState::default();
     state.model.workspace.content.netlist_source = Some("owned\n.op\n.end\n".to_owned());
-    state.ui.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
     state.model.workspace.content.netlist_source_path =
         Some(std::path::PathBuf::from("imported/owned.cir"));
     state.model.simulation.source.netlist_content = "owned\n.op\n.end\n".to_owned();
-    state.ui.netlist.revision = 9;
+    state.code.netlist.revision = 9;
 
     assert!(commit_owned_source_edit(
         &mut state,
@@ -1228,7 +1228,7 @@ fn editor_commit_updates_only_an_existing_owned_source() {
         Some(std::path::Path::new("imported/owned.cir"))
     );
     assert!(state.model.workspace.content.netlist_source_dirty);
-    assert_eq!(state.ui.netlist.revision, 10);
-    assert_eq!(state.ui.netlist.last_edit_time, 7.25);
+    assert_eq!(state.code.netlist.revision, 10);
+    assert_eq!(state.code.netlist.last_edit_time, 7.25);
     assert!(state.manual_run.edited_lines.contains(&1));
 }

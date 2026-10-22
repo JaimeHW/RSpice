@@ -29,7 +29,7 @@ fn bode_strip() -> AppState {
             ),
         ]),
     );
-    state.ui.results.session.viewer = super::super::super::ResultViewer::Bode;
+    state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
     state
 }
 
@@ -37,7 +37,7 @@ fn strip_key(state: &mut AppState) -> AnalysisPresentationKey {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -48,7 +48,7 @@ fn pane_units(state: &mut AppState) -> Vec<String> {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -65,7 +65,7 @@ fn pane_x(
     ordinal: usize,
 ) -> Option<(f64, f64)> {
     state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane(super::super::super::ResultViewer::Waves, analysis, ordinal)
@@ -88,7 +88,7 @@ fn zoom_from_a_companion_pane_moves_the_strips_shared_abscissa() {
         .expect("the phase pane");
     assert_ne!(phase_ordinal, 0, "the phase pane is the companion");
 
-    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
+    state.results.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: units[phase_ordinal].clone(),
     });
@@ -124,24 +124,24 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     );
     let analysis = strip_key(&mut state);
     let units = pane_units(&mut state);
-    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
+    state.results.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: units[0].clone(),
     });
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
     let model = &models[0];
     let pane = model.unit_panes().into_iter().next().expect("one pane");
-    set_pane_log_y(&mut state.ui.results.session, model, &pane, true);
+    set_pane_log_y(&mut state.results.results.session, model, &pane, true);
     drop(models);
     let before = (1.0, 100.0);
     state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane_mut(super::super::super::ResultViewer::Waves, analysis, 0)
@@ -150,7 +150,7 @@ fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
     zoom_active_pane(&mut state, &Tokens::default(), 0.5);
 
     let after = state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane(super::super::super::ResultViewer::Waves, analysis, 0)
@@ -181,19 +181,19 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
     let viewer = super::super::super::ResultViewer::Waves;
     for ordinal in [0usize, 1, 5] {
         state
-            .ui
+            .results
             .results
             .session
             .analysis_plot_view_pane_mut(viewer, analysis, ordinal)
             .x = Some((10.0, 100.0));
     }
     state
-        .ui
+        .results
         .results
         .session
         .analysis_plot_view_pane_mut(viewer, analysis, 1)
         .y = Some((-90.0, 0.0));
-    state.ui.results.session.active_wave_pane = Some(WavePanePresentationKey {
+    state.results.results.session.active_wave_pane = Some(WavePanePresentationKey {
         analysis,
         unit: units[0].clone(),
     });
@@ -201,7 +201,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
     fit_active_pane(&mut state, &Tokens::default());
 
     assert!(
-        !state.ui.results.session.analysis_strip_axis_is_pinned(
+        !state.results.results.session.analysis_strip_axis_is_pinned(
             viewer,
             analysis,
             super::super::super::PaneAxis::X
@@ -210,7 +210,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
     );
     assert_eq!(
         state
-            .ui
+            .results
             .results
             .session
             .analysis_plot_view_pane(viewer, analysis, 1)
@@ -239,7 +239,7 @@ fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -303,7 +303,7 @@ fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );

@@ -69,7 +69,7 @@ fn canvas_hover(
         ToolPointerAction::Select(query) => pointer_target::pointer_target(
             &view.design,
             query,
-            state.ui.schematic_selection_filter,
+            state.design.schematic_selection_filter,
             symbol_context,
             ctx,
             viewport,
@@ -123,7 +123,7 @@ pub(super) fn draw_scene(
         |probe: &crate::state::SchematicProbe| probe_visual_status(probe, &probe_statuses);
     let selected_trace_expression = || {
         state
-            .ui
+            .results
             .results
             .valid_selected_trace(&state.model.simulation)
             .map(|trace| trace.source_name())
@@ -135,10 +135,10 @@ pub(super) fn draw_scene(
         &scene::SceneView {
             design: super::schematic_design_view(state),
             editor: &state.model.schematic.session.editor,
-            net_highlighting: state.ui.schematic_visibility.net_highlighting,
-            parameter_labels: state.ui.schematic_visibility.parameter_labels,
+            net_highlighting: state.design.schematic_visibility.net_highlighting,
+            parameter_labels: state.design.schematic_visibility.parameter_labels,
             hover_wire_vertex: state.workbench.interaction.hover_wire_vertex,
-            selection_filter: state.ui.schematic_selection_filter,
+            selection_filter: state.design.schematic_selection_filter,
             hover: canvas_hover(painter.ctx(), available, viewport, state, symbol_context),
         },
         scene::SceneSymbols {
@@ -146,7 +146,7 @@ pub(super) fn draw_scene(
             context: symbol_context,
         },
         scene::SceneOverlays {
-            net_class_colors: if state.ui.schematic_visibility.net_highlighting
+            net_class_colors: if state.design.schematic_visibility.net_highlighting
                 == SchematicNetHighlighting::NetClassColors
             {
                 net_class_colors(state)
@@ -179,7 +179,9 @@ pub(super) fn draw_scene(
     );
 
     // Check results last — violation badges annotate everything below.
-    if state.ui.schematic_visibility.annotations == SchematicAnnotationVisibility::ViolationsOnly {
+    if state.design.schematic_visibility.annotations
+        == SchematicAnnotationVisibility::ViolationsOnly
+    {
         super::violations::draw_violation_markers(painter, viewport, state);
     }
 
@@ -508,7 +510,8 @@ fn annotated_operating_point(
     Option<crate::state::OperatingPointAnnotationEvidence>,
     Option<&rspice_core::circuit::DeviceOpReport>,
 )> {
-    if state.ui.schematic_visibility.annotations != SchematicAnnotationVisibility::OperatingPoint
+    if state.design.schematic_visibility.annotations
+        != SchematicAnnotationVisibility::OperatingPoint
         || !state.model.simulation.source.cross_probe.is_populated()
         || !state.model.simulation.source.cross_probe.is_current_for(
             &state.model.workspace.content.active_view,
@@ -761,7 +764,7 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
         .operating_point_badges
         .current(voltage_badge_fingerprint(state, dc_op))
         .map_or_else(|| voltage_badges(state, dc_op), |badges| badges.to_vec());
-    let back_annotation = state.ui.schematic_visibility.back_annotation;
+    let back_annotation = state.design.schematic_visibility.back_annotation;
 
     let retained_currents = retained_annotation.is_none_or(|annotation| {
         annotation == crate::state::OperatingPointAnnotationEvidence::VoltagesAndCurrents
@@ -1162,11 +1165,11 @@ mod tests {
     #[test]
     fn hidden_or_voltage_only_policy_enforces_annotation_detail() {
         let mut state = state_with_operating_point();
-        state.ui.schematic_visibility.back_annotation =
+        state.design.schematic_visibility.back_annotation =
             SchematicBackAnnotationContent::VoltagesOnly;
         assert_eq!(operating_point_annotations(&state).len(), 1);
 
-        state.ui.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
+        state.design.schematic_visibility.annotations = SchematicAnnotationVisibility::Hidden;
         assert!(operating_point_annotations(&state).is_empty());
     }
 
@@ -1183,7 +1186,7 @@ mod tests {
                 value: 2.5e-3,
                 unit: "W".to_owned(),
             });
-        state.ui.schematic_visibility.back_annotation =
+        state.design.schematic_visibility.back_annotation =
             SchematicBackAnnotationContent::VoltagesCurrentsAndPower;
 
         let annotations = operating_point_annotations(&state);
@@ -1417,7 +1420,7 @@ mod tests {
     #[test]
     fn an_open_pin_on_sheet_two_is_marked_at_its_own_point() {
         let mut state = super::super::sheet_visibility::two_sheet_state(&[6], &[7]);
-        state.ui.grid = crate::state::GridStyle::Off;
+        state.design.grid = crate::state::GridStyle::Off;
         let first = Component::new(6, ComponentType::Resistor, Point::new(100, 100));
         let second = Component::new(7, ComponentType::Capacitor, Point::new(300, 200));
         let terminals = |component: &Component| {

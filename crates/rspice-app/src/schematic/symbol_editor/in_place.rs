@@ -58,7 +58,7 @@ pub(super) fn frame(
     state.symbol_in_place()?;
     let Some(placement) = state.symbol_in_place_placement() else {
         // The parent or the instance is gone: nothing is placed to edit.
-        state.ui.symbol.in_place = None;
+        state.design.symbol.in_place = None;
         return None;
     };
     let navigation = state.model.preferences.canvas_navigation();
@@ -131,7 +131,7 @@ pub(super) fn draw(
         document,
         editor,
         ports,
-        &state.ui.symbol.editor,
+        &state.design.symbol.editor,
     );
 }
 
@@ -172,13 +172,13 @@ fn draw_parent(
                     .content
                     .design_management
                     .sheet_catalog(&key),
-                review_markers: state.ui.schematic_visibility.review_markers,
+                review_markers: state.design.schematic_visibility.review_markers,
             },
             editor: &session.parent_editor,
             net_highlighting: SchematicNetHighlighting::Off,
-            parameter_labels: state.ui.schematic_visibility.parameter_labels,
+            parameter_labels: state.design.schematic_visibility.parameter_labels,
             hover_wire_vertex: None,
-            selection_filter: state.ui.schematic_selection_filter,
+            selection_filter: state.design.schematic_selection_filter,
             hover: None,
         },
         scene::SceneSymbols {

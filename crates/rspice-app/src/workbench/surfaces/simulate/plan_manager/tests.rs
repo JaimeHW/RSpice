@@ -2352,5 +2352,5 @@ fn a_plan_edit_is_answered_on_the_status_bar_not_toasted() {
         app.state.prompt_text(),
         Some("Portable plan JSON was copied to the clipboard.")
     );
-    assert!(app.state.ui.toasts.activity().is_empty());
+    assert!(app.state.workbench.toasts.activity().is_empty());
 }

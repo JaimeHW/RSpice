@@ -63,7 +63,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
-    if let Some(plan) = state.ui.results.plans.sensitivity.as_ref()
+    if let Some(plan) = state.results.results.plans.sensitivity.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
     {
@@ -78,7 +78,7 @@ fn sensitivity_plan(state: &mut AppState) -> Option<Arc<SensitivityPlan>> {
         analysis: analysis_key,
         display: viewer::SensitivityPlan::new(view.rows),
     });
-    state.ui.results.plans.sensitivity = Some(Arc::clone(&built));
+    state.results.results.plans.sensitivity = Some(Arc::clone(&built));
     Some(built)
 }
 pub fn show(ui: &mut Ui, state: &mut AppState) {

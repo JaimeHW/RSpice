@@ -577,12 +577,12 @@ impl PaletteEntry {
                 }
                 app.state.model.simulation.view.data_version =
                     app.state.model.simulation.view.data_version.wrapping_add(1);
-                app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Waves;
+                app.state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
                 app.state
-                    .ui
+                    .results
                     .results
                     .restore_analysis_strip(&app.state.model.simulation, analysis_index);
-                app.state.ui.results.session.maximized_strip = None;
+                app.state.results.results.session.maximized_strip = None;
                 app.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Results);

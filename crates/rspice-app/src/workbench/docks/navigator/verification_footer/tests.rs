@@ -830,7 +830,7 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     assert!(select_result_signal(&mut app, 0, 0, 0));
     let selected = app
         .state
-        .ui
+        .results
         .results
         .valid_selected_trace(&app.state.model.simulation)
         .expect("signal selection resolves against the active dataset");
@@ -838,7 +838,7 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     crate::workbench::documents::result_document::prepare_viewer_state(&mut app);
     assert_eq!(
         app.state
-            .ui
+            .results
             .results
             .valid_selected_trace(&app.state.model.simulation)
             .map(|selected| selected.source_name()),
@@ -855,7 +855,7 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     assert_eq!(app.state.model.simulation.view.active_analysis_idx, Some(1));
     assert!(
         app.state
-            .ui
+            .results
             .results
             .valid_selected_trace(&app.state.model.simulation)
             .is_none(),
@@ -944,7 +944,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
     super::set_checked_signal_visibility(&mut app, &checked, false);
     assert!(
         !app.state
-            .ui
+            .results
             .results
             .session
             .waveform_visibility(&checked_key, source_default),
@@ -952,7 +952,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
     );
     assert_eq!(
         app.state
-            .ui
+            .results
             .results
             .session
             .waveform_visibility(&untouched_key, untouched_default),
@@ -968,7 +968,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
     super::set_checked_signal_visibility(&mut app, &checked, true);
     assert!(
         app.state
-            .ui
+            .results
             .results
             .session
             .waveform_visibility(&checked_key, source_default),
@@ -978,7 +978,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
     super::set_checked_signal_visibility(&mut app, &checked, true);
     assert!(
         app.state
-            .ui
+            .results
             .results
             .session
             .waveform_visibility(&checked_key, source_default)
@@ -1107,17 +1107,17 @@ fn browser_range_selection_uses_stable_filtered_order() {
     let second_selection = ResultBrowserSelectionKey::Waveform(second.clone());
     let visible = vec![first_selection.clone(), second_selection.clone()];
     app.state
-        .ui
+        .results
         .results
         .session
         .set_browser_range_anchor(first_selection);
     app.state
-        .ui
+        .results
         .results
         .session
         .select_checked_result_range(&second_selection, &visible);
-    assert!(app.state.ui.results.session.is_checked_signal(&first));
-    assert!(app.state.ui.results.session.is_checked_signal(&second));
+    assert!(app.state.results.results.session.is_checked_signal(&first));
+    assert!(app.state.results.results.session.is_checked_signal(&second));
 }
 
 /// The browser offers one facet per independent question. Kind carries the

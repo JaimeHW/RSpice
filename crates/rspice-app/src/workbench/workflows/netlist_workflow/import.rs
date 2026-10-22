@@ -141,7 +141,7 @@ fn install_imported_netlist(
     // Importing a new source deck changes future execution authority but does
     // not delete immutable datasets or a previously active top deck.
     candidate.model.design_execution_epoch = candidate.model.design_execution_epoch.wrapping_add(1);
-    candidate.ui.netlist = Default::default();
+    candidate.code.netlist = Default::default();
     *candidate.model.netlist_artifacts = Default::default();
     *candidate.manual_run = Default::default();
     candidate.workbench.netlist_open_documents.clear();
@@ -157,13 +157,13 @@ fn install_imported_netlist(
         .content
         .set_netlist_source_dirty(true);
     candidate.model.simulation.source.netlist_content = source;
-    candidate.ui.netlist.owned_document = Some(document);
-    candidate.ui.netlist.externally_saved_content_digest =
+    candidate.code.netlist.owned_document = Some(document);
+    candidate.code.netlist.externally_saved_content_digest =
         reopenable_import.then_some(source_digest);
-    candidate.ui.netlist.active_document =
+    candidate.code.netlist.active_document =
         crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource;
-    candidate.ui.netlist.active_document_initialized = true;
-    candidate.ui.netlist.revision = candidate.ui.netlist.revision.wrapping_add(1);
+    candidate.code.netlist.active_document_initialized = true;
+    candidate.code.netlist.revision = candidate.code.netlist.revision.wrapping_add(1);
     crate::workbench::documents::netlist_document::invalidate_source_evidence(&mut candidate);
     candidate
         .workbench

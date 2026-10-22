@@ -1524,7 +1524,7 @@ impl LiveSessionEngine {
             return;
         }
         let locus = if state.workbench.workspace == crate::workbench::state::Workspace::Design {
-            state.ui.canvas_hover.and_then(|(x, y)| {
+            state.design.canvas_hover.and_then(|(x, y)| {
                 let (x, y) = (x as f32, y as f32);
                 (x.is_finite() && y.is_finite()).then(|| CursorLocus::Canvas {
                     doc: schematic_doc_key(&state.model.workspace.content.active_key()),
@@ -1533,12 +1533,12 @@ impl LiveSessionEngine {
                 })
             })
         } else if state.workbench.workspace == crate::workbench::state::Workspace::Netlist
-            && state.ui.netlist.active_document
+            && state.code.netlist.active_document
                 == crate::workbench::documents::netlist_document::ActiveNetlistDocument::OwnedSource
         {
             Some(CursorLocus::Netlist {
                 doc: NETLIST_DOC.to_owned(),
-                line: u32::try_from(state.ui.netlist.cursor_line.saturating_add(1))
+                line: u32::try_from(state.code.netlist.cursor_line.saturating_add(1))
                     .unwrap_or(u32::MAX),
             })
         } else {

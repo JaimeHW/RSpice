@@ -20,6 +20,16 @@ use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
+/// Transient, device-local recovery point for a visibility-policy change.
+#[derive(Debug, Clone)]
+pub(crate) struct SchematicVisibilityRecovery {
+    pub(crate) view_path: String,
+    pub(crate) policy: SchematicVisibilityPolicy,
+    pub(crate) routing_mode: crate::state::WireRoutingMode,
+    pub(crate) net_highlight: crate::state::NetHighlightState,
+    pub(crate) selection: crate::state::Selection,
+}
+
 /// Isolated draft for Display options.
 ///
 /// The draft is device-local presentation state. Apply publishes every
@@ -62,10 +72,10 @@ pub(crate) fn open_display_options(state: &mut AppState) -> bool {
     if state.design.schematic_visibility_dialog.open {
         return false;
     }
-    state
-        .design
-        .schematic_visibility_dialog
-        .open(state.ui.schematic_visibility, state.ui.drawing_sheet_layers);
+    state.design.schematic_visibility_dialog.open(
+        state.design.schematic_visibility,
+        state.design.drawing_sheet_layers,
+    );
     true
 }
 
@@ -122,21 +132,21 @@ impl RSpiceApp {
 /// Publish both drafts together and close.
 fn apply_display_options(state: &mut AppState) {
     let policy = state.design.schematic_visibility_dialog.draft;
-    if policy != state.ui.schematic_visibility {
+    if policy != state.design.schematic_visibility {
         let recovery = capture_visibility_recovery(state);
-        state.ui.schematic_visibility_recovery = Some(recovery);
+        state.design.schematic_visibility_recovery = Some(recovery);
     }
     publish_visibility_policy(state, policy);
-    state.ui.drawing_sheet_layers = state.design.schematic_visibility_dialog.layers_draft;
+    state.design.drawing_sheet_layers = state.design.schematic_visibility_dialog.layers_draft;
     state.design.schematic_visibility_dialog.close();
     state.prompt("Display options applied on this device; the design is unchanged.");
 }
 
-fn capture_visibility_recovery(state: &AppState) -> crate::workbench::SchematicVisibilityRecovery {
-    crate::workbench::SchematicVisibilityRecovery {
+fn capture_visibility_recovery(state: &AppState) -> SchematicVisibilityRecovery {
+    SchematicVisibilityRecovery {
         view_path: state.model.workspace.content.active_view.display_path(),
-        policy: state.ui.schematic_visibility,
-        routing_mode: state.ui.schematic_routing_mode,
+        policy: state.design.schematic_visibility,
+        routing_mode: state.design.schematic_routing_mode,
         net_highlight: state.model.schematic.session.editor.net_highlight.clone(),
         selection: state.model.schematic.session.editor.selection.clone(),
     }
@@ -144,7 +154,7 @@ fn capture_visibility_recovery(state: &AppState) -> crate::workbench::SchematicV
 
 fn visibility_recovery_available(state: &AppState) -> bool {
     state
-        .ui
+        .design
         .schematic_visibility_recovery
         .as_ref()
         .is_some_and(|recovery| {
@@ -154,7 +164,7 @@ fn visibility_recovery_available(state: &AppState) -> bool {
 
 fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
     let recovery = state
-        .ui
+        .design
         .schematic_visibility_recovery
         .clone()
         .ok_or_else(|| "No prior schematic visibility state is available.".to_owned())?;
@@ -163,8 +173,8 @@ fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
             "The active cell/view changed; its prior visibility state was not applied.".to_owned(),
         );
     }
-    state.ui.schematic_visibility = recovery.policy;
-    state.ui.schematic_routing_mode = recovery.routing_mode;
+    state.design.schematic_visibility = recovery.policy;
+    state.design.schematic_routing_mode = recovery.routing_mode;
     state
         .model
         .schematic
@@ -191,7 +201,7 @@ fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
         buffer.editor.session.editor.selection =
             state.model.schematic.session.editor.selection.clone();
     }
-    state.ui.schematic_visibility_recovery = None;
+    state.design.schematic_visibility_recovery = None;
     Ok(())
 }
 
@@ -218,7 +228,7 @@ pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicV
         .editor
         .bus_drawing
         .routing_mode = routing_mode;
-    state.ui.schematic_routing_mode = routing_mode;
+    state.design.schematic_routing_mode = routing_mode;
     if !policy.net_highlighting.lights_selected_net() {
         state.model.schematic.session.editor.net_highlight.clear();
     }
@@ -253,7 +263,7 @@ pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicV
         .selection
         .design_notes
         .retain(|id| selectable_note_ids.contains(id));
-    state.ui.schematic_visibility = policy;
+    state.design.schematic_visibility = policy;
 }
 
 fn routing_mode_for(style: SchematicWireRoutingStyle, current: WireRoutingMode) -> WireRoutingMode {
@@ -485,9 +495,9 @@ mod tests {
             .draft
             .parameter_labels = SchematicParameterLabelVisibility::Hidden;
         apply_display_options(&mut app.state);
-        assert!(!app.state.ui.drawing_sheet_layers.zones);
+        assert!(!app.state.design.drawing_sheet_layers.zones);
         assert_eq!(
-            app.state.ui.schematic_visibility.parameter_labels,
+            app.state.design.schematic_visibility.parameter_labels,
             SchematicParameterLabelVisibility::Hidden
         );
         assert!(!app.state.design.schematic_visibility_dialog.open);
@@ -537,7 +547,7 @@ mod tests {
 
         publish_visibility_policy(&mut state, policy);
 
-        assert_eq!(state.ui.schematic_visibility, policy);
+        assert_eq!(state.design.schematic_visibility, policy);
         assert_eq!(
             state
                 .model
@@ -590,7 +600,7 @@ mod tests {
             .highlighted_wires
             .insert(91);
         let recovery = capture_visibility_recovery(&state);
-        state.ui.schematic_visibility_recovery = Some(recovery);
+        state.design.schematic_visibility_recovery = Some(recovery);
 
         publish_visibility_policy(
             &mut state,
@@ -604,7 +614,7 @@ mod tests {
         restore_visibility_recovery(&mut state).expect("restore device-local view");
 
         assert_eq!(
-            state.ui.schematic_visibility,
+            state.design.schematic_visibility,
             SchematicVisibilityPolicy::default()
         );
         assert_eq!(
@@ -637,7 +647,7 @@ mod tests {
                 .selection
                 .has_component(selected)
         );
-        assert!(state.ui.schematic_visibility_recovery.is_none());
+        assert!(state.design.schematic_visibility_recovery.is_none());
     }
 
     /// The default highlight lights the selected net in the open view only:

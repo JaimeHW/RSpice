@@ -160,7 +160,7 @@ pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
     }
     let dataset = active_schematic_dataset(&state.model.schematic);
     let mut view = state
-        .ui
+        .design
         .engineering_table_views
         .working
         .get(&dataset.id)
@@ -178,7 +178,7 @@ pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
         })
         .or_else(|| {
             state
-                .ui
+                .design
                 .engineering_table_views
                 .saved
                 .iter()
@@ -236,7 +236,7 @@ impl RSpiceApp {
                         ui,
                         &dataset,
                         &mut self.state.design.engineering_table,
-                        &self.state.ui.engineering_table_views.saved,
+                        &self.state.design.engineering_table_views.saved,
                         &self.state.model.workspace.content.engineering_table_views.saved,
                     ),
                     EngineeringTableDialogPage::SaveView => {
@@ -246,7 +246,7 @@ impl RSpiceApp {
                         ui,
                         &dataset,
                         &mut self.state.design.engineering_table,
-                        &self.state.ui.engineering_table_views.saved,
+                        &self.state.design.engineering_table_views.saved,
                         &self.state.model.workspace.content.engineering_table_views.saved,
                     ),
                     EngineeringTableDialogPage::Export => {
@@ -312,7 +312,7 @@ impl RSpiceApp {
                 let saved = match scope {
                     EngineeringViewScope::Personal => self
                         .state
-                        .ui
+                        .design
                         .engineering_table_views
                         .saved
                         .iter()
@@ -338,7 +338,7 @@ impl RSpiceApp {
             BodyAction::DeleteSaved(id, scope) => {
                 let deleted = match scope {
                     EngineeringViewScope::Personal => {
-                        self.state.ui.engineering_table_views.delete(&id)
+                        self.state.design.engineering_table_views.delete(&id)
                     }
                     EngineeringViewScope::Project => {
                         let deleted = self
@@ -361,7 +361,7 @@ impl RSpiceApp {
             BodyAction::MakeDefault(id, scope) => {
                 let changed = match scope {
                     EngineeringViewScope::Personal => {
-                        self.state.ui.engineering_table_views.make_default(&id)
+                        self.state.design.engineering_table_views.make_default(&id)
                     }
                     EngineeringViewScope::Project => {
                         let changed = self
@@ -396,7 +396,7 @@ impl RSpiceApp {
                 let name = self.state.design.engineering_table.saved_edit_name.clone();
                 let result = match scope {
                     EngineeringViewScope::Personal => {
-                        self.state.ui.engineering_table_views.rename(&id, &name)
+                        self.state.design.engineering_table_views.rename(&id, &name)
                     }
                     EngineeringViewScope::Project => {
                         let result = self
@@ -422,7 +422,9 @@ impl RSpiceApp {
             }
             BodyAction::DuplicateSaved(id, scope, source_name) => {
                 let store = match scope {
-                    EngineeringViewScope::Personal => &mut self.state.ui.engineering_table_views,
+                    EngineeringViewScope::Personal => {
+                        &mut self.state.design.engineering_table_views
+                    }
                     EngineeringViewScope::Project => {
                         &mut self.state.model.workspace.content.engineering_table_views
                     }
@@ -457,7 +459,7 @@ impl RSpiceApp {
         };
         view.normalize_for(dataset);
         self.state
-            .ui
+            .design
             .engineering_table_views
             .set_working(view, dataset);
         self.state.design.engineering_table.close();
@@ -481,7 +483,7 @@ impl RSpiceApp {
         ) {
             Ok(text) => {
                 let rows = dataset.project_selected(view, false, selected).rows.len();
-                self.state.ui.clipboard_text_request = Some(text);
+                self.state.workbench.clipboard_text_request = Some(text);
                 self.state.prompt(format!(
                     "{rows} engineering table row{} copied with headers and displayed units.",
                     if rows == 1 { "" } else { "s" }
@@ -499,7 +501,7 @@ impl RSpiceApp {
         let scope = self.state.design.engineering_table.save_scope;
         let make_default = self.state.design.engineering_table.save_as_default;
         let result = match scope {
-            EngineeringViewScope::Personal => self.state.ui.engineering_table_views.save(
+            EngineeringViewScope::Personal => self.state.design.engineering_table_views.save(
                 &name,
                 scope,
                 view,
@@ -948,7 +950,7 @@ impl RSpiceApp {
         let result = match scope {
             EngineeringViewScope::Personal => self
                 .state
-                .ui
+                .design
                 .engineering_table_views
                 .import_view(source, scope, &dataset),
             EngineeringViewScope::Project => {
@@ -984,7 +986,9 @@ impl RSpiceApp {
 
     fn export_engineering_saved_view(&mut self, id: &str, scope: EngineeringViewScope) {
         let result = match scope {
-            EngineeringViewScope::Personal => self.state.ui.engineering_table_views.export_view(id),
+            EngineeringViewScope::Personal => {
+                self.state.design.engineering_table_views.export_view(id)
+            }
             EngineeringViewScope::Project => self
                 .state
                 .model

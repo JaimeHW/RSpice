@@ -26,7 +26,7 @@ use super::AppState;
 /// than to the manual baseline. Silently substituting a different document
 /// under the same header is the one outcome worse than an empty viewer.
 pub(crate) fn run_snapshot_source(state: &AppState) -> String {
-    let Some(selection) = state.ui.netlist.executed_deck_view else {
+    let Some(selection) = state.code.netlist.executed_deck_view else {
         return state.manual_run.last_run_buffer.clone().unwrap_or_default();
     };
     state

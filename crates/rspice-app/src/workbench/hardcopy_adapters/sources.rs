@@ -133,13 +133,17 @@ fn capture_results_quick_view_presentation(
 ) -> Result<ResultsQuickViewPresentation, HardcopySourceError> {
     let fft = &state.analysis.fft_state;
     let histogram = &state.analysis.histogram_state;
-    let view = state.ui.results.session.plot_view(ResultViewer::Hist, 0);
+    let view = state
+        .results
+        .results
+        .session
+        .plot_view(ResultViewer::Hist, 0);
     let overlay = captured_results_run(state)
         .map(|run| capture_quick_view_overlays(state, run))
         .transpose()?
         .unwrap_or_default();
     ResultsQuickViewPresentation::try_new(
-        state.ui.results.session.viewer,
+        state.results.results.session.viewer,
         overlay,
         crate::workbench::documents::result_document::run_specifications(state),
         QuickFftSettings {
@@ -289,7 +293,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
             display_name: format!(
                 "{} · {}",
                 run.label,
-                state.ui.results.session.viewer.label()
+                state.results.results.session.viewer.label()
             ),
             document_kind: HardcopyDocumentKind::PlotOrWorksheet,
             allowed_scopes: vec![
@@ -807,7 +811,7 @@ fn quick_result_availability(
             run.dataset_id
         ));
     }
-    let viewer = state.ui.results.session.viewer;
+    let viewer = state.results.results.session.viewer;
     if viewer == ResultViewer::Manifest {
         // Manifest hardcopy is bound to the terminal dataset as a whole and
         // must not require an arbitrarily selected analysis.
@@ -1122,7 +1126,7 @@ fn active_visualization_document_pane(
         .content
         .visualization_document(document_id)?;
     if let Some(pane) = state
-        .ui
+        .results
         .results
         .session
         .persistent_document_pane(document_id)
@@ -1132,7 +1136,7 @@ fn active_visualization_document_pane(
         return Some((document, page, pane));
     }
     let selected_page_id = state
-        .ui
+        .results
         .results
         .session
         .persistent_document_page(document_id)

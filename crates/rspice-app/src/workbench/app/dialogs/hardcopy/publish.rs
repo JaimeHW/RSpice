@@ -1008,7 +1008,7 @@ fn active_retained_source_selection(
             )) => {
                 let pane_id = app
                     .state
-                    .ui
+                    .results
                     .results
                     .session
                     .persistent_document_pane(*document_id)

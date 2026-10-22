@@ -16,7 +16,7 @@ pub(super) fn on_screen_strips(state: &AppState) -> Vec<AnalysisPresentationKey>
     let Some(run) = state.model.simulation.active_run() else {
         return Vec::new();
     };
-    let results = &state.ui.results;
+    let results = &state.results.results;
     let present = |key: AnalysisPresentationKey| key.resolve(run).is_some();
     match results.session.maximized_strip {
         Some(max_key) if present(max_key) => vec![max_key],
@@ -40,14 +40,14 @@ fn with_readout<R>(
     let models = need_models.then(|| {
         cached_models(
             &state.model.simulation,
-            &mut state.ui.results,
+            &mut state.results.results,
             presentation.complex_number_display(),
             tokens,
         )
     });
     let strips = on_screen_strips(state);
     render(
-        &mut state.ui.results.session,
+        &mut state.results.results.session,
         ReadoutInput {
             models: models.as_deref().map_or(&[], Vec::as_slice),
             on_screen_strips: &strips,
@@ -67,7 +67,7 @@ fn apply_marker_actions(state: &mut AppState, actions: MarkerActions) {
 }
 
 pub fn readout_strip_height(state: &mut AppState) -> f32 {
-    let session = &state.ui.results.session;
+    let session = &state.results.results.session;
     let need_models = !session.readout_collapsed
         && session.cursor_readout_active()
         && session.cursor_strip.is_some();
@@ -80,7 +80,7 @@ pub fn readout_strip_height(state: &mut AppState) -> f32 {
 }
 
 pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
-    let session = &state.ui.results.session;
+    let session = &state.results.results.session;
     let need_models = (session.cursor_readout_active() && session.cursor_strip.is_some())
         || (!session.readout_collapsed
             && height > dock::READOUT_HEADER_H
@@ -97,7 +97,7 @@ pub fn readout_strip(ui: &mut Ui, state: &mut AppState, height: f32) {
 }
 
 pub(crate) fn inline_cursor_readout(state: &mut AppState, tokens: &Tokens) -> Option<String> {
-    let session = &state.ui.results.session;
+    let session = &state.results.results.session;
     if !session.readout_collapsed || !session.cursor_readout_active() {
         return None;
     }
@@ -112,7 +112,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
 
 #[cfg(test)]
 pub(super) fn readout_row_count(state: &mut AppState) -> usize {
-    let need_models = state.ui.results.session.cursor_strip.is_some();
+    let need_models = state.results.results.session.cursor_strip.is_some();
     with_readout(
         state,
         &Tokens::default(),
@@ -123,7 +123,7 @@ pub(super) fn readout_row_count(state: &mut AppState) -> usize {
 
 #[cfg(test)]
 pub(super) fn marker_body_height(state: &mut AppState) -> f32 {
-    let session = &state.ui.results.session;
+    let session = &state.results.results.session;
     let need_models = session.cursor_readout_active() && session.cursor_strip.is_some();
     with_readout(
         state,
@@ -137,7 +137,7 @@ pub(super) fn marker_body_height(state: &mut AppState) -> f32 {
 pub(super) fn visible_markers(state: &AppState) -> Vec<MarkerView<'_>> {
     on_screen_strips(state)
         .into_iter()
-        .flat_map(|analysis| state.ui.results.session.strip_markers(analysis))
+        .flat_map(|analysis| state.results.results.session.strip_markers(analysis))
         .collect()
 }
 

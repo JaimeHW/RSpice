@@ -40,7 +40,7 @@ const BUTTON: Vec2 = Vec2::new(24.0, 20.0);
 const GAP: f32 = 6.0;
 
 pub(super) fn show(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<StageAction>) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let band = ui.available_rect_before_wrap();
     ui.spacing_mut().item_spacing.y = 0.0;
 

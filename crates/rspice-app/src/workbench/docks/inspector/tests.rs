@@ -423,7 +423,7 @@ fn result_app_with_current_out_map(split: bool) -> RSpiceApp {
                 "#ffbd2e",
             )]),
         );
-    app.state.ui.results.session.selected_trace = Some(
+    app.state.results.results.session.selected_trace = Some(
         rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
             app.state
                 .model
@@ -667,7 +667,7 @@ fn historical_result_revision_cannot_cross_probe_current_geometry() {
         )]),
     );
     app.state.model.simulation.retained.runs[0] = stale_run;
-    app.state.ui.results.session.selected_trace = Some(
+    app.state.results.results.session.selected_trace = Some(
         rspice_results_ui::selection::SelectedResultTrace::from_run_indices(
             &app.state.model.simulation.retained.runs[0],
             0,
@@ -856,7 +856,7 @@ fn owned_provenance_requires_exact_saved_and_validated_bytes() {
     state.model.simulation.source.netlist_content = "owned\n.end\n".to_owned();
     let project_revision = state.model.workspace.content.project.revision().get();
     let digest = crate::state::content_digest(&state.model.simulation.source.netlist_content);
-    state.ui.netlist.externally_saved_content_digest = Some(digest);
+    state.code.netlist.externally_saved_content_digest = Some(digest);
     state.model.netlist_artifacts.validation = Some(crate::state::NetlistValidationReceipt {
         visible_content_digest: digest,
         executable_source_digest: digest,
@@ -1118,9 +1118,9 @@ fn waves_details_app() -> RSpiceApp {
     );
     let selected = rspice_results_ui::selection::SelectedResultTrace::from_run_indices(run, 0, 0)
         .expect("selected retained trace");
-    app.state.ui.results.session.selected_trace = Some(selected);
-    app.state.ui.results.session.viewer = ResultViewer::Waves;
-    app.state.ui.results.session.active_wave_pane = Some(
+    app.state.results.results.session.selected_trace = Some(selected);
+    app.state.results.results.session.viewer = ResultViewer::Waves;
+    app.state.results.results.session.active_wave_pane = Some(
         crate::workbench::documents::result_document::WavePanePresentationKey {
             analysis: analysis_key,
             unit: "V".to_owned(),
@@ -1443,7 +1443,7 @@ fn veriloga_inspector_app() -> RSpiceApp {
     else {
         panic!("an undeclared identifier refuses the compile");
     };
-    let veriloga = &mut app.state.ui.code_workspace.veriloga;
+    let veriloga = &mut app.state.code.code_workspace.veriloga;
     veriloga.last_failure = std::sync::Arc::new(
         crate::state::code_diagnostics::CodeDiagnosticCollection::try_new(diagnostics)
             .expect("few findings"),

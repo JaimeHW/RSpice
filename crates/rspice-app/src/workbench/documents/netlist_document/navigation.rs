@@ -22,7 +22,7 @@ pub(crate) fn open_diagnostic_location(
     diagnostic_id: uuid::Uuid,
 ) -> Result<(), String> {
     let diagnostic = state
-        .ui
+        .code
         .netlist
         .diagnostics
         .iter()
@@ -64,10 +64,10 @@ pub(crate) fn open_source_location(
     line: Option<usize>,
 ) -> Result<(), String> {
     let root = state
-        .ui
+        .code
         .netlist
         .active_dependency_root
-        .unwrap_or(state.ui.netlist.active_document);
+        .unwrap_or(state.code.netlist.active_document);
     if let Some(source_path) = included_source {
         let dependency_identity = canonical_root_document(state, root)
             .and_then(|document| {
@@ -90,13 +90,13 @@ pub(crate) fn open_source_location(
         open_netlist_dependency_from_root(state, root, &dependency_identity)?;
     }
 
-    state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+    state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Netlist);
     if let Some(line) = line {
-        state.ui.netlist.cursor_line = line;
-        state.ui.netlist.requested_line = Some(line.saturating_add(1));
+        state.code.netlist.cursor_line = line;
+        state.code.netlist.requested_line = Some(line.saturating_add(1));
     }
     Ok(())
 }

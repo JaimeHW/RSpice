@@ -133,10 +133,10 @@ fn wave_cache_unchanged_reads_and_clones_reuse_complete_models() {
 fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
     let mut state = AppState::default();
     state.model.simulation = restored_spectrum(1.0, 3);
-    let models = spectrum_models(&state.model.simulation, &mut state.ui.results);
+    let models = spectrum_models(&state.model.simulation, &mut state.results.results);
     assert_eq!(models[0].traces[0].y.as_slice(), [0.0; 3]);
-    state.ui.results.session.cursor_strip = Some(0);
-    state.ui.results.session.cursors.a = Some(1.0);
+    state.results.results.session.cursor_strip = Some(0);
+    state.results.results.session.cursors.a = Some(1.0);
     Arc::make_mut(&mut state.model.simulation.retained.runs[0].analyses[0].waveforms[0].y)
         .fill(10.0);
 
@@ -263,7 +263,7 @@ fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
     let mut state = branches::hysteresis_run();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         ComplexNumberDisplay::MagnitudePhaseDegrees,
         &Tokens::default(),
     );
@@ -272,7 +272,7 @@ fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
         let upper = step as f64 / 1000.0;
         for branch in 0..2 {
             let stats = trace_interval_statistics(
-                &mut state.ui.results.session.derived,
+                &mut state.results.results.session.derived,
                 model,
                 &model.traces[0],
                 Some((0.0, upper)),
@@ -283,9 +283,12 @@ fn measurement_cache_keeps_only_the_latest_window_per_trace_branch() {
             assert!((stats.mean - expected).abs() < 1e-14);
         }
     }
-    assert_eq!(state.ui.results.session.derived.window_stats_count(), 2);
+    assert_eq!(
+        state.results.results.session.derived.window_stats_count(),
+        2
+    );
     let last = state
-        .ui
+        .results
         .results
         .session
         .derived

@@ -73,7 +73,7 @@ fn distribution() -> (AppState, String) {
         .activate(WorkspaceDocumentId::ResultDataset(dataset));
     state.analysis.histogram_state.selected = Some("gain".to_owned());
     state.analysis.histogram_state.bin_count = 5;
-    state.ui.results.session.viewer = ResultViewer::Hist;
+    state.results.results.session.viewer = ResultViewer::Hist;
     let key = format!(
         "project:{}:result-dataset:{}",
         state.model.workspace.content.project.id().as_uuid(),
@@ -118,7 +118,7 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
     for mode in HistogramDisplayMode::ALL {
         state.analysis.histogram_state.mode = mode;
         state
-            .ui
+            .results
             .results
             .session
             .plot_view_mut(ResultViewer::Hist, 0)

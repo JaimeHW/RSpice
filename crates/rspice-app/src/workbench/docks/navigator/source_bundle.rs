@@ -211,7 +211,7 @@ fn open_file_action(
     )
     .and_then(|()| crate::workbench::app::open_source_document_dialog(&mut app.state));
     if let Err(error) = opened {
-        app.state.ui.code_workspace.source_file_dialog = None;
+        app.state.code.code_workspace.source_file_dialog = None;
         app.state.prompt(error);
     }
 }
@@ -289,13 +289,13 @@ fn active_bundle(
 }
 
 fn active_path(state: &AppState, language: ProjectSourceLanguage) -> Option<String> {
-    code_workspace::active_bundle_path(&state.model.workspace, &state.ui.code_workspace, language)
+    code_workspace::active_bundle_path(&state.model.workspace, &state.code.code_workspace, language)
 }
 
 fn select(state: &mut AppState, language: ProjectSourceLanguage, logical_path: &str) {
     code_workspace::select_source_document(
         &state.model.workspace,
-        &mut state.ui.code_workspace,
+        &mut state.code.code_workspace,
         language,
         logical_path,
     );
@@ -316,7 +316,7 @@ enum RailRequest {
 }
 
 fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let language = rail.language;
     let bundle = app.state.model.workspace.active_source_bundle(language);
     let bundle_id = bundle.map(crate::state::ProjectSourceBundle::id);
@@ -324,7 +324,7 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
         (Some(path), Some(bundle)) => document_navigation(
             app.state.model.workspace.content.project.id(),
             bundle,
-            &mut app.state.ui.code_workspace.source_index_cache,
+            &mut app.state.code.code_workspace.source_index_cache,
             path,
         ),
         _ => SourceNavigation::default(),
@@ -333,7 +333,7 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
         .zip(rail.active.as_deref())
         .and_then(|(bundle_id, path)| {
             code_workspace::viewed_veriloga_header(
-                &app.state.ui.code_workspace.veriloga,
+                &app.state.code.code_workspace.veriloga,
                 bundle_id,
                 path,
             )
@@ -385,7 +385,7 @@ fn show_rail(ui: &mut Ui, app: &mut RSpiceApp, rail: Rail) {
         }
         Some(RailRequest::ViewHeader(identity)) => {
             if let (Some(bundle_id), Some(over)) = (bundle_id, rail.active) {
-                app.state.ui.code_workspace.veriloga.viewed_header = Some(VerilogAHeaderView {
+                app.state.code.code_workspace.veriloga.viewed_header = Some(VerilogAHeaderView {
                     bundle_id,
                     over,
                     identity,

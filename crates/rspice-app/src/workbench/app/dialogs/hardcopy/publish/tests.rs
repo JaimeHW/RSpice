@@ -83,7 +83,7 @@ fn results_export_selects_the_active_project_document_pane_authority() {
         .documents
         .activate(WorkspaceDocumentId::VisualizationDocument(document_id));
     app.state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_pane(document_id, pane_id);
@@ -1004,7 +1004,7 @@ fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
         Err("Hardcopy export was cancelled before it was written.".to_owned()),
     );
     app.state.drain_notices(&ctx);
-    assert!(app.state.ui.toasts.activity().is_empty());
+    assert!(app.state.workbench.toasts.activity().is_empty());
 
     app.state.hardcopy.hardcopy.open = true;
     conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
@@ -1013,12 +1013,12 @@ fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
         app.state.hardcopy.hardcopy.error.as_deref(),
         Some("The disk is full.")
     );
-    assert!(app.state.ui.toasts.activity().is_empty());
+    assert!(app.state.workbench.toasts.activity().is_empty());
 
     app.state.hardcopy.hardcopy.close();
     conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
     app.state.drain_notices(&ctx);
-    let activity = app.state.ui.toasts.activity();
+    let activity = app.state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), "Hardcopy failed");
     assert_eq!(activity[0].message(), "The disk is full.");

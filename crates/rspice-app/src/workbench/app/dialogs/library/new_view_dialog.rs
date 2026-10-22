@@ -608,7 +608,7 @@ impl RSpiceApp {
         self.state
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
-        self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
+        self.state.code.code_workspace.veriloga.receipt = Some(receipt);
         self.state.record(
             LogSeverity::Info,
             LogSource::Studio,
@@ -1480,7 +1480,7 @@ mod tests {
         assert_eq!(selected.bundle().id(), bundle.id());
         assert_eq!(selected.selected_module(), Some("precision_amp"));
         assert!(selected.bundle().validation_is_current());
-        assert!(app.state.ui.code_workspace.veriloga.receipt.is_some());
+        assert!(app.state.code.code_workspace.veriloga.receipt.is_some());
     }
 
     /// A cell with no schematic ports and no symbol pins has no interface yet,

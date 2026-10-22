@@ -163,7 +163,13 @@ pub(crate) fn selected_veriloga_editor_snapshot(
     app: &RSpiceApp,
 ) -> Result<SelectedVerilogAEditorSnapshot, String> {
     let selected = selected_veriloga_source(app)?;
-    let explicit = app.state.ui.code_workspace.veriloga.selected_file.as_ref();
+    let explicit = app
+        .state
+        .code
+        .code_workspace
+        .veriloga
+        .selected_file
+        .as_ref();
     let selection_was_invalid = explicit.is_some_and(|selection| {
         selection.bundle_id != selected.bundle().id()
             || !selected.bundle().contains_file(&selection.logical_path)
@@ -188,17 +194,23 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
     poll_browser_import_completion(app);
 
-    if !app.state.ui.code_workspace.veriloga.import_requested {
+    if !app.state.code.code_workspace.veriloga.import_requested {
         return;
     }
-    app.state.ui.code_workspace.veriloga.import_requested = false;
+    app.state.code.code_workspace.veriloga.import_requested = false;
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let dependency_import = app.state.ui.code_workspace.veriloga.import_target.is_some();
+        let dependency_import = app
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .import_target
+            .is_some();
         let replacement = app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .replace_target
@@ -219,8 +231,8 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
             })
             .pick_file()
         else {
-            app.state.ui.code_workspace.veriloga.import_target = None;
-            app.state.ui.code_workspace.veriloga.replace_target = None;
+            app.state.code.code_workspace.veriloga.import_target = None;
+            app.state.code.code_workspace.veriloga.replace_target = None;
             return;
         };
         let result = (|| {
@@ -250,8 +262,8 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
         match result {
             Ok((file_name, contents)) => apply_import(app, file_name, contents),
             Err(error) => {
-                app.state.ui.code_workspace.veriloga.import_target = None;
-                app.state.ui.code_workspace.veriloga.replace_target = None;
+                app.state.code.code_workspace.veriloga.import_target = None;
+                app.state.code.code_workspace.veriloga.replace_target = None;
                 app.state.record(
                     LogSeverity::Error,
                     LogSource::Studio,
@@ -263,10 +275,16 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
 
     #[cfg(target_arch = "wasm32")]
     {
-        let dependency_import = app.state.ui.code_workspace.veriloga.import_target.is_some()
+        let dependency_import = app
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .import_target
+            .is_some()
             || app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .veriloga
                 .replace_target
@@ -276,8 +294,8 @@ pub fn poll_veriloga_import(app: &mut RSpiceApp) {
         ) {
             Ok(token) => token,
             Err(error) => {
-                app.state.ui.code_workspace.veriloga.import_target = None;
-                app.state.ui.code_workspace.veriloga.replace_target = None;
+                app.state.code.code_workspace.veriloga.import_target = None;
+                app.state.code.code_workspace.veriloga.replace_target = None;
                 app.state
                     .prompt(format!("Verilog-A import failed: {error}"));
                 return;
@@ -313,12 +331,12 @@ fn poll_browser_import_completion(app: &mut RSpiceApp) {
     match completion.result {
         Ok(Some(file)) => apply_import(app, file.name, file.contents),
         Ok(None) => {
-            app.state.ui.code_workspace.veriloga.import_target = None;
-            app.state.ui.code_workspace.veriloga.replace_target = None;
+            app.state.code.code_workspace.veriloga.import_target = None;
+            app.state.code.code_workspace.veriloga.replace_target = None;
         }
         Err(error) => {
-            app.state.ui.code_workspace.veriloga.import_target = None;
-            app.state.ui.code_workspace.veriloga.replace_target = None;
+            app.state.code.code_workspace.veriloga.import_target = None;
+            app.state.code.code_workspace.veriloga.replace_target = None;
             app.state.record(
                 LogSeverity::Error,
                 LogSource::Studio,
@@ -333,9 +351,9 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
     // tests and future non-picker import surfaces. Consume the request here as
     // well as in the polling adapter so no successful, failed, or stale
     // completion can leave the workspace permanently locked in "pending".
-    app.state.ui.code_workspace.veriloga.import_requested = false;
-    if let Some(target) = app.state.ui.code_workspace.veriloga.import_target.take() {
-        app.state.ui.code_workspace.veriloga.replace_target = None;
+    app.state.code.code_workspace.veriloga.import_requested = false;
+    if let Some(target) = app.state.code.code_workspace.veriloga.import_target.take() {
+        app.state.code.code_workspace.veriloga.replace_target = None;
         let target_is_current = app.state.model.workspace.content.project.id() == target.project_id
             && app
                 .state
@@ -381,7 +399,7 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
         }
         return;
     }
-    let Some(target) = app.state.ui.code_workspace.veriloga.replace_target.take() else {
+    let Some(target) = app.state.code.code_workspace.veriloga.replace_target.take() else {
         // File > Import never touches an open view: the file becomes cell
         // views of its own, and the form says which, and where, before any is
         // made. That holds whether or not a Verilog-A view is in front.
@@ -402,7 +420,7 @@ fn apply_import(app: &mut RSpiceApp, file_name: String, contents: String) {
         return;
     };
     let restorable = replacement_keeps_previous_text(bundle, &target.logical_path, &contents);
-    app.state.ui.code_workspace.veriloga.replace_review = Some(VerilogAReplaceReview {
+    app.state.code.code_workspace.veriloga.replace_review = Some(VerilogAReplaceReview {
         target,
         file_name,
         contents,
@@ -419,7 +437,7 @@ pub(crate) fn complete_veriloga_file_pick(app: &mut RSpiceApp, file_name: &str, 
 
 /// Read `contents` into File > Import's form.
 fn open_veriloga_import_form(app: &mut RSpiceApp, file_name: String, contents: String) {
-    app.state.ui.code_workspace.veriloga.import_form =
+    app.state.code.code_workspace.veriloga.import_form =
         Some(VerilogAImportFormState::read(app, file_name, contents));
 }
 
@@ -480,7 +498,7 @@ pub(crate) fn request_veriloga_source_replacement(
     {
         return Err(reason.to_owned());
     }
-    if app.state.ui.code_workspace.veriloga.import_requested {
+    if app.state.code.code_workspace.veriloga.import_requested {
         return Err("A Verilog-A file is already being chosen.".to_owned());
     }
     let selected = selected_veriloga_source(app)?;
@@ -492,7 +510,7 @@ pub(crate) fn request_veriloga_source_replacement(
     ) {
         return Err(format!("{logical_path} cannot be edited."));
     }
-    app.state.ui.code_workspace.veriloga.replace_target = Some(VerilogAReplaceTarget {
+    app.state.code.code_workspace.veriloga.replace_target = Some(VerilogAReplaceTarget {
         project_id: app.state.model.workspace.content.project.id(),
         view: app.state.model.workspace.content.active_view.clone(),
         bundle_id: selected.bundle().id(),
@@ -500,8 +518,8 @@ pub(crate) fn request_veriloga_source_replacement(
         closure_digest: selected.bundle().closure_digest(),
         logical_path: logical_path.to_owned(),
     });
-    app.state.ui.code_workspace.veriloga.import_target = None;
-    app.state.ui.code_workspace.veriloga.import_requested = true;
+    app.state.code.code_workspace.veriloga.import_target = None;
+    app.state.code.code_workspace.veriloga.import_requested = true;
     Ok(())
 }
 
@@ -510,7 +528,7 @@ pub(crate) fn request_veriloga_source_replacement(
 pub(crate) fn commit_veriloga_source_replacement(app: &mut RSpiceApp) -> Result<(), String> {
     let review = app
         .state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .replace_review
@@ -600,8 +618,8 @@ pub(crate) fn import_dropped_veriloga_source(
     if app.state.model.safe_mode.project_read_only() {
         return Err("The active project is read-only.".to_owned());
     }
-    if app.state.ui.code_workspace.veriloga.import_requested
-        || app.state.ui.code_workspace.veriloga.pending.is_some()
+    if app.state.code.code_workspace.veriloga.import_requested
+        || app.state.code.code_workspace.veriloga.pending.is_some()
     {
         return Err("A Verilog-A import or compile transaction is already active.".to_owned());
     }
@@ -636,7 +654,7 @@ pub(crate) fn active_veriloga_file_path(
     selected: &SelectedVerilogASource,
 ) -> String {
     app.state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .selected_file
@@ -686,7 +704,7 @@ fn add_bundle_file(
         .add_bundle_file(bundle_id, importer_path, file)
         .map_err(|error| error.to_string())?;
     if changed {
-        app.state.ui.code_workspace.veriloga.selected_file = Some(VerilogAFileSelection {
+        app.state.code.code_workspace.veriloga.selected_file = Some(VerilogAFileSelection {
             bundle_id,
             logical_path,
         });
@@ -705,7 +723,7 @@ fn add_bundle_file(
 /// clean.
 pub(crate) fn invalidate_veriloga_evidence(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
     mark_bundle_unsaved(app, bundle_id);
-    app.state.ui.code_workspace.veriloga.void_evidence();
+    app.state.code.code_workspace.veriloga.void_evidence();
 }
 
 /// The persisted bundle changed: the project has unsaved source, and so does
@@ -773,7 +791,7 @@ pub(crate) fn replace_selected_veriloga_file(
 /// bundle as its build profile first, so what compiles is always a profile
 /// the project holds.
 pub(crate) fn request_veriloga_compile(app: &mut RSpiceApp) -> Result<(), String> {
-    if app.state.ui.code_workspace.veriloga.pending.is_some() {
+    if app.state.code.code_workspace.veriloga.pending.is_some() {
         return Err("A Verilog-A compile is already running.".to_owned());
     }
     let mut selected = selected_veriloga_source(app)?;
@@ -800,7 +818,7 @@ pub(crate) fn request_veriloga_compile(app: &mut RSpiceApp) -> Result<(), String
             "Selected module '{module}' is not declared by the Verilog-A build profile."
         ));
     }
-    app.state.ui.code_workspace.veriloga.compile_request = Some(selected);
+    app.state.code.code_workspace.veriloga.compile_request = Some(selected);
     Ok(())
 }
 
@@ -888,14 +906,14 @@ fn start_veriloga_compile(
     selected: SelectedVerilogASource,
     repaint: &egui::Context,
 ) {
-    if app.state.ui.code_workspace.veriloga.pending.is_some() {
+    if app.state.code.code_workspace.veriloga.pending.is_some() {
         return;
     }
     let token = selected.token(app.state.model.workspace.content.project.id());
     let (sender, receiver) = mpsc::channel();
-    Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
-    app.state.ui.code_workspace.veriloga.last_failure_token = None;
-    app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+    Arc::make_mut(&mut app.state.code.code_workspace.veriloga.last_failure).clear();
+    app.state.code.code_workspace.veriloga.last_failure_token = None;
+    app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
         token,
         receiver: Arc::new(Mutex::new(receiver)),
     });
@@ -920,7 +938,7 @@ fn start_veriloga_compile(
 pub(crate) fn cancel_veriloga_compile(app: &mut RSpiceApp) {
     #[cfg(target_arch = "wasm32")]
     rspice_simulation::project_veriloga::compile_service::cancel_compile();
-    app.state.ui.code_workspace.veriloga.pending = None;
+    app.state.code.code_workspace.veriloga.pending = None;
 }
 
 /// Start the compile a Compile command asked for.
@@ -929,7 +947,14 @@ pub(crate) fn cancel_veriloga_compile(app: &mut RSpiceApp) {
 /// before any surface draws, with the context the worker wakes when it
 /// answers. Its result lands wherever the reader is by then.
 pub fn consume_veriloga_compile_request(app: &mut RSpiceApp, repaint: &egui::Context) {
-    if let Some(selected) = app.state.ui.code_workspace.veriloga.compile_request.take() {
+    if let Some(selected) = app
+        .state
+        .code
+        .code_workspace
+        .veriloga
+        .compile_request
+        .take()
+    {
         start_veriloga_compile(app, selected, repaint);
     }
 }
@@ -940,7 +965,7 @@ pub fn consume_veriloga_compile_request(app: &mut RSpiceApp, repaint: &egui::Con
 /// The frame loop runs this every frame, so a result is published whether or
 /// not an editor host is on screen when it lands.
 pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
-    let Some(pending) = app.state.ui.code_workspace.veriloga.pending.clone() else {
+    let Some(pending) = app.state.code.code_workspace.veriloga.pending.clone() else {
         return;
     };
     let received = pending
@@ -967,7 +992,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
         // The editor exposes one active compile receipt. Once an in-flight
         // result is rejected because its source/module contract changed, an
         // older receipt must not remain as apparently current evidence.
-        app.state.ui.code_workspace.veriloga.receipt = None;
+        app.state.code.code_workspace.veriloga.receipt = None;
         return;
     }
 
@@ -988,11 +1013,11 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     let diagnostic = diagnostic_capacity_failure(pending.token, error);
                     let diagnostics = [diagnostic.clone()];
                     let _ = record_veriloga_qualification(app, pending.token, None, &diagnostics);
-                    app.state.ui.code_workspace.veriloga.receipt = None;
-                    app.state.ui.code_workspace.veriloga.last_failure = Arc::new(
+                    app.state.code.code_workspace.veriloga.receipt = None;
+                    app.state.code.code_workspace.veriloga.last_failure = Arc::new(
                         CodeDiagnosticCollection::try_new(vec![diagnostic]).unwrap_or_default(),
                     );
-                    app.state.ui.code_workspace.veriloga.last_failure_token = Some(pending.token);
+                    app.state.code.code_workspace.veriloga.last_failure_token = Some(pending.token);
                     app.state.record(
                         LogSeverity::Error,
                         LogSource::Studio,
@@ -1014,7 +1039,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         "The compiler succeeded, but its qualification record could not be saved: {error}"
                     ),
                 );
-                app.state.ui.code_workspace.veriloga.receipt = None;
+                app.state.code.code_workspace.veriloga.receipt = None;
                 return;
             }
             let previous_identity = app
@@ -1075,7 +1100,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                                 applied.outcome,
                             );
                             super::veriloga_interface::offer_placement(
-                                &mut app.state.ui.code_workspace.veriloga,
+                                &mut app.state.code.code_workspace.veriloga,
                                 receipt,
                                 reference,
                                 report.abi.formal_ports.len(),
@@ -1083,9 +1108,9 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         }
                         _ => receipt,
                     };
-                    Arc::make_mut(&mut app.state.ui.code_workspace.veriloga.last_failure).clear();
-                    app.state.ui.code_workspace.veriloga.last_failure_token = None;
-                    app.state.ui.code_workspace.veriloga.receipt = Some(receipt);
+                    Arc::make_mut(&mut app.state.code.code_workspace.veriloga.last_failure).clear();
+                    app.state.code.code_workspace.veriloga.last_failure_token = None;
+                    app.state.code.code_workspace.veriloga.receipt = Some(receipt);
                     app.state.record(
                         LogSeverity::Info,
                         LogSource::Studio,
@@ -1118,7 +1143,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     ),
                 );
             }
-            app.state.ui.code_workspace.veriloga.receipt = None;
+            app.state.code.code_workspace.veriloga.receipt = None;
             let diagnostics = diagnostics
                 .into_iter()
                 .map(|diagnostic| {
@@ -1133,7 +1158,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     )
                 })
                 .collect();
-            app.state.ui.code_workspace.veriloga.last_failure = Arc::new(
+            app.state.code.code_workspace.veriloga.last_failure = Arc::new(
                 CodeDiagnosticCollection::try_new(diagnostics).unwrap_or_else(|error| {
                     CodeDiagnosticCollection::try_new(vec![diagnostic_capacity_failure(
                         pending.token,
@@ -1142,7 +1167,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     .unwrap_or_default()
                 }),
             );
-            app.state.ui.code_workspace.veriloga.last_failure_token = Some(pending.token);
+            app.state.code.code_workspace.veriloga.last_failure_token = Some(pending.token);
             app.state.record(
                 LogSeverity::Error,
                 LogSource::Studio,
@@ -1150,8 +1175,8 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
             );
         }
         Err(()) => {
-            app.state.ui.code_workspace.veriloga.receipt = None;
-            app.state.ui.code_workspace.veriloga.last_failure = Arc::new(
+            app.state.code.code_workspace.veriloga.receipt = None;
+            app.state.code.code_workspace.veriloga.last_failure = Arc::new(
                 CodeDiagnosticCollection::try_new(vec![
                     CodeEditorDiagnostic::current(
                         "rspice.veriloga.compiler-worker",
@@ -1173,7 +1198,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 ])
                 .unwrap_or_default(),
             );
-            let worker_diagnostics = app.state.ui.code_workspace.veriloga.last_failure.clone();
+            let worker_diagnostics = app.state.code.code_workspace.veriloga.last_failure.clone();
             if let Err(error) = record_veriloga_qualification(
                 app,
                 pending.token,
@@ -1188,7 +1213,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     ),
                 );
             }
-            app.state.ui.code_workspace.veriloga.last_failure_token = Some(pending.token);
+            app.state.code.code_workspace.veriloga.last_failure_token = Some(pending.token);
             app.state.record(
                 LogSeverity::Error,
                 LogSource::Studio,
@@ -1543,7 +1568,7 @@ mod tests {
 
         let request = app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .compile_request
@@ -1576,7 +1601,7 @@ mod tests {
     fn a_build_profile_is_written_over_the_document_the_bundle_holds() {
         let mut app = portless_module();
         request_veriloga_compile(&mut app).unwrap();
-        app.state.ui.code_workspace.veriloga.compile_request = None;
+        app.state.code.code_workspace.veriloga.compile_request = None;
         let selected = selected_veriloga_source(&app).unwrap();
         let revision = selected.bundle().revision();
         let mut profile =
@@ -1713,7 +1738,7 @@ mod tests {
         );
         let form = app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .import_form
@@ -1722,7 +1747,7 @@ mod tests {
         assert_eq!(form.file_name, "dropped.va");
         assert!(
             app.state
-                .ui
+                .code
                 .code_workspace
                 .veriloga
                 .replace_review
@@ -1743,12 +1768,12 @@ mod tests {
         let replacement = "module legacy(p, n); inout p, n; electrical p, n; endmodule\n";
 
         request_veriloga_source_replacement(&mut app, &root).unwrap();
-        assert!(app.state.ui.code_workspace.veriloga.import_requested);
+        assert!(app.state.code.code_workspace.veriloga.import_requested);
         apply_import(&mut app, "next.va".to_owned(), replacement.to_owned());
 
         let review = app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .replace_review
@@ -1773,7 +1798,7 @@ mod tests {
             original,
             "nothing is replaced before confirming"
         );
-        assert!(app.state.ui.code_workspace.veriloga.import_form.is_none());
+        assert!(app.state.code.code_workspace.veriloga.import_form.is_none());
 
         commit_veriloga_source_replacement(&mut app).unwrap();
 
@@ -1805,7 +1830,7 @@ mod tests {
         let sources_before = app.state.model.workspace.content.project_sources.clone();
         let source = "module actual_model(p, n); inout p, n; electrical p, n; endmodule\n";
 
-        app.state.ui.code_workspace.veriloga.import_requested = true;
+        app.state.code.code_workspace.veriloga.import_requested = true;
         apply_import(
             &mut app,
             "behavioral/presentation_name.va".to_owned(),
@@ -1814,7 +1839,7 @@ mod tests {
 
         let form = app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .import_form
@@ -1832,7 +1857,7 @@ mod tests {
             app.state.model.workspace.content.project_sources,
             sources_before
         );
-        assert!(!app.state.ui.code_workspace.veriloga.import_requested);
+        assert!(!app.state.code.code_workspace.veriloga.import_requested);
     }
 
     #[test]
@@ -1873,7 +1898,7 @@ mod tests {
         );
         assert!(
             app.state
-                .ui
+                .code
                 .code_workspace
                 .veriloga
                 .replace_target
@@ -1881,7 +1906,7 @@ mod tests {
         );
         assert!(
             app.state
-                .ui
+                .code
                 .code_workspace
                 .veriloga
                 .replace_review
@@ -1912,7 +1937,7 @@ mod tests {
             selected.selected_module(),
         )
         .unwrap();
-        app.state.ui.code_workspace.veriloga.receipt = Some(receipt);
+        app.state.code.code_workspace.veriloga.receipt = Some(receipt);
         let before = selected.token(app.state.model.workspace.content.project.id());
 
         assert!(
@@ -1932,7 +1957,7 @@ mod tests {
         assert!(after.revision > before.revision);
         assert_ne!(after.closure_digest, before.closure_digest);
         assert!(!edited.bundle().validation_is_current());
-        assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
+        assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
         assert!(app.state.model.workspace.content.project_sources_dirty);
     }
 
@@ -1996,7 +2021,7 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
@@ -2005,7 +2030,7 @@ mod tests {
 
         let published = app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .receipt
@@ -2018,10 +2043,17 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.code() == "VA-SEM-NO-EFFECT-SYSTEM-TASK")
         );
-        assert!(app.state.ui.code_workspace.veriloga.last_failure.is_empty());
         assert!(
             app.state
-                .ui
+                .code
+                .code_workspace
+                .veriloga
+                .last_failure
+                .is_empty()
+        );
+        assert!(
+            app.state
+                .code
                 .code_workspace
                 .veriloga
                 .last_failure_token
@@ -2089,7 +2121,7 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
@@ -2098,7 +2130,7 @@ mod tests {
         // Problems lists every diagnostic of the published receipt.
         let published = app
             .state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .receipt
@@ -2138,8 +2170,8 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.ui.code_workspace.veriloga.receipt = None;
-        app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+        app.state.code.code_workspace.veriloga.receipt = None;
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
@@ -2150,8 +2182,8 @@ mod tests {
 
         poll_veriloga_compile(&mut app);
 
-        assert!(app.state.ui.code_workspace.veriloga.pending.is_none());
-        assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
+        assert!(app.state.code.code_workspace.veriloga.pending.is_none());
+        assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
         let second_selected = selected_veriloga_source(&app).unwrap();
         assert!(!second_selected.matches_token(
             app.state.model.workspace.content.project.id(),
@@ -2180,7 +2212,7 @@ mod tests {
                 (**receipt.compilation.report()).clone(),
             )))
             .unwrap();
-        app.state.ui.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
         });
@@ -2196,8 +2228,8 @@ mod tests {
 
         poll_veriloga_compile(&mut app);
 
-        assert!(app.state.ui.code_workspace.veriloga.pending.is_none());
-        assert!(app.state.ui.code_workspace.veriloga.receipt.is_none());
+        assert!(app.state.code.code_workspace.veriloga.pending.is_none());
+        assert!(app.state.code.code_workspace.veriloga.receipt.is_none());
         let changed = selected_veriloga_source(&app).unwrap();
         assert!(!changed.matches_token(
             app.state.model.workspace.content.project.id(),

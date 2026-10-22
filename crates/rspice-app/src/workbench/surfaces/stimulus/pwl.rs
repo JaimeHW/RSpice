@@ -56,7 +56,7 @@ pub(super) fn points_editor(
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let text = read_field(&stage.working, POINTS_FIELD);
     let cells = text
         .split_whitespace()
@@ -190,7 +190,7 @@ fn raw_table(
     text: &str,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let editing = stage.editing_field.as_deref() == Some(POINTS_FIELD);
     let mut buffer = if editing {
         state
@@ -331,7 +331,7 @@ impl TableColumns {
 
 /// The column heads, over the columns [`TableColumns`] gives every row.
 fn table_header(ui: &mut Ui, state: &AppState, stage: &Stage) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let palette = Tokens::get(ui.ctx()).color;
     let font = theme::sans(tokens::FS_MICRO, FontWeight::Medium);
     let (row, _) = ui.allocate_exact_size(
@@ -403,7 +403,7 @@ fn cell_edit(
     } else {
         tokens.get(slot).cloned().unwrap_or_default()
     };
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let label = messages.format(
         if slot.is_multiple_of(2) {
             MessageId::StimulusPwlTimeOf
@@ -507,7 +507,7 @@ pub(super) fn file_editor(
     sheet: &PropertySheet,
     actions: &mut Vec<StageAction>,
 ) {
-    let messages = state.ui.messages();
+    let messages = state.workbench.messages();
     let palette = Tokens::get(ui.ctx()).color;
     let retained = match stage.working.pwl_file.as_ref() {
         Some(file) => messages.format(
@@ -572,7 +572,10 @@ pub(super) fn file_height(
         + grid_height(ui, &shape_fields(sheet, stage), width)
         + note_height(
             ui,
-            &state.ui.messages().text(MessageId::StimulusRetainedNote),
+            &state
+                .workbench
+                .messages()
+                .text(MessageId::StimulusRetainedNote),
             width,
         )
 }

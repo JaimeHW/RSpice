@@ -1532,17 +1532,17 @@ fn a_netlist_stage_failure_opens_the_deck_rather_than_re_running_design_checks()
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.workbench.activate(Workspace::Verify);
-    app.state.ui.code_workspace.page =
+    app.state.code.code_workspace.page =
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
     apply_remediation(&mut app, remediation);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
-        app.state.ui.code_workspace.page,
+        app.state.code.code_workspace.page,
         crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
     );
     assert_eq!(
-        app.state.ui.netlist.requested_line,
+        app.state.code.netlist.requested_line,
         Some(42),
         "a finding that named a line must land on it, not merely open the deck"
     );
@@ -1561,8 +1561,8 @@ fn a_named_line_survives_the_parser_to_buffer_conversion() {
         PreflightRemediation::NetlistSource { line: Some(1) },
     );
 
-    assert_eq!(app.state.ui.netlist.cursor_line, 0);
-    assert_eq!(app.state.ui.netlist.requested_line, Some(1));
+    assert_eq!(app.state.code.netlist.cursor_line, 0);
+    assert_eq!(app.state.code.netlist.requested_line, Some(1));
 }
 
 /// A plan of two analyses, the first of which will not run, with the other

@@ -24,7 +24,7 @@ fn the_strip_extent_matches_the_walk_it_replaced() {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -57,7 +57,7 @@ fn hiding_a_trace_moves_the_strip_extent() {
     let presentation = state.model.preferences.result_presentation_policy();
     let before = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -66,7 +66,7 @@ fn hiding_a_trace_moves_the_strip_extent() {
     state.model.simulation.retained.runs[0].analyses[0].waveforms[1].visible = false;
     let after = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -94,7 +94,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
     let presentation = state.model.preferences.result_presentation_policy();
     let before = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -108,7 +108,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
 
     let after = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -146,7 +146,7 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -183,7 +183,7 @@ fn the_extent_is_walked_once_per_strip_per_cache_build() {
     let baseline = WorkCounts::reset();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &Tokens::default(),
     );
@@ -198,7 +198,7 @@ fn the_extent_is_walked_once_per_strip_per_cache_build() {
     for _ in 0..5 {
         let _ = cached_models(
             &state.model.simulation,
-            &mut state.ui.results,
+            &mut state.results.results,
             presentation.complex_number_display(),
             &Tokens::default(),
         );

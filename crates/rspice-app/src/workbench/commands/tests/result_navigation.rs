@@ -410,7 +410,7 @@ fn the_task_deck_hop_is_refused_by_the_reason_it_would_have_failed() {
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
     assert_eq!(
         app.state
-            .ui
+            .code
             .netlist
             .executed_deck_view
             .as_ref()
@@ -475,13 +475,13 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     ));
 
     app.state
-        .ui
+        .results
         .results
         .session
         .checked_result_quantities
         .insert(artifact.clone());
     app.state
-        .ui
+        .results
         .results
         .session
         .checked_result_quantities
@@ -493,13 +493,13 @@ fn the_producer_log_hop_refuses_rather_than_choosing_a_quantity() {
     );
 
     app.state
-        .ui
+        .results
         .results
         .session
         .checked_result_quantities
         .clear();
     app.state
-        .ui
+        .results
         .results
         .session
         .checked_result_quantities

@@ -35,7 +35,8 @@ use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::time_compat::Instant;
 use crate::ui::Theme;
 use crate::workbench::app_state::AppState;
-use crate::workbench::{UiSessionState, UserPreferences};
+use crate::workbench::slots::{PlatformState, SettingsState};
+use crate::workbench::{UserPreferences, WorkbenchState};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
@@ -112,11 +113,16 @@ struct Values<'a> {
 }
 
 impl<'a> Values<'a> {
-    fn of(ui: &'a UiSessionState, preferences: &'a UserPreferences) -> Self {
+    fn of(
+        workbench: &WorkbenchState,
+        platform: &PlatformState,
+        settings: &SettingsState,
+        preferences: &'a UserPreferences,
+    ) -> Self {
         Self {
-            theme: ui.theme,
-            autosave_minutes: ui.autosave_minutes,
-            browser_spoken_feedback: ui.browser_spoken_feedback,
+            theme: workbench.theme,
+            autosave_minutes: platform.autosave_minutes,
+            browser_spoken_feedback: settings.browser_spoken_feedback,
             preferences,
         }
     }
@@ -325,7 +331,12 @@ fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
 /// have changed one. The shortcut library rides inside the preferences but is
 /// not in the file, and its own store owns its durability, so it is swapped
 /// out for the duration rather than serialized every time.
-fn fingerprint(ui: &UiSessionState, preferences: &mut UserPreferences) -> u64 {
+fn fingerprint(
+    workbench: &WorkbenchState,
+    platform: &PlatformState,
+    settings: &SettingsState,
+    preferences: &mut UserPreferences,
+) -> u64 {
     struct HashWriter(std::hash::DefaultHasher);
 
     impl std::io::Write for HashWriter {
@@ -343,7 +354,10 @@ fn fingerprint(ui: &UiSessionState, preferences: &mut UserPreferences) -> u64 {
     let mut writer = HashWriter(std::hash::DefaultHasher::new());
     // A value that will not serialize cannot be written either, so whatever
     // was hashed before the failure is as good an observation as any.
-    let _ = serde_json::to_writer(&mut writer, &Values::of(ui, preferences));
+    let _ = serde_json::to_writer(
+        &mut writer,
+        &Values::of(workbench, platform, settings, preferences),
+    );
     *preferences.shortcut_profiles_mut() = shortcuts;
     writer.0.finish()
 }
@@ -546,7 +560,12 @@ impl AppState {
                     Ok(settings) => {
                         self.apply_personal_settings(settings);
                         self.preferences_file.written = encode_bytes(
-                            &Values::of(&self.ui, &self.model.preferences),
+                            &Values::of(
+                                &self.workbench,
+                                &self.platform,
+                                &self.settings,
+                                &self.model.preferences,
+                            ),
                             &self.preferences_file.envelope,
                         )
                         .ok();
@@ -567,7 +586,12 @@ impl AppState {
                 );
             }
         }
-        self.preferences_file.observed = fingerprint(&self.ui, &mut self.model.preferences);
+        self.preferences_file.observed = fingerprint(
+            &self.workbench,
+            &self.platform,
+            &self.settings,
+            &mut self.model.preferences,
+        );
     }
 
     fn set_aside_preferences_file(&mut self, store: &PreferencesStore, bytes: &[u8], reason: &str) {
@@ -610,9 +634,9 @@ impl AppState {
     /// is not part of the preferences file.
     fn apply_personal_settings(&mut self, settings: PersonalSettings) {
         let shortcuts = std::mem::take(self.model.preferences.shortcut_profiles_mut());
-        self.ui.theme = settings.theme;
-        self.ui.autosave_minutes = settings.autosave_minutes;
-        self.ui.browser_spoken_feedback = settings.browser_spoken_feedback;
+        self.workbench.theme = settings.theme;
+        self.platform.autosave_minutes = settings.autosave_minutes;
+        self.settings.browser_spoken_feedback = settings.browser_spoken_feedback;
         *self.model.preferences = settings.preferences;
         *self.model.preferences.shortcut_profiles_mut() = shortcuts;
         self.preferences_file.envelope = settings.envelope;
@@ -648,7 +672,12 @@ impl AppState {
             {
                 runtime.looks += 1;
             }
-            let observed = fingerprint(&self.ui, &mut self.model.preferences);
+            let observed = fingerprint(
+                &self.workbench,
+                &self.platform,
+                &self.settings,
+                &mut self.model.preferences,
+            );
             if observed != runtime.observed {
                 runtime.observed = observed;
                 runtime.write_due = Some(now + WRITE_DELAY);
@@ -666,7 +695,12 @@ impl AppState {
     /// Write any change not yet in the file now, rather than when it settles.
     pub(in crate::workbench) fn flush_preferences_file(&mut self) {
         self.preferences_file.write_due = None;
-        self.preferences_file.observed = fingerprint(&self.ui, &mut self.model.preferences);
+        self.preferences_file.observed = fingerprint(
+            &self.workbench,
+            &self.platform,
+            &self.settings,
+            &mut self.model.preferences,
+        );
         self.write_preferences_file();
     }
 
@@ -679,7 +713,12 @@ impl AppState {
             return;
         }
         let outcome = encode_bytes(
-            &Values::of(&self.ui, &self.model.preferences),
+            &Values::of(
+                &self.workbench,
+                &self.platform,
+                &self.settings,
+                &self.model.preferences,
+            ),
             &runtime.envelope,
         )
         .and_then(|bytes| {
@@ -713,7 +752,12 @@ impl AppState {
     /// the shortcut library in use, together.
     pub(in crate::workbench) fn settings_file_bytes(&self) -> Result<Vec<u8>, String> {
         let preferences = encode(
-            &Values::of(&self.ui, &self.model.preferences),
+            &Values::of(
+                &self.workbench,
+                &self.platform,
+                &self.settings,
+                &self.model.preferences,
+            ),
             &self.preferences_file.envelope,
         )?;
         let shortcuts = serde_json::to_value(self.model.preferences.shortcut_profiles())

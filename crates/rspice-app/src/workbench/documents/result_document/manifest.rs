@@ -26,7 +26,7 @@ pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>>
         state.model.simulation.view.data_version,
     );
     let run_id = state.model.simulation.active_run()?.id;
-    if let Some(plan) = state.ui.results.plans.manifest.as_ref()
+    if let Some(plan) = state.results.results.plans.manifest.as_ref()
         && plan.source == source
         && plan.run == run_id
     {
@@ -38,7 +38,7 @@ pub(crate) fn active_manifest(state: &mut AppState) -> Option<Arc<ManifestPlan>>
         run: run_id,
         model,
     });
-    state.ui.results.plans.manifest = Some(Arc::clone(&built));
+    state.results.results.plans.manifest = Some(Arc::clone(&built));
     Some(built)
 }
 pub(crate) fn show(ui: &mut Ui, state: &mut AppState) {
@@ -114,7 +114,7 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         }
     }
     if response.open_plan {
-        state.ui.open_producing_plan_requested = true;
+        state.results.open_producing_plan_requested = true;
     }
     // Acted on after the panel is drawn, like the plan route above it, so the
     // workspace switch happens between frames rather than under the widget
@@ -274,7 +274,7 @@ mod tests {
         let original = active_manifest(&mut state).unwrap();
         let mut other = AppState::default();
         other.model.simulation = state.model.simulation.clone();
-        other.ui.results = state.ui.results.clone();
+        other.results.results = state.results.results.clone();
         let work = frame_work::WorkCounts::reset();
         for _ in 0..12 {
             assert!(Arc::ptr_eq(

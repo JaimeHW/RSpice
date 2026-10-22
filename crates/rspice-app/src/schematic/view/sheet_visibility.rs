@@ -255,7 +255,7 @@ pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
 /// active-sheet predicates, because "which objects does the reader see" is
 /// this module's question and not the edit command's.
 pub(crate) fn selectable_objects_on_active_sheet(state: &AppState) -> Selection {
-    let filter = state.ui.schematic_selection_filter;
+    let filter = state.design.schematic_selection_filter;
     let mut selection = Selection::default();
     if filter.instances {
         for object in &state.model.schematic.document().components {
@@ -331,7 +331,7 @@ pub(super) fn select_in_rect_on_active_sheet(
     symbol_context.select_in_rect(document, &mut editor.selection, window, add_to_selection);
     retain_selection_on_active_sheet(state);
     state
-        .ui
+        .design
         .schematic_selection_filter
         .retain_matching(&mut state.model.schematic.session.editor.selection);
     state
@@ -701,7 +701,7 @@ mod tests {
             vec![Component::new(10, ComponentType::Resistor, Point::origin())];
         state.model.schematic.document_mut_for_test().wires =
             vec![Wire::segment(11, Point::origin(), Point::new(20, 0))];
-        state.ui.schematic_selection_filter.instances = false;
+        state.design.schematic_selection_filter.instances = false;
 
         state.model.schematic.session.editor.selection = selectable_objects_on_active_sheet(&state);
 

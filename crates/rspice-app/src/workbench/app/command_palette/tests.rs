@@ -776,7 +776,7 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         "resource rows do not enter command recents"
     );
 
-    app.state.ui.results.session.viewer = crate::workbench::ResultViewer::Bode;
+    app.state.results.results.session.viewer = crate::workbench::ResultViewer::Bode;
     let hidden_strip = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
         active_dataset_id,
         &app.state.model.simulation.retained.runs[1].analyses[1],
@@ -787,12 +787,12 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
             &app.state.model.simulation.retained.runs[1].analyses[0],
         );
     app.state
-        .ui
+        .results
         .results
         .session
         .hidden_strips
         .insert(hidden_strip);
-    app.state.ui.results.session.maximized_strip = Some(maximized_strip);
+    app.state.results.results.session.maximized_strip = Some(maximized_strip);
     let version_before = app.state.model.simulation.view.data_version;
     entry.execute(&mut app).expect("open real result signal");
 
@@ -806,18 +806,18 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
     assert!(app.state.model.simulation.view.waveforms[0].visible);
     assert!(app.state.model.simulation.view.data_version > version_before);
     assert_eq!(
-        app.state.ui.results.session.viewer,
+        app.state.results.results.session.viewer,
         crate::workbench::ResultViewer::Waves
     );
     assert!(
         !app.state
-            .ui
+            .results
             .results
             .session
             .hidden_strips
             .contains(&hidden_strip)
     );
-    assert_eq!(app.state.ui.results.session.maximized_strip, None);
+    assert_eq!(app.state.results.results.session.maximized_strip, None);
     assert_eq!(
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Results
@@ -1071,7 +1071,7 @@ fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
     let next = application_frame(&ctx, &mut app, Vec::new());
     assert!(drawn(&next), "the next frame draws it: {next:?}");
     assert!(app.state.model.notices.is_empty());
-    let activity = app.state.ui.toasts.activity();
+    let activity = app.state.workbench.toasts.activity();
     assert_eq!(activity.len(), 1);
     assert_eq!(activity[0].title(), title);
 }

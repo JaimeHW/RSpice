@@ -217,7 +217,7 @@ impl Reader {
     fn caret(&self, bundle_id: ProjectSourceId, path: &str) -> Option<usize> {
         self.app
             .state
-            .ui
+            .code
             .code_workspace
             .source_carets
             .get(&(bundle_id, path.to_owned()))

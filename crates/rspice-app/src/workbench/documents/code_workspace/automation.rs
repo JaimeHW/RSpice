@@ -94,22 +94,28 @@ fn python_automation_requires_managed_worker(app: &RSpiceApp) -> bool {
 /// Automation closure while retaining only user-authored editor preferences.
 pub(crate) fn invalidate_automation_evidence(app: &mut RSpiceApp) {
     let _ = app.automation_runtime.terminate();
-    let selected_file = app.state.ui.code_workspace.automation.selected_file.clone();
+    let selected_file = app
+        .state
+        .code
+        .code_workspace
+        .automation
+        .selected_file
+        .clone();
     let breakpoints = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .debug
         .breakpoints
         .clone();
-    app.state.ui.code_workspace.automation = Default::default();
-    app.state.ui.code_workspace.automation.selected_file = selected_file;
-    app.state.ui.code_workspace.automation.debug.breakpoints = breakpoints;
+    app.state.code.code_workspace.automation = Default::default();
+    app.state.code.code_workspace.automation.selected_file = selected_file;
+    app.state.code.code_workspace.automation.debug.breakpoints = breakpoints;
 }
 
 fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLaunchMode) {
-    let runtime = &app.state.ui.code_workspace.automation;
+    let runtime = &app.state.code.code_workspace.automation;
     if runtime.runtime_execution.is_some()
         || runtime.pending_runtime_validation.is_some()
         || runtime.execution.is_active()
@@ -136,7 +142,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
     };
     let validated = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .receipt
@@ -144,7 +150,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
         .is_some_and(|receipt| receipt.token == token)
         && app
             .state
-            .ui
+            .code
             .code_workspace
             .automation
             .runtime_snapshot
@@ -152,7 +158,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
             .is_some_and(|snapshot| runtime_snapshot_matches_token(snapshot, token));
     if !validated {
         app.state
-            .ui
+            .code
             .code_workspace
             .automation
             .deferred_runtime_launch = Some(mode);
@@ -168,7 +174,7 @@ fn start_managed_python_workflow(app: &mut RSpiceApp, mode: AutomationRuntimeLau
 pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
     if let Some(pending) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_execution
@@ -190,7 +196,7 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
             }
         } else {
             let _ = app.automation_runtime.terminate();
-            let runtime = &mut app.state.ui.code_workspace.automation;
+            let runtime = &mut app.state.code.code_workspace.automation;
             runtime.runtime_execution = None;
             runtime.execution = AutomationExecutionState::Cancelled;
             runtime.cancel_requested = false;
@@ -204,14 +210,14 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
             return;
         }
     }
-    match app.state.ui.code_workspace.automation.execution.clone() {
+    match app.state.code.code_workspace.automation.execution.clone() {
         AutomationExecutionState::AwaitingDispatch { .. }
             if app.state.model.simulation.execution.trigger_simulation
                 && !app.state.model.simulation.execution.has_active_execution() =>
         {
             app.state.model.simulation.execution.trigger_simulation = false;
             app.invalidate_simulation_preflight();
-            let runtime = &mut app.state.ui.code_workspace.automation;
+            let runtime = &mut app.state.code.code_workspace.automation;
             runtime.execution = AutomationExecutionState::Cancelled;
             runtime.cancel_requested = false;
             runtime.artifacts.clear();
@@ -226,7 +232,7 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
         | AutomationExecutionState::Running { .. } => {
             match app.state.model.simulation.request_abort_active_run() {
                 Ok(_) => {
-                    app.state.ui.code_workspace.automation.cancel_requested = true;
+                    app.state.code.code_workspace.automation.cancel_requested = true;
                     app.state.prompt("Cancelling the active Automation run.");
                 }
                 Err(error) => fail(
@@ -243,7 +249,14 @@ pub fn cancel_automation_workflow(app: &mut RSpiceApp) {
 /// independent of simulation readiness so authors can resolve source,
 /// environment, and permission diagnostics before a design plan is configured.
 pub fn validate_automation_workspace(app: &mut RSpiceApp) {
-    if app.state.ui.code_workspace.automation.execution.is_active() {
+    if app
+        .state
+        .code
+        .code_workspace
+        .automation
+        .execution
+        .is_active()
+    {
         return;
     }
     let owner = ProjectSourceOwner::code_workspace(ProjectSourceLanguage::RSpiceAutomation);
@@ -296,7 +309,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
                 }
                 None => None,
             };
-            let runtime = &mut app.state.ui.code_workspace.automation;
+            let runtime = &mut app.state.code.code_workspace.automation;
             runtime.receipt = None;
             runtime.manifest = manifest;
             runtime.runtime_snapshot = runtime_snapshot;
@@ -306,7 +319,7 @@ pub fn validate_automation_workspace(app: &mut RSpiceApp) {
             runtime.last_error = None;
             runtime.execution = AutomationExecutionState::Idle;
 
-            if app.state.ui.code_workspace.automation.manifest.is_some() {
+            if app.state.code.code_workspace.automation.manifest.is_some() {
                 begin_managed_python_validation(app, bundle.id(), token);
             } else {
                 complete_automation_validation(app, bundle.id(), token);
@@ -333,7 +346,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
         };
         let validation = app
             .state
-            .ui
+            .code
             .code_workspace
             .automation
             .pending_runtime_validation
@@ -341,7 +354,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
             .filter(|pending| event.request_id == Some(pending.request_id));
         let execution = app
             .state
-            .ui
+            .code
             .code_workspace
             .automation
             .runtime_execution
@@ -360,7 +373,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
         {
             let current = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .runtime_execution
@@ -376,7 +389,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
             if current.is_none()
                 && let Some(pending) = app
                     .state
-                    .ui
+                    .code
                     .code_workspace
                     .automation
                     .runtime_execution
@@ -411,7 +424,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                     #[cfg(target_arch = "wasm32")]
                     if app
                         .state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .deferred_runtime_launch
@@ -437,7 +450,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                         continue;
                     }
                     let _ = app.automation_runtime.terminate();
-                    let runtime = &mut app.state.ui.code_workspace.automation;
+                    let runtime = &mut app.state.code.code_workspace.automation;
                     runtime.runtime_execution = None;
                     runtime.cancel_requested = false;
                     if pending.mode.is_debug() {
@@ -476,7 +489,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 }
                 (RuntimeState::Cancelled, _, Some(pending)) => {
                     let _ = app.automation_runtime.terminate();
-                    let runtime = &mut app.state.ui.code_workspace.automation;
+                    let runtime = &mut app.state.code.code_workspace.automation;
                     runtime.runtime_execution = None;
                     runtime.execution = if pending.mode.is_debug() {
                         AutomationExecutionState::Idle
@@ -499,7 +512,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 (RuntimeState::Failed | RuntimeState::Terminated, Some(_), _) => {
                     let _ = app.automation_runtime.terminate();
                     app.state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .pending_runtime_validation = None;
@@ -507,7 +520,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 }
                 (RuntimeState::Failed | RuntimeState::Terminated, _, Some(pending)) => {
                     let _ = app.automation_runtime.terminate();
-                    app.state.ui.code_workspace.automation.runtime_execution = None;
+                    app.state.code.code_workspace.automation.runtime_execution = None;
                     if pending.mode.is_debug() {
                         debug_fail(app, &format!("Managed Python debugger failed: {detail}"));
                     } else {
@@ -515,12 +528,12 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                     }
                 }
                 (RuntimeState::Running, _, Some(pending)) if pending.mode.is_debug() => {
-                    let debug = &mut app.state.ui.code_workspace.automation.debug;
+                    let debug = &mut app.state.code.code_workspace.automation.debug;
                     debug.phase = AutomationDebugPhase::Running;
                     debug.pause_requested = false;
                 }
                 (RuntimeState::Paused, _, Some(pending)) if pending.mode.is_debug() => {
-                    app.state.ui.code_workspace.automation.debug.phase =
+                    app.state.code.code_workspace.automation.debug.phase =
                         AutomationDebugPhase::Paused;
                 }
                 _ => {}
@@ -528,14 +541,14 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
             RuntimeEvent::Diagnostic { diagnostic } => {
                 let editor_diagnostic = runtime_editor_diagnostic(app, &diagnostic);
                 let capacity_error =
-                    Arc::make_mut(&mut app.state.ui.code_workspace.automation.diagnostics)
+                    Arc::make_mut(&mut app.state.code.code_workspace.automation.diagnostics)
                         .try_push(editor_diagnostic)
                         .err();
                 if let Some(error) = capacity_error {
                     let _ = app.automation_runtime.terminate();
-                    app.state.ui.code_workspace.automation.runtime_execution = None;
+                    app.state.code.code_workspace.automation.runtime_execution = None;
                     app.state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .pending_runtime_validation = None;
@@ -548,7 +561,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 text,
             } => {
                 let capacity_error = {
-                    let debug = &mut app.state.ui.code_workspace.automation.debug;
+                    let debug = &mut app.state.code.code_workspace.automation.debug;
                     push_debug_output(debug, &channel, &category, &text).err()
                 };
                 if let Some(error) = capacity_error {
@@ -564,13 +577,13 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                 let _ = app.automation_runtime.terminate();
                 if validation.is_some() {
                     app.state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .pending_runtime_validation = None;
                 }
                 if execution.is_some() {
-                    app.state.ui.code_workspace.automation.runtime_execution = None;
+                    app.state.code.code_workspace.automation.runtime_execution = None;
                 }
                 let rendered =
                     format!("Managed Python worker rejected the operation: {message} ({code})");
@@ -607,7 +620,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
                     );
                     continue;
                 };
-                let debug = &mut app.state.ui.code_workspace.automation.debug;
+                let debug = &mut app.state.code.code_workspace.automation.debug;
                 debug.phase = AutomationDebugPhase::Paused;
                 debug.pause_requested = false;
                 debug.selected_frame_id = frame_id;
@@ -649,7 +662,7 @@ pub fn poll_managed_automation_runtime(app: &mut RSpiceApp) {
             RuntimeEvent::Terminated { reason, .. }
                 if validation.is_some() || execution.is_some() =>
             {
-                let runtime = &mut app.state.ui.code_workspace.automation;
+                let runtime = &mut app.state.code.code_workspace.automation;
                 runtime.pending_runtime_validation = None;
                 runtime.runtime_execution = None;
                 fail(
@@ -687,7 +700,7 @@ fn complete_automation_validation(
         );
         return;
     }
-    let runtime = &mut app.state.ui.code_workspace.automation;
+    let runtime = &mut app.state.code.code_workspace.automation;
     runtime.receipt = Some(AutomationValidationReceipt { token });
     runtime.pending_runtime_validation = None;
     runtime.diagnostic_token = None;
@@ -700,7 +713,7 @@ fn complete_automation_validation(
     );
     let deferred = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .deferred_runtime_launch
@@ -728,7 +741,7 @@ fn begin_managed_python_execution(
     }
     let Some(snapshot) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot
@@ -795,7 +808,7 @@ fn begin_managed_python_execution(
     };
     match app.automation_runtime.send_request(request) {
         Ok(request_id) => {
-            let runtime = &mut app.state.ui.code_workspace.automation;
+            let runtime = &mut app.state.code.code_workspace.automation;
             runtime.runtime_execution = Some(super::page::PendingAutomationRuntimeExecution {
                 request_id,
                 bundle_id,
@@ -821,7 +834,7 @@ fn begin_managed_python_execution(
             runtime.artifacts.clear();
             runtime.last_error = None;
             if mode.is_debug() {
-                let debug = &mut app.state.ui.code_workspace.automation.debug;
+                let debug = &mut app.state.code.code_workspace.automation.debug;
                 debug.phase = AutomationDebugPhase::Running;
                 debug.pause_requested = false;
                 debug.current_line = None;
@@ -871,7 +884,7 @@ fn begin_managed_python_execution(
     }
     let Some(snapshot) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot
@@ -924,7 +937,7 @@ fn begin_managed_python_execution(
     };
     match app.automation_runtime.send_request(request) {
         Ok(request_id) => {
-            let runtime = &mut app.state.ui.code_workspace.automation;
+            let runtime = &mut app.state.code.code_workspace.automation;
             runtime.runtime_execution = Some(super::page::PendingAutomationRuntimeExecution {
                 request_id,
                 bundle_id,
@@ -950,7 +963,7 @@ fn begin_managed_python_execution(
             runtime.artifacts.clear();
             runtime.last_error = None;
             if mode.is_debug() {
-                let debug = &mut app.state.ui.code_workspace.automation.debug;
+                let debug = &mut app.state.code.code_workspace.automation.debug;
                 debug.phase = AutomationDebugPhase::Running;
                 debug.pause_requested = false;
                 debug.current_line = None;
@@ -992,7 +1005,7 @@ fn begin_managed_python_validation(
 
     let Some(snapshot) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot
@@ -1043,7 +1056,7 @@ fn begin_managed_python_validation(
     match app.automation_runtime.send_request(request) {
         Ok(request_id) => {
             app.state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .pending_runtime_validation =
@@ -1072,7 +1085,7 @@ fn begin_managed_python_validation(
 
     let Some(snapshot) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot
@@ -1109,7 +1122,7 @@ fn begin_managed_python_validation(
     match app.automation_runtime.send_request(request) {
         Ok(request_id) => {
             app.state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .pending_runtime_validation =
@@ -1129,7 +1142,7 @@ fn begin_managed_python_validation(
 }
 
 fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
-    let automation = &app.state.ui.code_workspace.automation;
+    let automation = &app.state.code.code_workspace.automation;
     let broker_owned = matches!(
         (&automation.runtime_execution, &automation.execution),
         (
@@ -1137,7 +1150,15 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
             AutomationExecutionState::PythonBroker { token, .. }
         ) if pending.token == *token
     );
-    if app.state.ui.code_workspace.automation.execution.is_active() && !broker_owned {
+    if app
+        .state
+        .code
+        .code_workspace
+        .automation
+        .execution
+        .is_active()
+        && !broker_owned
+    {
         return;
     }
     let Some(bundle) = app
@@ -1173,7 +1194,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
     let runtime_snapshot = match manifest.as_ref() {
         Some(manifest) => match app
             .state
-            .ui
+            .code
             .code_workspace
             .automation
             .runtime_snapshot
@@ -1212,10 +1233,10 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         None => None,
     };
     let manifest_for_preflight = manifest.clone();
-    app.state.ui.code_workspace.automation.manifest = manifest;
-    app.state.ui.code_workspace.automation.runtime_snapshot = runtime_snapshot;
-    Arc::make_mut(&mut app.state.ui.code_workspace.automation.diagnostics).clear();
-    app.state.ui.code_workspace.automation.diagnostic_token = None;
+    app.state.code.code_workspace.automation.manifest = manifest;
+    app.state.code.code_workspace.automation.runtime_snapshot = runtime_snapshot;
+    Arc::make_mut(&mut app.state.code.code_workspace.automation.diagnostics).clear();
+    app.state.code.code_workspace.automation.diagnostic_token = None;
 
     let active_name = app
         .state
@@ -1328,7 +1349,7 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         }
     };
     if !dispatch {
-        let runtime = &mut app.state.ui.code_workspace.automation;
+        let runtime = &mut app.state.code.code_workspace.automation;
         runtime.receipt = Some(AutomationValidationReceipt { token });
         runtime.artifacts.clear();
         runtime.last_error = None;
@@ -1391,16 +1412,17 @@ fn prepare_automation_workflow(app: &mut RSpiceApp, dispatch: bool) {
         .iter()
         .map(|run| run.run_id)
         .collect();
-    app.state.ui.code_workspace.automation.receipt = Some(AutomationValidationReceipt { token });
-    app.state.ui.code_workspace.automation.artifacts.clear();
-    app.state.ui.code_workspace.automation.cancel_requested = false;
-    app.state.ui.code_workspace.automation.last_error = None;
-    app.state.ui.code_workspace.automation.execution = AutomationExecutionState::AwaitingDispatch {
-        token,
-        plan,
-        prior_run_ids,
-        snapshot,
-    };
+    app.state.code.code_workspace.automation.receipt = Some(AutomationValidationReceipt { token });
+    app.state.code.code_workspace.automation.artifacts.clear();
+    app.state.code.code_workspace.automation.cancel_requested = false;
+    app.state.code.code_workspace.automation.last_error = None;
+    app.state.code.code_workspace.automation.execution =
+        AutomationExecutionState::AwaitingDispatch {
+            token,
+            plan,
+            prior_run_ids,
+            snapshot,
+        };
     app.state.request_run_set_simulation();
     app.state.record(
         LogSeverity::Info,
@@ -1669,15 +1691,15 @@ fn publish_compile_failure(
         ])
         .unwrap_or_default()
     });
-    app.state.ui.code_workspace.automation.manifest = None;
-    app.state.ui.code_workspace.automation.runtime_snapshot = None;
+    app.state.code.code_workspace.automation.manifest = None;
+    app.state.code.code_workspace.automation.runtime_snapshot = None;
     app.state
-        .ui
+        .code
         .code_workspace
         .automation
         .pending_runtime_validation = None;
-    app.state.ui.code_workspace.automation.diagnostics = Arc::new(diagnostics);
-    app.state.ui.code_workspace.automation.diagnostic_token = Some(token);
+    app.state.code.code_workspace.automation.diagnostics = Arc::new(diagnostics);
+    app.state.code.code_workspace.automation.diagnostic_token = Some(token);
     fail(app, &summary);
 }
 
@@ -1685,7 +1707,7 @@ fn publish_compile_failure(
 /// artifacts only after that immutable run, its release specs, and its named
 /// baseline comparison all complete.
 pub fn poll_automation_workflow(app: &mut RSpiceApp) {
-    let execution = app.state.ui.code_workspace.automation.execution.clone();
+    let execution = app.state.code.code_workspace.automation.execution.clone();
     match execution {
         AutomationExecutionState::AwaitingDispatch {
             token,
@@ -1718,7 +1740,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             }
             if let Some(run_id) = matching_run_ids.first().copied() {
                 if app.state.model.simulation.execution.has_active_execution() {
-                    app.state.ui.code_workspace.automation.execution =
+                    app.state.code.code_workspace.automation.execution =
                         AutomationExecutionState::Running {
                             token,
                             plan,
@@ -1743,8 +1765,8 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
             run_id,
             snapshot,
         } if !app.state.model.simulation.execution.has_active_execution() => {
-            if app.state.ui.code_workspace.automation.cancel_requested {
-                let runtime = &mut app.state.ui.code_workspace.automation;
+            if app.state.code.code_workspace.automation.cancel_requested {
+                let runtime = &mut app.state.code.code_workspace.automation;
                 runtime.execution = AutomationExecutionState::Cancelled;
                 runtime.cancel_requested = false;
                 runtime.artifacts.clear();
@@ -1774,7 +1796,7 @@ pub fn poll_automation_workflow(app: &mut RSpiceApp) {
 pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
     let Some(pending) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_execution
@@ -1794,11 +1816,11 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
         );
         return;
     };
-    let response = match app.state.ui.code_workspace.automation.execution {
+    let response = match app.state.code.code_workspace.automation.execution {
         AutomationExecutionState::Complete { run_id, .. } => {
             if let Some(current) = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .runtime_execution
@@ -1812,7 +1834,7 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
         AutomationExecutionState::Cancelled => {
             if let Some(current) = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .runtime_execution
@@ -1825,7 +1847,7 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
         AutomationExecutionState::Failed => {
             if let Some(current) = app
                 .state
-                .ui
+                .code
                 .code_workspace
                 .automation
                 .runtime_execution
@@ -1836,7 +1858,7 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
             host_failure(
                 "RUN-FAILED",
                 app.state
-                    .ui
+                    .code
                     .code_workspace
                     .automation
                     .last_error
@@ -1854,7 +1876,7 @@ pub fn settle_pending_python_execute(app: &mut RSpiceApp) {
 pub fn export_automation_artifact(app: &mut RSpiceApp, kind: ArtifactKind) {
     let Some(artifact) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .artifacts
@@ -2000,7 +2022,7 @@ fn finish_run(
             return;
         }
     };
-    app.state.ui.code_workspace.automation.artifacts =
+    app.state.code.code_workspace.automation.artifacts =
         match AutomationArtifactStore::try_new(artifacts) {
             Ok(artifacts) => artifacts,
             Err(error) => {
@@ -2008,8 +2030,8 @@ fn finish_run(
                 return;
             }
         };
-    app.state.ui.code_workspace.automation.last_error = None;
-    app.state.ui.code_workspace.automation.execution =
+    app.state.code.code_workspace.automation.last_error = None;
+    app.state.code.code_workspace.automation.execution =
         AutomationExecutionState::Complete { passed, run_id };
     let (severity, message) = if passed {
         (
@@ -2323,10 +2345,10 @@ fn editor_diagnostics(diagnostics: &DiagnosticSet) -> Vec<CodeEditorDiagnostic> 
 }
 
 fn fail(app: &mut RSpiceApp, message: &str) {
-    app.state.ui.code_workspace.automation.execution = AutomationExecutionState::Failed;
-    app.state.ui.code_workspace.automation.cancel_requested = false;
-    app.state.ui.code_workspace.automation.artifacts.clear();
-    app.state.ui.code_workspace.automation.last_error = Some(message.to_owned());
+    app.state.code.code_workspace.automation.execution = AutomationExecutionState::Failed;
+    app.state.code.code_workspace.automation.cancel_requested = false;
+    app.state.code.code_workspace.automation.artifacts.clear();
+    app.state.code.code_workspace.automation.last_error = Some(message.to_owned());
     app.state
         .record(LogSeverity::Error, LogSource::Studio, message);
 }

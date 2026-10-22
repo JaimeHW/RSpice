@@ -314,7 +314,7 @@ pub(crate) fn open_veriloga_build_settings(app: &mut RSpiceApp) -> Result<(), St
 /// list's field still holds that the list refuses, for a profile the build
 /// refuses, and for a source that moved since the form opened.
 pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, String> {
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     if app.state.model.safe_mode.project_read_only() {
         return Err(messages.text(MessageId::VerilogABuildSettingsReadOnly));
     }
@@ -472,7 +472,7 @@ impl RSpiceApp {
         {
             return;
         }
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let read_only = self.state.model.safe_mode.project_read_only();
         let refusals = FieldRefusals::of(&draft, &messages);
         let can_save = !read_only && !refusals.any();

@@ -10,8 +10,9 @@
 //! stack (`STATUS_STACK_OVERFLOW`, 2026-08-26) while the same suite passed on
 //! Linux CI's larger stacks.
 //!
-//! The fix was boxing the sub-states that carried the weight — the dialogs,
-//! now the feature slots, `ui`, `workbench`, `project_lifecycle` — and this
+//! The fix was boxing the sub-states that carried the weight — the dialogs
+//! and the document engines' session, now the feature slots, `workbench`,
+//! `project_lifecycle` — and this
 //! budget keeps the class of defect dead: growth has to land behind a `Box`,
 //! or consciously raise the number here with the multiplication redone. A
 //! boxed slot is still built on the stack before it is boxed, so each one
@@ -40,14 +41,15 @@ fn slot_budgets() -> Vec<(&'static str, usize, usize)> {
     vec![
         ("platform", held(|state| &*state.platform), 1024),
         ("design", held(|state| &*state.design), 24 * 1024),
-        ("code", held(|state| &*state.code), 2 * 1024),
+        ("code", held(|state| &*state.code), 12 * 1024),
         ("simulate", held(|state| &*state.simulate), 2 * 1024),
         ("project", held(|state| &*state.project), 8 * 1024),
-        ("results", held(|state| &*state.results), 1024),
+        ("results", held(|state| &*state.results), 6 * 1024),
         ("hardcopy", held(|state| &*state.hardcopy), 4 * 1024),
         ("settings", held(|state| &*state.settings), 4 * 1024),
         ("cloud", held(|state| &*state.cloud), 1024),
         ("sheets", held(|state| &*state.sheets), 10 * 1024),
+        ("runs", held(|state| &*state.runs), 1024),
     ]
 }
 
@@ -57,7 +59,7 @@ fn held<T>(_field: fn(&crate::workbench::app_state::AppState) -> &T) -> usize {
     size_of::<T>()
 }
 
-/// The inline fields only. The boxed sub-states (the feature slots, `ui`,
+/// The inline fields only. The boxed sub-states (the feature slots,
 /// `workbench`, `project_lifecycle`) contribute pointer size by construction
 /// and can never explain inline growth, so listing them would only add the
 /// upward module references this layer is retiring.

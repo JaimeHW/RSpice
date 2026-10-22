@@ -56,7 +56,7 @@ fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
     let run = state.model.simulation.active_run()?;
     let analysis_key =
         AnalysisPresentationKey::new(run.dataset_id, state.model.simulation.active_analysis()?);
-    if let Some(plan) = state.ui.results.plans.mismatch.as_ref()
+    if let Some(plan) = state.results.results.plans.mismatch.as_ref()
         && plan.source == source
         && plan.analysis == analysis_key
     {
@@ -71,7 +71,7 @@ fn mismatch_plan(state: &mut AppState) -> Option<Arc<MismatchPlan>> {
         analysis: analysis_key,
         display: viewer::MismatchPlan::new(view.evidence),
     });
-    state.ui.results.plans.mismatch = Some(Arc::clone(&built));
+    state.results.results.plans.mismatch = Some(Arc::clone(&built));
     Some(built)
 }
 pub(super) fn show(ui: &mut Ui, state: &mut AppState) {

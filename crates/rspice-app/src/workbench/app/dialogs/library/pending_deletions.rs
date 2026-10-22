@@ -847,21 +847,21 @@ fn remove_project_sources_for_deleted_scope(
     }
     state.model.workspace.content.project_sources_dirty = true;
     let transient_uses_removed = state
-        .ui
+        .code
         .code_workspace
         .veriloga
         .receipt
         .as_ref()
         .is_some_and(|receipt| removed.contains(&receipt.compilation.token().bundle_id))
         || state
-            .ui
+            .code
             .code_workspace
             .veriloga
             .pending
             .as_ref()
             .is_some_and(|pending| removed.contains(&pending.token.bundle_id));
     if transient_uses_removed {
-        state.ui.code_workspace.veriloga = Default::default();
+        state.code.code_workspace.veriloga = Default::default();
     }
 }
 

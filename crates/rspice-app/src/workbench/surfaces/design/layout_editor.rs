@@ -84,7 +84,7 @@ struct ResolvedDisplayContract {
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     // The status bar reads the cursor from here; a frame with no canvas
     // under the pointer has none.
-    app.state.ui.canvas_hover = None;
+    app.state.design.canvas_hover = None;
     let owner = app.state.model.workspace.content.active_view.clone();
     let session_id = ui.id().with(("physical-layout-editor", owner.key()));
     let mut session = ui.ctx().data_mut(|data| {
@@ -131,7 +131,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if pending_edits.is_none() {
         pending_edits = show_canvas(ui, &document, &display, &mut session);
     }
-    app.state.ui.canvas_hover = session.hover.map(|point| (point.x as f64, point.y as f64));
+    app.state.design.canvas_hover = session.hover.map(|point| (point.x as f64, point.y as f64));
 
     if let Some(edits) = pending_edits {
         match app
@@ -988,12 +988,12 @@ mod tests {
             );
             if step == 2 {
                 assert!(
-                    app.state.ui.canvas_hover.is_some(),
+                    app.state.design.canvas_hover.is_some(),
                     "a pointer over the layout canvas has a coordinate"
                 );
             }
         }
-        assert_eq!(app.state.ui.canvas_hover, None);
+        assert_eq!(app.state.design.canvas_hover, None);
     }
 
     #[test]

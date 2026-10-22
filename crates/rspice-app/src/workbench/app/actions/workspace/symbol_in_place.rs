@@ -10,8 +10,58 @@ mod tests;
 
 use crate::state::{CellViewRef, ComponentType, ViewType};
 use crate::workbench::app_state::AppState;
-use crate::workbench::lifecycle::session::{SymbolInPlace, SymbolInPlaceExit};
 use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
+
+/// A symbol edited in place on the schematic that places one of its
+/// instances.
+///
+/// The symbol view is the open document, so its tools, inspector, undo and
+/// save are the symbol editor's own. This records what the canvas needs to
+/// draw the symbol where the instance stands, over its parent, and what it
+/// takes to hand the author back.
+#[derive(Debug, Clone)]
+pub struct SymbolInPlace {
+    /// The symbol view every edit goes to.
+    pub symbol: crate::state::CellViewRef,
+    /// The schematic the instance stands on.
+    pub parent: crate::state::CellViewRef,
+    pub instance_id: u64,
+    pub instance_name: String,
+    /// The symbol origin when the session began. The instance is drawn from
+    /// it for the whole session, so dragging the origin cannot move the frame
+    /// the pointer is read in.
+    pub origin: crate::state::Point,
+    /// The parent canvas's pan and zoom: carried in, and handed back on exit.
+    pub pan: (f64, f64),
+    pub zoom: f64,
+    /// A zoom a command asked for, carried out on the canvas's next frame.
+    pub zoom_request: Option<rspice_schematic_editor::view::navigation::ZoomRequest>,
+    /// Whether the symbol had a tab of its own before the session opened it.
+    pub symbol_was_open: bool,
+    /// The symbol as the session began, or as last saved in it. Leaving with
+    /// anything else asks first.
+    pub baseline: (
+        crate::state::SymbolDocument,
+        crate::state::SymbolEditorMetadata,
+    ),
+    pub baseline_depth: usize,
+    /// The question asked on leaving with unsaved edits, while it is open.
+    pub leaving: Option<SymbolInPlaceExit>,
+    /// Where to land once the save dialog publishes the symbol.
+    pub exit_after_save: Option<SymbolInPlaceExit>,
+    /// The parent is drawn with nothing selected or hovered: it is context
+    /// for the edit, not a drawing being edited.
+    pub parent_editor: rspice_schematic_editor::session::EditorSession,
+}
+
+/// Where leaving an in-place symbol edit lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SymbolInPlaceExit {
+    /// The parent schematic, as the session found it.
+    Parent,
+    /// One level of the parent's occurrence, chosen on the breadcrumb.
+    Level(usize),
+}
 
 /// Why the selection cannot have its symbol edited in place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,7 +209,7 @@ impl AppState {
 
     /// The in-place session the open document belongs to.
     pub(crate) fn symbol_in_place(&self) -> Option<&SymbolInPlace> {
-        self.ui
+        self.design
             .symbol
             .in_place
             .as_deref()
@@ -168,7 +218,7 @@ impl AppState {
 
     pub(crate) fn symbol_in_place_mut(&mut self) -> Option<&mut SymbolInPlace> {
         let active = &self.model.workspace.content.active_view;
-        self.ui
+        self.design
             .symbol
             .in_place
             .as_deref_mut()
@@ -275,11 +325,11 @@ impl AppState {
             // An inspector edit that could not be committed kept the parent.
             return false;
         }
-        self.ui.symbol.editor.tool = crate::workbench::SymbolTool::Select;
-        self.ui.symbol.editor.clear_selection();
-        self.ui.symbol.in_place = Some(Box::new(SymbolInPlace {
+        self.design.symbol.editor.tool = crate::workbench::SymbolTool::Select;
+        self.design.symbol.editor.clear_selection();
+        self.design.symbol.in_place = Some(Box::new(SymbolInPlace {
             origin: baseline.0.origin,
-            baseline_depth: self.ui.symbol.history.undo_depth(&symbol.key()),
+            baseline_depth: self.design.symbol.history.undo_depth(&symbol.key()),
             symbol: symbol.clone(),
             parent: parent.clone(),
             instance_id,
@@ -305,7 +355,7 @@ impl AppState {
         let Some(session) = self.symbol_in_place() else {
             return false;
         };
-        if !self.ui.symbol.history.is_dirty(&session.symbol.key()) {
+        if !self.design.symbol.history.is_dirty(&session.symbol.key()) {
             return false;
         }
         let Ok(document) = self.load_symbol_document(&session.symbol) else {
@@ -318,7 +368,7 @@ impl AppState {
     /// Whether Esc has nothing of the canvas's own to cancel first, so it
     /// leaves the in-place edit instead.
     pub(crate) fn symbol_in_place_canvas_idle(&self) -> bool {
-        let editor = &self.ui.symbol.editor;
+        let editor = &self.design.symbol.editor;
         self.symbol_in_place().is_some()
             && editor.tool == crate::workbench::SymbolTool::Select
             && editor.pending_polyline.is_empty()
@@ -362,8 +412,8 @@ impl AppState {
         if let Some(session) = self.symbol_in_place_mut() {
             session.exit_after_save = Some(exit);
         }
-        self.ui.symbol.editor.save_dialog_open = true;
-        self.ui.symbol.editor.save_error = None;
+        self.design.symbol.editor.save_dialog_open = true;
+        self.design.symbol.editor.save_error = None;
     }
 
     /// Put the symbol back as the session found it, or as it was last saved
@@ -394,7 +444,7 @@ impl AppState {
         let Some(symbol) = self.symbol_in_place().map(|session| session.symbol.clone()) else {
             return;
         };
-        let depth = self.ui.symbol.history.undo_depth(&symbol.key());
+        let depth = self.design.symbol.history.undo_depth(&symbol.key());
         let baseline = self.load_symbol_document(&symbol).and_then(|document| {
             let metadata = self.load_symbol_editor_metadata(&symbol, &document)?;
             Ok((document, metadata))
@@ -425,18 +475,18 @@ impl AppState {
         let key = session.symbol.key();
         let depth = session.baseline_depth;
         let baseline = session.baseline.clone();
-        while self.ui.symbol.history.undo_depth(&key) > depth {
+        while self.design.symbol.history.undo_depth(&key) > depth {
             if !self.undo_active_symbol_document()? {
                 break;
             }
         }
-        while self.ui.symbol.history.undo_depth(&key) < depth {
+        while self.design.symbol.history.undo_depth(&key) < depth {
             if !self.redo_active_symbol_document()? {
                 break;
             }
         }
         // The edits are gone, not waiting to be redone.
-        self.ui.symbol.history.discard_redo(&key);
+        self.design.symbol.history.discard_redo(&key);
         // A stack trimmed to its cap cannot walk back that far; the
         // baseline itself is what the symbol returns to.
         let document = self.load_active_symbol_document()?;
@@ -450,12 +500,12 @@ impl AppState {
     /// End the session and land where `exit` says, the parent reopening with
     /// the instance selected and its canvas where the session left it.
     fn finish_symbol_in_place(&mut self, exit: SymbolInPlaceExit) {
-        let Some(session) = self.ui.symbol.in_place.take() else {
+        let Some(session) = self.design.symbol.in_place.take() else {
             return;
         };
         self.open_workspace_view(session.parent.clone());
         if self.model.workspace.content.active_view != session.parent {
-            self.ui.symbol.in_place = Some(session);
+            self.design.symbol.in_place = Some(session);
             return;
         }
         if !session.symbol_was_open {

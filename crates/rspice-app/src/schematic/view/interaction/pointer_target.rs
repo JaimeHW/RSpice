@@ -22,7 +22,7 @@ pub(in crate::schematic::view) fn pointer_target(
         ctx,
         viewport,
         pointer_pos,
-        state.ui.schematic_selection_filter,
+        state.design.schematic_selection_filter,
     )
 }
 

@@ -218,7 +218,7 @@ pub(crate) fn open_language_tools_in_bundle(
         .symbol_at(&active_path, caret_char_index)
         .unwrap_or_default()
         .to_owned();
-    app.state.ui.code_workspace.language_tools = Some(CodeLanguageToolsState {
+    app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
         index,
         active_path,
         caret_char_index,
@@ -283,7 +283,7 @@ pub(crate) fn commit_language_rename(app: &mut RSpiceApp) -> Result<String, Stri
         changed_files,
         if changed_files == 1 { "" } else { "s" }
     );
-    app.state.ui.code_workspace.language_tools = Some(CodeLanguageToolsState {
+    app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
         index,
         active_path: state.active_path,
         caret_char_index: state.caret_char_index,
@@ -348,7 +348,7 @@ pub(crate) fn commit_language_code_action(
 fn current_language_transaction(app: &RSpiceApp) -> Result<CodeLanguageToolsState, String> {
     let state = app
         .state
-        .ui
+        .code
         .code_workspace
         .language_tools
         .clone()
@@ -417,7 +417,7 @@ fn replace_one_language_document(
         .ok_or_else(|| "The changed source bundle could not be reloaded.".to_owned())?;
     let index =
         LanguageServiceIndex::build(app.state.model.workspace.content.project.id(), bundle)?;
-    if let Some(tools) = app.state.ui.code_workspace.language_tools.as_mut() {
+    if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
         tools.index = index;
         tools.confirm_rename = false;
         tools.error = None;
@@ -1725,7 +1725,7 @@ mod tests {
             2
         );
         let before_revision = index.bundle_revision;
-        app.state.ui.code_workspace.language_tools = Some(CodeLanguageToolsState {
+        app.state.code.code_workspace.language_tools = Some(CodeLanguageToolsState {
             index,
             active_path: root_path.to_owned(),
             caret_char_index: root_source.find("protected_name").unwrap(),

@@ -77,7 +77,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     };
     // The document's digits and phase stand in for the reader's own while it
     // is shown; leaving it for a quick view drops them.
-    app.state.ui.results.session.document_presentation = app
+    app.state.results.results.session.document_presentation = app
         .state
         .model
         .workspace
@@ -94,7 +94,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     };
     let selected_page_id = app
         .state
-        .ui
+        .results
         .results
         .session
         .persistent_document_page(document_id)
@@ -102,7 +102,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .unwrap_or(first_page.page.id);
 
     app.state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_page(document_id, selected_page_id);
@@ -132,7 +132,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     // whichever document was last shown.
     let requested_active_pane = app
         .state
-        .ui
+        .results
         .results
         .session
         .persistent_document_pane(document_id)
@@ -148,7 +148,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .find(|pane| pane.id.get() == active_pane_id)
         .expect("the resolved active pane belongs to the selected page");
     app.state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_pane(document_id, active_pane.id);
@@ -158,7 +158,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     }
     super::prepare_viewer_state(app);
     if let Some(viewer) = compatible_active_viewer(&app.state, &page.page.title, active_pane) {
-        app.state.ui.results.session.viewer = viewer;
+        app.state.results.results.session.viewer = viewer;
     }
     let page_titles = document
         .pages
@@ -179,7 +179,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
     }
     let active_viewer = compatible_active_viewer(&app.state, &page.page.title, active_pane);
     if let Some(viewer) = active_viewer {
-        app.state.ui.results.session.viewer = viewer;
+        app.state.results.results.session.viewer = viewer;
         if let Err(reason) = project_pane_presentation(&mut app.state, active_pane, viewer) {
             unavailable_surface(ui, &active_pane.title, &reason);
             return;
@@ -189,7 +189,12 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         }
         crate::ui::plot::set_interaction_mode(
             ui.ctx(),
-            app.state.ui.results.session.plot_tool.interaction_mode(),
+            app.state
+                .results
+                .results
+                .session
+                .plot_tool
+                .interaction_mode(),
         );
     }
 
@@ -224,7 +229,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
         .expect("a pane activated from this page remains in this page");
     if select_pane_binding(&mut app.state, restored_pane).is_ok() {
         app.state
-            .ui
+            .results
             .results
             .session
             .select_persistent_document_pane(document_id, restored_pane.id);
@@ -234,7 +239,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp, document_id: ResultDocument
             active_viewer
         };
         if let Some(viewer) = restored_viewer {
-            app.state.ui.results.session.viewer = viewer;
+            app.state.results.results.session.viewer = viewer;
         }
     }
     if let Some(fresh_pane) = projection(&app.state, document_id).and_then(|projection| {
@@ -266,7 +271,7 @@ pub(super) fn select_page(state: &mut AppState, document_id: ResultDocumentId, i
         return;
     };
     state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_page(document_id, page_id);
@@ -285,7 +290,7 @@ pub(super) fn reading_position(
         .content
         .visualization_document(document_id)?;
     let page = state
-        .ui
+        .results
         .results
         .session
         .persistent_document_page(document_id)
@@ -294,7 +299,7 @@ pub(super) fn reading_position(
     let panes = ordered_page_panes(document.panes(), page);
     let pane_id = resolved_active_pane_id(
         state
-            .ui
+            .results
             .results
             .session
             .persistent_document_pane(document_id)
@@ -324,7 +329,7 @@ fn compatible_active_viewer(
     family_label: &str,
     pane: &Pane,
 ) -> Option<ResultViewer> {
-    let selected = state.ui.results.session.viewer;
+    let selected = state.results.results.session.viewer;
     if super::family_allows_viewer(family_label, selected)
         && super::viewer_is_available(state, selected)
     {
@@ -412,7 +417,10 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
     };
     let tracking = document.tracking();
     if tracking.mode != ResultDocumentTrackingMode::Latest {
-        state.ui.results.clear_latest_retarget_failure(document_id);
+        state
+            .results
+            .results
+            .clear_latest_retarget_failure(document_id);
         return LatestBinding::Current;
     }
     // A tracking claim the document cannot substantiate is a reason to stop
@@ -468,7 +476,10 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
     let (candidate_dataset, candidate_digest, _) = candidate;
     let next = crate::product::DatasetBinding::new(candidate_dataset, candidate_digest);
     if next == previous {
-        state.ui.results.clear_latest_retarget_failure(document_id);
+        state
+            .results
+            .results
+            .clear_latest_retarget_failure(document_id);
         return LatestBinding::Current;
     }
     // Retargeting rebuilds the retained source dataset from the run. Re-trying
@@ -477,7 +488,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
     // against the exact candidate that produced it and re-tried only when a
     // different run becomes the candidate.
     if let Some(reason) = state
-        .ui
+        .results
         .results
         .latest_retarget_failure(document_id, candidate_dataset)
     {
@@ -504,7 +515,7 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
     };
     let refuse = |state: &mut AppState, cause: String| {
         let reason = degraded_tracking_reason(&cause);
-        state.ui.results.record_latest_retarget_failure(
+        state.results.results.record_latest_retarget_failure(
             document_id,
             candidate_dataset,
             reason.clone(),
@@ -552,7 +563,10 @@ fn refresh_latest_binding(state: &mut AppState, document_id: ResultDocumentId) -
             format!("This document could not be retargeted onto the newest run: {error}."),
         );
     }
-    state.ui.results.clear_latest_retarget_failure(document_id);
+    state
+        .results
+        .results
+        .clear_latest_retarget_failure(document_id);
     LatestBinding::Current
 }
 
@@ -566,7 +580,7 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
         return false;
     };
     let selected_page_id = state
-        .ui
+        .results
         .results
         .session
         .persistent_document_page(document_id)
@@ -580,7 +594,7 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
     let panes = ordered_page_panes(document.panes(), page);
     let active_pane_id = resolved_active_pane_id(
         state
-            .ui
+            .results
             .results
             .session
             .persistent_document_pane(document_id)
@@ -597,12 +611,12 @@ pub(super) fn activate(state: &mut AppState, document_id: ResultDocumentId) -> b
         return false;
     }
     state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_pane(document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
-        state.ui.results.session.viewer = viewer;
+        state.results.results.session.viewer = viewer;
     }
     true
 }
@@ -910,12 +924,12 @@ fn project_pane_presentation(
         })
         .collect::<Vec<_>>();
     state
-        .ui
+        .results
         .results
         .session
         .enter_persistent_pane(pane.document_id, pane.id, analysis_key);
     state
-        .ui
+        .results
         .results
         .project_waveform_visibility(analysis_key, visibility);
 
@@ -926,7 +940,7 @@ fn project_pane_presentation(
             .and_then(|axis| axis.range)
             .map(|range| (range.minimum, range.maximum))
     };
-    state.ui.results.session.project_persistent_plot_view(
+    state.results.results.session.project_persistent_plot_view(
         viewer,
         axis_range(AxisOrientation::Horizontal),
         axis_range(AxisOrientation::VerticalLeft),
@@ -941,9 +955,9 @@ fn project_pane_presentation(
                 _ => None,
             })
     };
-    state.ui.results.session.cursors.a = cursor_position("A");
-    state.ui.results.session.cursors.b = cursor_position("B");
-    state.ui.results.session.cursor_strip = state.model.simulation.view.active_analysis_idx;
+    state.results.results.session.cursors.a = cursor_position("A");
+    state.results.results.session.cursors.b = cursor_position("B");
+    state.results.results.session.cursor_strip = state.model.simulation.view.active_analysis_idx;
     // Retained markers project into their own overlay. They are entities of
     // this document, not quick-view annotations of the dataset, so they carry
     // the document's full-width serial and never enter the project's
@@ -986,7 +1000,11 @@ fn project_pane_presentation(
             note: marker.label.clone(),
         });
     }
-    state.ui.results.session.project_document_markers(markers);
+    state
+        .results
+        .results
+        .session
+        .project_document_markers(markers);
     Ok(())
 }
 
@@ -1005,8 +1023,8 @@ fn project_pane_presentation(
 /// the stale snapshot back would undo that link. An X range or cursor the
 /// reader did change carries every axis or cursor linked with it along.
 fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer: ResultViewer) {
-    let view = state.ui.results.session.persistent_plot_view(viewer);
-    let cursors = state.ui.results.session.cursors;
+    let view = state.results.results.session.persistent_plot_view(viewer);
+    let cursors = state.results.results.session.cursors;
     let Some(document) = state
         .model
         .workspace
@@ -1098,12 +1116,12 @@ fn capture_pane_presentation(state: &mut AppState, pane: &PaneProjection, viewer
 fn select_pane_context(state: &mut AppState, pane: &PaneProjection) -> Result<(), String> {
     select_pane_binding(state, pane)?;
     state
-        .ui
+        .results
         .results
         .session
         .select_persistent_document_pane(pane.document_id, pane.id);
     if let Some(viewer) = ResultViewer::from_viewer_document_id(&pane.viewer_id) {
-        state.ui.results.session.viewer = bound_viewer_projection(state, viewer);
+        state.results.results.session.viewer = bound_viewer_projection(state, viewer);
     }
     Ok(())
 }

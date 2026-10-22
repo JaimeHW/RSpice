@@ -31,7 +31,7 @@ pub(crate) enum NetCarry {
 
 impl AppState {
     fn carries_net_highlight(&self) -> bool {
-        self.ui.schematic_visibility.net_highlighting
+        self.design.schematic_visibility.net_highlighting
             == SchematicNetHighlighting::SelectedNetAcrossHierarchy
     }
 
@@ -185,7 +185,7 @@ mod tests {
         let amp = reference.amp_schematic.clone();
         let mut state = reference.state;
         state.open_workspace_view(reference.top.clone());
-        state.ui.schematic_visibility.net_highlighting =
+        state.design.schematic_visibility.net_highlighting =
             SchematicNetHighlighting::SelectedNetAcrossHierarchy;
         assert!(state.light_net_named("in"), "top has a net named in");
 

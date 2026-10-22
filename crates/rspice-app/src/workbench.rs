@@ -69,11 +69,7 @@ pub(crate) mod workflows;
 
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;
 pub use documents::result_document::ResultViewer;
-pub(crate) use lifecycle::session::{SchematicVisibilityRecovery, SymbolInPlaceExit};
-pub use lifecycle::session::{
-    SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind, SymbolGridSpacing,
-    SymbolTool, UiSessionState,
-};
+pub use lifecycle::session::{SymbolGridSpacing, SymbolTool};
 pub use lifecycle::window_session::ApplicationWindowId;
 pub use localization::UiTextLocale;
 pub(crate) use localization::{MessageCatalog, MessageId};

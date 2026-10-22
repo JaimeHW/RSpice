@@ -137,7 +137,7 @@ pub(super) fn announce_run_start(
         format!("Run {run_sequence} started: {}", analyses.join(", ")),
         LogAnchor::ResultRun { run_sequence },
     );
-    state.ui.run_watch.run_started(run_id);
+    state.runs.run_watch.run_started(run_id);
 }
 
 /// Close a run's log with its summary and write the same line in the

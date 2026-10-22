@@ -1075,7 +1075,7 @@ mod tests {
         app.record_publish_receipt();
         app.state.drain_notices(&ctx);
         assert!(
-            app.state.ui.toasts.activity().is_empty(),
+            app.state.workbench.toasts.activity().is_empty(),
             "the open dialog shows the failure itself"
         );
 
@@ -1083,7 +1083,7 @@ mod tests {
         app.record_publish_receipt();
         app.record_publish_receipt();
         app.state.drain_notices(&ctx);
-        let activity = app.state.ui.toasts.activity();
+        let activity = app.state.workbench.toasts.activity();
         assert_eq!(activity.len(), 1);
         assert_eq!(activity[0].title(), "Publish failed");
         assert_eq!(activity[0].message(), "The page could not be rendered.");

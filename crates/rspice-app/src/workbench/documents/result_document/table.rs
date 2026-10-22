@@ -31,7 +31,7 @@ fn artifact_text(
         state.model.simulation.retained.runs.revision(),
         state.model.simulation.view.data_version,
     );
-    if let Some(plan) = state.ui.results.plans.artifact.as_ref()
+    if let Some(plan) = state.results.results.plans.artifact.as_ref()
         && plan.source == source
         && &plan.key == key
     {
@@ -57,7 +57,7 @@ fn artifact_text(
         text,
         lines,
     });
-    state.ui.results.plans.artifact = Some(std::sync::Arc::clone(&built));
+    state.results.results.plans.artifact = Some(std::sync::Arc::clone(&built));
     Some(built)
 }
 
@@ -78,7 +78,13 @@ fn show_operating_point_table(ui: &mut Ui, state: &mut AppState) -> bool {
 }
 
 fn show_selected_result_artifact_table(ui: &mut Ui, state: &mut AppState) -> bool {
-    let Some(key) = state.ui.results.session.selected_result_artifact.clone() else {
+    let Some(key) = state
+        .results
+        .results
+        .session
+        .selected_result_artifact
+        .clone()
+    else {
         return false;
     };
     let Some(plan) = artifact_text(state, &key) else {
@@ -119,7 +125,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     let significant_digits = usize::from(presentation.displayed_significant_digits().get());
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &t,
     );
@@ -128,7 +134,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     }
 
-    let view = &state.ui.results.session.table;
+    let view = &state.results.results.session.table;
     let Some(model) = models
         .iter()
         .find(|model| Some(model.analysis_key()) == view.analysis)
@@ -140,11 +146,11 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
 
     // Around-cursor mode follows cursor A only when it belongs to this
     // analysis; a cursor on another strip is not a window into this one.
-    let cursor = (state.ui.results.session.cursor_strip == Some(model.analysis_index()))
-        .then_some(state.ui.results.session.cursors.a)
+    let cursor = (state.results.results.session.cursor_strip == Some(model.analysis_index()))
+        .then_some(state.results.results.session.cursors.a)
         .flatten();
-    let cursor_b = (state.ui.results.session.cursor_strip == Some(model.analysis_index()))
-        .then_some(state.ui.results.session.cursors.b)
+    let cursor_b = (state.results.results.session.cursor_strip == Some(model.analysis_index()))
+        .then_some(state.results.results.session.cursors.b)
         .flatten();
     let notations = OnceCell::new();
     let Some(response) = viewer::show_samples(
@@ -167,10 +173,10 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         return;
     };
     if let Some(sample) = response.clicked_sample {
-        place_table_cursor(&mut state.ui.results, model.analysis_index(), sample);
+        place_table_cursor(&mut state.results.results, model.analysis_index(), sample);
     }
-    state.ui.results.session.table.analysis = Some(model.analysis_key());
-    state.ui.results.session.table_status = Some(response.status);
+    state.results.results.session.table.analysis = Some(model.analysis_key());
+    state.results.results.session.table_status = Some(response.status);
 }
 
 pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
@@ -190,7 +196,7 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
     let presentation = state.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
-        &mut state.ui.results,
+        &mut state.results.results,
         presentation.complex_number_display(),
         &t,
     );
@@ -199,11 +205,11 @@ pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
         ui,
         viewer::TableControls {
             models: &models,
-            cursor_strip: state.ui.results.session.cursor_strip,
-            cursor_a: state.ui.results.session.cursors.a,
-            status: state.ui.results.session.table_status.as_deref(),
+            cursor_strip: state.results.results.session.cursor_strip,
+            cursor_a: state.results.results.session.cursors.a,
+            status: state.results.results.session.table_status.as_deref(),
         },
-        &mut state.ui.results.session.table,
+        &mut state.results.results.session.table,
         |name| {
             notations
                 .get_or_init(|| bus_notations(&state.model.workspace, &state.model.schematic))
@@ -301,33 +307,33 @@ mod tests {
     #[test]
     fn row_activation_places_a_and_b_at_exact_samples() {
         let mut state = AppState::default();
-        place_table_cursor(&mut state.ui.results, 3, 1.25e-6);
-        assert_eq!(state.ui.results.session.cursor_strip, Some(3));
-        assert_eq!(state.ui.results.session.cursors.a, Some(1.25e-6));
-        assert_eq!(state.ui.results.session.cursors.b, None);
+        place_table_cursor(&mut state.results.results, 3, 1.25e-6);
+        assert_eq!(state.results.results.session.cursor_strip, Some(3));
+        assert_eq!(state.results.results.session.cursors.a, Some(1.25e-6));
+        assert_eq!(state.results.results.session.cursors.b, None);
 
-        place_table_cursor(&mut state.ui.results, 3, 8.5e-6);
-        assert_eq!(state.ui.results.session.cursors.a, Some(1.25e-6));
-        assert_eq!(state.ui.results.session.cursors.b, Some(8.5e-6));
+        place_table_cursor(&mut state.results.results, 3, 8.5e-6);
+        assert_eq!(state.results.results.session.cursors.a, Some(1.25e-6));
+        assert_eq!(state.results.results.session.cursors.b, Some(8.5e-6));
 
-        place_table_cursor(&mut state.ui.results, 3, 4.0e-6);
-        assert_eq!(state.ui.results.session.cursors.a, Some(4.0e-6));
-        assert_eq!(state.ui.results.session.cursors.b, None);
+        place_table_cursor(&mut state.results.results, 3, 4.0e-6);
+        assert_eq!(state.results.results.session.cursors.a, Some(4.0e-6));
+        assert_eq!(state.results.results.session.cursors.b, None);
     }
 
     #[test]
     fn row_activation_rearms_and_rebinds_the_cursor_without_stale_b() {
         let mut state = AppState::default();
-        state.ui.results.session.toggle_cursor_tool();
-        assert!(!state.ui.results.session.cursor_tool.is_armed());
+        state.results.results.session.toggle_cursor_tool();
+        assert!(!state.results.results.session.cursor_tool.is_armed());
 
-        place_table_cursor(&mut state.ui.results, 1, 1.0);
-        place_table_cursor(&mut state.ui.results, 1, 2.0);
-        place_table_cursor(&mut state.ui.results, 2, 9.0);
+        place_table_cursor(&mut state.results.results, 1, 1.0);
+        place_table_cursor(&mut state.results.results, 1, 2.0);
+        place_table_cursor(&mut state.results.results, 2, 9.0);
 
-        assert!(state.ui.results.session.cursor_tool.is_armed());
-        assert_eq!(state.ui.results.session.cursor_strip, Some(2));
-        assert_eq!(state.ui.results.session.cursors.a, Some(9.0));
-        assert_eq!(state.ui.results.session.cursors.b, None);
+        assert!(state.results.results.session.cursor_tool.is_armed());
+        assert_eq!(state.results.results.session.cursor_strip, Some(2));
+        assert_eq!(state.results.results.session.cursors.a, Some(9.0));
+        assert_eq!(state.results.results.session.cursors.b, None);
     }
 }

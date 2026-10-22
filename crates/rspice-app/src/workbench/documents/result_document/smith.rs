@@ -232,7 +232,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     {
         let points = &trace.points;
         let key = owner ^ ((index as u64) << 8);
-        let derived = &mut state.ui.results.session.derived;
+        let derived = &mut state.results.results.session.derived;
         let real = derived.get_or(key ^ 0x501_0000, || {
             std::sync::Arc::new(points.iter().map(|p| p.s.re).collect::<Vec<_>>())
         });
@@ -246,7 +246,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
             imaginary,
         });
     }
-    let results = &mut state.ui.results;
+    let results = &mut state.results.results;
     let viewer = super::ResultViewer::Smith;
     let mut view = results.session.plot_view(viewer, 0);
     let mut pin = results.session.rf_pin.get(&viewer).copied();
@@ -283,7 +283,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut AppState) {
         ui,
         &state.analysis.smith_chart_state,
         state
-            .ui
+            .results
             .results
             .session
             .rf_pin
@@ -389,7 +389,7 @@ mod tests {
             hasher.finish()
         };
         let cached = state
-            .ui
+            .results
             .results
             .session
             .derived

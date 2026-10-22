@@ -426,10 +426,17 @@ fn save_and_compile_compiles_with_the_new_settings() {
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     wait_for_compile(&ctx, &mut app);
     assert!(
-        app.state.ui.code_workspace.veriloga.receipt.is_none(),
+        app.state.code.code_workspace.veriloga.receipt.is_none(),
         "without the define the module does not compile"
     );
-    assert!(!app.state.ui.code_workspace.veriloga.last_failure.is_empty());
+    assert!(
+        !app.state
+            .code
+            .code_workspace
+            .veriloga
+            .last_failure
+            .is_empty()
+    );
 
     Command::VerilogABuildSettings.execute(&mut app);
     draft(&mut app).define_draft = "GAIN_VALUE=2m".to_owned();
@@ -463,7 +470,7 @@ fn save_and_compile_compiles_with_the_new_settings() {
             .map(String::as_str),
         Some("2m")
     );
-    let veriloga = &app.state.ui.code_workspace.veriloga;
+    let veriloga = &app.state.code.code_workspace.veriloga;
     assert!(
         veriloga.last_failure.is_empty(),
         "{:?}",
@@ -532,7 +539,7 @@ fn render_build_settings_for_review() {
             };
             // The frame re-resolves the reader's theme every pass, so the
             // mode is theirs, not only the renderer's.
-            app.state.ui.theme = theme;
+            app.state.workbench.theme = theme;
             let canvas = crate::ui::raster::render_themed(theme, size, |ui, _| {
                 app.render_frame_chrome(ui);
                 app.render_frame_dialogs(ui.ctx());

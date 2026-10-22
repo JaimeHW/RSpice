@@ -19,7 +19,7 @@ pub(super) fn handle_runtime_host_call(
 
     let Some(mut pending) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_execution
@@ -70,7 +70,7 @@ pub(super) fn handle_runtime_host_call(
     }
     let Some(snapshot) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot
@@ -131,7 +131,7 @@ pub(super) fn handle_runtime_host_call(
         return;
     }
 
-    let manifest = app.state.ui.code_workspace.automation.manifest.clone();
+    let manifest = app.state.code.code_workspace.automation.manifest.clone();
     let mut response = None;
     match call.operation {
         HostOperation::OpenProject { selector } => {
@@ -201,17 +201,23 @@ pub(super) fn handle_runtime_host_call(
                     "Commercial Automation execution requires fail_closed=True.",
                 ));
             } else {
-                app.state.ui.code_workspace.automation.last_error = None;
+                app.state.code.code_workspace.automation.last_error = None;
                 prepare_automation_workflow(app, false);
                 let accepted = app
                     .state
-                    .ui
+                    .code
                     .code_workspace
                     .automation
                     .receipt
                     .as_ref()
                     .is_some_and(|receipt| receipt.token == pending.token)
-                    && app.state.ui.code_workspace.automation.last_error.is_none();
+                    && app
+                        .state
+                        .code
+                        .code_workspace
+                        .automation
+                        .last_error
+                        .is_none();
                 if accepted {
                     let handle = pending.preview_handle.unwrap_or_else(Uuid::new_v4);
                     pending.preview_handle = Some(handle);
@@ -219,7 +225,7 @@ pub(super) fn handle_runtime_host_call(
                 } else {
                     let message = app
                         .state
-                        .ui
+                        .code
                         .code_workspace
                         .automation
                         .last_error
@@ -251,17 +257,17 @@ pub(super) fn handle_runtime_host_call(
                         "dry-run execution call validated; no simulation was dispatched",
                     ));
                 } else {
-                    app.state.ui.code_workspace.automation.last_error = None;
+                    app.state.code.code_workspace.automation.last_error = None;
                     prepare_automation_workflow(app, true);
                     if matches!(
-                        app.state.ui.code_workspace.automation.execution,
+                        app.state.code.code_workspace.automation.execution,
                         AutomationExecutionState::AwaitingDispatch { .. }
                     ) {
                         pending.pending_execute_call_id = Some(call.call_id);
                     } else {
                         let message = app
                             .state
-                            .ui
+                            .code
                             .code_workspace
                             .automation
                             .last_error
@@ -380,7 +386,7 @@ pub(super) fn handle_runtime_host_call(
                 && requested.as_ref().is_some_and(|requested| {
                     requested.iter().any(|kind| {
                         !app.state
-                            .ui
+                            .code
                             .code_workspace
                             .automation
                             .artifacts
@@ -436,14 +442,14 @@ pub(super) fn retain_runtime_execution(
 ) {
     if app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_execution
         .as_ref()
         .is_some_and(|current| current.request_id == pending.request_id)
     {
-        app.state.ui.code_workspace.automation.runtime_execution = Some(pending);
+        app.state.code.code_workspace.automation.runtime_execution = Some(pending);
     }
 }
 
@@ -492,7 +498,7 @@ pub(super) fn reject_runtime_host_call(
 ) {
     if let Some(pending) = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_execution
@@ -535,14 +541,14 @@ pub(super) fn send_runtime_host_response(
 pub(super) fn runtime_protocol_failure(app: &mut RSpiceApp, message: &str) {
     let debugging = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_execution
         .as_ref()
         .is_some_and(|pending| pending.mode.is_debug());
     let _ = app.automation_runtime.terminate();
-    let runtime = &mut app.state.ui.code_workspace.automation;
+    let runtime = &mut app.state.code.code_workspace.automation;
     runtime.pending_runtime_validation = None;
     runtime.deferred_runtime_launch = None;
     runtime.runtime_execution = None;
@@ -558,7 +564,7 @@ pub(super) fn completed_run_matches_pending(
     pending: &page::PendingAutomationRuntimeExecution,
 ) -> bool {
     matches!(
-        app.state.ui.code_workspace.automation.execution,
+        app.state.code.code_workspace.automation.execution,
         AutomationExecutionState::Complete { run_id, .. }
             if pending.simulation_run_id == Some(run_id)
     )
@@ -579,7 +585,7 @@ pub(super) fn runtime_editor_diagnostic(
 ) -> CodeEditorDiagnostic {
     let snapshot = app
         .state
-        .ui
+        .code
         .code_workspace
         .automation
         .runtime_snapshot

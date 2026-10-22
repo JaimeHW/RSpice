@@ -30,19 +30,19 @@ const NETLIST_OUTLINE_CARET_SIZE: f32 = 9.0;
 const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
 
 pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.ui.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
+    if app.state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         netlist_diff(ui, app);
         return;
     }
     let root_label = active_netlist_artifact_name(&app.state);
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let index = crate::workbench::documents::netlist_document::visible_source_index(&mut app.state);
     lib_sections::refresh(&mut app.state);
     let projection = NetlistNavigatorProjection::from_index(
         &index,
         app.state.workbench.navigator_filter(),
         &root_label,
-        app.state.ui.netlist.active_document == ActiveNetlistDocument::Generated,
+        app.state.code.netlist.active_document == ActiveNetlistDocument::Generated,
         &app.state.workbench.netlist_outline_collapsed,
         &retained_include_facts(&app.state, messages),
         messages,
@@ -112,7 +112,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
             })
             .collect::<Vec<_>>()
     });
-    let active_line = app.state.ui.netlist.cursor_line.saturating_add(1);
+    let active_line = app.state.code.netlist.cursor_line.saturating_add(1);
     let height = outline_row_height(ui, &app.state);
 
     let mut goto = None;
@@ -510,8 +510,8 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         // Keep selection feedback immediate and hand the exact one-based
         // declaration to the editor's caret/scroll transaction for the next
         // document frame.
-        app.state.ui.netlist.cursor_line = line.saturating_sub(1);
-        app.state.ui.netlist.requested_line = Some(line);
+        app.state.code.netlist.cursor_line = line.saturating_sub(1);
+        app.state.code.netlist.requested_line = Some(line);
     }
     if let Some((line, section)) = use_section {
         match lib_sections::use_section(&mut app.state, line, &section) {
@@ -614,7 +614,7 @@ fn outline_group_row(
 }
 
 pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -> String {
-    match state.ui.netlist.active_document {
+    match state.code.netlist.active_document {
         ActiveNetlistDocument::Generated => "generated.sp".to_owned(),
         ActiveNetlistDocument::OwnedSource => state
             .model
@@ -646,11 +646,11 @@ pub(super) fn active_netlist_artifact_name(state: &crate::workbench::AppState) -
 pub(super) fn active_canonical_netlist_document(
     state: &crate::workbench::AppState,
 ) -> Option<&crate::state::NetlistDocument> {
-    match state.ui.netlist.active_document {
+    match state.code.netlist.active_document {
         ActiveNetlistDocument::Generated => {
             state.model.netlist_artifacts.generated_document.as_ref()
         }
-        ActiveNetlistDocument::OwnedSource => state.ui.netlist.owned_document.as_ref(),
+        ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
 }
@@ -878,7 +878,7 @@ pub(super) fn retained_include_facts(
             .iter()
             .map(|dependency| {
                 let locator = dependency.requested_locator().to_owned();
-                let resolution = state.ui.code_workspace.include_resolutions.get(&locator);
+                let resolution = state.code.code_workspace.include_resolutions.get(&locator);
                 IncludeRowFacts {
                     state: match dependency.resolution() {
                         crate::state::DependencyResolution::Missing { .. } => {
@@ -972,17 +972,17 @@ impl DiffHunk {
 }
 
 pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let query = NetlistNavigatorQuery::new(app.state.workbench.navigator_filter());
-    let hunks = diff_hunks(&app.state.ui.netlist.generated_diff_source, messages);
-    let (additions, removals) = diff_totals(&app.state.ui.netlist.generated_diff_source);
+    let hunks = diff_hunks(&app.state.code.netlist.generated_diff_source, messages);
+    let (additions, removals) = diff_totals(&app.state.code.netlist.generated_diff_source);
     let matching = hunks
         .iter()
         .filter(|hunk| query.matches_diff_hunk(hunk))
         .cloned()
         .collect::<Vec<_>>();
     let height = outline_row_height(ui, &app.state);
-    let active_line = app.state.ui.netlist.cursor_line.saturating_add(1);
+    let active_line = app.state.code.netlist.cursor_line.saturating_add(1);
     let mut goto = None;
 
     ScrollArea::vertical()
@@ -1037,8 +1037,8 @@ pub(super) fn netlist_diff(ui: &mut Ui, app: &mut RSpiceApp) {
         });
 
     if let Some(line) = goto {
-        app.state.ui.netlist.cursor_line = line.saturating_sub(1);
-        app.state.ui.netlist.requested_line = Some(line);
+        app.state.code.netlist.cursor_line = line.saturating_sub(1);
+        app.state.code.netlist.requested_line = Some(line);
     }
 }
 
@@ -2155,7 +2155,7 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
                 entry.component_id(),
             )
         });
-    let messages = app.state.ui.messages();
+    let messages = app.state.workbench.messages();
     let Some((cell, view, instance, component_id)) = mapping else {
         muted(ui, &messages.text(MessageId::NetlistNavigatorNoProvenance));
         return;

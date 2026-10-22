@@ -76,7 +76,7 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
     let language = code_workspace::active_source_language(
         app.state.workbench.workspace,
         &app.state.model.workspace,
-        app.state.ui.code_workspace.page,
+        app.state.code.code_workspace.page,
     )
     .ok_or_else(|| {
         "The netlist deck is served by its own completion and validation, not the project source index."
@@ -91,7 +91,7 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
         .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let logical_path = code_workspace::active_bundle_path(
         &app.state.model.workspace,
-        &app.state.ui.code_workspace,
+        &app.state.code.code_workspace,
         language,
     )
     .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
@@ -100,7 +100,7 @@ pub(crate) fn open_active_language_tools(app: &mut RSpiceApp) -> Result<(), Stri
     // missing caret would silently answer for position zero.
     let caret = app
         .state
-        .ui
+        .code
         .code_workspace
         .source_carets
         .get(&(bundle_id, logical_path.clone()))
@@ -128,7 +128,7 @@ pub(crate) fn navigate_active_source(
     let Some(language) = code_workspace::active_source_language(
         app.state.workbench.workspace,
         &app.state.model.workspace,
-        app.state.ui.code_workspace.page,
+        app.state.code.code_workspace.page,
     ) else {
         let message = match command {
             Command::GoToDefinition => Some(netlist::go_to_definition_at_cursor(&mut app.state)?),
@@ -153,13 +153,13 @@ pub(crate) fn navigate_active_source(
         .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let logical_path = code_workspace::active_bundle_path(
         &app.state.model.workspace,
-        &app.state.ui.code_workspace,
+        &app.state.code.code_workspace,
         language,
     )
     .ok_or_else(|| format!("This project owns no {} source yet.", language.label()))?;
     let caret = app
         .state
-        .ui
+        .code
         .code_workspace
         .source_carets
         .get(&(bundle_id, logical_path.clone()))
@@ -168,7 +168,7 @@ pub(crate) fn navigate_active_source(
     // The dialog's own state, built from the exact closure on screen. Go to
     // definition borrows it for the answer and leaves an open dialog as it
     // found it.
-    let previous = app.state.ui.code_workspace.language_tools.take();
+    let previous = app.state.code.code_workspace.language_tools.take();
     if let Err(error) = code_workspace::open_language_tools_in_bundle(
         app,
         language,
@@ -176,16 +176,16 @@ pub(crate) fn navigate_active_source(
         &logical_path,
         caret,
     ) {
-        app.state.ui.code_workspace.language_tools = previous;
+        app.state.code.code_workspace.language_tools = previous;
         return Err(error);
     }
     if command != Command::GoToDefinition {
-        if let Some(tools) = app.state.ui.code_workspace.language_tools.as_mut() {
+        if let Some(tools) = app.state.code.code_workspace.language_tools.as_mut() {
             tools.view = LanguageToolView::References;
         }
         return Ok(());
     }
-    let tools = std::mem::replace(&mut app.state.ui.code_workspace.language_tools, previous)
+    let tools = std::mem::replace(&mut app.state.code.code_workspace.language_tools, previous)
         .ok_or_else(|| "The source index could not be built.".to_owned())?;
     if tools.query.is_empty() {
         return Err("Place the caret on a name to go to its definition.".to_owned());
@@ -207,21 +207,21 @@ pub(crate) fn navigate_active_source(
     if !crate::state::project_source_paths_equal(&definition.logical_path, &logical_path) {
         match language {
             crate::state::ProjectSourceLanguage::VerilogA => {
-                app.state.ui.code_workspace.veriloga.selected_file =
+                app.state.code.code_workspace.veriloga.selected_file =
                     Some(code_workspace::VerilogAFileSelection {
                         bundle_id,
                         logical_path: definition.logical_path.clone(),
                     });
             }
             crate::state::ProjectSourceLanguage::RSpiceAutomation => {
-                app.state.ui.code_workspace.automation.selected_file =
+                app.state.code.code_workspace.automation.selected_file =
                     Some(definition.logical_path.clone());
             }
         }
     }
     // The page hands this to the editor it draws next, which is the
     // definition's file.
-    app.state.ui.source_editor_request = Some(
+    app.state.workbench.source_editor_request = Some(
         crate::workbench::documents::text_editor_commands::SourceEditorRequest::RevealLine(
             definition.line,
         ),
@@ -233,12 +233,12 @@ pub(crate) fn language_tools_are_available(state: &AppState) -> bool {
     code_workspace::active_source_language(
         state.workbench.workspace,
         &state.model.workspace,
-        state.ui.code_workspace.page,
+        state.code.code_workspace.page,
     )
     .is_some_and(|language| {
         code_workspace::active_bundle_path(
             &state.model.workspace,
-            &state.ui.code_workspace,
+            &state.code.code_workspace,
             language,
         )
         .is_some()
@@ -260,10 +260,10 @@ enum ToolAction {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_source_language_tools_dialog(&mut self, ctx: &Context) {
-        if self.state.ui.code_workspace.language_tools.is_none() {
+        if self.state.code.code_workspace.language_tools.is_none() {
             return;
         }
-        let Some(tools) = self.state.ui.code_workspace.language_tools.clone() else {
+        let Some(tools) = self.state.code.code_workspace.language_tools.clone() else {
             return;
         };
         let editable =
@@ -289,7 +289,7 @@ impl RSpiceApp {
                     .is_current(self.state.model.workspace.content.project.id(), bundle)
             });
 
-        let messages = self.state.ui.messages();
+        let messages = self.state.workbench.messages();
         let mut dialog = Dialog::new(
             messages.text(MessageId::CodeToolsTitle),
             messages.text(MessageId::CommonClose),
@@ -323,7 +323,7 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            self.state.ui.code_workspace.language_tools = None;
+            self.state.code.code_workspace.language_tools = None;
         }
     }
 
@@ -331,14 +331,14 @@ impl RSpiceApp {
         let outcome = match action {
             ToolAction::None => return,
             ToolAction::Select(view) => {
-                if let Some(tools) = self.state.ui.code_workspace.language_tools.as_mut() {
+                if let Some(tools) = self.state.code.code_workspace.language_tools.as_mut() {
                     tools.view = view;
                     tools.error = None;
                 }
                 return;
             }
             ToolAction::Query(query) => {
-                if let Some(tools) = self.state.ui.code_workspace.language_tools.as_mut() {
+                if let Some(tools) = self.state.code.code_workspace.language_tools.as_mut() {
                     tools.query = query;
                     tools.confirm_rename = false;
                     tools.error = None;
@@ -346,7 +346,7 @@ impl RSpiceApp {
                 return;
             }
             ToolAction::Replacement(replacement) => {
-                if let Some(tools) = self.state.ui.code_workspace.language_tools.as_mut() {
+                if let Some(tools) = self.state.code.code_workspace.language_tools.as_mut() {
                     tools.replacement = replacement;
                     tools.confirm_rename = false;
                     tools.error = None;
@@ -354,7 +354,7 @@ impl RSpiceApp {
                 return;
             }
             ToolAction::Reveal(logical_path, line) => {
-                let Some(tools) = self.state.ui.code_workspace.language_tools.as_ref() else {
+                let Some(tools) = self.state.code.code_workspace.language_tools.as_ref() else {
                     return;
                 };
                 let (language, bundle_id) = (tools.index.language, tools.index.bundle_id);
@@ -373,7 +373,7 @@ impl RSpiceApp {
                 code_workspace::commit_language_code_action(self, &code_action)
             }
         };
-        let Some(tools) = self.state.ui.code_workspace.language_tools.as_mut() else {
+        let Some(tools) = self.state.code.code_workspace.language_tools.as_mut() else {
             if let Err(error) = outcome {
                 self.state
                     .record(LogSeverity::Error, LogSource::Studio, error);
@@ -890,13 +890,13 @@ mod tests {
     #[test]
     fn the_index_answers_through_the_dialog_entry_point() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Automation;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
         assert!(language_tools_are_available(&app.state));
 
         open_active_language_tools(&mut app).expect("the Automation bundle is indexable");
         let tools = app
             .state
-            .ui
+            .code
             .code_workspace
             .language_tools
             .as_ref()
@@ -913,7 +913,7 @@ mod tests {
     #[test]
     fn the_netlist_page_has_no_bundle_index() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page = CodeWorkspacePage::Netlist;
+        app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
         assert!(!language_tools_are_available(&app.state));
         assert!(open_active_language_tools(&mut app).is_err());
     }

@@ -6,8 +6,8 @@
 //! read-only schematic refuses.
 
 mod libraries;
-mod symbol_document;
-mod symbol_in_place;
+pub(in crate::workbench) mod symbol_document;
+pub(in crate::workbench) mod symbol_in_place;
 
 use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};
@@ -71,9 +71,9 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
     // ID counter and name counters: without recalculation a freshly placed
     // component reuses an existing ID and selection matches both.
     schematic.recalculate_runtime_state();
-    schematic.session.editor.snap_engine = state.ui.schematic_snap.clone();
+    schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
     schematic.reconcile_grid_pitch_runtime();
-    state.ui.schematic_snap.grid_size = schematic.document().grid_size;
+    state.design.schematic_snap.grid_size = schematic.document().grid_size;
     schematic.session.editor.automatic_junctions =
         state.model.preferences.automatic_junction_dots();
     schematic.session.editor.selection_crossing = state.model.preferences.selection_crossing();
@@ -81,12 +81,12 @@ fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> Sch
         // A new schematic starts from the routing preference, and the
         // session's routing control follows it.
         let routing_mode = schematic.session.editor.wire_drawing.routing_mode;
-        state.ui.schematic_routing_mode = routing_mode;
-        state.ui.schematic_visibility.wire_routing =
+        state.design.schematic_routing_mode = routing_mode;
+        state.design.schematic_visibility.wire_routing =
             crate::workbench::app::dialogs::grid_snap_routing::routing_style(routing_mode);
     } else {
-        schematic.session.editor.wire_drawing.routing_mode = state.ui.schematic_routing_mode;
-        schematic.session.editor.bus_drawing.routing_mode = state.ui.schematic_routing_mode;
+        schematic.session.editor.wire_drawing.routing_mode = state.design.schematic_routing_mode;
+        schematic.session.editor.bus_drawing.routing_mode = state.design.schematic_routing_mode;
     }
     // Views from read-only libraries open for inspection, never for edit —
     // the docbar banner explains and every edit path checks this flag.
@@ -121,7 +121,7 @@ impl AppState {
         let Some(copy) = self.capture_active_schematic_selection() else {
             return false;
         };
-        self.ui.schematic_clipboard = copy;
+        self.design.schematic_clipboard = copy;
         true
     }
 
@@ -199,13 +199,14 @@ impl AppState {
         document.document_policy.net_naming = preferences.new_schematic_net_naming();
 
         let mut schematic = SchematicState::from_document(document);
-        schematic.session.editor.snap_engine = self.ui.schematic_snap.clone();
+        schematic.session.editor.snap_engine = self.design.schematic_snap.clone();
         schematic.reconcile_grid_pitch_runtime();
         schematic.session.editor.automatic_junctions = preferences.automatic_junction_dots();
         schematic.session.editor.selection_crossing = preferences.selection_crossing();
         // Routing comes from the preference, not from whatever the session
         // last drew with.
-        let routing_mode = preferences.new_schematic_routing_mode(self.ui.schematic_routing_mode);
+        let routing_mode =
+            preferences.new_schematic_routing_mode(self.design.schematic_routing_mode);
         schematic
             .session
             .editor
@@ -380,13 +381,13 @@ impl AppState {
                 self.open_workspace_view(reference);
                 self.workbench
                     .activate(crate::workbench::state::Workspace::Design);
-                self.ui.symbol.editor.select_pin(pin_name);
+                self.design.symbol.editor.select_pin(pin_name);
                 if let Some(point) = point {
-                    let zoom = self.ui.symbol.editor.zoom.max(1.0);
-                    self.ui.symbol.editor.pan =
+                    let zoom = self.design.symbol.editor.zoom.max(1.0);
+                    self.design.symbol.editor.pan =
                         (-(point.x as f32) * zoom, -(point.y as f32) * zoom);
                 }
-                self.ui.symbol.editor.needs_fit = false;
+                self.design.symbol.editor.needs_fit = false;
             }
             LogAnchor::Simulation { nets, devices } => {
                 self.highlight_failed_run_sites(&nets, &devices);
@@ -885,8 +886,8 @@ impl AppState {
                 .activate(WorkspaceDocumentId::CellView(reference));
             return;
         }
-        self.ui.canvas_hover = None;
-        self.ui.canvas_view_center = None;
+        self.design.canvas_hover = None;
+        self.design.canvas_view_center = None;
         let view_type = view_type_for_reference(self, &reference);
         self.model
             .workspace
@@ -1511,7 +1512,7 @@ impl AppState {
             self.model.workspace.content.project_sources = candidate_sources;
             self.model.workspace.content.project_sources_dirty = true;
             let transient_uses_renamed = self
-                .ui
+                .code
                 .code_workspace
                 .veriloga
                 .receipt
@@ -1520,14 +1521,14 @@ impl AppState {
                     renamed_source_ids.contains(&receipt.compilation.token().bundle_id)
                 })
                 || self
-                    .ui
+                    .code
                     .code_workspace
                     .veriloga
                     .pending
                     .as_ref()
                     .is_some_and(|pending| renamed_source_ids.contains(&pending.token.bundle_id));
             if transient_uses_renamed {
-                self.ui.code_workspace.veriloga = Default::default();
+                self.code.code_workspace.veriloga = Default::default();
             }
         }
         if renamed_configuration_roots > 0 {
@@ -1760,21 +1761,21 @@ impl AppState {
         self.model.workspace.content.project_sources = candidate;
         self.model.workspace.content.project_sources_dirty = true;
         let transient_uses_renamed = self
-            .ui
+            .code
             .code_workspace
             .veriloga
             .receipt
             .as_ref()
             .is_some_and(|receipt| renamed.contains(&receipt.compilation.token().bundle_id))
             || self
-                .ui
+                .code
                 .code_workspace
                 .veriloga
                 .pending
                 .as_ref()
                 .is_some_and(|pending| renamed.contains(&pending.token.bundle_id));
         if transient_uses_renamed {
-            self.ui.code_workspace.veriloga = Default::default();
+            self.code.code_workspace.veriloga = Default::default();
         }
     }
 
@@ -2033,13 +2034,13 @@ impl AppState {
             return;
         };
         crate::workbench::documents::netlist_document::open_generated_primary(self);
-        self.ui.code_workspace.page =
+        self.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
         self.workbench
             .activate(crate::workbench::state::Workspace::Netlist);
-        self.ui.netlist.cursor_line = location.line.saturating_sub(1);
-        self.ui.netlist.requested_line = Some(location.line);
-        let announced = self.ui.messages().format(
+        self.code.netlist.cursor_line = location.line.saturating_sub(1);
+        self.code.netlist.requested_line = Some(location.line);
+        let announced = self.workbench.messages().format(
             if location.stale {
                 crate::workbench::MessageId::NetlistShowInstanceStale
             } else {

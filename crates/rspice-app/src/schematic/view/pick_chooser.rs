@@ -60,7 +60,7 @@ pub(super) fn candidates_at(
     pointer_target::pointer_targets_all(
         &super::schematic_design_view(state),
         query,
-        state.ui.schematic_selection_filter,
+        state.design.schematic_selection_filter,
         symbol_context,
         ctx,
         viewport,

@@ -7,14 +7,14 @@ pub(super) struct WaveStackHost<'a>(pub &'a mut AppState);
 
 impl StackHost for WaveStackHost<'_> {
     fn session(&self) -> &ResultViewerState {
-        &self.0.ui.results.session
+        &self.0.results.results.session
     }
     fn session_mut(&mut self) -> &mut ResultViewerState {
-        &mut self.0.ui.results.session
+        &mut self.0.results.results.session
     }
     fn expression_is_complex(&self, analysis: AnalysisPresentationKey, text: &str) -> bool {
         self.0
-            .ui
+            .results
             .results
             .analysis_expr_cache
             .get(&(analysis, text.to_owned()))
@@ -34,7 +34,7 @@ impl StackHost for WaveStackHost<'_> {
     }
     fn forget_expression(&mut self, analysis: AnalysisPresentationKey, text: String) {
         self.0
-            .ui
+            .results
             .results
             .analysis_expr_cache
             .remove(&(analysis, text));
@@ -58,9 +58,9 @@ impl StackHost for WaveStackHost<'_> {
         show_unit_pane_header(ui, self.0, model, pane, ordinal, input)
     }
     fn family_envelopes(&mut self, model: &StripModel, pane: &UnitPane) -> Arc<FamilyEnvelopePlan> {
-        let generation = self.0.ui.results.models.generation();
+        let generation = self.0.results.results.models.generation();
         extent::family_envelopes(
-            &mut self.0.ui.results.plans.envelopes,
+            &mut self.0.results.results.plans.envelopes,
             generation,
             model,
             pane,
@@ -106,7 +106,7 @@ fn show_unit_pane_header(
     impl pane_header::PaneHeaderHost for HeaderHost<'_> {
         fn trace_selected(&self, trace: &StripTrace) -> bool {
             self.state
-                .ui
+                .results
                 .results
                 .valid_selected_trace(&self.state.model.simulation)
                 .is_some_and(|selected| {
@@ -117,14 +117,17 @@ fn show_unit_pane_header(
 
         fn toggle_trace_visibility(&mut self, trace: &StripTrace) {
             if let Some(key) = trace.family_visibility_key {
-                self.state.ui.results.toggle_family_trace_visibility(key);
+                self.state
+                    .results
+                    .results
+                    .toggle_family_trace_visibility(key);
             } else {
                 toggle_visibility(self.state, self.model.analysis_index, trace.waveform_index);
             }
         }
 
         fn select_trace(&mut self, trace: &StripTrace) {
-            self.state.ui.results.session.selected_trace =
+            self.state.results.results.session.selected_trace =
                 Some(SelectedResultTrace::from_identity(
                     self.model.analysis_key,
                     trace.source_waveform_name.clone(),
@@ -133,7 +136,7 @@ fn show_unit_pane_header(
         }
 
         fn activate_pane(&mut self) {
-            self.state.ui.results.session.active_wave_pane = Some(self.pane_key.clone());
+            self.state.results.results.session.active_wave_pane = Some(self.pane_key.clone());
         }
     }
     pane_header::show_header(

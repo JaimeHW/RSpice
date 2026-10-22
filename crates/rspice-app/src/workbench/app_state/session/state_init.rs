@@ -70,12 +70,12 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
     if let Ok(plan) = sim_setup.stable_analysis_plan() {
         workspace.content.migrate_active_plan_data(plan.id());
     }
-    let mut ui = crate::workbench::UiSessionState::new();
-    ui.schematic_snap.grid_size = schematic
+    let snap_grid_size = schematic
         .document()
         .document_policy
         .grid_pitch
         .canvas_grid_size();
+    let mut automation = None;
     if let Some(bundle) = workspace.content.project_sources.bundle_for_owner(
         &crate::state::ProjectSourceOwner::code_workspace(
             crate::state::ProjectSourceLanguage::RSpiceAutomation,
@@ -127,8 +127,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
             Vec::new(),
         )
         .expect("the canonical bootstrapped Automation worker snapshot must be valid");
-        ui.code_workspace.automation.manifest = Some(manifest);
-        ui.code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
+        automation = Some((manifest, runtime_snapshot));
         // Static compilation prepares editor metadata and the immutable worker
         // snapshot, but it cannot authorize Python execution. The managed
         // runtime creates the validation receipt after authoritative CPython
@@ -204,6 +203,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         settings: Box::default(),
         cloud: Box::default(),
         sheets: Box::default(),
+        runs: Box::default(),
         manual_run: Box::default(),
         project_lifecycle: Box::default(),
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
@@ -220,7 +220,6 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         license_key: None,
         license: None,
         analysis,
-        ui: Box::new(ui),
         workbench: Box::default(),
         shortcut_resolver: crate::workbench::app_state::session::shortcuts::ShortcutResolverState::default(),
         shortcut_library_persistence:
@@ -228,6 +227,11 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         shortcut_library_publication_continuation: None,
         preferences_file: Box::default(),
     };
+    state.design.schematic_snap.grid_size = snap_grid_size;
+    if let Some((manifest, runtime_snapshot)) = automation {
+        state.code.code_workspace.automation.manifest = Some(manifest);
+        state.code.code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
+    }
     let startup_errors = pdk_load_error
         .map(|error| {
             format!(
@@ -272,7 +276,7 @@ mod tests {
             ))
             .expect("bootstrapped Automation workspace");
         let snapshot = state
-            .ui
+            .code
             .code_workspace
             .automation
             .runtime_snapshot
@@ -289,12 +293,12 @@ mod tests {
             *automation.closure_digest().as_bytes()
         );
         assert!(
-            state.ui.code_workspace.automation.receipt.is_none(),
+            state.code.code_workspace.automation.receipt.is_none(),
             "static startup parsing must not impersonate managed-CPython validation"
         );
-        assert!(state.ui.code_workspace.automation.manifest.is_some());
+        assert!(state.code.code_workspace.automation.manifest.is_some());
         assert!(
-            state.ui.code_workspace.veriloga.receipt.is_none(),
+            state.code.code_workspace.veriloga.receipt.is_none(),
             "a new project has no Verilog-A source, so startup compiles none"
         );
     }

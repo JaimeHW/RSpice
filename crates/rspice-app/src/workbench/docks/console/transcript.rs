@@ -112,7 +112,7 @@ pub(super) fn collect_save(ctx: &egui::Context, state: &mut AppState) {
         Ok(Some(file)) => state.prompt(format!("Saved {}.", file.name)),
         Ok(None) => {}
         Err(error) => state
-            .ui
+            .workbench
             .toasts
             .error_with_title(ctx, "Log not saved", error),
     }

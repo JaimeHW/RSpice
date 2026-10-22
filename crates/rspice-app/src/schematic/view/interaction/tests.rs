@@ -1582,7 +1582,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         ),
         Some(PointerTarget::Component(10))
     );
-    state.ui.schematic_selection_filter.instances = false;
+    state.design.schematic_selection_filter.instances = false;
     assert_eq!(
         pointer_target(
             &state,
@@ -1596,7 +1596,7 @@ fn click_and_drag_share_one_overlapping_object_priority() {
         Some(PointerTarget::BusTap(21)),
         "disabled instance hit-testing must fall through to enabled conductors"
     );
-    state.ui.schematic_selection_filter.instances = true;
+    state.design.schematic_selection_filter.instances = true;
     state
         .model
         .schematic
@@ -1955,10 +1955,10 @@ fn requirement_link_activation_uses_owned_specifications_or_safe_external_url() 
         crate::workbench::state::Workspace::Results
     );
     assert_eq!(
-        state.ui.results.session.viewer,
+        state.results.results.session.viewer,
         crate::workbench::ResultViewer::Specs
     );
-    assert!(state.ui.results.session.spec_drafts.is_some());
+    assert!(state.results.results.session.spec_drafts.is_some());
 
     state
         .model
