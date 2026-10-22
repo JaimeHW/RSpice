@@ -39,13 +39,6 @@ impl SchematicState {
         Ok(id)
     }
 
-    pub fn remove_unpublished_validated_revision(
-        &mut self,
-        id: ValidatedSchematicRevisionId,
-    ) -> Result<(), ValidatedRevisionError> {
-        self.design.remove_unpublished_validated_revision(id)
-    }
-
     pub fn restore_validated_revision(
         &mut self,
         id: ValidatedSchematicRevisionId,

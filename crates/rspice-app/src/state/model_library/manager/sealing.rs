@@ -36,14 +36,6 @@ impl ModelLibraryManager {
         )
     }
 
-    /// Capture the manager's current executable catalog as an explicit plan
-    /// binding list. This is used only for schema migration and deliberate
-    /// user attachment; execution never calls it implicitly.
-    #[must_use]
-    pub fn default_simulation_plan_bindings(&self) -> Vec<SimulationPlanModelBinding> {
-        self.catalog.default_simulation_plan_bindings()
-    }
-
     /// Create one binding for a library the user explicitly attaches to a
     /// plan. Source-less catalog entries cannot be execution bindings.
     pub fn simulation_plan_binding(

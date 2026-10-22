@@ -122,46 +122,6 @@ pub(crate) fn download_bytes_file(
     Ok(())
 }
 
-pub(crate) fn download_href(filename: &str, href: &str) -> Result<(), String> {
-    use wasm_bindgen::JsCast as _;
-
-    let filename = if filename.trim().is_empty() {
-        "rspice-export.dat"
-    } else {
-        filename.trim()
-    };
-    let window = web_sys::window().ok_or_else(|| "Browser window is unavailable".to_string())?;
-    let document = window
-        .document()
-        .ok_or_else(|| "Browser document is unavailable".to_string())?;
-    let body = document
-        .body()
-        .ok_or_else(|| "Browser document body is unavailable".to_string())?;
-    let anchor = document.create_element("a").map_err(js_error_message)?;
-    anchor
-        .set_attribute("href", href)
-        .map_err(js_error_message)?;
-    anchor
-        .set_attribute("download", filename)
-        .map_err(js_error_message)?;
-    anchor
-        .set_attribute("style", "display: none")
-        .map_err(js_error_message)?;
-
-    let clickable = anchor
-        .dyn_ref::<web_sys::HtmlElement>()
-        .ok_or_else(|| "Browser download anchor is not clickable".to_string())?;
-    if let Err(error) = body.append_child(&anchor) {
-        let _ = body.remove_child(&anchor);
-        return Err(js_error_message(error));
-    }
-    clickable.click();
-    if let Err(error) = body.remove_child(&anchor) {
-        warn_download_cleanup("remove temporary download anchor", &js_error_message(error));
-    }
-    Ok(())
-}
-
 struct ObjectUrlLease {
     url: Option<String>,
 }

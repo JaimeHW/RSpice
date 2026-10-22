@@ -177,11 +177,6 @@ impl SchematicState {
             .probes
             .retain(|id| probe_ids.contains(id));
     }
-
-    /// Generate a unique component name
-    pub fn generate_name(&mut self, kind: ComponentType) -> String {
-        self.design.generate_name(kind)
-    }
 }
 
 #[cfg(test)]

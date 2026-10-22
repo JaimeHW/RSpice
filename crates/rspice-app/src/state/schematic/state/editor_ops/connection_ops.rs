@@ -11,11 +11,6 @@ impl SchematicState {
     // Wire Connection Management (for rubber-banding)
     // =========================================================================
 
-    /// Rebuild all wire connections based on current positions
-    pub fn rebuild_connections(&mut self) {
-        self.design.rebuild_connections();
-    }
-
     /// Rebuild the rubber-band cache from authoritative resolved terminal
     /// geometry. Authored library symbols must use this path because their pin
     /// positions can differ from intrinsic fallback geometry.

@@ -52,7 +52,6 @@ mod tests {
         "merge_overlapping_wires",
         "join_collinear_wires",
         "update_wire_junctions",
-        "auto_place_junctions",
         "remove_orphan_junctions",
         "optimize_all_wires",
         "remove_degenerate_segments",

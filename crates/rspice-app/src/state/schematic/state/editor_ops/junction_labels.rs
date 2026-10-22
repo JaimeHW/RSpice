@@ -29,16 +29,6 @@ impl SchematicState {
         removed
     }
 
-    /// Find junction at a position
-    pub fn junction_at(&self, pos: Point) -> Option<u64> {
-        self.design
-            .document()
-            .junctions
-            .iter()
-            .find(|j| j.pos == pos)
-            .map(|j| j.id)
-    }
-
     /// Check if a junction exists at a position
     pub fn has_junction(&self, pos: Point) -> bool {
         self.design

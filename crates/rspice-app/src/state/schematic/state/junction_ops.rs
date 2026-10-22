@@ -3,16 +3,6 @@
 use super::*;
 
 impl SchematicState {
-    /// Automatically place junctions at all detected intersection points
-    ///
-    /// This is the main entry point for automatic junction management.
-    /// Call this after wire operations to maintain junction consistency.
-    pub fn auto_place_junctions(&mut self, _scope: &ActiveSheetTopology) {
-        if self.design.auto_place_junctions() {
-            self.session.is_dirty = true;
-        }
-    }
-
     /// Remove junctions that no longer connect at least two distinct wires.
     pub fn remove_orphan_junctions(&mut self, _scope: &ActiveSheetTopology) -> usize {
         let removed = self.design.remove_orphan_junctions();
