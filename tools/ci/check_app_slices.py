@@ -56,6 +56,7 @@ D = "^workbench/app/dialogs/"
 SLICE_RULES = [
     (r"^(lib|main|workbench)\.rs$", "shell"),
     (W + r"app\.rs$", "shell"),
+    (W + r"app/browser_history\.rs$", "shell"),
     (W + r"frame\.rs$", "shell"),
     # The four session aggregates and their init/serialization.
     (W + r"app_state\.rs$", "session"),
