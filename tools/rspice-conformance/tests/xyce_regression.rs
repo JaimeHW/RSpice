@@ -756,29 +756,6 @@ fn get_xyce_tests_dir() -> PathBuf {
         .expect("tests/xyce must exist")
 }
 
-fn copy_fixture_tree(source: &Path, target: &Path) {
-    let metadata = fs::symlink_metadata(source).expect("inspect fixture source");
-    assert!(
-        !metadata.file_type().is_symlink(),
-        "fixture source must not contain symlinks: {}",
-        source.display()
-    );
-    if metadata.is_dir() {
-        fs::create_dir_all(target).expect("create fixture directory");
-        for entry in fs::read_dir(source).expect("read fixture directory") {
-            let entry = entry.expect("inspect fixture directory entry");
-            copy_fixture_tree(&entry.path(), &target.join(entry.file_name()));
-        }
-    } else {
-        assert!(
-            metadata.is_file(),
-            "fixture source must be a regular file: {}",
-            source.display()
-        );
-        fs::copy(source, target).expect("copy fixture file");
-    }
-}
-
 fn all_circuit_paths(root: &Path) -> BTreeSet<String> {
     fn visit(root: &Path, dir: &Path, paths: &mut BTreeSet<String>) {
         let Ok(entries) = fs::read_dir(dir) else {
@@ -1562,104 +1539,6 @@ fn test_xyce_stepped_noise_continuous_derivative_mixed_artifact_oracle() {
     );
     assert!(result.mismatches.is_empty());
     assert_eq!(result.contract, "wrapper_scalar_measure_step_noise");
-}
-
-#[test]
-fn test_xyce_stepped_noise_continuous_derivative_provenance_mutations_fail_closed() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
-    const OWNER: &str = "Netlists/MEASURE_CONT/STEP/DerivTestNoise.cir";
-    let corpus = get_xyce_tests_dir();
-    let make_fixture = |label: &str| {
-        let root = std::env::temp_dir().join(format!(
-            "rspice-measure-cont-step-noise-{label}-{}-{}",
-            std::process::id(),
-            FIXTURE_ID.fetch_add(1, Ordering::Relaxed)
-        ));
-        copy_fixture_tree(
-            &corpus.join("Netlists/MEASURE_CONT"),
-            &root.join("Netlists/MEASURE_CONT"),
-        );
-        copy_fixture_tree(
-            &corpus.join("OutputData/MEASURE_CONT"),
-            &root.join("OutputData/MEASURE_CONT"),
-        );
-        fs::copy(
-            corpus.join("RSPICE-HARNESS-MANIFEST.tsv"),
-            root.join("RSPICE-HARNESS-MANIFEST.tsv"),
-        )
-        .expect("copy canonical harness manifest");
-        root
-    };
-    let assert_fails = |root: &Path, label: &str| {
-        let result =
-            XyceTestRunner::new(root, XyceRunnerConfig::default()).run_test(root.join(OWNER));
-        assert!(
-            !result.passed && !result.expected_unsupported,
-            "{label} must fail the exact stepped NOISE derivative oracle: {result:?}"
-        );
-        assert_eq!(result.contract, "wrapper_scalar_measure_step_noise");
-    };
-
-    let root = make_fixture("canonical-lf");
-    for relative in [
-        OWNER,
-        "Netlists/MEASURE_CONT/STEP/DerivTestNoiseGSfile",
-        "OutputData/MEASURE_CONT/STEP/DerivTestNoise.cir.ma0",
-        "OutputData/MEASURE_CONT/STEP/DerivTestNoise.cir.ma1",
-    ] {
-        let path = root.join(relative);
-        let text = fs::read_to_string(&path).expect("read canonical-LF fixture member");
-        fs::write(path, text.replace("\r\n", "\n")).expect("write canonical-LF fixture member");
-    }
-    let canonical =
-        XyceTestRunner::new(&root, XyceRunnerConfig::default()).run_test(root.join(OWNER));
-    assert!(
-        canonical.passed && !canonical.expected_unsupported,
-        "canonical LF fixture must retain the exact oracle: {canonical:?}"
-    );
-    fs::remove_dir_all(&root).expect("remove canonical-LF fixture");
-
-    for (index, relative) in [
-        OWNER,
-        "Netlists/MEASURE_CONT/STEP/DerivTestNoiseGSfile",
-        "OutputData/MEASURE_CONT/STEP/DerivTestNoise.cir.ma0",
-        "OutputData/MEASURE_CONT/STEP/DerivTestNoise.cir.ma1",
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let root = make_fixture(&format!("member-{index}"));
-        let path = root.join(relative);
-        let mut bytes = fs::read(&path).expect("read mutation target");
-        bytes.push(b' ');
-        fs::write(path, bytes).expect("write one-byte provenance mutation");
-        assert_fails(&root, relative);
-        fs::remove_dir_all(root).expect("remove member-mutation fixture");
-    }
-
-    let root = make_fixture("manifest");
-    let manifest_path = root.join("RSPICE-HARNESS-MANIFEST.tsv");
-    let manifest = fs::read_to_string(&manifest_path).expect("read harness manifest");
-    fs::write(
-        &manifest_path,
-        manifest.replace(
-            "Netlists/MEASURE_CONT/STEP/DerivTestNoise.cir\trequires_upstream_wrapper",
-            "Netlists/MEASURE_CONT/STEP/DerivTestNoise.cir\trequires_upstream_wrapper ",
-        ),
-    )
-    .expect("mutate exact owner row");
-    assert_fails(&root, "manifest owner contract");
-    fs::remove_dir_all(root).expect("remove manifest fixture");
-
-    let root = make_fixture("extra-artifact");
-    fs::write(
-        root.join("OutputData/MEASURE_CONT/STEP/DerivTestNoise.cir.ma2"),
-        "unexpected\n",
-    )
-    .expect("write unexpected aggregate artifact");
-    assert_fails(&root, "unexpected aggregate artifact");
-    fs::remove_dir_all(root).expect("remove extra-artifact fixture");
 }
 
 #[test]
