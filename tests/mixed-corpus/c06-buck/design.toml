@@ -36,13 +36,14 @@ today = "runs"
 # The averaged model (design "O6 averaged") is an ngspice deck, so it is
 # captured as an O1 reference (oracle/vdig.tran.ngspice.cir).
 # Budgets are about five times the slower route's measured case time (tran
-# 13.4 s and ckpt 22.3 s interp, both the vsup variant's 1.6 ms run through
+# 38.5 s interp, the p3 variant's 1.6 ms run through its authored gate-drive
+# connect modules; ckpt 22.3 s interp, the vsup variant's 1.6 ms run through
 # its nanosecond gate edges; mc-tran 4.4 s native).
 [[analysis]]
 id = "tran"
 variants = ["vdig", "vams", "p3", "vsup"]
 oracles = ["O6", "O2", "O1"]
-timeout_s = 65
+timeout_s = 195
 phase = "P2"
 
 [[analysis]]
