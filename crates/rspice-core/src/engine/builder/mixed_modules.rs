@@ -179,6 +179,7 @@ pub(super) fn try_build_mixed_signal_instance(
             model.internal_nodes,
             model.branch_sources.len(),
             authored_nets,
+            &super::hdl_spice_leaves::design_nets(element, artifact),
         )
         .map_err(|(kind, detail)| refuse(&element.name, subckt_name, kind, detail))?;
     // Event connections may be declared by a later A-card or a generated
@@ -270,6 +271,38 @@ pub(super) fn try_build_mixed_signal_instance(
                 error.to_string(),
             )
         })?;
+    }
+
+    // A discrete port the design links on a circuit node of its own: one an
+    // in-design discipline boundary joins to a continuous net, or a variable
+    // a SPICE leaf reads. It converts as a deck-level port does.
+    for port in &artifact.hir.hoisted_ports {
+        let node = super::hdl_spice_leaves::hoisted_node(circuit, element, artifact, &port.net)
+            .ok_or_else(|| {
+                refuse(
+                    &element.name,
+                    subckt_name,
+                    ElaborationErrorKind::Internal,
+                    format!(
+                        "links discrete port '{}' on a port its design does not have",
+                        port.signal
+                    ),
+                )
+            })?;
+        let direction = match port.direction {
+            rspice_veriloga::ast::PortDirection::Input => BoundaryDirection::AnalogToDiscrete,
+            rspice_veriloga::ast::PortDirection::Output => BoundaryDirection::DiscreteToAnalog,
+            rspice_veriloga::ast::PortDirection::Inout => BoundaryDirection::Bidirectional,
+        };
+        host.declare_event_port(&port.signal, port.bit, node, direction.link_direction())
+            .map_err(|error| {
+                refuse(
+                    &element.name,
+                    subckt_name,
+                    host_failure_kind(&error),
+                    error.to_string(),
+                )
+            })?;
     }
 
     for bus in layout.buses {

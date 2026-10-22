@@ -161,6 +161,9 @@ pub struct AnalyzedModule {
     /// SPICE leaves of the elaborated hierarchy, one per occurrence; see
     /// [`crate::canonical_ir::HirModel::external_leaves`].
     pub external_leaves: Vec<crate::canonical_ir::HirExternalLeaf>,
+    /// Discrete ports the elaborated hierarchy links on circuit nodes; see
+    /// [`crate::canonical_ir::HirModel::hoisted_ports`].
+    pub hoisted_ports: Vec<crate::canonical_ir::HirHoistedPort>,
     /// Array variables: name -> contiguous element storage layout
     pub arrays: HashMap<SmolStr, AnalyzedArray>,
     pub symbol_table: SymbolTable,

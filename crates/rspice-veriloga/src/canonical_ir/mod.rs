@@ -85,9 +85,8 @@ pub use ground_reference::{GroundReferenceSummary, ground_reference};
 pub use hir::{
     CanonicalValueType, HirAnalogOperator, HirArray, HirAssignment, HirBranch, HirContribution,
     HirContributionKind, HirExprKind, HirExprRef, HirExpression, HirExternalLeaf, HirExternalNet,
-    HirFormalPort, HirInternalNode,
-    HirLimiterArgument, HirLoop, HirModel, HirParamRange, HirParameter, HirParameterDimension,
-    HirPort, HirStatement, HirVariable,
+    HirFormalPort, HirHoistedPort, HirInternalNode, HirLimiterArgument, HirLoop, HirModel,
+    HirParamRange, HirParameter, HirParameterDimension, HirPort, HirStatement, HirVariable,
 };
 pub use ids::{
     ArrayId, BlockId, BranchId, BranchUnknownId, ContributionId, DigitalLocalId, DigitalProcessId,

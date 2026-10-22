@@ -15,8 +15,10 @@ use smol_str::SmolStr;
 /// and metadata happen to repeat the same stale version number.
 ///
 /// Version 177 carries the SPICE leaves a design instantiates
-/// (`HirModel::external_leaves`). An earlier artifact has none, so a host
-/// would build the design without them.
+/// (`HirModel::external_leaves`) and the discrete ports it links on circuit
+/// nodes (`HirModel::hoisted_ports`). An earlier artifact has neither, so a
+/// host would build the design without its leaves and leave those ports
+/// unlinked.
 ///
 /// Version 176 carries a port's `supplySensitivity` and `groundSensitivity`
 /// attributes (`HirPort::supply_sensitivity`, `HirPort::ground_sensitivity`),

@@ -2508,39 +2508,86 @@ fn unelaborated_instance_constructs_refuse_by_name() {
     }
 }
 
+const BOUNDARY_CHILDREN: &str = "module dig(q);\n\
+                                 \x20   output q; reg q;\n\
+                                 \x20   initial q = 0;\n\
+                                 endmodule\n\
+                                 module res(a, b);\n\
+                                 \x20   inout a, b; electrical a, b;\n\
+                                 \x20   analog I(a, b) <+ V(a, b);\n\
+                                 endmodule\n";
+
 /// A declared net that joins a discrete child output and an analog child port
-/// is a discipline boundary inside the design. It used to be refused as if it
-/// were undeclared ("declare `n` with a `wire` declaration", though it is
-/// one). The refusal names what is missing, connect-module insertion inside
-/// a design, with the net, both instances and the two ways that work.
+/// is a discipline boundary inside the design (LRM 2.4 clause 7). The output
+/// keeps its own signal, and the compiled design links it on the net's
+/// circuit node, where the host converts it as it converts a deck-level port.
 #[test]
-fn a_discipline_boundary_inside_the_design_is_refused_as_one() {
-    const CHILDREN: &str = "module dig(q);\n\
-                            \x20   output q; reg q;\n\
-                            \x20   initial q = 0;\n\
-                            endmodule\n\
-                            module res(a, b);\n\
-                            \x20   inout a, b; electrical a, b;\n\
-                            \x20   analog I(a, b) <+ V(a, b);\n\
-                            endmodule\n";
+fn a_discipline_boundary_inside_the_design_links_the_discrete_port() {
     for declaration in ["wire m;", "electrical m;"] {
-        let message = hierarchy_error(&hierarchy(
-            CHILDREN,
-            &format!("    {declaration}\n     dig u1(m);\n     res u2(m, p);"),
-        ));
-        for fragment in [
-            "net `m` joins discrete port `q` of instance `u1`",
-            "analog port `a` of instance `u2`",
-            "inserts connect modules only where a deck node joins",
-            "converter module",
-        ] {
-            assert!(
-                message.contains(fragment),
-                "`{declaration}` must mention {fragment:?}, got {message:?}"
-            );
-        }
-        assert!(!message.contains("implicit net"), "{message}");
+        let artifact = VerilogACompiler::new(CompilerOptions {
+            enable_ams: true,
+            ..CompilerOptions::default()
+        })
+        .compile_canonical_ir_module(
+            &hierarchy(
+                BOUNDARY_CHILDREN,
+                &format!("    {declaration}\n     dig u1(m);\n     res u2(m, p);"),
+            ),
+            Some("top"),
+        )
+        .unwrap_or_else(|error| panic!("`{declaration}` must compile: {error}"));
+        let [port] = artifact.hir.hoisted_ports.as_slice() else {
+            panic!("`{declaration}`: {:?}", artifact.hir.hoisted_ports);
+        };
+        assert_eq!(port.signal, "u1.q", "{declaration}");
+        assert_eq!(port.bit, Some(0), "{declaration}");
+        assert_eq!(port.direction, PortDirection::Output, "{declaration}");
+        let rspice_veriloga::canonical_ir::HirExternalNet::Net(net) = &port.net else {
+            panic!("`{declaration}`: {:?}", port.net);
+        };
+        assert!(
+            artifact
+                .hir
+                .internal_nodes
+                .iter()
+                .any(|node| &node.name == net),
+            "`{declaration}`: the port lands on the analog half's node for `m`, not {net}"
+        );
     }
+}
+
+/// One bit of a continuous vector is a scalar net of its own after
+/// flattening, so a discrete port on it links on that bit's node.
+#[test]
+fn a_discrete_port_on_a_bit_of_a_continuous_vector_links_on_that_bit() {
+    let artifact = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    })
+    .compile_canonical_ir_module(
+        &hierarchy(
+            BOUNDARY_CHILDREN,
+            "    electrical [1:0] m;\n     dig u1(m[0]);\n     res u2(m[0], p);",
+        ),
+        Some("top"),
+    )
+    .unwrap_or_else(|error| panic!("a bit of a continuous vector links: {error}"));
+    let [port] = artifact.hir.hoisted_ports.as_slice() else {
+        panic!("{:?}", artifact.hir.hoisted_ports);
+    };
+    assert_eq!(port.signal, "u1.q");
+    assert_eq!(
+        port.net,
+        rspice_veriloga::canonical_ir::HirExternalNet::Net("m[0]".into())
+    );
+    assert!(
+        artifact
+            .hir
+            .internal_nodes
+            .iter()
+            .any(|node| node.name == "m[0]"),
+        "the port lands on the analog half's node for `m[0]`"
+    );
 }
 
 /// Both connection forms describe the same design, so they must elaborate to

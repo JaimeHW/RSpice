@@ -122,7 +122,9 @@ pub(super) fn materialize(
         // The body compiles with the deck's options, so its plain `wreal`
         // ports resolve as the deck's own modules' do.
         let runtime = rspice_veriloga::VerilogACompiler::new(
-            super::veriloga_cache::deck_include_compiler_options(body.wreal_resolution),
+            super::veriloga_cache::deck_include_compiler_options(
+                &super::veriloga_cache::DeckHdl::resolving_wreal(body.wreal_resolution),
+            ),
         )
         .compile_connect_runtime_with_configuration(
             &body.source_package,

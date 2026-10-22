@@ -234,11 +234,19 @@ pub(super) fn prepare<'a>(
         let specialized = if let Some(specialized) = specializations.get(&key) {
             specialized.clone()
         } else {
-            // The artifact was compiled under the deck's `wreal` resolution,
-            // and its specialization reads its declarations the same way.
+            // The artifact was compiled under the deck's `wreal` resolution
+            // and with its cells, and its specialization reads its
+            // declarations and leaves the same way.
             let compiler = rspice_veriloga::VerilogACompiler::new(
                 super::veriloga_cache::deck_include_compiler_options(
-                    super::veriloga_sources::wreal_resolution(netlist.options.wreal_resolution),
+                    &super::veriloga_cache::DeckHdl {
+                        wreal_resolution: super::veriloga_sources::wreal_resolution(
+                            netlist.options.wreal_resolution,
+                        ),
+                        external_cells: Some(Arc::new(super::hdl_spice_leaves::external_cells(
+                            netlist,
+                        ))),
+                    },
                 ),
             );
             let typed: Vec<_> = overrides

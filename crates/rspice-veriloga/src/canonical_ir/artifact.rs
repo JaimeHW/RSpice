@@ -984,6 +984,17 @@ fn hir_summary(hir: &HirModel) -> String {
     for leaf in &hir.external_leaves {
         write_hir_external_leaf(&mut out, leaf);
     }
+    for port in &hir.hoisted_ports {
+        writeln!(
+            out,
+            "hoisted_port signal={} bit={:?} direction={:?} net={}",
+            enc_str(&port.signal),
+            port.bit,
+            port.direction,
+            external_net(&port.net)
+        )
+        .expect("write to string");
+    }
     for expression in &hir.expressions {
         write_hir_expression(&mut out, expression);
     }

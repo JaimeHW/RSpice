@@ -54,7 +54,7 @@ impl Engine {
                     &control,
                 );
                 let compiler = rspice_veriloga::VerilogACompiler::new(
-                    veriloga_cache::deck_include_compiler_options(Default::default()),
+                    veriloga_cache::deck_include_compiler_options(&Default::default()),
                 );
                 let dependencies = compiler
                     .provider_source_dependencies(&provider, path)

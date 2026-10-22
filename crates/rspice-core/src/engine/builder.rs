@@ -92,6 +92,8 @@ mod connect_modules;
 #[cfg(all(test, feature = "veriloga"))]
 mod elaboration_scan;
 #[cfg(feature = "veriloga")]
+mod hdl_spice_leaves;
+#[cfg(feature = "veriloga")]
 mod mixed_boundaries;
 #[cfg(feature = "veriloga")]
 mod mixed_modules;
@@ -505,6 +507,9 @@ impl VerilogAUnknownNames<'_> {
         internal_count: usize,
         branch_count: usize,
         authored: &std::collections::HashSet<String>,
+        // The nets inside the design its SPICE leaves and hoisted ports
+        // name: the deck authors them for the design, on purpose.
+        design: &std::collections::HashSet<String>,
     ) -> Result<(), (crate::ElaborationErrorKind, String)> {
         let mut claimed: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
@@ -525,7 +530,7 @@ impl VerilogAUnknownNames<'_> {
             );
         for (kind, candidate) in candidates {
             let canonical = canonical_observable_name(&candidate);
-            if authored.contains(&canonical) {
+            if authored.contains(&canonical) && !design.contains(&canonical) {
                 return Err((
                     crate::ElaborationErrorKind::NameCollision,
                     format!(
@@ -5942,8 +5947,14 @@ impl Engine {
                 .as_deref()
                 .map(super::small_signal_state::TransientStateBias::transient_stop)
         });
-        let (built, reference) =
-            self.elaborate_circuit(netlist, default_ports, transient_stop_time, None, abort)?;
+        let (built, reference) = self.elaborate_circuit(
+            netlist,
+            default_ports,
+            transient_stop_time,
+            None,
+            false,
+            abort,
+        )?;
         let built = match reference {
             None => built,
             Some(reference) => {
@@ -5953,6 +5964,7 @@ impl Engine {
                     default_ports,
                     transient_stop_time,
                     Some(&reference),
+                    false,
                     abort,
                 )?
                 .0
@@ -5985,11 +5997,20 @@ impl Engine {
         default_ports: &[crate::analysis::s_param::Port],
         transient_stop_time: Option<Value>,
         reference: Option<&str>,
+        // Whether `netlist` already carries the SPICE leaves of its HDL
+        // designs as cards (`hdl_spice_leaves`).
+        leaves_built: bool,
         abort: &dyn AbortSignal,
     ) -> Result<(Box<BuiltRfCircuit>, Option<String>), SimulationError> {
         self.ensure_valid_configuration()?;
         check_build_abort(abort)?;
         check_netlist_source_resource_limits(self, netlist, abort)?;
+        // The deck as given, which a design's SPICE leaves are added to and
+        // whose own cells the HDL compiler is offered.
+        #[cfg(feature = "veriloga")]
+        let deck_netlist = netlist;
+        #[cfg(not(feature = "veriloga"))]
+        let _ = leaves_built;
         let mut statistical_base;
         let mut statistical_process = BTreeMap::new();
         let mut statistical_coordinate = None;
@@ -6380,11 +6401,20 @@ impl Engine {
                     _ => map.to_path_buf(),
                 }
             });
+            // A design may instantiate the deck's own cells as leaves.
+            let deck_hdl = veriloga_cache::DeckHdl {
+                wreal_resolution: veriloga_sources::wreal_resolution(
+                    netlist.options.wreal_resolution,
+                ),
+                external_cells: Some(std::sync::Arc::new(hdl_spice_leaves::external_cells(
+                    deck_netlist,
+                ))),
+            };
             let resolved = veriloga_sources::resolve_includes(
                 &netlist.veriloga_includes,
                 library_map.as_deref(),
                 &mut design_connect_rules,
-                veriloga_sources::wreal_resolution(netlist.options.wreal_resolution),
+                &deck_hdl,
                 self.config.resource_limits,
                 abort,
             )?;
@@ -6423,6 +6453,26 @@ impl Engine {
                     "Loaded Verilog-A model '{}' from {}",
                     entry.model.name,
                     include.file_path.display()
+                );
+            }
+            // A design that instantiates SPICE cells has them built as cards
+            // of the deck: the deck is built once more with them in it.
+            if !leaves_built
+                && let Some(deck) =
+                    hdl_spice_leaves::deck_with_leaves(deck_netlist, &flat_elements, |master| {
+                        veriloga_models
+                            .get(&normalize_model_key(master))
+                            .and_then(|binding| binding.model.as_ref())
+                            .and_then(|entry| entry.canonical_ir.clone())
+                    })?
+            {
+                return self.elaborate_circuit(
+                    &deck,
+                    default_ports,
+                    transient_stop_time,
+                    reference,
+                    true,
+                    abort,
                 );
             }
         }
@@ -9327,6 +9377,13 @@ impl Engine {
                                     model.branch_sources.len(),
                                     authored_net_names
                                         .get_or_init(|| authored_net_name_set(&flat_elements)),
+                                    &prepared
+                                        .canonical_ir
+                                        .as_deref()
+                                        .map(|artifact| {
+                                            hdl_spice_leaves::design_nets(element, artifact)
+                                        })
+                                        .unwrap_or_default(),
                                 )
                                 .map_err(|(kind, detail)| {
                                     refuse_veriloga_instance(

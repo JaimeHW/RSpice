@@ -238,6 +238,7 @@ jobs:
           --test transient_checkpoint
           --test transient_events_at_stop_time
           --test transient_noise_veriloga
+          --test verilog_on_top
           --test veriloga_ac
           --test veriloga_connect_source_closure
           --test veriloga_dc_lifecycle
@@ -432,6 +433,7 @@ jobs:
           --test transient_checkpoint
           --test transient_events_at_stop_time
           --test transient_noise_veriloga
+          --test verilog_on_top
           --test veriloga_ac
           --test veriloga_connect_source_closure
           --test veriloga_dc_lifecycle

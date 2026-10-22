@@ -448,6 +448,7 @@ fn prepare_boundaries(
     if !has_boundaries && !prepared_inputs {
         return Ok(None);
     }
+    let (mut planned, mut delegated) = (0usize, 0usize);
     for boundary in signals.into_values() {
         let resolved = resolve_disciplines(
             &boundary.signal,
@@ -506,6 +507,15 @@ fn prepare_boundaries(
             // their constants before ordinary hierarchy override resolution.
             rule.numeric_parameters()
                 .map_err(|cause| error(cause.to_string(), span))?;
+            // A shipped module the source names, or declares only as its
+            // signature, has no body to materialize here. The boundary stays,
+            // and the discrete port is linked on the net's circuit node, where
+            // the deck's rules convert it.
+            planned += 1;
+            if !executes_body(analyzed, &rule.connect_module) {
+                delegated += 1;
+                continue;
+            }
             let body_name = bodies.materialize(analyzed, sources, source, rule, &insertion)?;
             let mut private: SmolStr = format!("{}__net", insertion.instance).into();
             while !used.insert(private.clone()) {
@@ -665,12 +675,30 @@ fn prepare_boundaries(
     // the dependencies already recorded before that rewrite, or a scalar
     // parameter update could leave the selected topology unchanged.
     retain_parameter_guards(module, &mut analyzed);
-    analyzed.hierarchical_connections = module.hierarchical_connections || has_boundaries;
+    // Boundaries whose every module the deck converts insert nothing here.
+    let inserted = planned == 0 || delegated < planned;
+    analyzed.hierarchical_connections =
+        module.hierarchical_connections || (has_boundaries && inserted);
     analyzed.digital.bit_aliases = aliases;
     Ok(Some(Arc::new(SpecializedModule {
         source: prepared,
         analyzed,
     })))
+}
+
+/// Whether the source declares `connect_module` with a body to execute. A
+/// shipped module named without a declaration, or declared only as its
+/// signature, has none: the deck's converter law runs it.
+fn executes_body(analyzed: &AnalyzedFile, connect_module: &str) -> bool {
+    analyzed.source.items.iter().any(|item| {
+        matches!(item, Item::ConnectModule(module) if module.name == connect_module
+            && (module.analog_block.is_some()
+                || module.analog_initial.is_some()
+                || !module.instances.is_empty()
+                || !module.continuous_assigns.is_empty()
+                || !module.digital_processes.is_empty()
+                || !module.gate_arrays.is_empty()))
+    })
 }
 
 fn retain_parameter_guards(module: &AnalyzedModule, analyzed: &mut AnalyzedModule) {

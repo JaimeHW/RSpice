@@ -73,6 +73,13 @@ pub(crate) fn elaborate_executable_module<'a>(
         .elaboration_warnings
         .extend(hierarchy.warnings);
     elaborator.shared_occurrences = hierarchy.occurrences;
+    for connection in hierarchy.hoisted {
+        elaborator
+            .hoisted
+            .entry(connection.parent.clone())
+            .or_default()
+            .push(connection);
+    }
     elaborator.digital_frames = hierarchy
         .instances
         .iter()
@@ -111,6 +118,12 @@ pub(crate) fn elaborate_executable_module<'a>(
         .register(root, selected, &root_scope, None)?;
     elaborator.resolve_external_leaves(root, &root_scope, "")?;
     elaborator.append_instances(root, root_scope, selected.name.as_str())?;
+    if let Some(parent) = elaborator.hoisted.keys().next() {
+        return Err(internal_error(format!(
+            "occurrence '{parent}' joins a discrete port to a continuous net, and the hierarchy \
+             walk never reached it"
+        )));
+    }
     Ok(Cow::Owned(elaborator.finish()?))
 }
 
@@ -333,6 +346,9 @@ struct HierarchyElaborator<'a> {
     specialization_modules: HashSet<SmolStr>,
     specializations:
         HashMap<parameters::SpecializationKey, std::sync::Arc<parameters::SpecializedModule>>,
+    /// The discrete pass's in-design discipline boundaries, by the path of
+    /// the occurrence whose continuous net each joins.
+    hoisted: HashMap<SmolStr, Vec<super::digital_elaborate::HoistedConnection>>,
 }
 
 impl<'a> HierarchyElaborator<'a> {
@@ -376,6 +392,7 @@ impl<'a> HierarchyElaborator<'a> {
             parameter_hierarchy: Default::default(),
             specialization_modules,
             specializations: HashMap::new(),
+            hoisted: HashMap::new(),
         }
     }
 
@@ -657,13 +674,11 @@ impl<'a> HierarchyElaborator<'a> {
             )?;
             instances += 1;
             let next = self.append_instance(&instance, &stack, &path)?;
-            if !next.module.source().external_leaves.is_empty() {
-                let relative = path
-                    .strip_prefix(self.flattened.name.as_str())
-                    .and_then(|suffix| suffix.strip_prefix('.'))
-                    .unwrap_or(&path);
-                self.resolve_external_leaves(next.module.source(), &next.scope, relative)?;
-            }
+            let relative = path
+                .strip_prefix(self.flattened.name.as_str())
+                .and_then(|suffix| suffix.strip_prefix('.'))
+                .unwrap_or(&path);
+            self.resolve_external_leaves(next.module.source(), &next.scope, relative)?;
             stack.push(next);
         }
         Ok(())

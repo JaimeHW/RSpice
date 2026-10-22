@@ -125,6 +125,7 @@ pub(crate) fn elaborate_digital_hierarchy(
         occurrences: HashMap::new(),
         required: digital_subtrees(analyzed, source_modules),
         connections: Default::default(),
+        hoisted: Default::default(),
     };
     elaborator.connections.resolved_types = super::net_types::resolve(
         analyzed,
@@ -171,6 +172,7 @@ pub(crate) fn elaborate_digital_hierarchy(
         root: prepared_root,
         instances: elaborator.instances,
         occurrences: elaborator.occurrences,
+        hoisted: elaborator.hoisted.into_inner(),
     })
 }
 
@@ -180,6 +182,7 @@ pub(super) struct ElaboratedHierarchy {
     pub root: Option<std::sync::Arc<SpecializedModule>>,
     pub instances: Vec<ElaboratedDigitalInstance>,
     pub occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
+    pub hoisted: Vec<HoistedConnection>,
 }
 
 /// Include analog containers of digital descendants and all concrete source
@@ -380,6 +383,25 @@ struct DigitalElaborator<'a> {
     instances: Vec<ElaboratedDigitalInstance>,
     occurrences: HashMap<SmolStr, std::sync::Arc<SpecializedModule>>,
     required: HashSet<SmolStr>,
+    hoisted: std::cell::RefCell<Vec<HoistedConnection>>,
+}
+
+/// A discrete port connected to a continuous net of the instantiating
+/// module: a discipline boundary inside the design. The port keeps its own
+/// signal, which the host links on that net's circuit node as it links a
+/// deck-level port, so the deck's converter law, supplies and connect rules
+/// convert it.
+#[derive(Debug, Clone)]
+pub(super) struct HoistedConnection {
+    /// The instantiating occurrence's path below the root, empty at the root.
+    pub parent: SmolStr,
+    /// The continuous net, as that module names it.
+    pub net: SmolStr,
+    /// The port's own elaborated signal.
+    pub signal: SmolStr,
+    pub real: bool,
+    pub direction: PortDirection,
+    pub span: Span,
 }
 
 pub(super) fn check_hierarchy_capacity(
@@ -769,9 +791,47 @@ impl DigitalElaborator<'_> {
             // analysis refused any other (IEEE 1364-2005 section 12.3.3).
             let is_variable = declared.class.is_variable();
             let own = element_binding_name(declared, &child.digital.signals, path)?;
-            let form = connections[index]
+            let mut form = connections[index]
                 .map(|expression| connection_form(expression, parent_scope, path, &port.name))
                 .transpose()?;
+            // A discipline boundary inside the design: the port keeps its own
+            // signal, as an unconnected port does, and the host links that
+            // signal on the continuous net's circuit node.
+            let hoist = match &form {
+                Some(ConnectionForm::Net(identifier))
+                    if !parent_scope.signals.contains_key(&identifier.name)
+                        && parent_scope.connections.is_physical(&identifier.name) =>
+                {
+                    Some(*identifier)
+                }
+                _ => None,
+            };
+            if let Some(identifier) = hoist {
+                if declared.width > 1 {
+                    return Err(semantic_error(
+                        SemanticErrorKind::UnsupportedFeature(format!(
+                            "{}-bit discrete port `{}` of instance `{path}` connects continuous \
+                             net `{}`; this compiler links a discrete port on a continuous net \
+                             inside a design one scalar at a time, so connect the port bit by \
+                             bit",
+                            declared.width, port.name, identifier.name
+                        )),
+                        identifier.span,
+                    ));
+                }
+                self.hoisted.borrow_mut().push(HoistedConnection {
+                    parent: path
+                        .rsplit_once('.')
+                        .map_or("", |(parent, _)| parent)
+                        .into(),
+                    net: identifier.name.clone(),
+                    signal: own.clone(),
+                    real: declared.width == 0,
+                    direction: port.direction,
+                    span: identifier.span,
+                });
+                form = None;
+            }
             let binding = match form {
                 // An unconnected port is a net of its own. IEEE 1364-2005
                 // section 12.3.9 leaves an unconnected input at high
@@ -779,6 +839,7 @@ impl DigitalElaborator<'_> {
                 // unless `` `unconnected_drive `` (section 19.9) pulls it.
                 None => {
                     if let Some((pull, span)) = unconnected
+                        && hoist.is_none()
                         && port.direction == PortDirection::Input
                         && declared.width != 0
                     {
@@ -1398,9 +1459,10 @@ impl DigitalElaborator<'_> {
     /// A name the scope has no discrete signal for is either undeclared, or a
     /// continuous net: one an analog port of another instance in the same
     /// module made electrical. The second is a discipline boundary inside the
-    /// HDL design, where LRM 2.4 clause 7 would insert a connect module; this
-    /// compiler inserts them only where a deck node joins the two sides, so it
-    /// says that, naming the net and both instances, rather than asking for a
+    /// HDL design, where LRM 2.4 clause 7 would insert a connect module. A
+    /// whole scalar net never reaches here (`bind_ports` links the port on the
+    /// net's circuit node); a select or a concatenation of one does, and this
+    /// says so, naming the net and both instances, rather than asking for a
     /// `wire` declaration the source already has.
     fn lookup_connection(
         &self,
@@ -1423,11 +1485,10 @@ impl DigitalElaborator<'_> {
                 .unwrap_or_else(|| "an analog port".to_string());
             format!(
                 "net `{name}` joins discrete port `{port}` of instance `{path}` and {analog}, a \
-                 discipline boundary inside the HDL design; this compiler inserts connect \
-                 modules only where a deck node joins discrete and analog ports, not inside a \
-                 design (LRM 2.4 clause 7). Bring `{name}` out through a port of the top \
-                 module to a deck node, or join the two instances through an instance of a \
-                 converter module with one discrete and one electrical port"
+                 discipline boundary inside the HDL design; this compiler converts a discrete \
+                 port on a continuous net inside a design (LRM 2.4 clause 7) when the port \
+                 connects the whole of a scalar net, not a select of it or a concatenation. \
+                 Connect `{port}` to a scalar net of its own"
             )
         } else {
             format!(

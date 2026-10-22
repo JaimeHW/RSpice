@@ -1189,6 +1189,7 @@ impl SemanticAnalyzer {
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
             external_leaves: Vec::new(),
+            hoisted_ports: Vec::new(),
             arrays: HashMap::new(),
             symbol_table: SymbolTable::new(),
             digital: AnalyzedDigital::default(),

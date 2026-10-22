@@ -91,7 +91,7 @@ pub(super) fn resolve_includes(
     includes: &[VerilogAInclude],
     library_map: Option<&Path>,
     rules: &mut DesignConnectRules,
-    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+    deck: &super::veriloga_cache::DeckHdl,
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<Option<CachedVerilogAModel>>, SimulationError> {
@@ -172,7 +172,7 @@ pub(super) fn resolve_includes(
             models[index] = lookup_cached_veriloga_with_limits_and_abort(
                 path,
                 include.selected_module.as_deref(),
-                wreal_resolution,
+                deck,
                 limits,
                 abort,
             )?;
@@ -194,7 +194,7 @@ pub(super) fn resolve_includes(
             }
         }
         let prepared = if needs_preparation {
-            let prepared = prepare_veriloga_unit(&[path], None, wreal_resolution, limits, abort)?;
+            let prepared = prepare_veriloga_unit(&[path], None, deck, limits, abort)?;
             admit_source(prepared.preprocessed_source().len())?;
             for dependency in prepared.dependencies() {
                 dependency_versions.record(path, &dependency.path, dependency.content_identity)?;
@@ -292,7 +292,7 @@ pub(super) fn resolve_includes(
                 models: &mut models,
                 dependency_versions: &mut dependency_versions,
                 admit_source: &mut admit_source,
-                wreal_resolution,
+                deck,
             },
             limits,
             abort,
@@ -304,7 +304,7 @@ pub(super) fn resolve_includes(
     rules.finish_registration()?;
     let configuration = rules.configuration()?;
     let compiler = rspice_veriloga::VerilogACompiler::new(
-        super::veriloga_cache::deck_include_compiler_options(wreal_resolution),
+        super::veriloga_cache::deck_include_compiler_options(deck),
     );
     let control = super::veriloga_cache::VerilogACompileControl { abort };
     for group in frozen {
@@ -361,7 +361,7 @@ pub(super) fn resolve_includes(
                     selected,
                     super::veriloga_cache::configuration_identity(identity, configuration),
                     None,
-                    wreal_resolution,
+                    deck,
                     limits,
                     abort,
                 )? {
@@ -413,7 +413,7 @@ pub(super) fn resolve_includes(
                 configuration.as_deref(),
                 None,
                 original.map_or(&[], |entry| entry.dependencies.as_slice()),
-                wreal_resolution,
+                deck,
                 limits,
                 abort,
             )?;
@@ -464,8 +464,8 @@ struct UnitState<'a> {
     models: &'a mut [Option<CachedVerilogAModel>],
     dependency_versions: &'a mut DependencyVersions,
     admit_source: &'a mut dyn FnMut(usize) -> Result<(), SimulationError>,
-    /// The deck's resolution for a plain `wreal`.
-    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+    /// What the deck gives every compile beyond its sources.
+    deck: &'a super::veriloga_cache::DeckHdl,
 }
 
 /// A compilation unit of several files, after its first pass.
@@ -473,8 +473,9 @@ struct UnitPass {
     /// The includes of each file, in deck order.
     groups: Vec<Vec<usize>>,
     identity: [u8; 32],
-    /// The deck's resolution for a plain `wreal`, which keys every record.
-    wreal_resolution: rspice_veriloga::canonical_ir::digital::DigitalRealResolution,
+    /// What the deck gives every compile beyond its sources, which keys every
+    /// record.
+    deck: super::veriloga_cache::DeckHdl,
     /// The unit's preparation, unless every selection was a cache hit.
     prepared: Option<Box<rspice_veriloga::PreparedRuntimeSource>>,
 }
@@ -503,7 +504,7 @@ fn unit_first_pass(
         models,
         dependency_versions,
         admit_source,
-        wreal_resolution,
+        deck,
     } = state;
     let mut files: Vec<PathBuf> = groups
         .iter()
@@ -539,7 +540,7 @@ fn unit_first_pass(
             &include.file_path,
             include.selected_module.as_deref(),
             identity,
-            wreal_resolution,
+            deck,
             limits,
             abort,
         )?;
@@ -581,7 +582,7 @@ fn unit_first_pass(
         let prepared = Box::new(prepare_veriloga_unit(
             &paths,
             libraries.as_ref(),
-            wreal_resolution,
+            deck,
             limits,
             abort,
         )?);
@@ -620,7 +621,7 @@ fn unit_first_pass(
     Ok(UnitPass {
         groups,
         identity,
-        wreal_resolution,
+        deck: deck.clone(),
         prepared,
     })
 }
@@ -715,7 +716,7 @@ fn unit_second_pass(
                     selected,
                     configuration_identity(identity, configuration),
                     Some(unit.identity),
-                    unit.wreal_resolution,
+                    &unit.deck,
                     limits,
                     abort,
                 )? {
@@ -741,7 +742,7 @@ fn unit_second_pass(
                     module,
                 }),
                 &[],
-                unit.wreal_resolution,
+                &unit.deck,
                 limits,
                 abort,
             )?;

@@ -994,6 +994,24 @@ pub struct HirModel {
     /// to build from its own netlist ([`crate::CompilerOptions::external_cells`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub external_leaves: Vec<HirExternalLeaf>,
+    /// Discrete ports the design links on a circuit node of its own: a port
+    /// an in-design discipline boundary joins to a continuous net, and a
+    /// variable a SPICE leaf reads. The host links each as it links a
+    /// deck-level discrete port, so the deck's converters convert it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hoisted_ports: Vec<HirHoistedPort>,
+}
+
+/// One discrete signal of the design linked on a circuit node.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HirHoistedPort {
+    /// The signal in the digital plan.
+    pub signal: SmolStr,
+    /// Bit 0 of a scalar four-state signal; `None` for a real one.
+    pub bit: Option<u32>,
+    /// The way the port faces, from the design's side.
+    pub direction: crate::ast::PortDirection,
+    pub net: HirExternalNet,
 }
 
 /// One SPICE leaf of the design: an instance of a deck cell, or of an Annex E
@@ -1276,6 +1294,7 @@ impl HirModel {
                 .collect(),
             ground_nodes: module.ground_nodes.clone(),
             external_leaves: module.external_leaves.clone(),
+            hoisted_ports: module.hoisted_ports.clone(),
             digital_observations: Vec::new(),
             discrete_selections: module
                 .discrete_selections
