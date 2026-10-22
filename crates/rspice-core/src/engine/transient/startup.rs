@@ -1008,6 +1008,25 @@ impl Engine {
         initial_step.min(breakpoint_gap / 100.0)
     }
 
+    /// The first step of a run that starts at `start_time` sitting on a
+    /// breakpoint, as a run starts at t = 0: ngspice's initial step, capped
+    /// by the gap from `start_time` to `next_breakpoint`, not by that
+    /// breakpoint's absolute time. A resumed run and a stall restart both
+    /// start this way.
+    #[inline]
+    pub(super) fn ngspice_initial_timestep_from(
+        start_time: Value,
+        next_breakpoint: Option<Value>,
+        stop_time: Value,
+        tran_step_hint: Option<Value>,
+        hinted_max_step: Value,
+    ) -> Value {
+        Self::ngspice_t0_breakpoint_limited_initial_timestep(
+            Self::ngspice_initial_timestep(stop_time, tran_step_hint, hinted_max_step),
+            next_breakpoint.map(|breakpoint| breakpoint - start_time),
+        )
+    }
+
     #[inline]
     pub(super) fn startup_practical_min_timestep(
         has_bjts: bool,
@@ -1166,6 +1185,28 @@ mod tests {
         assert_close(
             Engine::ngspice_t0_breakpoint_limited_initial_timestep(initial, Some(1e-9)),
             1e-11,
+        );
+    }
+
+    #[test]
+    fn late_start_caps_first_step_by_the_gap_to_the_next_breakpoint() {
+        // A run restarted at 5 ms with a breakpoint 1 ns later: the gap caps
+        // the first step at 10 fs, where that breakpoint's absolute time
+        // (a 50 us cap) would leave ngspice's 10 ns seed untouched.
+        let (start, next) = (5e-3, 5e-3 + 1e-9);
+        let initial = Engine::ngspice_initial_timestep(10e-3, Some(1e-6), 1e-6);
+        assert_close(initial, 1e-8);
+        assert_close(
+            Engine::ngspice_t0_breakpoint_limited_initial_timestep(initial, Some(next)),
+            1e-8,
+        );
+
+        let step =
+            Engine::ngspice_initial_timestep_from(start, Some(next), 10e-3, Some(1e-6), 1e-6);
+        assert!((step / 1e-11 - 1.0).abs() < 1e-6, "first step {step:e}");
+        assert_eq!(
+            Engine::ngspice_initial_timestep_from(start, None, 10e-3, Some(1e-6), 1e-6).to_bits(),
+            initial.to_bits()
         );
     }
 

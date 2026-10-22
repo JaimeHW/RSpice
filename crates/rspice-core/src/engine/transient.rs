@@ -5425,11 +5425,12 @@ impl Engine {
             configured_initial_step
                 .map(|step| step.max(1e-30))
                 .unwrap_or_else(|| {
-                    Self::ngspice_t0_breakpoint_limited_initial_timestep(
-                        Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
-                        breakpoints
-                            .next_after(resume_time)
-                            .map(|breakpoint| breakpoint - resume_time),
+                    Self::ngspice_initial_timestep_from(
+                        resume_time,
+                        breakpoints.next_after(resume_time),
+                        tstop,
+                        tran_step_hint,
+                        hinted_max_step,
                     )
                 })
         };
@@ -7246,9 +7247,14 @@ impl Engine {
                         lte_warmup_skips = 2;
                     }
                     xyce_lte_restart_first_step = lte_estimator.uses_accepted_solution_reference();
-                    let restart_dt = Self::ngspice_t0_breakpoint_limited_initial_timestep(
-                        Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
+                    // The restart starts at `t` as a resumed run starts at
+                    // its checkpoint.
+                    let restart_dt = Self::ngspice_initial_timestep_from(
+                        t,
                         breakpoints.next_after(t),
+                        tstop,
+                        tran_step_hint,
+                        hinted_max_step,
                     );
                     timestep.force_step(restart_dt.max(timestep.preferred_min_dt()).min(max_step));
                     trap_order = native_order_after_restart(current_integration_method(&trapgear));
