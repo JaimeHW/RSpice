@@ -19,6 +19,7 @@ pub const REGISTRY: Registry = &[
     ("vss", vss),
     ("tper", tper),
     ("dead", dead),
+    ("dead_time", dead_time),
     ("ripple", ripple),
     ("ilmean", ilmean),
     ("vgate", vgate),
@@ -46,6 +47,11 @@ fn vss(_: &Context<'_>) -> Result<Expected, String> {
 
 fn tper(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![PERIOD]))
+}
+
+/// hs's fall to ls's rise: two ticks, 62.5 ns.
+fn dead_time(_: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![DEAD_TICKS * TICK]))
 }
 
 /// ls as the controller's schedule derives it from hs: up two ticks after

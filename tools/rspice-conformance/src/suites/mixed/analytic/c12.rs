@@ -11,10 +11,15 @@ use super::{Context, Registry};
 use crate::suites::mixed::compare::Expected;
 use crate::suites::mixed::measure::Measured;
 
-pub const REGISTRY: Registry = &[("ok", ok)];
+pub const REGISTRY: Registry = &[("ok", ok), ("okt", okt)];
 
 /// The verdict: 0 from the initial block, 1 at 1600 µs.
 const VERDICT_TIME: f64 = 1600e-6;
+
+/// When `ok` rises: 16 trim steps of 100 µs, 1600 µs.
+fn okt(_: &Context<'_>) -> Result<Expected, String> {
+    Ok(super::values(vec![VERDICT_TIME]))
+}
 
 fn ok(context: &Context<'_>) -> Result<Expected, String> {
     let nets = context

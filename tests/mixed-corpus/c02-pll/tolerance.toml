@@ -51,6 +51,17 @@ abs = 5e-11
 why = "locked; ≤ 1 VCO period / 50 cycles"
 
 [[q]]
+id = "fdiv.meas"
+analysis = "tran"
+variants = ["mx"]
+kind = "meas"
+signal = "fdiv"
+oracle = "O6"
+expect = "c02::fdiv"
+abs = 5.1e-11
+why = "the deck's .MEASURE of the divider's rises 1 and 50 after 20 us, over the 49 periods between them (a 51st rise falls past the 25 us stop): locked, each period is one reference period, 100 ns; every divider edge sits on a VCO edge, so the span is within one VCO period (2.5 ns at 400 MHz) of 49 reference periods, 2.5 ns / 49 = 51 ps"
+
+[[q]]
 id = "tlock"
 analysis = "tran"
 variants = ["xs"]

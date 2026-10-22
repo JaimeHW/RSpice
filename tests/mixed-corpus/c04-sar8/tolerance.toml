@@ -17,6 +17,17 @@ expect = "c04::codes"
 why = "the register's own bits at each eoc rise, read on the design's nets: a bit net carries what sar8 drove and eoc is the testbench's own event net in full, so neither is named by a converter endpoint, which only a variant with a converter there has; every input is mid-code, half an LSB (1.95 mV) from both decision levels: v(xcmp.o1) = 0.195 V, tanh(9.8), so every decision is unambiguous"
 
 [[q]]
+id = "tconv"
+analysis = "tran"
+variants = ["ports"]
+kind = "meas"
+signal = "tconv"
+oracle = "O6"
+expect = "c04::tconv"
+abs = 2e-12
+why = "the deck's .MEASURE from samp's fall to eoc's rise, on the register's own bits: samp falls at clock 0 and eoc rises at clock 9, both on posedges, so nine 100 ns clock periods, 900 ns; each edge is held to the module's 1 ps precision, two roundings"
+
+[[q]]
 id = "code"
 analysis = "tran"
 variants = ["full", "ports", "split"]

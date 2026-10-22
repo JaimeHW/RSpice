@@ -363,6 +363,18 @@ pub fn evaluate(
             }
             Ok(Measured::Values(codes))
         }
+        "meas" => {
+            let name = single_signal(spec, variant)?.to_ascii_lowercase();
+            let record = observation
+                .measures
+                .get(&name)
+                .ok_or_else(|| MeasureError::Missing(format!(".MEASURE {name}")))?;
+            match (record.value, &record.error) {
+                (_, Some(error)) => invalid(format!(".MEASURE {name}: {error}")),
+                (Some(value), None) => Ok(scaled(vec![value])),
+                (None, None) => invalid(format!(".MEASURE {name}: no value")),
+            }
+        }
         other => invalid(format!(
             "measure kind {other} is not evaluable on one observation"
         )),
@@ -1114,6 +1126,34 @@ mod tests {
         );
         held.at = Some(vec![-1.0]);
         assert!(evaluate(&held, "x", &observation).is_err());
+    }
+
+    #[test]
+    fn a_meas_quantity_reads_the_decks_named_measure() {
+        use crate::suites::mixed::case::MeasureRecord;
+        let mut observation = ramp();
+        observation
+            .measures
+            .insert("tconv".into(), MeasureRecord::of(Some(9e-7), None));
+        observation
+            .measures
+            .insert("late".into(), MeasureRecord::of(None, Some("no crossing")));
+        let mut meas = spec("meas");
+        meas.signal = Some(PerVariant::All("TCONV".into()));
+        assert_eq!(
+            evaluate(&meas, "x", &observation).unwrap(),
+            Measured::Values(vec![9e-7])
+        );
+        meas.signal = Some(PerVariant::All("late".into()));
+        let Err(MeasureError::Invalid(message)) = evaluate(&meas, "x", &observation) else {
+            panic!("a failed measure is invalid");
+        };
+        assert!(message.contains("no crossing"), "{message}");
+        meas.signal = Some(PerVariant::All("absent".into()));
+        assert!(matches!(
+            evaluate(&meas, "x", &observation),
+            Err(MeasureError::Missing(_))
+        ));
     }
 
     #[test]

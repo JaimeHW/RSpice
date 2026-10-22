@@ -48,7 +48,7 @@ use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_vocabulary::product::AnalysisInstanceId;
 
 use super::Route;
-use super::case::{CaseResult, ErrorRecord, Observation, canonical_signal};
+use super::case::{CaseResult, ErrorRecord, MeasureRecord, Observation, canonical_signal};
 use super::design::{Design, analysis_kind, at_transient_state, deck_cards};
 use super::measure::parse_expression;
 use crate::suites::deadline::DeadlineAbort;
@@ -158,6 +158,10 @@ pub fn retained_outputs(
             .into_iter()
             .flatten()
         {
+            if measure.kind == "meas" {
+                // A `.MEASURE` result is named by the deck, not retained.
+                continue;
+            }
             let mut expressions: Vec<String> = measure.signals.clone().unwrap_or_default();
             if let Some(signal) = measure
                 .signal
@@ -808,11 +812,13 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
             time,
             waveforms,
             events,
+            measurements,
             ..
         } => {
             observation.kind = "tran".into();
             observation.axis = time.clone();
             waveforms_into(&mut observation, waveforms);
+            record_measures(measurements, &mut observation);
             for history in &events.digital {
                 let trace = history
                     .points
@@ -1308,7 +1314,21 @@ fn run_transient(
 ) -> Result<Observation, rspice_core::SimulationError> {
     let result =
         engine.run_tran_with_startup_mode_and_abort(netlist, stop, max_step, startup, abort)?;
-    Ok(transient_observation(&result))
+    let mut observation = transient_observation(&result);
+    let measurements =
+        rspice_core::analysis::measure_signals::evaluate_tran_measurements(netlist, &result);
+    record_measures(&measurements, &mut observation);
+    Ok(observation)
+}
+
+/// Record the deck's `.MEASURE` results on `observation`.
+fn record_measures(measurements: &[rspice_core::MeasureResult], observation: &mut Observation) {
+    for measurement in measurements {
+        observation.measures.insert(
+            measurement.name.to_ascii_lowercase(),
+            MeasureRecord::of(measurement.value, measurement.error.as_deref()),
+        );
+    }
 }
 
 /// A core transient result as an observation (the fallback's result shape).

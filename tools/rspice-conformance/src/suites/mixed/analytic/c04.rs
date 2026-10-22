@@ -10,13 +10,19 @@ use num_complex::Complex64;
 use super::{Context, Registry, complex, points, values};
 use crate::suites::mixed::compare::Expected;
 
-pub const REGISTRY: Registry = &[("codes", codes), ("acc", acc), ("nz", nz)];
+pub const REGISTRY: Registry = &[("codes", codes), ("tconv", tconv), ("acc", acc), ("nz", nz)];
 
 /// The staircase's codes, in conversion order (`net/vin_codes.cir`).
 pub const STAIRCASE: [u8; 32] = [
     0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 127, 128, 129, 144, 170, 191, 200, 233, 250, 254, 255,
     64, 63, 32, 31, 16, 15, 7, 6, 4, 192,
 ];
+
+/// The clock period (`net/sar_ports.cir`).
+const CLOCK_PERIOD: f64 = 100e-9;
+/// Clocks from samp's fall (clock 0) to eoc's rise (clock 9), both on
+/// posedges (`net/sar8.v`).
+const CONVERSION_CLOCKS: f64 = 9.0;
 
 const GM: f64 = 1e-3;
 const RO: f64 = 100e3;
@@ -35,6 +41,11 @@ fn codes(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(
         STAIRCASE.iter().map(|code| f64::from(*code)).collect(),
     ))
+}
+
+/// One conversion, samp's fall to eoc's rise: nine clock periods, 900 ns.
+fn tconv(_: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![CONVERSION_CLOCKS * CLOCK_PERIOD]))
 }
 
 /// `v(xcmp.o1)/v(cref) = gm·ro/(1 + jf/fp)`: cref drives inn; the top plate

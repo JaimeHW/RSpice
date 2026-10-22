@@ -41,6 +41,17 @@ expect = "c12::ok"
 edge_abs = 1e-9
 why = "the trim ladder is monotonic: vref (1 + 100k/(75k - k 1k)) steps by 9.0 to 13.7 mV, inside [5 mV, 20 mV], so ok goes 0 -> 1 once, at 1600 us; digital, exact"
 
+[[q]]
+id = "okt"
+analysis = "tran"
+variants = ["full"]
+kind = "meas"
+signal = "okt"
+oracle = "O6"
+expect = "c12::okt"
+abs = 1e-12
+why = "the deck's .MEASURE WHEN ok rises, on its exact event time: the testbench raises ok after 16 trim steps of 100 us, at 1600 us"
+
 # vk.<k>: the testbench reads V(vout) 92.5 us after latching code k and holds
 # it on meas; each reading is compared with the operating point at code k
 # (oracle/c<k>.op.o5.ngspice.cir), the loop settled (C5: ~50 us after a latch).

@@ -5,5 +5,10 @@
 .include ../net/loopf_mx.cir
 .include ../net/pll-models.cir
 .param r1v=300 c1v=10n
+* The locked divider period, over the 49 periods from the first divider rise
+* after 20 us: a 51st rise would fall past the stop time.
+.measure tran tdiv TRIG D(d_divout) VAL=0.5 RISE=1 TD=20u
++ TARG D(d_divout) VAL=0.5 RISE=50 TD=20u
+.measure tran fdiv PARAM='tdiv/49'
 .tran 0.1n 25u uic
 .end

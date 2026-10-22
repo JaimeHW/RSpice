@@ -6,5 +6,8 @@
 .include ../net/vin_codes.cir
 .include ../net/sar_ports.cir
 .param vcc=1.8
+* One conversion, on the register's own bits: samp falls at clock 0 and eoc
+* rises at clock 9.
+.measure tran tconv TRIG D(samp) VAL=0.5 FALL=1 TARG D(eoc) VAL=0.5 RISE=1
 .tran 1n 32u
 .end

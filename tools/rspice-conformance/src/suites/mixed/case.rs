@@ -161,6 +161,38 @@ pub struct Observation {
     /// are only the ones the tolerance file already names.
     #[serde(default)]
     pub available_events: Vec<String>,
+    /// The deck's own `.MEASURE` results, by lower-case name, as the product
+    /// reported them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub measures: BTreeMap<String, MeasureRecord>,
+}
+
+/// One `.MEASURE` result: its value, and the product's error when it reported
+/// one (a measurement that misses its `GOAL` keeps its value). A non-finite
+/// value is withheld, as a non-finite series is.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeasureRecord {
+    #[serde(default)]
+    pub value: Option<f64>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl MeasureRecord {
+    /// The record of one product measurement.
+    pub fn of(value: Option<f64>, error: Option<&str>) -> Self {
+        let error = match (value, error) {
+            (_, Some(error)) => Some(error.to_owned()),
+            (Some(value), None) if !value.is_finite() => Some(format!("non-finite value {value}")),
+            (None, None) => Some("no value".to_owned()),
+            (Some(_), None) => None,
+        };
+        Self {
+            value: value.filter(|value| value.is_finite()),
+            error,
+        }
+    }
 }
 
 impl Observation {

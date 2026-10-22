@@ -11,5 +11,7 @@ xtb vout sclk sdi csn ok meas tb_ldo
 * The cell reads ok on its converter's endpoint, which a run records only when
 * named: the deck net ok carries the same bit.
 .esave xtb.ok__event_0
+* When the testbench's verdict rises.
+.measure tran okt WHEN D(xtb.ok__event_0)=0.5 RISE=1
 .tran 0.5u 1.65m
 .end

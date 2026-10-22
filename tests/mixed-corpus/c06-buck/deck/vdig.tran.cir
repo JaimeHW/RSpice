@@ -9,5 +9,11 @@ xctrl vout ghs gls buck_ctrl
 * The cell reads the gate drives on their converters' endpoints, which a run
 * records only when named: ghs and gls carry the same bits.
 .esave xctrl.hs__event_0 xctrl.ls__event_0
+* After the soft start: the dead time from hs's fall to ls's rise, and the
+* switching period between two hs rises.
+.measure tran dead TRIG D(xctrl.hs__event_0) VAL=0.5 FALL=1 TD=400u
++ TARG D(xctrl.ls__event_0) VAL=0.5 RISE=1 TD=400u
+.measure tran tper TRIG D(xctrl.hs__event_0) VAL=0.5 RISE=1 TD=400u
++ TARG D(xctrl.hs__event_0) VAL=0.5 RISE=2 TD=400u
 .tran 50n 0.8m
 .end

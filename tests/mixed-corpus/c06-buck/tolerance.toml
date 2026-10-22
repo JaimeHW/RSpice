@@ -157,6 +157,28 @@ expect = "c06::dead"
 edge_abs = 1e-12
 why = "ls rises 2 ticks (62.5 ns) after each hs fall and falls 2 ticks before the next hs rise; every edge on the 31.25 ns tick"
 
+[[q]]
+id = "dead.meas"
+analysis = "tran"
+variants = ["vdig"]
+kind = "meas"
+signal = "dead"
+oracle = "O6"
+expect = "c06::dead_time"
+abs = 1e-12
+why = "the deck's .MEASURE from the first hs fall after 400 us to the first ls rise after it, on the exact event times: ls rises 2 ticks after hs falls, 62.5 ns"
+
+[[q]]
+id = "tper.meas"
+analysis = "tran"
+variants = ["vdig"]
+kind = "meas"
+signal = "tper"
+oracle = "O6"
+expect = "c06::tper"
+abs = 1e-12
+why = "the deck's .MEASURE between the first two hs rises after 400 us, on the exact event times: hs rises at tick 2 of every 64-tick period, 2 us"
+
 # --- inductor current (settled, 2 ohm) ---------------------------------------
 # Peak-to-peak i(L) (the `pp` kind). The design's (Vin − Vout)·D·T/L with
 # D = Vout/Vin = 0.1047·(22u/L) A is the lossless continuous-duty figure; the
