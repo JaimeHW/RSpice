@@ -288,7 +288,7 @@ pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
     let bound_sections = bound_library_sections(state, &rows);
     // Nothing is proposed: the value is the user's to choose, and Apply
     // waits for it.
-    state.design.selection_bulk_edit = SelectionBulkEditDialogState {
+    *state.design.selection_bulk_edit = SelectionBulkEditDialogState {
         open: true,
         filter,
         selected,

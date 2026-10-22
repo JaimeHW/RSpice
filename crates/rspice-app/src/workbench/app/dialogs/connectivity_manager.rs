@@ -270,7 +270,7 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
         Ok(report) => (report, None),
         Err(error) => (ConnectivityReport::default(), Some(error)),
     };
-    state.design.connectivity_manager = ConnectivityManagerDialogState {
+    *state.design.connectivity_manager = ConnectivityManagerDialogState {
         open: true,
         authority: Some(SchematicEditAuthority::capture(state)),
         report,

@@ -67,11 +67,11 @@ pub(crate) struct DesignState {
 
     /// Named linear, rectangular, or radial documentation array transaction.
     pub(crate) array_selection:
-        crate::workbench::app::dialogs::selection::array::ArraySelectionDialogState,
+        Box<crate::workbench::app::dialogs::selection::array::ArraySelectionDialogState>,
 
     /// Pin-, parameter-, model-, and netlist-compatible instance replacement.
     pub(crate) replace_instance:
-        crate::workbench::app::dialogs::replace_instance::ReplaceInstanceDialogState,
+        Box<crate::workbench::app::dialogs::replace_instance::ReplaceInstanceDialogState>,
 
     /// Adopting a stimulus definition onto a placed source, or saving one from
     /// it. Both directions are one transaction over one instance, so they are
@@ -82,16 +82,16 @@ pub(crate) struct DesignState {
 
     /// Multi-document selected-instance extraction transaction.
     pub(crate) create_hierarchy:
-        crate::workbench::app::dialogs::hierarchy::create::CreateHierarchyDialogState,
+        Box<crate::workbench::app::dialogs::hierarchy::create::CreateHierarchyDialogState>,
 
     /// The project's design-rule deck.
     pub(crate) rule_setup: crate::workbench::app::dialogs::rule_setup::RuleSetupDialogState,
 
     /// Live connectivity, typed-bus, and reviewed repair manager.
-    pub(crate) connectivity_manager: ConnectivityManagerDialogState,
+    pub(crate) connectivity_manager: Box<ConnectivityManagerDialogState>,
 
     /// Filtered selection query and atomic active-owner property transaction.
-    pub(crate) selection_bulk_edit: SelectionBulkEditDialogState,
+    pub(crate) selection_bulk_edit: Box<SelectionBulkEditDialogState>,
 
     /// Durable anchored schematic review threads and resolution workflow.
     pub(crate) design_review_comments: DesignReviewCommentsDialogState,
