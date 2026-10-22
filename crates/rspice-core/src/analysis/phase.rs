@@ -19,15 +19,6 @@ pub(super) fn difference(from: Value, to: Value, period: Value) -> Option<Value>
     Some(reduced)
 }
 
-pub(super) fn group_delay(f0: Value, p0: Value, f1: Value, p1: Value) -> Option<Value> {
-    if !f0.is_finite() || !f1.is_finite() || f0 < 0.0 || f1 <= f0 {
-        return None;
-    }
-    let delta = difference(p0, p1, std::f64::consts::TAU)?;
-    let delay = -(delta / std::f64::consts::TAU) / (f1 - f0);
-    delay.is_finite().then_some(delay)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,6 +32,5 @@ mod tests {
             assert!(delta.abs() <= std::f64::consts::PI);
         }
         assert_eq!(difference(0.0, Value::NAN, 360.0), None);
-        assert_eq!(group_delay(1.0, 0.0, 1.0, 1.0), None);
     }
 }
