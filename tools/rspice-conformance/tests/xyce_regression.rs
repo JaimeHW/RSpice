@@ -28,6 +28,25 @@ const XYCE_CASE_RUNNER_RESULT_GRACE_MS: u128 = 1_000;
 const XYCE_PROGRESS_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const XYCE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 const XYCE_CLASSIFICATION_REPORT_ENV: &str = "RSPICE_XYCE_CLASSIFICATION_REPORT";
+const XYCE_CONTRACT_MANIFEST_FILE: &str = "contract-manifest.tsv";
+/// Contracts the watchdog here writes when the case runner itself failed. Such
+/// a result says nothing about the deck's contract, so the contract manifest
+/// skips it and `failed == 0` reports it.
+const XYCE_HARNESS_FAILURE_CONTRACTS: [&str; 4] = [
+    "case_runner_spawn_failure",
+    "case_runner_result_failure",
+    "hard_process_timeout",
+    "case_runner_poll_failure",
+];
+/// Appended to a contract-manifest failure: what the pin is and how to move it.
+const XYCE_CONTRACT_REBASELINE: &str = "\
+The contract manifest pins, for every deck, whether it executes, is expected \
+unsupported, or is upstream-excluded, and which contract judges it. To \
+re-baseline after a deliberate change, capture a fresh census:\n  \
+RSPICE_XYCE_CLASSIFICATION_REPORT=<report.tsv> cargo test --release -p rspice-conformance \\\n    \
+--test xyce_regression test_full_xyce_suite_summary_accounts_for_every_deck\n\
+then copy the report over tests/xyce/contract-manifest.tsv and say in the \
+commit message why each changed row is right.";
 const XYCE_GRID_ALIGNMENT_REPORT_ENV: &str = "RSPICE_XYCE_GRID_REPORT";
 const XYCE_GRID_ALIGNMENT_MANIFEST_FILE: &str = "grid-alignment-manifest.tsv";
 
@@ -478,6 +497,98 @@ fn xyce_grid_alignment_failures(
     failures
 }
 
+/// `deck -> (outcome, contract)` read from `tests/xyce/contract-manifest.tsv`.
+///
+/// Parsing is strict, like the grid-alignment manifest: malformed, unsorted,
+/// or duplicated rows and unknown outcomes are failures.
+fn read_xyce_contract_manifest(root: &Path) -> BTreeMap<String, (String, String)> {
+    let path = root.join(XYCE_CONTRACT_MANIFEST_FILE);
+    let content = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let mut manifest = BTreeMap::new();
+    let mut previous: Option<String> = None;
+    for (index, raw_line) in content.lines().enumerate() {
+        let line_number = index + 1;
+        let line = raw_line.trim_end_matches('\r');
+        if line.trim().is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        let [relative_path, outcome, contract] = fields[..] else {
+            panic!(
+                "{}:{line_number}: expected `<relative_path>\\t<outcome>\\t<contract>`, got {line:?}",
+                path.display()
+            );
+        };
+        assert!(
+            matches!(
+                outcome,
+                "executed" | "expected_unsupported" | "upstream_excluded"
+            ),
+            "{}:{line_number}: unknown outcome {outcome:?}",
+            path.display()
+        );
+        assert!(
+            !relative_path.is_empty() && !relative_path.contains('\\') && !contract.is_empty(),
+            "{}:{line_number}: needs a `/`-separated deck path and a contract, got {line:?}",
+            path.display()
+        );
+        assert!(
+            previous
+                .as_deref()
+                .is_none_or(|earlier| earlier < relative_path),
+            "{}:{line_number}: rows must be sorted and unique; {relative_path:?} \
+             does not follow {previous:?}",
+            path.display()
+        );
+        previous = Some(relative_path.to_string());
+        manifest.insert(
+            relative_path.to_string(),
+            (outcome.to_string(), contract.to_string()),
+        );
+    }
+    manifest
+}
+
+/// Check every deck's outcome and contract against the manifest, in both
+/// directions. `failed == 0` cannot see a deck that slides from its own
+/// contract to another passing one, or to expected-unsupported; this can.
+fn xyce_contract_manifest_failures(
+    results: &[XyceTestResult],
+    manifest: &BTreeMap<String, (String, String)>,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    let mut seen = BTreeSet::new();
+    for result in results {
+        seen.insert(result.relative_path.as_str());
+        if XYCE_HARNESS_FAILURE_CONTRACTS.contains(&result.contract.as_str()) {
+            continue;
+        }
+        let outcome = xyce_contract_outcome(result);
+        match manifest.get(&result.relative_path) {
+            Some((expected_outcome, expected_contract))
+                if expected_outcome == outcome && *expected_contract == result.contract => {}
+            Some((expected_outcome, expected_contract)) => failures.push(format!(
+                "{}: manifested as {expected_outcome} under {expected_contract}, \
+                 but ran as {outcome} under {}",
+                result.relative_path, result.contract
+            )),
+            None => failures.push(format!(
+                "{}: ran as {outcome} under {} but is absent from the contract manifest",
+                result.relative_path, result.contract
+            )),
+        }
+    }
+    for relative_path in manifest.keys() {
+        if !seen.contains(relative_path.as_str()) {
+            failures.push(format!(
+                "{relative_path}: named by the contract manifest but not discovered in the corpus"
+            ));
+        }
+    }
+    failures
+}
+
 fn validate_xyce_classification_field(name: &str, value: &str) -> io::Result<()> {
     if value.is_empty()
         || value
@@ -827,6 +938,67 @@ fn xyce_contract_fixture(relative_path: &str, outcome: &str, contract: &str) -> 
 }
 
 #[test]
+fn xyce_contract_manifest_names_exactly_the_discovered_decks() {
+    let root = get_xyce_tests_dir();
+    let manifest = read_xyce_contract_manifest(&root);
+    let discovered = XyceTestRunner::new(&root, XyceRunnerConfig::default())
+        .discover_tests()
+        .into_iter()
+        .map(|deck| deck.relative_path)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        manifest.keys().cloned().collect::<BTreeSet<_>>(),
+        discovered,
+        "the contract manifest must name every discovered deck and nothing else.\n\
+         {XYCE_CONTRACT_REBASELINE}"
+    );
+}
+
+#[test]
+fn xyce_contract_manifest_is_enforced_in_both_directions() {
+    let deck = |name: &str| format!("Netlists/ContractFixture/{name}.cir");
+    let manifest = BTreeMap::from([(
+        deck("pinned"),
+        ("executed".to_string(), "fixture_contract".to_string()),
+    )]);
+    let pinned = xyce_contract_fixture(&deck("pinned"), "executed", "fixture_contract");
+    assert!(xyce_contract_manifest_failures(std::slice::from_ref(&pinned), &manifest).is_empty());
+    // A case-runner failure carries the watchdog's contract, not the deck's.
+    let timed_out = xyce_contract_fixture(&deck("pinned"), "executed", "hard_process_timeout");
+    assert!(xyce_contract_manifest_failures(&[timed_out], &manifest).is_empty());
+
+    for moved in [
+        xyce_contract_fixture(&deck("pinned"), "executed", "generic_contract"),
+        xyce_contract_fixture(&deck("pinned"), "expected_unsupported", "fixture_contract"),
+    ] {
+        let failures = xyce_contract_manifest_failures(&[moved], &manifest);
+        assert_eq!(failures.len(), 1);
+        assert!(
+            failures[0].starts_with(&format!("{}: manifested as executed", deck("pinned"))),
+            "{}",
+            failures[0]
+        );
+    }
+
+    let newcomer = xyce_contract_fixture(&deck("newcomer"), "executed", "fixture_contract");
+    let failures = xyce_contract_manifest_failures(&[pinned, newcomer], &manifest);
+    assert_eq!(failures.len(), 1);
+    assert!(
+        failures[0].contains("absent from the contract manifest"),
+        "{}",
+        failures[0]
+    );
+
+    let vanished = xyce_contract_manifest_failures(&[], &manifest);
+    assert_eq!(vanished.len(), 1);
+    assert!(
+        vanished[0].contains("not discovered in the corpus"),
+        "{}",
+        vanished[0]
+    );
+}
+
+#[test]
 fn xyce_grid_alignment_manifest_parses_and_names_real_decks() {
     let root = get_xyce_tests_dir();
     let manifest = read_xyce_grid_alignment_manifest(&root);
@@ -1132,912 +1304,6 @@ fn test_xyce_wrapper_manifest_covers_trimmed_sidecar_contracts() {
         !runner.requires_upstream_wrapper("Netlists/RESISTOR/resistor.cir"),
         "plain resistor smoke deck should not require removed wrapper semantics"
     );
-}
-
-#[test]
-fn test_xyce_typed_expected_failure_wrapper_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    let cases = [
-        (
-            "Netlists/Certification_Tests/BUG_67/bug_67.cir",
-            "expected_failure_behavioral_expression_build",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_671/vpwl_binaryfile.cir",
-            "expected_failure_external_pwl_load",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_726/adjacent.cir",
-            "expected_failure_adjacent_coupling_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_744/bad_dc_op.cir",
-            "expected_failure_dc_operating_point",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_75_SON/bug75.cir",
-            "expected_failure_bug75_undefined_mutual_inductor_reference_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_1595/bug1595.cir",
-            "expected_failure_bug1595_hierarchical_mutual_inductor_reference_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_387_SON/bug_387.cir",
-            "expected_failure_missing_library_endl_parse",
-        ),
-        (
-            "Netlists/Message/Subcircuit/subckt_noname.cir",
-            "expected_failure_missing_subcircuit_name_parse",
-        ),
-        (
-            "Netlists/Message/Subcircuit/subckt_a2_dup_error.cir",
-            "expected_failure_message_subckt_a2_duplicate_binding_build",
-        ),
-        (
-            "Netlists/Message/Subcircuit/subckt_j1_dup_error.cir",
-            "expected_failure_message_subckt_j1_duplicate_binding_build",
-        ),
-        (
-            "Netlists/Message/Subcircuit/subckt_missing_ends.cir",
-            "expected_failure_subckt_missing_ends_end_card_parse",
-        ),
-        (
-            "Netlists/Message/Subcircuit/subckt_missing_ends2.cir",
-            "expected_failure_subckt_missing_ends_include_eof_parse",
-        ),
-        (
-            "Netlists/Message/Subcircuit/subckt_missing_ends3.cir",
-            "expected_failure_subckt_missing_ends_toplevel_eof_parse",
-        ),
-        (
-            "Netlists/Message/Subcircuit/subckt_missing_ends4.cir",
-            "expected_failure_subckt_missing_ends_ts_inv_eof_parse",
-        ),
-        (
-            "Netlists/Message/Input/DC_excessArgs.cir",
-            "expected_failure_dc_excess_arguments_parse",
-        ),
-        (
-            "Netlists/Message/Input/AC_setupSweepParam.cir",
-            "expected_failure_ac_unsupported_sweep_type_parse",
-        ),
-        (
-            "Netlists/Message/Input/NOISE_setupSweepParam.cir",
-            "expected_failure_noise_unsupported_sweep_type_parse",
-        ),
-        (
-            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2a.cir",
-            "expected_failure_message_missing_library_endl_parse",
-        ),
-        (
-            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2b.cir",
-            "expected_failure_message_missing_library_file_unquoted_parse",
-        ),
-        (
-            "Netlists/Message/Input/CircuitBlock_parseIncludeFile_2c.cir",
-            "expected_failure_message_missing_library_file_quoted_parse",
-        ),
-        (
-            "Netlists/Message/Device/CircuitBlock_addTableData_1.cir",
-            "expected_failure_message_duplicate_device_parse",
-        ),
-        (
-            "Netlists/Message/Device/DeviceBlock_extractNodes_1.cir",
-            "expected_failure_message_missing_device_nodes_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_702/dup-external.cir",
-            "expected_failure_bug702_duplicate_external_initcond_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_702/dup-inlined.cir",
-            "expected_failure_bug702_duplicate_inlined_initcond_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_702/empty-initcond.cir",
-            "expected_failure_bug702_malformed_initcond_file_load",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_702/missing-initcond.cir",
-            "expected_failure_bug702_missing_initcond_file_load",
-        ),
-        (
-            "Netlists/Certification_Tests/ISSUE_455/issue455.cir",
-            "expected_failure_duplicate_dc_source_function_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_1578/bug_1578.cir",
-            "expected_failure_bug1578_invalid_device_type_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_198/bug_198.cir",
-            "expected_failure_bug198_unrecognized_line_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_204/bug204.cir",
-            "expected_failure_bug204_invalid_dc_sweep_arity_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_258/bug_198.cir",
-            "expected_failure_bug258_unrecognized_line_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_587/587.cir",
-            "expected_failure_bug587_invalid_numeric_notation_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_281/bug_281.cir",
-            "expected_failure_bug281_invalid_dc_sweep_arity_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir",
-            "expected_failure_bug354_unknown_print_function_output_validation",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir",
-            "expected_failure_bug354_unknown_iv_print_function_output_validation",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir",
-            "expected_failure_bug354_unresolved_print_identifier_output_validation",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_401/bad-device-line.cir",
-            "expected_failure_bug401_bad_device_line_build",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_401/extra-space.cir",
-            "expected_failure_bug401_extra_space_build",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_401/worse-device-line.cir",
-            "expected_failure_bug401_worse_device_line_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_701/dup-toplevel.cir",
-            "expected_failure_bug701_duplicate_toplevel_device_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_701/dup-subcircuit.cir",
-            "expected_failure_bug701_duplicate_subcircuit_device_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_769/bug_769a.cir",
-            "expected_failure_bug769_parameter_node_voltage_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_769/bug_769b.cir",
-            "expected_failure_bug769_parameter_device_current_parse",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_769/bug_769c.cir",
-            "expected_failure_bug769_parameter_lead_current_parse",
-        ),
-    ];
-
-    let mut observed_contracts = BTreeSet::new();
-    for (relative, expected_contract) in cases {
-        assert!(
-            runner.requires_upstream_wrapper(relative),
-            "{relative} must retain removed-wrapper manifest provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} must execute and validate its typed expected failure, got {result:?}"
-        );
-        assert_eq!(result.contract, expected_contract);
-        assert!(
-            observed_contracts.insert(result.contract),
-            "{relative} must not share an indistinguishable result contract"
-        );
-    }
-    assert_eq!(
-        observed_contracts.len(),
-        44,
-        "the expected-failure oracle census is exactly forty-four distinct physical records"
-    );
-}
-
-#[test]
-fn test_xyce_bug702_positive_initcond_aliases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for (relative, expected_contract) in [
-        (
-            "Netlists/Certification_Tests/BUG_702/inlined-multiple.cir",
-            "bug702_inlined_multiple_initcond_alias_tran",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_702/inlined-single.cir",
-            "bug702_inlined_single_initcond_alias_tran",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_702/external.cir",
-            "bug702_external_initcond_alias_tran",
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_702/precedence.cir",
-            "bug702_initcond_precedence_alias_tran",
-        ),
-    ] {
-        assert!(
-            runner.requires_upstream_wrapper(relative),
-            "{relative} must retain BUG702 wrapper provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} must execute its BUG702 alias transient oracle, got {result:?}"
-        );
-        assert_eq!(result.contract, expected_contract);
-        assert!(result.mismatches.is_empty());
-    }
-}
-
-#[test]
-fn test_xyce_static_prn_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/RESISTOR/resistor.cir",
-        "Netlists/RESISTOR/resistor_neg.cir",
-        "Netlists/ABM_EXPLN/exp_const.cir",
-        "Netlists/ABM_SCT/sct.cir",
-        "Netlists/BJT_PSPICE_NK/bjt_test_nk.cir",
-        "Netlists/BINARYOPS/binary_funcs.cir",
-        "Netlists/Certification_Tests/BUG_302/DC_comma.cir",
-        "Netlists/Certification_Tests/BUG_302/DC_defaults.cir",
-        "Netlists/Certification_Tests/BUG_302/DC_delimiter_invalid.cir",
-        "Netlists/Certification_Tests/BUG_302/DC_tab.cir",
-        "Netlists/Certification_Tests/BUG_28_SON/bug_28_son2.cir",
-        "Netlists/Certification_Tests/BUG_1456/bug_1456.cir",
-        "Netlists/Certification_Tests/BUG_1602/vbic_3T_et_cf.cir",
-        "Netlists/Certification_Tests/BUG_1602/vbic_3T_et_cf_TNOM27.cir",
-        "Netlists/Certification_Tests/BUG_1807/vbic_pnp_default.cir",
-        "Netlists/EXPPRINT/expPrint.cir",
-        "Netlists/MOS6/nmos6_dc.cir",
-        "Netlists/MOS6/pmos6_dc.cir",
-        "Netlists/NMESFET/nmesfet.cir",
-        "Netlists/NJFET_DC/njfet-2109.cir",
-        "Netlists/NMOS1_DC/nmos1.cir",
-        "Netlists/NMOS3_DC/mos3_dc.cir",
-        "Netlists/NPN_DC/npn1.cir",
-        "Netlists/PARAMS2/Params_A0.cir",
-        "Netlists/PARAMS2/Params_A1.cir",
-        "Netlists/PARAMS2/Params_A2.cir",
-        "Netlists/PARAMS2/Params_A3.cir",
-        "Netlists/PARAMS2/Params_A4.cir",
-        "Netlists/PARAMS2/Params_A5.cir",
-        "Netlists/PARAMS2/Params_A5_hs.cir",
-        "Netlists/PARAMS2/Params_A6.cir",
-        "Netlists/PARAMS2/Params_A6_hs.cir",
-        "Netlists/PARAMS2/Params_A7.cir",
-        "Netlists/PARAMS2/Params_A7_hs.cir",
-        "Netlists/PARAMS2/Params_A8.cir",
-        "Netlists/PARAMS2/Params_A8_hs.cir",
-        "Netlists/PARAMS2/Params_B0.cir",
-        "Netlists/PARAMS2/Params_B1.cir",
-        "Netlists/PARAMS2/Params_B2.cir",
-        "Netlists/PARAMS2/Params_B3.cir",
-        "Netlists/PARAMS2/Params_B4.cir",
-        "Netlists/PARAMS2/Params_B5.cir",
-        "Netlists/PARAMS2/Params_B5_hs.cir",
-        "Netlists/PARAMS2/Params_B6.cir",
-        "Netlists/PARAMS2/Params_B6_hs.cir",
-        "Netlists/PARAMS2/Params_B7.cir",
-        "Netlists/PARAMS2/Params_B7_hs.cir",
-        "Netlists/PARAMS2/Params_C0.cir",
-        "Netlists/PARAMS2/Params_C1.cir",
-        "Netlists/PARAMS2/Params_C2.cir",
-        "Netlists/PARAMS2/Params_C3.cir",
-        "Netlists/PARAMS2/Params_C3_hs.cir",
-        "Netlists/PARAMS2/Params_C4.cir",
-        "Netlists/PARAMS2/Params_C4_hs.cir",
-        "Netlists/PARAMS2/Params_C5.cir",
-        "Netlists/PARAMS2/Params_C5_hs.cir",
-        "Netlists/PARAMS2/Params_C6.cir",
-        "Netlists/PARAMS2/Params_C7.cir",
-        "Netlists/PARAMS2/Params_C8.cir",
-        "Netlists/PARAMS2/Params_C9.cir",
-        "Netlists/PARAMS2/Params_D0.cir",
-        "Netlists/PARAMS2/Params_D1.cir",
-        "Netlists/PARAMS2/Params_D2.cir",
-        "Netlists/PARAMS2/Params_D3.cir",
-        "Netlists/PARAMS2/Params_D3_hs.cir",
-        "Netlists/PARAMS2/Params_D4.cir",
-        "Netlists/PARAMS2/Params_D4_hs.cir",
-        "Netlists/PARAMS2/Params_D5.cir",
-        "Netlists/PARAMS2/Params_D5_hs.cir",
-        "Netlists/PARAMS2/Params_E1.cir",
-        "Netlists/PARAMS2/Params_G1.cir",
-        "Netlists/PJFET_DC/pjfet-2108.cir",
-        "Netlists/PMOS1_DC/pmos1.cir",
-        "Netlists/PNP_DC/pnp1.cir",
-        "Netlists/POLY/oneVarFourthOrd.cir",
-        "Netlists/POLY/poly.cir",
-        "Netlists/POLY/twoVarThirdOrd.cir",
-        "Netlists/REDUND_REMOVE/exprGnd.cir",
-        "Netlists/RESISTOR_TD/temp_dep_2.cir",
-        "Netlists/SUBCKT/subckt_h0.cir",
-        "Netlists/SUBCKT/subckt_h0_hs.cir",
-        "Netlists/SUBCKT/subckt_i1.cir",
-        "Netlists/SUBCKT/subckt_i2.cir",
-        "Netlists/SUBCKT/subckt_i3.cir",
-        "Netlists/SUBCKT/subckt_i3_hs.cir",
-        "Netlists/SUPERNODE/supernode2.cir",
-        "Netlists/SUPERNODE/supernode3.cir",
-        "Netlists/SUPERNODE/supernode4.cir",
-        "Netlists/SUPERNODE/supernode5.cir",
-        "Netlists/UNARYOPS/unary_funcs.cir",
-        "Netlists/VDMOS_DC/irf130.cir",
-        "Netlists/VDMOS_DC/irhc110.cir",
-        "Netlists/VDMOS_DC/mtb60p06v.cir",
-    ] {
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a numeric Xyce .prn comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in Xyce .prn oracle"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_level1_npn_transient_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/MCNC_BJT_LATCH/latch.cir",
-        "Netlists/MCNC_BJT_RCA/rca.cir",
-    ] {
-        assert!(
-            !runner.requires_upstream_wrapper(relative),
-            "{relative} should be a native Xyce deck without removed wrapper provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run inside the validated native Level-1 NPN transient envelope, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in Xyce .prn oracle"
-        );
-        assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_static_ac_fd_prn_wrapper_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/ABM_DB/dbTest.cir",
-        "Netlists/ACtests/RC_simple.cir",
-        "Netlists/ACtests/lowpass_old.cir",
-        "Netlists/ACtests/reg0.cir",
-        "Netlists/Output/AC/ac-gnuplot.cir",
-        "Netlists/LEAD_CURRENTS/lead_min_ac.cir",
-        "Netlists/LEAD_CURRENTS/lead_bsrc_ac.cir",
-        "Netlists/COMPLEX_NUM/test1.cir",
-        "Netlists/COMPLEX_NUM/test3.cir",
-        "Netlists/Certification_Tests/BUG_401_SON/bug_401.cir",
-        "Netlists/Certification_Tests/BUG_407_SON/bug_407_ac.cir",
-        "Netlists/Certification_Tests/BUG_1035_SON/RC_AC_data_exprAlone.cir",
-        "Netlists/Certification_Tests/BUG_1035_SON/RC_simple.cir",
-        "Netlists/Certification_Tests/BUG_1212_SON/bug1212.cir",
-        "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir",
-        "Netlists/Certification_Tests/BUG_701_SON/ac_files.cir",
-        "Netlists/Output/AC/ac-phase-in-radians.cir",
-        "Netlists/Output/AC/ac-prn.cir",
-        "Netlists/Output/AC/ac-prn-diff.cir",
-        "Netlists/Output/AC/ac-touchstone-defaults-to-prn.cir",
-        "Netlists/Output/AC/op-print-line-order.cir",
-        "Netlists/Output/AC/op-prn.cir",
-        "Netlists/Output/Dasho/ac.cir",
-    ] {
-        assert!(
-            runner.requires_upstream_wrapper(relative),
-            "{relative} should retain removed wrapper provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a native wrapper-origin Xyce AC .FD.prn comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in Xyce .FD.prn oracle"
-        );
-        assert_eq!(
-            result.contract, "wrapper_static_fd_prn_ac",
-            "{relative} should report the wrapper-origin AC .FD.prn contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_static_ac_fd_csv_wrapper_case_runs() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/Certification_Tests/BUG_701_SON/ac_files_csv.cir",
-        "Netlists/Output/AC/ac-csv.cir",
-        "Netlists/Output/AC/op-csv.cir",
-    ] {
-        assert!(
-            runner.requires_upstream_wrapper(relative),
-            "{relative} should retain removed wrapper provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a native wrapper-origin Xyce AC .FD.csv comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in Xyce .FD.csv oracle"
-        );
-        assert_eq!(
-            result.contract, "wrapper_static_fd_csv_ac",
-            "{relative} should report the wrapper-origin AC .FD.csv contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_static_ac_ic_td_wrapper_case_runs() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    let relative = "Netlists/Output/AC/op-td-prn.cir";
-    assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain removed wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native wrapper-origin Xyce AC_IC .TD.prn comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .TD.prn oracle"
-    );
-    assert_eq!(
-        result.contract, "wrapper_static_td_prn_ac_ic",
-        "{relative} should report the wrapper-origin AC_IC .TD.prn contract"
-    );
-}
-
-#[test]
-fn test_xyce_static_ac_probe_wrapper_case_runs() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    let relative = "Netlists/Output/AC/ac-probe.cir";
-    assert!(
-        runner.requires_upstream_wrapper(relative),
-        "{relative} should retain removed wrapper provenance"
-    );
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native wrapper-origin Xyce AC PROBE/CSDF comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .csd oracle"
-    );
-    assert_eq!(
-        result.contract, "wrapper_csd_ac",
-        "{relative} should report the wrapper-origin AC CSDF contract"
-    );
-}
-
-#[test]
-fn test_xyce_static_ac_step_fd_prn_wrapper_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/Output/AC/ac-step-gnuplot.cir",
-        "Netlists/Output/AC/ac-stepnum-col.cir",
-        "Netlists/Output/AC/ac-step-prn.cir",
-        "Netlists/Output/AC/op-step-prn.cir",
-    ] {
-        assert!(
-            runner.requires_upstream_wrapper(relative),
-            "{relative} should retain removed stepped AC PRN wrapper provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a native wrapper-origin stepped Xyce AC .FD.prn comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in stepped Xyce .FD.prn oracle"
-        );
-        assert_eq!(
-            result.contract, "wrapper_static_fd_prn_step_ac",
-            "{relative} should report the wrapper-origin stepped AC .FD.prn contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_static_ac_step_probe_wrapper_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/Output/AC/ac-step-probe.cir",
-        "Netlists/Output/AC/op-step-probe.cir",
-    ] {
-        assert!(
-            runner.requires_upstream_wrapper(relative),
-            "{relative} should retain removed stepped AC PROBE wrapper provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a native wrapper-origin stepped Xyce AC PROBE/CSDF comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in stepped Xyce .csd oracle"
-        );
-        assert_eq!(
-            result.contract, "wrapper_csd_step_ac",
-            "{relative} should report the wrapper-origin stepped AC CSDF contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_transient_delimiter_option_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/Certification_Tests/BUG_302/transient_comma.cir",
-        "Netlists/Certification_Tests/BUG_302/transient_defaults.cir",
-        "Netlists/Certification_Tests/BUG_302/transient_tab.cir",
-        "Netlists/Certification_Tests/BUG_302/transient_delimiter_invalid.cir",
-    ] {
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a native Xyce transient delimiter .prn comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in Xyce .prn oracle"
-        );
-        assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_hyperbolic_abm_transient_case_runs() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    let relative = "Netlists/Certification_Tests/BUG_254/atanh_tanh.cir";
-
-    let result = runner.run_test(root.join(relative));
-    assert!(
-        result.passed && !result.expected_unsupported,
-        "{relative} should run as a native Xyce hyperbolic ABM transient .prn comparison, got {result:?}"
-    );
-    assert!(
-        result.mismatches.is_empty(),
-        "{relative} should match the checked-in Xyce .prn oracle"
-    );
-    assert_eq!(
-        result.contract, "static_prn_tran",
-        "{relative} should report the native transient .prn contract"
-    );
-}
-
-#[test]
-fn test_xyce_bug_307_311_wrapper_transient_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/Certification_Tests/BUG_307/bug_307_d.cir",
-        "Netlists/Certification_Tests/BUG_311/bug_311_a.cir",
-    ] {
-        assert!(
-            runner.requires_upstream_wrapper(relative),
-            "{relative} should retain removed wrapper provenance"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a native wrapper-origin Xyce transient .prn comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in Xyce .prn oracle"
-        );
-        assert_eq!(
-            result.contract, "wrapper_static_prn_tran",
-            "{relative} should report the wrapper-origin transient .prn contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_bug_307_311_native_transient_cases_run() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for relative in [
-        "Netlists/Certification_Tests/BUG_307/bug_307_e.cir",
-        "Netlists/Certification_Tests/BUG_307/bug_307_f.cir",
-        "Netlists/Certification_Tests/BUG_307/bug_307_g.cir",
-        "Netlists/Certification_Tests/BUG_307/bug_307_h.cir",
-        "Netlists/Certification_Tests/BUG_307/bug_307_i.cir",
-        "Netlists/Certification_Tests/BUG_311/bug_311_b.cir",
-    ] {
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should run as a native Xyce transient .prn comparison, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should match the checked-in Xyce .prn oracle"
-        );
-        assert_eq!(
-            result.contract, "static_prn_tran",
-            "{relative} should report the native transient .prn contract"
-        );
-    }
-}
-
-#[test]
-fn test_xyce_bug_318_scoped_model_family_runs_exactly() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for (relative, expected_contract, wrapper_origin) in [
-        (
-            "Netlists/Certification_Tests/BUG_318/bug_318.cir",
-            "scoped_model_family_wrapper",
-            true,
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_318/bug_318_noscope.cir",
-            "scoped_model_family_baseline",
-            false,
-        ),
-    ] {
-        assert_eq!(
-            runner.requires_upstream_wrapper(relative),
-            wrapper_origin,
-            "{relative} wrapper provenance changed"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should pass the exact scoped-model relational contract, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should have bit-exact time/probe/value parity with its sibling representation"
-        );
-        assert_eq!(result.contract, expected_contract);
-    }
-}
-
-#[test]
-fn test_xyce_bjt_external_node_family_runs_exact_dc_parity() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for (relative, expected_contract, wrapper_origin) in [
-        (
-            "Netlists/BJT_EXTNODE/npn.cir",
-            "bjt_external_node_family_wrapper",
-            true,
-        ),
-        (
-            "Netlists/BJT_EXTNODE/npn1.cir",
-            "bjt_external_node_family_baseline",
-            false,
-        ),
-        (
-            "Netlists/BJT_EXTNODE/npn2.cir",
-            "bjt_external_node_family_wrapper",
-            false,
-        ),
-    ] {
-        assert_eq!(
-            runner.requires_upstream_wrapper(relative),
-            wrapper_origin,
-            "{relative} wrapper provenance changed"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should pass exact omitted/explicit grounded-substrate DC parity, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should have bit-exact sweep/probe/value parity with its sibling representation"
-        );
-        assert_eq!(result.contract, expected_contract);
-    }
-}
-
-#[test]
-fn test_xyce_sin_expression_family_runs_exact_transient_parity() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for (relative, expected_contract, wrapper_origin) in [
-        (
-            "Netlists/Certification_Tests/BUG_791_SON/bug791.cir",
-            "sin_expression_family_wrapper",
-            true,
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_791_SON/bug791_vsrc.cir",
-            "sin_expression_family_baseline",
-            false,
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_791_SON/bug791_expr.cir",
-            "sin_expression_family_wrapper",
-            false,
-        ),
-    ] {
-        assert_eq!(
-            runner.requires_upstream_wrapper(relative),
-            wrapper_origin,
-            "{relative} wrapper provenance changed"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should pass exact independent-SIN/behavioral-SPICE_SIN parity, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should have bit-exact time/probe/value parity with its sibling representation"
-        );
-        assert_eq!(result.contract, expected_contract);
-    }
-}
-
-#[test]
-fn test_xyce_bug_1806_parameter_expression_family_runs_canonical_transient_parity() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for (relative, expected_contract, wrapper_origin) in [
-        (
-            "Netlists/Certification_Tests/BUG_1806/bug_1806.cir",
-            "param_expression_family_wrapper",
-            true,
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_1806/bug_1806_2.cir",
-            "param_expression_family_baseline",
-            false,
-        ),
-        (
-            "Netlists/Certification_Tests/BUG_1806/bug_1806_2a.cir",
-            "param_expression_family_wrapper",
-            false,
-        ),
-    ] {
-        assert_eq!(
-            runner.requires_upstream_wrapper(relative),
-            wrapper_origin,
-            "{relative} wrapper provenance changed"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should pass strict parameter/literal expression qualification and the canonical xyce_verify transient oracle, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should satisfy the Release 7.10 interpolated RMS comparison"
-        );
-        assert_eq!(result.contract, expected_contract);
-    }
-}
-
-#[test]
-fn test_xyce_bug_374_passive_primary_value_composite_runs_exact_prn_parity() {
-    let _xyce_runner_guard = lock_xyce_runner();
-    let root = get_xyce_tests_dir();
-    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-
-    for (relative, expected_contract, wrapper_origin) in [
-        (
-            "Netlists/BUG_374/bug_374.cir",
-            "passive_primary_value_composite_wrapper",
-            true,
-        ),
-        (
-            "Netlists/BUG_374/capacitor.cir",
-            "passive_primary_value_capacitor_tran_baseline",
-            false,
-        ),
-        (
-            "Netlists/BUG_374/capacitor-bug.cir",
-            "passive_primary_value_capacitor_tran_wrapper",
-            false,
-        ),
-        (
-            "Netlists/BUG_374/resistor.cir",
-            "passive_primary_value_resistor_dc_baseline",
-            false,
-        ),
-        (
-            "Netlists/BUG_374/resistor-bug.cir",
-            "passive_primary_value_resistor_dc_wrapper",
-            false,
-        ),
-    ] {
-        assert_eq!(
-            runner.requires_upstream_wrapper(relative),
-            wrapper_origin,
-            "{relative} wrapper provenance changed"
-        );
-        let result = runner.run_test(root.join(relative));
-        assert!(
-            result.passed && !result.expected_unsupported,
-            "{relative} should pass exact named/positional passive primary-value PRN parity, got {result:?}"
-        );
-        assert!(
-            result.mismatches.is_empty(),
-            "{relative} should satisfy the Release 7.10 byte-exact default-PRN comparison"
-        );
-        assert_eq!(result.contract, expected_contract);
-    }
 }
 
 #[test]
@@ -12174,9 +11440,9 @@ fn test_xyce_bug1692_noworkee_remains_upstream_excluded() {
     );
 }
 
-// The aggregate intentionally replays every retained deck and therefore has
-// release-profile runtime requirements. Individual supported contracts remain
-// in the normal test tier above, while nightly release CI runs this full census.
+// The aggregate replays every retained deck, so it runs only in release (the
+// nightly and engine-release workflows). Each deck's numbers are held by
+// `failed == 0`, its contract by the contract manifest.
 #[cfg_attr(
     debug_assertions,
     ignore = "release-only full Xyce corpus; run with `cargo test --release -p rspice-conformance --test xyce_regression test_full_xyce_suite_summary_accounts_for_every_deck`"
@@ -12242,12 +11508,20 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         stats.executed > 0,
         "At least one Xyce deck must run as a numeric comparison"
     );
-    // Checked before the pass/fail census, and deliberately. A comparison's
-    // geometry is decided by the two time axes alone, so it is just as valid on
-    // a deck that then failed on values; and if this ran second, a corpus that
-    // is red for any unrelated reason would take the grid pin offline with it —
-    // which is exactly when a quiet slide from index alignment to interpolation
-    // would go unnoticed.
+    // Both manifests are checked before the pass/fail census, and deliberately.
+    // A deck's contract is chosen before it runs, and a comparison's geometry is
+    // decided by the two time axes alone, so both are just as valid on a deck
+    // that then failed on values; checked second, a corpus that is red for any
+    // unrelated reason would take the pins offline with it. Contracts go first
+    // because a moved contract is the usual reason a grid pin breaks.
+    let contract_failures =
+        xyce_contract_manifest_failures(&results, &read_xyce_contract_manifest(&root));
+    assert!(
+        contract_failures.is_empty(),
+        "Xyce contract manifest disagrees with the suite in {} place(s):\n{}\n\n{XYCE_CONTRACT_REBASELINE}",
+        contract_failures.len(),
+        contract_failures.join("\n")
+    );
     let grid_alignment_failures =
         xyce_grid_alignment_failures(&results, &read_xyce_grid_alignment_manifest(&root));
     assert!(
