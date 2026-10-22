@@ -21,10 +21,6 @@
 
 use crate::Value;
 
-mod ac;
 mod dc;
 
-pub use ac::{
-    AcSweepType, AcTransferAnalyzer, AcTransferConfig, AcTransferPoint, AcTransferResult,
-};
-pub use dc::{TransferFunctionConfig, TransferFunctionResult};
+pub use dc::TransferFunctionResult;

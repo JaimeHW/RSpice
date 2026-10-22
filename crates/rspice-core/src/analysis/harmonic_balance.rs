@@ -35,15 +35,13 @@
 
 mod config;
 mod fft;
-mod multi_tone;
 mod result;
 mod solver;
 
 pub use config::{HbConfig, HbConfigError, HbTone};
 pub use fft::HbFft;
-pub use multi_tone::{FrequencyIndex, FrequencyMap, MultiToneConfig};
 pub use result::{
-    HarmonicData, HbContinuationLimitation, HbPhaseProjectionError, HbPhaseState, HbReactiveKind,
+    HbContinuationLimitation, HbPhaseProjectionError, HbPhaseState, HbReactiveKind,
     HbReactivePhaseState, HbReactiveSpectrum, HbResult, SpectralBranchCurrent, SpectralVoltage,
 };
 #[cfg(test)]

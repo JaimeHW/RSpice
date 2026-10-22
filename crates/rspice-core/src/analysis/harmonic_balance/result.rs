@@ -228,54 +228,6 @@ impl SpectralVoltage {
     }
 }
 
-/// Detailed data for a single harmonic
-#[derive(Debug, Clone)]
-pub struct HarmonicData {
-    /// Harmonic index (0 = DC, 1 = fundamental, etc.)
-    pub index: usize,
-
-    /// Frequency in Hz
-    pub frequency: Value,
-
-    /// Complex coefficient
-    pub coefficient: Complex64,
-
-    /// Magnitude
-    pub magnitude: Value,
-
-    /// Phase in radians
-    pub phase: Value,
-
-    /// Magnitude in dBV
-    pub magnitude_dbv: Value,
-
-    /// Phase in degrees
-    pub phase_degrees: Value,
-}
-
-impl HarmonicData {
-    /// Create from coefficient
-    pub fn from_coefficient(index: usize, frequency: Value, coeff: Complex64) -> Self {
-        let magnitude = coeff.norm();
-        let phase = coeff.arg();
-        let magnitude_dbv = if magnitude > 1e-15 {
-            20.0 * magnitude.log10()
-        } else {
-            -300.0
-        };
-
-        Self {
-            index,
-            frequency,
-            coefficient: coeff,
-            magnitude,
-            phase,
-            magnitude_dbv,
-            phase_degrees: phase.to_degrees(),
-        }
-    }
-}
-
 /// Complete result of Harmonic Balance analysis
 #[derive(Debug, Clone)]
 pub struct HbResult {

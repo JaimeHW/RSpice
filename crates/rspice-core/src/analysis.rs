@@ -24,7 +24,6 @@
 // deciding which of the two to open was guesswork.
 pub mod ac;
 mod assertions;
-pub mod corner;
 pub mod dc;
 pub mod dcmatch;
 pub mod distortion;
@@ -48,7 +47,6 @@ pub mod pac;
 mod phase;
 pub mod pnoise;
 pub mod pole_zero;
-pub mod post_processing;
 pub mod pss;
 pub mod pstb;
 pub mod pxf;
@@ -103,16 +101,12 @@ pub use stb::{
     StbConfig, StbConfigError, StbResult, StbSweepType,
 };
 pub use temperature::{ResistorTempCoeffs, TemperatureContext};
-pub use transfer::{TransferFunctionConfig, TransferFunctionResult};
+pub use transfer::TransferFunctionResult;
 pub use {
     ac::AcResult,
     assertions::{
         AssertViolation, AssertionReport, evaluate_dc_assertions, evaluate_op_assertions,
         evaluate_tran_assertions,
-    },
-    corner::{
-        CornerConfig, CornerPoint, CornerResult, CornerRunner, CornerSimResult, CornerSummary,
-        ProcessCorner,
     },
     dc::{DcAnalysis, DcSweep},
     distortion::{
@@ -120,10 +114,9 @@ pub use {
     },
     fourier::{FourierAnalysis, FourierConfig, FourierError, FourierResult, HarmonicComponent},
     harmonic_balance::{
-        FrequencyIndex, FrequencyMap, HarmonicData, HbConfig, HbContinuationLimitation, HbError,
-        HbFft, HbPhaseProjectionError, HbPhaseState, HbReactiveKind, HbReactivePhaseState,
-        HbReactiveSpectrum, HbResult, HbSolver, HbSolverState, HbTone, MultiToneConfig,
-        SpectralBranchCurrent, SpectralVoltage,
+        HbConfig, HbContinuationLimitation, HbError, HbFft, HbPhaseProjectionError, HbPhaseState,
+        HbReactiveKind, HbReactivePhaseState, HbReactiveSpectrum, HbResult, HbSolver,
+        HbSolverState, HbTone, SpectralBranchCurrent, SpectralVoltage,
     },
     measure::{
         ContinuousMeasureAggregatePolicy, ContinuousMeasureCoordinate,

@@ -302,12 +302,11 @@ mod tests {
     use crate::abort_signal::{CountingAbort, ImmediateAbort, NoAbort};
 
     #[test]
-    fn periodic_frequency_density_reaches_pac_pxf_stb_and_transfer_configs() {
+    fn periodic_frequency_density_reaches_pac_pxf_and_stb_configs() {
         use crate::analysis::{
             pac::{PacConfig, PacSweepType},
             pxf::{PxfConfig, PxfSweepType},
             stb::{StbConfig, StbSweepType},
-            transfer::{AcSweepType, AcTransferConfig},
         };
         for (octave, start, stop, density, expected) in [
             (
@@ -362,10 +361,6 @@ mod tests {
                 } else {
                     StbSweepType::Decade
                 });
-            let mut transfer = AcTransferConfig::decade("out", "V1", start, stop, density);
-            if octave {
-                transfer.sweep_type = AcSweepType::Octave;
-            }
             for count in [
                 pac.frequency_point_count().unwrap(),
                 pxf.frequency_point_count().unwrap(),
@@ -377,7 +372,6 @@ mod tests {
                 pac.frequency_points().unwrap(),
                 pxf.frequency_points().unwrap(),
                 stb.frequency_points().unwrap(),
-                transfer.frequency_points().unwrap(),
             ] {
                 assert_eq!(grid.len(), expected.len());
                 for (&actual, &expected) in grid.iter().zip(&expected) {
