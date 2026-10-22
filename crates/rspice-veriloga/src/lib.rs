@@ -193,9 +193,9 @@ pub use specialist::{
 };
 pub use types::{FunctionRegistry, ParameterRange, ValueType};
 pub use virtual_source::{
-    VirtualCompileLimits, VirtualModuleDiscovery, VirtualRuntimeCompilation,
-    VirtualRuntimeCompileFailure, VirtualSourceBundle, VirtualSourceDependency,
-    VirtualSourceDiagnostic, VirtualSourceError, VirtualSourceFile, VirtualSourceInclude,
+    VirtualCompileLimits, VirtualRuntimeCompilation, VirtualRuntimeCompileFailure,
+    VirtualSourceBundle, VirtualSourceDependency, VirtualSourceDiagnostic, VirtualSourceError,
+    VirtualSourceFile, VirtualSourceInclude,
 };
 
 /// What one source file says about Verilog-AMS LRM 2.4 clause 7.
@@ -698,34 +698,6 @@ impl VerilogACompiler {
         )
     }
 
-    /// Discover every executable module declared by one sealed virtual root.
-    ///
-    /// Discovery uses the same bounded provider, preprocessor, parser, and
-    /// semantic analyzer as runtime compilation. The returned include graph is
-    /// therefore the exact active closure selected by macros, not a textual
-    /// approximation of `` `include `` cards.
-    pub fn discover_virtual_modules(
-        &self,
-        bundle: &VirtualSourceBundle,
-        limits: VirtualCompileLimits,
-    ) -> Result<VirtualModuleDiscovery, VirtualRuntimeCompileFailure> {
-        let prepared = self.prepare_virtual_runtime_source(bundle, limits)?;
-        let module_names = prepared
-            .module_names()
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
-        if module_names.is_empty() {
-            return Err(prepared.diagnose(CompileError::ModuleSelection(format!(
-                "no executable modules found in virtual root '{}'",
-                bundle.root_path()
-            ))));
-        }
-        Ok(VirtualModuleDiscovery {
-            module_names,
-            dependency_closure: prepared.dependency_closure().to_vec(),
-            include_graph: prepared.include_graph().to_vec(),
-        })
-    }
     /// Compile one explicitly selected module from a sealed virtual source
     /// bundle without consulting the file system.
     ///

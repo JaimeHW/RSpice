@@ -203,17 +203,6 @@ pub struct VirtualSourceInclude {
     pub included_path: String,
 }
 
-/// Parsed module catalogue and exact dependency closure for one sealed
-/// virtual Verilog-A root. Discovery runs the same preprocessor and semantic
-/// front end as compilation, so callers never infer executable modules from a
-/// textual scan that disagrees with active macros or includes.
-#[derive(Debug, Clone)]
-pub struct VirtualModuleDiscovery {
-    pub module_names: Vec<String>,
-    pub dependency_closure: Vec<VirtualSourceDependency>,
-    pub include_graph: Vec<VirtualSourceInclude>,
-}
-
 /// One compiler diagnostic mapped back to an exact virtual source document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VirtualSourceDiagnostic {
