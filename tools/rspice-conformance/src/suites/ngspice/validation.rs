@@ -81,34 +81,6 @@ impl TestRunner {
         Ok(unknown.into_iter().collect())
     }
 
-    pub fn has_valid_reference_output(&self, cir_path: &Path) -> bool {
-        if self.suppresses_historical_reference_output_for(cir_path) {
-            return false;
-        }
-        self.load_dc_op_reference(cir_path).ok().flatten().is_some()
-            || self
-                .load_digital_eprint_reference(cir_path)
-                .ok()
-                .flatten()
-                .is_some()
-            || self
-                .load_reference_table_for_axis(cir_path, &["time"])
-                .ok()
-                .flatten()
-                .is_some()
-            || self
-                .load_reference_table_for_axis(cir_path, &["frequency"])
-                .ok()
-                .flatten()
-                .is_some()
-            || self
-                .load_reference_table_for_axis(cir_path, &["v-sweep"])
-                .ok()
-                .flatten()
-                .is_some()
-            || self.load_pz_reference(cir_path).ok().flatten().is_some()
-    }
-
     #[inline]
     pub(super) fn is_internal_device_op_probe(name: &str) -> bool {
         let normalized = name.trim().to_ascii_lowercase();

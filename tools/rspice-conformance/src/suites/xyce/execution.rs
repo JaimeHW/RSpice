@@ -70,22 +70,6 @@ impl XyceTestRunner {
         Ok(startup)
     }
 
-    /// Run every discovered vendored `.cir` through the Xyce corpus contract.
-    pub fn run_all(&self) -> Vec<XyceTestResult> {
-        self.discover_tests()
-            .into_iter()
-            .map(|deck| self.run_discovered_test(&deck))
-            .collect()
-    }
-
-    /// Run every simulator regression deck under `Netlists`.
-    pub fn run_netlist_suite(&self) -> Vec<XyceTestResult> {
-        self.discover_netlist_tests()
-            .into_iter()
-            .map(|deck| self.run_discovered_test(&deck))
-            .collect()
-    }
-
     /// Run one deck path.
     pub fn run_test<P: AsRef<Path>>(&self, deck_path: P) -> XyceTestResult {
         let path = deck_path
