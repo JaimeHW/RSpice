@@ -403,26 +403,5 @@ impl ArcLengthContinuation {
 }
 
 //=============================================================================
-// Arc-Length Continuation Result
-//=============================================================================
-
-/// Result of arc-length continuation
-#[derive(Debug, Clone)]
-pub struct ArcLengthResult {
-    /// Final continuation parameter (should be 1.0 for success)
-    pub final_lambda: Value,
-    /// Number of continuation steps
-    pub continuation_steps: usize,
-    /// Total Newton iterations
-    pub total_newton_iters: usize,
-    /// Whether continuation succeeded
-    pub success: bool,
-    /// Minimum step size reached
-    pub min_step_reached: Value,
-    /// Solution path (x, λ) pairs if tracking enabled
-    pub path: Option<Vec<(Vec<Value>, Value)>>,
-}
-
-//=============================================================================
 // Tests
 //=============================================================================

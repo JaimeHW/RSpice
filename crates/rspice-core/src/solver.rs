@@ -2,7 +2,6 @@
 
 pub mod arc_length;
 pub mod convergence;
-pub mod damping;
 mod newton;
 #[doc(hidden)]
 pub use rspice_matrix::klu_backend_enabled;
@@ -17,9 +16,8 @@ pub mod klu {
     pub use rspice_matrix::KluSolver;
 }
 
-pub use arc_length::{ArcLengthConfig, ArcLengthContinuation, ArcLengthResult, ArcLengthState};
+pub use arc_length::{ArcLengthConfig, ArcLengthContinuation, ArcLengthState};
 pub use convergence::{PseudoTransient, SourceStepper};
-pub use damping::{DampingController, DampingStatistics, DampingStrategy};
 pub use newton::*;
 
 use crate::Value;

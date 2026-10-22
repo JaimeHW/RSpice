@@ -2,14 +2,12 @@
 //!
 //! Reading and writing the same format used to sit in two unrelated places —
 //! the reader under `compat` (as a foreign-simulator shim) and the writers
-//! under `analysis::output`. They are one concern, and the round-trip test in
-//! [`waveform_stream`] needs both, so they live together here.
+//! under `analysis::output`. They are one concern, so they live together here.
 //!
 //! The RAW modules remain leaf components: [`raw_export`] has no in-crate
-//! dependencies and [`waveform_stream`] needs only [`crate::resource`] for its
-//! read limits. [`vcd`] carries the event-driven half — irregular four-state
-//! timelines rather than a sampled table — and needs the same read limits and
-//! nothing else. [`xyce_prn`] deliberately consumes the typed `.PRINT` layout
+//! dependencies. [`vcd`] carries the event-driven half — irregular four-state
+//! timelines rather than a sampled table — and needs only [`crate::resource`]
+//! for its read limits. [`xyce_prn`] deliberately consumes the typed `.PRINT` layout
 //! and simulation output policy retained by `netlist`, but no format
 //! module reaches for a circuit or analysis-result type. Callers still provide
 //! names and columns of [`crate::Value`], keeping serialization independent of
@@ -28,7 +26,6 @@ pub mod json;
 pub mod ltspice_raw;
 pub mod raw_export;
 pub mod vcd;
-pub mod waveform_stream;
 pub mod xyce_prn;
 
 /// Whether converting validated decimal text erased a nonzero mantissa.
@@ -62,7 +59,6 @@ pub use vcd::{
     parse_vcd_bytes_with_limits, parse_vcd_file, parse_vcd_file_with_limits, parse_vcd_reader,
     parse_vcd_reader_with_limits, write_vcd,
 };
-pub use waveform_stream::{StreamingWaveformWriter, WaveformStreamError};
 pub use xyce_prn::{
     XycePrnError, XycePrnFooter, XycePrnLimits, XycePrnScientificStyle, XycePrnTable,
     format_xyce_prn_scientific, serialize_legacy_compact_prn_for_comparison,
