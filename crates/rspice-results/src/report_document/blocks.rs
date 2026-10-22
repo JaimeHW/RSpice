@@ -162,14 +162,6 @@ impl ReportPageEvidenceBinding {
     pub(crate) const fn is_default(&self) -> bool {
         matches!(self, Self::Unbound)
     }
-
-    #[must_use]
-    pub const fn exact_dataset(self) -> Option<DatasetBinding> {
-        match self {
-            Self::ExactDataset { binding } => Some(binding),
-            Self::Unbound | Self::LatestAcceptedRun => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

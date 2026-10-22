@@ -472,7 +472,6 @@ stable_id!(MarkerId);
 stable_id!(MeasurementId);
 stable_id!(AnnotationId);
 stable_id!(LinkGroupId);
-stable_id!(OperationId);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", tag = "kind", content = "id")]
@@ -1778,12 +1777,8 @@ pub enum VisualizationError {
     },
     #[error("column {0} does not exist")]
     ColumnNotFound(String),
-    #[error("query must specify every coordinate column exactly once")]
-    IncompleteCoordinateQuery,
     #[error("query has no exact source row; interpolation would be required")]
     InterpolationRequired,
-    #[error("query has no matching source row")]
-    RowNotFound,
     #[error("transaction expected revision {expected:?}, current revision is {actual:?}")]
     RevisionConflict {
         expected: ObjectRevision,
@@ -1814,25 +1809,6 @@ pub enum VisualizationError {
         baseline: Option<String>,
         candidate: Option<String>,
     },
-    #[error("operation cannot {event} from {from}")]
-    InvalidOperationTransition {
-        from: &'static str,
-        event: &'static str,
-    },
-    #[error(
-        "operation progress must increase from {previous}, not exceed total {total}; received {next}"
-    )]
-    InvalidProgress {
-        previous: u64,
-        next: u64,
-        total: u64,
-    },
-    #[error("a completed operation requires an output digest")]
-    MissingOutputDigest,
-    #[error("an output digest is only valid on the final progress update")]
-    UnexpectedOutputDigest,
-    #[error("operation recovery counter is exhausted")]
-    RecoverySpaceExhausted,
     #[error("visualization document serialization failed: {0}")]
     Serialization(String),
     #[error(transparent)]
@@ -2231,51 +2207,6 @@ impl VisualizationDocument {
             tombstoned,
             edit_count: edits.len(),
         })
-    }
-
-    /// Reserves a stable operation identity and advances the document revision
-    /// so persisted identity allocation can never be replayed or reused.
-    pub fn start_operation(
-        &mut self,
-        expected_revision: ObjectRevision,
-        kind: ProgressiveOperationKind,
-        total_units: u64,
-    ) -> Result<(VisualizationTransactionReceipt, ProgressiveOperation), VisualizationError> {
-        if expected_revision != self.revision {
-            return Err(VisualizationError::RevisionConflict {
-                expected: expected_revision,
-                actual: self.revision,
-            });
-        }
-        let previous_revision = self.revision;
-        let committed_revision = previous_revision.next()?;
-        let mut candidate = self.clone();
-        let operation_id = OperationId::allocate(candidate.allocate_serial()?)?;
-        let operation = ProgressiveOperation::start(
-            operation_id,
-            kind,
-            self.id,
-            previous_revision,
-            total_units,
-        )?;
-        candidate.revision = committed_revision;
-        *self = candidate;
-        Ok((
-            VisualizationTransactionReceipt {
-                document_id: self.id,
-                previous_revision,
-                committed_revision,
-                created: Vec::new(),
-                tombstoned: Vec::new(),
-                edit_count: 1,
-            },
-            operation,
-        ))
-    }
-
-    pub fn query_exact_row(&self, query: &ExactRowQuery) -> Result<ExactRow, VisualizationError> {
-        let dataset = self.dataset_for_binding(query.binding)?;
-        query_dataset_exact(dataset, query)
     }
 
     pub fn compare(

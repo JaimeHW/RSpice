@@ -1121,56 +1121,6 @@ fn one_hundred_thousand_exact_coordinate_rows_validate_in_one_pass() {
 }
 
 #[test]
-fn exact_query_returns_typed_values_and_never_interpolates() {
-    let (document, source) = document();
-    let exact = document
-        .query_exact_row(&ExactRowQuery {
-            binding: source,
-            coordinates: vec![QueryCoordinate {
-                column: "time".to_owned(),
-                value: TypedValue::Real(1.0),
-            }],
-            projections: vec!["v(out)".to_owned()],
-        })
-        .unwrap();
-    assert_eq!(exact.row_index, 1);
-    assert!(exact.values[0].1.exact_eq(&TypedValue::Real(1.0)));
-    assert_eq!(
-        document.query_exact_row(&ExactRowQuery {
-            binding: source,
-            coordinates: vec![QueryCoordinate {
-                column: "time".to_owned(),
-                value: TypedValue::Real(1.5),
-            }],
-            projections: vec!["v(out)".to_owned()],
-        }),
-        Err(VisualizationError::InterpolationRequired)
-    );
-}
-
-#[test]
-fn digest_mismatch_and_incomplete_queries_fail_explicitly() {
-    let (document, source) = document();
-    let wrong = DatasetBinding::new(source.dataset_id, ContentDigest::from_bytes([9; 32]));
-    assert!(matches!(
-        document.query_exact_row(&ExactRowQuery {
-            binding: wrong,
-            coordinates: vec![],
-            projections: vec!["v(out)".to_owned()],
-        }),
-        Err(VisualizationError::SourceDigestMismatch { .. })
-    ));
-    assert_eq!(
-        document.query_exact_row(&ExactRowQuery {
-            binding: source,
-            coordinates: vec![],
-            projections: vec!["v(out)".to_owned()],
-        }),
-        Err(VisualizationError::IncompleteCoordinateQuery)
-    );
-}
-
-#[test]
 fn transaction_is_atomic_and_preserves_identity_on_rollback() {
     let (mut document, _) = document();
     let before = document.clone();
@@ -1475,54 +1425,6 @@ fn comparison_exact_intersection_never_synthesizes_rows() {
         })
         .unwrap();
     assert_eq!(receipt.rows_compared, 1);
-}
-
-#[test]
-fn progressive_operation_enforces_progress_cancel_and_recovery_transitions() {
-    let (mut document, _) = document();
-    let (_, mut operation) = document
-        .start_operation(document.revision(), ProgressiveOperationKind::Export, 10)
-        .unwrap();
-    operation
-        .advance(4, ContentDigest::from_bytes([2; 32]), None)
-        .unwrap();
-    assert!(matches!(
-        operation.advance(3, ContentDigest::from_bytes([3; 32]), None),
-        Err(VisualizationError::InvalidProgress { .. })
-    ));
-    operation.request_cancel().unwrap();
-    operation.confirm_cancelled().unwrap();
-    operation.recover().unwrap();
-    assert_eq!(operation.recovery_count(), 1);
-    operation
-        .advance(
-            10,
-            ContentDigest::from_bytes([4; 32]),
-            Some(ContentDigest::from_bytes([5; 32])),
-        )
-        .unwrap();
-    assert!(matches!(
-        operation.state(),
-        ProgressiveOperationState::Completed { .. }
-    ));
-}
-
-#[test]
-fn invalid_operation_updates_leave_operation_unchanged() {
-    let (mut document, _) = document();
-    let (_, mut operation) = document
-        .start_operation(document.revision(), ProgressiveOperationKind::Transform, 2)
-        .unwrap();
-    let before = operation.clone();
-    assert_eq!(
-        operation.advance(
-            1,
-            ContentDigest::from_bytes([3; 32]),
-            Some(ContentDigest::from_bytes([4; 32]))
-        ),
-        Err(VisualizationError::UnexpectedOutputDigest)
-    );
-    assert_eq!(operation, before);
 }
 
 #[test]

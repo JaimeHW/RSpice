@@ -234,15 +234,6 @@ pub struct EngineeringTableViewStore {
 }
 
 impl EngineeringTableViewStore {
-    pub fn working_view(&mut self, dataset: &EngineeringDataset) -> EngineeringTableView {
-        let view = self
-            .working
-            .entry(dataset.id.clone())
-            .or_insert_with(|| EngineeringTableView::for_dataset(dataset));
-        view.normalize_for(dataset);
-        view.clone()
-    }
-
     pub fn set_working(&mut self, mut view: EngineeringTableView, dataset: &EngineeringDataset) {
         view.normalize_for(dataset);
         self.working.insert(dataset.id.clone(), view);

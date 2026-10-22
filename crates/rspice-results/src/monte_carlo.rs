@@ -60,15 +60,6 @@ impl MonteCarloMeanConfidence {
             }
         }
     }
-
-    pub fn estimator_label(&self) -> String {
-        match self.method {
-            MonteCarloMeanMethod::StudentT => "Student t".into(),
-            MonteCarloMeanMethod::PercentileBootstrap { resamples, seed } => {
-                format!("Percentile bootstrap · {resamples} resamples · seed {seed}")
-            }
-        }
-    }
 }
 
 #[cfg(test)]
