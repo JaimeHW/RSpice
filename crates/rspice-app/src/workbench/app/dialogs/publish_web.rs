@@ -126,7 +126,7 @@ impl RSpiceApp {
             ..Default::default()
         };
         dialog.scope = Some(build_scope(&self.state, &publication_draft(&dialog)));
-        self.state.dialogs.publish_web = dialog;
+        self.state.cloud.publish_web = dialog;
         if let Some(binding) = self
             .state
             .model
@@ -141,14 +141,12 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn render_publish_web_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.publish_web.open {
+        if !self.state.cloud.publish_web.open {
             return;
         }
-        if !self.state.dialogs.publish_web.submitted
-            && self.state.dialogs.publish_web.scope.is_none()
-        {
-            let draft = publication_draft(&self.state.dialogs.publish_web);
-            self.state.dialogs.publish_web.scope = Some(build_scope(&self.state, &draft));
+        if !self.state.cloud.publish_web.submitted && self.state.cloud.publish_web.scope.is_none() {
+            let draft = publication_draft(&self.state.cloud.publish_web);
+            self.state.cloud.publish_web.scope = Some(build_scope(&self.state, &draft));
         }
 
         // Server-side facts, cloned before the body borrows app state.
@@ -182,7 +180,7 @@ impl RSpiceApp {
             0
         };
 
-        let submitted = self.state.dialogs.publish_web.submitted;
+        let submitted = self.state.cloud.publish_web.submitted;
         let in_flight = submitted
             && matches!(
                 publish_state,
@@ -198,21 +196,21 @@ impl RSpiceApp {
             None
         };
 
-        let scope_ok = matches!(self.state.dialogs.publish_web.scope, Some(Ok(_)));
+        let scope_ok = matches!(self.state.cloud.publish_web.scope, Some(Ok(_)));
         let imported_models_confirmed = self
             .state
-            .dialogs
+            .cloud
             .publish_web
             .scope
             .as_ref()
             .and_then(|scope| scope.as_ref().ok())
             .is_none_or(|scope| {
                 scope.imported_model_sources == 0
-                    || self.state.dialogs.publish_web.imported_models_acknowledged
+                    || self.state.cloud.publish_web.imported_models_acknowledged
             });
         let compose_ready = scope_ok
             && imported_models_confirmed
-            && !self.state.dialogs.publish_web.title.trim().is_empty()
+            && !self.state.cloud.publish_web.title.trim().is_empty()
             && (binding.is_some() || !workspaces.is_empty());
 
         let publish_label = if version_count > 0 {
@@ -250,7 +248,7 @@ impl RSpiceApp {
             dialog = dialog.secondary("Copy URL");
         }
 
-        let dialog_state = &mut self.state.dialogs.publish_web;
+        let dialog_state = &mut self.state.cloud.publish_web;
         let choice = dialog.show(ctx, |ui| {
             let t = Tokens::get(ui.ctx());
             let c = t.color;
@@ -329,13 +327,13 @@ impl RSpiceApp {
                 // receipt still binds the project and reports to the console,
                 // and a failure is reported once this dialog is not there to
                 // show it. A publish that already ended was shown here.
-                self.state.dialogs.publish_web.open = false;
-                self.state.dialogs.publish_web.submitted = in_flight;
+                self.state.cloud.publish_web.open = false;
+                self.state.cloud.publish_web.submitted = in_flight;
             }
             DialogChoice::Secondary => {
                 if secondary_unpublishes {
                     if let (Some((_, circuit_id)), Some(live)) = (&binding, &live_publication) {
-                        self.state.dialogs.publish_web.open = false;
+                        self.state.cloud.publish_web.open = false;
                         self.open_unpublish_web_dialog(
                             circuit_id.clone(),
                             live.id.clone(),
@@ -349,7 +347,7 @@ impl RSpiceApp {
             }
             DialogChoice::Primary => {
                 if succeeded {
-                    self.state.dialogs.publish_web.open = false;
+                    self.state.cloud.publish_web.open = false;
                 } else if !in_flight {
                     self.submit_publish(binding, &workspaces);
                 }
@@ -410,7 +408,7 @@ impl RSpiceApp {
     /// The dialog shows a failure while it is open. Once it is closed nothing
     /// else would, and a publish the user asked for must not fail silently.
     fn report_unwatched_publish_failure(&mut self) {
-        let dialog = &self.state.dialogs.publish_web;
+        let dialog = &self.state.cloud.publish_web;
         if dialog.open || !dialog.submitted {
             return;
         }
@@ -418,7 +416,7 @@ impl RSpiceApp {
             return;
         };
         let message = message.clone();
-        self.state.dialogs.publish_web.submitted = false;
+        self.state.cloud.publish_web.submitted = false;
         self.state.report_failure("Publish failed", message);
     }
 
@@ -429,9 +427,9 @@ impl RSpiceApp {
         binding: Option<(String, String)>,
         workspaces: &[crate::services::cloud_account::WorkspaceSummary],
     ) {
-        let include_netlist = self.state.dialogs.publish_web.include_netlist;
+        let include_netlist = self.state.cloud.publish_web.include_netlist;
         let imported_models_acknowledged =
-            self.state.dialogs.publish_web.imported_models_acknowledged;
+            self.state.cloud.publish_web.imported_models_acknowledged;
         let imported_model_sources = imported_model_source_count(&self.state, include_netlist);
         if imported_model_sources > 0 && !imported_models_acknowledged {
             self.state.prompt(
@@ -439,7 +437,7 @@ impl RSpiceApp {
             );
             return;
         }
-        let dialog = &self.state.dialogs.publish_web;
+        let dialog = &self.state.cloud.publish_web;
         let title = dialog.title.trim().to_owned();
         let description = dialog.description.trim().to_owned();
         let public = dialog.public_visibility;
@@ -448,7 +446,7 @@ impl RSpiceApp {
         let target = match resolve_target(binding, workspaces, workspace_index, public) {
             Ok(target) => target,
             Err(message) => {
-                self.state.dialogs.publish_web.scope = Some(Err(message));
+                self.state.cloud.publish_web.scope = Some(Err(message));
                 return;
             }
         };
@@ -468,10 +466,10 @@ impl RSpiceApp {
                     description,
                     snapshot_bytes,
                 });
-                self.state.dialogs.publish_web.submitted = true;
+                self.state.cloud.publish_web.submitted = true;
             }
             Err(message) => {
-                self.state.dialogs.publish_web.scope = Some(Err(message));
+                self.state.cloud.publish_web.scope = Some(Err(message));
                 self.state.record(
                     LogSeverity::Error,
                     LogSource::Studio,
@@ -1072,8 +1070,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = RSpiceApp::test_instance();
         app.cloud_account = failed("The page could not be rendered.");
-        app.state.dialogs.publish_web.open = true;
-        app.state.dialogs.publish_web.submitted = true;
+        app.state.cloud.publish_web.open = true;
+        app.state.cloud.publish_web.submitted = true;
         app.record_publish_receipt();
         app.state.drain_notices(&ctx);
         assert!(
@@ -1081,7 +1079,7 @@ mod tests {
             "the open dialog shows the failure itself"
         );
 
-        app.state.dialogs.publish_web.open = false;
+        app.state.cloud.publish_web.open = false;
         app.record_publish_receipt();
         app.record_publish_receipt();
         app.state.drain_notices(&ctx);

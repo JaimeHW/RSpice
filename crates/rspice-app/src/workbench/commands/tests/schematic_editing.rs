@@ -68,14 +68,14 @@ fn descend_requires_a_resolved_schematic_master() {
     let parent = app.state.model.workspace.content.active_view.clone();
     Command::DescendHierarchy.execute(&mut app);
     assert!(
-        app.state.dialogs.descend_hierarchy.open,
+        app.state.design.descend_hierarchy.open,
         "the menu/palette command owns the explicit edit-context transaction"
     );
     assert_eq!(
         app.state.model.workspace.content.active_view, parent,
         "opening the transaction must not navigate before commit"
     );
-    app.state.dialogs.descend_hierarchy.close();
+    app.state.design.descend_hierarchy.close();
 
     app.state.model.schematic.document_mut_for_test().components[0]
         .library_cell
@@ -348,7 +348,7 @@ fn rotate_and_mirror_have_their_keys_on_the_canvas() {
 fn plain_r_turns_the_selection_while_move_carries_it() {
     let (mut app, _) = app_with_selected_resistor_pair();
     crate::workbench::app::arm_move_selection(&mut app.state);
-    assert!(app.state.dialogs.move_selection.armed);
+    assert!(app.state.design.move_selection.armed);
     let before = app.state.model.schematic.document().components[1].pos
         - app.state.model.schematic.document().components[0].pos;
 
@@ -378,10 +378,7 @@ fn plain_r_turns_the_selection_while_move_carries_it() {
     let after = app.state.model.schematic.document().components[1].pos
         - app.state.model.schematic.document().components[0].pos;
     assert_eq!(after, rotated_cw(before));
-    assert!(
-        app.state.dialogs.move_selection.armed,
-        "the move carries on"
-    );
+    assert!(app.state.design.move_selection.armed, "the move carries on");
 }
 
 #[test]
@@ -601,7 +598,7 @@ fn select_all_command_selects_the_active_sheet_without_a_dialog() {
 
     Command::SelectAll.execute(&mut app);
 
-    assert!(!app.state.dialogs.application_modal_open());
+    assert!(!app.state.dialog_modal_open());
     for id in [1_u64, 2, 5, 6] {
         assert!(
             app.state
@@ -667,12 +664,12 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
         .select_only_component(1);
 
     Command::Duplicate.execute(&mut app);
-    assert!(!app.state.dialogs.application_modal_open());
+    assert!(!app.state.dialog_modal_open());
     assert!(app.state.place_floating_paste());
     assert_eq!(app.state.model.schematic.document().components.len(), 2);
 
     Command::Cut.execute(&mut app);
-    assert!(!app.state.dialogs.application_modal_open());
+    assert!(!app.state.dialog_modal_open());
     assert_eq!(app.state.model.schematic.document().components.len(), 1);
     assert_eq!(app.state.ui.schematic_clipboard.components.len(), 1);
 
@@ -684,7 +681,7 @@ fn delete_cut_and_duplicate_act_on_the_schematic_without_a_dialog() {
         .selection
         .select_only_component(1);
     Command::Delete.execute(&mut app);
-    assert!(!app.state.dialogs.application_modal_open());
+    assert!(!app.state.dialog_modal_open());
     assert!(app.state.model.schematic.document().components.is_empty());
 }
 
@@ -935,12 +932,12 @@ fn array_selection_requires_a_live_eligible_editable_selection() {
 #[test]
 fn cancel_retires_an_armed_array_transaction_and_restores_select() {
     let mut app = RSpiceApp::test_instance();
-    app.state.dialogs.array_selection.armed = true;
+    app.state.design.array_selection.armed = true;
     app.state.model.schematic.session.editor.tool = Tool::ArraySelection;
 
     Command::Cancel.execute(&mut app);
 
-    assert!(!app.state.dialogs.array_selection.armed);
+    assert!(!app.state.design.array_selection.armed);
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
 }
 
@@ -974,9 +971,9 @@ fn rename_command_has_mockup_identity_and_opens_the_stable_target_dialog() {
         .select_only_component(id);
     assert!(Command::RenameSelection.is_enabled(&app));
     Command::RenameSelection.execute(&mut app);
-    assert!(app.state.dialogs.rename_selection.open);
+    assert!(app.state.design.rename_selection.open);
     assert!(matches!(
-        app.state.dialogs.rename_selection.target.as_ref(),
+        app.state.design.rename_selection.target.as_ref(),
         Some(crate::workbench::app::RenameSelectionTarget::Component(component))
             if component.id == id
     ));
@@ -1027,10 +1024,10 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
     assert!(Command::ObjectProperties.is_enabled(&app));
     Command::ObjectProperties.execute(&mut app);
     assert!(matches!(
-        app.state.dialogs.object_properties.draft,
+        app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))
     ));
-    app.state.dialogs.object_properties.close();
+    app.state.design.object_properties.close();
 
     app.state
         .model
@@ -1041,15 +1038,15 @@ fn object_properties_dispatches_selected_buses_and_taps_and_refuses_read_only() 
         .select_only_bus_tap(81);
     Command::ObjectProperties.execute(&mut app);
     assert!(matches!(
-        app.state.dialogs.object_properties.draft,
+        app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::BusTap(_))
     ));
-    app.state.dialogs.object_properties.close();
+    app.state.design.object_properties.close();
 
     app.state.model.schematic.session.read_only = true;
     assert!(!Command::ObjectProperties.is_enabled(&app));
     Command::ObjectProperties.execute(&mut app);
-    assert!(!app.state.dialogs.object_properties.open);
+    assert!(!app.state.design.object_properties.open);
 }
 
 #[test]
@@ -1074,11 +1071,11 @@ fn object_properties_availability_includes_one_selected_net_label() {
     assert!(Command::ObjectProperties.is_enabled(&app));
     Command::ObjectProperties.execute(&mut app);
     assert!(matches!(
-        app.state.dialogs.object_properties.draft,
+        app.state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
             if draft.original.id == id
     ));
-    app.state.dialogs.object_properties.close();
+    app.state.design.object_properties.close();
     app.state.model.schematic.session.read_only = true;
     assert!(!Command::ObjectProperties.is_enabled(&app));
     app.state.model.schematic.session.read_only = false;

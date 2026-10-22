@@ -43,13 +43,13 @@ impl AppState {
                 .ok_or_else(|| "No writable destination library is available.".to_owned())?
         };
 
-        self.dialogs.copy_cell_source_library = library.to_owned();
-        self.dialogs.copy_cell_source_cell = cell.to_owned();
-        self.dialogs.copy_cell_target_library = target;
-        self.dialogs.copy_cell_name = format!("{cell}_copy");
-        self.dialogs.copy_cell_error = None;
-        self.dialogs.copy_cell_library_revision = self.model.library_manager.revision();
-        self.dialogs.copy_cell_dialog = true;
+        self.project.copy_cell_source_library = library.to_owned();
+        self.project.copy_cell_source_cell = cell.to_owned();
+        self.project.copy_cell_target_library = target;
+        self.project.copy_cell_name = format!("{cell}_copy");
+        self.project.copy_cell_error = None;
+        self.project.copy_cell_library_revision = self.model.library_manager.revision();
+        self.project.copy_cell_dialog = true;
         Ok(())
     }
 
@@ -73,39 +73,39 @@ impl AppState {
             return Err(format!("Cell '{library}/{cell}' no longer exists."));
         }
 
-        self.dialogs.rename_cell_library = library.to_owned();
-        self.dialogs.rename_cell_current = cell.to_owned();
-        self.dialogs.rename_cell_name = cell.to_owned();
-        self.dialogs.rename_cell_error = None;
-        self.dialogs.rename_cell_library_revision = self.model.library_manager.revision();
-        self.dialogs.rename_cell_dialog = true;
+        self.project.rename_cell_library = library.to_owned();
+        self.project.rename_cell_current = cell.to_owned();
+        self.project.rename_cell_name = cell.to_owned();
+        self.project.rename_cell_error = None;
+        self.project.rename_cell_library_revision = self.model.library_manager.revision();
+        self.project.rename_cell_dialog = true;
         Ok(())
     }
 
     fn commit_copy_cell_dialog(&mut self) -> Result<usize, String> {
-        if self.model.library_manager.revision() != self.dialogs.copy_cell_library_revision {
+        if self.model.library_manager.revision() != self.project.copy_cell_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let name = self.dialogs.copy_cell_name.trim().to_owned();
+        let name = self.project.copy_cell_name.trim().to_owned();
         if let Some(error) = validate_lcv_name(&name, "Cell name") {
             return Err(error);
         }
-        if self.dialogs.copy_cell_target_library.is_empty() {
+        if self.project.copy_cell_target_library.is_empty() {
             return Err("Please select a library".to_owned());
         }
-        let source_library = self.dialogs.copy_cell_source_library.clone();
-        let source_cell = self.dialogs.copy_cell_source_cell.clone();
-        let target = self.dialogs.copy_cell_target_library.clone();
+        let source_library = self.project.copy_cell_source_library.clone();
+        let source_cell = self.project.copy_cell_source_cell.clone();
+        let target = self.project.copy_cell_target_library.clone();
         self.copy_cell(&source_library, &source_cell, &target, &name)
     }
 
     fn commit_rename_cell_dialog(&mut self) -> Result<Option<usize>, String> {
-        if self.model.library_manager.revision() != self.dialogs.rename_cell_library_revision {
+        if self.model.library_manager.revision() != self.project.rename_cell_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let name = self.dialogs.rename_cell_name.trim().to_owned();
-        let library = self.dialogs.rename_cell_library.clone();
-        let current = self.dialogs.rename_cell_current.clone();
+        let name = self.project.rename_cell_name.trim().to_owned();
+        let library = self.project.rename_cell_library.clone();
+        let current = self.project.rename_cell_current.clone();
         if name == current {
             return Ok(None);
         }
@@ -118,7 +118,7 @@ impl AppState {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_copy_cell_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.copy_cell_dialog {
+        if !self.state.project.copy_cell_dialog {
             return;
         }
 
@@ -139,18 +139,18 @@ impl RSpiceApp {
             .state
             .model
             .library_manager
-            .get_library(&self.state.dialogs.copy_cell_source_library)
-            .and_then(|lib| lib.get_cell(&self.state.dialogs.copy_cell_source_cell))
+            .get_library(&self.state.project.copy_cell_source_library)
+            .and_then(|lib| lib.get_cell(&self.state.project.copy_cell_source_cell))
             .map(|cell| cell.views.len())
             .unwrap_or(0);
         let hint = format!("copies all {view_count} views and their content");
         let catalog_current = self.state.model.library_manager.revision()
-            == self.state.dialogs.copy_cell_library_revision;
+            == self.state.project.copy_cell_library_revision;
         if !catalog_current {
-            self.state.dialogs.copy_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            self.state.project.copy_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
 
-        let dialogs = &mut self.state.dialogs;
+        let dialogs = &mut self.state.project;
         let source = format!(
             "{} / {}",
             dialogs.copy_cell_source_library, dialogs.copy_cell_source_cell
@@ -221,9 +221,9 @@ impl RSpiceApp {
         }
 
         if should_copy {
-            let source_cell = self.state.dialogs.copy_cell_source_cell.clone();
-            let target = self.state.dialogs.copy_cell_target_library.clone();
-            let name = self.state.dialogs.copy_cell_name.trim().to_owned();
+            let source_cell = self.state.project.copy_cell_source_cell.clone();
+            let target = self.state.project.copy_cell_target_library.clone();
+            let name = self.state.project.copy_cell_name.trim().to_owned();
             match self.state.commit_copy_cell_dialog() {
                 Ok(views) => {
                     self.state.record(
@@ -231,15 +231,15 @@ impl RSpiceApp {
                         LogSource::Studio,
                         format!("Copied '{source_cell}' to '{target}/{name}' ({views} views)."),
                     );
-                    self.state.dialogs.copy_cell_error = None;
+                    self.state.project.copy_cell_error = None;
                     should_close = true;
                 }
-                Err(error) => self.state.dialogs.copy_cell_error = Some(error),
+                Err(error) => self.state.project.copy_cell_error = Some(error),
             }
         }
 
         if should_close {
-            let dialogs = &mut self.state.dialogs;
+            let dialogs = &mut self.state.project;
             dialogs.copy_cell_dialog = false;
             dialogs.copy_cell_name.clear();
             dialogs.copy_cell_error = None;
@@ -247,7 +247,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn process_rename_cell_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.rename_cell_dialog {
+        if !self.state.project.rename_cell_dialog {
             return;
         }
 
@@ -255,11 +255,11 @@ impl RSpiceApp {
         let mut should_rename = false;
 
         let catalog_current = self.state.model.library_manager.revision()
-            == self.state.dialogs.rename_cell_library_revision;
+            == self.state.project.rename_cell_library_revision;
         if !catalog_current {
-            self.state.dialogs.rename_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            self.state.project.rename_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let dialogs = &mut self.state.dialogs;
+        let dialogs = &mut self.state.project;
         let source = format!(
             "{} / {}",
             dialogs.rename_cell_library, dialogs.rename_cell_current
@@ -297,8 +297,8 @@ impl RSpiceApp {
         }
 
         if should_rename {
-            let current = self.state.dialogs.rename_cell_current.clone();
-            let name = self.state.dialogs.rename_cell_name.trim().to_owned();
+            let current = self.state.project.rename_cell_current.clone();
+            let name = self.state.project.rename_cell_name.trim().to_owned();
             match self.state.commit_rename_cell_dialog() {
                 Ok(Some(remapped)) => {
                     self.state.record(
@@ -309,16 +309,16 @@ impl RSpiceApp {
                              references now name it."
                         ),
                     );
-                    self.state.dialogs.rename_cell_error = None;
+                    self.state.project.rename_cell_error = None;
                     should_close = true;
                 }
                 Ok(None) => should_close = true,
-                Err(error) => self.state.dialogs.rename_cell_error = Some(error),
+                Err(error) => self.state.project.rename_cell_error = Some(error),
             }
         }
 
         if should_close {
-            let dialogs = &mut self.state.dialogs;
+            let dialogs = &mut self.state.project;
             dialogs.rename_cell_dialog = false;
             dialogs.rename_cell_name.clear();
             dialogs.rename_cell_error = None;
@@ -342,13 +342,13 @@ mod tests {
             .open_rename_cell_dialog("work", "amplifier")
             .expect("default work/amplifier cell is writable");
 
-        assert!(state.dialogs.rename_cell_dialog);
-        assert_eq!(state.dialogs.rename_cell_library, "work");
-        assert_eq!(state.dialogs.rename_cell_current, "amplifier");
-        assert_eq!(state.dialogs.rename_cell_name, "amplifier");
-        assert!(state.dialogs.rename_cell_error.is_none());
+        assert!(state.project.rename_cell_dialog);
+        assert_eq!(state.project.rename_cell_library, "work");
+        assert_eq!(state.project.rename_cell_current, "amplifier");
+        assert_eq!(state.project.rename_cell_name, "amplifier");
+        assert!(state.project.rename_cell_error.is_none());
         assert_eq!(
-            state.dialogs.rename_cell_library_revision,
+            state.project.rename_cell_library_revision,
             state.model.library_manager.revision()
         );
     }
@@ -359,16 +359,16 @@ mod tests {
         let mut library = Library::new("work");
         library.add_cell(Cell::new("amplifier"));
         state.model.library_manager.add_library(library);
-        state.dialogs.copy_cell_source_library = "sentinel".to_owned();
-        state.dialogs.rename_cell_library = "sentinel".to_owned();
+        state.project.copy_cell_source_library = "sentinel".to_owned();
+        state.project.rename_cell_library = "sentinel".to_owned();
 
         assert!(state.open_copy_cell_dialog("missing", "amplifier").is_err());
         assert!(state.open_rename_cell_dialog("work", "missing").is_err());
 
-        assert!(!state.dialogs.copy_cell_dialog);
-        assert!(!state.dialogs.rename_cell_dialog);
-        assert_eq!(state.dialogs.copy_cell_source_library, "sentinel");
-        assert_eq!(state.dialogs.rename_cell_library, "sentinel");
+        assert!(!state.project.copy_cell_dialog);
+        assert!(!state.project.rename_cell_dialog);
+        assert_eq!(state.project.copy_cell_source_library, "sentinel");
+        assert_eq!(state.project.rename_cell_library, "sentinel");
     }
 
     #[test]
@@ -389,8 +389,8 @@ mod tests {
             .expect_err("read-only libraries must fail closed");
 
         assert!(error.contains("read-only"));
-        assert!(!state.dialogs.rename_cell_dialog);
-        assert!(state.dialogs.rename_cell_library.is_empty());
+        assert!(!state.project.rename_cell_dialog);
+        assert!(state.project.rename_cell_library.is_empty());
     }
 
     #[test]
@@ -403,7 +403,7 @@ mod tests {
             .open_copy_cell_dialog("work", "amplifier")
             .expect("copy dialog opens");
         assert_eq!(
-            copy_state.dialogs.copy_cell_library_revision,
+            copy_state.project.copy_cell_library_revision,
             copy_state.model.library_manager.revision()
         );
         copy_state
@@ -434,7 +434,7 @@ mod tests {
         rename_state
             .open_rename_cell_dialog("work", "amplifier")
             .expect("rename dialog opens");
-        rename_state.dialogs.rename_cell_name = "amplifier_v2".to_owned();
+        rename_state.project.rename_cell_name = "amplifier_v2".to_owned();
         rename_state
             .model
             .library_manager

@@ -54,24 +54,24 @@ const DESCRIPTION: &str = "Choose how many pins each vector port has.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_builtin_xspice_placement_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.builtin_xspice_placement.open {
+        if !self.state.design.builtin_xspice_placement.open {
             return;
         }
 
         let validation_error = validate_draft(self).err();
         let title = format!(
             "Configure {}",
-            self.state.dialogs.builtin_xspice_placement.display_name
+            self.state.design.builtin_xspice_placement.display_name
         );
         let refusal = validation_error.clone().or_else(|| {
             self.state
-                .dialogs
+                .design
                 .builtin_xspice_placement
                 .validation_error
                 .clone()
         });
 
-        let draft = &mut self.state.dialogs.builtin_xspice_placement;
+        let draft = &mut self.state.design.builtin_xspice_placement;
         let mut edited = false;
         let choice = CommandForm::new(&title, PRIMARY)
             .describe(DESCRIPTION)
@@ -89,25 +89,25 @@ impl RSpiceApp {
             });
         if edited {
             // An edit answers the refusal the last attempt recorded.
-            self.state.dialogs.builtin_xspice_placement.validation_error = None;
+            self.state.design.builtin_xspice_placement.validation_error = None;
         }
         match choice {
             DialogChoice::Primary => match validate_draft(self) {
                 Ok(binding) => {
                     let label =
                         crate::workbench::app::arm_library_cell_placement(&mut self.state, binding);
-                    self.state.dialogs.builtin_xspice_placement.close();
+                    self.state.design.builtin_xspice_placement.close();
                     self.state.prompt(format!(
                         "{label} is armed; it will snap to the schematic grid."
                     ));
                     rspice_schematic_editor::view::canvas::request_focus(ctx);
                 }
                 Err(error) => {
-                    self.state.dialogs.builtin_xspice_placement.validation_error = Some(error);
+                    self.state.design.builtin_xspice_placement.validation_error = Some(error);
                 }
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.builtin_xspice_placement.close();
+                self.state.design.builtin_xspice_placement.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -115,7 +115,7 @@ impl RSpiceApp {
 }
 
 fn validate_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstance, String> {
-    let draft = &app.state.dialogs.builtin_xspice_placement;
+    let draft = &app.state.design.builtin_xspice_placement;
     if app.state.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
@@ -133,7 +133,7 @@ fn validate_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstance, 
 }
 
 fn materialize_draft(app: &RSpiceApp) -> Result<crate::state::LibraryCellInstance, String> {
-    let draft = &app.state.dialogs.builtin_xspice_placement;
+    let draft = &app.state.design.builtin_xspice_placement;
     let descriptor = engine_only_xspice_devices()
         .iter()
         .find(|descriptor| descriptor.stable_id == draft.stable_id)
@@ -159,14 +159,14 @@ mod tests {
             .expect("lookup-table descriptor");
         let ports = crate::state::builtin_xspice_vector_ports(descriptor).expect("ports");
         let mut app = RSpiceApp::test_instance();
-        app.state.dialogs.builtin_xspice_placement.open(
+        app.state.design.builtin_xspice_placement.open(
             descriptor.stable_id,
             descriptor.display_name,
             ports,
             schematic_editor_request_source(&app.state),
         );
         app.state
-            .dialogs
+            .design
             .builtin_xspice_placement
             .widths
             .insert("in".to_owned(), 6);
@@ -213,7 +213,7 @@ mod tests {
                 .unwrap();
             let ports = crate::state::builtin_xspice_vector_ports(descriptor).unwrap();
             let source = schematic_editor_request_source(state);
-            state.dialogs.builtin_xspice_placement.open(
+            state.design.builtin_xspice_placement.open(
                 descriptor.stable_id,
                 descriptor.display_name,
                 ports.clone(),
@@ -268,7 +268,7 @@ mod tests {
                     },
                     "XSPICE context test".to_owned(),
                 ),
-                "missing" => state.dialogs.builtin_xspice_placement.source = None,
+                "missing" => state.design.builtin_xspice_placement.source = None,
                 _ => unreachable!(),
             }
             assert!(
@@ -292,12 +292,12 @@ mod tests {
             assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
             assert!(!state.model.schematic.can_undo());
             if change != "missing" {
-                assert_eq!(state.dialogs.builtin_xspice_placement.source, Some(source));
+                assert_eq!(state.design.builtin_xspice_placement.source, Some(source));
             }
-            state.dialogs.builtin_xspice_placement.close();
-            assert!(state.dialogs.builtin_xspice_placement.source.is_none());
+            state.design.builtin_xspice_placement.close();
+            assert!(state.design.builtin_xspice_placement.source.is_none());
             if !state.schematic_edit_read_only() {
-                state.dialogs.builtin_xspice_placement.open(
+                state.design.builtin_xspice_placement.open(
                     descriptor.stable_id,
                     descriptor.display_name,
                     ports,

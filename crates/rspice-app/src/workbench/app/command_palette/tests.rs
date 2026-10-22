@@ -5,11 +5,11 @@ use super::*;
 #[test]
 fn task_focused_menu_can_open_the_palette_in_an_exact_scope() {
     let mut app = RSpiceApp::test_instance();
-    app.state.dialogs.command_palette.open_in_scope("Design");
+    app.state.workbench.command_palette.open_in_scope("Design");
 
-    assert!(app.state.dialogs.command_palette.open);
+    assert!(app.state.workbench.command_palette.open);
     assert_eq!(
-        app.state.dialogs.command_palette.initial_scope.as_deref(),
+        app.state.workbench.command_palette.initial_scope.as_deref(),
         Some("Design")
     );
     assert_eq!(
@@ -305,15 +305,15 @@ fn opening_shortcut_and_repeated_letters_in_one_frame_preserve_the_search() {
         app.handle_shortcuts(ctx);
         app.render_command_palette(ctx);
     });
-    assert!(app.state.dialogs.command_palette.open);
-    assert_eq!(app.state.dialogs.command_palette.query, query);
+    assert!(app.state.workbench.command_palette.open);
+    assert_eq!(app.state.workbench.command_palette.query, query);
 
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
         app.handle_shortcuts(ctx);
         app.render_command_palette(ctx);
     });
-    assert_eq!(app.state.dialogs.command_palette.query, query);
-    assert!(!app.state.dialogs.bus_tap.open);
+    assert_eq!(app.state.workbench.command_palette.query, query);
+    assert!(!app.state.design.bus_tap.open);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -346,7 +346,7 @@ fn opening_input_keeps_palette_editing_keys() {
             app.render_command_palette(ctx);
         },
     );
-    assert_eq!(app.state.dialogs.command_palette.query, "Review comments");
+    assert_eq!(app.state.workbench.command_palette.query, "Review comments");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -384,7 +384,7 @@ fn opening_input_respects_custom_palette_bindings() {
             let _ = ctx.run_ui(raw_input(vec![primary_key_event(Key::K)]), |ctx| {
                 app.handle_shortcuts(ctx)
             });
-            assert!(!app.state.dialogs.command_palette.open);
+            assert!(!app.state.workbench.command_palette.open);
         }
         let mut events = if chord {
             vec![primary_key_event(Key::P)]
@@ -402,7 +402,7 @@ fn opening_input_respects_custom_palette_bindings() {
             app.handle_shortcuts(ctx);
             app.render_command_palette(ctx);
         });
-        assert_eq!(app.state.dialogs.command_palette.query, "Review comments");
+        assert_eq!(app.state.workbench.command_palette.query, "Review comments");
     }
 }
 
@@ -437,7 +437,7 @@ fn opening_input_is_owned_before_background_text_edits() {
             },
         );
         assert_eq!(underlying, format!("unchanged{before}"));
-        assert_eq!(app.state.dialogs.command_palette.query, "Review comments");
+        assert_eq!(app.state.workbench.command_palette.query, "Review comments");
     }
 }
 
@@ -445,7 +445,7 @@ fn opening_input_is_owned_before_background_text_edits() {
 #[test]
 fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete() {
     let mut app = test_app();
-    app.state.dialogs.command_palette.recent = vec![Command::PlaceProbe, Command::Save];
+    app.state.workbench.command_palette.recent = vec![Command::PlaceProbe, Command::Save];
     let all = app.palette_rows(
         "",
         PaletteScope::All,
@@ -560,10 +560,10 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
         row.entry.execute(&mut app).expect("the command runs");
     }
 
-    assert!(app.state.dialogs.new_veriloga_device.open);
-    assert!(app.state.dialogs.new_view_dialog);
-    assert_eq!(app.state.dialogs.new_view_library, "behavioral");
-    assert_eq!(app.state.dialogs.new_view_cell, "gain");
+    assert!(app.state.code.new_veriloga_device.open);
+    assert!(app.state.project.new_view_dialog);
+    assert_eq!(app.state.project.new_view_library, "behavioral");
+    assert_eq!(app.state.project.new_view_cell, "gain");
 
     // With nothing it could write, neither is offered as runnable.
     let mut read_only = test_app();
@@ -619,7 +619,7 @@ fn veriloga_build_settings_is_a_palette_command_that_opens_its_form() {
     let row = find(&app).expect("the palette finds Build settings");
     assert!(row.blocked.is_none(), "{:?}", row.blocked);
     row.entry.execute(&mut app).expect("the command runs");
-    assert!(app.state.dialogs.veriloga_build_settings.is_some());
+    assert!(app.state.code.veriloga_build_settings.is_some());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -692,15 +692,15 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
         crate::state::model_library::ModelType::Other,
     ));
     app.state.model.model_library_manager.add_library(library);
-    app.state.dialogs.command_palette.open();
-    app.state.dialogs.command_palette.query = "opa189_a".to_owned();
+    app.state.workbench.command_palette.open();
+    app.state.workbench.command_palette.query = "opa189_a".to_owned();
 
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
         app.render_command_palette(ctx);
     });
 
-    assert!(!app.state.dialogs.command_palette.open);
+    assert!(!app.state.workbench.command_palette.open);
     assert_eq!(
         app.state
             .model
@@ -713,7 +713,7 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
         app.state.workbench.selected_model.as_deref(),
         Some("opa189_a")
     );
-    assert!(app.state.dialogs.command_palette.recent.is_empty());
+    assert!(app.state.workbench.command_palette.recent.is_empty());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -822,7 +822,7 @@ fn active_run_signals_are_searchable_and_open_the_visible_waveform() {
         app.state.workbench.workspace,
         crate::workbench::state::Workspace::Results
     );
-    assert!(app.state.dialogs.command_palette.recent.is_empty());
+    assert!(app.state.workbench.command_palette.recent.is_empty());
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -832,7 +832,7 @@ fn accesskit_exposes_modal_combobox_scopes_listbox_and_options() {
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = test_app();
-    app.state.dialogs.command_palette.open();
+    app.state.workbench.command_palette.open();
     let output = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
     let nodes = output
         .platform_output
@@ -889,7 +889,7 @@ fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
-    app.state.dialogs.command_palette.open();
+    app.state.workbench.command_palette.open();
     let row_count = app
         .palette_rows(
             "",
@@ -903,33 +903,33 @@ fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::ArrowDown)]), |ctx| {
         app.render_command_palette(ctx);
     });
-    assert_eq!(app.state.dialogs.command_palette.selected, 1);
+    assert_eq!(app.state.workbench.command_palette.selected, 1);
 
-    app.state.dialogs.command_palette.selected = 0;
+    app.state.workbench.command_palette.selected = 0;
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::ArrowUp)]), |ctx| {
         app.render_command_palette(ctx);
     });
-    assert_eq!(app.state.dialogs.command_palette.selected, row_count - 1);
+    assert_eq!(app.state.workbench.command_palette.selected, row_count - 1);
 
-    app.state.dialogs.command_palette.query = "Stop active run".to_owned();
-    app.state.dialogs.command_palette.selected = 0;
+    app.state.workbench.command_palette.query = "Stop active run".to_owned();
+    app.state.workbench.command_palette.selected = 0;
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
         app.render_command_palette(ctx);
     });
-    assert!(app.state.dialogs.command_palette.open);
-    assert!(app.state.dialogs.command_palette.recent.is_empty());
+    assert!(app.state.workbench.command_palette.open);
+    assert!(app.state.workbench.command_palette.recent.is_empty());
 
-    app.state.dialogs.command_palette.query = "About RSpice".to_owned();
-    app.state.dialogs.command_palette.selected = 0;
+    app.state.workbench.command_palette.query = "About RSpice".to_owned();
+    app.state.workbench.command_palette.selected = 0;
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
     let _ = ctx.run_ui(raw_input(vec![key_event(Key::Enter)]), |ctx| {
         app.render_command_palette(ctx);
     });
-    assert!(!app.state.dialogs.command_palette.open);
-    assert!(app.state.dialogs.about);
+    assert!(!app.state.workbench.command_palette.open);
+    assert!(app.state.shell.about);
     assert_eq!(
-        app.state.dialogs.command_palette.recent.first(),
+        app.state.workbench.command_palette.recent.first(),
         Some(&Command::About)
     );
 }
@@ -940,7 +940,7 @@ fn tab_moves_to_an_action_without_leaving_the_modal_layer() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = test_app();
-    app.state.dialogs.command_palette.open();
+    app.state.workbench.command_palette.open();
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| app.render_command_palette(ctx));
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(search_id()));
 
@@ -972,7 +972,7 @@ fn modal_claims_and_restores_prior_focus_on_escape() {
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(underlying_id));
 
     let mut app = test_app();
-    app.state.dialogs.command_palette.open();
+    app.state.workbench.command_palette.open();
     let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.add(egui::TextEdit::singleline(&mut underlying).id(underlying_id));
@@ -996,7 +996,7 @@ fn modal_claims_and_restores_prior_focus_on_escape() {
         });
         app.render_command_palette(ctx);
     });
-    assert!(!app.state.dialogs.command_palette.open);
+    assert!(!app.state.workbench.command_palette.open);
     assert_eq!(ctx.memory(|memory| memory.focused()), Some(underlying_id));
     assert_eq!(underlying, "baseline");
 }
@@ -1046,8 +1046,8 @@ fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
         .model
         .pdk_config
         .add_library_path(missing.to_string_lossy().into_owned());
-    app.state.dialogs.command_palette.open();
-    app.state.dialogs.command_palette.query = "Rescan model libraries".to_owned();
+    app.state.workbench.command_palette.open();
+    app.state.workbench.command_palette.query = "Rescan model libraries".to_owned();
     let title = "Model library rescan completed with warnings";
     // The toast's own control: the Console's copy of the line is drawn too.
     let dismiss = format!("Dismiss {title}");
@@ -1056,7 +1056,7 @@ fn a_notice_reported_from_the_palette_is_toasted_by_the_next_frame() {
     let _ = application_frame(&ctx, &mut app, Vec::new());
     let ran = application_frame(&ctx, &mut app, vec![key_event(Key::Enter)]);
     assert!(
-        !app.state.dialogs.command_palette.open,
+        !app.state.workbench.command_palette.open,
         "Enter ran the command"
     );
     assert!(

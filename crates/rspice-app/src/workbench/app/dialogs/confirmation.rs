@@ -15,7 +15,7 @@ use crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId;
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_confirmation_dialog(&mut self, ctx: &Context) {
-        if self.state.dialogs.confirmation_dialog.visible {
+        if self.state.workbench.confirmation_dialog.visible {
             self.render_save_confirmation_dialog(ctx);
         }
         #[cfg(target_arch = "wasm32")]
@@ -25,7 +25,7 @@ impl RSpiceApp {
 
     #[cfg(target_arch = "wasm32")]
     fn render_pending_browser_file_operation(&mut self, ctx: &Context) {
-        if self.state.dialogs.confirmation_dialog.visible {
+        if self.state.workbench.confirmation_dialog.visible {
             return;
         }
         let Some(message) =
@@ -70,7 +70,7 @@ impl RSpiceApp {
     }
 
     fn render_save_confirmation_dialog(&mut self, ctx: &Context) {
-        let (title, consequence) = match self.state.dialogs.confirmation_dialog.pending_action {
+        let (title, consequence) = match self.state.workbench.confirmation_dialog.pending_action {
             Some(action) => (
                 action.prompt_title(self.state.model.workspace.content.project.name().trim()),
                 action.prompt_consequence(),
@@ -100,7 +100,7 @@ impl RSpiceApp {
     }
 
     fn render_project_review_dialog(&mut self, ctx: &Context) {
-        let Some(request) = self.state.dialogs.project_review_dialog.request.clone() else {
+        let Some(request) = self.state.workbench.project_review_dialog.request.clone() else {
             return;
         };
         match request {
@@ -132,14 +132,14 @@ impl RSpiceApp {
                 });
                 match choice {
                     DialogChoice::Primary => {
-                        self.state.dialogs.project_review_dialog.close();
+                        self.state.workbench.project_review_dialog.close();
                         crate::workbench::workflows::project_workflow::confirm_revert_active_document(
                             &mut self.state,
                             &token,
                         );
                     }
                     DialogChoice::Ghost | DialogChoice::Cancelled => {
-                        self.state.dialogs.project_review_dialog.close();
+                        self.state.workbench.project_review_dialog.close();
                     }
                     DialogChoice::Secondary | DialogChoice::None => {}
                 }
@@ -184,7 +184,7 @@ impl RSpiceApp {
         if self.state.model.simulation.execution.has_active_execution() {
             self.render_close_blocked_by_run(ctx, &unsaved);
         } else if documents.is_empty() && unsaved.is_empty() {
-            self.state.dialogs.project_review_dialog.close();
+            self.state.workbench.project_review_dialog.close();
             crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
         } else {
             self.render_close_save_prompt(ctx, never_saved, &unsaved);
@@ -228,13 +228,13 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => self.begin_close_project_after_save(),
             DialogChoice::Secondary => {
-                self.state.dialogs.project_review_dialog.close();
+                self.state.workbench.project_review_dialog.close();
                 crate::workbench::workflows::project_workflow::close_project_discard(
                     &mut self.state,
                 );
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.project_review_dialog.close();
+                self.state.workbench.project_review_dialog.close();
                 self.state.workbench.cancel_project_close();
             }
             DialogChoice::None => {}
@@ -275,7 +275,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.project_review_dialog.close();
+                self.state.workbench.project_review_dialog.close();
                 self.state.workbench.cancel_project_close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
@@ -441,7 +441,10 @@ mod tests {
             .project
             .rename("lna-frontend")
             .expect("valid project name");
-        app.state.dialogs.project_review_dialog.show_close_project();
+        app.state
+            .workbench
+            .project_review_dialog
+            .show_close_project();
         app
     }
 
@@ -515,8 +518,8 @@ mod tests {
             .project
             .rename("lna-frontend")
             .expect("valid project name");
-        app.state.dialogs.confirmation_dialog.visible = true;
-        app.state.dialogs.confirmation_dialog.pending_action =
+        app.state.workbench.confirmation_dialog.visible = true;
+        app.state.workbench.confirmation_dialog.pending_action =
             Some(crate::workbench::app::ConfirmationAction::ProjectOpen);
 
         let painted = painted_text(&render_close_review(&mut app, egui::vec2(1_280.0, 800.0)));

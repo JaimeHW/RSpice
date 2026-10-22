@@ -125,7 +125,7 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
         .find(active_id)
         .map(|sheet| sheet.page_format().clone())
         .ok_or_else(|| "The governed active sheet is unavailable.".to_owned())?;
-    state.dialogs.drawing_sheet_support.manager = SheetFormatManagerState {
+    state.sheets.drawing_sheet_support.manager = SheetFormatManagerState {
         open: true,
         edit: Some(edit),
         owner_key,
@@ -142,17 +142,17 @@ pub(crate) fn open_sheet_format_manager(state: &mut AppState) -> Result<(), Stri
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_drawing_sheet_support_dialogs(&mut self, ctx: &Context) {
-        if !self.state.dialogs.drawing_sheet_support.manager.open {
+        if !self.state.sheets.drawing_sheet_support.manager.open {
             return;
         }
         let authority_error = validate_manager_authority(
             &self.state,
-            &self.state.dialogs.drawing_sheet_support.manager,
+            &self.state.sheets.drawing_sheet_support.manager,
         )
         .err();
         let selected = self
             .state
-            .dialogs
+            .sheets
             .drawing_sheet_support
             .manager
             .rows
@@ -170,27 +170,27 @@ impl RSpiceApp {
         .show(ctx, |ui| {
             sheet_format_manager_body(
                 ui,
-                &mut self.state.dialogs.drawing_sheet_support.manager,
+                &mut self.state.sheets.drawing_sheet_support.manager,
                 authority_error.as_deref(),
             );
         });
         match choice {
             DialogChoice::Primary
-                if self.state.dialogs.drawing_sheet_support.manager.source
+                if self.state.sheets.drawing_sheet_support.manager.source
                     == SheetManagerFormatSource::SheetProperties =>
             {
-                self.state.dialogs.drawing_sheet_support.manager = Default::default();
+                self.state.sheets.drawing_sheet_support.manager = Default::default();
                 crate::workbench::app::reveal_sheet_properties(&mut self.state);
             }
             DialogChoice::Primary => match apply_sheet_format_manager(self) {
                 Ok(message) => {
                     self.state.prompt(message);
-                    self.state.dialogs.drawing_sheet_support.manager = Default::default();
+                    self.state.sheets.drawing_sheet_support.manager = Default::default();
                 }
-                Err(error) => self.state.dialogs.drawing_sheet_support.manager.error = Some(error),
+                Err(error) => self.state.sheets.drawing_sheet_support.manager.error = Some(error),
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.drawing_sheet_support.manager = Default::default();
+                self.state.sheets.drawing_sheet_support.manager = Default::default();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -518,7 +518,7 @@ fn validate_manager_authority(
 }
 
 fn apply_sheet_format_manager(app: &mut RSpiceApp) -> Result<String, String> {
-    let transaction = app.state.dialogs.drawing_sheet_support.manager.clone();
+    let transaction = app.state.sheets.drawing_sheet_support.manager.clone();
     validate_manager_authority(&app.state, &transaction)?;
     let selected = transaction
         .rows
@@ -1007,10 +1007,10 @@ mod tests {
             .expect_err("read-only documents must not start an edit transaction");
 
         assert_eq!(error, "The active schematic is read-only.");
-        assert!(!app.state.dialogs.drawing_sheet_support.manager.open);
+        assert!(!app.state.sheets.drawing_sheet_support.manager.open);
         assert!(
             app.state
-                .dialogs
+                .sheets
                 .drawing_sheet_support
                 .manager
                 .edit
@@ -1047,7 +1047,7 @@ mod tests {
             .expect("a catalog");
         assert_eq!(catalog.sheets().len(), 1);
         assert_eq!(catalog.sheets()[0].name(), "Sheet 1");
-        assert!(app.state.dialogs.drawing_sheet_support.manager.open);
+        assert!(app.state.sheets.drawing_sheet_support.manager.open);
     }
 
     #[test]
@@ -1140,7 +1140,7 @@ mod tests {
         }
         let topology = app.state.model.schematic.topology_version();
         open_sheet_format_manager(&mut app.state).unwrap();
-        for row in &mut app.state.dialogs.drawing_sheet_support.manager.rows {
+        for row in &mut app.state.sheets.drawing_sheet_support.manager.rows {
             row.selected = true;
         }
 
@@ -1202,7 +1202,7 @@ mod tests {
             .bootstrap_for_cell_view(&key, "Main", [])
             .unwrap();
         open_sheet_format_manager(&mut app.state).unwrap();
-        app.state.dialogs.drawing_sheet_support.manager.source =
+        app.state.sheets.drawing_sheet_support.manager.source =
             SheetManagerFormatSource::SheetProperties;
         assert_eq!(
             apply_sheet_format_manager(&mut app).unwrap_err(),

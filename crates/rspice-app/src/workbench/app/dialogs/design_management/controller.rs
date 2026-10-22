@@ -8,16 +8,16 @@ use crate::diagnostics::{LogSeverity, LogSource};
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_design_management_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.design_management.open {
+        if !self.state.project.design_management.open {
             return;
         }
-        let page = self.state.dialogs.design_management.page;
-        let manager_dirty = self.state.dialogs.design_management.dirty();
-        let discard = self.state.dialogs.design_management.discard_confirmation;
+        let page = self.state.project.design_management.page;
+        let manager_dirty = self.state.project.design_management.dirty();
+        let discard = self.state.project.design_management.discard_confirmation;
         // A new edit invalidates a previously displayed discard confirmation.
         // Capture its exact subject only while that confirmation is visible.
         let discard_baseline = discard.then(|| {
-            let draft = &self.state.dialogs.design_management;
+            let draft = &self.state.project.design_management;
             (draft.inputs.clone(), draft.draft.clone())
         });
         let validation = validate_design_management_page(&self.state, page);
@@ -51,8 +51,8 @@ impl RSpiceApp {
         } else {
             "Cancel"
         };
-        let error = self.state.dialogs.design_management.error.clone();
-        let mut body_scroll_offset = self.state.dialogs.design_management.body_scroll_offset;
+        let error = self.state.project.design_management.error.clone();
+        let mut body_scroll_offset = self.state.project.design_management.body_scroll_offset;
         let mut dialog = Dialog::new(page.title(), page.primary())
             .description(description)
             .size(size)
@@ -90,7 +90,7 @@ impl RSpiceApp {
             let response = if page == DesignManagementPage::Manager {
                 body_action = design_management_manager_body(
                     ui,
-                    &mut self.state.dialogs.design_management,
+                    &mut self.state.project.design_management,
                     &self.state.model.workspace,
                     &self.state.model.library_manager,
                     &self.state.model.schematic,
@@ -100,7 +100,7 @@ impl RSpiceApp {
             } else {
                 Some(design_management_subflow_body(
                     ui,
-                    &mut self.state.dialogs.design_management,
+                    &mut self.state.project.design_management,
                     &self.state.model.workspace,
                     &self.state.model.library_manager,
                     &self.state.model.schematic,
@@ -110,16 +110,16 @@ impl RSpiceApp {
             };
             response.map(|response| response.id)
         });
-        self.state.dialogs.design_management.body_scroll_offset = body_scroll_offset;
+        self.state.project.design_management.body_scroll_offset = body_scroll_offset;
         if let Some((inputs, catalog)) = discard_baseline {
-            let draft = &mut self.state.dialogs.design_management;
+            let draft = &mut self.state.project.design_management;
             if inputs != draft.inputs || catalog != draft.draft {
                 draft.discard_confirmation = false;
             }
         }
         self.handle_design_management_body_action(body_action);
-        if !self.state.dialogs.design_management.open
-            || self.state.dialogs.design_management.page != page
+        if !self.state.project.design_management.open
+            || self.state.project.design_management.page != page
         {
             return;
         }
@@ -131,30 +131,30 @@ impl RSpiceApp {
                     self.commit_design_management_subflow(page)
                 };
                 if let Err(error) = result {
-                    self.state.dialogs.design_management.error = Some(error);
+                    self.state.project.design_management.error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 let dirty = if page == DesignManagementPage::Manager {
-                    self.state.dialogs.design_management.dirty()
+                    self.state.project.design_management.dirty()
                 } else {
-                    self.state.dialogs.design_management.subflow_dirty()
+                    self.state.project.design_management.subflow_dirty()
                 };
-                if dirty && !self.state.dialogs.design_management.discard_confirmation {
-                    self.state.dialogs.design_management.discard_confirmation = true;
+                if dirty && !self.state.project.design_management.discard_confirmation {
+                    self.state.project.design_management.discard_confirmation = true;
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else if page == DesignManagementPage::Manager {
-                    self.state.dialogs.design_management.close_and_discard();
+                    self.state.project.design_management.close_and_discard();
                     crate::workbench::app::close_design_management_dialog_route(&mut self.state);
                 } else {
                     let active_sheet = self
                         .state
-                        .dialogs
+                        .project
                         .design_management
                         .draft
                         .as_ref()
                         .and_then(|catalog| {
-                            catalog.sheet_catalog(&self.state.dialogs.design_management.owner_key)
+                            catalog.sheet_catalog(&self.state.project.design_management.owner_key)
                         })
                         .and_then(|catalog| catalog.active_sheet_id());
                     let configurations = self
@@ -164,7 +164,7 @@ impl RSpiceApp {
                         .content
                         .configuration_sets
                         .clone();
-                    self.state.dialogs.design_management.reset_inputs_for_page(
+                    self.state.project.design_management.reset_inputs_for_page(
                         DesignManagementPage::Manager,
                         Some(&configurations),
                         active_sheet,
@@ -181,12 +181,12 @@ impl RSpiceApp {
             DesignManagementBodyAction::Open(page) => {
                 let active_sheet = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_ref()
                     .and_then(|catalog| {
-                        catalog.sheet_catalog(&self.state.dialogs.design_management.owner_key)
+                        catalog.sheet_catalog(&self.state.project.design_management.owner_key)
                     })
                     .and_then(|catalog| catalog.active_sheet_id());
                 let configurations = self
@@ -196,33 +196,33 @@ impl RSpiceApp {
                     .content
                     .configuration_sets
                     .clone();
-                self.state.dialogs.design_management.reset_inputs_for_page(
+                self.state.project.design_management.reset_inputs_for_page(
                     page,
                     Some(&configurations),
                     active_sheet,
                 );
             }
             DesignManagementBodyAction::OpenConfigurationSets => {
-                if self.state.dialogs.design_management.dirty() {
-                    self.state.dialogs.design_management.error = Some(
+                if self.state.project.design_management.dirty() {
+                    self.state.project.design_management.error = Some(
                         "Apply or discard this Design Management draft before opening configuration bindings."
                             .to_owned(),
                     );
                     return;
                 }
-                self.state.dialogs.design_management.close_and_discard();
+                self.state.project.design_management.close_and_discard();
                 crate::workbench::app::close_design_management_dialog_route(&mut self.state);
                 crate::workbench::app::open_configuration_sets_dialog(&mut self.state);
             }
             DesignManagementBodyAction::OpenConfigurationBinding => {
-                if self.state.dialogs.design_management.dirty() {
-                    self.state.dialogs.design_management.error = Some(
+                if self.state.project.design_management.dirty() {
+                    self.state.project.design_management.error = Some(
                         "Apply or discard this Design Management draft before opening configuration bindings."
                             .to_owned(),
                     );
                     return;
                 }
-                self.state.dialogs.design_management.close_and_discard();
+                self.state.project.design_management.close_and_discard();
                 crate::workbench::app::close_design_management_dialog_route(&mut self.state);
                 crate::workbench::app::open_configuration_binding_dialog(&mut self.state);
             }
@@ -233,7 +233,7 @@ impl RSpiceApp {
         let before = (*self.state.model.workspace.content.design_management).clone();
         let draft = self
             .state
-            .dialogs
+            .project
             .design_management
             .draft
             .clone()
@@ -284,27 +284,27 @@ impl RSpiceApp {
                 committed_revision.get()
             ),
         );
-        let owner_key = self.state.dialogs.design_management.owner_key.clone();
+        let owner_key = self.state.project.design_management.owner_key.clone();
         let selection_object_ids = self
             .state
-            .dialogs
+            .project
             .design_management
             .selection_object_ids
             .clone();
         let selection_summary = self
             .state
-            .dialogs
+            .project
             .design_management
             .selection_summary
             .clone();
-        let all_object_ids = self.state.dialogs.design_management.all_object_ids.clone();
+        let all_object_ids = self.state.project.design_management.all_object_ids.clone();
         let default_sheet_name = self
             .state
-            .dialogs
+            .project
             .design_management
             .default_sheet_name
             .clone();
-        self.state.dialogs.design_management.open(
+        self.state.project.design_management.open(
             &candidate,
             owner_key,
             selection_object_ids,
@@ -320,7 +320,7 @@ pub(super) fn validate_design_management_page(
     state: &AppState,
     page: DesignManagementPage,
 ) -> Result<(), String> {
-    let dialog = &state.dialogs.design_management;
+    let dialog = &state.project.design_management;
     let draft = dialog
         .draft
         .as_ref()

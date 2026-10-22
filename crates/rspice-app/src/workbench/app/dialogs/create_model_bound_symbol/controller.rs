@@ -130,7 +130,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
             default_template(source.model_type, &source.model)
         });
 
-    state.dialogs.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
+    state.design.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
         open: true,
         target: format!("{library} / {cell}"),
         source_mode,
@@ -208,7 +208,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
         requires_pin_review: true,
         pins: pins.clone(),
     };
-    state.dialogs.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
+    state.design.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
         open: true,
         target: format!("{target_library} / {cell}"),
         source_mode: CreateSymbolSourceMode::Model,
@@ -223,7 +223,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
 }
 
 pub(super) fn validate_create_symbol_draft(state: &AppState) -> Result<(), String> {
-    let draft = &state.dialogs.create_model_bound_symbol;
+    let draft = &state.design.create_model_bound_symbol;
     if state.model.library_manager.revision() != draft.expected_library_revision {
         return Err(
             "The design library changed after this transaction opened. Close and reopen Create symbol."
@@ -452,7 +452,7 @@ fn default_cell_name(model: &str) -> String {
 pub(super) fn build_create_symbol_definition(
     state: &AppState,
 ) -> Result<ModelBoundSymbolDefinition, String> {
-    let draft = &state.dialogs.create_model_bound_symbol;
+    let draft = &state.design.create_model_bound_symbol;
     let (library_name, cell_name) = parse_target(&draft.target)?;
     let library = state
         .model
@@ -1012,7 +1012,7 @@ pub(super) fn commit_create_model_bound_symbol(state: &mut AppState) -> Result<(
         format!("Create symbol revision {revision} for {library_name}/{cell_name}"),
         fixture,
     )?;
-    state.dialogs.create_model_bound_symbol.close();
+    state.design.create_model_bound_symbol.close();
     let view_name = if definition.generated_views.symbol {
         "symbol"
     } else if definition.generated_views.parameter_form {

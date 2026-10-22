@@ -79,7 +79,7 @@ pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
         ViewType::Schematic | ViewType::Testbench
     )
     .then(|| active.clone());
-    state.dialogs.new_veriloga_device = NewVerilogADeviceFormState {
+    state.code.new_veriloga_device = NewVerilogADeviceFormState {
         open: true,
         library,
         origin,
@@ -105,7 +105,7 @@ enum Draft {
 }
 
 fn draft(state: &AppState) -> Draft {
-    let form = &state.dialogs.new_veriloga_device;
+    let form = &state.code.new_veriloga_device;
     let messages = state.ui.messages();
     if !writable_libraries(&state.model.library_manager).contains(&form.library) {
         return Draft::Refused(messages.text(MessageId::VerilogADeviceNoLibrary));
@@ -125,7 +125,7 @@ fn draft(state: &AppState) -> Draft {
 /// Cell's is; the module it is named after is made from it by
 /// [`verilog_module_name`].
 fn typed_cell(state: &AppState, messages: &MessageCatalog) -> Option<Result<String, String>> {
-    let form = &state.dialogs.new_veriloga_device;
+    let form = &state.code.new_veriloga_device;
     let cell = form.name.trim();
     if cell.is_empty() {
         return None;
@@ -307,13 +307,13 @@ pub(super) fn seed_veriloga_view(
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_new_veriloga_device_form(&mut self, ctx: &Context) {
-        if !self.state.dialogs.new_veriloga_device.open {
+        if !self.state.code.new_veriloga_device.open {
             return;
         }
         let messages = self.state.ui.messages();
         let libraries = writable_libraries(&self.state.model.library_manager);
         let current = draft(&self.state);
-        let form = &self.state.dialogs.new_veriloga_device;
+        let form = &self.state.code.new_veriloga_device;
         // A refusal about a field stands under that field. The status line
         // holds only what belongs to none: no library to write, or a create
         // the project refused.
@@ -333,7 +333,7 @@ impl RSpiceApp {
         let name_id = egui::Id::new("workbench.new-veriloga-device.name");
         let ports_id = egui::Id::new("workbench.new-veriloga-device.ports");
 
-        let form = &mut self.state.dialogs.new_veriloga_device;
+        let form = &mut self.state.code.new_veriloga_device;
         let typed_before = (form.name.clone(), form.ports.clone());
         let mut picked = None;
         let choice = CommandForm::new(&title, &primary)
@@ -377,12 +377,12 @@ impl RSpiceApp {
             // reaches the status line.
             DialogChoice::Primary if matches!(draft(&self.state), Draft::Ready { .. }) => {
                 if let Err(error) = self.commit_new_veriloga_device() {
-                    self.state.dialogs.new_veriloga_device.error = Some(error);
+                    self.state.code.new_veriloga_device.error = Some(error);
                 }
             }
             DialogChoice::Primary => {}
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.new_veriloga_device = NewVerilogADeviceFormState::default();
+                self.state.code.new_veriloga_device = NewVerilogADeviceFormState::default();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -404,7 +404,7 @@ impl RSpiceApp {
                     .text(MessageId::VerilogADeviceCellInvalid));
             }
         };
-        let library = self.state.dialogs.new_veriloga_device.library.clone();
+        let library = self.state.code.new_veriloga_device.library.clone();
         let reference = CellViewRef::new(&library, &cell, VERILOGA_VIEW);
 
         let mut libraries = self.state.model.library_manager.clone();
@@ -431,7 +431,7 @@ impl RSpiceApp {
         self.state.model.workspace.content.project_sources_dirty = true;
         self.state.model.library_manager = libraries;
         self.state.publish_project_library_mutation(prepared);
-        let form = std::mem::take(&mut self.state.dialogs.new_veriloga_device);
+        let form = std::mem::take(&mut self.state.code.new_veriloga_device);
         // The starter compile above is not the reader's: the device is offered
         // for placement after the first compile they start leaves it a port.
         let handoffs = &mut self.state.ui.code_workspace.veriloga.placement_handoffs;

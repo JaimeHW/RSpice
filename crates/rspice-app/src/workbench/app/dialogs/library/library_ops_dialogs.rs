@@ -18,10 +18,10 @@ use crate::workbench::AppState;
 impl AppState {
     /// Open New Library with an empty name.
     pub(crate) fn open_new_library_dialog(&mut self) {
-        self.dialogs.new_library_name.clear();
-        self.dialogs.new_library_error = None;
-        self.dialogs.new_library_library_revision = self.model.library_manager.revision();
-        self.dialogs.new_library_dialog = true;
+        self.project.new_library_name.clear();
+        self.project.new_library_error = None;
+        self.project.new_library_library_revision = self.model.library_manager.revision();
+        self.project.new_library_dialog = true;
     }
 
     /// Open Rename Library pre-filled with the current name.
@@ -37,11 +37,11 @@ impl AppState {
             ));
         }
 
-        self.dialogs.rename_library_current = library.to_owned();
-        self.dialogs.rename_library_name = library.to_owned();
-        self.dialogs.rename_library_error = None;
-        self.dialogs.rename_library_library_revision = self.model.library_manager.revision();
-        self.dialogs.rename_library_dialog = true;
+        self.project.rename_library_current = library.to_owned();
+        self.project.rename_library_name = library.to_owned();
+        self.project.rename_library_error = None;
+        self.project.rename_library_library_revision = self.model.library_manager.revision();
+        self.project.rename_library_dialog = true;
         Ok(())
     }
 
@@ -51,18 +51,18 @@ impl AppState {
             return Err(format!("Library '{library}' no longer exists."));
         }
 
-        self.dialogs.delete_library_target = library.to_owned();
-        self.dialogs.delete_library_error = None;
-        self.dialogs.delete_library_library_revision = self.model.library_manager.revision();
-        self.dialogs.delete_library_dialog = true;
+        self.project.delete_library_target = library.to_owned();
+        self.project.delete_library_error = None;
+        self.project.delete_library_library_revision = self.model.library_manager.revision();
+        self.project.delete_library_dialog = true;
         Ok(())
     }
 
     fn commit_new_library_dialog(&mut self) -> Result<String, String> {
-        if self.model.library_manager.revision() != self.dialogs.new_library_library_revision {
+        if self.model.library_manager.revision() != self.project.new_library_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let name = self.dialogs.new_library_name.trim().to_owned();
+        let name = self.project.new_library_name.trim().to_owned();
         if let Some(error) = validate_lcv_name(&name, "Library name") {
             return Err(error);
         }
@@ -70,11 +70,11 @@ impl AppState {
     }
 
     fn commit_rename_library_dialog(&mut self) -> Result<Option<usize>, String> {
-        if self.model.library_manager.revision() != self.dialogs.rename_library_library_revision {
+        if self.model.library_manager.revision() != self.project.rename_library_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let name = self.dialogs.rename_library_name.trim().to_owned();
-        let current = self.dialogs.rename_library_current.clone();
+        let name = self.project.rename_library_name.trim().to_owned();
+        let current = self.project.rename_library_current.clone();
         if name == current {
             return Ok(None);
         }
@@ -85,10 +85,10 @@ impl AppState {
     }
 
     fn commit_delete_library_review(&mut self) -> Result<usize, String> {
-        if self.model.library_manager.revision() != self.dialogs.delete_library_library_revision {
+        if self.model.library_manager.revision() != self.project.delete_library_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let library = self.dialogs.delete_library_target.clone();
+        let library = self.project.delete_library_target.clone();
         self.delete_library(&library)
     }
 }
@@ -158,7 +158,7 @@ fn error_label(ui: &mut egui::Ui, error: &str) {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_new_library_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.new_library_dialog {
+        if !self.state.project.new_library_dialog {
             return;
         }
 
@@ -166,11 +166,11 @@ impl RSpiceApp {
         let mut should_create = false;
 
         let catalog_current = self.state.model.library_manager.revision()
-            == self.state.dialogs.new_library_library_revision;
+            == self.state.project.new_library_library_revision;
         if !catalog_current {
-            self.state.dialogs.new_library_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            self.state.project.new_library_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let dialogs = &mut self.state.dialogs;
+        let dialogs = &mut self.state.project;
         let choice = Dialog::new("New library", "Create")
             .description(
                 "Create an empty writable library in this project. Cells and views are added to it afterwards.",
@@ -201,15 +201,15 @@ impl RSpiceApp {
                         LogSource::Studio,
                         format!("Created library '{name}'."),
                     );
-                    self.state.dialogs.new_library_error = None;
+                    self.state.project.new_library_error = None;
                     should_close = true;
                 }
-                Err(error) => self.state.dialogs.new_library_error = Some(error),
+                Err(error) => self.state.project.new_library_error = Some(error),
             }
         }
 
         if should_close {
-            let dialogs = &mut self.state.dialogs;
+            let dialogs = &mut self.state.project;
             dialogs.new_library_dialog = false;
             dialogs.new_library_name.clear();
             dialogs.new_library_error = None;
@@ -217,7 +217,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn process_rename_library_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.rename_library_dialog {
+        if !self.state.project.rename_library_dialog {
             return;
         }
 
@@ -225,12 +225,12 @@ impl RSpiceApp {
         let mut should_rename = false;
 
         let catalog_current = self.state.model.library_manager.revision()
-            == self.state.dialogs.rename_library_library_revision;
+            == self.state.project.rename_library_library_revision;
         if !catalog_current {
-            self.state.dialogs.rename_library_error =
+            self.state.project.rename_library_error =
                 Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let dialogs = &mut self.state.dialogs;
+        let dialogs = &mut self.state.project;
         let current = dialogs.rename_library_current.clone();
         let choice = Dialog::new("Rename library", "Rename")
             .description(
@@ -256,8 +256,8 @@ impl RSpiceApp {
         }
 
         if should_rename {
-            let current = self.state.dialogs.rename_library_current.clone();
-            let name = self.state.dialogs.rename_library_name.trim().to_owned();
+            let current = self.state.project.rename_library_current.clone();
+            let name = self.state.project.rename_library_name.trim().to_owned();
             match self.state.commit_rename_library_dialog() {
                 Ok(Some(remapped)) => {
                     self.state.record(
@@ -268,16 +268,16 @@ impl RSpiceApp {
                              references now name it."
                         ),
                     );
-                    self.state.dialogs.rename_library_error = None;
+                    self.state.project.rename_library_error = None;
                     should_close = true;
                 }
                 Ok(None) => should_close = true,
-                Err(error) => self.state.dialogs.rename_library_error = Some(error),
+                Err(error) => self.state.project.rename_library_error = Some(error),
             }
         }
 
         if should_close {
-            let dialogs = &mut self.state.dialogs;
+            let dialogs = &mut self.state.project;
             dialogs.rename_library_dialog = false;
             dialogs.rename_library_name.clear();
             dialogs.rename_library_error = None;
@@ -285,19 +285,19 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn process_delete_library_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.delete_library_dialog {
+        if !self.state.project.delete_library_dialog {
             return;
         }
 
-        let library = self.state.dialogs.delete_library_target.clone();
+        let library = self.state.project.delete_library_target.clone();
         let impact = library_deletion_impact(&self.state, &library);
         let catalog_current = self.state.model.library_manager.revision()
-            == self.state.dialogs.delete_library_library_revision;
+            == self.state.project.delete_library_library_revision;
         let blocker = self.state.library_deletion_blocker(&library);
         let displayed_error = if catalog_current {
             blocker
                 .clone()
-                .or_else(|| self.state.dialogs.delete_library_error.clone())
+                .or_else(|| self.state.project.delete_library_error.clone())
         } else {
             Some(
                 "The library catalog changed after this review opened. Cancel and review the deletion again."
@@ -357,17 +357,17 @@ impl RSpiceApp {
                             if cells == 1 { "" } else { "s" }
                         ),
                     );
-                    self.state.dialogs.delete_library_error = None;
+                    self.state.project.delete_library_error = None;
                     should_close = true;
                 }
-                Err(error) => self.state.dialogs.delete_library_error = Some(error),
+                Err(error) => self.state.project.delete_library_error = Some(error),
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => should_close = true,
             DialogChoice::Secondary | DialogChoice::None => {}
         }
 
         if should_close {
-            let dialogs = &mut self.state.dialogs;
+            let dialogs = &mut self.state.project;
             dialogs.delete_library_dialog = false;
             dialogs.delete_library_target.clear();
             dialogs.delete_library_error = None;

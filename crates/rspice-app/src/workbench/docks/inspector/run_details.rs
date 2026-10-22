@@ -16,8 +16,15 @@ use super::super::super::design_system::{
 };
 use super::{engineering_readout, executed_deck, result_authority::forced_lte_acceptances};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
-use crate::workbench::app::RunDetailsDialogState;
 use crate::workbench::{AppState, RSpiceApp};
+
+/// The run Run details… is open on, with its manifest taken once when the
+/// dialog opened: projecting a run digests every sample it retained.
+#[derive(Debug, Clone)]
+pub(crate) struct RunDetailsDialogState {
+    pub(crate) run_id: u64,
+    pub(crate) manifest: rspice_results::manifest::ManifestViewModel,
+}
 
 /// At most this many significant digits for the times a convergence record
 /// names.
@@ -40,13 +47,13 @@ pub(in crate::workbench::docks) fn open(state: &mut AppState, run_id: u64) {
         return;
     };
     let manifest = crate::workbench::documents::result_document::manifest::manifest_for_run(run);
-    state.dialogs.run_details = Some(RunDetailsDialogState { run_id, manifest });
+    state.simulate.run_details = Some(RunDetailsDialogState { run_id, manifest });
 }
 
 /// Draw Run details… while it is open, and act on its two routes once the
 /// borrow of the run it describes is done.
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
-    let Some(dialog) = app.state.dialogs.run_details.as_ref() else {
+    let Some(dialog) = app.state.simulate.run_details.as_ref() else {
         return;
     };
     let run_id = dialog.run_id;
@@ -60,7 +67,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
         .find(|run| run.id == run_id)
     else {
         // The run left the history while its details were open.
-        app.state.dialogs.run_details = None;
+        app.state.simulate.run_details = None;
         return;
     };
     let manifest = &dialog.manifest;
@@ -191,7 +198,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 
     let close = matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled);
     if close || open_plan || open_deck.is_some() {
-        app.state.dialogs.run_details = None;
+        app.state.simulate.run_details = None;
     }
     if let Some(run_id) = open_deck {
         executed_deck::reveal(&mut app.state, run_id);

@@ -394,7 +394,7 @@ fn new_veriloga_device_opens_the_form_from_the_canvas() {
         Point::origin(),
         &symbol_context,
     );
-    assert!(state.dialogs.new_veriloga_device.open);
+    assert!(state.code.new_veriloga_device.open);
 
     let names = state
         .model
@@ -504,7 +504,7 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
 
     let mut local = state_with_selected_source(0, false);
     stimulus::execute(ContextAction::SaveStimulus, &mut local);
-    assert!(local.dialogs.stimulus_link.open);
+    assert!(local.design.stimulus_link.open);
 
     let mut adopted = state_with_selected_source(0, true);
     stimulus::execute(ContextAction::OpenStimulusDefinition, &mut adopted);
@@ -580,7 +580,7 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
             .editor
             .selection
             .select_only_component(7);
-        state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
+        state.workbench.interaction.context_target = Some((ContextTarget::Component(7), (0, 0)));
         let symbol_context = schematic_symbol_context(&state);
 
         let _ = ctx.run_ui(Default::default(), |ctx| {
@@ -600,7 +600,7 @@ fn focused_keyboard_context_row_activates_with_enter_or_space() {
         });
 
         assert!(
-            state.tabbed_property_dialog.open || state.dialogs.object_properties.open,
+            state.tabbed_property_dialog.open || state.design.object_properties.open,
             "{key:?} should activate the focused Object properties row"
         );
         assert!(
@@ -790,10 +790,10 @@ fn net_label_context_exposes_the_complete_object_lifecycle() {
         label.pos,
         &symbol_context,
     );
-    assert!(state.dialogs.object_properties.open);
-    assert!(!state.dialogs.rename_selection.open);
+    assert!(state.design.object_properties.open);
+    assert!(!state.design.rename_selection.open);
     assert!(matches!(
-        state.dialogs.object_properties.draft,
+        state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
             if draft.original == label
     ));
@@ -842,7 +842,7 @@ fn design_note_context_exposes_only_compatible_object_lifecycle_actions() {
         &symbol_context,
     );
     assert!(matches!(
-        state.dialogs.object_properties.draft,
+        state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DesignNote(ref draft))
             if draft.original == note
     ));
@@ -891,7 +891,7 @@ fn documentation_shape_context_exposes_the_complete_non_electrical_lifecycle() {
         &symbol_context,
     );
     assert!(matches!(
-        state.dialogs.object_properties.draft,
+        state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DocumentationShape(ref draft))
             if draft.original == shape
     ));
@@ -1117,8 +1117,8 @@ fn the_replace_instance_row_is_offered_and_runs_only_for_one_replaceable_instanc
         &symbol_context,
     );
 
-    assert!(state.dialogs.replace_instance.open);
-    assert_eq!(state.dialogs.replace_instance.source_component_id, first);
+    assert!(state.design.replace_instance.open);
+    assert_eq!(state.design.replace_instance.source_component_id, first);
 }
 
 /// One reported device, selected on the canvas.
@@ -1308,7 +1308,7 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
             .editor
             .selection
             .select_only_component(7);
-        state.dialogs.interaction.context_target = Some((ContextTarget::Component(7), (70, 0)));
+        state.workbench.interaction.context_target = Some((ContextTarget::Component(7), (70, 0)));
         let request = ContextMenuRequest {
             binding: context_menu_binding(&state).unwrap(),
             action: ContextAction::Delete,
@@ -1323,12 +1323,12 @@ fn context_requests_recheck_the_opening_selection_source_and_authority() {
                 .selection
                 .select_only_component(8),
             "target" => {
-                state.dialogs.interaction.context_target =
+                state.workbench.interaction.context_target =
                     Some((ContextTarget::Component(8), (80, 0)))
             }
             "tool" => state.model.schematic.session.editor.tool = Tool::Wire,
             "read-only" => state.model.schematic.session.read_only = true,
-            "modal" => state.dialogs.preferences_open = true,
+            "modal" => state.settings.preferences_open = true,
             "none" => {}
             _ => unreachable!(),
         }
@@ -1413,7 +1413,7 @@ fn render_the_per_target_context_menus_for_review() {
             ContextTarget::Component(id),
         ),
     ] {
-        state.dialogs.interaction.context_target = Some((target, (0, 0)));
+        state.workbench.interaction.context_target = Some((target, (0, 0)));
         // The popup's own frame and 286 px width, at the desktop row height.
         let size = vec2(300.0, 620.0);
         let canvas = crate::ui::raster::render(size, |ui, _| {

@@ -54,9 +54,9 @@ fn operation_live(app: &RSpiceApp) -> bool {
     state.model.schematic.canvas_settings_change_blocked()
         || editor.tool != Tool::Select
         || editor.zoom_box.armed
-        || state.dialogs.move_selection.armed
-        || state.dialogs.stretch_selection.armed
-        || state.dialogs.array_selection.armed
+        || state.design.move_selection.armed
+        || state.design.stretch_selection.armed
+        || state.design.array_selection.armed
         || state.schematic_drag_in_progress()
 }
 

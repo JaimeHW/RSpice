@@ -127,7 +127,7 @@ fn opening_uses_real_writable_library_and_selected_model() {
 
     open_create_model_bound_symbol_dialog(&mut state);
 
-    let draft = &state.dialogs.create_model_bound_symbol;
+    let draft = &state.design.create_model_bound_symbol;
     assert!(draft.open);
     assert_eq!(draft.target, "analog_blocks / precision_opamp");
     assert_eq!(draft.source_mode, CreateSymbolSourceMode::Model);
@@ -143,14 +143,11 @@ fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
     let mut state = state_with_bound_mos_model();
     let initial_project_revision = state.model.workspace.content.project.revision();
     open_create_model_bound_symbol_dialog(&mut state);
-    state
-        .dialogs
-        .create_model_bound_symbol
-        .pin_contract_reviewed = true;
+    state.design.create_model_bound_symbol.pin_contract_reviewed = true;
 
     commit_create_model_bound_symbol(&mut state).expect("model-bound symbol commit");
 
-    assert!(!state.dialogs.create_model_bound_symbol.open);
+    assert!(!state.design.create_model_bound_symbol.open);
     assert_eq!(state.model.workspace.content.active_view.view, "symbol");
     assert_eq!(
         state.model.workspace.content.active_view.library,
@@ -203,7 +200,7 @@ fn commit_publishes_one_typed_revision_and_opens_the_symbol_editor() {
 fn generated_fixture_is_real_editable_topology_in_the_atomic_publication() {
     let mut state = state_with_bound_mos_model();
     open_create_model_bound_symbol_dialog(&mut state);
-    let draft = &mut state.dialogs.create_model_bound_symbol;
+    let draft = &mut state.design.create_model_bound_symbol;
     draft.pin_contract_reviewed = true;
     draft.simulation_test_fixture = true;
     draft.pins[3].electrical_type = CreateSymbolPinType::Ground;
@@ -293,11 +290,11 @@ fn existing_schematic_source_is_identity_locked_and_preserves_the_master() {
 
     open_create_model_bound_symbol_dialog(&mut state);
     state
-        .dialogs
+        .design
         .create_model_bound_symbol
         .select_source(CreateSymbolSourceMode::ExistingSchematicPins);
     assert_eq!(
-        state.dialogs.create_model_bound_symbol.target,
+        state.design.create_model_bound_symbol.target,
         format!("{library} / {cell}")
     );
     let definition = build_create_symbol_definition(&state).expect("schematic definition");
@@ -308,7 +305,7 @@ fn existing_schematic_source_is_identity_locked_and_preserves_the_master() {
     assert_eq!(definition.netlist.model, None);
     assert_eq!(definition.netlist.device_prefix, "X");
 
-    state.dialogs.create_model_bound_symbol.target = format!("{library} / different_cell");
+    state.design.create_model_bound_symbol.target = format!("{library} / different_cell");
     assert!(
         validate_create_symbol_draft(&state)
             .expect_err("cross-cell identity must fail")
@@ -321,7 +318,7 @@ fn blank_contract_publishes_truthful_review_views_but_never_a_fixture() {
     let mut state = state_with_bound_mos_model();
     open_create_model_bound_symbol_dialog(&mut state);
     {
-        let draft = &mut state.dialogs.create_model_bound_symbol;
+        let draft = &mut state.design.create_model_bound_symbol;
         draft.select_source(CreateSymbolSourceMode::BlankExplicitContract);
         draft.pins.push(CreateSymbolPinDraft::new(
             "IO",
@@ -365,7 +362,7 @@ fn accessibility_tree_exposes_the_mockup_dialog_and_complete_actions() {
     app.state = state_with_bound_mos_model();
     open_create_model_bound_symbol_dialog(&mut app.state);
     app.state
-        .dialogs
+        .design
         .create_model_bound_symbol
         .pin_contract_reviewed = true;
     let output = ctx.run_ui(
@@ -420,7 +417,7 @@ fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
     )
     .expect("subcircuit draft opens");
 
-    let draft = &mut state.dialogs.create_model_bound_symbol;
+    let draft = &mut state.design.create_model_bound_symbol;
     assert!(draft.open);
     assert_eq!(
         draft
@@ -497,7 +494,7 @@ fn mockup_width_keeps_pin_actions_and_generated_views_in_separate_tracks() {
     );
     assert_eq!(
         earlier.len(),
-        app.state.dialogs.create_model_bound_symbol.pins.len()
+        app.state.design.create_model_bound_symbol.pins.len()
     );
     assert_eq!(later.len(), earlier.len());
     for (up, down) in earlier.into_iter().zip(later) {
@@ -530,7 +527,7 @@ fn validation_status_reserves_height_and_desktop_generated_views_do_not_clip() {
     let invalid_add = node_bounds(&invalid_nodes, egui::accesskit::Role::Button, "Add pin");
 
     app.state
-        .dialogs
+        .design
         .create_model_bound_symbol
         .pin_contract_reviewed = true;
     let valid_nodes = render_accessibility_frame(&mut app, &ctx, size);

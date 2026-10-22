@@ -20,7 +20,7 @@ pub(super) fn handle_keyboard_object_navigation(
         &KeyboardNavigationView {
             design: super::schematic_design_view(state),
             editor: &state.model.schematic.session.editor,
-            keyboard_focus: state.dialogs.interaction.schematic_keyboard_focus,
+            keyboard_focus: state.workbench.interaction.schematic_keyboard_focus,
             filter: state.ui.schematic_selection_filter,
         },
         KeyboardCapabilities {
@@ -109,7 +109,7 @@ mod tests {
         assert!(!available);
         assert!(state.model.schematic.session.editor.selection.is_empty());
         assert_eq!(
-            state.dialogs.interaction.schematic_keyboard_focus,
+            state.workbench.interaction.schematic_keyboard_focus,
             Some(SchematicKeyboardFocus::Probe(2))
         );
 
@@ -128,7 +128,7 @@ mod tests {
             Some(3)
         );
         assert_eq!(
-            state.dialogs.interaction.schematic_keyboard_focus,
+            state.workbench.interaction.schematic_keyboard_focus,
             Some(SchematicKeyboardFocus::DesignNote(3))
         );
     }
@@ -371,7 +371,7 @@ mod tests {
             .editor
             .selection
             .select_only_component(11);
-        state.dialogs.about = true;
+        state.shell.about = true;
 
         let (handled, key_still_available) =
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
@@ -388,7 +388,7 @@ mod tests {
             Some(11)
         );
 
-        state.dialogs.about = false;
+        state.shell.about = false;
         Popup::open_id(&ctx, Id::new("test-context-owner"));
         let (handled, key_still_available) =
             run_navigation_frame(&ctx, Key::ArrowRight, Modifiers::NONE, &mut state, true);
@@ -428,7 +428,7 @@ mod tests {
         assert!(handled);
         assert!(!key_still_available);
         assert_eq!(state.model.schematic.document().components.len(), 2);
-        assert!(!state.dialogs.application_modal_open());
+        assert!(!state.dialog_modal_open());
         assert_eq!(
             state.model.schematic.undo_description(),
             Some("delete selection")

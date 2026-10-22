@@ -122,8 +122,11 @@ pub(crate) fn open_window_workflow(app: &mut RSpiceApp, workflow: WindowWorkflow
     let active = crate::workbench::chrome::document_bar::document_descriptors(&app.state)
         .into_iter()
         .find(|document| document.active && document.open);
-    app.state.dialogs.window_session.open_workflow(workflow);
-    let dialog = &mut app.state.dialogs.window_session;
+    app.state
+        .workbench
+        .window_session_dialog
+        .open_workflow(workflow);
+    let dialog = &mut app.state.workbench.window_session_dialog;
     dialog.source_window = source_window;
     if let Some(active) = active {
         dialog.source_document = Some(active.id);
@@ -163,10 +166,10 @@ pub(crate) fn open_window_workflow(app: &mut RSpiceApp, workflow: WindowWorkflow
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_window_session_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.window_session.open {
+        if !self.state.workbench.window_session_dialog.open {
             return;
         }
-        if let Some(workflow) = self.state.dialogs.window_session.workflow {
+        if let Some(workflow) = self.state.workbench.window_session_dialog.workflow {
             self.render_window_workflow(ctx, workflow);
         } else {
             self.render_window_manager(ctx);
@@ -178,7 +181,7 @@ impl RSpiceApp {
             crate::workbench::chrome::document_bar::all_document_descriptors(&self.state);
         let open_count = documents.iter().filter(|document| document.open).count();
         let dirty_count = documents.iter().filter(|document| document.dirty).count();
-        let mut page = self.state.dialogs.window_session.page;
+        let mut page = self.state.workbench.window_session_dialog.page;
         let mut action = None;
 
         let choice = Dialog::new("Windows, documents and session", "Close")
@@ -214,9 +217,9 @@ impl RSpiceApp {
                 }
             });
 
-        self.state.dialogs.window_session.page = page;
+        self.state.workbench.window_session_dialog.page = page;
         if choice != DialogChoice::None {
-            self.state.dialogs.window_session.close();
+            self.state.workbench.window_session_dialog.close();
             return;
         }
         if let Some(action) = action {
@@ -251,12 +254,12 @@ impl RSpiceApp {
                 crate::workbench::chrome::document_bar::close_all_documents(&mut self.state);
             }
             WindowSessionAction::WorkspaceLayouts => {
-                self.state.dialogs.window_session.close();
+                self.state.workbench.window_session_dialog.close();
                 Command::WorkspaceLayouts.execute(self);
             }
             WindowSessionAction::ResetLayout => Command::ResetLayout.execute(self),
             WindowSessionAction::OpenRecovery => {
-                self.state.dialogs.window_session.close();
+                self.state.workbench.window_session_dialog.close();
                 Command::ProjectPage(ProjectPage::Recovery).execute(self);
             }
             WindowSessionAction::OpenWorkflow(workflow) => open_window_workflow(self, workflow),
@@ -287,18 +290,41 @@ impl RSpiceApp {
 
     fn render_window_workflow(&mut self, ctx: &Context, workflow: WindowWorkflow) {
         let (title, primary) = workflow_copy(workflow);
-        let source_window = self.state.dialogs.window_session.source_window;
-        let source_document = self.state.dialogs.window_session.source_document.clone();
-        let source_label = self.state.dialogs.window_session.source_label.clone();
-        let mut initial_content = self.state.dialogs.window_session.initial_content;
-        let mut destination = self.state.dialogs.window_session.destination;
-        let mut layout_choice = self.state.dialogs.window_session.layout_choice;
-        let mut restore_on_launch = self.state.dialogs.window_session.restore_on_launch;
-        let mut synchronize_chrome = self.state.dialogs.window_session.synchronize_chrome;
-        let mut reattach_at_end = self.state.dialogs.window_session.reattach_at_end;
-        let mut recovery_selected = self.state.dialogs.window_session.recovery_selected.clone();
-        let mut recover_future = self.state.dialogs.window_session.recover_all_future_windows;
-        let error = self.state.dialogs.window_session.error.clone();
+        let source_window = self.state.workbench.window_session_dialog.source_window;
+        let source_document = self
+            .state
+            .workbench
+            .window_session_dialog
+            .source_document
+            .clone();
+        let source_label = self
+            .state
+            .workbench
+            .window_session_dialog
+            .source_label
+            .clone();
+        let mut initial_content = self.state.workbench.window_session_dialog.initial_content;
+        let mut destination = self.state.workbench.window_session_dialog.destination;
+        let mut layout_choice = self.state.workbench.window_session_dialog.layout_choice;
+        let mut restore_on_launch = self.state.workbench.window_session_dialog.restore_on_launch;
+        let mut synchronize_chrome = self
+            .state
+            .workbench
+            .window_session_dialog
+            .synchronize_chrome;
+        let mut reattach_at_end = self.state.workbench.window_session_dialog.reattach_at_end;
+        let mut recovery_selected = self
+            .state
+            .workbench
+            .window_session_dialog
+            .recovery_selected
+            .clone();
+        let mut recover_future = self
+            .state
+            .workbench
+            .window_session_dialog
+            .recover_all_future_windows;
+        let error = self.state.workbench.window_session_dialog.error.clone();
 
         let choice = Dialog::new(title, primary)
             .description(workflow_description(workflow))
@@ -347,7 +373,7 @@ impl RSpiceApp {
             });
 
         {
-            let dialog = &mut self.state.dialogs.window_session;
+            let dialog = &mut self.state.workbench.window_session_dialog;
             dialog.initial_content = initial_content;
             dialog.destination = destination;
             dialog.layout_choice = layout_choice;
@@ -362,13 +388,13 @@ impl RSpiceApp {
                 if let Err(error) =
                     self.commit_window_workflow(workflow, source_window, source_document)
                 {
-                    self.state.dialogs.window_session.error = Some(error);
+                    self.state.workbench.window_session_dialog.error = Some(error);
                 } else {
-                    self.state.dialogs.window_session.close();
+                    self.state.workbench.window_session_dialog.close();
                 }
             }
             DialogChoice::Secondary | DialogChoice::Cancelled => {
-                self.state.dialogs.window_session.close();
+                self.state.workbench.window_session_dialog.close();
             }
             DialogChoice::None | DialogChoice::Ghost => {}
         }
@@ -380,7 +406,7 @@ impl RSpiceApp {
         source_window: ApplicationWindowId,
         source_document: Option<WorkspaceDocumentId>,
     ) -> Result<(), String> {
-        let dialog = self.state.dialogs.window_session.clone();
+        let dialog = self.state.workbench.window_session_dialog.clone();
         if self
             .state
             .workbench
@@ -1087,8 +1113,8 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         app.state
-            .dialogs
-            .window_session
+            .workbench
+            .window_session_dialog
             .open(WindowSessionPage::Windows);
         // Access updates are incremental: keep the latest of every node.
         let mut nodes = std::collections::HashMap::new();

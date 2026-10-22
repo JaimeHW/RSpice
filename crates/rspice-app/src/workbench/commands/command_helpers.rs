@@ -12,7 +12,7 @@ pub(super) fn open_command_palette(state: &mut AppState) {
         state.prompt(format!("The Command Palette could not be opened: {error}"));
         return;
     }
-    state.dialogs.command_palette.open_routed();
+    state.workbench.command_palette.open_routed();
 }
 
 pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app::HelpCenterPage) {
@@ -25,7 +25,7 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
         state.prompt(format!("The Help Center could not be opened: {error}"));
         return;
     }
-    state.dialogs.help_center.open_routed(page);
+    state.shell.help_center.open_routed(page);
 }
 
 /// Whether the netlist document — not merely the workspace that hosts it — is
@@ -213,14 +213,14 @@ pub(super) fn schematic_selection_has_duplicable_object(
 
 pub(super) fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     activate_workspace(app, Workspace::Design);
-    if app.state.dialogs.move_selection.armed && tool != Tool::MoveSelection {
-        app.state.dialogs.move_selection.close();
+    if app.state.design.move_selection.armed && tool != Tool::MoveSelection {
+        app.state.design.move_selection.close();
     }
-    if app.state.dialogs.stretch_selection.armed && tool != Tool::StretchSelection {
-        app.state.dialogs.stretch_selection.close();
+    if app.state.design.stretch_selection.armed && tool != Tool::StretchSelection {
+        app.state.design.stretch_selection.close();
     }
-    if app.state.dialogs.array_selection.armed && tool != Tool::ArraySelection {
-        app.state.dialogs.array_selection.close();
+    if app.state.design.array_selection.armed && tool != Tool::ArraySelection {
+        app.state.design.array_selection.close();
     }
     app.state.model.schematic.arm_tool(tool);
 }
@@ -343,7 +343,7 @@ pub(super) fn open_new_cell_dialog(app: &mut RSpiceApp) {
     });
     let library_revision = app.state.model.library_manager.revision();
 
-    let dialogs = &mut app.state.dialogs;
+    let dialogs = &mut app.state.project;
     dialogs.new_cell_library = target_library.unwrap_or_default();
     dialogs.new_cell_name.clear();
     dialogs.new_cell_description.clear();

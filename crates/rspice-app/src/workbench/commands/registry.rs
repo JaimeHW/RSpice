@@ -1175,7 +1175,7 @@ impl Command {
             {
                 "open an editable schematic or testbench drawing sheet"
             }
-            Self::SheetFormatManager if app.state.dialogs.drawing_sheet_support.manager.open => {
+            Self::SheetFormatManager if app.state.sheets.drawing_sheet_support.manager.open => {
                 "Sheet Format Manager is already open"
             }
             Self::SheetFormatManager

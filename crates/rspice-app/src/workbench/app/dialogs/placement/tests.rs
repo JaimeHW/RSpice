@@ -58,7 +58,7 @@ fn render_placement_forms() {
             |app| {
                 declare_bus(&mut app.state, "DATA[15:0]");
                 super::bus_tap::open_bus_tap(&mut app.state);
-                app.state.dialogs.bus_tap.fields.slice = "DATA[7:0]".to_owned();
+                app.state.design.bus_tap.fields.slice = "DATA[7:0]".to_owned();
             },
             |app, ctx| app.render_bus_tap_dialog(ctx),
         ),
@@ -66,8 +66,8 @@ fn render_placement_forms() {
             "bus-tap-refused",
             |app| {
                 super::bus_tap::open_bus_tap(&mut app.state);
-                app.state.dialogs.bus_tap.fields.bus = "DATA[15:0]".to_owned();
-                app.state.dialogs.bus_tap.fields.slice = "ADDR[7:0]".to_owned();
+                app.state.design.bus_tap.fields.bus = "DATA[15:0]".to_owned();
+                app.state.design.bus_tap.fields.slice = "ADDR[7:0]".to_owned();
             },
             |app, ctx| app.render_bus_tap_dialog(ctx),
         ),
@@ -75,9 +75,9 @@ fn render_placement_forms() {
             "design-note",
             |app| {
                 let source = schematic_editor_request_source(&app.state);
-                app.state.dialogs.design_note.open(source);
-                app.state.dialogs.design_note.kind = DesignNoteKind::ReviewNote;
-                app.state.dialogs.design_note.text =
+                app.state.design.design_note.open(source);
+                app.state.design.design_note.kind = DesignNoteKind::ReviewNote;
+                app.state.design.design_note.text =
                     "Check the start-up path before tape-out".to_owned();
             },
             |app, ctx| app.render_design_note_dialog(ctx),
@@ -86,7 +86,7 @@ fn render_placement_forms() {
             "design-note-empty",
             |app| {
                 let source = schematic_editor_request_source(&app.state);
-                app.state.dialogs.design_note.open(source);
+                app.state.design.design_note.open(source);
             },
             |app, ctx| app.render_design_note_dialog(ctx),
         ),
@@ -101,7 +101,7 @@ fn render_placement_forms() {
                     .document()
                     .documentation_shapes
                     .clone();
-                app.state.dialogs.documentation_shape.open(source, shapes);
+                app.state.design.documentation_shape.open(source, shapes);
             },
             |app, ctx| app.render_documentation_shape_dialog(ctx),
         ),
@@ -115,7 +115,7 @@ fn render_placement_forms() {
                 let ports =
                     crate::state::builtin_xspice_vector_ports(descriptor).expect("vector ports");
                 let source = schematic_editor_request_source(&app.state);
-                app.state.dialogs.builtin_xspice_placement.open(
+                app.state.design.builtin_xspice_placement.open(
                     descriptor.stable_id,
                     descriptor.display_name,
                     ports,
@@ -173,12 +173,12 @@ fn render_net_label_entry() {
         ("net-label-refused", |app| {
             app.state.model.schematic.session.editor.tool = Tool::Label;
             crate::workbench::app::open_net_label_placement(&mut app.state, Point::new(30, 50));
-            app.state.dialogs.net_label_placement.name = "two nodes".to_owned();
+            app.state.design.net_label_placement.name = "two nodes".to_owned();
         }),
         ("off-sheet-connector", |app| {
             app.state.model.schematic.session.editor.tool = Tool::OffSheetConnector;
             crate::workbench::app::open_net_label_placement(&mut app.state, Point::new(30, 50));
-            app.state.dialogs.net_label_placement.name = "BIAS".to_owned();
+            app.state.design.net_label_placement.name = "BIAS".to_owned();
         }),
     ];
     for (stem, open) in cases {

@@ -230,7 +230,7 @@ fn registry(
     // in the modal, and nothing else is coming to repaint the row it removed.
     let mut removal = app
         .state
-        .dialogs
+        .simulate
         .plan_removal_review
         .take_confirmed_variable(plan_id)
         .inspect(|_| ui.ctx().request_repaint())
@@ -271,7 +271,7 @@ fn registry(
             // left naming nothing. Removing one nothing reads costs nothing, so
             // it is not worth a modal.
             match removal_consequences(app, &variables[index]) {
-                Some(consequences) => app.state.dialogs.plan_removal_review.open(
+                Some(consequences) => app.state.simulate.plan_removal_review.open(
                     PlanRemovalTarget::Variable { plan: plan_id, id },
                     name,
                     consequences,

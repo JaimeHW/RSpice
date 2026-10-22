@@ -743,20 +743,20 @@ fn project_recovery(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected = app.state.workbench.project_checkpoint_selection.as_deref();
     let checkpoint = app
         .state
-        .dialogs
+        .project
         .project_checkpoint_recovery
         .checkpoints
         .iter()
         .find(|item| selected.is_some_and(|id| id == item.checkpoint_id().to_string()));
     let integrity = app
         .state
-        .dialogs
+        .project
         .project_checkpoint_recovery
         .error
         .is_none()
         && app
             .state
-            .dialogs
+            .project
             .project_checkpoint_recovery
             .quarantined
             .is_empty();
@@ -771,7 +771,7 @@ fn project_recovery(ui: &mut Ui, app: &mut RSpiceApp) {
 
     let quarantined = app
         .state
-        .dialogs
+        .project
         .project_checkpoint_recovery
         .quarantined
         .len();

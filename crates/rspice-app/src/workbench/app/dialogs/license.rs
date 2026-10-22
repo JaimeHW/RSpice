@@ -47,7 +47,7 @@ impl RSpiceApp {
     /// Open the dialog: fresh entry, or the stored grant when already
     /// activated (primary becomes Close, secondary removes the license).
     pub(crate) fn open_license_dialog(&mut self) {
-        let dialog = &mut self.state.dialogs.license_dialog;
+        let dialog = &mut self.state.cloud.license_dialog;
         dialog.open = true;
         dialog.text.clear();
         dialog.phase = match &self.state.license {
@@ -57,18 +57,18 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn render_license_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.license_dialog.open {
+        if !self.state.cloud.license_dialog.open {
             return;
         }
         let already_active = self.state.license.is_some()
             && matches!(
-                self.state.dialogs.license_dialog.phase,
+                self.state.cloud.license_dialog.phase,
                 LicensePhase::Verified(_)
             )
-            && self.state.dialogs.license_dialog.text.is_empty();
+            && self.state.cloud.license_dialog.text.is_empty();
 
-        let phase = self.state.dialogs.license_dialog.phase.clone();
-        let empty = self.state.dialogs.license_dialog.text.trim().is_empty();
+        let phase = self.state.cloud.license_dialog.phase.clone();
+        let empty = self.state.cloud.license_dialog.text.trim().is_empty();
         let (title, primary) = match &phase {
             LicensePhase::Entry | LicensePhase::Error(_) => ("Enter license key", "Verify"),
             LicensePhase::Verified(_) if already_active => ("License", "Close"),
@@ -117,7 +117,7 @@ impl RSpiceApp {
         let choice = dialog.show(ctx, |ui| {
             fact_grid::show(ui, |rows| match &phase {
                 LicensePhase::Entry | LicensePhase::Error(_) => {
-                    let text = &mut state.dialogs.license_dialog.text;
+                    let text = &mut state.cloud.license_dialog.text;
                     rows.block("Key", |ui, width| {
                         edited = ui
                             .add(
@@ -144,7 +144,7 @@ impl RSpiceApp {
         // A key edited after a refusal is a new key: the refusal was about
         // the old one.
         if edited && matches!(phase, LicensePhase::Error(_)) {
-            self.state.dialogs.license_dialog.phase = LicensePhase::Entry;
+            self.state.cloud.license_dialog.phase = LicensePhase::Entry;
         }
 
         let choice = if choice == DialogChoice::None && ctrl_enter && primary_enabled {
@@ -156,14 +156,14 @@ impl RSpiceApp {
         match choice {
             DialogChoice::None => {}
             DialogChoice::Cancelled | DialogChoice::Ghost => {
-                self.state.dialogs.license_dialog.open = false;
+                self.state.cloud.license_dialog.open = false;
             }
             DialogChoice::Secondary if already_active => self.remove_license(),
             DialogChoice::Secondary => {}
-            DialogChoice::Primary => match self.state.dialogs.license_dialog.phase.clone() {
+            DialogChoice::Primary => match self.state.cloud.license_dialog.phase.clone() {
                 LicensePhase::Entry | LicensePhase::Error(_) => self.verify_license_input(),
                 LicensePhase::Verified(_) if already_active => {
-                    self.state.dialogs.license_dialog.open = false;
+                    self.state.cloud.license_dialog.open = false;
                 }
                 LicensePhase::Verified(info) => self.activate_license(info),
             },
@@ -171,15 +171,15 @@ impl RSpiceApp {
     }
 
     fn verify_license_input(&mut self) {
-        let text = self.state.dialogs.license_dialog.text.clone();
-        self.state.dialogs.license_dialog.phase = match license::parse_and_verify(&text) {
+        let text = self.state.cloud.license_dialog.text.clone();
+        self.state.cloud.license_dialog.phase = match license::parse_and_verify(&text) {
             Ok(info) => LicensePhase::Verified(info),
             Err(error) => LicensePhase::Error(error.message().to_owned()),
         };
     }
 
     fn activate_license(&mut self, info: LicenseInfo) {
-        let key = self.state.dialogs.license_dialog.text.trim().to_owned();
+        let key = self.state.cloud.license_dialog.text.trim().to_owned();
         #[cfg(not(target_arch = "wasm32"))]
         if let Err(error) = license::store_key(&key) {
             self.state.record(
@@ -194,7 +194,7 @@ impl RSpiceApp {
             info.tier, info.updates_until
         );
         self.state.license = Some(info);
-        self.state.dialogs.license_dialog.open = false;
+        self.state.cloud.license_dialog.open = false;
         self.state
             .record(LogSeverity::Info, LogSource::Studio, message);
     }
@@ -206,7 +206,7 @@ impl RSpiceApp {
         }
         self.state.license_key = None;
         self.state.license = None;
-        self.state.dialogs.license_dialog.open = false;
+        self.state.cloud.license_dialog.open = false;
         self.state.record(
             LogSeverity::Info,
             LogSource::Studio,
@@ -298,7 +298,7 @@ mod tests {
     fn a_verified_key_names_where_this_platform_keeps_it() {
         let mut app = RSpiceApp::test_instance();
         app.open_license_dialog();
-        app.state.dialogs.license_dialog.text = license::SAMPLE_KEY.to_owned();
+        app.state.cloud.license_dialog.text = license::SAMPLE_KEY.to_owned();
         app.verify_license_input();
         let shown = shown_texts(&mut app);
         assert!(
@@ -326,10 +326,10 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.open_license_dialog();
         let mut seen = shown_texts(&mut app);
-        app.state.dialogs.license_dialog.text = "RSPICE-K1.TRUNCATED".to_owned();
+        app.state.cloud.license_dialog.text = "RSPICE-K1.TRUNCATED".to_owned();
         app.verify_license_input();
         seen.extend(shown_texts(&mut app));
-        app.state.dialogs.license_dialog.text = license::SAMPLE_KEY.to_owned();
+        app.state.cloud.license_dialog.text = license::SAMPLE_KEY.to_owned();
         app.verify_license_input();
         seen.extend(shown_texts(&mut app));
         assert!(

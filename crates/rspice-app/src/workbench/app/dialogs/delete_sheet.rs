@@ -40,7 +40,7 @@ impl PendingSheetDelete {
 }
 
 pub(in crate::workbench) fn render_delete_sheet_confirmation(ctx: &Context, state: &mut AppState) {
-    let Some(pending) = state.dialogs.delete_sheet.clone() else {
+    let Some(pending) = state.sheets.delete_sheet.clone() else {
         return;
     };
     let title = pending.title();
@@ -61,10 +61,10 @@ pub(in crate::workbench) fn render_delete_sheet_confirmation(ctx: &Context, stat
         });
     match choice {
         DialogChoice::Primary => {
-            state.dialogs.delete_sheet = None;
+            state.sheets.delete_sheet = None;
             confirm_sheet_delete(state, &pending);
         }
-        DialogChoice::Ghost | DialogChoice::Cancelled => state.dialogs.delete_sheet = None,
+        DialogChoice::Ghost | DialogChoice::Cancelled => state.sheets.delete_sheet = None,
         DialogChoice::Secondary | DialogChoice::None => {}
     }
 }

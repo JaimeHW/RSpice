@@ -248,13 +248,13 @@ pub(crate) fn open_array_selection_dialog(state: &mut AppState) {
             return;
         }
     };
-    if state.dialogs.move_selection.armed {
+    if state.design.move_selection.armed {
         crate::workbench::app::cancel_armed_move_selection(state);
     }
-    if state.dialogs.stretch_selection.armed {
+    if state.design.stretch_selection.armed {
         crate::workbench::app::cancel_armed_stretch_selection(state);
     }
-    state.dialogs.array_selection.open(
+    state.design.array_selection.open(
         SchematicEditAuthority::capture(state),
         count.to_string(),
         naming,
@@ -267,7 +267,7 @@ fn field_id(stable: &str) -> Id {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_array_selection_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.array_selection.open {
+        if !self.state.design.array_selection.open {
             return;
         }
         let validation = validate_draft(&self.state);
@@ -280,26 +280,26 @@ impl RSpiceApp {
             })
             .status_lines(2)
             .show(ctx, |rows| {
-                array_form(rows, &validation, &mut self.state.dialogs.array_selection)
+                array_form(rows, &validation, &mut self.state.design.array_selection)
             });
         match choice {
             DialogChoice::Primary => {
                 if validate_draft(&self.state).can_commit() {
-                    let radial_center = if self.state.dialogs.array_selection.kind
+                    let radial_center = if self.state.design.array_selection.kind
                         == SchematicArrayKind::RadialDocumentation
                     {
                         radial_documentation_center(&self.state)
                     } else {
                         None
                     };
-                    self.state.dialogs.array_selection.arm();
-                    self.state.dialogs.array_selection.canvas.anchor = radial_center;
+                    self.state.design.array_selection.arm();
+                    self.state.design.array_selection.canvas.anchor = radial_center;
                     self.state.model.schematic.arm_tool(Tool::ArraySelection);
                     rspice_schematic_editor::view::canvas::request_focus(ctx);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.array_selection.close();
+                self.state.design.array_selection.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -307,7 +307,7 @@ impl RSpiceApp {
 }
 
 fn validate_draft(state: &AppState) -> DraftValidation {
-    let draft = &state.dialogs.array_selection;
+    let draft = &state.design.array_selection;
     let mut errors = DraftErrors::default();
     let Some(authority) = draft.authority.as_ref() else {
         errors.messages.push(
@@ -386,7 +386,7 @@ fn validate_draft(state: &AppState) -> DraftValidation {
 }
 
 pub(crate) fn armed_array_selection_authority(state: &AppState) -> Result<(), String> {
-    if !state.dialogs.array_selection.armed
+    if !state.design.array_selection.armed
         || state.model.schematic.session.editor.tool != Tool::ArraySelection
     {
         return Err("Create array is not armed.".to_owned());
@@ -402,13 +402,13 @@ pub(crate) fn armed_array_selection_plan(
     placement: SchematicArrayPlacement,
 ) -> Result<SchematicArrayPlan, String> {
     armed_array_selection_authority(state)?;
-    let draft = &state.dialogs.array_selection;
+    let draft = &state.design.array_selection;
     SchematicArrayPlan::parse(draft.kind, &draft.count, &draft.naming, placement)
         .map_err(|error| error.to_string())
 }
 
 pub(crate) fn cancel_armed_array_selection(state: &mut AppState) {
-    state.dialogs.array_selection.close();
+    state.design.array_selection.close();
     if state.model.schematic.session.editor.tool == Tool::ArraySelection {
         state.model.schematic.cancel_tool();
     }
@@ -553,10 +553,10 @@ mod tests {
 
         open_array_selection_dialog(&mut state);
 
-        assert!(state.dialogs.array_selection.open);
-        assert_eq!(state.dialogs.array_selection.count, DEFAULT_COUNT);
-        assert!(!state.dialogs.array_selection.naming.is_empty());
-        assert!(state.dialogs.array_selection.authority.is_some());
+        assert!(state.design.array_selection.open);
+        assert_eq!(state.design.array_selection.count, DEFAULT_COUNT);
+        assert!(!state.design.array_selection.naming.is_empty());
+        assert!(state.design.array_selection.authority.is_some());
     }
 
     #[test]
@@ -605,7 +605,7 @@ mod tests {
             .select_design_note(11);
 
         open_array_selection_dialog(&mut state);
-        state.dialogs.array_selection.kind = SchematicArrayKind::RadialDocumentation;
+        state.design.array_selection.kind = SchematicArrayKind::RadialDocumentation;
 
         assert!(validate_draft(&state).can_commit());
         assert_eq!(
@@ -634,7 +634,7 @@ mod tests {
             .selection
             .select_only_component(4);
         open_array_selection_dialog(&mut state);
-        state.dialogs.array_selection.kind = SchematicArrayKind::Rectangular;
+        state.design.array_selection.kind = SchematicArrayKind::Rectangular;
 
         let validation = validate_draft(&state);
         assert_eq!(validation.field_errors(), (false, true, false));
@@ -663,7 +663,7 @@ mod tests {
             .selection
             .select_only_component(4);
         open_array_selection_dialog(&mut state);
-        state.dialogs.array_selection.naming = "R1 to R8".to_owned();
+        state.design.array_selection.naming = "R1 to R8".to_owned();
 
         let validation = validate_draft(&state);
         assert_eq!(validation.field_errors(), (false, false, true));
@@ -696,7 +696,7 @@ mod tests {
             .selection
             .select_only_component(4);
         open_array_selection_dialog(&mut state);
-        state.dialogs.array_selection.authority = None;
+        state.design.array_selection.authority = None;
 
         // No field is at fault, so the refusal stands at the foot of the form
         // rather than being pinned on a value the reader typed correctly.

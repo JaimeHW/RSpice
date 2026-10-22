@@ -65,7 +65,7 @@ fn retain_hardcopy_receipt(app: &mut RSpiceApp, receipt: HardcopyReceipt) -> Res
         .content
         .record_hardcopy_receipt(receipt.clone())
         .map_err(|error| error.to_string())?;
-    app.state.dialogs.hardcopy.last_receipt = Some(receipt);
+    app.state.hardcopy.hardcopy.last_receipt = Some(receipt);
     Ok(())
 }
 
@@ -241,10 +241,10 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
         crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources(
             &app.state,
         );
-    app.state.dialogs.hardcopy.begin_open(workflow, candidates);
+    app.state.hardcopy.hardcopy.begin_open(workflow, candidates);
     let generation = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .next_source_resolution_generation();
     if let Err(error) = start_source_resolution(
@@ -255,8 +255,8 @@ pub(crate) fn open_hardcopy_workflow(app: &mut RSpiceApp, workflow: HardcopyWork
         scope,
         None,
     ) {
-        app.state.dialogs.hardcopy.busy = false;
-        app.state.dialogs.hardcopy.error = Some(error);
+        app.state.hardcopy.hardcopy.busy = false;
+        app.state.hardcopy.hardcopy.error = Some(error);
     }
 }
 
@@ -273,15 +273,15 @@ pub(super) fn select_retained_source(
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
-                app.state.dialogs.hardcopy.error = Some(error.to_string());
+                app.state.hardcopy.hardcopy.error = Some(error.to_string());
                 return;
             }
         };
-    app.state.dialogs.hardcopy.busy = true;
-    app.state.dialogs.hardcopy.error = None;
+    app.state.hardcopy.hardcopy.busy = true;
+    app.state.hardcopy.hardcopy.error = None;
     let generation = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .next_source_resolution_generation();
     if let Err(error) = start_source_resolution(
@@ -292,8 +292,8 @@ pub(super) fn select_retained_source(
         scope,
         None,
     ) {
-        app.state.dialogs.hardcopy.busy = false;
-        app.state.dialogs.hardcopy.error = Some(error);
+        app.state.hardcopy.hardcopy.busy = false;
+        app.state.hardcopy.hardcopy.error = Some(error);
     }
 }
 
@@ -399,12 +399,12 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
     let Some((generation, purpose, source_key, scope, expected, result)) = completed else {
         return;
     };
-    if !app.state.dialogs.hardcopy.open
-        || app.state.dialogs.hardcopy.source_resolution_generation != generation
+    if !app.state.hardcopy.hardcopy.open
+        || app.state.hardcopy.hardcopy.source_resolution_generation != generation
     {
         clear_pending_authentication(purpose);
-        if app.state.dialogs.hardcopy.open {
-            app.state.dialogs.hardcopy.busy = false;
+        if app.state.hardcopy.hardcopy.open {
+            app.state.hardcopy.hardcopy.busy = false;
         }
         return;
     }
@@ -418,9 +418,9 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 ) {
                     Ok(prepared) => prepared,
                     Err(error) => {
-                        app.state.dialogs.hardcopy.busy = false;
+                        app.state.hardcopy.hardcopy.busy = false;
                         clear_pending_authentication(purpose);
-                        app.state.dialogs.hardcopy.error = Some(error.to_string());
+                        app.state.hardcopy.hardcopy.error = Some(error.to_string());
                         return;
                     }
                 };
@@ -432,9 +432,9 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 scope,
                 Some(resolved),
             ) {
-                app.state.dialogs.hardcopy.busy = false;
+                app.state.hardcopy.hardcopy.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.dialogs.hardcopy.error = Some(error);
+                app.state.hardcopy.hardcopy.error = Some(error);
             }
         }
         Ok(resolved) => {
@@ -442,53 +442,53 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 purpose,
                 SourceResolutionPurpose::Open(_) | SourceResolutionPurpose::Select
             ) {
-                app.state.dialogs.hardcopy.busy = false;
+                app.state.hardcopy.hardcopy.busy = false;
             }
             if expected.as_ref() != Some(&resolved) {
-                app.state.dialogs.hardcopy.busy = false;
+                app.state.hardcopy.hardcopy.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.dialogs.hardcopy.error =
+                app.state.hardcopy.hardcopy.error =
                     Some("The source document changed while it was being checked.".to_owned());
                 return;
             }
             match purpose {
                 SourceResolutionPurpose::Open(workflow) => {
                     if let Err(error) = apply_open_resolved(app, workflow, resolved) {
-                        app.state.dialogs.hardcopy.error = Some(error);
+                        app.state.hardcopy.hardcopy.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Select => {
                     if let Err(error) = apply_selected_resolved(app, resolved) {
-                        app.state.dialogs.hardcopy.error = Some(error);
+                        app.state.hardcopy.hardcopy.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Publish => {
                     if let Err(error) = finish_publication_authentication(app, resolved) {
-                        app.state.dialogs.hardcopy.busy = false;
+                        app.state.hardcopy.hardcopy.busy = false;
                         clear_pending_publication();
-                        app.state.dialogs.hardcopy.error = Some(error);
+                        app.state.hardcopy.hardcopy.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::SavePageSetup => {
                     match finish_page_setup_authentication(app, resolved) {
                         Ok(message) => {
-                            app.state.dialogs.hardcopy.busy = false;
+                            app.state.hardcopy.hardcopy.busy = false;
                             app.state.prompt(message);
-                            app.state.dialogs.hardcopy.close();
+                            app.state.hardcopy.hardcopy.close();
                         }
                         Err(error) => {
-                            app.state.dialogs.hardcopy.busy = false;
+                            app.state.hardcopy.hardcopy.busy = false;
                             clear_pending_authentication(purpose);
-                            app.state.dialogs.hardcopy.error = Some(error);
+                            app.state.hardcopy.hardcopy.error = Some(error);
                         }
                     }
                 }
             }
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.busy = false;
+            app.state.hardcopy.hardcopy.busy = false;
             clear_pending_authentication(purpose);
-            app.state.dialogs.hardcopy.error = Some(error);
+            app.state.hardcopy.hardcopy.error = Some(error);
         }
     }
 }
@@ -526,12 +526,12 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
     let Some((generation, purpose, source_key, scope, expected, result)) = completed else {
         return;
     };
-    if !app.state.dialogs.hardcopy.open
-        || app.state.dialogs.hardcopy.source_resolution_generation != generation
+    if !app.state.hardcopy.hardcopy.open
+        || app.state.hardcopy.hardcopy.source_resolution_generation != generation
     {
         clear_pending_authentication(purpose);
-        if app.state.dialogs.hardcopy.open {
-            app.state.dialogs.hardcopy.busy = false;
+        if app.state.hardcopy.hardcopy.open {
+            app.state.hardcopy.hardcopy.busy = false;
         }
         return;
     }
@@ -545,9 +545,9 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 ) {
                     Ok(prepared) => prepared,
                     Err(error) => {
-                        app.state.dialogs.hardcopy.busy = false;
+                        app.state.hardcopy.hardcopy.busy = false;
                         clear_pending_authentication(purpose);
-                        app.state.dialogs.hardcopy.error = Some(error.to_string());
+                        app.state.hardcopy.hardcopy.error = Some(error.to_string());
                         return;
                     }
                 };
@@ -559,9 +559,9 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 scope,
                 Some(resolved),
             ) {
-                app.state.dialogs.hardcopy.busy = false;
+                app.state.hardcopy.hardcopy.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.dialogs.hardcopy.error = Some(error);
+                app.state.hardcopy.hardcopy.error = Some(error);
             }
         }
         Ok(resolved) => {
@@ -569,53 +569,53 @@ pub(super) fn poll_source_resolution(app: &mut RSpiceApp) {
                 purpose,
                 SourceResolutionPurpose::Open(_) | SourceResolutionPurpose::Select
             ) {
-                app.state.dialogs.hardcopy.busy = false;
+                app.state.hardcopy.hardcopy.busy = false;
             }
             if expected.as_ref() != Some(&resolved) {
-                app.state.dialogs.hardcopy.busy = false;
+                app.state.hardcopy.hardcopy.busy = false;
                 clear_pending_authentication(purpose);
-                app.state.dialogs.hardcopy.error =
+                app.state.hardcopy.hardcopy.error =
                     Some("The source document changed while it was being checked.".to_owned());
                 return;
             }
             match purpose {
                 SourceResolutionPurpose::Open(workflow) => {
                     if let Err(error) = apply_open_resolved(app, workflow, resolved) {
-                        app.state.dialogs.hardcopy.error = Some(error);
+                        app.state.hardcopy.hardcopy.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Select => {
                     if let Err(error) = apply_selected_resolved(app, resolved) {
-                        app.state.dialogs.hardcopy.error = Some(error);
+                        app.state.hardcopy.hardcopy.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::Publish => {
                     if let Err(error) = finish_publication_authentication(app, resolved) {
-                        app.state.dialogs.hardcopy.busy = false;
+                        app.state.hardcopy.hardcopy.busy = false;
                         clear_pending_publication();
-                        app.state.dialogs.hardcopy.error = Some(error);
+                        app.state.hardcopy.hardcopy.error = Some(error);
                     }
                 }
                 SourceResolutionPurpose::SavePageSetup => {
                     match finish_page_setup_authentication(app, resolved) {
                         Ok(message) => {
-                            app.state.dialogs.hardcopy.busy = false;
+                            app.state.hardcopy.hardcopy.busy = false;
                             app.state.prompt(message);
-                            app.state.dialogs.hardcopy.close();
+                            app.state.hardcopy.hardcopy.close();
                         }
                         Err(error) => {
-                            app.state.dialogs.hardcopy.busy = false;
+                            app.state.hardcopy.hardcopy.busy = false;
                             clear_pending_authentication(purpose);
-                            app.state.dialogs.hardcopy.error = Some(error);
+                            app.state.hardcopy.hardcopy.error = Some(error);
                         }
                     }
                 }
             }
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.busy = false;
+            app.state.hardcopy.hardcopy.busy = false;
             clear_pending_authentication(purpose);
-            app.state.dialogs.hardcopy.error = Some(error);
+            app.state.hardcopy.hardcopy.error = Some(error);
         }
     }
 }
@@ -671,18 +671,18 @@ fn apply_open_resolved(
         None
     };
     let metadata = metadata_for(app, &resolved).map_err(|error| error.to_string())?;
-    let source_candidates = app.state.dialogs.hardcopy.source_candidates.clone();
+    let source_candidates = app.state.hardcopy.hardcopy.source_candidates.clone();
     app.state
-        .dialogs
+        .hardcopy
         .hardcopy
         .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
         .map_err(|error| error.to_string())?;
-    app.state.dialogs.hardcopy.schematic_page_authority = schematic_authority;
-    app.state.dialogs.hardcopy.metadata = Some(metadata);
-    app.state.dialogs.hardcopy.source_candidates = source_candidates;
+    app.state.hardcopy.hardcopy.schematic_page_authority = schematic_authority;
+    app.state.hardcopy.hardcopy.metadata = Some(metadata);
+    app.state.hardcopy.hardcopy.source_candidates = source_candidates;
     #[cfg(not(target_arch = "wasm32"))]
     if (workflow == HardcopyWorkflow::Print
-        || app.state.dialogs.hardcopy.format == OutputFormat::NativePrinter)
+        || app.state.hardcopy.hardcopy.format == OutputFormat::NativePrinter)
         && crate::workbench::hardcopy_adapters::print::native_print_platform_support()
             == crate::workbench::hardcopy_adapters::print::NativePrintPlatformSupport::Available
     {
@@ -695,7 +695,7 @@ fn apply_selected_resolved(
     app: &mut RSpiceApp,
     resolved: ResolvedHardcopyDocument,
 ) -> Result<(), String> {
-    let workflow = app.state.dialogs.hardcopy.workflow;
+    let workflow = app.state.hardcopy.hardcopy.workflow;
     let schematic_authority = if workflow == HardcopyWorkflow::PageSetup {
         active_schematic_page_authority(app, &resolved)
     } else {
@@ -722,15 +722,15 @@ fn apply_selected_resolved(
         None
     };
     let metadata = metadata_for(app, &resolved).map_err(|error| error.to_string())?;
-    let source_candidates = app.state.dialogs.hardcopy.source_candidates.clone();
+    let source_candidates = app.state.hardcopy.hardcopy.source_candidates.clone();
     app.state
-        .dialogs
+        .hardcopy
         .hardcopy
         .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
         .map_err(|error| error.to_string())?;
-    app.state.dialogs.hardcopy.schematic_page_authority = schematic_authority;
-    app.state.dialogs.hardcopy.metadata = Some(metadata);
-    app.state.dialogs.hardcopy.source_candidates = source_candidates;
+    app.state.hardcopy.hardcopy.schematic_page_authority = schematic_authority;
+    app.state.hardcopy.hardcopy.metadata = Some(metadata);
+    app.state.hardcopy.hardcopy.source_candidates = source_candidates;
     Ok(())
 }
 
@@ -1102,14 +1102,14 @@ pub(super) fn refresh_printer_catalog(app: &mut RSpiceApp) {
     if crate::workbench::hardcopy_adapters::print::native_print_platform_support()
         != crate::workbench::hardcopy_adapters::print::NativePrintPlatformSupport::Available
     {
-        app.state.dialogs.hardcopy.printer_report = None;
-        app.state.dialogs.hardcopy.printer_capabilities = None;
-        app.state.dialogs.hardcopy.clear_printer();
-        app.state.dialogs.hardcopy.error =
+        app.state.hardcopy.hardcopy.printer_report = None;
+        app.state.hardcopy.hardcopy.printer_capabilities = None;
+        app.state.hardcopy.hardcopy.clear_printer();
+        app.state.hardcopy.hardcopy.error =
             Some("Native printer discovery is available on Windows only.".to_owned());
         return;
     }
-    if app.state.dialogs.hardcopy.printer_discovery_busy {
+    if app.state.hardcopy.hardcopy.printer_discovery_busy {
         return;
     }
     let (sender, receiver) = std::sync::mpsc::sync_channel(1);
@@ -1119,11 +1119,11 @@ pub(super) fn refresh_printer_catalog(app: &mut RSpiceApp) {
             let _ = sender.send(discover_native_printers().map_err(|error| error.to_string()));
         }) {
         Ok(_) => {
-            app.state.dialogs.hardcopy.printer_discovery_busy = true;
+            app.state.hardcopy.hardcopy.printer_discovery_busy = true;
             PRINTER_DISCOVERY.with(|slot| *slot.borrow_mut() = Some(receiver));
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.error =
+            app.state.hardcopy.hardcopy.error =
                 Some(format!("Could not start printer discovery: {error}"));
         }
     }
@@ -1150,25 +1150,25 @@ pub(super) fn poll_printer_catalog(app: &mut RSpiceApp) {
     let Some(result) = result else {
         return;
     };
-    app.state.dialogs.hardcopy.printer_discovery_busy = false;
+    app.state.hardcopy.hardcopy.printer_discovery_busy = false;
     match result {
         Ok(report) => {
             let preferred = report
                 .printers()
                 .iter()
                 .find(|entry| {
-                    entry.capabilities().device_id() == app.state.dialogs.hardcopy.printer_id
+                    entry.capabilities().device_id() == app.state.hardcopy.hardcopy.printer_id
                 })
                 .or_else(|| report.printers().iter().find(|entry| entry.is_default()))
                 .or_else(|| report.printers().first())
                 .map(|entry| entry.capabilities().clone());
-            app.state.dialogs.hardcopy.printer_report = Some(report);
+            app.state.hardcopy.hardcopy.printer_report = Some(report);
             match preferred {
                 Some(capabilities) => select_printer_capabilities(app, capabilities, None),
                 None => {
-                    app.state.dialogs.hardcopy.clear_printer();
-                    app.state.dialogs.hardcopy.printer_capabilities = None;
-                    app.state.dialogs.hardcopy.error = Some(
+                    app.state.hardcopy.hardcopy.clear_printer();
+                    app.state.hardcopy.hardcopy.printer_capabilities = None;
+                    app.state.hardcopy.hardcopy.error = Some(
                         "Windows did not report an available printer whose capabilities could be read."
                             .to_owned(),
                     );
@@ -1176,10 +1176,10 @@ pub(super) fn poll_printer_catalog(app: &mut RSpiceApp) {
             }
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.printer_report = None;
-            app.state.dialogs.hardcopy.printer_capabilities = None;
-            app.state.dialogs.hardcopy.clear_printer();
-            app.state.dialogs.hardcopy.error = Some(error);
+            app.state.hardcopy.hardcopy.printer_report = None;
+            app.state.hardcopy.hardcopy.printer_capabilities = None;
+            app.state.hardcopy.hardcopy.clear_printer();
+            app.state.hardcopy.hardcopy.error = Some(error);
         }
     }
 }
@@ -1192,7 +1192,7 @@ pub(super) fn select_printer_capabilities(
     capabilities: PrinterCapabilitySnapshot,
     suggested: Option<crate::workbench::hardcopy_adapters::print::PrinterDriverSettingsSuggestion>,
 ) {
-    let previous = app.state.dialogs.hardcopy.printer_job.clone();
+    let previous = app.state.hardcopy.hardcopy.printer_job.clone();
     let media_source = suggested
         .as_ref()
         .map(|value| value.media_source.clone())
@@ -1235,9 +1235,9 @@ pub(super) fn select_printer_capabilities(
         .map(|value| value.to_string())
         .or_else(|| selected_printer_paper_id(app, &capabilities));
     let Some(selected_paper_id) = selected_paper_id else {
-        app.state.dialogs.hardcopy.printer_capabilities = Some(capabilities);
-        app.state.dialogs.hardcopy.clear_printer();
-        app.state.dialogs.hardcopy.error = Some(
+        app.state.hardcopy.hardcopy.printer_capabilities = Some(capabilities);
+        app.state.hardcopy.hardcopy.clear_printer();
+        app.state.hardcopy.hardcopy.error = Some(
             "The selected printer does not report the page size configured in Custom paper and margins."
                 .to_owned(),
         );
@@ -1253,9 +1253,9 @@ pub(super) fn select_printer_capabilities(
         ) {
             Ok(geometry) => geometry,
             Err(error) => {
-                app.state.dialogs.hardcopy.printer_capabilities = Some(capabilities);
-                app.state.dialogs.hardcopy.clear_printer();
-                app.state.dialogs.hardcopy.error = Some(error.to_string());
+                app.state.hardcopy.hardcopy.printer_capabilities = Some(capabilities);
+                app.state.hardcopy.hardcopy.clear_printer();
+                app.state.hardcopy.hardcopy.error = Some(error.to_string());
                 return;
             }
         };
@@ -1271,13 +1271,13 @@ pub(super) fn select_printer_capabilities(
     ) {
         Ok(job) => {
             let id = capabilities.device_id().to_owned();
-            app.state.dialogs.hardcopy.printer_capabilities = Some(capabilities);
-            app.state.dialogs.hardcopy.set_printer(id, job);
+            app.state.hardcopy.hardcopy.printer_capabilities = Some(capabilities);
+            app.state.hardcopy.hardcopy.set_printer(id, job);
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.printer_capabilities = None;
-            app.state.dialogs.hardcopy.clear_printer();
-            app.state.dialogs.hardcopy.error = Some(error.to_string());
+            app.state.hardcopy.hardcopy.printer_capabilities = None;
+            app.state.hardcopy.hardcopy.clear_printer();
+            app.state.hardcopy.hardcopy.error = Some(error.to_string());
         }
     }
 }
@@ -1314,13 +1314,13 @@ fn selected_printer_paper_id(
 ) -> Option<String> {
     let paper = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .paper
         .build(
-            app.state.dialogs.hardcopy.display_unit,
+            app.state.hardcopy.hardcopy.display_unit,
             app.state
-                .dialogs
+                .hardcopy
                 .hardcopy
                 .resolved_document
                 .as_ref()
@@ -1340,13 +1340,13 @@ fn selected_printer_paper_id(
 }
 
 fn resolved_orientation(app: &RSpiceApp) -> ResolvedOrientation {
-    match app.state.dialogs.hardcopy.orientation {
+    match app.state.hardcopy.hardcopy.orientation {
         Orientation::Portrait => ResolvedOrientation::Portrait,
         Orientation::Landscape => ResolvedOrientation::Landscape,
         Orientation::AutomaticPerPage => {
             if app
                 .state
-                .dialogs
+                .hardcopy
                 .hardcopy
                 .content_extent
                 .is_some_and(|extent| extent.width() > extent.height())
@@ -1378,22 +1378,22 @@ fn media_supported(source: &PrinterMediaSource, capabilities: &PrinterCapability
 }
 
 pub(super) fn commit_hardcopy_workflow(app: &mut RSpiceApp) {
-    if app.state.dialogs.hardcopy.busy {
+    if app.state.hardcopy.hardcopy.busy {
         return;
     }
-    app.state.dialogs.hardcopy.busy = true;
-    app.state.dialogs.hardcopy.error = None;
-    app.state.dialogs.hardcopy.cancellation = HardcopyCancellationToken::default();
-    let workflow = app.state.dialogs.hardcopy.workflow;
+    app.state.hardcopy.hardcopy.busy = true;
+    app.state.hardcopy.hardcopy.error = None;
+    app.state.hardcopy.hardcopy.cancellation = HardcopyCancellationToken::default();
+    let workflow = app.state.hardcopy.hardcopy.workflow;
     #[cfg(target_arch = "wasm32")]
     let browser_print_reservation = if workflow == HardcopyWorkflow::Print
-        && app.state.dialogs.hardcopy.format == OutputFormat::BrowserPrintDocument
+        && app.state.hardcopy.hardcopy.format == OutputFormat::BrowserPrintDocument
     {
         match reserve_browser_print_window() {
             Ok(reservation) => Some(reservation),
             Err(error) => {
-                app.state.dialogs.hardcopy.busy = false;
-                app.state.dialogs.hardcopy.error = Some(error.to_string());
+                app.state.hardcopy.hardcopy.busy = false;
+                app.state.hardcopy.hardcopy.error = Some(error.to_string());
                 return;
             }
         }
@@ -1417,11 +1417,11 @@ pub(super) fn commit_hardcopy_workflow(app: &mut RSpiceApp) {
     match result {
         Ok(PublicationCompletion::Pending) => {}
         Ok(PublicationCompletion::Cancelled) => {
-            app.state.dialogs.hardcopy.busy = false;
+            app.state.hardcopy.hardcopy.busy = false;
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.busy = false;
-            app.state.dialogs.hardcopy.error = Some(error);
+            app.state.hardcopy.hardcopy.busy = false;
+            app.state.hardcopy.hardcopy.error = Some(error);
         }
     }
 }
@@ -1513,13 +1513,13 @@ fn current_plan(
 ) -> Result<std::sync::Arc<HardcopyPlan>, String> {
     let setup = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .build_setup()
         .map_err(|error| error.to_string())?;
     let preview_plan = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .preview_plan
         .as_ref()
@@ -1558,7 +1558,7 @@ fn current_plan(
 
 fn current_metadata(app: &RSpiceApp) -> Result<HardcopySceneMetadata, String> {
     app.state
-        .dialogs
+        .hardcopy
         .hardcopy
         .metadata
         .clone()
@@ -1582,7 +1582,7 @@ fn begin_publication_authentication(
         .map_err(|error| error.to_string())?;
     let generation = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .next_source_resolution_generation();
     start_source_resolution(
@@ -1614,7 +1614,7 @@ fn begin_publication_authentication(
         .map_err(|error| error.to_string())?;
     let generation = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .next_source_resolution_generation();
     start_source_resolution(
@@ -1704,18 +1704,18 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
     }
     let source = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .resolved_document
         .clone()
         .ok_or_else(|| "The dialog has no source document.".to_owned())?;
     let setup = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .build_setup()
         .map_err(|error| error.to_string())?;
-    let schematic_authority = app.state.dialogs.hardcopy.schematic_page_authority.clone();
+    let schematic_authority = app.state.hardcopy.hardcopy.schematic_page_authority.clone();
     if let Some(authority) = &schematic_authority {
         validate_schematic_page_authority(&app.state, authority)?;
     }
@@ -1729,7 +1729,7 @@ fn save_page_setup(app: &mut RSpiceApp) -> Result<PublicationCompletion, String>
         .map_err(|error| error.to_string())?;
     let generation = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .next_source_resolution_generation();
     start_source_resolution(
@@ -1799,14 +1799,14 @@ fn publish_print(
     #[cfg(target_arch = "wasm32")] reservation: Option<BrowserPrintReservation>,
 ) -> Result<PublicationCompletion, String> {
     if !matches!(
-        app.state.dialogs.hardcopy.format,
+        app.state.hardcopy.hardcopy.format,
         OutputFormat::NativePrinter | OutputFormat::BrowserPrintDocument
     ) {
         return publish_export(app);
     }
     let source = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .resolved_document
         .clone()
@@ -1852,25 +1852,25 @@ fn publish_print(
         // device off the UI thread immediately before the spool boundary.
         let capabilities = app
             .state
-            .dialogs
+            .hardcopy
             .hardcopy
             .printer_capabilities
             .clone()
             .ok_or_else(|| "The selected printer has no capability snapshot.".to_owned())?;
-        if capabilities.device_id() != app.state.dialogs.hardcopy.printer_id {
+        if capabilities.device_id() != app.state.hardcopy.hardcopy.printer_id {
             return Err(
                 "The selected printer does not match the capabilities read for it.".to_owned(),
             );
         }
         let dpi = app
             .state
-            .dialogs
+            .hardcopy
             .hardcopy
             .printer_job
             .as_ref()
             .ok_or_else(|| "Select printer properties before printing.".to_owned())?
             .resolution_dpi();
-        let cancellation = app.state.dialogs.hardcopy.cancellation.clone();
+        let cancellation = app.state.hardcopy.hardcopy.cancellation.clone();
         begin_publication_authentication(
             app,
             PendingNativePublication {
@@ -1893,7 +1893,7 @@ fn publish_print(
 fn publish_export(app: &mut RSpiceApp) -> Result<PublicationCompletion, String> {
     let initial_source = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .resolved_document
         .clone()
@@ -1994,7 +1994,7 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
     let Some((publication, result)) = completed else {
         return false;
     };
-    let current = &app.state.dialogs.hardcopy;
+    let current = &app.state.hardcopy.hardcopy;
     if current.open
         && (current.preview_generation != publication.ticket.generation
             || current
@@ -2008,9 +2008,9 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
                 .map(|source| source.authority().content_digest())
                 != Some(publication.source_digest))
     {
-        app.state.dialogs.hardcopy.busy = false;
-        if app.state.dialogs.hardcopy.open {
-            app.state.dialogs.hardcopy.error = Some(
+        app.state.hardcopy.hardcopy.busy = false;
+        if app.state.hardcopy.hardcopy.open {
+            app.state.hardcopy.hardcopy.error = Some(
                 "The hardcopy source or plan changed before native finalization completed."
                     .to_owned(),
             );
@@ -2151,23 +2151,23 @@ fn poll_native_finalization(app: &mut RSpiceApp) -> bool {
 /// way a failed export is; one the reader cancelled by closing is not.
 #[cfg(not(target_arch = "wasm32"))]
 fn conclude_native_finalization(app: &mut RSpiceApp, completion: Result<String, String>) {
-    app.state.dialogs.hardcopy.busy = false;
+    app.state.hardcopy.hardcopy.busy = false;
     match completion {
         Ok(message) => {
-            let message = if app.state.dialogs.hardcopy.last_receipt.is_some() {
+            let message = if app.state.hardcopy.hardcopy.last_receipt.is_some() {
                 format!("{message} It is recorded in the project history.")
             } else {
                 message
             };
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, message);
-            if app.state.dialogs.hardcopy.open {
-                app.state.dialogs.hardcopy.close();
+            if app.state.hardcopy.hardcopy.open {
+                app.state.hardcopy.hardcopy.close();
             }
         }
         Err(error) => {
-            if app.state.dialogs.hardcopy.open {
-                app.state.dialogs.hardcopy.error = Some(error);
+            if app.state.hardcopy.hardcopy.open {
+                app.state.hardcopy.hardcopy.error = Some(error);
             } else if !error.contains("was cancelled") {
                 app.state.report_failure("Hardcopy failed", error);
             }

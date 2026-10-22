@@ -2158,7 +2158,7 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
     let mut app = RSpiceApp::test_instance();
     EditorHandoff::Calculator.dispatch(&mut app);
     assert!(
-        app.state.dialogs.waveform_calculator_dialog,
+        app.state.results.waveform_calculator_dialog,
         "the calculator hand-off opens the calculator"
     );
 
@@ -2166,7 +2166,7 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
     seed_two_specifications(&mut app.state);
     EditorHandoff::UnitDiagnostics.dispatch(&mut app);
     assert!(
-        app.state.dialogs.expression_diagnostics_dialog,
+        app.state.results.expression_diagnostics_dialog,
         "the diagnostics hand-off opens the diagnostics window"
     );
 

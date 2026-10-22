@@ -43,7 +43,7 @@ pub(crate) fn open_rule_setup(state: &mut AppState) {
         state.prompt("Design rule setup requires an open project.");
         return;
     }
-    state.dialogs.rule_setup = RuleSetupDialogState {
+    state.design.rule_setup = RuleSetupDialogState {
         open: true,
         draft: (*state.model.workspace.content.design_rules).clone(),
         refusal: None,
@@ -63,13 +63,13 @@ fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
 /// Draw the dialog while it is open. Returns whether the draft was applied,
 /// so the caller drops any run prepared under the old deck.
 pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut AppState) -> bool {
-    if !state.dialogs.rule_setup.open {
+    if !state.design.rule_setup.open {
         return false;
     }
     let read_only = state.model.safe_mode.project_read_only();
-    let unread = unread_issue(&state.dialogs.rule_setup.draft);
+    let unread = unread_issue(&state.design.rule_setup.draft);
     let editable = !read_only && unread.is_none();
-    let changed = state.dialogs.rule_setup.draft != *state.model.workspace.content.design_rules;
+    let changed = state.design.rule_setup.draft != *state.model.workspace.content.design_rules;
     let mut dialog = Dialog::new(TITLE, PRIMARY)
         .description(DESCRIPTION)
         .size(DialogSize::Manager)
@@ -87,18 +87,18 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
             "Inspection only",
             "The project is read-only.",
         );
-    } else if let Some(refusal) = state.dialogs.rule_setup.refusal.clone() {
+    } else if let Some(refusal) = state.design.rule_setup.refusal.clone() {
         dialog =
             dialog.transaction_state(DialogTransactionTone::Error, "Severity refused", refusal);
     }
-    let session = &mut state.dialogs.rule_setup;
+    let session = &mut state.design.rule_setup;
     match dialog.show(ctx, |ui| rule_table(ui, session, editable)) {
         DialogChoice::Primary => {
             apply_rule_setup(state);
             true
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.dialogs.rule_setup = RuleSetupDialogState::default();
+            state.design.rule_setup = RuleSetupDialogState::default();
             false
         }
         DialogChoice::None | DialogChoice::Secondary => false,
@@ -109,12 +109,12 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
 /// go stale through their digests, and preflight authority is dropped,
 /// because what blocks a run has changed.
 fn apply_rule_setup(state: &mut AppState) {
-    let draft = state.dialogs.rule_setup.draft.clone();
+    let draft = state.design.rule_setup.draft.clone();
     *state.model.workspace.content.design_rules = draft;
     state.model.workspace.content.project_metadata_dirty = true;
     state.workbench.preflight.invalidate();
     state.publish_rule_deck_issues();
-    state.dialogs.rule_setup = RuleSetupDialogState::default();
+    state.design.rule_setup = RuleSetupDialogState::default();
 }
 
 fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
@@ -263,21 +263,21 @@ mod tests {
             .set_severity(DrcViolationType::DanglingWire, DrcSeverity::Error)
             .expect("a dangling wire may be promoted");
         open_rule_setup(&mut app.state);
-        assert!(app.state.dialogs.rule_setup.open);
+        assert!(app.state.design.rule_setup.open);
         assert_eq!(
-            app.state.dialogs.rule_setup.draft,
+            app.state.design.rule_setup.draft,
             *app.state.model.workspace.content.design_rules
         );
 
         app.state
-            .dialogs
+            .design
             .rule_setup
             .draft
             .set_severity(DrcViolationType::FloatingNode, DrcSeverity::Info)
             .expect("a floating node may be demoted");
         app.state.model.workspace.content.project_metadata_dirty = false;
         apply_rule_setup(&mut app.state);
-        assert!(!app.state.dialogs.rule_setup.open);
+        assert!(!app.state.design.rule_setup.open);
         assert!(app.state.model.workspace.content.project_metadata_dirty);
         assert_eq!(
             app.state
@@ -327,7 +327,7 @@ mod tests {
             serde_json::from_str(r#"{"schema_version":9}"#).expect("a stored deck always reads");
         open_rule_setup(&mut app.state);
         assert!(matches!(
-            unread_issue(&app.state.dialogs.rule_setup.draft),
+            unread_issue(&app.state.design.rule_setup.draft),
             Some(DeckIssue::UnsupportedSchema { version: 9 })
         ));
     }

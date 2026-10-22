@@ -191,18 +191,18 @@ pub(crate) fn open_configuration_sets_dialog(state: &mut AppState) {
     }
     let catalog = state.model.workspace.content.configuration_sets.clone();
     let root = state.model.workspace.content.simulation_root_reference();
-    state.dialogs.configuration_sets.open(&catalog, root);
+    state.simulate.configuration_sets.open(&catalog, root);
 }
 
 pub(crate) fn open_configuration_binding_dialog(state: &mut AppState) {
     open_configuration_sets_dialog(state);
-    if !state.dialogs.configuration_sets.open {
+    if !state.simulate.configuration_sets.open {
         return;
     }
-    if state.dialogs.configuration_sets.draft.is_some() {
-        state.dialogs.configuration_sets.page = ConfigurationDialogPage::Binding;
+    if state.simulate.configuration_sets.draft.is_some() {
+        state.simulate.configuration_sets.page = ConfigurationDialogPage::Binding;
     } else {
-        state.dialogs.configuration_sets.error =
+        state.simulate.configuration_sets.error =
             Some("Create a configuration set before editing hierarchy bindings.".to_owned());
     }
 }
@@ -220,10 +220,10 @@ enum BodyAction {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_configuration_sets_dialog(&mut self, ctx: &Context) {
-        let page = self.state.dialogs.configuration_sets.page;
+        let page = self.state.simulate.configuration_sets.page;
         self.render_configuration_sets_page(ctx);
-        if self.state.dialogs.configuration_sets.open
-            && self.state.dialogs.configuration_sets.page != page
+        if self.state.simulate.configuration_sets.open
+            && self.state.simulate.configuration_sets.page != page
         {
             // A page transition owns the input that follows its activating click.
             self.render_configuration_sets_page(ctx);
@@ -235,13 +235,13 @@ impl RSpiceApp {
     }
 
     fn render_configuration_sets_page(&mut self, ctx: &Context) {
-        if !self.state.dialogs.configuration_sets.open {
+        if !self.state.simulate.configuration_sets.open {
             return;
         }
-        let page = self.state.dialogs.configuration_sets.page;
+        let page = self.state.simulate.configuration_sets.page;
         let dirty = self
             .state
-            .dialogs
+            .simulate
             .configuration_sets
             .dirty(&self.state.model.workspace.content.configuration_sets);
         let (title, primary, description) = match page {
@@ -265,7 +265,7 @@ impl RSpiceApp {
                 Some(name_id(page))
             }
             ConfigurationDialogPage::Binding
-                if write_allowed && self.state.dialogs.configuration_sets.draft.is_some() =>
+                if write_allowed && self.state.simulate.configuration_sets.draft.is_some() =>
             {
                 Some(field_id("ordered-views"))
             }
@@ -275,7 +275,7 @@ impl RSpiceApp {
             && match page {
                 ConfigurationDialogPage::Manager => {
                     dirty
-                        || self.state.dialogs.configuration_sets.selected_id
+                        || self.state.simulate.configuration_sets.selected_id
                             != self
                                 .state
                                 .model
@@ -287,14 +287,14 @@ impl RSpiceApp {
                 ConfigurationDialogPage::New => {
                     !self
                         .state
-                        .dialogs
+                        .simulate
                         .configuration_sets
                         .new_name
                         .trim()
                         .is_empty()
                         && self
                             .state
-                            .dialogs
+                            .simulate
                             .configuration_sets
                             .new_root
                             .as_ref()
@@ -310,16 +310,21 @@ impl RSpiceApp {
                 ConfigurationDialogPage::Clone => {
                     !self
                         .state
-                        .dialogs
+                        .simulate
                         .configuration_sets
                         .new_name
                         .trim()
                         .is_empty()
-                        && self.state.dialogs.configuration_sets.clone_source.is_some()
+                        && self
+                            .state
+                            .simulate
+                            .configuration_sets
+                            .clone_source
+                            .is_some()
                 }
                 ConfigurationDialogPage::Binding => {
                     dirty
-                        || self.state.dialogs.configuration_sets.selected_id
+                        || self.state.simulate.configuration_sets.selected_id
                             != self
                                 .state
                                 .model
@@ -331,9 +336,10 @@ impl RSpiceApp {
             };
         let _opening_input = initial_focus.map(|id| crate::ui::input::InputScope::enter(ctx, id));
         let discard = page == ConfigurationDialogPage::Manager
-            && self.state.dialogs.configuration_sets.discard_confirmation;
-        let discard_baseline = discard.then(|| self.state.dialogs.configuration_sets.draft.clone());
-        let transaction_error = self.state.dialogs.configuration_sets.error.clone();
+            && self.state.simulate.configuration_sets.discard_confirmation;
+        let discard_baseline =
+            discard.then(|| self.state.simulate.configuration_sets.draft.clone());
+        let transaction_error = self.state.simulate.configuration_sets.error.clone();
         let mut dialog = Dialog::new(title, primary)
             .description(description)
             .size(DialogSize::WideWorkflow)
@@ -371,7 +377,7 @@ impl RSpiceApp {
         let mut response = dialog.show_transaction(ctx, |ui| {
             action = configuration_body(
                 ui,
-                &mut self.state.dialogs.configuration_sets,
+                &mut self.state.simulate.configuration_sets,
                 &self.state.model.workspace,
                 &self.state.model.library_manager,
                 &self.state.model.model_library_manager,
@@ -386,7 +392,7 @@ impl RSpiceApp {
                 || (matches!(action, BodyAction::New | BodyAction::Clone)
                     && !self
                         .state
-                        .dialogs
+                        .simulate
                         .configuration_sets
                         .dirty(&self.state.model.workspace.content.configuration_sets))
             {
@@ -395,40 +401,40 @@ impl RSpiceApp {
             initial_focus
         });
         self.handle_configuration_body_action(action);
-        if self.state.dialogs.configuration_sets.page != page {
+        if self.state.simulate.configuration_sets.page != page {
             return;
         }
         if let Some(baseline) = discard_baseline
-            && baseline != self.state.dialogs.configuration_sets.draft
+            && baseline != self.state.simulate.configuration_sets.draft
         {
-            self.state.dialogs.configuration_sets.discard_confirmation = false;
+            self.state.simulate.configuration_sets.discard_confirmation = false;
         }
         let dirty = self
             .state
-            .dialogs
+            .simulate
             .configuration_sets
             .dirty(&self.state.model.workspace.content.configuration_sets);
         match response.choice {
             DialogChoice::Primary => self.commit_configuration_dialog_page(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 if page != ConfigurationDialogPage::Manager {
-                    self.state.dialogs.configuration_sets.page = ConfigurationDialogPage::Manager;
-                    self.state.dialogs.configuration_sets.error = None;
-                    self.state.dialogs.configuration_sets.discard_confirmation = false;
+                    self.state.simulate.configuration_sets.page = ConfigurationDialogPage::Manager;
+                    self.state.simulate.configuration_sets.error = None;
+                    self.state.simulate.configuration_sets.discard_confirmation = false;
                     // The manager renders again below, so what was typed after
                     // Escape belongs in its filter now, not two frames later.
                     response.route_cancel_input(field_id("filter"));
                     if page != ConfigurationDialogPage::Binding {
                         self.state
-                            .dialogs
+                            .simulate
                             .configuration_sets
                             .load_selected(&self.state.model.workspace.content.configuration_sets);
                     }
-                } else if dirty && !self.state.dialogs.configuration_sets.discard_confirmation {
-                    self.state.dialogs.configuration_sets.discard_confirmation = true;
+                } else if dirty && !self.state.simulate.configuration_sets.discard_confirmation {
+                    self.state.simulate.configuration_sets.discard_confirmation = true;
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else {
-                    self.state.dialogs.configuration_sets.close();
+                    self.state.simulate.configuration_sets.close();
                 }
             }
             DialogChoice::None | DialogChoice::Secondary => {}
@@ -439,36 +445,36 @@ impl RSpiceApp {
         match action {
             BodyAction::None => {}
             BodyAction::Select(id) => {
-                if self.state.dialogs.configuration_sets.selected_id == Some(id) {
+                if self.state.simulate.configuration_sets.selected_id == Some(id) {
                     return;
                 }
                 if self
                     .state
-                    .dialogs
+                    .simulate
                     .configuration_sets
                     .dirty(&self.state.model.workspace.content.configuration_sets)
-                    && self.state.dialogs.configuration_sets.selected_id != Some(id)
+                    && self.state.simulate.configuration_sets.selected_id != Some(id)
                 {
-                    self.state.dialogs.configuration_sets.error = Some(
+                    self.state.simulate.configuration_sets.error = Some(
                         "Save or discard the current configuration edits before selecting another configuration."
                             .to_owned(),
                     );
                     return;
                 }
-                self.state.dialogs.configuration_sets.selected_id = Some(id);
+                self.state.simulate.configuration_sets.selected_id = Some(id);
                 self.state
-                    .dialogs
+                    .simulate
                     .configuration_sets
                     .load_selected(&self.state.model.workspace.content.configuration_sets);
             }
             BodyAction::New => {
                 if self
                     .state
-                    .dialogs
+                    .simulate
                     .configuration_sets
                     .dirty(&self.state.model.workspace.content.configuration_sets)
                 {
-                    self.state.dialogs.configuration_sets.error = Some(
+                    self.state.simulate.configuration_sets.error = Some(
                         "Save or discard the current configuration edits before creating another configuration."
                             .to_owned(),
                     );
@@ -478,7 +484,7 @@ impl RSpiceApp {
                     &self.state.model.workspace.content.configuration_sets,
                     "Lab characterization",
                 );
-                let dialog = &mut self.state.dialogs.configuration_sets;
+                let dialog = &mut self.state.simulate.configuration_sets;
                 dialog.page = ConfigurationDialogPage::New;
                 dialog.new_name = default_name;
                 dialog.new_root = Some(
@@ -494,17 +500,17 @@ impl RSpiceApp {
             BodyAction::Clone => {
                 if self
                     .state
-                    .dialogs
+                    .simulate
                     .configuration_sets
                     .dirty(&self.state.model.workspace.content.configuration_sets)
                 {
-                    self.state.dialogs.configuration_sets.error = Some(
+                    self.state.simulate.configuration_sets.error = Some(
                         "Save or discard the current configuration edits before cloning a committed revision."
                             .to_owned(),
                     );
                     return;
                 }
-                let dialog = &mut self.state.dialogs.configuration_sets;
+                let dialog = &mut self.state.simulate.configuration_sets;
                 dialog.page = ConfigurationDialogPage::Clone;
                 dialog.clone_source = dialog.selected_id;
                 dialog.clone_scope = ConfigurationCloneScope::AllBindings;
@@ -526,11 +532,11 @@ impl RSpiceApp {
                 dialog.error = None;
             }
             BodyAction::Binding => {
-                self.state.dialogs.configuration_sets.page = ConfigurationDialogPage::Binding;
-                self.state.dialogs.configuration_sets.error = None;
+                self.state.simulate.configuration_sets.page = ConfigurationDialogPage::Binding;
+                self.state.simulate.configuration_sets.error = None;
             }
             BodyAction::AddOverride => {
-                if let Some(draft) = self.state.dialogs.configuration_sets.draft.as_mut() {
+                if let Some(draft) = self.state.simulate.configuration_sets.draft.as_mut() {
                     let next = draft.overrides.len() + 1;
                     draft.overrides.push(ConfigurationSetOverride {
                         instance_path: new_override_scope(next),
@@ -542,7 +548,7 @@ impl RSpiceApp {
                 }
             }
             BodyAction::RemoveOverride(index) => {
-                if let Some(draft) = self.state.dialogs.configuration_sets.draft.as_mut()
+                if let Some(draft) = self.state.simulate.configuration_sets.draft.as_mut()
                     && index < draft.overrides.len()
                 {
                     draft.overrides.remove(index);
@@ -552,7 +558,7 @@ impl RSpiceApp {
     }
 
     fn commit_configuration_dialog_page(&mut self) {
-        let page = self.state.dialogs.configuration_sets.page;
+        let page = self.state.simulate.configuration_sets.page;
         let result = match page {
             ConfigurationDialogPage::Manager | ConfigurationDialogPage::Binding => {
                 self.commit_configuration_update()
@@ -561,7 +567,7 @@ impl RSpiceApp {
             ConfigurationDialogPage::Clone => self.commit_cloned_configuration(),
         };
         if let Err(error) = result {
-            self.state.dialogs.configuration_sets.error = Some(error);
+            self.state.simulate.configuration_sets.error = Some(error);
         }
     }
 
@@ -615,7 +621,7 @@ impl RSpiceApp {
             format!("Configuration cannot be published because source sealing failed: {error}")
         })?;
         if candidate == *self.state.model.workspace.content.configuration_sets {
-            let dialog = &mut self.state.dialogs.configuration_sets;
+            let dialog = &mut self.state.simulate.configuration_sets;
             dialog.page = ConfigurationDialogPage::Manager;
             dialog.selected_id = Some(selected);
             dialog.load_selected(&self.state.model.workspace.content.configuration_sets);
@@ -634,7 +640,7 @@ impl RSpiceApp {
             .current_generation_input_digest = None;
         self.state
             .record(LogSeverity::Info, LogSource::Studio, message);
-        let dialog = &mut self.state.dialogs.configuration_sets;
+        let dialog = &mut self.state.simulate.configuration_sets;
         dialog.page = ConfigurationDialogPage::Manager;
         dialog.selected_id = Some(selected);
         dialog.load_selected(&self.state.model.workspace.content.configuration_sets);
@@ -642,7 +648,7 @@ impl RSpiceApp {
     }
 
     fn commit_configuration_update(&mut self) -> Result<(), String> {
-        let dialog = &self.state.dialogs.configuration_sets;
+        let dialog = &self.state.simulate.configuration_sets;
         let id = dialog
             .selected_id
             .ok_or_else(|| "Select a configuration before saving.".to_owned())?;
@@ -675,7 +681,7 @@ impl RSpiceApp {
     }
 
     fn commit_new_configuration(&mut self) -> Result<(), String> {
-        let dialog = &self.state.dialogs.configuration_sets;
+        let dialog = &self.state.simulate.configuration_sets;
         let root = dialog
             .new_root
             .clone()
@@ -700,7 +706,7 @@ impl RSpiceApp {
     }
 
     fn commit_cloned_configuration(&mut self) -> Result<(), String> {
-        let dialog = &self.state.dialogs.configuration_sets;
+        let dialog = &self.state.simulate.configuration_sets;
         let source_id = dialog
             .clone_source
             .ok_or_else(|| "Select a source configuration.".to_owned())?;

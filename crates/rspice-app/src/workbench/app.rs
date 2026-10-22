@@ -77,8 +77,8 @@ thread_local! {
 pub(in crate::workbench) mod actions;
 #[cfg(target_arch = "wasm32")]
 mod browser_history;
-mod command_palette;
-mod dialogs;
+pub(in crate::workbench) mod command_palette;
+pub(in crate::workbench) mod dialogs;
 pub(in crate::workbench) mod drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
 mod pack_persistence;
@@ -180,10 +180,7 @@ pub(crate) use dialogs::hardcopy::{HardcopyDialogState, HardcopyWorkflow, open_h
 pub(crate) use dialogs::plan_removal::{
     PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
 };
-pub use dialogs::state::DialogState;
-pub(crate) use dialogs::state::{
-    DatasetExportPicker, GridSnapSpacingChoice, HelpCenterPage, RunDetailsDialogState,
-};
+pub(crate) use dialogs::state::{GridSnapSpacingChoice, HelpCenterPage};
 
 /// Test-only: the studio pins this against its own hop label, and the dialog
 /// module it lives in is private to the shell.
@@ -824,12 +821,12 @@ impl RSpiceApp {
         if let Some(document) = window_state.active_document {
             // This is a temporary rendering projection, not user navigation.
             // The gesture remains owned by its original window and document.
-            let drag = std::mem::take(&mut self.state.dialogs.interaction.drag);
+            let drag = std::mem::take(&mut self.state.workbench.interaction.drag);
             let _ = crate::workbench::chrome::document_bar::activate_document_by_id(
                 &mut self.state,
                 &document,
             );
-            self.state.dialogs.interaction.drag = drag;
+            self.state.workbench.interaction.drag = drag;
         }
         self.state.workbench.drawer = window_state.drawer;
         self.state.workbench.console_maximized = window_state.console_maximized;
@@ -1001,10 +998,10 @@ impl RSpiceApp {
     fn synchronize_design_management_route(&mut self) {
         let route_active = self.state.workbench.current_route().surface_id()
             == crate::workbench::SurfaceId::DesignManagement;
-        if route_active && !self.state.dialogs.design_management.open {
+        if route_active && !self.state.project.design_management.open {
             open_design_management_dialog(&mut self.state);
-        } else if !route_active && self.state.dialogs.design_management.open {
-            self.state.dialogs.design_management.close_and_discard();
+        } else if !route_active && self.state.project.design_management.open {
+            self.state.project.design_management.close_and_discard();
         }
     }
 
@@ -1016,22 +1013,22 @@ impl RSpiceApp {
         let surface = self.state.workbench.current_route().surface_id();
 
         if surface == crate::workbench::SurfaceId::CommandPalette {
-            if !self.state.dialogs.command_palette.open {
-                self.state.dialogs.command_palette.open_routed();
+            if !self.state.workbench.command_palette.open {
+                self.state.workbench.command_palette.open_routed();
             }
-        } else if self.state.dialogs.command_palette.route_owned {
-            self.state.dialogs.command_palette.close();
+        } else if self.state.workbench.command_palette.route_owned {
+            self.state.workbench.command_palette.close();
         }
 
         if surface == crate::workbench::SurfaceId::HelpCenter {
-            if !self.state.dialogs.help_center.open {
+            if !self.state.shell.help_center.open {
                 self.state
-                    .dialogs
+                    .shell
                     .help_center
                     .open_routed(crate::workbench::app::HelpCenterPage::Help);
             }
-        } else if self.state.dialogs.help_center.route_owned {
-            self.state.dialogs.help_center.close();
+        } else if self.state.shell.help_center.route_owned {
+            self.state.shell.help_center.close();
         }
     }
 }
@@ -1294,7 +1291,7 @@ mod gesture_tests;
 mod wiring_acceptance;
 
 #[cfg(test)]
-mod veriloga_design_tests;
+pub(in crate::workbench) mod veriloga_design_tests;
 
 #[cfg(test)]
 mod veriloga_cell_source_tests;
@@ -1571,7 +1568,7 @@ mod tests {
             fixture.frame(Vec::new());
             fixture.frame(Vec::new());
             fixture.frame(vec![egui::Event::Text("help".to_owned())]);
-            assert_eq!(fixture.app.state.dialogs.command_palette.query, "help");
+            assert_eq!(fixture.app.state.workbench.command_palette.query, "help");
             assert_eq!(
                 fixture
                     .app
@@ -2021,9 +2018,9 @@ mod tests {
         let mut state = AppState::default();
         assert!(!state.application_modal_open());
 
-        state.dialogs.preferences_open = true;
+        state.settings.preferences_open = true;
         assert!(state.application_modal_open());
-        state.dialogs.preferences_open = false;
+        state.settings.preferences_open = false;
 
         state.model.sim_setup.session.palette_open = true;
         assert!(state.application_modal_open());
@@ -2078,10 +2075,10 @@ mod tests {
                 crate::workbench::RouteTransitionSource::Restore,
             )
             .expect("Design Management route is executable");
-        assert!(!app.state.dialogs.design_management.open);
+        assert!(!app.state.project.design_management.open);
 
         app.synchronize_design_management_route();
-        assert!(app.state.dialogs.design_management.open);
+        assert!(app.state.project.design_management.open);
 
         app.state
             .workbench
@@ -2091,7 +2088,7 @@ mod tests {
             )
             .expect("Design workspace route is executable");
         app.synchronize_design_management_route();
-        assert!(!app.state.dialogs.design_management.open);
+        assert!(!app.state.project.design_management.open);
     }
 
     #[test]
@@ -2107,8 +2104,8 @@ mod tests {
             )
             .expect("Command Palette route is executable");
         app.synchronize_route_owned_dialogs();
-        assert!(app.state.dialogs.command_palette.open);
-        assert!(app.state.dialogs.command_palette.route_owned);
+        assert!(app.state.workbench.command_palette.open);
+        assert!(app.state.workbench.command_palette.route_owned);
 
         app.state
             .workbench
@@ -2118,9 +2115,9 @@ mod tests {
             )
             .expect("Help Center route is executable");
         app.synchronize_route_owned_dialogs();
-        assert!(!app.state.dialogs.command_palette.open);
-        assert!(app.state.dialogs.help_center.open);
-        assert!(app.state.dialogs.help_center.route_owned);
+        assert!(!app.state.workbench.command_palette.open);
+        assert!(app.state.shell.help_center.open);
+        assert!(app.state.shell.help_center.route_owned);
 
         app.state
             .workbench
@@ -2130,7 +2127,7 @@ mod tests {
             )
             .expect("Design route is executable");
         app.synchronize_route_owned_dialogs();
-        assert!(!app.state.dialogs.help_center.open);
+        assert!(!app.state.shell.help_center.open);
     }
 
     #[test]

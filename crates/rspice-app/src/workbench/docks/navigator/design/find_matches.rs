@@ -16,7 +16,7 @@ use crate::workbench::design_system::WorkbenchIcon;
 const MAX_ROWS: usize = 200;
 
 pub(super) fn find_matches_section(ui: &mut Ui, state: &mut AppState) {
-    if !state.dialogs.find_replace.open {
+    if !state.design.find_replace.open {
         return;
     }
     // A query that cannot run says why in the form, beside the field.
@@ -108,7 +108,7 @@ mod tests {
             .collect();
         document.net_labels = vec![NetLabel::new(9, Point::origin(), "out_r1")];
         crate::workbench::app::open_find_replace(&mut app.state);
-        let form = &mut app.state.dialogs.find_replace;
+        let form = &mut app.state.design.find_replace;
         form.find = "r1".to_owned();
         form.replace = "RA".to_owned();
         let canvas = crate::ui::raster::render(egui::vec2(300.0, 160.0), |ui, _background| {

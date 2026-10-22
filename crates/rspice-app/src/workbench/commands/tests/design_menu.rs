@@ -147,10 +147,10 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
     assert!(Command::CheckAndSave.is_enabled(&app));
 
     Command::CheckAndSave.execute(&mut app);
-    assert!(app.state.dialogs.check_and_save.open);
-    assert!(app.state.dialogs.check_and_save.report.is_some());
+    assert!(app.state.project.check_and_save.open);
+    assert!(app.state.project.check_and_save.report.is_some());
 
-    app.state.dialogs.check_and_save.close();
+    app.state.project.check_and_save.close();
     app.state.model.schematic.session.read_only = true;
     assert!(!Command::CheckAndSave.is_enabled(&app));
 
@@ -182,10 +182,10 @@ fn configuration_sets_has_mockup_identity_and_opens_the_owned_workflow() {
     let mut app = RSpiceApp::test_instance();
     assert!(Command::ConfigurationSets.is_enabled(&app));
     Command::ConfigurationSets.execute(&mut app);
-    assert!(app.state.dialogs.configuration_sets.open);
-    assert!(app.state.dialogs.application_modal_open());
+    assert!(app.state.simulate.configuration_sets.open);
+    assert!(app.state.dialog_modal_open());
 
-    app.state.dialogs.configuration_sets.open = false;
+    app.state.simulate.configuration_sets.open = false;
     app.state.close_project_session();
     assert!(!Command::ConfigurationSets.is_enabled(&app));
 }
@@ -226,10 +226,10 @@ fn design_management_has_mockup_identity_authority_and_owned_workflow() {
         crate::workbench::SurfaceId::DesignManagement
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
-    assert!(app.state.dialogs.design_management.open);
-    assert!(app.state.dialogs.application_modal_open());
+    assert!(app.state.project.design_management.open);
+    assert!(app.state.dialog_modal_open());
 
-    app.state.dialogs.design_management.open = false;
+    app.state.project.design_management.open = false;
     app.state.model.schematic.session.read_only = true;
     assert!(!Command::DesignManagement.is_enabled(&app));
 
@@ -273,10 +273,10 @@ fn connectivity_manager_has_mockup_identity_and_supports_read_only_inspection() 
     app.state.model.schematic.session.read_only = true;
     assert!(Command::ConnectivityManager.is_enabled(&app));
     Command::ConnectivityManager.execute(&mut app);
-    assert!(app.state.dialogs.connectivity_manager.open);
-    assert!(app.state.dialogs.application_modal_open());
+    assert!(app.state.design.connectivity_manager.open);
+    assert!(app.state.dialog_modal_open());
 
-    app.state.dialogs.connectivity_manager.open = false;
+    app.state.design.connectivity_manager.open = false;
     app.state.close_project_session();
     assert!(!Command::ConnectivityManager.is_enabled(&app));
 }
@@ -313,10 +313,10 @@ fn selection_bulk_edit_has_mockup_identity_order_and_read_only_inspection() {
     app.state.model.schematic.session.read_only = true;
     assert!(Command::SelectionBulkEdit.is_enabled(&app));
     Command::SelectionBulkEdit.execute(&mut app);
-    assert!(app.state.dialogs.selection_bulk_edit.open);
-    assert!(app.state.dialogs.application_modal_open());
+    assert!(app.state.design.selection_bulk_edit.open);
+    assert!(app.state.dialog_modal_open());
 
-    app.state.dialogs.selection_bulk_edit.open = false;
+    app.state.design.selection_bulk_edit.open = false;
     app.state.close_project_session();
     assert!(!Command::SelectionBulkEdit.is_enabled(&app));
 }

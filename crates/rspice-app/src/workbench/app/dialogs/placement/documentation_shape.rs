@@ -43,13 +43,13 @@ const DESCRIPTION: &str = "Pick the shape, then drag it on the sheet.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_documentation_shape_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.documentation_shape.open {
+        if !self.state.design.documentation_shape.open {
             return;
         }
         let validation = validate_draft(&self.state);
         let refusal = validation.as_ref().err().cloned();
 
-        let draft = &mut self.state.dialogs.documentation_shape;
+        let draft = &mut self.state.design.documentation_shape;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .describe(DESCRIPTION)
             .primary_enabled(validation.is_ok())
@@ -80,11 +80,11 @@ impl RSpiceApp {
                         .model
                         .schematic
                         .arm_tool(Tool::DocumentationShape);
-                    self.state.dialogs.documentation_shape.close();
+                    self.state.design.documentation_shape.close();
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.documentation_shape.close();
+                self.state.design.documentation_shape.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -92,7 +92,7 @@ impl RSpiceApp {
 }
 
 fn validate_draft(state: &AppState) -> Result<PendingDocumentationShapePlacement, String> {
-    let draft = &state.dialogs.documentation_shape;
+    let draft = &state.design.documentation_shape;
     if state.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
@@ -155,7 +155,7 @@ mod tests {
         );
         let source = schematic_editor_request_source(&state);
         state
-            .dialogs
+            .design
             .documentation_shape
             .open(source.clone(), Vec::new());
         let Ok(pending) = validate_draft(&state) else {
@@ -169,9 +169,9 @@ mod tests {
             crate::state::ViewType::Schematic,
         );
         assert!(validate_draft(&state).is_err());
-        assert_eq!(state.dialogs.documentation_shape.source, Some(source));
-        state.dialogs.documentation_shape.close();
-        assert!(state.dialogs.documentation_shape.source.is_none());
+        assert_eq!(state.design.documentation_shape.source, Some(source));
+        state.design.documentation_shape.close();
+        assert!(state.design.documentation_shape.source.is_none());
         assert!(
             state
                 .model

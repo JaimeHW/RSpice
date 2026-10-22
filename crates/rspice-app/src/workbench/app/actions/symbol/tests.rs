@@ -238,7 +238,7 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
                 .content
                 .set_active_read_only_reference(true),
             "session" => app.state.model.schematic.session.read_only = true,
-            "modal" => app.state.dialogs.preferences_open = true,
+            "modal" => app.state.settings.preferences_open = true,
             _ => unreachable!(),
         }
         let selection = app.state.ui.symbol.editor.effective_selection();

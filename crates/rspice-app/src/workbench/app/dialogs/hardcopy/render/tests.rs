@@ -212,13 +212,13 @@ fn settled_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::F
         ctx.input(|input| input.time) + f64::from(ctx.global_style().animation_time);
     for _ in 0..400 {
         let _ = render_studio(ctx, app, viewport);
-        if app.state.dialogs.hardcopy.preview.is_some()
+        if app.state.hardcopy.hardcopy.preview.is_some()
             && ctx.input(|input| input.time) >= fully_visible_at
         {
             let _ = render_studio(ctx, app, viewport);
             return render_studio(ctx, app, viewport);
         }
-        if app.state.dialogs.hardcopy.preview.is_none() {
+        if app.state.hardcopy.hardcopy.preview.is_none() {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
@@ -323,8 +323,8 @@ fn the_studio_fits_every_viewport_and_section_without_scrolling() {
         };
         for section in HardcopySection::ALL {
             for previewing in regions.iter().copied() {
-                app.state.dialogs.hardcopy.section = section;
-                app.state.dialogs.hardcopy.region = if previewing {
+                app.state.hardcopy.hardcopy.section = section;
+                app.state.hardcopy.hardcopy.region = if previewing {
                     HardcopyRegion::Preview
                 } else {
                     HardcopyRegion::Setup
@@ -541,7 +541,7 @@ fn the_narrow_strip_asks_one_question_per_control() {
     let mut app = studio_app();
     let viewport = vec2(390.0, 844.0);
 
-    app.state.dialogs.hardcopy.region = HardcopyRegion::Setup;
+    app.state.hardcopy.hardcopy.region = HardcopyRegion::Setup;
     let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
     assert!(control_rect(&controls, "01  Source and scope").is_some());
     assert!(control_rect(&controls, "Setup").is_some());
@@ -555,7 +555,7 @@ fn the_narrow_strip_asks_one_question_per_control() {
 
     // With the page on screen there is no section to choose, so the chips
     // that would choose one are not there to be read as inert.
-    app.state.dialogs.hardcopy.region = HardcopyRegion::Preview;
+    app.state.hardcopy.hardcopy.region = HardcopyRegion::Preview;
     let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
     assert!(control_rect(&controls, "01  Source and scope").is_none());
     assert!(control_rect(&controls, "Setup").is_some());
@@ -673,7 +673,7 @@ fn no_widget_changes_its_id_as_the_studio_changes() {
     };
     for _ in 0..200 {
         record(&render_studio(&ctx, &mut app, viewport));
-        if app.state.dialogs.hardcopy.preview.is_some() {
+        if app.state.hardcopy.hardcopy.preview.is_some() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -682,12 +682,12 @@ fn no_widget_changes_its_id_as_the_studio_changes() {
     // arrival is the move that shifted the rail's ids. Without it the rest
     // of this probe would pass by never having been tested.
     assert!(
-        app.state.dialogs.hardcopy.preview.is_some(),
+        app.state.hardcopy.hardcopy.preview.is_some(),
         "the studio never resolved a source and an exact page preview"
     );
     record(&render_studio(&ctx, &mut app, viewport));
     for section in HardcopySection::ALL {
-        app.state.dialogs.hardcopy.section = section;
+        app.state.hardcopy.hardcopy.section = section;
         record(&render_studio(&ctx, &mut app, viewport));
         record(&render_studio(&ctx, &mut app, viewport));
     }
@@ -695,17 +695,17 @@ fn no_widget_changes_its_id_as_the_studio_changes() {
     // row, and clearing it closes it again. Both are ordinary, and a
     // publication that fails late raises one over a plan that stayed valid.
     for refusal in [true, false] {
-        app.state.dialogs.hardcopy.error =
+        app.state.hardcopy.hardcopy.error =
             refusal.then(|| "the publication was refused".to_owned());
         record(&render_studio(&ctx, &mut app, viewport));
         record(&render_studio(&ctx, &mut app, viewport));
     }
-    app.state.dialogs.hardcopy.margin_left = "100".to_owned();
-    app.state.dialogs.hardcopy.refresh_preview();
+    app.state.hardcopy.hardcopy.margin_left = "100".to_owned();
+    app.state.hardcopy.hardcopy.refresh_preview();
     record(&render_studio(&ctx, &mut app, viewport));
     record(&render_studio(&ctx, &mut app, viewport));
-    app.state.dialogs.hardcopy.margin_left = "0.5".to_owned();
-    app.state.dialogs.hardcopy.refresh_preview();
+    app.state.hardcopy.hardcopy.margin_left = "0.5".to_owned();
+    app.state.hardcopy.hardcopy.refresh_preview();
     record(&render_studio(&ctx, &mut app, viewport));
     record(&render_studio(&ctx, &mut app, viewport));
 
@@ -715,7 +715,7 @@ fn no_widget_changes_its_id_as_the_studio_changes() {
     record(&render_studio(&ctx, &mut app, narrow));
     record(&render_studio(&ctx, &mut app, narrow));
     for region in [HardcopyRegion::Preview, HardcopyRegion::Setup] {
-        app.state.dialogs.hardcopy.region = region;
+        app.state.hardcopy.hardcopy.region = region;
         record(&render_studio(&ctx, &mut app, narrow));
         record(&render_studio(&ctx, &mut app, narrow));
     }
@@ -763,11 +763,11 @@ fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
         );
 
         // A margin wider than the page, entered while standing in Output.
-        app.state.dialogs.hardcopy.section = HardcopySection::Output;
-        app.state.dialogs.hardcopy.margin_left = "100".to_owned();
-        app.state.dialogs.hardcopy.refresh_preview();
+        app.state.hardcopy.hardcopy.section = HardcopySection::Output;
+        app.state.hardcopy.hardcopy.margin_left = "100".to_owned();
+        app.state.hardcopy.hardcopy.refresh_preview();
         assert_eq!(
-            app.state.dialogs.hardcopy.error_section,
+            app.state.hardcopy.hardcopy.error_section,
             Some(HardcopySection::Page)
         );
         // A blocked draft compiles no plan, so the settling probe would wait
@@ -843,10 +843,10 @@ fn the_narrow_strip_marks_the_blocked_section_too() {
     let viewport = vec2(390.0, 844.0);
     let _ = settled_studio(&ctx, &mut app, viewport);
 
-    app.state.dialogs.hardcopy.region = HardcopyRegion::Setup;
-    app.state.dialogs.hardcopy.section = HardcopySection::Identity;
-    app.state.dialogs.hardcopy.margin_left = "100".to_owned();
-    app.state.dialogs.hardcopy.refresh_preview();
+    app.state.hardcopy.hardcopy.region = HardcopyRegion::Setup;
+    app.state.hardcopy.hardcopy.section = HardcopySection::Identity;
+    app.state.hardcopy.hardcopy.margin_left = "100".to_owned();
+    app.state.hardcopy.hardcopy.refresh_preview();
     let _ = render_studio(&ctx, &mut app, viewport);
     let controls = dialog_controls(&render_studio(&ctx, &mut app, viewport));
 
@@ -858,8 +858,8 @@ fn the_narrow_strip_marks_the_blocked_section_too() {
 /// what the section takes, and how far the widest thing in it reaches.
 #[cfg(not(target_arch = "wasm32"))]
 fn editor_extent(app: &mut RSpiceApp, section: HardcopySection, measure: f32) -> (f32, f32) {
-    app.state.dialogs.hardcopy.section = section;
-    let draft = &mut app.state.dialogs.hardcopy;
+    app.state.hardcopy.hardcopy.section = section;
+    let draft = &mut app.state.hardcopy.hardcopy;
     let ctx = Context::default();
     ctx.enable_accesskit();
     crate::ui::Theme::default().apply(&ctx);

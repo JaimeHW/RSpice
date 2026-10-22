@@ -286,7 +286,7 @@ pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
     let bound_sections = bound_library_sections(state, &rows);
     // Nothing is proposed: the value is the user's to choose, and Apply
     // waits for it.
-    state.dialogs.selection_bulk_edit = SelectionBulkEditDialogState {
+    state.design.selection_bulk_edit = SelectionBulkEditDialogState {
         open: true,
         filter,
         selected,
@@ -305,29 +305,29 @@ pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_selection_bulk_edit_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.selection_bulk_edit.open {
+        if !self.state.design.selection_bulk_edit.open {
             return;
         }
-        let filter = self.state.dialogs.selection_bulk_edit.filter.clone();
-        let property = self.state.dialogs.selection_bulk_edit.property;
+        let filter = self.state.design.selection_bulk_edit.filter.clone();
+        let property = self.state.design.selection_bulk_edit.property;
         let rows = build_rows(&self.state, &filter, property);
         let impact = preview_impact(
             &self.state.model.schematic,
             &rows,
-            &self.state.dialogs.selection_bulk_edit.selected,
+            &self.state.design.selection_bulk_edit.selected,
             property,
-            &self.state.dialogs.selection_bulk_edit.new_value,
-            self.state.dialogs.selection_bulk_edit.unset_behavior,
+            &self.state.design.selection_bulk_edit.new_value,
+            self.state.design.selection_bulk_edit.unset_behavior,
             &self
                 .state
-                .dialogs
+                .design
                 .selection_bulk_edit
                 .filter
                 .current_property,
         );
         let stale = self
             .state
-            .dialogs
+            .design
             .selection_bulk_edit
             .authority
             .as_ref()
@@ -336,14 +336,14 @@ impl RSpiceApp {
             && !self.state.model.safe_mode.project_read_only();
         let primary_enabled =
             write_allowed && stale.is_none() && impact.error.is_none() && impact.changed > 0;
-        let mut body_scroll_offset = self.state.dialogs.selection_bulk_edit.body_scroll_offset;
+        let mut body_scroll_offset = self.state.design.selection_bulk_edit.body_scroll_offset;
         // A value not yet chosen is not a failed edit: the footer says what
         // Apply is waiting for, and no "nothing was changed" banner opens
         // over a dialog nobody has touched.
-        let missing_value = missing_value_reason(&self.state.dialogs.selection_bulk_edit);
+        let missing_value = missing_value_reason(&self.state.design.selection_bulk_edit);
         let error = self
             .state
-            .dialogs
+            .design
             .selection_bulk_edit
             .error
             .as_deref()
@@ -394,7 +394,7 @@ impl RSpiceApp {
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = selection_bulk_body(
                 ui,
-                &mut self.state.dialogs.selection_bulk_edit,
+                &mut self.state.design.selection_bulk_edit,
                 &rows,
                 &impact,
                 analyses,
@@ -403,17 +403,17 @@ impl RSpiceApp {
             );
             None
         });
-        self.state.dialogs.selection_bulk_edit.body_scroll_offset = body_scroll_offset;
+        self.state.design.selection_bulk_edit.body_scroll_offset = body_scroll_offset;
         self.handle_selection_bulk_body_action(action);
 
         match choice {
             DialogChoice::Primary => {
                 if let Err(error) = self.commit_selection_bulk_edit() {
-                    self.state.dialogs.selection_bulk_edit.error = Some(error);
+                    self.state.design.selection_bulk_edit.error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.selection_bulk_edit.close();
+                self.state.design.selection_bulk_edit.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -423,49 +423,49 @@ impl RSpiceApp {
         match action {
             SelectionBulkBodyAction::None => {}
             SelectionBulkBodyAction::FilterChanged => {
-                let filter = self.state.dialogs.selection_bulk_edit.filter.clone();
+                let filter = self.state.design.selection_bulk_edit.filter.clone();
                 self.state.ui.schematic_bulk_edit_filters.active = filter.clone();
-                let property = self.state.dialogs.selection_bulk_edit.property;
+                let property = self.state.design.selection_bulk_edit.property;
                 let rows = build_rows(&self.state, &filter, property);
-                self.state.dialogs.selection_bulk_edit.bound_sections =
+                self.state.design.selection_bulk_edit.bound_sections =
                     bound_library_sections(&self.state, &rows);
-                self.state.dialogs.selection_bulk_edit.selected = rows
+                self.state.design.selection_bulk_edit.selected = rows
                     .into_iter()
                     .filter(SelectionBulkRow::editable)
                     .map(|row| row.key)
                     .collect();
-                self.state.dialogs.selection_bulk_edit.error = None;
-                self.state.dialogs.selection_bulk_edit.authority =
+                self.state.design.selection_bulk_edit.error = None;
+                self.state.design.selection_bulk_edit.authority =
                     Some(SelectionBulkEditAuthority::capture(&self.state));
             }
             SelectionBulkBodyAction::SaveFilter => {
                 let name = self
                     .state
-                    .dialogs
+                    .design
                     .selection_bulk_edit
                     .save_filter_name
                     .clone();
                 self.state.ui.schematic_bulk_edit_filters.active =
-                    self.state.dialogs.selection_bulk_edit.filter.clone();
+                    self.state.design.selection_bulk_edit.filter.clone();
                 match self.state.ui.schematic_bulk_edit_filters.save_active(&name) {
                     Ok(()) => {
-                        self.state.dialogs.selection_bulk_edit.selected_saved_filter =
+                        self.state.design.selection_bulk_edit.selected_saved_filter =
                             Some(name.trim().to_owned());
                         self.state
-                            .dialogs
+                            .design
                             .selection_bulk_edit
                             .save_filter_name
                             .clear();
-                        self.state.dialogs.selection_bulk_edit.save_filter_open = false;
-                        self.state.dialogs.selection_bulk_edit.error = None;
+                        self.state.design.selection_bulk_edit.save_filter_open = false;
+                        self.state.design.selection_bulk_edit.error = None;
                     }
-                    Err(error) => self.state.dialogs.selection_bulk_edit.error = Some(error),
+                    Err(error) => self.state.design.selection_bulk_edit.error = Some(error),
                 }
             }
             SelectionBulkBodyAction::LoadFilter => {
                 let name = self
                     .state
-                    .dialogs
+                    .design
                     .selection_bulk_edit
                     .selected_saved_filter
                     .clone();
@@ -473,38 +473,38 @@ impl RSpiceApp {
                     && self.state.ui.schematic_bulk_edit_filters.load(&name)
                 {
                     let filter = self.state.ui.schematic_bulk_edit_filters.active.clone();
-                    self.state.dialogs.selection_bulk_edit.filter = filter.clone();
-                    let property = self.state.dialogs.selection_bulk_edit.property;
-                    self.state.dialogs.selection_bulk_edit.selected =
+                    self.state.design.selection_bulk_edit.filter = filter.clone();
+                    let property = self.state.design.selection_bulk_edit.property;
+                    self.state.design.selection_bulk_edit.selected =
                         build_rows(&self.state, &filter, property)
                             .into_iter()
                             .filter(SelectionBulkRow::editable)
                             .map(|row| row.key)
                             .collect();
-                    self.state.dialogs.selection_bulk_edit.authority =
+                    self.state.design.selection_bulk_edit.authority =
                         Some(SelectionBulkEditAuthority::capture(&self.state));
-                    self.state.dialogs.selection_bulk_edit.error = None;
+                    self.state.design.selection_bulk_edit.error = None;
                 }
             }
             SelectionBulkBodyAction::DeleteFilter => {
                 let name = self
                     .state
-                    .dialogs
+                    .design
                     .selection_bulk_edit
                     .selected_saved_filter
                     .clone();
                 if let Some(name) = name
                     && self.state.ui.schematic_bulk_edit_filters.remove(&name)
                 {
-                    self.state.dialogs.selection_bulk_edit.selected_saved_filter = None;
-                    self.state.dialogs.selection_bulk_edit.error = None;
+                    self.state.design.selection_bulk_edit.selected_saved_filter = None;
+                    self.state.design.selection_bulk_edit.error = None;
                 }
             }
         }
     }
 
     fn commit_selection_bulk_edit(&mut self) -> Result<(), String> {
-        let dialog = &self.state.dialogs.selection_bulk_edit;
+        let dialog = &self.state.design.selection_bulk_edit;
         let authority = dialog
             .authority
             .as_ref()
@@ -543,7 +543,7 @@ impl RSpiceApp {
             analyses,
             if analyses == 1 { "is" } else { "es" },
         ));
-        self.state.dialogs.selection_bulk_edit.close();
+        self.state.design.selection_bulk_edit.close();
         Ok(())
     }
 }
@@ -1865,7 +1865,7 @@ mod tests {
 
         open_selection_bulk_edit_dialog(&mut state);
 
-        let dialog = &state.dialogs.selection_bulk_edit;
+        let dialog = &state.design.selection_bulk_edit;
         assert!(dialog.open);
         assert_eq!(dialog.new_value, "");
         assert!(missing_value_reason(dialog).is_some());
@@ -1879,9 +1879,9 @@ mod tests {
         state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
 
         open_selection_bulk_edit_dialog(&mut state);
-        assert!(state.dialogs.selection_bulk_edit.bound_sections.is_empty());
+        assert!(state.design.selection_bulk_edit.bound_sections.is_empty());
         assert_eq!(
-            missing_value_reason(&state.dialogs.selection_bulk_edit),
+            missing_value_reason(&state.design.selection_bulk_edit),
             Some(NO_BOUND_SECTIONS)
         );
 
@@ -1899,7 +1899,7 @@ mod tests {
         state.model.model_library_manager.add_library(library);
 
         open_selection_bulk_edit_dialog(&mut state);
-        let dialog = &state.dialogs.selection_bulk_edit;
+        let dialog = &state.design.selection_bulk_edit;
         assert_eq!(dialog.bound_sections, ["mc_ss", "TT_PRE"]);
         assert_eq!(
             missing_value_reason(dialog),
@@ -2268,7 +2268,7 @@ mod tests {
         open_selection_bulk_edit_dialog(&mut app.state);
         assert!(
             app.state
-                .dialogs
+                .design
                 .selection_bulk_edit
                 .bound_sections
                 .is_empty()

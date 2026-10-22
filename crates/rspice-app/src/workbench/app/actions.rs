@@ -109,7 +109,7 @@ impl RSpiceApp {
         });
         if consumed && let Some(command) = resolution.command {
             self.execute_shortcut_command(command);
-            if self.state.dialogs.command_palette.open
+            if self.state.workbench.command_palette.open
                 && let Some(input) = palette_input
             {
                 super::command_palette::route_opening_input(ctx, input);
@@ -734,21 +734,21 @@ mod shortcut_ownership_tests {
 
         app.execute_shortcut_command(ShortcutCommand::ObjectProperties);
         assert!(matches!(
-            app.state.dialogs.object_properties.draft,
+            app.state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))
         ));
         let Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(draft)) =
-            app.state.dialogs.object_properties.draft.as_mut()
+            app.state.design.object_properties.draft.as_mut()
         else {
             unreachable!()
         };
         draft.declaration = "ADDR[7:0]".to_owned();
-        app.state.dialogs.object_properties.mark_edited();
+        app.state.design.object_properties.mark_edited();
 
         // The draft owns nothing until Apply, so one Escape leaves and the
         // bus is as it was.
         app.execute_shortcut_command(ShortcutCommand::Cancel);
-        assert!(!app.state.dialogs.object_properties.open);
+        assert!(!app.state.design.object_properties.open);
         assert_eq!(
             app.state.model.schematic.document().buses[0].declaration,
             Some(BusDeclaration::parse("DATA[7:0]").unwrap())

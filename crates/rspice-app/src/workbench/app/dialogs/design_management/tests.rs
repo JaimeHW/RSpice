@@ -11,8 +11,8 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
         let mut app = RSpiceApp::test_instance();
         let catalog = app.state.model.workspace.content.design_management.clone();
         open_design_management_dialog(&mut app.state);
-        assert!(app.state.dialogs.design_management.open);
-        app.state.dialogs.design_management.reset_inputs_for_page(
+        assert!(app.state.project.design_management.open);
+        app.state.project.design_management.reset_inputs_for_page(
             DesignManagementPage::NewSheet,
             None,
             None,
@@ -28,7 +28,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
         let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
             app.render_design_management_dialog(ctx);
         });
-        app.state.dialogs.design_management.discard_confirmation = confirmed_before_edit;
+        app.state.project.design_management.discard_confirmation = confirmed_before_edit;
         let key = |key, modifiers| egui::Event::Key {
             key,
             physical_key: Some(key),
@@ -48,7 +48,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
             ]),
             |ctx| app.render_design_management_dialog(ctx),
         );
-        let draft = &app.state.dialogs.design_management;
+        let draft = &app.state.project.design_management;
         assert_eq!(draft.page, DesignManagementPage::NewSheet);
         assert_eq!(draft.inputs.sheet_name, "Newly edited sheet");
         assert!(draft.discard_confirmation);
@@ -58,10 +58,10 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
             app.render_design_management_dialog(ctx);
         });
         assert_eq!(
-            app.state.dialogs.design_management.page,
+            app.state.project.design_management.page,
             DesignManagementPage::Manager
         );
-        assert!(!app.state.dialogs.design_management.discard_confirmation);
+        assert!(!app.state.project.design_management.discard_confirmation);
         assert_eq!(app.state.model.workspace.content.design_management, catalog);
     }
 }
@@ -153,13 +153,13 @@ fn design_management_opens_on_the_tab_a_row_asks_for() {
     ] {
         let mut app = RSpiceApp::test_instance();
         open_design_management_on(&mut app.state, tab);
-        assert!(app.state.dialogs.design_management.open);
-        assert_eq!(app.state.dialogs.design_management.active_tab, tab);
+        assert!(app.state.project.design_management.open);
+        assert_eq!(app.state.project.design_management.active_tab, tab);
     }
     let mut app = RSpiceApp::test_instance();
     open_design_management_dialog(&mut app.state);
     assert_eq!(
-        app.state.dialogs.design_management.active_tab,
+        app.state.project.design_management.active_tab,
         DesignManagementTab::Sheets
     );
 }

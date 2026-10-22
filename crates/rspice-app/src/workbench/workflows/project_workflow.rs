@@ -932,7 +932,7 @@ pub(crate) fn cancel_pending_browser_file_operation(state: &mut AppState) -> boo
     let lifecycle_cancelled =
         crate::workbench::lifecycle::project_lifecycle::cancel_pending_browser_operation(state);
     let continuation_cancelled = state
-        .dialogs
+        .workbench
         .confirmation_dialog
         .cancel_awaiting_canonical_save();
     let cancelled = import_cancelled || lifecycle_cancelled || continuation_cancelled;
@@ -945,7 +945,7 @@ pub(crate) fn cancel_pending_browser_file_operation(state: &mut AppState) -> boo
 pub(crate) fn request_revert_active_document(state: &mut AppState) -> bool {
     match crate::workbench::lifecycle::project_lifecycle::prepare_revert_active_document(state) {
         Ok(token) => {
-            state.dialogs.project_review_dialog.show_revert(token);
+            state.workbench.project_review_dialog.show_revert(token);
             true
         }
         Err(error) => {
@@ -1009,7 +1009,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
     if closing_loses_nothing(state) {
         return close_project_discard(state);
     }
-    state.dialogs.project_review_dialog.show_close_project();
+    state.workbench.project_review_dialog.show_close_project();
     true
 }
 

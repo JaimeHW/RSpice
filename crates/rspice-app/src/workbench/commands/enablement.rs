@@ -80,7 +80,7 @@ impl Command {
             Self::SheetFormatManager => {
                 crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
                     && !state.schematic_edit_read_only()
-                    && !state.dialogs.drawing_sheet_support.manager.open
+                    && !state.sheets.drawing_sheet_support.manager.open
                     && state
                         .model.workspace
                         .content.design_management
@@ -89,11 +89,11 @@ impl Command {
             }
             Self::CustomSheetSizes => {
                 crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
-                    && !state.dialogs.drawing_sheet_presets.any_open()
+                    && !state.sheets.drawing_sheet_presets.any_open()
             }
             Self::SheetDefaults => {
                 crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable(state)
-                    && !state.dialogs.drawing_sheet_defaults.open
+                    && !state.sheets.drawing_sheet_defaults.open
             }
             Self::ExportActiveView => {
                 crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available(state)
@@ -209,7 +209,7 @@ impl Command {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
                     && (schematic_selection_has_live_object(&state.model.schematic)
-                        || state.dialogs.floating_paste.is_some())
+                        || state.design.floating_paste.is_some())
             }
             Self::AlignSelectionLeft
             | Self::AlignSelectionCenter

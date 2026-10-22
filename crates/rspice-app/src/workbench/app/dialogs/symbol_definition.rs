@@ -41,7 +41,7 @@ pub(crate) fn open_symbol_import_dialog_for(
                 .filter(|reference| reference_has_typed_definition(state, reference))
         })
         .or_else(|| first_model_bound_symbol_reference(state));
-    state.dialogs.symbol_import = SymbolImportDialogState {
+    state.design.symbol_import = SymbolImportDialogState {
         open: true,
         target_library,
         binding_source,
@@ -115,7 +115,7 @@ pub(crate) fn open_symbol_parameter_form_dialog_for(state: &mut AppState, target
         .first()
         .and_then(|section| section.fields.first())
         .map(|field| field.key.clone());
-    state.dialogs.symbol_parameter_form = SymbolParameterFormDialogState {
+    state.design.symbol_parameter_form = SymbolParameterFormDialogState {
         open: true,
         target: Some(target),
         original_definition: Some(definition),
@@ -239,13 +239,13 @@ mod tests {
 
         open_symbol_import_dialog(&mut state);
 
-        assert!(state.dialogs.symbol_import.open);
+        assert!(state.design.symbol_import.open);
         assert_eq!(
-            state.dialogs.symbol_import.target_library,
+            state.design.symbol_import.target_library,
             state.model.workspace.content.active_view.library
         );
-        assert!(state.dialogs.symbol_import.source_text.is_empty());
-        assert!(!state.dialogs.symbol_import.dirty);
+        assert!(state.design.symbol_import.source_text.is_empty());
+        assert!(!state.design.symbol_import.dirty);
     }
 
     #[test]
@@ -277,14 +277,14 @@ mod tests {
 
         open_symbol_parameter_form_dialog(&mut state);
 
-        assert!(state.dialogs.symbol_parameter_form.open);
+        assert!(state.design.symbol_parameter_form.open);
         assert_eq!(
-            state.dialogs.symbol_parameter_form.target,
+            state.design.symbol_parameter_form.target,
             Some(CellViewRef::new(&library_name, cell_name, "symbol"))
         );
         assert_eq!(
             state
-                .dialogs
+                .design
                 .symbol_parameter_form
                 .draft_form
                 .as_ref()

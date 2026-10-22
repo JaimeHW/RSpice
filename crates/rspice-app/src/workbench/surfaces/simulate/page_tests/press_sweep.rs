@@ -364,7 +364,22 @@ fn studio_state(app: &RSpiceApp) -> String {
     let state: &AppState = &app.state;
     format!(
         "{:?}\n{:?}\n{:?}\n{:?}",
-        state.model.sim_setup, state.workbench, state.dialogs, state.model.workspace
+        state.model.sim_setup,
+        state.workbench,
+        (
+            &state.shell,
+            &state.platform,
+            &state.design,
+            &state.code,
+            &state.simulate,
+            &state.project,
+            &state.results,
+            &state.hardcopy,
+            &state.settings,
+            &state.cloud,
+            &state.sheets,
+        ),
+        state.model.workspace
     )
 }
 
@@ -1571,14 +1586,14 @@ fn is_destructive(label: &str) -> bool {
 impl Sweep {
     /// Whether a removal review is staged.
     fn review_open(&self) -> bool {
-        self.app.state.dialogs.plan_removal_review.target.is_some()
+        self.app.state.simulate.plan_removal_review.target.is_some()
     }
 
     /// Answer a staged review the way Cancel answers it, then run the frame the
     /// answer produces. The dialog itself is drawn by the application shell,
     /// which these surface-and-overlay passes do not run.
     fn cancel_review(&mut self) {
-        self.app.state.dialogs.plan_removal_review.close();
+        self.app.state.simulate.plan_removal_review.close();
         self.pass(Vec::new());
     }
 

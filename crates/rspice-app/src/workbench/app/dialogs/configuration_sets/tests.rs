@@ -29,7 +29,7 @@ fn keyboard_configuration_activation_does_not_insert_its_space() {
                 );
                 (
                     output,
-                    app.state.dialogs.configuration_sets.new_name.clone(),
+                    app.state.simulate.configuration_sets.new_name.clone(),
                 )
             };
             let key_event = |key, pressed| egui::Event::Key {
@@ -92,7 +92,7 @@ fn keyboard_configuration_activation_does_not_insert_its_space() {
                 app.state.model.workspace.content.configuration_sets,
                 catalog
             );
-            assert!(app.state.dialogs.configuration_sets.query.is_empty());
+            assert!(app.state.simulate.configuration_sets.query.is_empty());
         }
     }
 }
@@ -156,7 +156,7 @@ fn configuration_page_handoff_keeps_immediate_name_input() {
             egui::Event::Paste("Production bias sweep".to_owned()),
         ]);
         assert_eq!(
-            app.state.dialogs.configuration_sets.new_name, "Production bias sweep",
+            app.state.simulate.configuration_sets.new_name, "Production bias sweep",
             "{label} opening input"
         );
         assert_eq!(
@@ -164,7 +164,7 @@ fn configuration_page_handoff_keeps_immediate_name_input() {
             catalog
         );
         assert!(
-            app.state.dialogs.configuration_sets.query.is_empty(),
+            app.state.simulate.configuration_sets.query.is_empty(),
             "new page typing must not change the manager filter"
         );
     }
@@ -227,7 +227,7 @@ fn cancelling_a_configuration_draft_returns_the_opening_input_to_the_filter() {
         ],
     );
     assert_eq!(
-        app.state.dialogs.configuration_sets.new_name, "Abandoned draft",
+        app.state.simulate.configuration_sets.new_name, "Abandoned draft",
         "the new page takes the opening input"
     );
     let _ = render(
@@ -241,7 +241,7 @@ fn cancelling_a_configuration_draft_returns_the_opening_input_to_the_filter() {
         }],
     );
     assert_eq!(
-        app.state.dialogs.configuration_sets.page,
+        app.state.simulate.configuration_sets.page,
         ConfigurationDialogPage::Manager,
         "Escape leaves the draft page"
     );
@@ -250,10 +250,10 @@ fn cancelling_a_configuration_draft_returns_the_opening_input_to_the_filter() {
         vec![select_all, egui::Event::Paste("Returned filter".to_owned())],
     );
     assert_eq!(
-        app.state.dialogs.configuration_sets.query, "Returned filter",
+        app.state.simulate.configuration_sets.query, "Returned filter",
         "the manager's filter takes the opening input after a cancelled draft"
     );
-    assert!(app.state.dialogs.configuration_sets.open);
+    assert!(app.state.simulate.configuration_sets.open);
     assert_eq!(
         app.state.model.workspace.content.configuration_sets,
         catalog
@@ -383,7 +383,7 @@ fn a_cancelled_draft_hands_the_browser_keystrokes_to_the_filter() {
                 }
                 let output = observe(&mut app);
                 assert_eq!(
-                    app.state.dialogs.configuration_sets.query, query,
+                    app.state.simulate.configuration_sets.query, query,
                     "the manager's filter takes the opening input ({case})"
                 );
                 let tree = output.platform_output.accesskit_update.unwrap();
@@ -420,7 +420,7 @@ fn a_cancelled_draft_hands_the_browser_keystrokes_to_the_filter() {
                 }
                 let _ = observe(&mut app);
                 assert_eq!(
-                    app.state.dialogs.configuration_sets.new_name, draft,
+                    app.state.simulate.configuration_sets.new_name, draft,
                     "the new page takes the opening input ({case})"
                 );
                 let returned = "Configuration filter after Escape";
@@ -445,15 +445,15 @@ fn a_cancelled_draft_hands_the_browser_keystrokes_to_the_filter() {
                     1,
                     "one rendered field holds the input that followed Escape \
                  ({case}, holders: {holders:?}, query: {:?}, name: {:?}, page: {:?})",
-                    app.state.dialogs.configuration_sets.query,
-                    app.state.dialogs.configuration_sets.new_name,
-                    app.state.dialogs.configuration_sets.page,
+                    app.state.simulate.configuration_sets.query,
+                    app.state.simulate.configuration_sets.new_name,
+                    app.state.simulate.configuration_sets.page,
                 );
                 assert_eq!(
-                    app.state.dialogs.configuration_sets.query, returned,
+                    app.state.simulate.configuration_sets.query, returned,
                     "the manager's filter holds it ({case})"
                 );
-                assert!(app.state.dialogs.configuration_sets.open);
+                assert!(app.state.simulate.configuration_sets.open);
                 assert_eq!(
                     app.state.model.workspace.content.configuration_sets,
                     catalog
@@ -498,7 +498,7 @@ fn opening_configuration_text(page: ConfigurationDialogPage) {
         },
         |ui| app.render_frame_dialogs(ui),
     );
-    let dialog = &app.state.dialogs.configuration_sets;
+    let dialog = &app.state.simulate.configuration_sets;
     match page {
         ConfigurationDialogPage::Binding => assert_eq!(
             dialog.draft.as_ref().unwrap().executable_view_policy,
@@ -565,7 +565,7 @@ fn initial_focus_keeps_inspection_only_configuration_fields_read_only() {
             },
             "UI focus qualification".to_owned(),
         );
-        let before = app.state.dialogs.configuration_sets.clone();
+        let before = app.state.simulate.configuration_sets.clone();
         let catalog = app.state.model.workspace.content.configuration_sets.clone();
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -578,7 +578,7 @@ fn initial_focus_keeps_inspection_only_configuration_fields_read_only() {
             },
             |ui| app.render_frame_dialogs(ui),
         );
-        let dialog = &app.state.dialogs.configuration_sets;
+        let dialog = &app.state.simulate.configuration_sets;
         assert_eq!(dialog.new_name, before.new_name);
         assert_eq!(dialog.draft, before.draft);
         assert_eq!(
@@ -617,7 +617,7 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool, prior_confirmation:
     open_configuration_sets_dialog(&mut app.state);
     let catalog = app.state.model.workspace.content.configuration_sets.clone();
     if prior_confirmation {
-        let dialog = &mut app.state.dialogs.configuration_sets;
+        let dialog = &mut app.state.simulate.configuration_sets;
         dialog.draft.as_mut().unwrap().name.push_str(" prior edit");
         dialog.discard_confirmation = true;
     }
@@ -700,7 +700,7 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool, prior_confirmation:
         });
     }
     let _ = render(events);
-    let dialog = &app.state.dialogs.configuration_sets;
+    let dialog = &app.state.simulate.configuration_sets;
     assert!(dialog.open);
     assert!(dialog.discard_confirmation);
     assert!(dialog.draft.as_ref().unwrap().name.contains(" updated"));
@@ -721,7 +721,7 @@ fn editing_frame_keeps_the_configuration_draft(escape: bool, prior_confirmation:
             },
             |ui| app.render_frame_dialogs(ui),
         );
-        assert!(!app.state.dialogs.configuration_sets.open);
+        assert!(!app.state.simulate.configuration_sets.open);
         assert_eq!(
             app.state.model.workspace.content.configuration_sets,
             catalog
@@ -850,22 +850,22 @@ fn generated_names_are_case_insensitively_unique() {
 fn hierarchy_binding_entry_opens_the_binding_page_and_requires_a_configuration() {
     let (mut app, _) = valid_configuration_app();
     open_configuration_binding_dialog(&mut app.state);
-    assert!(app.state.dialogs.configuration_sets.open);
+    assert!(app.state.simulate.configuration_sets.open);
     assert_eq!(
-        app.state.dialogs.configuration_sets.page,
+        app.state.simulate.configuration_sets.page,
         ConfigurationDialogPage::Binding
     );
-    assert!(app.state.dialogs.configuration_sets.error.is_none());
+    assert!(app.state.simulate.configuration_sets.error.is_none());
 
     let mut empty = RSpiceApp::test_instance();
     open_configuration_binding_dialog(&mut empty.state);
-    assert!(empty.state.dialogs.configuration_sets.open);
+    assert!(empty.state.simulate.configuration_sets.open);
     assert_eq!(
-        empty.state.dialogs.configuration_sets.page,
+        empty.state.simulate.configuration_sets.page,
         ConfigurationDialogPage::Manager
     );
     assert_eq!(
-        empty.state.dialogs.configuration_sets.error.as_deref(),
+        empty.state.simulate.configuration_sets.error.as_deref(),
         Some("Create a configuration set before editing hierarchy bindings.")
     );
 }
@@ -891,7 +891,7 @@ fn same_row_and_subordinate_actions_never_discard_a_dirty_draft() {
         .expect("second configuration");
     open_configuration_sets_dialog(&mut app.state);
     app.state
-        .dialogs
+        .simulate
         .configuration_sets
         .draft
         .as_mut()
@@ -901,7 +901,7 @@ fn same_row_and_subordinate_actions_never_discard_a_dirty_draft() {
     app.handle_configuration_body_action(BodyAction::Select(selected));
     assert_eq!(
         app.state
-            .dialogs
+            .simulate
             .configuration_sets
             .draft
             .as_ref()
@@ -916,23 +916,23 @@ fn same_row_and_subordinate_actions_never_discard_a_dirty_draft() {
     ] {
         app.handle_configuration_body_action(action);
         assert_eq!(
-            app.state.dialogs.configuration_sets.page,
+            app.state.simulate.configuration_sets.page,
             ConfigurationDialogPage::Manager
         );
         assert_eq!(
-            app.state.dialogs.configuration_sets.selected_id,
+            app.state.simulate.configuration_sets.selected_id,
             Some(selected)
         );
         assert_eq!(
             app.state
-                .dialogs
+                .simulate
                 .configuration_sets
                 .draft
                 .as_ref()
                 .map(|draft| draft.name.as_str()),
             Some("Unsaved release")
         );
-        assert!(app.state.dialogs.configuration_sets.error.is_some());
+        assert!(app.state.simulate.configuration_sets.error.is_some());
     }
 }
 
@@ -1022,7 +1022,7 @@ fn normalization_only_save_revalidates_without_mutating_project_authority() {
     open_configuration_sets_dialog(&mut app.state);
     let revision = app.state.model.workspace.content.project.revision();
     app.state
-        .dialogs
+        .simulate
         .configuration_sets
         .draft
         .as_mut()
@@ -1049,7 +1049,7 @@ fn normalization_only_save_revalidates_without_mutating_project_authority() {
     );
     assert_eq!(
         app.state
-            .dialogs
+            .simulate
             .configuration_sets
             .draft
             .as_ref()
@@ -1065,7 +1065,7 @@ fn invalid_save_preserves_catalog_and_project_revision() {
     let catalog = app.state.model.workspace.content.configuration_sets.clone();
     let revision = app.state.model.workspace.content.project.revision();
     app.state
-        .dialogs
+        .simulate
         .configuration_sets
         .draft
         .as_mut()

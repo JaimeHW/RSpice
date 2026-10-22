@@ -155,7 +155,7 @@ thread_local! {
 }
 
 pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
-    if state.dialogs.engineering_table.open {
+    if state.design.engineering_table.open {
         return false;
     }
     let dataset = active_schematic_dataset(&state.model.schematic);
@@ -188,7 +188,7 @@ pub(crate) fn open_engineering_table_dialog(state: &mut AppState) -> bool {
         .unwrap_or_else(|| EngineeringTableView::for_dataset(&dataset));
     view.normalize_for(&dataset);
     state
-        .dialogs
+        .design
         .engineering_table
         .open(view, dataset.source_revision);
     true
@@ -198,19 +198,19 @@ impl RSpiceApp {
     pub(in crate::workbench) fn render_engineering_table_dialog(&mut self, ctx: &Context) {
         #[cfg(target_arch = "wasm32")]
         self.consume_engineering_view_import();
-        if !self.state.dialogs.engineering_table.open {
+        if !self.state.design.engineering_table.open {
             return;
         }
 
         let dataset = active_schematic_dataset(&self.state.model.schematic);
-        if self.state.dialogs.engineering_table.source_revision != dataset.source_revision {
-            if let Some(draft) = self.state.dialogs.engineering_table.draft.as_mut() {
+        if self.state.design.engineering_table.source_revision != dataset.source_revision {
+            if let Some(draft) = self.state.design.engineering_table.draft.as_mut() {
                 draft.normalize_for(&dataset);
             }
-            self.state.dialogs.engineering_table.source_revision = dataset.source_revision;
+            self.state.design.engineering_table.source_revision = dataset.source_revision;
         }
 
-        let page = self.state.dialogs.engineering_table.page;
+        let page = self.state.design.engineering_table.page;
         let (title, primary) = match page {
             EngineeringTableDialogPage::Manager => ("Engineering table view", "Apply table view"),
             EngineeringTableDialogPage::SaveView => ("Save engineering table view", "Save view"),
@@ -235,27 +235,27 @@ impl RSpiceApp {
                     EngineeringTableDialogPage::Manager => manager_body(
                         ui,
                         &dataset,
-                        &mut self.state.dialogs.engineering_table,
+                        &mut self.state.design.engineering_table,
                         &self.state.ui.engineering_table_views.saved,
                         &self.state.model.workspace.content.engineering_table_views.saved,
                     ),
                     EngineeringTableDialogPage::SaveView => {
-                        save_view_body(ui, &mut self.state.dialogs.engineering_table)
+                        save_view_body(ui, &mut self.state.design.engineering_table)
                     }
                     EngineeringTableDialogPage::SavedViews => saved_views_body(
                         ui,
                         &dataset,
-                        &mut self.state.dialogs.engineering_table,
+                        &mut self.state.design.engineering_table,
                         &self.state.ui.engineering_table_views.saved,
                         &self.state.model.workspace.content.engineering_table_views.saved,
                     ),
                     EngineeringTableDialogPage::Export => {
-                        export_body(ui, &dataset, &mut self.state.dialogs.engineering_table)
+                        export_body(ui, &dataset, &mut self.state.design.engineering_table)
                     }
                     EngineeringTableDialogPage::RowDetails => row_details_body(
                         ui,
                         &dataset,
-                        &mut self.state.dialogs.engineering_table,
+                        &mut self.state.design.engineering_table,
                     ),
                 };
                 Some(ui.make_persistent_id(("engineering-table-first", page)))
@@ -270,7 +270,7 @@ impl RSpiceApp {
                 EngineeringTableDialogPage::Manager => self.apply_engineering_table_view(&dataset),
                 EngineeringTableDialogPage::SaveView => self.save_engineering_table_view(&dataset),
                 EngineeringTableDialogPage::SavedViews => {
-                    self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::Manager;
+                    self.state.design.engineering_table.page = EngineeringTableDialogPage::Manager;
                 }
                 EngineeringTableDialogPage::Export => self.export_engineering_table(&dataset),
                 EngineeringTableDialogPage::RowDetails => {
@@ -279,10 +279,10 @@ impl RSpiceApp {
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 if page == EngineeringTableDialogPage::Manager {
-                    self.state.dialogs.engineering_table.close();
+                    self.state.design.engineering_table.close();
                 } else {
-                    self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::Manager;
-                    self.state.dialogs.engineering_table.error = None;
+                    self.state.design.engineering_table.page = EngineeringTableDialogPage::Manager;
+                    self.state.design.engineering_table.error = None;
                 }
             }
             DialogChoice::Secondary | DialogChoice::None => {}
@@ -297,16 +297,16 @@ impl RSpiceApp {
         match action {
             BodyAction::Copy => self.copy_engineering_table(dataset),
             BodyAction::Export => {
-                self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::Export;
-                self.state.dialogs.engineering_table.error = None;
+                self.state.design.engineering_table.page = EngineeringTableDialogPage::Export;
+                self.state.design.engineering_table.error = None;
             }
             BodyAction::Save => {
-                self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::SaveView;
-                self.state.dialogs.engineering_table.error = None;
+                self.state.design.engineering_table.page = EngineeringTableDialogPage::SaveView;
+                self.state.design.engineering_table.error = None;
             }
             BodyAction::Manage => {
-                self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::SavedViews;
-                self.state.dialogs.engineering_table.error = None;
+                self.state.design.engineering_table.page = EngineeringTableDialogPage::SavedViews;
+                self.state.design.engineering_table.error = None;
             }
             BodyAction::UseSaved(id, scope) => {
                 let saved = match scope {
@@ -330,9 +330,9 @@ impl RSpiceApp {
                 if let Some(saved) = saved {
                     let mut definition = saved.definition.clone();
                     definition.normalize_for(dataset);
-                    self.state.dialogs.engineering_table.draft = Some(definition);
-                    self.state.dialogs.engineering_table.selected_saved_id = Some(saved.id.clone());
-                    self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::Manager;
+                    self.state.design.engineering_table.draft = Some(definition);
+                    self.state.design.engineering_table.selected_saved_id = Some(saved.id.clone());
+                    self.state.design.engineering_table.page = EngineeringTableDialogPage::Manager;
                 }
             }
             BodyAction::DeleteSaved(id, scope) => {
@@ -382,18 +382,18 @@ impl RSpiceApp {
                 }
             }
             BodyAction::OpenDetails(id) => {
-                self.state.dialogs.engineering_table.row_details_id = Some(id);
-                self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::RowDetails;
+                self.state.design.engineering_table.row_details_id = Some(id);
+                self.state.design.engineering_table.page = EngineeringTableDialogPage::RowDetails;
             }
             BodyAction::ImportSaved => self.import_engineering_saved_view(),
             BodyAction::ExportSaved(id, scope) => self.export_engineering_saved_view(&id, scope),
             BodyAction::BeginRename(id, name) => {
-                self.state.dialogs.engineering_table.saved_edit_id = Some(id);
-                self.state.dialogs.engineering_table.saved_edit_name = name;
-                self.state.dialogs.engineering_table.error = None;
+                self.state.design.engineering_table.saved_edit_id = Some(id);
+                self.state.design.engineering_table.saved_edit_name = name;
+                self.state.design.engineering_table.error = None;
             }
             BodyAction::CommitRename(id, scope) => {
-                let name = self.state.dialogs.engineering_table.saved_edit_name.clone();
+                let name = self.state.design.engineering_table.saved_edit_name.clone();
                 let result = match scope {
                     EngineeringViewScope::Personal => {
                         self.state.ui.engineering_table_views.rename(&id, &name)
@@ -414,10 +414,10 @@ impl RSpiceApp {
                 };
                 match result {
                     Ok(()) => {
-                        self.state.dialogs.engineering_table.saved_edit_id = None;
-                        self.state.dialogs.engineering_table.saved_edit_name.clear();
+                        self.state.design.engineering_table.saved_edit_id = None;
+                        self.state.design.engineering_table.saved_edit_name.clear();
                     }
-                    Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+                    Err(error) => self.state.design.engineering_table.error = Some(error),
                 }
             }
             BodyAction::DuplicateSaved(id, scope, source_name) => {
@@ -445,14 +445,14 @@ impl RSpiceApp {
                             self.state.model.workspace.content.project_metadata_dirty = true;
                         }
                     }
-                    Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+                    Err(error) => self.state.design.engineering_table.error = Some(error),
                 }
             }
         }
     }
 
     fn apply_engineering_table_view(&mut self, dataset: &EngineeringDataset) {
-        let Some(mut view) = self.state.dialogs.engineering_table.draft.clone() else {
+        let Some(mut view) = self.state.design.engineering_table.draft.clone() else {
             return;
         };
         view.normalize_for(dataset);
@@ -460,22 +460,22 @@ impl RSpiceApp {
             .ui
             .engineering_table_views
             .set_working(view, dataset);
-        self.state.dialogs.engineering_table.close();
+        self.state.design.engineering_table.close();
         self.state
             .prompt("Engineering table view applied on this device; the project is unchanged.");
     }
 
     fn copy_engineering_table(&mut self, dataset: &EngineeringDataset) {
-        let Some(view) = self.state.dialogs.engineering_table.draft.as_ref() else {
+        let Some(view) = self.state.design.engineering_table.draft.as_ref() else {
             return;
         };
         let selected = (!self
             .state
-            .dialogs
+            .design
             .engineering_table
             .selected_row_ids
             .is_empty())
-        .then_some(&self.state.dialogs.engineering_table.selected_row_ids);
+        .then_some(&self.state.design.engineering_table.selected_row_ids);
         match crate::state::engineering_table::delimited_text_selected(
             dataset, view, b'\t', true, true, false, selected,
         ) {
@@ -487,17 +487,17 @@ impl RSpiceApp {
                     if rows == 1 { "" } else { "s" }
                 ));
             }
-            Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+            Err(error) => self.state.design.engineering_table.error = Some(error),
         }
     }
 
     fn save_engineering_table_view(&mut self, dataset: &EngineeringDataset) {
-        let Some(view) = self.state.dialogs.engineering_table.draft.clone() else {
+        let Some(view) = self.state.design.engineering_table.draft.clone() else {
             return;
         };
-        let name = self.state.dialogs.engineering_table.save_name.clone();
-        let scope = self.state.dialogs.engineering_table.save_scope;
-        let make_default = self.state.dialogs.engineering_table.save_as_default;
+        let name = self.state.design.engineering_table.save_name.clone();
+        let scope = self.state.design.engineering_table.save_scope;
+        let make_default = self.state.design.engineering_table.save_as_default;
         let result = match scope {
             EngineeringViewScope::Personal => self.state.ui.engineering_table_views.save(
                 &name,
@@ -526,47 +526,47 @@ impl RSpiceApp {
         };
         match result {
             Ok(id) => {
-                self.state.dialogs.engineering_table.selected_saved_id = Some(id);
-                self.state.dialogs.engineering_table.page = EngineeringTableDialogPage::Manager;
-                self.state.dialogs.engineering_table.save_name.clear();
-                self.state.dialogs.engineering_table.error = None;
+                self.state.design.engineering_table.selected_saved_id = Some(id);
+                self.state.design.engineering_table.page = EngineeringTableDialogPage::Manager;
+                self.state.design.engineering_table.save_name.clear();
+                self.state.design.engineering_table.error = None;
                 self.state.prompt("Engineering table view saved.");
             }
-            Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+            Err(error) => self.state.design.engineering_table.error = Some(error),
         }
     }
 
     fn export_engineering_table(&mut self, dataset: &EngineeringDataset) {
-        let Some(current) = self.state.dialogs.engineering_table.draft.as_ref() else {
+        let Some(current) = self.state.design.engineering_table.draft.as_ref() else {
             return;
         };
         let mut view = current.clone();
-        let selected_rows = match self.state.dialogs.engineering_table.export_scope {
+        let selected_rows = match self.state.design.engineering_table.export_scope {
             EngineeringTableExportScope::CurrentView => None,
             EngineeringTableExportScope::SelectedRows => {
                 if self
                     .state
-                    .dialogs
+                    .design
                     .engineering_table
                     .selected_row_ids
                     .is_empty()
                 {
-                    self.state.dialogs.engineering_table.error =
+                    self.state.design.engineering_table.error =
                         Some("Select at least one engineering table row first.".to_owned());
                     return;
                 }
-                Some(&self.state.dialogs.engineering_table.selected_row_ids)
+                Some(&self.state.design.engineering_table.selected_row_ids)
             }
             EngineeringTableExportScope::CompleteDataset => {
                 view.filters.clear();
                 None
             }
         };
-        let format = self.state.dialogs.engineering_table.export_format;
-        let include_headers = self.state.dialogs.engineering_table.export_headers;
-        let include_units = self.state.dialogs.engineering_table.export_units;
-        let include_metadata = self.state.dialogs.engineering_table.export_metadata;
-        let include_hidden = self.state.dialogs.engineering_table.export_hidden_columns;
+        let format = self.state.design.engineering_table.export_format;
+        let include_headers = self.state.design.engineering_table.export_headers;
+        let include_units = self.state.design.engineering_table.export_units;
+        let include_metadata = self.state.design.engineering_table.export_metadata;
+        let include_hidden = self.state.design.engineering_table.export_hidden_columns;
         let (extension, filter_name) = match format {
             EngineeringTableExportFormat::CsvSchema if cfg!(target_arch = "wasm32") => {
                 ("zip", "CSV + schema package")
@@ -593,7 +593,7 @@ impl RSpiceApp {
             Ok(Some(path)) => path,
             Ok(None) => return,
             Err(error) => {
-                self.state.dialogs.engineering_table.error = Some(error);
+                self.state.design.engineering_table.error = Some(error);
                 return;
             }
         };
@@ -724,21 +724,21 @@ impl RSpiceApp {
         })();
         match result {
             Ok(()) => {
-                self.state.dialogs.engineering_table.close();
+                self.state.design.engineering_table.close();
                 self.state.record(
                     LogSeverity::Info,
                     LogSource::Studio,
                     format!("Engineering table exported to {}.", destination.display()),
                 );
             }
-            Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+            Err(error) => self.state.design.engineering_table.error = Some(error),
         }
     }
 
     fn cross_probe_engineering_row(&mut self) {
         let Some(stable_id) = self
             .state
-            .dialogs
+            .design
             .engineering_table
             .row_details_id
             .as_deref()
@@ -850,12 +850,12 @@ impl RSpiceApp {
             None => {}
         }
         if selected {
-            self.state.dialogs.engineering_table.close();
+            self.state.design.engineering_table.close();
             self.state.workbench.inspector_visible = true;
             self.state
                 .prompt("The source schematic object was selected and opened in the Inspector.");
         } else {
-            self.state.dialogs.engineering_table.error =
+            self.state.design.engineering_table.error =
                 Some("The source object no longer exists in the active schematic.".to_owned());
         }
     }
@@ -883,19 +883,19 @@ impl RSpiceApp {
                 });
             match result {
                 Ok(source) => self.publish_imported_engineering_view(&source),
-                Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+                Err(error) => self.state.design.engineering_table.error = Some(error),
             }
         }
         #[cfg(target_arch = "wasm32")]
         {
             if self
                 .state
-                .dialogs
+                .design
                 .engineering_table
                 .saved_import_token
                 .is_some()
             {
-                self.state.dialogs.engineering_table.error =
+                self.state.design.engineering_table.error =
                     Some("An engineering table view picker is already open.".to_owned());
                 return;
             }
@@ -904,11 +904,11 @@ impl RSpiceApp {
             ) {
                 Ok(token) => token,
                 Err(error) => {
-                    self.state.dialogs.engineering_table.error = Some(error);
+                    self.state.design.engineering_table.error = Some(error);
                     return;
                 }
             };
-            self.state.dialogs.engineering_table.saved_import_token = Some(token);
+            self.state.design.engineering_table.saved_import_token = Some(token);
             crate::workbench::browser::file_import::pick_text_file(
                 "RSpice engineering table view",
                 &["json", "rspice-table-view"],
@@ -929,22 +929,22 @@ impl RSpiceApp {
         else {
             return;
         };
-        if self.state.dialogs.engineering_table.saved_import_token != Some(token)
+        if self.state.design.engineering_table.saved_import_token != Some(token)
             || !crate::workbench::browser::file_import::finish_text_import(token)
         {
             return;
         }
-        self.state.dialogs.engineering_table.saved_import_token = None;
+        self.state.design.engineering_table.saved_import_token = None;
         match result {
             Ok(Some(file)) => self.publish_imported_engineering_view(&file.contents),
             Ok(None) => {}
-            Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+            Err(error) => self.state.design.engineering_table.error = Some(error),
         }
     }
 
     fn publish_imported_engineering_view(&mut self, source: &str) {
         let dataset = active_schematic_dataset(&self.state.model.schematic);
-        let scope = self.state.dialogs.engineering_table.save_scope;
+        let scope = self.state.design.engineering_table.save_scope;
         let result = match scope {
             EngineeringViewScope::Personal => self
                 .state
@@ -971,14 +971,14 @@ impl RSpiceApp {
         };
         match result {
             Ok(_) => {
-                self.state.dialogs.engineering_table.error = None;
+                self.state.design.engineering_table.error = None;
                 self.state.record(
                     LogSeverity::Info,
                     LogSource::Studio,
                     "Imported an engineering table view.",
                 );
             }
-            Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+            Err(error) => self.state.design.engineering_table.error = Some(error),
         }
     }
 
@@ -996,7 +996,7 @@ impl RSpiceApp {
         let source = match result {
             Ok(source) => source,
             Err(error) => {
-                self.state.dialogs.engineering_table.error = Some(error);
+                self.state.design.engineering_table.error = Some(error);
                 return;
             }
         };
@@ -1010,7 +1010,7 @@ impl RSpiceApp {
             Ok(Some(path)) => path,
             Ok(None) => return,
             Err(error) => {
-                self.state.dialogs.engineering_table.error = Some(error);
+                self.state.design.engineering_table.error = Some(error);
                 return;
             }
         };
@@ -1028,7 +1028,7 @@ impl RSpiceApp {
                     ),
                 );
             }
-            Err(error) => self.state.dialogs.engineering_table.error = Some(error),
+            Err(error) => self.state.design.engineering_table.error = Some(error),
         }
     }
 }
@@ -1778,11 +1778,11 @@ mod tests {
 
         assert!(open_engineering_table_dialog(&mut state));
 
-        assert!(state.dialogs.engineering_table.open);
-        assert_eq!(state.dialogs.engineering_table.source_revision, revision);
+        assert!(state.design.engineering_table.open);
+        assert_eq!(state.design.engineering_table.source_revision, revision);
         assert_eq!(
             state
-                .dialogs
+                .design
                 .engineering_table
                 .draft
                 .as_ref()
@@ -1797,17 +1797,17 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         let dataset = active_schematic_dataset(&app.state.model.schematic);
-        app.state.dialogs.engineering_table.open(
+        app.state.design.engineering_table.open(
             EngineeringTableView::for_dataset(&dataset),
             dataset.source_revision,
         );
-        app.state.dialogs.engineering_table.save_name = "Personal review".to_owned();
-        app.state.dialogs.engineering_table.save_scope = EngineeringViewScope::Personal;
+        app.state.design.engineering_table.save_name = "Personal review".to_owned();
+        app.state.design.engineering_table.save_scope = EngineeringViewScope::Personal;
         app.save_engineering_table_view(&dataset);
         assert!(!app.state.model.workspace.content.project_metadata_dirty);
 
-        app.state.dialogs.engineering_table.save_name = "Project review".to_owned();
-        app.state.dialogs.engineering_table.save_scope = EngineeringViewScope::Project;
+        app.state.design.engineering_table.save_name = "Project review".to_owned();
+        app.state.design.engineering_table.save_scope = EngineeringViewScope::Project;
         app.save_engineering_table_view(&dataset);
         assert!(app.state.model.workspace.content.project_metadata_dirty);
     }

@@ -21,7 +21,7 @@ pub(super) fn handle_floating_paste(
     state: &mut AppState,
     viewport: &Viewport,
 ) -> bool {
-    if state.dialogs.floating_paste.is_none() {
+    if state.design.floating_paste.is_none() {
         return false;
     }
     if state.application_modal_open() {
@@ -47,7 +47,7 @@ pub(super) fn handle_floating_paste(
     let hovered = response.hover_pos().map(on_canvas);
     let keyboard = (response.has_focus() || response.contains_pointer())
         .then(|| ui.input_mut(|input| consume_keyboard(input, grid)));
-    let Some(floating) = state.dialogs.floating_paste.as_mut() else {
+    let Some(floating) = state.design.floating_paste.as_mut() else {
         return true;
     };
     if let Some(pointer) = clicked.or(hovered) {
@@ -91,7 +91,7 @@ pub(super) fn draw_floating_paste_preview(
     symbol_library: Option<&SymbolLibrary>,
 ) {
     let content_version = state.model.schematic.content_version();
-    let Some(floating) = state.dialogs.floating_paste.as_ref() else {
+    let Some(floating) = state.design.floating_paste.as_ref() else {
         return;
     };
     if floating.current_preview(content_version).is_none() {
@@ -118,11 +118,11 @@ pub(super) fn draw_floating_paste_preview(
             state.model.schematic.document(),
             candidate.document(),
         );
-        if let Some(floating) = state.dialogs.floating_paste.as_mut() {
+        if let Some(floating) = state.design.floating_paste.as_mut() {
             floating.remember_preview(content_version, diff, result);
         }
     }
-    let Some(floating) = state.dialogs.floating_paste.as_ref() else {
+    let Some(floating) = state.design.floating_paste.as_ref() else {
         return;
     };
     let Some(preview_state) = floating.current_preview(content_version) else {

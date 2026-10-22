@@ -138,14 +138,14 @@ fn require_save_confirmation_if_dirty(state: &mut AppState, action: Confirmation
         return false;
     }
 
-    state.dialogs.confirmation_dialog.show(action);
+    state.workbench.confirmation_dialog.show(action);
     true
 }
 
 fn request_exit(state: &mut AppState) {
     if state.workbench.has_unsaved_authoring_changes() {
         state
-            .dialogs
+            .workbench
             .confirmation_dialog
             .show(ConfirmationAction::Exit);
     } else if !require_save_confirmation_if_dirty(state, ConfirmationAction::Exit) {
@@ -161,7 +161,7 @@ fn require_netlist_source_save_confirmation_if_dirty(
         return false;
     }
 
-    state.dialogs.confirmation_dialog.show(action);
+    state.workbench.confirmation_dialog.show(action);
     true
 }
 
@@ -175,7 +175,7 @@ fn require_project_save_confirmation_if_dirty(
         return false;
     }
 
-    state.dialogs.confirmation_dialog.show(action);
+    state.workbench.confirmation_dialog.show(action);
     true
 }
 
@@ -192,7 +192,7 @@ mod tests {
             &mut state,
             ConfirmationAction::ImportNetlist,
         ));
-        assert!(!state.dialogs.confirmation_dialog.visible);
+        assert!(!state.workbench.confirmation_dialog.visible);
 
         state.model.workspace.content.set_netlist_source_dirty(true);
         assert!(require_netlist_source_save_confirmation_if_dirty(
@@ -200,7 +200,7 @@ mod tests {
             ConfirmationAction::ImportNetlist,
         ));
         assert_eq!(
-            state.dialogs.confirmation_dialog.pending_action,
+            state.workbench.confirmation_dialog.pending_action,
             Some(ConfirmationAction::ImportNetlist)
         );
     }
@@ -307,7 +307,7 @@ mod tests {
         assert_eq!(state.model.schematic.document().components[0].name, "V9");
         assert!(state.workbench.inline_edit.session().is_none());
         assert_eq!(
-            state.dialogs.confirmation_dialog.pending_action,
+            state.workbench.confirmation_dialog.pending_action,
             Some(ConfirmationAction::ProjectNew)
         );
     }

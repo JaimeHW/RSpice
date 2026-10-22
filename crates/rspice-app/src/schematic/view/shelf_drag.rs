@@ -197,8 +197,8 @@ fn apply_placement_transform(
 /// floating paste or duplicate, a selection Move is carrying, or the
 /// placement ghost.
 pub(super) fn something_floats(state: &AppState) -> bool {
-    state.dialogs.floating_paste.is_some()
-        || state.dialogs.move_selection.armed
+    state.design.floating_paste.is_some()
+        || state.design.move_selection.armed
         || state.model.schematic.session.editor.tool.is_place_tool()
 }
 
@@ -206,9 +206,9 @@ pub(super) fn something_floats(state: &AppState) -> bool {
 /// Rotate and Mirror on the touch strip and the canvas menu while something
 /// floats, since a tablet has no R or M key. Returns whether anything did.
 pub(super) fn turn_what_floats(state: &mut AppState, transform: PlacementTransform) -> bool {
-    if state.dialogs.floating_paste.is_some() {
+    if state.design.floating_paste.is_some() {
         crate::workbench::app::turn_floating_paste(state, selection_transform(transform))
-    } else if state.dialogs.move_selection.armed {
+    } else if state.design.move_selection.armed {
         turn_the_move(state, transform);
         true
     } else if state.model.schematic.session.editor.tool.is_place_tool() {
@@ -242,7 +242,7 @@ pub(crate) fn handle_pre_render_placement_transform(
     // A floating paste, or the selection Move carries, turns about its own
     // middle and keeps floating. A turn of what Move carries is its own undo
     // step; the floating copy is not on the sheet until it lands.
-    let carried = state.dialogs.floating_paste.is_some() || state.dialogs.move_selection.armed;
+    let carried = state.design.floating_paste.is_some() || state.design.move_selection.armed;
     if carried && (canvas_has_focus || pointer_over_canvas) {
         let Some(transform) = ctx.input_mut(consume_placement_transform) else {
             return false;
@@ -273,7 +273,7 @@ fn turn_the_move(state: &mut AppState, transform: PlacementTransform) {
     if transform_selection_on_active_sheet(state, &symbol_context, transform) {
         // The move was armed against the drawing as it stood; it now
         // carries the turned selection.
-        state.dialogs.move_selection.authority = Some(
+        state.design.move_selection.authority = Some(
             crate::workbench::app::SchematicEditAuthority::capture(state),
         );
     }

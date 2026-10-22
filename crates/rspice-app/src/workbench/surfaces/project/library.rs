@@ -1351,9 +1351,9 @@ mod tests {
                 cell: "filter".to_owned(),
             },
         );
-        assert!(app.state.dialogs.new_view_dialog);
-        assert_eq!(app.state.dialogs.new_view_library, "intent_test");
-        assert_eq!(app.state.dialogs.new_view_cell, "filter");
+        assert!(app.state.project.new_view_dialog);
+        assert_eq!(app.state.project.new_view_library, "intent_test");
+        assert_eq!(app.state.project.new_view_cell, "filter");
 
         apply_library_intent(
             &ctx,
@@ -1363,9 +1363,9 @@ mod tests {
                 cell: "filter".to_owned(),
             },
         );
-        assert!(app.state.dialogs.copy_cell_dialog);
-        assert_eq!(app.state.dialogs.copy_cell_source_library, "intent_test");
-        assert_eq!(app.state.dialogs.copy_cell_source_cell, "filter");
+        assert!(app.state.project.copy_cell_dialog);
+        assert_eq!(app.state.project.copy_cell_source_library, "intent_test");
+        assert_eq!(app.state.project.copy_cell_source_cell, "filter");
 
         apply_library_intent(
             &ctx,
@@ -1375,9 +1375,9 @@ mod tests {
                 cell: "filter".to_owned(),
             },
         );
-        assert!(app.state.dialogs.rename_cell_dialog);
-        assert_eq!(app.state.dialogs.rename_cell_library, "intent_test");
-        assert_eq!(app.state.dialogs.rename_cell_current, "filter");
+        assert!(app.state.project.rename_cell_dialog);
+        assert_eq!(app.state.project.rename_cell_library, "intent_test");
+        assert_eq!(app.state.project.rename_cell_current, "filter");
 
         apply_library_intent(
             &ctx,
@@ -1386,14 +1386,14 @@ mod tests {
         );
         assert_eq!(
             app.state
-                .dialogs
+                .project
                 .library_deletion_review
                 .target
                 .as_ref()
                 .map(|target| target.display_path()),
             Some("intent_test/filter/symbol".to_owned())
         );
-        app.state.dialogs.library_deletion_review.close();
+        app.state.project.library_deletion_review.close();
 
         apply_library_intent(
             &ctx,
@@ -1405,7 +1405,7 @@ mod tests {
         );
         assert_eq!(
             app.state
-                .dialogs
+                .project
                 .library_deletion_review
                 .target
                 .as_ref()
@@ -1418,29 +1418,29 @@ mod tests {
             &mut app,
             LibraryIntent::RenameView(CellViewRef::new("intent_test", "filter", "symbol")),
         );
-        assert!(app.state.dialogs.rename_view_dialog);
-        assert_eq!(app.state.dialogs.rename_view_library, "intent_test");
-        assert_eq!(app.state.dialogs.rename_view_cell, "filter");
-        assert_eq!(app.state.dialogs.rename_view_current, "symbol");
+        assert!(app.state.project.rename_view_dialog);
+        assert_eq!(app.state.project.rename_view_library, "intent_test");
+        assert_eq!(app.state.project.rename_view_cell, "filter");
+        assert_eq!(app.state.project.rename_view_current, "symbol");
 
         apply_library_intent(&ctx, &mut app, LibraryIntent::NewLibrary);
-        assert!(app.state.dialogs.new_library_dialog);
+        assert!(app.state.project.new_library_dialog);
 
         apply_library_intent(
             &ctx,
             &mut app,
             LibraryIntent::RenameLibrary("intent_test".to_owned()),
         );
-        assert!(app.state.dialogs.rename_library_dialog);
-        assert_eq!(app.state.dialogs.rename_library_current, "intent_test");
+        assert!(app.state.project.rename_library_dialog);
+        assert_eq!(app.state.project.rename_library_current, "intent_test");
 
         apply_library_intent(
             &ctx,
             &mut app,
             LibraryIntent::DeleteLibrary("intent_test".to_owned()),
         );
-        assert!(app.state.dialogs.delete_library_dialog);
-        assert_eq!(app.state.dialogs.delete_library_target, "intent_test");
+        assert!(app.state.project.delete_library_dialog);
+        assert_eq!(app.state.project.delete_library_target, "intent_test");
     }
 
     #[test]
@@ -1473,13 +1473,13 @@ mod tests {
             apply_library_intent(&ctx, &mut app, intent);
         }
 
-        assert!(!app.state.dialogs.new_view_dialog);
-        assert!(!app.state.dialogs.copy_cell_dialog);
-        assert!(!app.state.dialogs.rename_cell_dialog);
-        assert!(!app.state.dialogs.rename_view_dialog);
-        assert!(!app.state.dialogs.rename_library_dialog);
-        assert!(!app.state.dialogs.delete_library_dialog);
-        assert!(app.state.dialogs.library_deletion_review.target.is_none());
+        assert!(!app.state.project.new_view_dialog);
+        assert!(!app.state.project.copy_cell_dialog);
+        assert!(!app.state.project.rename_cell_dialog);
+        assert!(!app.state.project.rename_view_dialog);
+        assert!(!app.state.project.rename_library_dialog);
+        assert!(!app.state.project.delete_library_dialog);
+        assert!(app.state.project.library_deletion_review.target.is_none());
     }
 
     #[test]

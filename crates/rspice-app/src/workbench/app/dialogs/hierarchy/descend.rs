@@ -73,7 +73,7 @@ const DESCRIPTION: &str =
     "Review the operation, its inputs, impact, validation state, and available actions.";
 
 pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
-    if state.dialogs.descend_hierarchy.open {
+    if state.design.descend_hierarchy.open {
         return false;
     }
     let Some((instance_name, reference)) = state.selected_hierarchy_master() else {
@@ -87,7 +87,7 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
     } else {
         HierarchyDescendEditMode::OpenIsolated
     };
-    state.dialogs.descend_hierarchy.open(
+    state.design.descend_hierarchy.open(
         instance_name,
         reference,
         authority,
@@ -99,19 +99,19 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_descend_hierarchy_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.descend_hierarchy.open {
+        if !self.state.design.descend_hierarchy.open {
             return;
         }
 
         let target = self
             .state
-            .dialogs
+            .design
             .descend_hierarchy
             .reference
             .as_ref()
             .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view))
             .unwrap_or_else(|| "Selection no longer resolves".to_owned());
-        let instance = self.state.dialogs.descend_hierarchy.instance_name.clone();
+        let instance = self.state.design.descend_hierarchy.instance_name.clone();
         let occurrence_path = descend_target_path(&self.state.model.workspace, &instance);
         let choice = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
@@ -121,7 +121,7 @@ impl RSpiceApp {
             .show_with_initial_body_focus(ctx, |ui| {
                 Some(descend_body(
                     ui,
-                    &mut self.state.dialogs.descend_hierarchy,
+                    &mut self.state.design.descend_hierarchy,
                     &occurrence_path,
                     &target,
                 ))
@@ -130,11 +130,11 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => {
                 if let Err(error) = commit_descend_context(&mut self.state) {
-                    self.state.dialogs.descend_hierarchy.validation_error = Some(error);
+                    self.state.design.descend_hierarchy.validation_error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.descend_hierarchy.close();
+                self.state.design.descend_hierarchy.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -156,7 +156,7 @@ fn descend_target_path(workspace: &crate::state::ProjectWorkspace, instance: &st
 }
 
 fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
-    let draft = state.dialogs.descend_hierarchy.clone();
+    let draft = state.design.descend_hierarchy.clone();
     let authority = draft
         .authority
         .as_ref()
@@ -171,7 +171,7 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
                 refusal.reason()
             ));
         }
-        state.dialogs.descend_hierarchy.close();
+        state.design.descend_hierarchy.close();
         state.edit_selected_symbol_in_place();
         return Ok(());
     }
@@ -206,7 +206,7 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
         }
         HierarchyDescendEditMode::EditSymbolInPlace => {}
     }
-    state.dialogs.descend_hierarchy.close();
+    state.design.descend_hierarchy.close();
     state.prompt("Descended into the instance; the parent's unsaved changes are kept.");
     Ok(())
 }
@@ -531,14 +531,14 @@ mod tests {
     fn menu_transaction_opens_without_navigating_and_rejects_selection_drift() {
         let (mut state, parent, _) = hierarchy_state();
         assert!(open_descend_hierarchy_dialog(&mut state));
-        assert!(state.dialogs.descend_hierarchy.open);
+        assert!(state.design.descend_hierarchy.open);
         assert_eq!(state.model.workspace.content.active_view, parent);
 
         state.model.schematic.session.editor.selection.clear();
         let error = commit_descend_context(&mut state).expect_err("selection drift must block");
         assert!(error.contains("selected-object set changed"));
         assert_eq!(state.model.workspace.content.active_view, parent);
-        assert!(state.dialogs.descend_hierarchy.open);
+        assert!(state.design.descend_hierarchy.open);
     }
 
     #[test]
@@ -556,7 +556,7 @@ mod tests {
                 .unwrap(),
             "XAFE"
         );
-        assert!(!state.dialogs.descend_hierarchy.open);
+        assert!(!state.design.descend_hierarchy.open);
     }
 
     #[test]
@@ -575,7 +575,7 @@ mod tests {
             state.model.workspace.content.occurrence_labels(),
             ["afe_core"]
         );
-        assert!(!state.dialogs.descend_hierarchy.open);
+        assert!(!state.design.descend_hierarchy.open);
     }
 
     #[test]
@@ -587,11 +587,11 @@ mod tests {
             .set_toggle(TogglePreference::HierarchicalEditInPlace, false);
         assert!(open_descend_hierarchy_dialog(&mut state));
         assert_eq!(
-            state.dialogs.descend_hierarchy.edit_mode,
+            state.design.descend_hierarchy.edit_mode,
             HierarchyDescendEditMode::OpenIsolated
         );
 
-        state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditInPlace;
+        state.design.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditInPlace;
         commit_descend_context(&mut state).expect("explicit edit-in-place choice remains valid");
 
         assert_eq!(state.model.workspace.content.active_view, child);
@@ -611,7 +611,7 @@ mod tests {
     fn the_symbol_mode_edits_the_instance_symbol_on_this_sheet() {
         let (mut state, parent, _) = hierarchy_state();
         assert!(open_descend_hierarchy_dialog(&mut state));
-        state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditSymbolInPlace;
+        state.design.descend_hierarchy.edit_mode = HierarchyDescendEditMode::EditSymbolInPlace;
         let error = commit_descend_context(&mut state).expect_err("afe_core has no symbol view");
         assert!(error.contains("the cell has no symbol view"), "{error}");
         assert_eq!(state.model.workspace.content.active_view, parent);
@@ -625,7 +625,7 @@ mod tests {
             .add_view(View::new("symbol", ViewType::Symbol));
         commit_descend_context(&mut state).expect("the symbol is editable");
 
-        assert!(!state.dialogs.descend_hierarchy.open);
+        assert!(!state.design.descend_hierarchy.open);
         assert_eq!(
             state.model.workspace.content.active_view,
             CellViewRef::new("hierarchy_test", "afe_core", "symbol")
@@ -641,7 +641,7 @@ mod tests {
     fn read_only_reference_belongs_to_its_document_and_never_mutates_library_ownership() {
         let (mut state, parent, child) = hierarchy_state();
         assert!(open_descend_hierarchy_dialog(&mut state));
-        state.dialogs.descend_hierarchy.edit_mode = HierarchyDescendEditMode::ReadOnlyReference;
+        state.design.descend_hierarchy.edit_mode = HierarchyDescendEditMode::ReadOnlyReference;
         commit_descend_context(&mut state).expect("valid reference context");
 
         assert_eq!(state.model.workspace.content.active_view, child);

@@ -632,7 +632,7 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
     if !dependents.is_empty() {
         let label = analysis_display_name(app, id);
         app.state
-            .dialogs
+            .simulate
             .plan_removal_refusal
             .open(id, label, dependents);
         return;
@@ -656,7 +656,7 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
     // never reaches this review. It is still stated, because a reader deciding
     // what retained results cost needs to know that nothing else is at stake.
     let dependents = PlanRemovalConsequence::stated("Analyses bound to it", "none");
-    app.state.dialogs.plan_removal_review.open(
+    app.state.simulate.plan_removal_review.open(
         PlanRemovalTarget::Analysis(id),
         label,
         vec![retained, dependents],
@@ -670,7 +670,7 @@ pub(super) fn remove_analysis_instance(app: &mut RSpiceApp, id: AnalysisInstance
 pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
     if let Some(id) = app
         .state
-        .dialogs
+        .simulate
         .plan_removal_review
         .take_confirmed_analysis()
     {
@@ -688,7 +688,7 @@ pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
 /// is on screen and touches nothing else, and a handler holding the whole
 /// application could mutate every subsystem to do it.
 pub(super) fn apply_requested_blocker_reveal(state: &mut AppState) {
-    if let Some(blocker) = state.dialogs.plan_removal_refusal.take_reveal_target() {
+    if let Some(blocker) = state.simulate.plan_removal_refusal.take_reveal_target() {
         super::advanced_options::reveal_in_analyses(&mut state.workbench, blocker);
     }
 }

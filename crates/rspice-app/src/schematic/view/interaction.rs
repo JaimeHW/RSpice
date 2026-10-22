@@ -69,32 +69,32 @@ pub(super) fn handle_tool_interactions(
     let current_tool = state.model.schematic.session.editor.tool;
     // A floating copy owns the canvas until it lands; a tool chosen since
     // it began is the next command, and the copy is let go.
-    if state.dialogs.floating_paste.is_some() && current_tool != Tool::Select {
+    if state.design.floating_paste.is_some() && current_tool != Tool::Select {
         crate::workbench::app::cancel_floating_paste(state);
     }
     if super::floating_paste::handle_floating_paste(ui, response, state, viewport) {
         return;
     }
-    if state.dialogs.move_selection.armed && current_tool != Tool::MoveSelection {
-        state.dialogs.move_selection.close();
+    if state.design.move_selection.armed && current_tool != Tool::MoveSelection {
+        state.design.move_selection.close();
         // The pointer event that exposed an inconsistent tool/draft pair belongs
         // to neither workflow. Do not hand it to Select after cancelling the
         // transactional move or the same gesture could mutate geometry through
         // the legacy direct-drag path.
         return;
-    } else if current_tool == Tool::MoveSelection && !state.dialogs.move_selection.armed {
+    } else if current_tool == Tool::MoveSelection && !state.design.move_selection.armed {
         state.model.schematic.cancel_tool();
         return;
-    } else if state.dialogs.stretch_selection.armed && current_tool != Tool::StretchSelection {
-        state.dialogs.stretch_selection.close();
+    } else if state.design.stretch_selection.armed && current_tool != Tool::StretchSelection {
+        state.design.stretch_selection.close();
         return;
-    } else if current_tool == Tool::StretchSelection && !state.dialogs.stretch_selection.armed {
+    } else if current_tool == Tool::StretchSelection && !state.design.stretch_selection.armed {
         state.model.schematic.cancel_tool();
         return;
-    } else if state.dialogs.array_selection.armed && current_tool != Tool::ArraySelection {
-        state.dialogs.array_selection.close();
+    } else if state.design.array_selection.armed && current_tool != Tool::ArraySelection {
+        state.design.array_selection.close();
         return;
-    } else if current_tool == Tool::ArraySelection && !state.dialogs.array_selection.armed {
+    } else if current_tool == Tool::ArraySelection && !state.design.array_selection.armed {
         state.model.schematic.cancel_tool();
         return;
     }
@@ -1531,7 +1531,7 @@ fn retain_probe_flag(
             .editor
             .selection
             .select_only_probe(id);
-        state.dialogs.interaction.schematic_keyboard_focus = Some(
+        state.workbench.interaction.schematic_keyboard_focus = Some(
             crate::workbench::app_state::SchematicKeyboardFocus::Probe(id),
         );
         return Ok(id);
@@ -1541,7 +1541,7 @@ fn retain_probe_flag(
             .model
             .schematic
             .place_schematic_probe(position, label, source_expression, binding)?;
-    state.dialogs.interaction.schematic_keyboard_focus = Some(
+    state.workbench.interaction.schematic_keyboard_focus = Some(
         crate::workbench::app_state::SchematicKeyboardFocus::Probe(probe_id),
     );
     state.sync_active_schematic_to_workspace();

@@ -1109,7 +1109,7 @@ fn render_the_veriloga_import_and_netlist_dependency_for_review() {
     // A prompt outside this family, for the header inset it shares.
     let mut app = open_project_app();
     app.state
-        .dialogs
+        .workbench
         .confirmation_dialog
         .show(super::ConfirmationAction::CloseProject);
     let canvas = crate::ui::raster::render(DESKTOP, |ui, _| {

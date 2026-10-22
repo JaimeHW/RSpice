@@ -18,13 +18,13 @@ use crate::workbench::app::dialogs::review_primitives::{configure_field_validati
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_create_model_bound_symbol_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.create_model_bound_symbol.open {
+        if !self.state.design.create_model_bound_symbol.open {
             return;
         }
 
         let validation = validate_create_symbol_draft(&self.state);
-        let discard_confirm = self.state.dialogs.create_model_bound_symbol.discard_confirm;
-        let pin_count = self.state.dialogs.create_model_bound_symbol.pins.len();
+        let discard_confirm = self.state.design.create_model_bound_symbol.discard_confirm;
+        let pin_count = self.state.design.create_model_bound_symbol.pins.len();
         let footer_hint = format!(
             "{} pin{} \u{00b7} atomic library revision",
             pin_count,
@@ -60,22 +60,19 @@ impl RSpiceApp {
         let mut response = dialog.show_transaction(ctx, |ui| {
             Some(create_symbol_body(
                 ui,
-                &mut self.state.dialogs.create_model_bound_symbol,
+                &mut self.state.design.create_model_bound_symbol,
             ))
         });
         match response.choice {
             DialogChoice::Primary => {
                 if let Err(error) = commit_create_model_bound_symbol(&mut self.state) {
                     // The dialog stays open and states the refusal in place.
-                    self.state
-                        .dialogs
-                        .create_model_bound_symbol
-                        .validation_error = Some(error);
+                    self.state.design.create_model_bound_symbol.validation_error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.create_model_bound_symbol.attempt_close();
-                if self.state.dialogs.create_model_bound_symbol.open {
+                self.state.design.create_model_bound_symbol.attempt_close();
+                if self.state.design.create_model_bound_symbol.open {
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 }
             }

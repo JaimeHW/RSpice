@@ -85,10 +85,10 @@ pub(crate) struct DocumentMatches {
 }
 
 pub(crate) fn open_find_replace(state: &mut AppState) {
-    if state.dialogs.application_modal_open() {
+    if state.dialog_modal_open() {
         return;
     }
-    state.dialogs.find_replace.open = true;
+    state.design.find_replace.open = true;
     // The matches are listed in the Navigator, so it comes forward.
     state.workbench.navigator_visible = true;
     state.workbench.design_panel = crate::workbench::state::DesignPanel::Navigator;
@@ -97,7 +97,7 @@ pub(crate) fn open_find_replace(state: &mut AppState) {
 /// Every text the form's query changes, cell view by cell view, the active
 /// one first; or why the query cannot run.
 pub(crate) fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatches>, String> {
-    let form = &state.dialogs.find_replace;
+    let form = &state.design.find_replace;
     let query = FindQuery::new(&form.find, &form.replace, form.options, form.targets)?;
     let active = state.model.workspace.content.active_schematic_reference();
     let scope = form.scope();
@@ -239,7 +239,7 @@ pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_find_replace_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.find_replace.open {
+        if !self.state.design.find_replace.open {
             return;
         }
         let found = find_replace_matches(&self.state);
@@ -251,7 +251,7 @@ impl RSpiceApp {
                 1 => format!("{count} {}", plural(count, "match", "matches")),
                 documents => format!("{count} matches in {documents} cell views"),
             })),
-            Ok(_) if self.state.dialogs.find_replace.find.is_empty() => Ok(None),
+            Ok(_) if self.state.design.find_replace.find.is_empty() => Ok(None),
             Ok(_) => Ok(Some("No matches".to_owned())),
             Err(reason) => Err(reason.clone()),
         };
@@ -267,7 +267,7 @@ impl RSpiceApp {
             .content
             .active_view
             .display_path();
-        let form = &mut self.state.dialogs.find_replace;
+        let form = &mut self.state.design.find_replace;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .context(Some(view_path.as_str()))
             .describe(DESCRIPTION)
@@ -300,7 +300,7 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match replace_all(&mut self.state) {
                 Ok((texts, documents)) => {
-                    self.state.dialogs.find_replace.open = false;
+                    self.state.design.find_replace.open = false;
                     self.state.prompt(match documents {
                         1 => format!("Replaced {texts} {}.", plural(texts, "match", "matches")),
                         _ => format!("Replaced {texts} matches in {documents} cell views."),
@@ -309,7 +309,7 @@ impl RSpiceApp {
                 Err(reason) => self.state.prompt(reason),
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.find_replace.open = false;
+                self.state.design.find_replace.open = false;
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -359,7 +359,7 @@ mod tests {
                     let document = app.state.model.schematic.document_mut_for_test();
                     document.components = vec![part(1, "R1", "10k"), part(2, "R2", "10k")];
                     open_find_replace(&mut app.state);
-                    app.state.dialogs.find_replace.options.regex = regex;
+                    app.state.design.find_replace.options.regex = regex;
                     ask(&mut app.state, find, "22k", FindScope::CellView);
                     let canvas = super::super::render_settled_form(mode, size, |ctx| {
                         app.render_find_replace_dialog(ctx);
@@ -374,7 +374,7 @@ mod tests {
     }
 
     fn ask(state: &mut AppState, find: &str, replace: &str, scope: FindScope) {
-        let form = &mut state.dialogs.find_replace;
+        let form = &mut state.design.find_replace;
         form.find = find.to_owned();
         form.replace = replace.to_owned();
         form.scope = match scope {
@@ -549,7 +549,7 @@ mod tests {
         let document = state.model.schematic.document_mut_for_test();
         document.components = vec![part(1, "R1", "1k"), part(2, "R2", "1k")];
         state.model.schematic.init_undo_history();
-        let options = &mut state.dialogs.find_replace.options;
+        let options = &mut state.design.find_replace.options;
         options.regex = true;
         ask(&mut state, r"R\d", "RA", FindScope::CellView);
         assert_eq!(

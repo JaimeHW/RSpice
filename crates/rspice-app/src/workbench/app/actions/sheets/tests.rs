@@ -291,7 +291,7 @@ fn a_moving_delete_policy_relocates_the_objects_and_undo_restores_them() {
         "nothing moved before the confirmation"
     );
     let pending = state
-        .dialogs
+        .sheets
         .delete_sheet
         .clone()
         .expect("the confirmation names the outcome");
@@ -323,7 +323,7 @@ fn a_confirmed_delete_whose_outcome_changed_deletes_nothing() {
         SheetDeleteBehavior::MoveReferencesToReviewedReplacement,
     );
     delete_sheet(&mut state, second).expect("the delete waits for confirmation");
-    let mut pending = state.dialogs.delete_sheet.clone().expect("pending");
+    let mut pending = state.sheets.delete_sheet.clone().expect("pending");
     pending.objects += 1;
 
     crate::workbench::app::dialogs::delete_sheet::confirm_sheet_delete(&mut state, &pending);

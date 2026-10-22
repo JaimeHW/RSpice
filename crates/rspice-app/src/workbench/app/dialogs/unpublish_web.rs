@@ -32,7 +32,7 @@ impl RSpiceApp {
         url_path: String,
         version_count: usize,
     ) {
-        self.state.dialogs.unpublish_web = UnpublishWebDialogState {
+        self.state.cloud.unpublish_web = UnpublishWebDialogState {
             open: true,
             acknowledged: false,
             circuit_id,
@@ -43,14 +43,14 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn render_unpublish_web_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.unpublish_web.open {
+        if !self.state.cloud.unpublish_web.open {
             return;
         }
-        let title = format!("Unpublish {}", self.state.dialogs.unpublish_web.url_path);
-        let acknowledged = self.state.dialogs.unpublish_web.acknowledged;
-        let version_count = self.state.dialogs.unpublish_web.version_count;
+        let title = format!("Unpublish {}", self.state.cloud.unpublish_web.url_path);
+        let acknowledged = self.state.cloud.unpublish_web.acknowledged;
+        let version_count = self.state.cloud.unpublish_web.version_count;
 
-        let dialog_state = &mut self.state.dialogs.unpublish_web;
+        let dialog_state = &mut self.state.cloud.unpublish_web;
         let choice = Dialog::new(&title, "Unpublish")
             .description(
                 "Take the published page down for everyone and keep its history privately on \
@@ -100,10 +100,10 @@ impl RSpiceApp {
         match choice {
             DialogChoice::None => {}
             DialogChoice::Cancelled | DialogChoice::Ghost | DialogChoice::Secondary => {
-                self.state.dialogs.unpublish_web.open = false;
+                self.state.cloud.unpublish_web.open = false;
             }
             DialogChoice::Primary => {
-                let dialog = &self.state.dialogs.unpublish_web;
+                let dialog = &self.state.cloud.unpublish_web;
                 if dialog.acknowledged {
                     let circuit_id = dialog.circuit_id.clone();
                     let publication_id = dialog.publication_id.clone();
@@ -111,7 +111,7 @@ impl RSpiceApp {
                     self.cloud_account.unpublish(circuit_id, publication_id);
                     self.state
                         .prompt(format!("Unpublish requested for {url_path}."));
-                    self.state.dialogs.unpublish_web.open = false;
+                    self.state.cloud.unpublish_web.open = false;
                 }
             }
         }

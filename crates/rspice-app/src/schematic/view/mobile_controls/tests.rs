@@ -369,7 +369,7 @@ fn touch_requests_recheck_document_route_and_modal_state() {
         match change {
             "document" => app.state.bump_active_schematic_epoch(),
             "route" => app.state.workbench.activate(Workspace::Results),
-            "modal" => app.state.dialogs.preferences_open = true,
+            "modal" => app.state.settings.preferences_open = true,
             "read-only" => app.state.model.schematic.session.read_only = true,
             "none" => {}
             _ => unreachable!(),
@@ -585,7 +585,7 @@ fn the_strip_turns_a_floating_duplicate() {
     finger.wake();
     finger.press("Rotate clockwise");
     assert!(
-        finger.app.state.dialogs.floating_paste.is_some(),
+        finger.app.state.design.floating_paste.is_some(),
         "the copy still floats"
     );
     assert!(finger.app.state.place_floating_paste());

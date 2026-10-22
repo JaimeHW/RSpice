@@ -31,7 +31,7 @@ pub(super) fn transform_preview_style<'a>(
         symbol_library,
         symbol_context,
         parameter_labels: state.ui.schematic_visibility.parameter_labels,
-        hover_wire_vertex: state.dialogs.interaction.hover_wire_vertex,
+        hover_wire_vertex: state.workbench.interaction.hover_wire_vertex,
     }
 }
 
@@ -133,24 +133,24 @@ fn draw_move_selection_preview(
 ) {
     if state.schematic_edit_read_only()
         || state.model.schematic.session.editor.tool != Tool::MoveSelection
-        || !state.dialogs.move_selection.armed
+        || !state.design.move_selection.armed
     {
         return;
     }
-    let delta = state.dialogs.move_selection.canvas.preview_delta;
+    let delta = state.design.move_selection.canvas.preview_delta;
     if delta == Point::origin() {
         return;
     }
-    let mode = state.dialogs.move_selection.mode;
+    let mode = state.design.move_selection.mode;
     let outcome = move_preview_diff(state, symbol_context, delta, mode);
     let valid = match &outcome {
         Ok(Some(_)) => {
-            state.dialogs.move_selection.canvas.preview_error = None;
+            state.design.move_selection.canvas.preview_error = None;
             true
         }
         Ok(None) => return,
         Err(error) => {
-            state.dialogs.move_selection.canvas.preview_error = Some(error.clone());
+            state.design.move_selection.canvas.preview_error = Some(error.clone());
             false
         }
     };
@@ -167,7 +167,7 @@ fn draw_move_selection_preview(
     }
 
     let detail = state
-        .dialogs
+        .design
         .move_selection
         .canvas
         .preview_error
@@ -186,17 +186,17 @@ fn draw_stretch_selection_preview(
 ) {
     if state.schematic_edit_read_only()
         || state.model.schematic.session.editor.tool != Tool::StretchSelection
-        || !state.dialogs.stretch_selection.armed
+        || !state.design.stretch_selection.armed
     {
         return;
     }
-    let delta = state.dialogs.stretch_selection.canvas.gesture.preview_delta;
-    let Some(target) = state.dialogs.stretch_selection.canvas.target else {
+    let delta = state.design.stretch_selection.canvas.gesture.preview_delta;
+    let Some(target) = state.design.stretch_selection.canvas.target else {
         return;
     };
     if delta == Point::origin() {
         if let Some(detail) = state
-            .dialogs
+            .design
             .stretch_selection
             .canvas
             .gesture
@@ -207,15 +207,15 @@ fn draw_stretch_selection_preview(
         }
         return;
     }
-    let policy = state.dialogs.stretch_selection.policy;
+    let policy = state.design.stretch_selection.policy;
     let diff = match stretch_preview_diff(state, symbol_context, delta, target, policy) {
         Ok(Some(diff)) => {
-            state.dialogs.stretch_selection.canvas.gesture.preview_error = None;
+            state.design.stretch_selection.canvas.gesture.preview_error = None;
             diff
         }
         Ok(None) => return,
         Err(error) => {
-            state.dialogs.stretch_selection.canvas.gesture.preview_error = Some(error.clone());
+            state.design.stretch_selection.canvas.gesture.preview_error = Some(error.clone());
             preview::draw_transform_feedback(painter, response, false, error);
             return;
         }
@@ -224,7 +224,7 @@ fn draw_stretch_selection_preview(
     preview::draw_stretch_diff(painter, viewport, &diff);
 
     let detail = state
-        .dialogs
+        .design
         .stretch_selection
         .canvas
         .gesture
@@ -394,11 +394,11 @@ fn draw_array_selection_preview(
 ) {
     if state.schematic_edit_read_only()
         || state.model.schematic.session.editor.tool != Tool::ArraySelection
-        || !state.dialogs.array_selection.armed
+        || !state.design.array_selection.armed
     {
         return;
     }
-    let draft = &state.dialogs.array_selection;
+    let draft = &state.design.array_selection;
     if draft.kind != SchematicArrayKind::RadialDocumentation
         && draft.canvas.preview_delta == Point::origin()
     {
@@ -410,7 +410,7 @@ fn draw_array_selection_preview(
     let placement = match array_placement(state) {
         Ok(placement) => placement,
         Err(message) => {
-            state.dialogs.array_selection.canvas.preview_error = Some(message.to_owned());
+            state.design.array_selection.canvas.preview_error = Some(message.to_owned());
             preview::draw_transform_feedback(painter, response, false, message.to_owned());
             return;
         }
@@ -418,7 +418,7 @@ fn draw_array_selection_preview(
     let plan = match crate::workbench::app::armed_array_selection_plan(state, placement) {
         Ok(plan) => plan,
         Err(message) => {
-            state.dialogs.array_selection.canvas.preview_error = Some(message.clone());
+            state.design.array_selection.canvas.preview_error = Some(message.clone());
             preview::draw_transform_feedback(painter, response, false, message);
             return;
         }
@@ -426,7 +426,7 @@ fn draw_array_selection_preview(
     let library_revision = state.model.library_manager.revision();
     let symbol_revision = symbol_context.revision();
     let identity_cursor = state.model.schematic.identity_cursor();
-    let mut cache = state.dialogs.array_selection.preview_cache.take();
+    let mut cache = state.design.array_selection.preview_cache.take();
     let cache_matches = cache.as_ref().is_some_and(|cached| {
         cached.plan == plan
             && cached.library_revision == library_revision
@@ -455,13 +455,13 @@ fn draw_array_selection_preview(
     let cache = cache.expect("array preview cache was populated");
     let preview = match &cache.preview {
         Ok(preview) => {
-            state.dialogs.array_selection.canvas.preview_error = None;
+            state.design.array_selection.canvas.preview_error = None;
             preview
         }
         Err(detail) => {
             let detail = detail.clone();
-            state.dialogs.array_selection.canvas.preview_error = Some(detail.clone());
-            state.dialogs.array_selection.preview_cache = Some(cache);
+            state.design.array_selection.canvas.preview_error = Some(detail.clone());
+            state.design.array_selection.preview_cache = Some(cache);
             preview::draw_transform_feedback(painter, response, false, detail);
             return;
         }
@@ -487,7 +487,7 @@ fn draw_array_selection_preview(
             impact.replicas, center.x, center.y
         ),
     };
-    state.dialogs.array_selection.preview_cache = Some(cache);
+    state.design.array_selection.preview_cache = Some(cache);
     preview::draw_transform_feedback(painter, response, true, detail);
 }
 
@@ -650,7 +650,7 @@ mod tests {
     fn the_move_preview_is_held_until_an_input_changes() {
         let mut state = movable_state();
         let symbols = schematic_symbol_context(&state);
-        let mode = state.dialogs.move_selection.mode;
+        let mode = state.design.move_selection.mode;
         let delta = Point::new(40, 0);
         let first = held_diff(move_preview_diff(&mut state, &symbols, delta, mode));
         assert!(Arc::ptr_eq(

@@ -1158,6 +1158,24 @@ pub struct WorkbenchState {
     /// Hide what has been read. A second axis rather than a fourth filter,
     /// because "unread" crosses the Jobs/System split instead of joining it.
     pub notification_unread_only: bool,
+
+    /// Device-local window, document, and session presentation manager.
+    pub(crate) window_session_dialog:
+        crate::workbench::app::dialogs::window_session::WindowSessionDialogState,
+
+    /// Command palette state
+    pub command_palette: crate::workbench::app::command_palette::CommandPaletteState,
+
+    /// Runtime interaction state for drag, hover, etc.
+    pub interaction: crate::workbench::app_state::InteractionState,
+
+    /// State for save confirmation modal (unsaved changes warning)
+    pub confirmation_dialog: crate::workbench::app::ConfirmationDialogState,
+
+    /// Dedicated engineering review for Revert and Close Project. These
+    /// destructive ellipsis actions intentionally do not use the generic
+    /// Save/Don't save confirmation grammar.
+    pub(crate) project_review_dialog: crate::workbench::app::ProjectReviewDialogState,
 }
 
 pub(in crate::workbench) const fn default_navigator_width() -> f32 {
@@ -1284,6 +1302,11 @@ impl Default for WorkbenchState {
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             notification_unread_only: false,
+            window_session_dialog: Default::default(),
+            command_palette: Default::default(),
+            interaction: Default::default(),
+            confirmation_dialog: Default::default(),
+            project_review_dialog: Default::default(),
         }
     }
 }

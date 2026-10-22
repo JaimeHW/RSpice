@@ -58,7 +58,7 @@ struct RecoverySnapshot {
 
 impl RecoverySnapshot {
     fn capture(state: &AppState) -> Self {
-        let recovery = &state.dialogs.project_checkpoint_recovery;
+        let recovery = &state.project.project_checkpoint_recovery;
         #[cfg(target_arch = "wasm32")]
         let loading = recovery.loading && !recovery.initialized;
         #[cfg(not(target_arch = "wasm32"))]
@@ -131,7 +131,7 @@ impl RecoveryIntent {
         match self {
             Self::Create => create_manual_checkpoint(ctx, &mut app.state),
             Self::RevisionHistory => Command::RevisionHistory.execute(app),
-            Self::Reload => app.state.dialogs.project_checkpoint_recovery.invalidate(),
+            Self::Reload => app.state.project.project_checkpoint_recovery.invalidate(),
             Self::Select(id) => app.state.workbench.project_checkpoint_selection = Some(id),
             Self::Compare(checkpoint) => {
                 app.state.workbench.project_checkpoint_selection =
@@ -662,23 +662,23 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
     let _ = ctx;
     let project_id = state.model.workspace.content.project.id().to_string();
     if state
-        .dialogs
+        .project
         .project_checkpoint_recovery
         .project_id
         .as_deref()
         != Some(project_id.as_str())
     {
-        state.dialogs.project_checkpoint_recovery = Default::default();
-        state.dialogs.project_checkpoint_recovery.project_id = Some(project_id.clone());
+        state.project.project_checkpoint_recovery = Default::default();
+        state.project.project_checkpoint_recovery.project_id = Some(project_id.clone());
     }
-    if state.dialogs.project_checkpoint_recovery.initialized {
+    if state.project.project_checkpoint_recovery.initialized {
         return;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         let result = crate::workbench::lifecycle::project_checkpoint::list(state);
-        let recovery = &mut state.dialogs.project_checkpoint_recovery;
+        let recovery = &mut state.project.project_checkpoint_recovery;
         recovery.initialized = true;
         match result {
             Ok(catalog) => {
@@ -692,10 +692,10 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
 
     #[cfg(target_arch = "wasm32")]
     {
-        if state.dialogs.project_checkpoint_recovery.loading {
+        if state.project.project_checkpoint_recovery.loading {
             return;
         }
-        state.dialogs.project_checkpoint_recovery.loading = true;
+        state.project.project_checkpoint_recovery.loading = true;
         let queued_project_id = project_id;
         let repaint = ctx.clone();
         crate::workbench::lifecycle::project_checkpoint::start_list(state, move |result| {
@@ -761,7 +761,7 @@ fn create_manual_checkpoint(_: &Context, state: &mut AppState) {
         crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
     ) {
         Ok(checkpoint) => {
-            state.dialogs.project_checkpoint_recovery.initialized = false;
+            state.project.project_checkpoint_recovery.initialized = false;
             record_manual_checkpoint(state, &checkpoint);
         }
         Err(error) => {
@@ -822,7 +822,7 @@ fn poll_browser_manual_checkpoint(state: &mut AppState) {
         }
         match completion.result {
             Ok(checkpoint) => {
-                state.dialogs.project_checkpoint_recovery.initialized = false;
+                state.project.project_checkpoint_recovery.initialized = false;
                 record_manual_checkpoint(state, &checkpoint);
             }
             Err(error) => {

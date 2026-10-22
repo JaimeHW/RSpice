@@ -183,8 +183,8 @@ fn command_palette_and_help_commands_own_canonical_routes() {
         palette.state.workbench.current_route(),
         crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::CommandPalette)
     );
-    assert!(palette.state.dialogs.command_palette.open);
-    assert!(palette.state.dialogs.command_palette.route_owned);
+    assert!(palette.state.workbench.command_palette.open);
+    assert!(palette.state.workbench.command_palette.route_owned);
     assert_eq!(
         palette.state.workbench.previous_route(),
         Some(palette_source)
@@ -197,10 +197,10 @@ fn command_palette_and_help_commands_own_canonical_routes() {
         help.state.workbench.current_route(),
         crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::HelpCenter)
     );
-    assert!(help.state.dialogs.help_center.open);
-    assert!(help.state.dialogs.help_center.route_owned);
+    assert!(help.state.shell.help_center.open);
+    assert!(help.state.shell.help_center.route_owned);
     assert_eq!(
-        help.state.dialogs.help_center.page,
+        help.state.shell.help_center.page,
         crate::workbench::app::HelpCenterPage::ReleaseNotes
     );
     assert_eq!(help.state.workbench.previous_route(), Some(help_source));

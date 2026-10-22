@@ -417,7 +417,7 @@ impl LiveSessionEngine {
                 .workbench
                 .begin_project_close(crate::workbench::state::ProjectCloseDestination::LiveMirror);
             if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
-                state.dialogs.project_review_dialog.show_close_project();
+                state.workbench.project_review_dialog.show_close_project();
             } else if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
                 state.workbench.cancel_project_close();
             }

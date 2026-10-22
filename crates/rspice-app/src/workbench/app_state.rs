@@ -39,7 +39,10 @@ pub(in crate::workbench) mod waivers;
 
 use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::{Notice, NoticeKind};
-use crate::workbench::app::DialogState;
+use crate::workbench::slots::{
+    CloudState, CodeState, DesignState, HardcopyState, PlatformState, ProjectState, ResultsState,
+    SettingsState, SheetsState, ShellState, SimulateState,
+};
 
 pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
 pub(crate) use design_history::{
@@ -76,9 +79,22 @@ pub struct AppState {
     /// grid's order, filters and groups. A reading position over the evidence, never
     /// evidence itself, and never persisted.
     pub(crate) problems_view: problems_view::ProblemsView,
-    /// Dialog visibility. Boxed: this is the largest sub-state, and an inline
-    /// copy would ride along in every stack frame that moves an [`AppState`].
-    pub(crate) dialogs: Box<DialogState>,
+    /// The shell's own dialogs. Inline: a few flags and a filter.
+    pub(crate) shell: ShellState,
+    /// The platform services' runtime state.
+    pub(crate) platform: Box<PlatformState>,
+    /// What each feature keeps open between frames: its dialogs and the
+    /// drafts they edit. Boxed, so a moved state carries a pointer per
+    /// feature rather than every feature's dialogs.
+    pub(crate) design: Box<DesignState>,
+    pub(crate) code: Box<CodeState>,
+    pub(crate) simulate: Box<SimulateState>,
+    pub(crate) project: Box<ProjectState>,
+    pub(crate) results: Box<ResultsState>,
+    pub(crate) hardcopy: Box<HardcopyState>,
+    pub(crate) settings: Box<SettingsState>,
+    pub(crate) cloud: Box<CloudState>,
+    pub(crate) sheets: Box<SheetsState>,
     /// The deck a manual-deck run started from and the baseline the last one
     /// left. Runtime only, and boxed so a moved state stays the same size.
     pub(crate) manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
@@ -88,10 +104,6 @@ pub struct AppState {
     /// reconstructs this boundary at startup.
     pub(crate) project_lifecycle:
         Box<crate::workbench::lifecycle::project_lifecycle::ProjectLifecycleState>,
-    /// Pending cell deletion (library, cell_name)
-    pub(crate) pending_delete_cell: Option<(String, String)>,
-    /// Pending view deletion (library, cell, view_name)
-    pub(crate) pending_delete_view: Option<(String, String, String)>,
     /// Tabbed property dialog state (commercial-grade property editing)
     pub(crate) tabbed_property_dialog: crate::properties::TabbedPropertyDialogState,
     /// Property registry (component property schemas)
@@ -803,7 +815,7 @@ impl AppState {
         let browser_file_operation_open = false;
 
         self.workbench.application_modal_open()
-            || self.dialogs.application_modal_open()
+            || self.dialog_modal_open()
             || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
                 && self.ui.netlist.application_modal_open())
             || self.model.sim_setup.session.palette_open
@@ -1250,7 +1262,7 @@ impl AppState {
     /// while a drag is held, or a copy floating under the pointer. History
     /// waits for either to land or be cancelled.
     pub(crate) fn schematic_edit_in_progress(&self) -> bool {
-        self.model.schematic.has_pending_operation() || self.dialogs.floating_paste.is_some()
+        self.model.schematic.has_pending_operation() || self.design.floating_paste.is_some()
     }
 }
 

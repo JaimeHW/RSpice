@@ -228,7 +228,7 @@ pub(in crate::workbench) fn delete_sheet(
     {
         let name = state_sheet_name(state, id);
         let message = format!("Deleting sheet `{name}` waits for confirmation.");
-        state.dialogs.delete_sheet = Some(
+        state.sheets.delete_sheet = Some(
             crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
                 sheet: id,
                 name,

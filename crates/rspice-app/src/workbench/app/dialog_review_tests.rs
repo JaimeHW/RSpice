@@ -712,7 +712,7 @@ fn render_the_help_dialogs_for_review() {
                     Opens::VerifiedKey => {
                         use crate::services::license;
                         Command::License.execute(&mut reader.app);
-                        let dialog = &mut reader.app.state.dialogs.license_dialog;
+                        let dialog = &mut reader.app.state.cloud.license_dialog;
                         dialog.text = license::SAMPLE_KEY.to_owned();
                         dialog.phase =
                             crate::workbench::app::dialogs::license::LicensePhase::Verified(

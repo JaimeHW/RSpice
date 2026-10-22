@@ -188,13 +188,13 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
         })
         .or_else(|| packages.first().map(signed_package_key));
     app.state
-        .dialogs
+        .project
         .technology_attachment
         .open(selected_library, selected_signed_package);
 }
 
 pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceApp) {
-    if !app.state.dialogs.technology_attachment.open {
+    if !app.state.project.technology_attachment.open {
         return;
     }
 
@@ -209,7 +209,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         .to_vec();
     let selected_is_current = app
         .state
-        .dialogs
+        .project
         .technology_attachment
         .selected_library
         .as_deref()
@@ -219,13 +219,13 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 .any(|candidate| candidate.binding.model_library() == selected)
         });
     if !selected_is_current {
-        app.state.dialogs.technology_attachment.selected_library = candidates
+        app.state.project.technology_attachment.selected_library = candidates
             .first()
             .map(|candidate| candidate.binding.model_library().to_owned());
     }
     let selected_package_is_current = app
         .state
-        .dialogs
+        .project
         .technology_attachment
         .selected_signed_package
         .as_deref()
@@ -236,7 +236,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         });
     if !selected_package_is_current {
         app.state
-            .dialogs
+            .project
             .technology_attachment
             .selected_signed_package = app
             .state
@@ -255,7 +255,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
 
     let selected_name = app
         .state
-        .dialogs
+        .project
         .technology_attachment
         .selected_library
         .clone();
@@ -274,7 +274,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         .unwrap_or("No model library can be attached");
     let selected_package_key = app
         .state
-        .dialogs
+        .project
         .technology_attachment
         .selected_signed_package
         .clone();
@@ -381,16 +381,16 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         .is_some();
     let migration_ready = migration_gate_error.is_none()
         && (!migration_requires_review
-            || app.state.dialogs.technology_attachment.migration_reviewed);
+            || app.state.project.technology_attachment.migration_reviewed);
     let validation_error = app
         .state
-        .dialogs
+        .project
         .technology_attachment
         .validation_error
         .clone();
-    let checkpoint_pending = technology_checkpoint_pending(&app.state.dialogs);
+    let checkpoint_pending = technology_checkpoint_pending(&app.state.project);
     let authority_ready =
-        technology_authority_fields_ready(&app.state.dialogs.technology_attachment);
+        technology_authority_fields_ready(&app.state.project.technology_attachment);
     let selected_is_attached = selected_binding.as_ref().is_some_and(|binding| {
         let label = binding.display_label();
         app.state
@@ -435,9 +435,9 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             &options,
             ui.available_width(),
         ) {
-            app.state.dialogs.technology_attachment.selected_library =
+            app.state.project.technology_attachment.selected_library =
                 Some(candidates[index].binding.model_library().to_owned());
-            app.state.dialogs.technology_attachment.validation_error = None;
+            app.state.project.technology_attachment.validation_error = None;
         }
 
         ui.add_space(10.0);
@@ -451,11 +451,11 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
             ui.available_width(),
         ) {
             app.state
-                .dialogs
+                .project
                 .technology_attachment
                 .selected_signed_package = Some(signed_package_key(&packages[index]));
-            app.state.dialogs.technology_attachment.migration_reviewed = false;
-            app.state.dialogs.technology_attachment.validation_error = None;
+            app.state.project.technology_attachment.migration_reviewed = false;
+            app.state.project.technology_attachment.validation_error = None;
         }
 
         ui.add_space(10.0);
@@ -463,7 +463,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         ui.add_enabled(
             !checkpoint_pending,
             egui::TextEdit::singleline(
-                &mut app.state.dialogs.technology_attachment.actor_id,
+                &mut app.state.project.technology_attachment.actor_id,
             )
             .hint_text("Actor ID")
             .char_limit(240)
@@ -472,7 +472,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         ui.add_enabled(
             !checkpoint_pending,
             egui::TextEdit::singleline(
-                &mut app.state.dialogs.technology_attachment.authority_id,
+                &mut app.state.project.technology_attachment.authority_id,
             )
             .hint_text("Authority ID")
             .char_limit(240)
@@ -480,7 +480,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
         );
         ui.add_enabled(
             !checkpoint_pending,
-            egui::TextEdit::multiline(&mut app.state.dialogs.technology_attachment.reason)
+            egui::TextEdit::multiline(&mut app.state.project.technology_attachment.reason)
                 .hint_text("Change reason")
                 .char_limit(1_024)
                 .desired_rows(2)
@@ -621,7 +621,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                     ui.add_enabled(
                         !checkpoint_pending,
                         egui::Checkbox::new(
-                            &mut app.state.dialogs.technology_attachment.migration_reviewed,
+                            &mut app.state.project.technology_attachment.migration_reviewed,
                             "I reviewed the signed revision diff and approve this non-breaking replacement",
                         ),
                     );
@@ -686,7 +686,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
     });
 
     if create_migration_copy {
-        app.state.dialogs.technology_attachment.close();
+        app.state.project.technology_attachment.close();
         let saved = crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);
         if saved {
             app.state.record(
@@ -707,7 +707,7 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                         .to_owned()
                 })
                 .and_then(|binding| {
-                    technology_change_authority(&app.state.dialogs.technology_attachment).and_then(
+                    technology_change_authority(&app.state.project.technology_attachment).and_then(
                         |authority| {
                             attach_technology_binding(
                                 ctx,
@@ -721,22 +721,22 @@ pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceA
                 });
             match result {
                 Ok(receipt) => {
-                    if technology_checkpoint_pending(&app.state.dialogs) {
+                    if technology_checkpoint_pending(&app.state.project) {
                         app.state.prompt(receipt);
                         return;
                     }
-                    app.state.dialogs.technology_attachment.close();
+                    app.state.project.technology_attachment.close();
                     app.state
                         .record(LogSeverity::Info, LogSource::Studio, receipt);
                 }
                 Err(error) => {
-                    app.state.dialogs.technology_attachment.validation_error = Some(error);
+                    app.state.project.technology_attachment.validation_error = Some(error);
                 }
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            if !technology_checkpoint_pending(&app.state.dialogs) {
-                app.state.dialogs.technology_attachment.close();
+            if !technology_checkpoint_pending(&app.state.project) {
+                app.state.project.technology_attachment.close();
             }
         }
         DialogChoice::Secondary | DialogChoice::None => {}
@@ -843,7 +843,7 @@ pub(super) fn commit_technology_after_checkpoint(
     if revision == previous_revision {
         return Err("Technology attachment unexpectedly produced no project revision".to_owned());
     }
-    app.state.dialogs.project_checkpoint_recovery.invalidate();
+    app.state.project.project_checkpoint_recovery.invalidate();
     Ok(format!(
         "Attached {} at project revision {} (technology receipt #{}, {} source file{}); checkpoint {} keeps revision {}.",
         binding.display_label(),
@@ -856,7 +856,9 @@ pub(super) fn commit_technology_after_checkpoint(
     ))
 }
 
-pub(super) fn technology_checkpoint_pending(dialogs: &crate::workbench::app::DialogState) -> bool {
+pub(super) fn technology_checkpoint_pending(
+    dialogs: &crate::workbench::slots::ProjectState,
+) -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         dialogs.technology_attachment.checkpoint_pending
@@ -876,7 +878,7 @@ pub(super) fn start_browser_technology_checkpoint(
     authority: crate::state::ProjectTechnologyChangeAuthority,
     migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<(), String> {
-    if app.state.dialogs.technology_attachment.checkpoint_pending {
+    if app.state.project.technology_attachment.checkpoint_pending {
         return Err("A project recovery checkpoint is already being written".to_owned());
     }
     let project_id = app.state.model.workspace.content.project.id().to_string();
@@ -903,8 +905,8 @@ pub(super) fn start_browser_technology_checkpoint(
             repaint.request_repaint();
         },
     )?;
-    app.state.dialogs.technology_attachment.checkpoint_pending = true;
-    app.state.dialogs.technology_attachment.validation_error = None;
+    app.state.project.technology_attachment.checkpoint_pending = true;
+    app.state.project.technology_attachment.validation_error = None;
     Ok(())
 }
 
@@ -917,8 +919,8 @@ pub(super) fn poll_browser_technology_checkpoint(_: &Context, app: &mut RSpiceAp
             || app.state.model.workspace.content.project.revision().get()
                 != completion.expected_revision
         {
-            app.state.dialogs.technology_attachment.checkpoint_pending = false;
-            app.state.dialogs.technology_attachment.validation_error = Some(
+            app.state.project.technology_attachment.checkpoint_pending = false;
+            app.state.project.technology_attachment.validation_error = Some(
                 "Project changed while its recovery checkpoint was being written; attachment was not committed"
                     .to_owned(),
             );
@@ -934,15 +936,15 @@ pub(super) fn poll_browser_technology_checkpoint(_: &Context, app: &mut RSpiceAp
                 &checkpoint,
             )
         });
-        app.state.dialogs.technology_attachment.checkpoint_pending = false;
+        app.state.project.technology_attachment.checkpoint_pending = false;
         match result {
             Ok(receipt) => {
-                app.state.dialogs.technology_attachment.close();
+                app.state.project.technology_attachment.close();
                 app.state
                     .record(LogSeverity::Info, LogSource::Studio, receipt);
             }
             Err(error) => {
-                app.state.dialogs.technology_attachment.validation_error = Some(error);
+                app.state.project.technology_attachment.validation_error = Some(error);
             }
         }
     }
@@ -957,7 +959,7 @@ pub(super) fn poll_browser_recovery_completions(_: &Context, app: &mut RSpiceApp
         if completion.project_id != project_id {
             continue;
         }
-        let recovery = &mut app.state.dialogs.project_checkpoint_recovery;
+        let recovery = &mut app.state.project.project_checkpoint_recovery;
         recovery.loading = false;
         recovery.initialized = true;
         match completion.result {

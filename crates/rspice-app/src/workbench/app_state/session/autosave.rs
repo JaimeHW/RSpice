@@ -82,7 +82,7 @@ impl RSpiceApp {
     /// opens the file; Esc opens the file and keeps the checkpoint.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::workbench) fn process_autosave_restore_dialog(&mut self, ctx: &Context) {
-        let Some(candidate) = self.state.dialogs.pending_autosave_restore.clone() else {
+        let Some(candidate) = self.state.platform.pending_autosave_restore.clone() else {
             return;
         };
         let path = candidate.source.clone();
@@ -148,7 +148,7 @@ impl RSpiceApp {
                             LogSource::Studio,
                             format!("Restored the autosave from {age}; save to keep it."),
                         );
-                        self.state.dialogs.pending_autosave_restore = None;
+                        self.state.platform.pending_autosave_restore = None;
                     }
                     Err(error) => {
                         self.state.record(
@@ -174,7 +174,7 @@ impl RSpiceApp {
                                 &path,
                                 io,
                             );
-                            self.state.dialogs.pending_autosave_restore = None;
+                            self.state.platform.pending_autosave_restore = None;
                         }
                         Err(error) => {
                             self.state.record(
@@ -196,7 +196,7 @@ impl RSpiceApp {
                             checkpoint.display()
                         ),
                     );
-                    self.state.dialogs.pending_autosave_restore = None;
+                    self.state.platform.pending_autosave_restore = None;
                 }
             }
             DialogChoice::Cancelled => {
@@ -206,7 +206,7 @@ impl RSpiceApp {
                     LogSource::Studio,
                     format!("Kept the autosave at {}.", checkpoint.display()),
                 );
-                self.state.dialogs.pending_autosave_restore = None;
+                self.state.platform.pending_autosave_restore = None;
             }
             DialogChoice::Secondary => {}
         }

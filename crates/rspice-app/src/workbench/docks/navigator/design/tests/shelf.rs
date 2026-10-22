@@ -79,7 +79,7 @@ fn port_shelf_entry_uses_the_typed_place_pin_transaction() {
 
     arm_primitive(&mut app, ComponentType::Port, &egui::Context::default());
 
-    assert!(app.state.dialogs.pin_port.open);
+    assert!(app.state.design.pin_port.open);
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
     assert!(
         app.state
@@ -633,7 +633,7 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
         fixed.stable_id
     );
     assert!(
-        !app.state.dialogs.builtin_xspice_placement.open,
+        !app.state.design.builtin_xspice_placement.open,
         "and asks nothing"
     );
 
@@ -644,11 +644,11 @@ fn a_code_model_with_open_port_widths_asks_before_it_arms() {
         open.stable_id
     );
     assert!(
-        app.state.dialogs.builtin_xspice_placement.open,
+        app.state.design.builtin_xspice_placement.open,
         "so the click raises the placement dialog instead"
     );
     assert_eq!(
-        app.state.dialogs.builtin_xspice_placement.stable_id, open.stable_id,
+        app.state.design.builtin_xspice_placement.stable_id, open.stable_id,
         "for the model the row named"
     );
     assert_eq!(

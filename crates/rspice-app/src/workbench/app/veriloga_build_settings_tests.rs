@@ -47,7 +47,7 @@ fn veriloga_view_holding(source: &str) -> RSpiceApp {
 
 fn draft(app: &mut RSpiceApp) -> &mut VerilogABuildSettingsDraft {
     app.state
-        .dialogs
+        .code
         .veriloga_build_settings
         .as_mut()
         .expect("Build settings is open")
@@ -141,7 +141,7 @@ fn build_settings_round_trips_every_field_through_the_profile_document() {
     form.checks.portability = false;
 
     assert!(save_veriloga_build_settings(&mut app).expect("the save is made"));
-    assert!(app.state.dialogs.veriloga_build_settings.is_none());
+    assert!(app.state.code.veriloga_build_settings.is_none());
 
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
     let resolved = resolve_veriloga_build_profile(selected.bundle()).unwrap();
@@ -297,7 +297,7 @@ fn build_settings_save_is_refused_on_a_read_only_project() {
         before.bundle().closure_digest()
     );
     assert!(
-        app.state.dialogs.veriloga_build_settings.is_some(),
+        app.state.code.veriloga_build_settings.is_some(),
         "the form stays open"
     );
 
@@ -439,10 +439,10 @@ fn save_and_compile_compiles_with_the_new_settings() {
         &messages().text(MessageId::VerilogABuildSettingsPrimary),
     );
     assert!(
-        app.state.dialogs.veriloga_build_settings.is_none(),
+        app.state.code.veriloga_build_settings.is_none(),
         "the form closed: {:?}",
         app.state
-            .dialogs
+            .code
             .veriloga_build_settings
             .as_ref()
             .map(|form| &form.error)

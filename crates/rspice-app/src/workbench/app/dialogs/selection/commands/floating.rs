@@ -78,13 +78,13 @@ impl AppState {
         let objects = bound_to_active_cell(self, objects)?.into_owned();
         // A copy floating is the command now running; the one before it
         // stops, as a new command stops the last in every schematic editor.
-        if self.dialogs.move_selection.armed {
+        if self.design.move_selection.armed {
             crate::workbench::app::cancel_armed_move_selection(self);
         }
-        if self.dialogs.stretch_selection.armed {
+        if self.design.stretch_selection.armed {
             crate::workbench::app::cancel_armed_stretch_selection(self);
         }
-        if self.dialogs.array_selection.armed {
+        if self.design.array_selection.armed {
             crate::workbench::app::cancel_armed_array_selection(self);
         }
         if self.model.schematic.session.editor.tool != Tool::Select {
@@ -92,7 +92,7 @@ impl AppState {
         }
         let grid = self.model.schematic.document().grid_size;
         let count = objects.count();
-        self.dialogs.floating_paste = Some(FloatingPaste {
+        self.design.floating_paste = Some(FloatingPaste {
             objects,
             start: on_grid(anchor, grid),
             grab: self
@@ -115,7 +115,7 @@ impl AppState {
     /// Land the floating copy where it sits now. Returns whether anything
     /// was placed.
     pub(crate) fn place_floating_paste(&mut self) -> bool {
-        let Some(floating) = self.dialogs.floating_paste.take() else {
+        let Some(floating) = self.design.floating_paste.take() else {
             return false;
         };
         if let Err(reason) = floating_scope(self, &floating) {
@@ -217,7 +217,7 @@ impl FloatingPaste {
 
 /// Let the floating copy go.
 pub(crate) fn cancel_floating_paste(state: &mut AppState) -> bool {
-    let Some(floating) = state.dialogs.floating_paste.take() else {
+    let Some(floating) = state.design.floating_paste.take() else {
         return false;
     };
     state.prompt(format!("{} cancelled.", floating.origin.verb()));
@@ -227,7 +227,7 @@ pub(crate) fn cancel_floating_paste(state: &mut AppState) -> bool {
 /// Turn or flip the floating copy about its middle. Returns whether a copy
 /// was floating.
 pub(crate) fn turn_floating_paste(state: &mut AppState, transform: SelectionTransform) -> bool {
-    let Some(floating) = state.dialogs.floating_paste.as_mut() else {
+    let Some(floating) = state.design.floating_paste.as_mut() else {
         return false;
     };
     transform_clipboard(&mut floating.objects, transform);
@@ -238,7 +238,7 @@ pub(crate) fn turn_floating_paste(state: &mut AppState, transform: SelectionTran
 /// Why the floating copy can no longer land where it was asked for, if it
 /// cannot: it was bound to one cell view and one sheet.
 pub(crate) fn floating_paste_scope(state: &AppState) -> Result<(), String> {
-    match state.dialogs.floating_paste.as_ref() {
+    match state.design.floating_paste.as_ref() {
         Some(floating) => floating_scope(state, floating),
         None => Ok(()),
     }

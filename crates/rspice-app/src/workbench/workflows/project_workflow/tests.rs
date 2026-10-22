@@ -167,11 +167,11 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
 
     assert!(request_close_project(&mut state));
     assert!(matches!(
-        state.dialogs.project_review_dialog.request,
+        state.workbench.project_review_dialog.request,
         Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
     ));
 
-    state.dialogs.project_review_dialog.close();
+    state.workbench.project_review_dialog.close();
     assert!(close_project_discard(&mut state));
     assert!(!state.project_lifecycle.is_open());
     state.assert_project_open_fact();
@@ -1954,7 +1954,7 @@ fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
 
     create_new_project(&mut state);
 
-    assert!(!state.dialogs.new_project.open);
+    assert!(!state.project.new_project.open);
     let defaults = NewProjectParams::default();
     assert_eq!(state.model.workspace.content.project.name(), defaults.name);
     assert_eq!(

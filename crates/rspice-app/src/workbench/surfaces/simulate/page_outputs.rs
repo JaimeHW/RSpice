@@ -366,7 +366,7 @@ fn registry(
     let mut removal = plan_id
         .and_then(|plan_id| {
             app.state
-                .dialogs
+                .simulate
                 .plan_removal_review
                 .take_confirmed_output(plan_id)
         })
@@ -407,7 +407,7 @@ fn registry(
             // on one click: the group's forecast and the requirement's source
             // both change with it, and neither is visible from this row.
             match removal_consequences(payload, &membership, output_id) {
-                Some(consequences) => app.state.dialogs.plan_removal_review.open(
+                Some(consequences) => app.state.simulate.plan_removal_review.open(
                     PlanRemovalTarget::Output {
                         plan: plan_id,
                         id: output_id,

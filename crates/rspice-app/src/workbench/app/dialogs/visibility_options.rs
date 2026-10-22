@@ -59,12 +59,12 @@ const DESCRIPTION: &str = "Choose what the schematic canvas shows on this device
 /// Open Display options. Both the schematic-visibility and the
 /// drawing-sheet-layers commands land here; it is one dialog.
 pub(crate) fn open_display_options(state: &mut AppState) -> bool {
-    if state.dialogs.schematic_visibility.open {
+    if state.design.schematic_visibility_dialog.open {
         return false;
     }
     state
-        .dialogs
-        .schematic_visibility
+        .design
+        .schematic_visibility_dialog
         .open(state.ui.schematic_visibility, state.ui.drawing_sheet_layers);
     true
 }
@@ -79,7 +79,7 @@ pub(crate) fn open_drawing_sheet_layers_dialog(state: &mut AppState) -> bool {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_schematic_visibility_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.schematic_visibility.open {
+        if !self.state.design.schematic_visibility_dialog.open {
             return;
         }
 
@@ -90,7 +90,7 @@ impl RSpiceApp {
         if recovery_available {
             form = form.secondary("Undo last change");
         }
-        let dialog_state = &mut self.state.dialogs.schematic_visibility;
+        let dialog_state = &mut self.state.design.schematic_visibility_dialog;
         let choice = form.show(ctx, |rows| {
             Some(display_options_rows(
                 rows,
@@ -102,11 +102,11 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => apply_display_options(&mut self.state),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.schematic_visibility.close();
+                self.state.design.schematic_visibility_dialog.close();
             }
             DialogChoice::Secondary => match restore_visibility_recovery(&mut self.state) {
                 Ok(()) => {
-                    self.state.dialogs.schematic_visibility.close();
+                    self.state.design.schematic_visibility_dialog.close();
                     self.state
                         .prompt("Restored the previous schematic visibility on this device.");
                 }
@@ -121,14 +121,14 @@ impl RSpiceApp {
 
 /// Publish both drafts together and close.
 fn apply_display_options(state: &mut AppState) {
-    let policy = state.dialogs.schematic_visibility.draft;
+    let policy = state.design.schematic_visibility_dialog.draft;
     if policy != state.ui.schematic_visibility {
         let recovery = capture_visibility_recovery(state);
         state.ui.schematic_visibility_recovery = Some(recovery);
     }
     publish_visibility_policy(state, policy);
-    state.ui.drawing_sheet_layers = state.dialogs.schematic_visibility.layers_draft;
-    state.dialogs.schematic_visibility.close();
+    state.ui.drawing_sheet_layers = state.design.schematic_visibility_dialog.layers_draft;
+    state.design.schematic_visibility_dialog.close();
     state.prompt("Display options applied on this device; the design is unchanged.");
 }
 
@@ -474,10 +474,14 @@ mod tests {
             "wire routing is not a display option:\n{labels}"
         );
 
-        app.state.dialogs.schematic_visibility.layers_draft.zones = false;
         app.state
-            .dialogs
-            .schematic_visibility
+            .design
+            .schematic_visibility_dialog
+            .layers_draft
+            .zones = false;
+        app.state
+            .design
+            .schematic_visibility_dialog
             .draft
             .parameter_labels = SchematicParameterLabelVisibility::Hidden;
         apply_display_options(&mut app.state);
@@ -486,7 +490,7 @@ mod tests {
             app.state.ui.schematic_visibility.parameter_labels,
             SchematicParameterLabelVisibility::Hidden
         );
-        assert!(!app.state.dialogs.schematic_visibility.open);
+        assert!(!app.state.design.schematic_visibility_dialog.open);
     }
 
     #[test]

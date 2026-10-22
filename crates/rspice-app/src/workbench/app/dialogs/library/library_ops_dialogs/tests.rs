@@ -25,16 +25,16 @@ fn library_dialog_entry_points_capture_the_exact_catalog_revision() {
         .open_delete_library_review("work")
         .expect("an existing library opens the deletion review");
 
-    assert!(state.dialogs.new_library_dialog);
-    assert!(state.dialogs.rename_library_dialog);
-    assert!(state.dialogs.delete_library_dialog);
-    assert_eq!(state.dialogs.rename_library_current, "work");
-    assert_eq!(state.dialogs.rename_library_name, "work");
-    assert_eq!(state.dialogs.delete_library_target, "work");
+    assert!(state.project.new_library_dialog);
+    assert!(state.project.rename_library_dialog);
+    assert!(state.project.delete_library_dialog);
+    assert_eq!(state.project.rename_library_current, "work");
+    assert_eq!(state.project.rename_library_name, "work");
+    assert_eq!(state.project.delete_library_target, "work");
     for revision in [
-        state.dialogs.new_library_library_revision,
-        state.dialogs.rename_library_library_revision,
-        state.dialogs.delete_library_library_revision,
+        state.project.new_library_library_revision,
+        state.project.rename_library_library_revision,
+        state.project.delete_library_library_revision,
     ] {
         assert_eq!(revision, state.model.library_manager.revision());
     }
@@ -43,8 +43,8 @@ fn library_dialog_entry_points_capture_the_exact_catalog_revision() {
 #[test]
 fn library_dialog_entry_points_reject_missing_and_read_only_targets() {
     let mut state = state_with_writable_work_library();
-    state.dialogs.rename_library_current = "sentinel".to_owned();
-    state.dialogs.delete_library_target = "sentinel".to_owned();
+    state.project.rename_library_current = "sentinel".to_owned();
+    state.project.delete_library_target = "sentinel".to_owned();
 
     assert!(state.open_rename_library_dialog("missing").is_err());
     assert!(state.open_delete_library_review("missing").is_err());
@@ -60,21 +60,21 @@ fn library_dialog_entry_points_reject_missing_and_read_only_targets() {
         .expect_err("a read-only library must fail closed");
 
     assert!(error.contains("read-only"), "{error}");
-    assert!(!state.dialogs.rename_library_dialog);
-    assert!(!state.dialogs.delete_library_dialog);
-    assert_eq!(state.dialogs.rename_library_current, "sentinel");
-    assert_eq!(state.dialogs.delete_library_target, "sentinel");
+    assert!(!state.project.rename_library_dialog);
+    assert!(!state.project.delete_library_dialog);
+    assert_eq!(state.project.rename_library_current, "sentinel");
+    assert_eq!(state.project.delete_library_target, "sentinel");
 }
 
 #[test]
 fn library_dialog_commits_reject_an_intervening_catalog_change() {
     let mut state = state_with_writable_work_library();
     state.open_new_library_dialog();
-    state.dialogs.new_library_name = "vendor".to_owned();
+    state.project.new_library_name = "vendor".to_owned();
     state
         .open_rename_library_dialog("work")
         .expect("rename dialog opens");
-    state.dialogs.rename_library_name = "work_v2".to_owned();
+    state.project.rename_library_name = "work_v2".to_owned();
     state
         .open_delete_library_review("work")
         .expect("deletion review opens");

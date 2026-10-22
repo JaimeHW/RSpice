@@ -145,19 +145,19 @@ fn shortcut_row_matches(
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_help_center_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.help_center.open {
+        if !self.state.shell.help_center.open {
             return;
         }
 
         // System diagnostics and Create support bundle both open Report a
         // problem, which is its own dialog rather than two of these pages.
-        if report_problem::is_report_page(self.state.dialogs.help_center.page) {
+        if report_problem::is_report_page(self.state.shell.help_center.page) {
             self.render_report_problem_dialog(ctx);
             return;
         }
 
-        let mut page = self.state.dialogs.help_center.page;
-        let mut query = self.state.dialogs.help_center.query.clone();
+        let mut page = self.state.shell.help_center.page;
+        let mut query = self.state.shell.help_center.query.clone();
         let mut action = None;
 
         let choice = Dialog::new(page.label(), "Close")
@@ -191,8 +191,8 @@ impl RSpiceApp {
                 }
             });
 
-        self.state.dialogs.help_center.page = page;
-        self.state.dialogs.help_center.query = query;
+        self.state.shell.help_center.page = page;
+        self.state.shell.help_center.query = query;
 
         if choice != DialogChoice::None {
             self.close_help_center_route();
@@ -213,8 +213,8 @@ impl RSpiceApp {
     }
 
     fn close_help_center_route(&mut self) {
-        let route_owned = self.state.dialogs.help_center.route_owned;
-        self.state.dialogs.help_center.close();
+        let route_owned = self.state.shell.help_center.route_owned;
+        self.state.shell.help_center.close();
         if route_owned {
             crate::workbench::app::close_route_owned_transient(
                 &mut self.state,
@@ -225,7 +225,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn render_about_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.about {
+        if !self.state.shell.about {
             return;
         }
 
@@ -269,7 +269,7 @@ impl RSpiceApp {
             });
 
         if notices {
-            self.state.dialogs.about = false;
+            self.state.shell.about = false;
             Command::LegalPrivacy.execute(self);
             return;
         }
@@ -286,12 +286,12 @@ impl RSpiceApp {
                 self.state
                     .prompt("Application and platform diagnostics were copied to the clipboard.");
             }
-            _ => self.state.dialogs.about = false,
+            _ => self.state.shell.about = false,
         }
     }
 
     pub(in crate::workbench) fn render_shortcuts_help_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.shortcuts_help {
+        if !self.state.shell.shortcuts_help {
             return;
         }
 
@@ -300,7 +300,7 @@ impl RSpiceApp {
         let shortcuts = self.state.model.preferences.shortcuts().clone();
         let platform = crate::workbench::app_state::runtime_command_platform(ctx);
         let operating_system = ctx.os();
-        let filter = self.state.dialogs.shortcuts_filter.trim().to_lowercase();
+        let filter = self.state.shell.shortcuts_filter.trim().to_lowercase();
         let total: usize = ShortcutCategory::ALL
             .iter()
             .flat_map(|category| category.commands())
@@ -312,7 +312,7 @@ impl RSpiceApp {
             .count();
         let hint = format!("{shown} of {total} commands");
 
-        let filter_text = &mut self.state.dialogs.shortcuts_filter;
+        let filter_text = &mut self.state.shell.shortcuts_filter;
         let choice = Dialog::new("Command reference", "Close")
             .description(
                 "Search every discoverable command by name, stable identity, category, or shortcut.",
@@ -411,8 +411,8 @@ impl RSpiceApp {
             });
 
         if choice != DialogChoice::None {
-            self.state.dialogs.shortcuts_help = false;
-            self.state.dialogs.shortcuts_filter.clear();
+            self.state.shell.shortcuts_help = false;
+            self.state.shell.shortcuts_filter.clear();
         }
     }
 }

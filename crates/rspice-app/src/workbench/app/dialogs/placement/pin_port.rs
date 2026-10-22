@@ -87,12 +87,12 @@ pub(crate) fn open_create_pins(state: &mut AppState) {
         // Empty on first use: a suggestion invented before the reader has
         // named anything is sample data, and this form used to open holding
         // one.
-        None => match state.dialogs.pin_port.last_name.as_str() {
+        None => match state.design.pin_port.last_name.as_str() {
             "" => String::new(),
             base => state.model.schematic.suggested_port_name(base),
         },
     };
-    let draft = &mut state.dialogs.pin_port;
+    let draft = &mut state.design.pin_port;
     if let Some(sequence) = armed {
         draft.fields.direction = sequence.direction;
         draft.fields.signal_type = sequence.signal_type;
@@ -135,7 +135,7 @@ impl Draft {
 }
 
 fn draft(state: &AppState) -> Draft {
-    let form = &state.dialogs.pin_port;
+    let form = &state.design.pin_port;
     if state.schematic_edit_read_only() {
         return Draft::Blocked(READ_ONLY);
     }
@@ -222,7 +222,7 @@ fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_pin_port_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.pin_port.open {
+        if !self.state.design.pin_port.open {
             return;
         }
         let current = draft(&self.state);
@@ -242,7 +242,7 @@ impl RSpiceApp {
             .active_view
             .display_path();
 
-        let form = &mut self.state.dialogs.pin_port;
+        let form = &mut self.state.design.pin_port;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .context(Some(view_path.as_str()))
             .describe(DESCRIPTION)
@@ -267,7 +267,7 @@ impl RSpiceApp {
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.pin_port.close();
+                self.state.design.pin_port.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -276,7 +276,7 @@ impl RSpiceApp {
     /// Freeze the batch, arm the canvas tool, and give the canvas the keyboard
     /// so R, M and Esc work before the pointer has moved over it.
     fn arm_create_pins(&mut self, ctx: &Context, names: Vec<String>) {
-        let form = &self.state.dialogs.pin_port;
+        let form = &self.state.design.pin_port;
         let Some(authority) = form.authority.clone() else {
             return;
         };
@@ -299,7 +299,7 @@ impl RSpiceApp {
             .editor
             .pending_port_sequence = Some(sequence);
         rspice_schematic_editor::view::canvas::request_focus(ctx);
-        let form = &mut self.state.dialogs.pin_port;
+        let form = &mut self.state.design.pin_port;
         form.last_name = last_name;
         form.close();
     }

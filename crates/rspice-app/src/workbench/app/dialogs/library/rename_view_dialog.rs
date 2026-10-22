@@ -39,24 +39,24 @@ impl AppState {
             return Err(format!("View '{library}/{cell}/{view}' no longer exists."));
         }
 
-        self.dialogs.rename_view_library = library.to_owned();
-        self.dialogs.rename_view_cell = cell.to_owned();
-        self.dialogs.rename_view_current = view.to_owned();
-        self.dialogs.rename_view_name = view.to_owned();
-        self.dialogs.rename_view_error = None;
-        self.dialogs.rename_view_library_revision = self.model.library_manager.revision();
-        self.dialogs.rename_view_dialog = true;
+        self.project.rename_view_library = library.to_owned();
+        self.project.rename_view_cell = cell.to_owned();
+        self.project.rename_view_current = view.to_owned();
+        self.project.rename_view_name = view.to_owned();
+        self.project.rename_view_error = None;
+        self.project.rename_view_library_revision = self.model.library_manager.revision();
+        self.project.rename_view_dialog = true;
         Ok(())
     }
 
     fn commit_rename_view_dialog(&mut self) -> Result<Option<usize>, String> {
-        if self.model.library_manager.revision() != self.dialogs.rename_view_library_revision {
+        if self.model.library_manager.revision() != self.project.rename_view_library_revision {
             return Err(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let name = self.dialogs.rename_view_name.trim().to_owned();
-        let library = self.dialogs.rename_view_library.clone();
-        let cell = self.dialogs.rename_view_cell.clone();
-        let current = self.dialogs.rename_view_current.clone();
+        let name = self.project.rename_view_name.trim().to_owned();
+        let library = self.project.rename_view_library.clone();
+        let cell = self.project.rename_view_cell.clone();
+        let current = self.project.rename_view_current.clone();
         if name == current {
             return Ok(None);
         }
@@ -69,7 +69,7 @@ impl AppState {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_rename_view_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.rename_view_dialog {
+        if !self.state.project.rename_view_dialog {
             return;
         }
 
@@ -77,11 +77,11 @@ impl RSpiceApp {
         let mut should_rename = false;
 
         let catalog_current = self.state.model.library_manager.revision()
-            == self.state.dialogs.rename_view_library_revision;
+            == self.state.project.rename_view_library_revision;
         if !catalog_current {
-            self.state.dialogs.rename_view_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            self.state.project.rename_view_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
-        let dialogs = &mut self.state.dialogs;
+        let dialogs = &mut self.state.project;
         let source = format!(
             "{} / {} / {}",
             dialogs.rename_view_library, dialogs.rename_view_cell, dialogs.rename_view_current
@@ -118,8 +118,8 @@ impl RSpiceApp {
         }
 
         if should_rename {
-            let current = self.state.dialogs.rename_view_current.clone();
-            let name = self.state.dialogs.rename_view_name.trim().to_owned();
+            let current = self.state.project.rename_view_current.clone();
+            let name = self.state.project.rename_view_name.trim().to_owned();
             match self.state.commit_rename_view_dialog() {
                 Ok(Some(remapped)) => {
                     self.state.record(
@@ -130,16 +130,16 @@ impl RSpiceApp {
                              references now name it."
                         ),
                     );
-                    self.state.dialogs.rename_view_error = None;
+                    self.state.project.rename_view_error = None;
                     should_close = true;
                 }
                 Ok(None) => should_close = true,
-                Err(error) => self.state.dialogs.rename_view_error = Some(error),
+                Err(error) => self.state.project.rename_view_error = Some(error),
             }
         }
 
         if should_close {
-            let dialogs = &mut self.state.dialogs;
+            let dialogs = &mut self.state.project;
             dialogs.rename_view_dialog = false;
             dialogs.rename_view_name.clear();
             dialogs.rename_view_error = None;

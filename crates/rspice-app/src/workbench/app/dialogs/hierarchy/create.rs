@@ -189,7 +189,7 @@ pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
             return;
         }
     };
-    state.dialogs.create_hierarchy.open(
+    state.design.create_hierarchy.open(
         SchematicEditAuthority::capture(state),
         plan,
         state.model.library_manager.revision(),
@@ -198,12 +198,12 @@ pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_create_hierarchy_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.create_hierarchy.open {
+        if !self.state.design.create_hierarchy.open {
             return;
         }
         let validation = validate_draft(&self.state);
-        let discard_confirm = self.state.dialogs.create_hierarchy.discard_confirm;
-        let table_rows = self.state.dialogs.create_hierarchy.ports.len().max(1) as f32;
+        let discard_confirm = self.state.design.create_hierarchy.discard_confirm;
+        let table_rows = self.state.design.create_hierarchy.ports.len().max(1) as f32;
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .size(DialogSize::Transaction)
             .flush_body()
@@ -240,18 +240,18 @@ impl RSpiceApp {
         }
 
         let mut response = dialog.show_transaction(ctx, |ui| {
-            Some(hierarchy_body(ui, &mut self.state.dialogs.create_hierarchy))
+            Some(hierarchy_body(ui, &mut self.state.design.create_hierarchy))
         });
         match response.choice {
             DialogChoice::Primary => {
                 // The dialog states the refusal in place.
                 if let Err(error) = commit_create_hierarchy(&mut self.state) {
-                    self.state.dialogs.create_hierarchy.validation_error = Some(error);
+                    self.state.design.create_hierarchy.validation_error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.create_hierarchy.attempt_close();
-                if self.state.dialogs.create_hierarchy.open {
+                self.state.design.create_hierarchy.attempt_close();
+                if self.state.design.create_hierarchy.open {
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 }
             }
@@ -492,11 +492,11 @@ fn status_text(ui: &mut Ui, text: &str) {
 }
 
 fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
-    if let Some(error) = state.dialogs.create_hierarchy.validation_error.as_deref() {
+    if let Some(error) = state.design.create_hierarchy.validation_error.as_deref() {
         return Err(error.to_owned());
     }
     let authority = state
-        .dialogs
+        .design
         .create_hierarchy
         .authority
         .as_ref()
@@ -505,22 +505,22 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
                 .to_owned()
         })?;
     authority.validate(state, "Create hierarchy")?;
-    if state.dialogs.create_hierarchy.library_revision != state.model.library_manager.revision() {
+    if state.design.create_hierarchy.library_revision != state.model.library_manager.revision() {
         return Err(
             "The library or symbol contract changed. Close and reopen Create hierarchy.".to_owned(),
         );
     }
-    let mut plan = state.dialogs.create_hierarchy.plan.clone().ok_or_else(|| {
+    let mut plan = state.design.create_hierarchy.plan.clone().ok_or_else(|| {
         "The retained hierarchy plan is unavailable. Close and reopen Create hierarchy.".to_owned()
     })?;
-    if plan.ports.len() != state.dialogs.create_hierarchy.ports.len() {
+    if plan.ports.len() != state.design.create_hierarchy.ports.len() {
         return Err("The inferred interface draft is inconsistent.".to_owned());
     }
     let mut names = HashSet::new();
     for (port, draft) in plan
         .ports
         .iter_mut()
-        .zip(&state.dialogs.create_hierarchy.ports)
+        .zip(&state.design.create_hierarchy.ports)
     {
         if port.source_net != draft.source_net {
             return Err("A boundary net identity changed inside the isolated draft.".to_owned());
@@ -539,17 +539,17 @@ fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
     }
     validate_hierarchy_reference_impact(state, &plan)?;
 
-    let cell_name = state.dialogs.create_hierarchy.cell_name.trim();
+    let cell_name = state.design.create_hierarchy.cell_name.trim();
     let target = CellViewRef::new(
         &state.model.workspace.content.active_view.library,
         cell_name,
-        state.dialogs.create_hierarchy.target_view.display_name(),
+        state.design.create_hierarchy.target_view.display_name(),
     );
     target
         .validate_name_segments()
         .map_err(|error| format!("Cell and view: {error}"))?;
     if !matches!(
-        state.dialogs.create_hierarchy.target_view,
+        state.design.create_hierarchy.target_view,
         ViewType::Schematic | ViewType::Symbol
     ) {
         return Err("Create hierarchy supports the schematic or symbol child view.".to_owned());
@@ -701,7 +701,7 @@ fn resolved_terminal_contract(
 fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let plan = validate_draft(state)?;
     let authority = state
-        .dialogs
+        .design
         .create_hierarchy
         .authority
         .as_ref()
@@ -711,7 +711,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
     let current_plan = source_plan(state)?;
     if current_plan
         != state
-            .dialogs
+            .design
             .create_hierarchy
             .plan
             .clone()
@@ -722,8 +722,8 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
 
     let parent_ref = state.model.workspace.content.active_view.clone();
     let library_name = parent_ref.library.clone();
-    let cell_name = state.dialogs.create_hierarchy.cell_name.trim().to_owned();
-    let target_view_type = state.dialogs.create_hierarchy.target_view;
+    let cell_name = state.design.create_hierarchy.cell_name.trim().to_owned();
+    let target_view_type = state.design.create_hierarchy.target_view;
     let target_schematic_ref = CellViewRef::new(&library_name, &cell_name, "schematic");
     let target_open_ref =
         CellViewRef::new(&library_name, &cell_name, target_view_type.display_name());
@@ -872,7 +872,7 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         hierarchy_stack_after,
         hierarchy_instances_after,
     });
-    state.dialogs.create_hierarchy.close();
+    state.design.create_hierarchy.close();
     state.record(
         LogSeverity::Info,
         LogSource::Studio,
@@ -1148,7 +1148,7 @@ mod tests {
         let library_name = parent_ref.library.clone();
 
         open_create_hierarchy_dialog(&mut state);
-        assert!(state.dialogs.create_hierarchy.open);
+        assert!(state.design.create_hierarchy.open);
         commit_create_hierarchy(&mut state).expect("transaction commits");
 
         let target_ref = CellViewRef::new(&library_name, DEFAULT_CELL, "schematic");
@@ -1270,7 +1270,7 @@ mod tests {
         let before = crate::state::SchematicSnapshot::capture(state.model.schematic.document());
 
         open_create_hierarchy_dialog(&mut state);
-        assert!(state.dialogs.create_hierarchy.open);
+        assert!(state.design.create_hierarchy.open);
         let error = commit_create_hierarchy(&mut state).expect_err("reference must block");
         assert!(error.contains("saved output 'branch_current'"), "{error}");
         assert!(before.is_equal_document(state.model.schematic.document()));

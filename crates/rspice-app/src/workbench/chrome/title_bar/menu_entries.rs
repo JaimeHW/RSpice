@@ -202,7 +202,7 @@ pub(super) struct MenuChoice {
 impl MenuChoice {
     pub(super) fn run(self, app: &mut RSpiceApp) {
         if let Some(scope) = self.palette_scope {
-            app.state.dialogs.command_palette.open_in_scope(scope);
+            app.state.workbench.command_palette.open_in_scope(scope);
         } else {
             self.command.execute(app);
         }

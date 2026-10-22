@@ -555,7 +555,7 @@ pub(crate) fn open(state: &mut AppState) {
 /// transaction visually and interactively on top.
 pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     if app.state.workbench.current_route().surface_id() != SurfaceId::AccountOrganization
-        || app.state.dialogs.license_dialog.open
+        || app.state.cloud.license_dialog.open
     {
         return;
     }
@@ -1544,12 +1544,12 @@ mod tests {
         for action in [AccountAction::ActivateLicense, AccountAction::ManageLicense] {
             let mut license_app = RSpiceApp::test_instance();
             execute_action(&mut license_app, action);
-            assert!(license_app.state.dialogs.license_dialog.open);
+            assert!(license_app.state.cloud.license_dialog.open);
         }
 
         let mut help_app = RSpiceApp::test_instance();
         execute_action(&mut help_app, AccountAction::SupportBundle);
-        assert!(help_app.state.dialogs.help_center.open);
+        assert!(help_app.state.shell.help_center.open);
 
         // Cloud session actions delegate to the account service; on an
         // unconfigured test instance they must be accepted no-ops.

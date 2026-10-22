@@ -138,7 +138,7 @@ impl Registry {
     }
 
     fn review_open(&self) -> bool {
-        self.app.state.dialogs.plan_removal_review.target.is_some()
+        self.app.state.simulate.plan_removal_review.target.is_some()
     }
 
     /// Answer the review the way the dialog's primary action answers it, then
@@ -146,14 +146,14 @@ impl Registry {
     /// application shell, which these page-only passes do not run.
     fn confirm(&mut self) {
         assert!(self.review_open(), "no review is staged to confirm");
-        self.app.state.dialogs.plan_removal_review.confirmed = true;
+        self.app.state.simulate.plan_removal_review.confirmed = true;
         self.pass(Vec::new());
     }
 
     /// Answer it the way Cancel answers it.
     fn cancel(&mut self) {
         assert!(self.review_open(), "no review is staged to cancel");
-        self.app.state.dialogs.plan_removal_review.close();
+        self.app.state.simulate.plan_removal_review.close();
         self.pass(Vec::new());
     }
 
@@ -648,11 +648,11 @@ fn an_analysis_something_is_bound_to_refuses_removal_instead_of_reviewing_it() {
     remove_analysis_instance(&mut app, prerequisite);
 
     assert!(
-        app.state.dialogs.plan_removal_review.target.is_none(),
+        app.state.simulate.plan_removal_review.target.is_none(),
         "a removal the plan refuses must not be staged as a destructive review"
     );
     assert_eq!(
-        app.state.dialogs.plan_removal_refusal.analysis,
+        app.state.simulate.plan_removal_refusal.analysis,
         Some(prerequisite),
         "the refusal must be raised on the analysis whose removal was asked for"
     );
@@ -667,17 +667,17 @@ fn an_analysis_something_is_bound_to_refuses_removal_instead_of_reviewing_it() {
         "stating a refusal must not remove the analysis"
     );
     assert_eq!(
-        app.state.dialogs.plan_removal_refusal.label, "Bias point",
+        app.state.simulate.plan_removal_refusal.label, "Bias point",
         "the refusal must name the analysis by what it shows under"
     );
     assert_eq!(
-        app.state.dialogs.plan_removal_refusal.blockers,
+        app.state.simulate.plan_removal_refusal.blockers,
         vec![(dependent, "Gain sweep".to_owned())],
         "the blocker must be carried by display name, and by id for the hop"
     );
     assert!(
         !app.state
-            .dialogs
+            .simulate
             .plan_removal_refusal
             .blockers
             .iter()
@@ -709,7 +709,7 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
         "an unanswered refusal must not navigate anywhere"
     );
 
-    app.state.dialogs.plan_removal_refusal.reveal = true;
+    app.state.simulate.plan_removal_refusal.reveal = true;
     apply_requested_blocker_reveal(&mut app.state);
     assert_eq!(
         app.state.workbench.simulation_page,
@@ -722,7 +722,7 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
         "the hop must select the analysis that is blocking the removal"
     );
     assert!(
-        app.state.dialogs.plan_removal_refusal.analysis.is_none(),
+        app.state.simulate.plan_removal_refusal.analysis.is_none(),
         "the refusal must close behind the hop it sent the reader on"
     );
 
@@ -784,17 +784,17 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
 
     remove_analysis_instance(&mut app, ac);
     assert_eq!(
-        app.state.dialogs.plan_removal_review.target,
+        app.state.simulate.plan_removal_review.target,
         Some(crate::workbench::app::PlanRemovalTarget::Analysis(ac)),
         "a removal that orphans retained results must still be reviewed"
     );
     assert!(
-        app.state.dialogs.plan_removal_refusal.analysis.is_none(),
+        app.state.simulate.plan_removal_refusal.analysis.is_none(),
         "a removal the plan will perform is a question, not a refusal"
     );
     let stated: Vec<(String, String)> = app
         .state
-        .dialogs
+        .simulate
         .plan_removal_review
         .consequences
         .iter()
@@ -822,10 +822,10 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
         "staging a review must not remove the analysis"
     );
 
-    app.state.dialogs.plan_removal_review.confirmed = true;
+    app.state.simulate.plan_removal_review.confirmed = true;
     apply_confirmed_analysis_removal(&mut app);
     assert!(
-        app.state.dialogs.plan_removal_review.target.is_none(),
+        app.state.simulate.plan_removal_review.target.is_none(),
         "the review must close once its answer has been applied"
     );
     assert!(
@@ -879,8 +879,8 @@ fn an_analysis_with_no_dependents_and_no_results_is_removed_at_once() {
 
     remove_analysis_instance(&mut app, ac);
     assert!(
-        app.state.dialogs.plan_removal_review.target.is_none()
-            && app.state.dialogs.plan_removal_refusal.analysis.is_none(),
+        app.state.simulate.plan_removal_review.target.is_none()
+            && app.state.simulate.plan_removal_refusal.analysis.is_none(),
         "an analysis nothing depends on must not raise a modal"
     );
     assert!(
@@ -911,12 +911,12 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
     // A review staged against a plan that has since bound something to this
     // analysis: the modal's answer reaches the transaction, and the
     // transaction is what refuses it.
-    app.state.dialogs.plan_removal_review.open(
+    app.state.simulate.plan_removal_review.open(
         crate::workbench::app::PlanRemovalTarget::Analysis(prerequisite),
         "Bias point".to_owned(),
         Vec::new(),
     );
-    app.state.dialogs.plan_removal_review.confirmed = true;
+    app.state.simulate.plan_removal_review.confirmed = true;
     apply_confirmed_analysis_removal(&mut app);
 
     assert!(
@@ -959,16 +959,16 @@ fn a_registry_only_takes_the_answer_it_staged() {
     let mut app = RSpiceApp::test_instance();
     let plan = plan_id(&app);
     let variable = crate::product::DesignVariableId::new();
-    app.state.dialogs.plan_removal_review.open(
+    app.state.simulate.plan_removal_review.open(
         crate::workbench::app::PlanRemovalTarget::Variable { plan, id: variable },
         "vref".to_owned(),
         Vec::new(),
     );
-    app.state.dialogs.plan_removal_review.confirmed = true;
+    app.state.simulate.plan_removal_review.confirmed = true;
 
     assert!(
         app.state
-            .dialogs
+            .simulate
             .plan_removal_review
             .take_confirmed_analysis()
             .is_none(),
@@ -976,7 +976,7 @@ fn a_registry_only_takes_the_answer_it_staged() {
     );
     assert!(
         app.state
-            .dialogs
+            .simulate
             .plan_removal_review
             .take_confirmed_capture_group(plan)
             .is_none(),
@@ -984,14 +984,14 @@ fn a_registry_only_takes_the_answer_it_staged() {
     );
     assert_eq!(
         app.state
-            .dialogs
+            .simulate
             .plan_removal_review
             .take_confirmed_variable(plan),
         Some(variable),
         "the registry that staged it must still find its answer"
     );
     assert!(
-        app.state.dialogs.plan_removal_review.target.is_none(),
+        app.state.simulate.plan_removal_review.target.is_none(),
         "an answer is taken exactly once"
     );
 }

@@ -251,7 +251,7 @@ fn the_manager_rows_start_on_the_dialog_edge_without_kickers() {
 fn creating_a_bus_is_a_command_form_without_constant_rows() {
     let mut app = RSpiceApp::test_instance();
     open_connectivity_manager(&mut app.state);
-    app.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
+    app.state.design.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
     let nodes = rendered_nodes(app);
     let (left, right) = surface_edges(&nodes, CREATE_BUS_PRIMARY);
     assert!(

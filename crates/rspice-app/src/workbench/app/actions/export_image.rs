@@ -69,11 +69,11 @@ mod tests {
             "the request must be consumed exactly once"
         );
         assert!(
-            app.state.dialogs.hardcopy.open,
+            app.state.hardcopy.hardcopy.open,
             "the figure export must open the hardcopy dialog"
         );
         assert_eq!(
-            app.state.dialogs.hardcopy.workflow,
+            app.state.hardcopy.hardcopy.workflow,
             HardcopyWorkflow::Export
         );
     }
@@ -84,6 +84,6 @@ mod tests {
 
         app.handle_image_export();
 
-        assert!(!app.state.dialogs.hardcopy.open);
+        assert!(!app.state.hardcopy.hardcopy.open);
     }
 }

@@ -29,14 +29,14 @@ const DISCARD_DETAIL: &str =
 
 impl RSpiceApp {
     pub(super) fn render_symbol_parameter_form_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.symbol_parameter_form.open {
+        if !self.state.design.symbol_parameter_form.open {
             return;
         }
-        let phase = self.state.dialogs.symbol_parameter_form.phase;
-        let discard_confirm = self.state.dialogs.symbol_parameter_form.discard_confirm;
+        let phase = self.state.design.symbol_parameter_form.phase;
+        let discard_confirm = self.state.design.symbol_parameter_form.discard_confirm;
         let diagnostics = self
             .state
-            .dialogs
+            .design
             .symbol_parameter_form
             .draft_form
             .as_ref()
@@ -50,7 +50,7 @@ impl RSpiceApp {
             });
         let error = self
             .state
-            .dialogs
+            .design
             .symbol_parameter_form
             .validation_error
             .clone();
@@ -100,12 +100,12 @@ impl RSpiceApp {
             let id = match phase {
                 ParameterFormPhase::Review => form_review_body(
                     ui,
-                    &mut self.state.dialogs.symbol_parameter_form,
+                    &mut self.state.design.symbol_parameter_form,
                     &self.state.model.library_manager,
                 ),
                 ParameterFormPhase::Designer => form_designer_body(
                     ui,
-                    &mut self.state.dialogs.symbol_parameter_form,
+                    &mut self.state.design.symbol_parameter_form,
                     &diagnostics,
                     &mut changed,
                 ),
@@ -113,23 +113,23 @@ impl RSpiceApp {
             Some(id)
         });
         if changed {
-            self.state.dialogs.symbol_parameter_form.dirty = true;
-            self.state.dialogs.symbol_parameter_form.discard_confirm = false;
-            self.state.dialogs.symbol_parameter_form.validation_error = None;
+            self.state.design.symbol_parameter_form.dirty = true;
+            self.state.design.symbol_parameter_form.discard_confirm = false;
+            self.state.design.symbol_parameter_form.validation_error = None;
         }
         match response.choice {
             DialogChoice::Primary if phase == ParameterFormPhase::Review => {
-                self.state.dialogs.symbol_parameter_form.phase = ParameterFormPhase::Designer;
+                self.state.design.symbol_parameter_form.phase = ParameterFormPhase::Designer;
             }
             DialogChoice::Primary => self.commit_symbol_parameter_form(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                if self.state.dialogs.symbol_parameter_form.dirty
-                    && !self.state.dialogs.symbol_parameter_form.discard_confirm
+                if self.state.design.symbol_parameter_form.dirty
+                    && !self.state.design.symbol_parameter_form.discard_confirm
                 {
-                    self.state.dialogs.symbol_parameter_form.discard_confirm = true;
+                    self.state.design.symbol_parameter_form.discard_confirm = true;
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else {
-                    self.state.dialogs.symbol_parameter_form.close_and_discard();
+                    self.state.design.symbol_parameter_form.close_and_discard();
                 }
             }
             DialogChoice::Secondary | DialogChoice::None => {}
@@ -137,25 +137,25 @@ impl RSpiceApp {
     }
 
     fn commit_symbol_parameter_form(&mut self) {
-        self.state.dialogs.symbol_parameter_form.validation_error = None;
-        let Some(target) = self.state.dialogs.symbol_parameter_form.target.clone() else {
-            self.state.dialogs.symbol_parameter_form.validation_error =
+        self.state.design.symbol_parameter_form.validation_error = None;
+        let Some(target) = self.state.design.symbol_parameter_form.target.clone() else {
+            self.state.design.symbol_parameter_form.validation_error =
                 Some("The target symbol is unavailable.".to_owned());
             return;
         };
         let Some(original) = self
             .state
-            .dialogs
+            .design
             .symbol_parameter_form
             .original_definition
             .clone()
         else {
-            self.state.dialogs.symbol_parameter_form.validation_error =
+            self.state.design.symbol_parameter_form.validation_error =
                 Some("The original symbol definition is unavailable.".to_owned());
             return;
         };
-        let Some(draft) = self.state.dialogs.symbol_parameter_form.draft_form.clone() else {
-            self.state.dialogs.symbol_parameter_form.validation_error =
+        let Some(draft) = self.state.design.symbol_parameter_form.draft_form.clone() else {
+            self.state.design.symbol_parameter_form.validation_error =
                 Some("The parameter form draft is unavailable.".to_owned());
             return;
         };
@@ -211,9 +211,9 @@ impl RSpiceApp {
                         target.library, target.cell
                     ),
                 );
-                self.state.dialogs.symbol_parameter_form.close_and_discard();
+                self.state.design.symbol_parameter_form.close_and_discard();
             }
-            Err(error) => self.state.dialogs.symbol_parameter_form.validation_error = Some(error),
+            Err(error) => self.state.design.symbol_parameter_form.validation_error = Some(error),
         }
     }
 }

@@ -53,7 +53,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 !apply_surface_request(&mut state, request),
                 "{action:?}, stale view: {stale_view}"
             );
-            assert!(!state.dialogs.copy_cell_dialog);
+            assert!(!state.project.copy_cell_dialog);
             assert_eq!(state.load_active_symbol_document().unwrap(), before);
             assert!(!state.can_undo_active_symbol_document());
 
@@ -67,9 +67,9 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 action: SymbolSurfaceAction::CopyToEditableLibrary,
             };
             assert!(apply_surface_request(&mut state, request));
-            assert!(state.dialogs.copy_cell_dialog);
-            assert_eq!(state.dialogs.copy_cell_source_library, "work");
-            assert_eq!(state.dialogs.copy_cell_source_cell, "amp");
+            assert!(state.project.copy_cell_dialog);
+            assert_eq!(state.project.copy_cell_source_library, "work");
+            assert_eq!(state.project.copy_cell_source_cell, "amp");
         }
     }
 }

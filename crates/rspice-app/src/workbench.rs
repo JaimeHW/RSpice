@@ -60,6 +60,7 @@ pub(crate) mod publication_snapshot;
 pub(crate) mod routing;
 pub(crate) mod shortcuts;
 pub(crate) mod simulation_analysis_tabs;
+pub(crate) mod slots;
 pub(crate) mod state;
 mod surfaces;
 pub(crate) mod tools;

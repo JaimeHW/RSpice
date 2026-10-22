@@ -45,7 +45,7 @@ FEATURES = (
     "project", "design", "simulate", "results", "models",
     "code", "sheets", "hardcopy", "cloud", "settings",
 )
-SESSION = "session"  # the AppState/WorkbenchState/UiSessionState/DialogState aggregate
+SESSION = "session"  # the AppState/WorkbenchState/UiSessionState aggregate
 SHELL = "shell"
 SLICES = (*LOWER, SESSION, *FEATURES, SHELL)
 GROUPS = ("feature->feature", "lower->upper", "whole-app")
@@ -84,6 +84,19 @@ SLICE_RULES = [
     (W + r"app_state/session/shortcuts", "framework"),
     (W + r"app_state/session/veriloga_library", "code"),
     (W + r"app_state/", "session"),
+    # The slots AppState holds, each by the feature that owns it.
+    (W + r"slots(\.rs$|/tests\.rs$)", "session"),
+    (W + r"slots/cloud\.rs$", "cloud"),
+    (W + r"slots/code\.rs$", "code"),
+    (W + r"slots/design\.rs$", "design"),
+    (W + r"slots/hardcopy\.rs$", "hardcopy"),
+    (W + r"slots/platform\.rs$", "services"),
+    (W + r"slots/project\.rs$", "project"),
+    (W + r"slots/results\.rs$", "results"),
+    (W + r"slots/settings\.rs$", "settings"),
+    (W + r"slots/sheets\.rs$", "sheets"),
+    (W + r"slots/shell\.rs$", "shell"),
+    (W + r"slots/simulate\.rs$", "simulate"),
     # Dialogs, by the feature they serve.
     (D + r"(check_and_save|check_and_save_validation|design_management|project_revision_history)(\.rs$|/)", "project"),
     (D + r"project(\.rs$|/)", "project"),

@@ -60,7 +60,7 @@ impl NewProjectDialogState {
 /// name starts empty because it is the one field with no defensible default:
 /// requiring it is the point of the dialog.
 pub(crate) fn open_new_project_dialog(state: &mut AppState) {
-    state.dialogs.new_project = NewProjectDialogState {
+    state.project.new_project = NewProjectDialogState {
         open: true,
         library: DEFAULT_PROJECT_LIBRARY.to_owned(),
         top_cell: DEFAULT_TOP_CELL.to_owned(),
@@ -91,16 +91,16 @@ fn library_slug(name: &str) -> String {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_new_project_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.new_project.open {
+        if !self.state.project.new_project.open {
             return;
         }
         // The footer is declared before the body runs, so the primary gate
         // reads the identity as of this frame's start. Creation re-reads and
         // re-validates the post-edit identity, so the one-frame lag can never
         // let an invalid identity through.
-        let entry_valid = self.state.dialogs.new_project.params().validate().is_ok();
+        let entry_valid = self.state.project.new_project.params().validate().is_ok();
 
-        let dialog = &mut self.state.dialogs.new_project;
+        let dialog = &mut self.state.project.new_project;
         let choice = Dialog::new("Create RSpice project", "Create project")
             .description(
                 "Name the new project, its editable design library, and its top cell before it \
@@ -119,14 +119,14 @@ impl RSpiceApp {
 
         match choice {
             DialogChoice::Primary => {
-                let params = self.state.dialogs.new_project.params();
+                let params = self.state.project.new_project.params();
                 match create_new_project_with(&mut self.state, &params) {
-                    Ok(()) => self.state.dialogs.new_project = NewProjectDialogState::default(),
-                    Err(error) => self.state.dialogs.new_project.error = Some(error),
+                    Ok(()) => self.state.project.new_project = NewProjectDialogState::default(),
+                    Err(error) => self.state.project.new_project.error = Some(error),
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.new_project = NewProjectDialogState::default();
+                self.state.project.new_project = NewProjectDialogState::default();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

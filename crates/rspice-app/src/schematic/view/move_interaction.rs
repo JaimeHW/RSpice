@@ -24,7 +24,7 @@ pub(super) fn handle_armed_move_selection(
 ) {
     if state.application_modal_open()
         || state.model.schematic.session.editor.tool != Tool::MoveSelection
-        || !state.dialogs.move_selection.armed
+        || !state.design.move_selection.armed
     {
         return;
     }
@@ -40,7 +40,7 @@ pub(super) fn handle_armed_move_selection(
         symbol_context,
         MoveInputView {
             design: super::schematic_design_view(state),
-            canvas: &state.dialogs.move_selection.canvas,
+            canvas: &state.design.move_selection.canvas,
             selection: &state.model.schematic.session.editor.selection,
             filter: state.ui.schematic_selection_filter,
             snap_engine: &state.model.schematic.session.editor.snap_engine,
@@ -56,14 +56,14 @@ fn capture(state: &AppState, transition: TransformInputTransition) -> MoveInputR
     MoveInputRequest {
         source: editor_request_source(state),
         selection: state.model.schematic.session.editor.selection.clone(),
-        generation: state.dialogs.move_selection.generation,
-        mode: state.dialogs.move_selection.mode,
+        generation: state.design.move_selection.generation,
+        mode: state.design.move_selection.mode,
         transition,
     }
 }
 
 fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveInputRequest) {
-    let draft = &state.dialogs.move_selection;
+    let draft = &state.design.move_selection;
     if request.source != editor_request_source(state)
         || request.selection != state.model.schematic.session.editor.selection
         || request.generation != draft.generation
@@ -76,7 +76,7 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: MoveIn
     {
         return;
     }
-    state.dialogs.move_selection.canvas = request.transition.next;
+    state.design.move_selection.canvas = request.transition.next;
     if request.transition.commit {
         commit_armed_move_selection(state, symbols);
     }
@@ -91,8 +91,8 @@ pub(super) fn commit_armed_move_selection(
         cancel_armed_move_selection(state);
         return;
     }
-    let delta = state.dialogs.move_selection.canvas.preview_delta;
-    let mode = state.dialogs.move_selection.mode;
+    let delta = state.design.move_selection.canvas.preview_delta;
+    let mode = state.design.move_selection.mode;
     if delta == Point::origin() {
         state.prompt("Nothing moved.");
         cancel_armed_move_selection(state);
@@ -148,9 +148,9 @@ pub(super) fn commit_armed_move_selection(
         }
         Err(error) => {
             state.model.schematic.cancel_operation();
-            state.dialogs.move_selection.canvas.preview_error = Some(error.to_string());
-            state.dialogs.move_selection.canvas.anchor = None;
-            state.dialogs.move_selection.canvas.preview_delta = Point::origin();
+            state.design.move_selection.canvas.preview_error = Some(error.to_string());
+            state.design.move_selection.canvas.anchor = None;
+            state.design.move_selection.canvas.preview_delta = Point::origin();
             state.prompt(format!("Move not committed: {error}"));
         }
     }
@@ -162,9 +162,9 @@ mod tests {
     use crate::schematic::view::schematic_symbol_context;
     use crate::state::{Component, ComponentType, Wire};
     fn arm_test_move(state: &mut AppState, mode: crate::state::MoveSelectionMode) {
-        state.dialogs.move_selection.mode = mode;
+        state.design.move_selection.mode = mode;
         crate::workbench::app::arm_move_selection(state);
-        assert!(state.dialogs.move_selection.armed);
+        assert!(state.design.move_selection.armed);
     }
     #[test]
     fn armed_move_commits_once_syncs_workspace_and_retains_selection() {
@@ -191,7 +191,7 @@ mod tests {
             .select_only_component(1);
         state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
-        state.dialogs.move_selection.canvas.preview_delta = Point::origin();
+        state.design.move_selection.canvas.preview_delta = Point::origin();
         let symbols = schematic_symbol_context(&state);
 
         let ctx = egui::Context::default();
@@ -264,7 +264,7 @@ mod tests {
                 .has_component(1)
         );
         assert_eq!(state.model.schematic.session.editor.tool, Tool::Select);
-        assert!(!state.dialogs.move_selection.armed);
+        assert!(!state.design.move_selection.armed);
         assert_eq!(
             state
                 .model
@@ -314,7 +314,7 @@ mod tests {
             .select_only_component(1);
         state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
-        state.dialogs.move_selection.canvas.preview_delta = Point::new(0, 10);
+        state.design.move_selection.canvas.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_move_selection(&mut state, &symbols);
@@ -361,7 +361,7 @@ mod tests {
             .select_only_component(2);
         state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
-        state.dialogs.move_selection.canvas.preview_delta = Point::new(30, 20);
+        state.design.move_selection.canvas.preview_delta = Point::new(30, 20);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_move_selection(&mut state, &symbols);
@@ -394,7 +394,7 @@ mod tests {
             .select_only_component(2);
         state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
-        state.dialogs.move_selection.canvas.preview_delta = Point::new(30, 20);
+        state.design.move_selection.canvas.preview_delta = Point::new(30, 20);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_move_selection(&mut state, &symbols);
@@ -465,7 +465,7 @@ mod tests {
             .select_only_component(1);
         state.model.schematic.init_undo_history();
         arm_test_move(&mut state, crate::state::MoveSelectionMode::Shove);
-        state.dialogs.move_selection.canvas.preview_delta = Point::new(40, 10);
+        state.design.move_selection.canvas.preview_delta = Point::new(40, 10);
 
         crate::workbench::app::cancel_armed_move_selection(&mut state);
 
@@ -512,7 +512,7 @@ mod tests {
                 .select_only_component(id);
             state.model.schematic.clear_undo_history();
             arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
-            let expected = state.dialogs.move_selection.canvas.clone();
+            let expected = state.design.move_selection.canvas.clone();
             let mut next = expected.clone();
             next.preview_delta = Point::new(100, 0);
             let request = capture(
@@ -526,11 +526,9 @@ mod tests {
             match change {
                 "document" => state.model.active_schematic_epoch += 1,
                 "selection" => state.model.schematic.session.editor.selection.clear(),
-                "mode" => {
-                    state.dialogs.move_selection.mode = crate::state::MoveSelectionMode::Shove
-                }
-                "draft" => state.dialogs.move_selection.canvas.anchor = Some(Point::new(10, 0)),
-                "modal" => state.dialogs.preferences_open = true,
+                "mode" => state.design.move_selection.mode = crate::state::MoveSelectionMode::Shove,
+                "draft" => state.design.move_selection.canvas.anchor = Some(Point::new(10, 0)),
+                "modal" => state.settings.preferences_open = true,
                 "read-only" => state.model.schematic.session.read_only = true,
                 "tool" => state.model.schematic.arm_tool(Tool::Select),
                 "replacement" => {
@@ -538,15 +536,15 @@ mod tests {
                     arm_test_move(&mut state, crate::state::MoveSelectionMode::Connected);
                     assert_eq!(
                         request.transition.expected,
-                        state.dialogs.move_selection.canvas
+                        state.design.move_selection.canvas
                     );
                     assert_eq!(request.source, editor_request_source(&state));
-                    assert_ne!(request.generation, state.dialogs.move_selection.generation);
+                    assert_ne!(request.generation, state.design.move_selection.generation);
                 }
                 "none" => {}
                 _ => unreachable!(),
             }
-            let canvas = state.dialogs.move_selection.canvas.clone();
+            let canvas = state.design.move_selection.canvas.clone();
             let symbols = schematic_symbol_context(&state);
             apply(&mut state, &symbols, request);
             if change == "none" {
@@ -565,8 +563,8 @@ mod tests {
                     "{change}"
                 );
                 assert!(!state.model.schematic.can_undo(), "{change}");
-                assert_eq!(state.dialogs.move_selection.canvas, canvas, "{change}");
-                assert!(state.dialogs.move_selection.armed, "{change}");
+                assert_eq!(state.design.move_selection.canvas, canvas, "{change}");
+                assert!(state.design.move_selection.armed, "{change}");
             }
         }
     }

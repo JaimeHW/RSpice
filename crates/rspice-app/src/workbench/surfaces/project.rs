@@ -1284,7 +1284,7 @@ mod tests {
         app.state.workbench.project_checkpoint_selection = catalog
             .first()
             .map(|checkpoint| checkpoint.checkpoint_id().to_string());
-        let recovery = &mut app.state.dialogs.project_checkpoint_recovery;
+        let recovery = &mut app.state.project.project_checkpoint_recovery;
         recovery.project_id = Some(project_id);
         recovery.initialized = true;
         recovery.checkpoints = catalog;

@@ -1128,13 +1128,13 @@ mod tests {
                 viewport,
             };
             studio.settle();
-            studio.app.state.dialogs.hardcopy.section = HardcopySection::Output;
-            studio.app.state.dialogs.hardcopy.region = HardcopyRegion::Setup;
-            studio.app.state.dialogs.hardcopy.format = OutputFormat::Png { dpi: 150 };
-            studio.app.state.dialogs.hardcopy.raster_dpi_draft = "150".to_owned();
-            studio.app.state.dialogs.hardcopy.embed_fonts = false;
-            studio.app.state.dialogs.hardcopy.searchable_text = false;
-            studio.app.state.dialogs.hardcopy.refresh_preview();
+            studio.app.state.hardcopy.hardcopy.section = HardcopySection::Output;
+            studio.app.state.hardcopy.hardcopy.region = HardcopyRegion::Setup;
+            studio.app.state.hardcopy.hardcopy.format = OutputFormat::Png { dpi: 150 };
+            studio.app.state.hardcopy.hardcopy.raster_dpi_draft = "150".to_owned();
+            studio.app.state.hardcopy.hardcopy.embed_fonts = false;
+            studio.app.state.hardcopy.hardcopy.searchable_text = false;
+            studio.app.state.hardcopy.hardcopy.refresh_preview();
             studio.settle();
             studio
         }
@@ -1177,7 +1177,7 @@ mod tests {
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
             loop {
                 let _ = self.pass(Vec::new());
-                if self.app.state.dialogs.hardcopy.preview.is_some() {
+                if self.app.state.hardcopy.hardcopy.preview.is_some() {
                     let _ = self.pass(Vec::new());
                     return self.pass(Vec::new());
                 }
@@ -1224,7 +1224,7 @@ mod tests {
                 egui::Event::Text(text.to_owned()),
             ]);
             assert_eq!(
-                self.app.state.dialogs.hardcopy.raster_dpi_draft, text,
+                self.app.state.hardcopy.hardcopy.raster_dpi_draft, text,
                 "the field did not take the typed resolution"
             );
         }
@@ -1238,11 +1238,11 @@ mod tests {
                 self.exports.load(Ordering::SeqCst),
                 1,
                 "the export never reached its destination: {:?}",
-                self.app.state.dialogs.hardcopy.error
+                self.app.state.hardcopy.hardcopy.error
             );
             self.app
                 .state
-                .dialogs
+                .hardcopy
                 .hardcopy
                 .preview_plan
                 .as_ref()
@@ -1317,7 +1317,7 @@ mod tests {
         let _ = studio.pass(click(button.center()));
 
         assert_eq!(studio.published_resolution(), Some(300));
-        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+        assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "300");
     }
 
     /// The same gesture spread over two passes, which is what a click looks
@@ -1331,7 +1331,7 @@ mod tests {
         let _ = studio.pass(release(button.center()));
 
         assert_eq!(studio.published_resolution(), Some(300));
-        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+        assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "300");
     }
 
     /// The rail replaces the section in the pass it is clicked, so the field is
@@ -1345,7 +1345,7 @@ mod tests {
         let rail = studio.control(Role::Button, "Identity");
         let _ = studio.pass(click(rail.center()));
         assert_eq!(
-            studio.app.state.dialogs.hardcopy.section,
+            studio.app.state.hardcopy.hardcopy.section,
             HardcopySection::Identity,
             "the rail did not leave the output section"
         );
@@ -1354,7 +1354,7 @@ mod tests {
         let _ = studio.pass(click(button.center()));
 
         assert_eq!(studio.published_resolution(), Some(300));
-        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+        assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "300");
     }
 
     /// Below `STUDIO_SPLIT_WIDTH` the surface shows the setup or the page and
@@ -1369,7 +1369,7 @@ mod tests {
         let preview = studio.control(Role::Button, "Preview");
         let _ = studio.pass(click(preview.center()));
         assert_eq!(
-            studio.app.state.dialogs.hardcopy.region,
+            studio.app.state.hardcopy.hardcopy.region,
             HardcopyRegion::Preview,
             "the switch did not leave the setup region"
         );
@@ -1378,7 +1378,7 @@ mod tests {
         let _ = studio.pass(click(button.center()));
 
         assert_eq!(studio.published_resolution(), Some(300));
-        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "300");
+        assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "300");
     }
 
     /// Settling belongs on the path every pass takes, not on the surfaces a
@@ -1399,13 +1399,13 @@ mod tests {
             let composition = studio.viewport;
             for section in HardcopySection::ALL {
                 for region in [HardcopyRegion::Setup, HardcopyRegion::Preview] {
-                    studio.app.state.dialogs.hardcopy.format = OutputFormat::Png { dpi: 150 };
-                    studio.app.state.dialogs.hardcopy.raster_dpi_draft = "300".to_owned();
-                    studio.app.state.dialogs.hardcopy.section = section;
-                    studio.app.state.dialogs.hardcopy.region = region;
+                    studio.app.state.hardcopy.hardcopy.format = OutputFormat::Png { dpi: 150 };
+                    studio.app.state.hardcopy.hardcopy.raster_dpi_draft = "300".to_owned();
+                    studio.app.state.hardcopy.hardcopy.section = section;
+                    studio.app.state.hardcopy.hardcopy.region = region;
                     let _ = studio.pass(Vec::new());
                     assert_eq!(
-                        studio.app.state.dialogs.hardcopy.format.raster_dpi(),
+                        studio.app.state.hardcopy.hardcopy.format.raster_dpi(),
                         Some(300),
                         "{composition:?} {section:?} {region:?} left a typed resolution uncommitted"
                     );
@@ -1418,13 +1418,13 @@ mod tests {
     /// ceiling well under both the contract's range and the default a raster
     /// target would otherwise commit.
     fn ceiling_bound_media(studio: &mut Studio) -> u16 {
-        studio.app.state.dialogs.hardcopy.paper = PaperDraft::Standard(StandardPaper::A0);
-        studio.app.state.dialogs.hardcopy.refresh_preview();
+        studio.app.state.hardcopy.hardcopy.paper = PaperDraft::Standard(StandardPaper::A0);
+        studio.app.state.hardcopy.hardcopy.refresh_preview();
         let _ = studio.pass(Vec::new());
         let plan = studio
             .app
             .state
-            .dialogs
+            .hardcopy
             .hardcopy
             .preview_plan
             .clone()
@@ -1448,7 +1448,7 @@ mod tests {
     fn the_target_list_offers_no_resolution_the_page_it_is_on_refuses() {
         let mut studio = Studio::wide();
         let ceiling = ceiling_bound_media(&mut studio);
-        let draft = &studio.app.state.dialogs.hardcopy;
+        let draft = &studio.app.state.hardcopy.hardcopy;
 
         let png = bounded_raster(
             draft,
@@ -1486,14 +1486,14 @@ mod tests {
     #[test]
     fn a_page_that_lowers_the_ceiling_lowers_the_resolution_committed_with_it() {
         let mut studio = Studio::wide();
-        studio.app.state.dialogs.hardcopy.format = OutputFormat::Png {
+        studio.app.state.hardcopy.hardcopy.format = OutputFormat::Png {
             dpi: DEFAULT_RASTER_DPI,
         };
-        studio.app.state.dialogs.hardcopy.raster_dpi_draft = DEFAULT_RASTER_DPI.to_string();
-        studio.app.state.dialogs.hardcopy.refresh_preview();
+        studio.app.state.hardcopy.hardcopy.raster_dpi_draft = DEFAULT_RASTER_DPI.to_string();
+        studio.app.state.hardcopy.hardcopy.refresh_preview();
         let _ = studio.pass(Vec::new());
         assert_eq!(
-            studio.app.state.dialogs.hardcopy.format,
+            studio.app.state.hardcopy.hardcopy.format,
             OutputFormat::Png {
                 dpi: DEFAULT_RASTER_DPI
             },
@@ -1502,12 +1502,12 @@ mod tests {
 
         let ceiling = ceiling_bound_media(&mut studio);
         assert_eq!(
-            studio.app.state.dialogs.hardcopy.format,
+            studio.app.state.hardcopy.hardcopy.format,
             OutputFormat::Png { dpi: ceiling },
             "the wider media left a resolution behind that this host cannot raster"
         );
         assert_eq!(
-            output_summary(studio.app.state.dialogs.hardcopy.format),
+            output_summary(studio.app.state.hardcopy.hardcopy.format),
             format!("PNG · {ceiling} dpi")
         );
 
@@ -1521,13 +1521,13 @@ mod tests {
     #[test]
     fn a_field_nobody_is_editing_states_the_resolution_in_force() {
         let mut studio = Studio::wide();
-        studio.app.state.dialogs.hardcopy.raster_dpi_draft = "3oo".to_owned();
-        studio.app.state.dialogs.hardcopy.section = HardcopySection::Page;
+        studio.app.state.hardcopy.hardcopy.raster_dpi_draft = "3oo".to_owned();
+        studio.app.state.hardcopy.hardcopy.section = HardcopySection::Page;
         let _ = studio.pass(Vec::new());
 
-        assert_eq!(studio.app.state.dialogs.hardcopy.raster_dpi_draft, "150");
+        assert_eq!(studio.app.state.hardcopy.hardcopy.raster_dpi_draft, "150");
         assert_eq!(
-            studio.app.state.dialogs.hardcopy.format,
+            studio.app.state.hardcopy.hardcopy.format,
             OutputFormat::Png { dpi: 150 }
         );
     }
@@ -1539,13 +1539,13 @@ mod tests {
         let mut studio = Studio::wide();
         studio.type_resolution("1200");
         assert_eq!(
-            studio.app.state.dialogs.hardcopy.format,
+            studio.app.state.hardcopy.hardcopy.format,
             OutputFormat::Png { dpi: 150 },
             "the field committed while it was still being typed into"
         );
         let _ = studio.pass(Vec::new());
         assert_eq!(
-            studio.app.state.dialogs.hardcopy.format,
+            studio.app.state.hardcopy.hardcopy.format,
             OutputFormat::Png { dpi: 150 },
             "the field committed while it still held the caret"
         );

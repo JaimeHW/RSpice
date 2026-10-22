@@ -90,15 +90,15 @@ pub(crate) fn arm_stretch_selection(state: &mut AppState) {
     let Some(target) = state.model.schematic.default_stretch_target() else {
         return;
     };
-    if state.dialogs.move_selection.armed {
+    if state.design.move_selection.armed {
         crate::workbench::app::cancel_armed_move_selection(state);
     }
-    if state.dialogs.array_selection.armed {
+    if state.design.array_selection.armed {
         crate::workbench::app::cancel_armed_array_selection(state);
     }
     let policy = policy_for_sheet(state);
     state
-        .dialogs
+        .design
         .stretch_selection
         .arm(SchematicEditAuthority::capture(state), target, policy);
     state.model.schematic.arm_tool(Tool::StretchSelection);
@@ -108,7 +108,7 @@ fn validate_draft(state: &AppState) -> Result<(), String> {
     if state.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    let draft = &state.dialogs.stretch_selection;
+    let draft = &state.design.stretch_selection;
     let Some(authority) = draft.authority.as_ref() else {
         return Err("Stretch is not armed.".to_owned());
     };
@@ -125,7 +125,7 @@ fn validate_draft(state: &AppState) -> Result<(), String> {
 }
 
 pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), String> {
-    let draft = &state.dialogs.stretch_selection;
+    let draft = &state.design.stretch_selection;
     if !draft.armed || state.model.schematic.session.editor.tool != Tool::StretchSelection {
         return Err("Stretch is not armed.".to_owned());
     }
@@ -133,7 +133,7 @@ pub(crate) fn armed_stretch_selection_authority(state: &AppState) -> Result<(), 
 }
 
 pub(crate) fn cancel_armed_stretch_selection(state: &mut AppState) {
-    state.dialogs.stretch_selection.close();
+    state.design.stretch_selection.close();
     if state.model.schematic.session.editor.tool == Tool::StretchSelection {
         state.model.schematic.cancel_tool();
     }
@@ -169,9 +169,9 @@ mod tests {
 
         arm_stretch_selection(&mut state);
 
-        let draft = &state.dialogs.stretch_selection;
+        let draft = &state.design.stretch_selection;
         assert!(draft.armed);
-        assert!(!state.dialogs.application_modal_open());
+        assert!(!state.dialog_modal_open());
         assert_eq!(draft.policy, StretchOrthogonalPolicy::PreserveOrthogonal);
         assert_eq!(
             draft.canvas.target,
@@ -197,7 +197,7 @@ mod tests {
         arm_stretch_selection(&mut state);
 
         assert_eq!(
-            state.dialogs.stretch_selection.policy,
+            state.design.stretch_selection.policy,
             StretchOrthogonalPolicy::AllowDiagonal
         );
     }
@@ -206,7 +206,7 @@ mod tests {
     fn nothing_stretchable_refuses_instead_of_arming() {
         let mut state = AppState::default();
         arm_stretch_selection(&mut state);
-        assert!(!state.dialogs.stretch_selection.armed);
+        assert!(!state.design.stretch_selection.armed);
         assert_ne!(
             state.model.schematic.session.editor.tool,
             Tool::StretchSelection

@@ -278,7 +278,7 @@ pub(crate) fn open_veriloga_build_settings(app: &mut RSpiceApp) -> Result<(), St
     if !entry_module.is_empty() && !modules.contains(&entry_module) {
         modules.insert(0, entry_module.clone());
     }
-    app.state.dialogs.veriloga_build_settings = Some(VerilogABuildSettingsDraft {
+    app.state.code.veriloga_build_settings = Some(VerilogABuildSettingsDraft {
         modules,
         entry_module,
         generated_rust: profile.targets.generated_rust,
@@ -320,7 +320,7 @@ pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, 
     }
     let draft = app
         .state
-        .dialogs
+        .code
         .veriloga_build_settings
         .clone()
         .ok_or_else(|| "Build settings is not open.".to_owned())?;
@@ -347,7 +347,7 @@ pub(crate) fn save_veriloga_build_settings(app: &mut RSpiceApp) -> Result<bool, 
             after_revision,
             binding,
         });
-    app.state.dialogs.veriloga_build_settings = None;
+    app.state.code.veriloga_build_settings = None;
     Ok(changed)
 }
 
@@ -456,7 +456,7 @@ fn refusal_line(rows: &mut FormRows<'_>, field: Id, refusal: Option<&String>) {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_veriloga_build_settings(&mut self, ctx: &Context) {
-        let Some(mut draft) = self.state.dialogs.veriloga_build_settings.take() else {
+        let Some(mut draft) = self.state.code.veriloga_build_settings.take() else {
             return;
         };
         // The form belongs to one source. If that source is gone, so is the
@@ -509,7 +509,7 @@ impl RSpiceApp {
         }
         match choice {
             DialogChoice::Primary | DialogChoice::Secondary if can_save => {
-                self.state.dialogs.veriloga_build_settings = Some(draft);
+                self.state.code.veriloga_build_settings = Some(draft);
                 match save_veriloga_build_settings(self) {
                     Ok(_) if choice == DialogChoice::Primary => {
                         if let Err(error) = code_workspace::request_veriloga_compile(self) {
@@ -518,7 +518,7 @@ impl RSpiceApp {
                     }
                     Ok(_) => {}
                     Err(error) => {
-                        if let Some(draft) = self.state.dialogs.veriloga_build_settings.as_mut() {
+                        if let Some(draft) = self.state.code.veriloga_build_settings.as_mut() {
                             draft.error = Some(error);
                         }
                     }
@@ -526,7 +526,7 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {}
             DialogChoice::None | DialogChoice::Primary | DialogChoice::Secondary => {
-                self.state.dialogs.veriloga_build_settings = Some(draft);
+                self.state.code.veriloga_build_settings = Some(draft);
             }
         }
     }

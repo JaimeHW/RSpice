@@ -312,7 +312,7 @@ impl PlanRemovalTarget {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_plan_removal_review_dialog(&mut self, ctx: &Context) {
-        let review = &self.state.dialogs.plan_removal_review;
+        let review = &self.state.simulate.plan_removal_review;
         let Some(target) = review.target else {
             return;
         };
@@ -364,10 +364,10 @@ impl RSpiceApp {
 
         match choice {
             DialogChoice::Primary => {
-                self.state.dialogs.plan_removal_review.confirmed = true;
+                self.state.simulate.plan_removal_review.confirmed = true;
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.plan_removal_review.close();
+                self.state.simulate.plan_removal_review.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -387,7 +387,7 @@ impl RSpiceApp {
     /// destroys anything here: the only thing to do about a blocked removal is
     /// to go and look at what is blocking it.
     pub(in crate::workbench) fn process_plan_removal_refusal_dialog(&mut self, ctx: &Context) {
-        let refusal = &self.state.dialogs.plan_removal_refusal;
+        let refusal = &self.state.simulate.plan_removal_refusal;
         if refusal.analysis.is_none() {
             return;
         }
@@ -401,7 +401,7 @@ impl RSpiceApp {
             // A refusal with nothing to name is not a refusal anyone can act
             // on. Nothing opens one, and standing one open would be a modal
             // whose only statement is that something unnamed is in the way.
-            self.state.dialogs.plan_removal_refusal.close();
+            self.state.simulate.plan_removal_refusal.close();
             return;
         }
 
@@ -437,10 +437,10 @@ impl RSpiceApp {
             // applied — this module renders and records, and navigates nothing
             // itself.
             DialogChoice::Primary => {
-                self.state.dialogs.plan_removal_refusal.reveal = true;
+                self.state.simulate.plan_removal_refusal.reveal = true;
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.plan_removal_refusal.close();
+                self.state.simulate.plan_removal_refusal.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

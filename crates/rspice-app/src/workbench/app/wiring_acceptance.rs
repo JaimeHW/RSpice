@@ -191,10 +191,10 @@ impl Bench {
     /// press Enter.
     pub(super) fn move_selection(&mut self, delta: Point, mode: MoveSelectionMode) {
         let state = &mut self.app.state;
-        state.dialogs.move_selection.mode = mode;
+        state.design.move_selection.mode = mode;
         super::arm_move_selection(state);
-        if state.dialogs.move_selection.armed {
-            state.dialogs.move_selection.canvas.preview_delta = delta;
+        if state.design.move_selection.armed {
+            state.design.move_selection.canvas.preview_delta = delta;
             gesture_commits::commit_move(state);
         }
         self.end_frame();
@@ -205,8 +205,8 @@ impl Bench {
     pub(super) fn stretch_selection(&mut self, delta: Point) {
         let state = &mut self.app.state;
         super::arm_stretch_selection(state);
-        if state.dialogs.stretch_selection.armed {
-            state.dialogs.stretch_selection.canvas.gesture.preview_delta = delta;
+        if state.design.stretch_selection.armed {
+            state.design.stretch_selection.canvas.gesture.preview_delta = delta;
             gesture_commits::commit_stretch(state);
         }
         self.end_frame();

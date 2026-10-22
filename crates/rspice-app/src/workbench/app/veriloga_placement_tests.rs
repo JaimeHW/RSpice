@@ -40,7 +40,7 @@ fn device_created_from_a_schematic() -> (RSpiceApp, CellViewRef, CellViewRef) {
         "the form is opened from a schematic"
     );
     crate::workbench::app::open_new_veriloga_device_form(&mut app.state);
-    let form = &mut app.state.dialogs.new_veriloga_device;
+    let form = &mut app.state.code.new_veriloga_device;
     form.library = LIBRARY.to_owned();
     form.name = "gain".to_owned();
     let reference = app
@@ -218,7 +218,7 @@ fn render_the_new_device_form_and_the_placement_offer_for_review() {
             app.state.workbench.activate(Workspace::Design);
             app.state.workbench.coarse_pointer = size.x < 500.0;
             crate::workbench::app::open_new_veriloga_device_form(&mut app.state);
-            let form = &mut app.state.dialogs.new_veriloga_device;
+            let form = &mut app.state.code.new_veriloga_device;
             form.library = LIBRARY.to_owned();
             form.name = cell.to_owned();
             form.ports = ports.to_owned();

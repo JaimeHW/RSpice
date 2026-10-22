@@ -22,10 +22,10 @@ const DISCARD_DETAIL: &str =
 
 impl RSpiceApp {
     pub(super) fn render_symbol_import_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.symbol_import.open {
+        if !self.state.design.symbol_import.open {
             return;
         }
-        suggest_target_name(&mut self.state.dialogs.symbol_import);
+        suggest_target_name(&mut self.state.design.symbol_import);
         let binding_options = bound_symbol_references(&self.state);
         let writable_libraries = self
             .state
@@ -36,21 +36,21 @@ impl RSpiceApp {
             .filter(|library| !library.read_only)
             .map(|library| library.name.clone())
             .collect::<Vec<_>>();
-        if self.state.dialogs.symbol_import.binding_source.is_none() {
-            self.state.dialogs.symbol_import.binding_source = binding_options.first().cloned();
+        if self.state.design.symbol_import.binding_source.is_none() {
+            self.state.design.symbol_import.binding_source = binding_options.first().cloned();
         }
         let preview = import_candidate(&self.state).map_err(|error| error.to_string());
-        let discard_confirm = self.state.dialogs.symbol_import.discard_confirm;
+        let discard_confirm = self.state.design.symbol_import.discard_confirm;
         let validation_error = self
             .state
-            .dialogs
+            .design
             .symbol_import
             .validation_error
             .as_deref()
-            .or(self.state.dialogs.symbol_import.source_error.as_deref())
+            .or(self.state.design.symbol_import.source_error.as_deref())
             .map(str::to_owned)
             .or_else(|| {
-                (!self.state.dialogs.symbol_import.source_text.is_empty())
+                (!self.state.design.symbol_import.source_text.is_empty())
                     .then(|| preview.as_ref().err().cloned())
                     .flatten()
             });
@@ -81,7 +81,7 @@ impl RSpiceApp {
         let mut response = dialog.show_transaction(ctx, |ui| {
             let first = import_body(
                 ui,
-                &mut self.state.dialogs.symbol_import,
+                &mut self.state.design.symbol_import,
                 &writable_libraries,
                 &binding_options,
                 preview.as_ref().ok(),
@@ -91,23 +91,23 @@ impl RSpiceApp {
             Some(first)
         });
         if browse {
-            source_picker::pick_symbol_source(&mut self.state.dialogs.symbol_import);
+            source_picker::pick_symbol_source(&mut self.state.design.symbol_import);
         }
         if changed {
-            self.state.dialogs.symbol_import.dirty = true;
-            self.state.dialogs.symbol_import.discard_confirm = false;
-            self.state.dialogs.symbol_import.validation_error = None;
+            self.state.design.symbol_import.dirty = true;
+            self.state.design.symbol_import.discard_confirm = false;
+            self.state.design.symbol_import.validation_error = None;
         }
         match response.choice {
             DialogChoice::Primary => self.commit_symbol_import(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                if self.state.dialogs.symbol_import.dirty
-                    && !self.state.dialogs.symbol_import.discard_confirm
+                if self.state.design.symbol_import.dirty
+                    && !self.state.design.symbol_import.discard_confirm
                 {
-                    self.state.dialogs.symbol_import.discard_confirm = true;
+                    self.state.design.symbol_import.discard_confirm = true;
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 } else {
-                    self.state.dialogs.symbol_import.close_and_discard();
+                    self.state.design.symbol_import.close_and_discard();
                 }
             }
             DialogChoice::Secondary | DialogChoice::None => {}
@@ -115,18 +115,18 @@ impl RSpiceApp {
     }
 
     fn commit_symbol_import(&mut self) {
-        self.state.dialogs.symbol_import.validation_error = None;
+        self.state.design.symbol_import.validation_error = None;
         let imported = match import_candidate(&self.state) {
             Ok(imported) => imported,
             Err(error) => {
-                self.state.dialogs.symbol_import.validation_error = Some(error.to_string());
+                self.state.design.symbol_import.validation_error = Some(error.to_string());
                 return;
             }
         };
-        let library_name = self.state.dialogs.symbol_import.target_library.clone();
+        let library_name = self.state.design.symbol_import.target_library.clone();
         let cell_name = self
             .state
-            .dialogs
+            .design
             .symbol_import
             .target_name
             .trim()
@@ -174,9 +174,9 @@ impl RSpiceApp {
                         format!("Imported symbol {cell_name} from {format}."),
                     );
                 }
-                self.state.dialogs.symbol_import.close_and_discard();
+                self.state.design.symbol_import.close_and_discard();
             }
-            Err(error) => self.state.dialogs.symbol_import.validation_error = Some(error),
+            Err(error) => self.state.design.symbol_import.validation_error = Some(error),
         }
     }
 }
@@ -355,7 +355,7 @@ fn check_table(ui: &mut Ui, preview: Option<&SymbolDefinitionImport>) {
 fn import_candidate(
     state: &crate::workbench::app_state::AppState,
 ) -> Result<SymbolDefinitionImport, String> {
-    let draft = &state.dialogs.symbol_import;
+    let draft = &state.design.symbol_import;
     if draft.source_text.is_empty() {
         return Err("Choose a symbol definition source.".to_owned());
     }
@@ -538,14 +538,14 @@ mod tests {
     fn review_only_svg_import_keeps_real_geometry_without_an_executable_contract() {
         let mut app = crate::workbench::app_state::AppState::default();
         app.open_project_session();
-        app.dialogs.symbol_import.source_name = "review.svg".to_owned();
-        app.dialogs.symbol_import.source_text =
+        app.design.symbol_import.source_name = "review.svg".to_owned();
+        app.design.symbol_import.source_text =
             r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="40" height="20"/></svg>"#
                 .to_owned();
-        app.dialogs.symbol_import.target_library =
+        app.design.symbol_import.target_library =
             app.model.workspace.content.active_view.library.clone();
-        app.dialogs.symbol_import.target_name = "review_graphic".to_owned();
-        app.dialogs.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
+        app.design.symbol_import.target_name = "review_graphic".to_owned();
+        app.design.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
 
         let imported = import_candidate(&app).expect("review-only SVG import");
 
@@ -574,12 +574,12 @@ mod tests {
         let mut app = crate::workbench::app_state::AppState::default();
         app.open_project_session();
         let library_name = app.model.workspace.content.active_view.library.clone();
-        app.dialogs.symbol_import.source_name = "review.svg".to_owned();
-        app.dialogs.symbol_import.source_text =
+        app.design.symbol_import.source_name = "review.svg".to_owned();
+        app.design.symbol_import.source_text =
             r#"<svg><line x1="0" y1="0" x2="10" y2="10"/></svg>"#.to_owned();
-        app.dialogs.symbol_import.target_library = library_name.clone();
-        app.dialogs.symbol_import.target_name = "existing".to_owned();
-        app.dialogs.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
+        app.design.symbol_import.target_library = library_name.clone();
+        app.design.symbol_import.target_name = "existing".to_owned();
+        app.design.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
         app.model
             .library_manager
             .get_library_mut(&library_name)

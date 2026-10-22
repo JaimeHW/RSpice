@@ -519,14 +519,14 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
         )
         .expect("active schematic resolves");
     app.state
-        .dialogs
+        .hardcopy
         .hardcopy
         .open_resolved(HardcopyWorkflow::Export, resolved.clone(), None)
         .expect("dialog opens");
 
     let preview = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .preview_plan
         .as_ref()
@@ -535,7 +535,7 @@ fn publication_reuses_only_the_exact_sealed_preview_plan() {
     let publication = current_plan(&app, &resolved).expect("unchanged plan");
     assert!(std::sync::Arc::ptr_eq(&preview, &publication));
 
-    app.state.dialogs.hardcopy.margin_left = "0.5".to_owned();
+    app.state.hardcopy.hardcopy.margin_left = "0.5".to_owned();
     assert!(
         current_plan(&app, &resolved)
             .expect_err("unpreviewed settings must fail closed")
@@ -568,13 +568,13 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         )
         .expect("active schematic resolves");
     app.state
-        .dialogs
+        .hardcopy
         .hardcopy
         .open_resolved(HardcopyWorkflow::Export, resolved.clone(), None)
         .expect("dialog opens");
     let plan = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .preview_plan
         .as_ref()
@@ -582,7 +582,7 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         .clone();
     let metadata = HardcopySceneMetadata::try_new(resolved.authority().display_name(), "RSpice")
         .expect("metadata");
-    app.state.dialogs.hardcopy.preview = Some(std::sync::Arc::new(
+    app.state.hardcopy.hardcopy.preview = Some(std::sync::Arc::new(
         HardcopyRenderer::render_preview_pages_resolved(
             &plan,
             &resolved,
@@ -595,10 +595,10 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         .pop()
         .expect("one requested preview page"),
     ));
-    app.state.dialogs.hardcopy.source_resolution_generation = 19;
-    app.state.dialogs.hardcopy.printer_report =
+    app.state.hardcopy.hardcopy.source_resolution_generation = 19;
+    app.state.hardcopy.hardcopy.printer_report =
         Some(crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport::default());
-    app.state.dialogs.hardcopy.printer_job = Some(
+    app.state.hardcopy.hardcopy.printer_job = Some(
         PrinterJobSettings::try_new(
             ContentDigest::from_bytes([0x50; 32]),
             "1",
@@ -611,7 +611,7 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         )
         .unwrap(),
     );
-    app.state.dialogs.hardcopy.last_receipt = Some(
+    app.state.hardcopy.hardcopy.last_receipt = Some(
         HardcopyReceipt::record(
             &plan,
             HardcopyOutcome::Failed {
@@ -623,11 +623,11 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
         )
         .expect("receipt"),
     );
-    app.state.dialogs.hardcopy.busy = true;
-    app.state.dialogs.hardcopy.error = Some("test error".to_owned());
+    app.state.hardcopy.hardcopy.busy = true;
+    app.state.hardcopy.hardcopy.error = Some("test error".to_owned());
 
     let cloned = app.state.clone();
-    let hardcopy = &cloned.dialogs.hardcopy;
+    let hardcopy = &cloned.hardcopy.hardcopy;
     assert!(!hardcopy.open);
     assert!(hardcopy.source.is_none());
     assert!(hardcopy.resolved_document.is_none());
@@ -793,7 +793,7 @@ fn export_open_on_a_netlist_owned_project() -> RSpiceApp {
 /// after it: open, busy with its job, and holding the same sealed plan.
 #[cfg(not(target_arch = "wasm32"))]
 fn assert_export_survived(app: &RSpiceApp, plan: &std::sync::Arc<HardcopyPlan>, transaction: &str) {
-    let hardcopy = &app.state.dialogs.hardcopy;
+    let hardcopy = &app.state.hardcopy.hardcopy;
     assert!(hardcopy.open, "{transaction} closed the export");
     assert!(hardcopy.busy, "{transaction} dropped the export's job");
     assert!(
@@ -815,10 +815,10 @@ fn netlist_transactions_keep_an_export_in_flight() {
     };
 
     let mut app = export_open_on_a_netlist_owned_project();
-    app.state.dialogs.hardcopy.busy = true;
+    app.state.hardcopy.hardcopy.busy = true;
     let plan = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .preview_plan
         .clone()
@@ -862,10 +862,10 @@ fn reverting_a_document_keeps_an_export_in_flight() {
         .document_mut_for_test()
         .wires
         .push(Wire::segment(72, Point::new(0, 10), Point::new(20, 10)));
-    app.state.dialogs.hardcopy.busy = true;
+    app.state.hardcopy.hardcopy.busy = true;
     let plan = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .preview_plan
         .clone()
@@ -903,7 +903,7 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         .expect("the destination is observed");
     let source = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .resolved_document
         .clone()
@@ -914,7 +914,7 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
     let staged_mapping = stage_print_mapping_persistence(&app, plan.setup().print_mapping())
         .expect("the print mapping stages");
     let metadata = current_metadata(&app).expect("the identity block is validated");
-    app.state.dialogs.hardcopy.busy = true;
+    app.state.hardcopy.hardcopy.busy = true;
     begin_publication_authentication(
         &mut app,
         PendingNativePublication {
@@ -954,13 +954,13 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         || PUBLICATION.with(|slot| slot.borrow().is_some())
         || FINALIZATION.with(|slot| slot.borrow().is_some());
     assert!(
-        app.state.dialogs.hardcopy.open && app.state.dialogs.hardcopy.busy && job_active,
+        app.state.hardcopy.hardcopy.open && app.state.hardcopy.hardcopy.busy && job_active,
         "the frame after the live update cancelled the export: {:?}",
-        app.state.dialogs.hardcopy.error
+        app.state.hardcopy.hardcopy.error
     );
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while app.state.dialogs.hardcopy.busy {
+    while app.state.hardcopy.hardcopy.busy {
         assert!(
             std::time::Instant::now() < deadline,
             "the export never finished"
@@ -969,14 +969,14 @@ fn an_export_started_before_a_live_update_lands_its_file_and_receipt() {
         let _ = ctx.run_ui(input(), |ui| app.render_hardcopy_dialog(ui));
     }
 
-    assert_eq!(app.state.dialogs.hardcopy.error, None);
+    assert_eq!(app.state.hardcopy.hardcopy.error, None);
     assert!(
-        !app.state.dialogs.hardcopy.open,
+        !app.state.hardcopy.hardcopy.open,
         "a finished export closes its dialog"
     );
     let receipt = app
         .state
-        .dialogs
+        .hardcopy
         .hardcopy
         .last_receipt
         .as_ref()
@@ -1006,16 +1006,16 @@ fn a_hardcopy_that_fails_after_its_dialog_closed_is_reported() {
     app.state.drain_notices(&ctx);
     assert!(app.state.ui.toasts.activity().is_empty());
 
-    app.state.dialogs.hardcopy.open = true;
+    app.state.hardcopy.hardcopy.open = true;
     conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
     app.state.drain_notices(&ctx);
     assert_eq!(
-        app.state.dialogs.hardcopy.error.as_deref(),
+        app.state.hardcopy.hardcopy.error.as_deref(),
         Some("The disk is full.")
     );
     assert!(app.state.ui.toasts.activity().is_empty());
 
-    app.state.dialogs.hardcopy.close();
+    app.state.hardcopy.hardcopy.close();
     conclude_native_finalization(&mut app, Err("The disk is full.".to_owned()));
     app.state.drain_notices(&ctx);
     let activity = app.state.ui.toasts.activity();

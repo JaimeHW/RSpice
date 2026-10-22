@@ -43,7 +43,7 @@ struct ExpressionRow {
 
 /// Show the tool when it is open.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
-    if !app.state.dialogs.expression_diagnostics_dialog {
+    if !app.state.results.expression_diagnostics_dialog {
         return;
     }
     let t = Tokens::get(ctx);
@@ -66,7 +66,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         )
         .show(ctx, |ui| body(ui, app));
     if !open {
-        app.state.dialogs.expression_diagnostics_dialog = false;
+        app.state.results.expression_diagnostics_dialog = false;
     }
 }
 

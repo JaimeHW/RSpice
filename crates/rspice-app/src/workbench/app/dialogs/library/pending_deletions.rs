@@ -144,14 +144,15 @@ impl AppState {
         target: LibraryDeletionTarget,
     ) -> Result<(), String> {
         validate_library_deletion_target(self, &target)?;
-        if self.pending_delete_cell.is_some() || self.pending_delete_view.is_some() {
+        if self.project.pending_delete_cell.is_some() || self.project.pending_delete_view.is_some()
+        {
             return Err("Another library deletion is already pending.".to_owned());
         }
-        self.dialogs.library_deletion_review.target = Some(target);
-        self.dialogs
+        self.project.library_deletion_review.target = Some(target);
+        self.project
             .library_deletion_review
             .expected_library_revision = self.model.library_manager.revision();
-        self.dialogs.library_deletion_review.error = None;
+        self.project.library_deletion_review.error = None;
         Ok(())
     }
 
@@ -159,7 +160,7 @@ impl AppState {
         &mut self,
         resolution: DeletionInstanceResolution,
     ) -> Result<(), String> {
-        let review = &self.dialogs.library_deletion_review;
+        let review = &self.project.library_deletion_review;
         let target = review
             .target
             .clone()
@@ -172,38 +173,39 @@ impl AppState {
         }
         let impact = library_deletion_impact(self, &target);
         can_delete(self, &target, &impact, Some(resolution))?;
-        if self.pending_delete_cell.is_some() || self.pending_delete_view.is_some() {
+        if self.project.pending_delete_cell.is_some() || self.project.pending_delete_view.is_some()
+        {
             return Err("Another library deletion is already pending.".to_owned());
         }
 
         match target {
             LibraryDeletionTarget::Cell { library, cell } => {
-                self.pending_delete_cell = Some((library, cell));
+                self.project.pending_delete_cell = Some((library, cell));
             }
             LibraryDeletionTarget::View {
                 library,
                 cell,
                 view,
             } => {
-                self.pending_delete_view = Some((library, cell, view));
+                self.project.pending_delete_view = Some((library, cell, view));
             }
         }
-        self.dialogs.library_deletion_review.close();
-        self.dialogs.library_deletion_review.resolution = Some(resolution);
+        self.project.library_deletion_review.close();
+        self.project.library_deletion_review.resolution = Some(resolution);
         Ok(())
     }
 }
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_library_deletion_review_dialog(&mut self, ctx: &Context) {
-        let Some(target) = self.state.dialogs.library_deletion_review.target.clone() else {
+        let Some(target) = self.state.project.library_deletion_review.target.clone() else {
             return;
         };
         let impact = library_deletion_impact(&self.state, &target);
         let revision_current = self.state.model.library_manager.revision()
             == self
                 .state
-                .dialogs
+                .project
                 .library_deletion_review
                 .expected_library_revision;
         let gate = can_delete(
@@ -230,7 +232,7 @@ impl RSpiceApp {
         });
         let retained_error = self
             .state
-            .dialogs
+            .project
             .library_deletion_review
             .error
             .as_deref()
@@ -332,7 +334,7 @@ impl RSpiceApp {
             DialogChoice::Primary => Some(DeletionInstanceResolution::KeepUnresolved),
             DialogChoice::Secondary => Some(DeletionInstanceResolution::RemoveInstances),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.library_deletion_review.close();
+                self.state.project.library_deletion_review.close();
                 None
             }
             DialogChoice::None => None,
@@ -340,12 +342,12 @@ impl RSpiceApp {
         if let Some(resolution) = resolution
             && let Err(error) = self.state.confirm_library_deletion_review(resolution)
         {
-            self.state.dialogs.library_deletion_review.error = Some(error);
+            self.state.project.library_deletion_review.error = Some(error);
         }
     }
 
     pub(in crate::workbench) fn process_pending_library_deletions(&mut self) {
-        if let Some((lib_name, cell_name)) = self.state.pending_delete_cell.take() {
+        if let Some((lib_name, cell_name)) = self.state.project.pending_delete_cell.take() {
             let target = LibraryDeletionTarget::Cell {
                 library: lib_name.clone(),
                 cell: cell_name.clone(),
@@ -405,7 +407,9 @@ impl RSpiceApp {
             }
         }
 
-        if let Some((lib_name, cell_name, view_name)) = self.state.pending_delete_view.take() {
+        if let Some((lib_name, cell_name, view_name)) =
+            self.state.project.pending_delete_view.take()
+        {
             let target = LibraryDeletionTarget::View {
                 library: lib_name.clone(),
                 cell: cell_name.clone(),
@@ -532,7 +536,7 @@ fn staged_resolution(
     state: &mut AppState,
     target: &LibraryDeletionTarget,
 ) -> Option<DeletionInstanceResolution> {
-    let resolution = state.dialogs.library_deletion_review.resolution.take();
+    let resolution = state.project.library_deletion_review.resolution.take();
     let impact = library_deletion_impact(state, target);
     match can_delete(state, target, &impact, resolution) {
         Ok(()) => Some(resolution.unwrap_or_default()),
@@ -1090,8 +1094,8 @@ mod tests {
         cell: &str,
         resolution: DeletionInstanceResolution,
     ) {
-        state.pending_delete_cell = Some(("user".to_owned(), cell.to_owned()));
-        state.dialogs.library_deletion_review.resolution = Some(resolution);
+        state.project.pending_delete_cell = Some(("user".to_owned(), cell.to_owned()));
+        state.project.library_deletion_review.resolution = Some(resolution);
     }
 
     fn default_project_with_active_top_instancing_amp() -> crate::workbench::app_state::AppState {
@@ -1137,24 +1141,24 @@ mod tests {
             .expect("writable exact cell should open a deletion review");
 
         assert_eq!(
-            state.dialogs.library_deletion_review.target,
+            state.project.library_deletion_review.target,
             Some(LibraryDeletionTarget::Cell {
                 library: "work".to_owned(),
                 cell: "amp".to_owned(),
             })
         );
-        assert!(state.pending_delete_cell.is_none());
-        assert!(state.pending_delete_view.is_none());
+        assert!(state.project.pending_delete_cell.is_none());
+        assert!(state.project.pending_delete_view.is_none());
 
         state
             .confirm_library_deletion_review(DeletionInstanceResolution::KeepUnresolved)
             .expect("unchanged reviewed cell should stage deletion");
 
         assert_eq!(
-            state.pending_delete_cell,
+            state.project.pending_delete_cell,
             Some(("work".to_owned(), "amp".to_owned()))
         );
-        assert!(state.dialogs.library_deletion_review.target.is_none());
+        assert!(state.project.library_deletion_review.target.is_none());
         assert!(
             state
                 .model
@@ -1182,9 +1186,9 @@ mod tests {
             .expect_err("catalog revision changes must invalidate the review");
 
         assert!(stale_error.contains("changed after this review opened"));
-        assert!(state.pending_delete_view.is_none());
-        assert!(state.dialogs.library_deletion_review.target.is_some());
-        state.dialogs.library_deletion_review.close();
+        assert!(state.project.pending_delete_view.is_none());
+        assert!(state.project.library_deletion_review.target.is_some());
+        state.project.library_deletion_review.close();
 
         state
             .model
@@ -1196,8 +1200,8 @@ mod tests {
             .open_library_cell_deletion_review("work", "amp")
             .expect_err("read-only library must fail closed");
         assert!(read_only_error.contains("read-only"));
-        assert!(state.pending_delete_cell.is_none());
-        assert!(state.dialogs.library_deletion_review.target.is_none());
+        assert!(state.project.pending_delete_cell.is_none());
+        assert!(state.project.library_deletion_review.target.is_none());
     }
 
     #[test]
@@ -1241,7 +1245,7 @@ mod tests {
         let mut app = app_with_state(state_with_open_amp_cell());
         let source_id = insert_cell_source(&mut app.state, "amp", "behavior");
         let project_revision_before = app.state.model.workspace.content.project.revision().get();
-        app.state.pending_delete_cell = Some(("work".to_string(), "amp".to_string()));
+        app.state.project.pending_delete_cell = Some(("work".to_string(), "amp".to_string()));
 
         app.process_pending_library_deletions();
 
@@ -1331,7 +1335,7 @@ mod tests {
         state.model.workspace.content.hierarchy_stack = vec![symbol_ref.clone()];
         state.model.workspace.content.hierarchy_instances.clear();
         let mut app = app_with_state(state);
-        app.state.pending_delete_view =
+        app.state.project.pending_delete_view =
             Some(("work".to_string(), "amp".to_string(), "symbol".to_string()));
 
         app.process_pending_library_deletions();
@@ -1395,7 +1399,7 @@ mod tests {
         let removed_id = insert_cell_source(&mut state, "amp", "behavior");
         let retained_id = insert_cell_source(&mut state, "keep", "behavior");
         let mut app = app_with_state(state);
-        app.state.pending_delete_view =
+        app.state.project.pending_delete_view =
             Some(("work".to_owned(), "amp".to_owned(), "behavior".to_owned()));
 
         app.process_pending_library_deletions();
@@ -1437,7 +1441,7 @@ mod tests {
         let before_catalog = state.model.workspace.content.configuration_sets.clone();
         let mut app = app_with_state(state);
 
-        app.state.pending_delete_view =
+        app.state.project.pending_delete_view =
             Some(("work".to_owned(), "amp".to_owned(), "schematic".to_owned()));
         app.process_pending_library_deletions();
         assert!(
@@ -1450,7 +1454,7 @@ mod tests {
                 .is_some()
         );
 
-        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.state.project.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
         app.process_pending_library_deletions();
         assert!(
             app.state
@@ -1470,7 +1474,7 @@ mod tests {
     fn deleting_hierarchy_ancestor_resets_invalid_breadcrumb_path() {
         let leaf = CellViewRef::new("work", "leaf", "schematic");
         let mut app = app_with_state(state_with_active_leaf_under_amp());
-        app.state.pending_delete_cell = Some(("work".to_string(), "amp".to_string()));
+        app.state.project.pending_delete_cell = Some(("work".to_string(), "amp".to_string()));
 
         app.process_pending_library_deletions();
 
@@ -1492,7 +1496,7 @@ mod tests {
     #[test]
     fn deleting_default_top_cell_does_not_recreate_deleted_design() {
         let mut app = app_with_state(crate::workbench::app_state::AppState::default());
-        app.state.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
+        app.state.project.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
 
         app.process_pending_library_deletions();
 
@@ -1521,7 +1525,7 @@ mod tests {
     #[test]
     fn deleting_default_top_schematic_view_does_not_recreate_deleted_view() {
         let mut app = app_with_state(crate::workbench::app_state::AppState::default());
-        app.state.pending_delete_view = Some((
+        app.state.project.pending_delete_view = Some((
             "user".to_string(),
             "top".to_string(),
             "schematic".to_string(),
@@ -1556,7 +1560,7 @@ mod tests {
     fn deleting_non_active_project_top_cell_repoints_root_and_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_keep_cell());
         let original_epoch = app.state.model.design_execution_epoch;
-        app.state.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
+        app.state.project.pending_delete_cell = Some(("user".to_string(), "top".to_string()));
 
         app.process_pending_library_deletions();
 
@@ -1582,7 +1586,7 @@ mod tests {
     fn deleting_non_active_project_top_schematic_repoints_root_and_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_keep_cell());
         let original_epoch = app.state.model.design_execution_epoch;
-        app.state.pending_delete_view = Some((
+        app.state.project.pending_delete_view = Some((
             "user".to_string(),
             "top".to_string(),
             "schematic".to_string(),
@@ -1634,12 +1638,12 @@ mod tests {
     fn deleting_instanced_non_active_schematic_invalidates_runs() {
         let mut app = app_with_state(default_project_with_active_top_instancing_amp());
         let original_epoch = app.state.model.design_execution_epoch;
-        app.state.pending_delete_view = Some((
+        app.state.project.pending_delete_view = Some((
             "user".to_string(),
             "amp".to_string(),
             "schematic".to_string(),
         ));
-        app.state.dialogs.library_deletion_review.resolution =
+        app.state.project.library_deletion_review.resolution =
             Some(DeletionInstanceResolution::KeepUnresolved);
 
         app.process_pending_library_deletions();
@@ -1724,7 +1728,7 @@ mod tests {
         let catalog_before_blocked_delete = state.model.workspace.content.design_management.clone();
         let mut app = app_with_state(state);
 
-        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.state.project.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
         app.process_pending_library_deletions();
 
         assert!(
@@ -1786,7 +1790,7 @@ mod tests {
             .journal()
             .len();
 
-        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.state.project.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
         app.process_pending_library_deletions();
 
         assert!(
@@ -1903,7 +1907,7 @@ mod tests {
             .len();
         let mut app = app_with_state(state);
 
-        app.state.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
+        app.state.project.pending_delete_cell = Some(("work".to_owned(), "amp".to_owned()));
         app.process_pending_library_deletions();
 
         assert!(
@@ -1953,7 +1957,7 @@ mod tests {
     #[test]
     fn delete_cell_with_instances_requires_a_resolution() {
         let mut app = app_with_state(default_project_with_active_top_instancing_amp());
-        app.state.pending_delete_cell = Some(("user".to_owned(), "amp".to_owned()));
+        app.state.project.pending_delete_cell = Some(("user".to_owned(), "amp".to_owned()));
 
         app.process_pending_library_deletions();
 

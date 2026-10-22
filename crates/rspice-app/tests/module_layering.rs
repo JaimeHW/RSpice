@@ -700,6 +700,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "chrome",
     "docks",
     "menu_bar",
+    // The state each feature owns, one slot per feature. A slot names the
+    // dialog and draft types its feature renders, so it ranks above them;
+    // the session aggregate that holds the slots reaches up to it.
+    "slots",
     "surfaces",
     "tools/notification_center",
     "tools/project_launcher",
@@ -804,9 +808,10 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("hardcopy_adapters/sources", "app_state", 2),
     ("lifecycle/project_checkpoint", "app_state", 1),
     // Upward: fields whose types live in the feature that renders them, plus
-    // gating methods that query a module above. `-> app` is `DialogState`,
-    // which still lives in the dialogs tree.
-    ("app_state", "app", 4),
+    // gating methods that query a module above. `-> slots` is the feature
+    // slots the state holds; they rank with the dialog types they name.
+    ("app_state", "app", 2),
+    ("app_state", "slots", 1),
     ("app_state", "workflows/file_workflow", 1),
     ("app_state", "workflows/project_workflow", 1),
     // What still reaches the application root rather than the session data.
@@ -837,6 +842,12 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("state", "lifecycle/window_session", 2),
     ("state", "preferences", 1),
     ("state", "simulation_analysis_tabs", 1),
+    // The framework dialogs the workbench holds: the window-session manager,
+    // the command palette, the confirmation and project-review dialogs, and
+    // pointer interaction. Their types still live with the application root
+    // and the session aggregate.
+    ("state", "app", 4),
+    ("state", "app_state", 1),
     // The interaction session reaching into the engines that hang off it.
     ("lifecycle/session", "documents/result_document", 3),
     ("lifecycle/session", "cross_probe", 1),

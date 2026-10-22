@@ -182,7 +182,7 @@ pub(crate) fn load_schematic_from_path_with_io(
     #[cfg(not(target_arch = "wasm32"))]
     match crate::workbench::lifecycle::recovery_checkpoint::autosave_restore_candidate(path) {
         Ok(Some(candidate)) => {
-            state.dialogs.pending_autosave_restore = Some(candidate);
+            state.platform.pending_autosave_restore = Some(candidate);
             return true;
         }
         Ok(None) => {}

@@ -1659,7 +1659,7 @@ pub(super) fn place_builtin_xspice(
                 .any(|port| port.maximum.is_none_or(|maximum| maximum != port.minimum)) =>
         {
             state.workbench.close_drawer();
-            state.dialogs.builtin_xspice_placement.open(
+            state.design.builtin_xspice_placement.open(
                 descriptor.stable_id,
                 descriptor.display_name,
                 vector_ports,

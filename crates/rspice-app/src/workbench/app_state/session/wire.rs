@@ -543,6 +543,11 @@ impl<'a> WorkbenchWireRef<'a> {
             notification_center_open: _,
             notification_filter: _,
             notification_unread_only: _,
+            window_session_dialog: _,
+            command_palette: _,
+            interaction: _,
+            confirmation_dialog: _,
+            project_review_dialog: _,
         } = state;
         Self {
             workspace,
@@ -820,6 +825,11 @@ impl WorkbenchWire {
             notification_center_open: _,
             notification_filter: _,
             notification_unread_only: _,
+            window_session_dialog: _,
+            command_palette: _,
+            interaction: _,
+            confirmation_dialog: _,
+            project_review_dialog: _,
         } = state;
         *workspace = self.workspace;
         *window_session = self.window_session;

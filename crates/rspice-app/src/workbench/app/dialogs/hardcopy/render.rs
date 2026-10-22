@@ -160,7 +160,7 @@ struct RenderingInputs {
 impl RSpiceApp {
     pub(in crate::workbench) fn render_hardcopy_dialog(&mut self, ctx: &Context) {
         publish::register_repaint_context(ctx);
-        if !self.state.dialogs.hardcopy.open {
+        if !self.state.hardcopy.hardcopy.open {
             publish::cancel_source_resolution();
             publish::cancel_publication();
             publish::poll_publication(self);
@@ -171,19 +171,20 @@ impl RSpiceApp {
         publish::poll_source_resolution(self);
         publish::poll_printer_catalog(self);
         publish::poll_publication(self);
-        if !self.state.dialogs.hardcopy.open {
+        if !self.state.hardcopy.hardcopy.open {
             clear_preview_textures(ctx);
             return;
         }
-        if self.state.dialogs.hardcopy.printer_discovery_busy || self.state.dialogs.hardcopy.busy {
+        if self.state.hardcopy.hardcopy.printer_discovery_busy || self.state.hardcopy.hardcopy.busy
+        {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
-        ensure_preview(ctx, &mut self.state.dialogs.hardcopy);
-        let page = self.state.dialogs.hardcopy.page;
+        ensure_preview(ctx, &mut self.state.hardcopy.hardcopy);
+        let page = self.state.hardcopy.hardcopy.page;
         let (title, primary, secondary): (&str, &str, Option<&str>) = match page {
             HardcopyDialogPage::Main => (
-                self.state.dialogs.hardcopy.workflow.title(),
-                self.state.dialogs.hardcopy.workflow.primary_label(),
+                self.state.hardcopy.hardcopy.workflow.title(),
+                self.state.hardcopy.hardcopy.workflow.primary_label(),
                 None,
             ),
             HardcopyDialogPage::PrinterProperties => {
@@ -198,9 +199,9 @@ impl RSpiceApp {
                 None,
             ),
         };
-        let error = self.state.dialogs.hardcopy.error.clone();
-        let busy = self.state.dialogs.hardcopy.busy;
-        let plan_valid = self.state.dialogs.hardcopy.preview_plan.is_some();
+        let error = self.state.hardcopy.hardcopy.error.clone();
+        let busy = self.state.hardcopy.hardcopy.busy;
+        let plan_valid = self.state.hardcopy.hardcopy.preview_plan.is_some();
         let description = match page {
             HardcopyDialogPage::Main => {
                 "Choose the source document, page, styling, and output target before previewing or publishing."
@@ -215,7 +216,7 @@ impl RSpiceApp {
                 "Map schematic layers, traces, and markers to accessible hardcopy styles."
             }
         };
-        let mut body_scroll_offset = self.state.dialogs.hardcopy.body_scroll_offset;
+        let mut body_scroll_offset = self.state.hardcopy.hardcopy.body_scroll_offset;
         let mut body_action = BodyAction::None;
         // The main page is a studio, not a form: a fixed section rail, one
         // section's fields, and a full-height preview beside them. Showing
@@ -254,7 +255,7 @@ impl RSpiceApp {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Error,
                 self.state
-                    .dialogs
+                    .hardcopy
                     .hardcopy
                     .error_section
                     .filter(|_| page == HardcopyDialogPage::Main)
@@ -268,44 +269,44 @@ impl RSpiceApp {
         let choice = dialog.show(ctx, |ui| {
             ui.add_enabled_ui(!busy, |ui| {
                 body_action = match page {
-                    HardcopyDialogPage::Main => main_body(ui, &mut self.state.dialogs.hardcopy),
+                    HardcopyDialogPage::Main => main_body(ui, &mut self.state.hardcopy.hardcopy),
                     HardcopyDialogPage::PrinterProperties => {
-                        printer_properties_body(ui, &mut self.state.dialogs.hardcopy)
+                        printer_properties_body(ui, &mut self.state.hardcopy.hardcopy)
                     }
                     HardcopyDialogPage::CustomPaperMargins => {
-                        custom_paper_body(ui, &mut self.state.dialogs.hardcopy);
+                        custom_paper_body(ui, &mut self.state.hardcopy.hardcopy);
                         BodyAction::None
                     }
                     HardcopyDialogPage::PrintMapping => {
-                        print_mapping_body(ui, &mut self.state.dialogs.hardcopy);
+                        print_mapping_body(ui, &mut self.state.hardcopy.hardcopy);
                         BodyAction::None
                     }
                 };
             });
         });
-        self.state.dialogs.hardcopy.body_scroll_offset = body_scroll_offset;
+        self.state.hardcopy.hardcopy.body_scroll_offset = body_scroll_offset;
 
         match body_action {
             BodyAction::None => {}
             BodyAction::PrinterProperties => self
                 .state
-                .dialogs
+                .hardcopy
                 .hardcopy
                 .open_subflow(HardcopyDialogPage::PrinterProperties),
             BodyAction::CustomPaper => self
                 .state
-                .dialogs
+                .hardcopy
                 .hardcopy
                 .open_subflow(HardcopyDialogPage::CustomPaperMargins),
             BodyAction::PrintMapping => self
                 .state
-                .dialogs
+                .hardcopy
                 .hardcopy
                 .open_subflow(HardcopyDialogPage::PrintMapping),
             BodyAction::SelectPrinter(device_id) => {
                 let capabilities = self
                     .state
-                    .dialogs
+                    .hardcopy
                     .hardcopy
                     .printer_report
                     .as_ref()
@@ -323,7 +324,7 @@ impl RSpiceApp {
             BodyAction::DriverProperties => {
                 #[cfg(target_os = "windows")]
                 {
-                    let printer_id = self.state.dialogs.hardcopy.printer_id.clone();
+                    let printer_id = self.state.hardcopy.hardcopy.printer_id.clone();
                     match crate::workbench::hardcopy_adapters::print::show_native_printer_properties(
                         &printer_id,
                         None,
@@ -333,7 +334,7 @@ impl RSpiceApp {
                             suggestion,
                         }) => {
                             apply_suggested_paper(
-                                &mut self.state.dialogs.hardcopy,
+                                &mut self.state.hardcopy.hardcopy,
                                 &capabilities,
                                 suggestion.paper_platform_id,
                             );
@@ -345,7 +346,7 @@ impl RSpiceApp {
                         }
                         Ok(crate::workbench::hardcopy_adapters::print::PrinterDriverPropertiesOutcome::Cancelled) => {}
                         Err(error) => {
-                            self.state.dialogs.hardcopy.error = Some(error.to_string());
+                            self.state.hardcopy.hardcopy.error = Some(error.to_string());
                         }
                     }
                 }
@@ -360,28 +361,28 @@ impl RSpiceApp {
             }
             DialogChoice::Primary => {
                 if page == HardcopyDialogPage::PrinterProperties
-                    && self.state.dialogs.hardcopy.format == OutputFormat::NativePrinter
-                    && !reconcile_native_printer_job(&mut self.state.dialogs.hardcopy)
+                    && self.state.hardcopy.hardcopy.format == OutputFormat::NativePrinter
+                    && !reconcile_native_printer_job(&mut self.state.hardcopy.hardcopy)
                 {
-                    self.state.dialogs.hardcopy.error = Some(
+                    self.state.hardcopy.hardcopy.error = Some(
                         "The selected paper, orientation, and resolution are not supported by the current printer."
                             .to_owned(),
                     );
                     return;
                 }
-                if let Err(error) = self.state.dialogs.hardcopy.accept_subflow() {
-                    self.state.dialogs.hardcopy.error = Some(error.to_string());
+                if let Err(error) = self.state.hardcopy.hardcopy.accept_subflow() {
+                    self.state.hardcopy.hardcopy.error = Some(error.to_string());
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled if page != HardcopyDialogPage::Main => {
-                self.state.dialogs.hardcopy.cancel_subflow();
+                self.state.hardcopy.hardcopy.cancel_subflow();
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 publish::cancel_source_resolution();
                 publish::cancel_publication();
                 cancel_preview_worker();
                 clear_preview_textures(ctx);
-                self.state.dialogs.hardcopy.close();
+                self.state.hardcopy.hardcopy.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

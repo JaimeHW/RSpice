@@ -303,7 +303,10 @@ impl Fixture {
             )],
             true,
         );
-        assert_eq!(self.app.state.dialogs.interaction.drag.drag_type, expected);
+        assert_eq!(
+            self.app.state.workbench.interaction.drag.drag_type,
+            expected
+        );
         assert!(self.app.state.schematic_drag_in_progress());
     }
 
@@ -1221,7 +1224,7 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
     let start = fixture
         .app
         .state
-        .dialogs
+        .design
         .floating_paste
         .as_ref()
         .expect("the paste floats")
@@ -1238,7 +1241,7 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
     let floating = fixture
         .app
         .state
-        .dialogs
+        .design
         .floating_paste
         .as_ref()
         .expect("still floating");
@@ -1263,7 +1266,7 @@ fn a_paste_follows_the_pointer_turns_with_r_and_lands_on_the_click() {
     fixture.frame(vec![fixture.button(400.0, true)], true);
     fixture.frame(vec![fixture.button(400.0, false)], true);
 
-    assert!(fixture.app.state.dialogs.floating_paste.is_none());
+    assert!(fixture.app.state.design.floating_paste.is_none());
     let document = fixture.app.state.model.schematic.document();
     assert_eq!(document.components.len(), 2, "the click placed the copy");
     let pasted = &document.components[1];
@@ -1311,7 +1314,7 @@ fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
     let at_first = fixture
         .app
         .state
-        .dialogs
+        .design
         .floating_paste
         .as_ref()
         .expect("floating")
@@ -1323,7 +1326,7 @@ fn a_copy_carried_to_the_canvas_edge_pans_the_view() {
     let at_later = fixture
         .app
         .state
-        .dialogs
+        .design
         .floating_paste
         .as_ref()
         .expect("floating")
@@ -1346,11 +1349,11 @@ fn escape_lets_a_floating_paste_go() {
     let before =
         crate::state::SchematicSnapshot::capture(fixture.app.state.model.schematic.document());
     float_a_pasted_resistor(&mut fixture, 300.0);
-    assert!(fixture.app.state.dialogs.floating_paste.is_some());
+    assert!(fixture.app.state.design.floating_paste.is_some());
 
     fixture.frame(vec![key(egui::Key::Escape)], true);
 
-    assert!(fixture.app.state.dialogs.floating_paste.is_none());
+    assert!(fixture.app.state.design.floating_paste.is_none());
     assert!(before.is_equal_document(fixture.app.state.model.schematic.document()));
     assert!(!fixture.app.state.model.schematic.can_undo());
     fixture.frame(vec![fixture.button(400.0, true)], true);

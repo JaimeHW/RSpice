@@ -830,8 +830,8 @@ mod tests {
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
 
         execute_netlist_first_action(&mut app, NetlistFirstAction::CreateSchematic);
-        assert!(app.state.dialogs.new_cell_dialog);
-        assert!(app.state.dialogs.new_cell_create_schematic);
+        assert!(app.state.project.new_cell_dialog);
+        assert!(app.state.project.new_cell_create_schematic);
     }
 
     #[test]

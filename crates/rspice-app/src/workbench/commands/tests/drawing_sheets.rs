@@ -59,7 +59,7 @@ fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
 
     assert!(!app.state.workbench.reveal_sheet_section);
     assert!(
-        !app.state.dialogs.hardcopy.open,
+        !app.state.hardcopy.hardcopy.open,
         "Sheet properties must not substitute output-media setup"
     );
 }
@@ -109,16 +109,16 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
     assert!(Command::CustomSheetSizes.is_enabled(&app));
 
     Command::SheetFormatManager.execute(&mut app);
-    assert!(app.state.dialogs.drawing_sheet_support.manager.open);
+    assert!(app.state.sheets.drawing_sheet_support.manager.open);
 
     Command::CustomSheetSizes.execute(&mut app);
-    assert!(app.state.dialogs.drawing_sheet_presets.any_open());
+    assert!(app.state.sheets.drawing_sheet_presets.any_open());
 
     // The project default is where a format reaches several sheets, so its
     // dialog is a command of its own.
     assert!(Command::SheetDefaults.is_enabled(&app));
     Command::SheetDefaults.execute(&mut app);
-    assert!(app.state.dialogs.drawing_sheet_defaults.open);
+    assert!(app.state.sheets.drawing_sheet_defaults.open);
 
     let mut results = RSpiceApp::test_instance();
     results.state.open_project_session();
@@ -149,5 +149,5 @@ fn sheet_format_manager_requires_live_schematic_edit_authority() {
         CommandAvailability::Disabled("the active schematic is read-only")
     );
     Command::SheetFormatManager.execute(&mut app);
-    assert!(!app.state.dialogs.drawing_sheet_support.manager.open);
+    assert!(!app.state.sheets.drawing_sheet_support.manager.open);
 }

@@ -500,7 +500,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
         studio
             .app
             .state
-            .dialogs
+            .simulate
             .plan_removal_review
             .target
             .is_some(),
@@ -513,7 +513,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     );
     // Two passes, as a click settles in two: the first applies the answer, and
     // the ledger it had already drawn is redrawn by the second.
-    studio.app.state.dialogs.plan_removal_review.confirmed = true;
+    studio.app.state.simulate.plan_removal_review.confirmed = true;
     studio.pass(Vec::new());
     studio.pass(Vec::new());
     assert_eq!(

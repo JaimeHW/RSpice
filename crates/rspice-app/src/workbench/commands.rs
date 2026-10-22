@@ -962,12 +962,12 @@ impl Command {
                     .workspace()
                     .map(|workspace| workspace.preset())
                     .unwrap_or_default();
-                app.state.dialogs.workspace_layout_manager.open(preset);
+                app.state.settings.workspace_layout_manager.open(preset);
             }
             Self::WindowManager => app
                 .state
-                .dialogs
-                .window_session
+                .workbench
+                .window_session_dialog
                 .open(crate::workbench::app::WindowSessionPage::Windows),
             Self::PreviousWorkspace => app.state.workbench.cycle_workspace(true),
             Self::NextWorkspace => app.state.workbench.cycle_workspace(false),
@@ -1002,7 +1002,7 @@ impl Command {
             Self::PlaceText => {
                 activate_workspace(app, Workspace::Design);
                 let source = crate::workbench::app::schematic_editor_request_source(&app.state);
-                app.state.dialogs.design_note.open(source);
+                app.state.design.design_note.open(source);
             }
             Self::PlaceShape => {
                 activate_workspace(app, Workspace::Design);
@@ -1015,7 +1015,7 @@ impl Command {
                     .documentation_shapes
                     .clone();
                 app.state
-                    .dialogs
+                    .design
                     .documentation_shape
                     .open(source, expected_shapes);
             }
@@ -1225,20 +1225,20 @@ impl Command {
                     // A pointer edit is the innermost active interaction.
                 } else if app.state.model.schematic.session.editor.zoom_box.armed {
                     app.state.model.schematic.session.editor.zoom_box.disarm();
-                } else if app.state.dialogs.descend_hierarchy.open {
-                    app.state.dialogs.descend_hierarchy.close();
+                } else if app.state.design.descend_hierarchy.open {
+                    app.state.design.descend_hierarchy.close();
                 } else if crate::workbench::app::cancel_floating_paste(&mut app.state) {
                     // The floating copy is let go; the drawing never changed.
-                } else if app.state.dialogs.move_selection.armed {
+                } else if app.state.design.move_selection.armed {
                     crate::workbench::app::cancel_armed_move_selection(&mut app.state);
-                } else if app.state.dialogs.stretch_selection.armed {
+                } else if app.state.design.stretch_selection.armed {
                     crate::workbench::app::cancel_armed_stretch_selection(&mut app.state);
-                } else if app.state.dialogs.array_selection.armed {
+                } else if app.state.design.array_selection.armed {
                     crate::workbench::app::cancel_armed_array_selection(&mut app.state);
                 } else if app.state.workbench.drawer.is_some() {
                     app.state.workbench.close_drawer();
-                } else if app.state.dialogs.object_properties.open {
-                    app.state.dialogs.object_properties.close();
+                } else if app.state.design.object_properties.open {
+                    app.state.design.object_properties.close();
                 } else if app.state.tabbed_property_dialog.open {
                     app.state.tabbed_property_dialog.attempt_close();
                 } else if app.state.workbench.workspace == Workspace::Results
@@ -1418,9 +1418,9 @@ impl Command {
             Self::CreateResultDocument => {
                 crate::workbench::documents::result_document::open_create_document(app);
             }
-            Self::WaveformCalculator => app.state.dialogs.waveform_calculator_dialog = true,
+            Self::WaveformCalculator => app.state.results.waveform_calculator_dialog = true,
             Self::ExpressionDiagnostics => {
-                app.state.dialogs.expression_diagnostics_dialog = true;
+                app.state.results.expression_diagnostics_dialog = true;
             }
             Self::CompareResultDatasets => {
                 crate::workbench::documents::result_document::open_compare(&mut app.state);
@@ -1598,7 +1598,7 @@ impl Command {
                     crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
             }
             Self::CommandPalette => open_command_palette(&mut app.state),
-            Self::KeyboardShortcuts => app.state.dialogs.shortcuts_help = true,
+            Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,
             Self::AccountOrganization => {
                 super::account_organization::open(&mut app.state);
             }
@@ -1690,7 +1690,7 @@ impl Command {
                 &mut app.state,
                 crate::workbench::app::HelpCenterPage::LegalPrivacy,
             ),
-            Self::About => app.state.dialogs.about = true,
+            Self::About => app.state.shell.about = true,
         }
     }
 }

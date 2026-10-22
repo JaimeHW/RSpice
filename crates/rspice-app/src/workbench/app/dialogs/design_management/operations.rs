@@ -17,13 +17,13 @@ impl RSpiceApp {
         if page == DesignManagementPage::MoveSelection
             && self
                 .state
-                .dialogs
+                .project
                 .design_management
                 .inputs
                 .move_hierarchy_effect
                 == MoveHierarchyEffect::CreateChildCell
         {
-            if self.state.dialogs.design_management.dirty() {
+            if self.state.project.design_management.dirty() {
                 return Err(
                     "Apply the pending Design Management draft before transferring this selection to Create hierarchy."
                         .to_owned(),
@@ -37,22 +37,22 @@ impl RSpiceApp {
                         .to_owned(),
                 );
             }
-            self.state.dialogs.design_management.close_and_discard();
+            self.state.project.design_management.close_and_discard();
             crate::workbench::app::close_design_management_dialog_route(&mut self.state);
             crate::workbench::app::dialogs::hierarchy::create::open_create_hierarchy_dialog(
                 &mut self.state,
             );
             return Ok(());
         }
-        let owner_key = self.state.dialogs.design_management.owner_key.clone();
-        let inputs = self.state.dialogs.design_management.inputs.clone();
+        let owner_key = self.state.project.design_management.owner_key.clone();
+        let inputs = self.state.project.design_management.inputs.clone();
         let selection = self
             .state
-            .dialogs
+            .project
             .design_management
             .selection_object_ids
             .clone();
-        let all_objects = self.state.dialogs.design_management.all_object_ids.clone();
+        let all_objects = self.state.project.design_management.all_object_ids.clone();
 
         // An operation reports only what it produced that the manager's own
         // tabs do not show — a created-object count, a difference count, a
@@ -69,7 +69,7 @@ impl RSpiceApp {
                     .drawing_sheet_personal_preferences();
                 let draft = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_mut()
@@ -159,7 +159,7 @@ impl RSpiceApp {
                 }
                 let draft = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_mut()
@@ -223,7 +223,7 @@ impl RSpiceApp {
             DesignManagementPage::NewVariant => {
                 let draft = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_mut()
@@ -249,7 +249,7 @@ impl RSpiceApp {
                     .ok_or_else(|| "Comparison variant is required.".to_owned())?;
                 let result = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_ref()
@@ -278,7 +278,7 @@ impl RSpiceApp {
             DesignManagementPage::VariantMatrix => {
                 let draft = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_mut()
@@ -343,7 +343,7 @@ impl RSpiceApp {
             DesignManagementPage::RenumberPreview => {
                 let design_management = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_ref()
@@ -357,7 +357,7 @@ impl RSpiceApp {
                 )?;
                 let draft = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_mut()
@@ -382,11 +382,11 @@ impl RSpiceApp {
             DesignManagementPage::AnnotationPolicy => {
                 let ranges = parse_reserved_ranges(
                     &inputs.reserved_ranges,
-                    &self.state.dialogs.design_management,
+                    &self.state.project.design_management,
                 )?;
                 let draft = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_mut()
@@ -456,7 +456,7 @@ impl RSpiceApp {
                 };
                 let draft = self
                     .state
-                    .dialogs
+                    .project
                     .design_management
                     .draft
                     .as_mut()
@@ -486,7 +486,7 @@ impl RSpiceApp {
             }
         };
 
-        let dialog = &mut self.state.dialogs.design_management;
+        let dialog = &mut self.state.project.design_management;
         dialog.page = DesignManagementPage::Manager;
         dialog.active_tab = tab;
         dialog.input_baseline = None;

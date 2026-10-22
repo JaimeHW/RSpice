@@ -21,14 +21,14 @@ fn rename_view_dialog_starts_with_the_exact_active_view_identity() {
         .open_rename_view_dialog("work", "amplifier", "schematic")
         .expect("a writable view opens Rename View");
 
-    assert!(state.dialogs.rename_view_dialog);
-    assert_eq!(state.dialogs.rename_view_library, "work");
-    assert_eq!(state.dialogs.rename_view_cell, "amplifier");
-    assert_eq!(state.dialogs.rename_view_current, "schematic");
-    assert_eq!(state.dialogs.rename_view_name, "schematic");
-    assert!(state.dialogs.rename_view_error.is_none());
+    assert!(state.project.rename_view_dialog);
+    assert_eq!(state.project.rename_view_library, "work");
+    assert_eq!(state.project.rename_view_cell, "amplifier");
+    assert_eq!(state.project.rename_view_current, "schematic");
+    assert_eq!(state.project.rename_view_name, "schematic");
+    assert!(state.project.rename_view_error.is_none());
     assert_eq!(
-        state.dialogs.rename_view_library_revision,
+        state.project.rename_view_library_revision,
         state.model.library_manager.revision()
     );
 }
@@ -36,7 +36,7 @@ fn rename_view_dialog_starts_with_the_exact_active_view_identity() {
 #[test]
 fn rename_view_entry_point_rejects_missing_and_read_only_targets() {
     let mut state = state_with_amplifier_schematic();
-    state.dialogs.rename_view_library = "sentinel".to_owned();
+    state.project.rename_view_library = "sentinel".to_owned();
 
     assert!(
         state
@@ -55,8 +55,8 @@ fn rename_view_entry_point_rejects_missing_and_read_only_targets() {
         .expect_err("a read-only library must fail closed");
 
     assert!(error.contains("read-only"), "{error}");
-    assert!(!state.dialogs.rename_view_dialog);
-    assert_eq!(state.dialogs.rename_view_library, "sentinel");
+    assert!(!state.project.rename_view_dialog);
+    assert_eq!(state.project.rename_view_library, "sentinel");
 }
 
 #[test]
@@ -65,7 +65,7 @@ fn rename_view_commit_rejects_an_intervening_catalog_change() {
     state
         .open_rename_view_dialog("work", "amplifier", "schematic")
         .expect("rename dialog opens");
-    state.dialogs.rename_view_name = "schematic_v2".to_owned();
+    state.project.rename_view_name = "schematic_v2".to_owned();
     state
         .model
         .library_manager

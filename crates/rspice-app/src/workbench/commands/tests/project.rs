@@ -100,8 +100,8 @@ fn new_cell_command_captures_exact_library_catalog_revision() {
 
     Command::NewCell.execute(&mut app);
 
-    assert!(app.state.dialogs.new_cell_dialog);
-    assert_eq!(app.state.dialogs.new_cell_library_revision, revision);
+    assert!(app.state.project.new_cell_dialog);
+    assert_eq!(app.state.project.new_cell_library_revision, revision);
 }
 
 #[test]

@@ -3,9 +3,9 @@
 //! [`AppState::application_modal_open`] is a hand-written OR over the dialog
 //! gate, the workbench's own gate, and five owners of their own. Every row
 //! below sets one term on a default session and nothing else. The dialog
-//! gate's terms each have their row beside `DialogState`; here it is one
-//! term. The browser's file-operation term is set only by an operation a
-//! browser is running, so no native test can open it.
+//! gate's terms each have their row beside `AppState::dialog_modal_open`;
+//! here it is one term. The browser's file-operation term is set only by an
+//! operation a browser is running, so no native test can open it.
 
 use crate::workbench::app_state::AppState;
 use crate::workbench::state::Workspace;
@@ -100,7 +100,7 @@ const APPLICATION_GATE: &[GateRow] = &[
     ("route NotificationCenter", |state| {
         navigate(state, SurfaceId::NotificationCenter);
     }),
-    ("dialogs", |state| state.dialogs.about = true),
+    ("dialogs", |state| state.shell.about = true),
     ("ui.netlist, in the Netlist workspace", |state| {
         state.workbench.activate(Workspace::Netlist);
         state.ui.netlist.find.open = true;

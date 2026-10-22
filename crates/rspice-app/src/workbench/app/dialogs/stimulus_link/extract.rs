@@ -100,11 +100,11 @@ pub(super) fn render(
         focus
     });
 
-    state.dialogs.stimulus_link.name = name;
-    state.dialogs.stimulus_link.purpose = purpose;
-    state.dialogs.stimulus_link.select_name = false;
+    state.design.stimulus_link.name = name;
+    state.design.stimulus_link.purpose = purpose;
+    state.design.stimulus_link.select_name = false;
     if closed {
-        state.dialogs.stimulus_link.close();
+        state.design.stimulus_link.close();
         return;
     }
     match choice {
@@ -115,11 +115,11 @@ pub(super) fn render(
                     crate::diagnostics::LogSource::Studio,
                     line,
                 );
-                state.dialogs.stimulus_link.close();
+                state.design.stimulus_link.close();
             }
-            Err(refusal) => state.dialogs.stimulus_link.error = Some(refusal),
+            Err(refusal) => state.design.stimulus_link.error = Some(refusal),
         },
-        DialogChoice::Ghost | DialogChoice::Cancelled => state.dialogs.stimulus_link.close(),
+        DialogChoice::Ghost | DialogChoice::Cancelled => state.design.stimulus_link.close(),
         DialogChoice::None | DialogChoice::Secondary => {}
     }
 }

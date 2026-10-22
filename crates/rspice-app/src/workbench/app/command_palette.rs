@@ -812,7 +812,7 @@ impl RSpiceApp {
                     .collect();
             }
 
-            let recents = &self.state.dialogs.command_palette.recent;
+            let recents = &self.state.workbench.command_palette.recent;
             let workspace_scope = match self.state.workbench.workspace {
                 crate::workbench::state::Workspace::Project => PaletteScope::Navigate,
                 crate::workbench::state::Workspace::Design => PaletteScope::Design,
@@ -895,7 +895,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn render_command_palette(&mut self, ctx: &Context) {
-        if !self.state.dialogs.command_palette.open {
+        if !self.state.workbench.command_palette.open {
             crate::ui::input::InputScope::discard(ctx, palette_id());
             return;
         }
@@ -921,7 +921,7 @@ impl RSpiceApp {
         if opened_this_pass {
             scope = self
                 .state
-                .dialogs
+                .workbench
                 .command_palette
                 .initial_scope
                 .take()
@@ -945,11 +945,11 @@ impl RSpiceApp {
             };
             if next != index {
                 scope = PaletteScope::ALL[next];
-                self.state.dialogs.command_palette.selected = 0;
+                self.state.workbench.command_palette.selected = 0;
                 ctx.memory_mut(|memory| memory.request_focus(scope_id(scope)));
             } else if keys.activate {
                 scope = PaletteScope::ALL[index];
-                self.state.dialogs.command_palette.selected = 0;
+                self.state.workbench.command_palette.selected = 0;
             }
         }
 
@@ -1010,15 +1010,15 @@ impl RSpiceApp {
             let search_response = render_search_row(
                 &mut surface,
                 regions.search,
-                &mut self.state.dialogs.command_palette.query,
+                &mut self.state.workbench.command_palette.query,
             );
             search_response_id = Some(search_response.id);
             if search_response.changed() {
-                self.state.dialogs.command_palette.selected = 0;
+                self.state.workbench.command_palette.selected = 0;
             }
-            if self.state.dialogs.command_palette.want_focus || opened_this_pass {
+            if self.state.workbench.command_palette.want_focus || opened_this_pass {
                 search_response.request_focus();
-                self.state.dialogs.command_palette.want_focus = false;
+                self.state.workbench.command_palette.want_focus = false;
             }
 
             let scope_changed = render_scope_row(
@@ -1030,16 +1030,16 @@ impl RSpiceApp {
                 keys.activate,
             );
             if scope_changed {
-                self.state.dialogs.command_palette.selected = 0;
+                self.state.workbench.command_palette.selected = 0;
             }
 
             let rows = self.palette_rows(
-                &self.state.dialogs.command_palette.query,
+                &self.state.workbench.command_palette.query,
                 scope,
                 crate::workbench::app_state::runtime_command_platform(ctx),
                 ctx.os(),
             );
-            let selected = &mut self.state.dialogs.command_palette.selected;
+            let selected = &mut self.state.workbench.command_palette.selected;
             if rows.is_empty() {
                 *selected = 0;
             } else {
@@ -1093,7 +1093,7 @@ impl RSpiceApp {
                 layout.narrow,
                 rows.len(),
                 local_index_count,
-                self.state.dialogs.command_palette.query.trim().is_empty()
+                self.state.workbench.command_palette.query.trim().is_empty()
                     && scope == PaletteScope::All,
             );
         });
@@ -1127,8 +1127,8 @@ impl RSpiceApp {
 
         let close = keys.close || run.is_some();
         if close {
-            let route_owned = self.state.dialogs.command_palette.route_owned;
-            self.state.dialogs.command_palette.close();
+            let route_owned = self.state.workbench.command_palette.route_owned;
+            self.state.workbench.command_palette.close();
             ctx.data_mut(|data| {
                 data.remove_temp::<PaletteScope>(scope_state_id);
             });
@@ -1144,7 +1144,7 @@ impl RSpiceApp {
 
         if let Some(entry) = run {
             if let Some(command) = entry.command() {
-                let recent = &mut self.state.dialogs.command_palette.recent;
+                let recent = &mut self.state.workbench.command_palette.recent;
                 recent.retain(|candidate| *candidate != command);
                 recent.insert(0, command);
                 recent.truncate(MAX_RECENT);

@@ -43,13 +43,13 @@ const DESCRIPTION: &str = "Write the note, then click to place it.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_design_note_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.design_note.open {
+        if !self.state.design.design_note.open {
             return;
         }
         let validation = validate_draft(&self.state);
         // An untouched form has nothing to answer for: the primary is off and
         // the slot stays blank until the reader has typed something to refuse.
-        let refusal = if self.state.dialogs.design_note.text.trim().is_empty() {
+        let refusal = if self.state.design.design_note.text.trim().is_empty() {
             None
         } else {
             validation.as_ref().err().cloned()
@@ -62,7 +62,7 @@ impl RSpiceApp {
             .active_view
             .display_path();
 
-        let draft = &mut self.state.dialogs.design_note;
+        let draft = &mut self.state.design.design_note;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .context(Some(view_path.as_str()))
             .describe(DESCRIPTION)
@@ -88,11 +88,11 @@ impl RSpiceApp {
                         .editor
                         .pending_design_note = Some(pending);
                     self.state.model.schematic.arm_tool(Tool::DesignNote);
-                    self.state.dialogs.design_note.close();
+                    self.state.design.design_note.close();
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.design_note.close();
+                self.state.design.design_note.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -100,7 +100,7 @@ impl RSpiceApp {
 }
 
 fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String> {
-    let draft = &state.dialogs.design_note;
+    let draft = &state.design.design_note;
     if state.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
@@ -152,7 +152,7 @@ mod tests {
         ctx.options_mut(|options| options.max_passes = std::num::NonZeroUsize::new(1).unwrap());
         let mut app = RSpiceApp::test_instance();
         let source = schematic_editor_request_source(&app.state);
-        app.state.dialogs.design_note.open(source);
+        app.state.design.design_note.open(source);
         // The form asks for the caret once its rows exist, so the frame that
         // builds them is the frame before the one that can be typed into.
         let _ = ctx.run_ui(
@@ -186,7 +186,7 @@ mod tests {
             |ctx| app.render_design_note_dialog(ctx),
         );
         assert_eq!(
-            app.state.dialogs.design_note.text,
+            app.state.design.design_note.text,
             "Browser recovery qualification"
         );
         assert!(app.state.model.schematic.document().design_notes.is_empty());
@@ -199,8 +199,8 @@ mod tests {
     fn an_untouched_form_places_no_note() {
         let mut state = AppState::default();
         let source = schematic_editor_request_source(&state);
-        state.dialogs.design_note.open(source);
-        assert_eq!(state.dialogs.design_note.text, "");
+        state.design.design_note.open(source);
+        assert_eq!(state.design.design_note.text, "");
         assert!(validate_draft(&state).is_err());
         assert!(state.model.schematic.document().design_notes.is_empty());
     }
@@ -210,16 +210,16 @@ mod tests {
         let mut state = AppState::default();
         assert!(validate_draft(&state).is_err());
         let source = schematic_editor_request_source(&state);
-        state.dialogs.design_note.open(source.clone());
-        state.dialogs.design_note.text = "Check the bias network".to_owned();
+        state.design.design_note.open(source.clone());
+        state.design.design_note.text = "Check the bias network".to_owned();
         let Ok(pending) = validate_draft(&state) else {
             panic!("valid draft");
         };
         assert_eq!(pending.text, "Check the bias network");
         assert_eq!(pending.source.as_ref(), Some(&source));
-        assert_eq!(state.dialogs.design_note.source.as_ref(), Some(&source));
-        state.dialogs.design_note.close();
-        assert!(state.dialogs.design_note.source.is_none());
+        assert_eq!(state.design.design_note.source.as_ref(), Some(&source));
+        state.design.design_note.close();
+        assert!(state.design.design_note.source.is_none());
         assert_eq!(pending.source, Some(source));
         assert!(state.model.schematic.document().design_notes.is_empty());
     }
@@ -252,8 +252,8 @@ mod tests {
                 .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
                 .unwrap();
             let source = schematic_editor_request_source(&state);
-            state.dialogs.design_note.open(source.clone());
-            state.dialogs.design_note.text = "Check the bias network".to_owned();
+            state.design.design_note.open(source.clone());
+            state.design.design_note.text = "Check the bias network".to_owned();
             assert!(validate_draft(&state).is_ok());
             match change {
                 "document" => state.model.design_execution_epoch += 1,
@@ -319,13 +319,13 @@ mod tests {
             }
             let notes = state.model.schematic.document().design_notes.clone();
             assert!(validate_draft(&state).is_err(), "{change}");
-            assert_eq!(state.dialogs.design_note.source, Some(source));
+            assert_eq!(state.design.design_note.source, Some(source));
             if !state.schematic_edit_read_only() {
                 state
-                    .dialogs
+                    .design
                     .design_note
                     .open(schematic_editor_request_source(&state));
-                state.dialogs.design_note.text = "Check the bias network".to_owned();
+                state.design.design_note.text = "Check the bias network".to_owned();
                 assert!(validate_draft(&state).is_ok(), "fresh {change}");
             }
             assert_eq!(state.model.schematic.document().design_notes, notes);

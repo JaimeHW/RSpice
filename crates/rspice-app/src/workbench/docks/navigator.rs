@@ -703,7 +703,7 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .to_ascii_lowercase();
     let checkpoints = app
         .state
-        .dialogs
+        .project
         .project_checkpoint_recovery
         .checkpoints
         .iter()
@@ -6147,10 +6147,10 @@ mod tests {
 
         let now = crate::time_compat::checked_unix_time_ms().expect("clock");
         let name = state.model.workspace.content.project.name().to_owned();
-        state.dialogs.project_checkpoint_recovery.project_id =
+        state.project.project_checkpoint_recovery.project_id =
             Some(state.model.workspace.content.project.id().to_string());
-        state.dialogs.project_checkpoint_recovery.initialized = true;
-        state.dialogs.project_checkpoint_recovery.checkpoints = [
+        state.project.project_checkpoint_recovery.initialized = true;
+        state.project.project_checkpoint_recovery.checkpoints = [
             (ProjectCheckpointReason::Manual, 3, 6 * 60_000, 48_214),
             (
                 ProjectCheckpointReason::TechnologyAttachment,

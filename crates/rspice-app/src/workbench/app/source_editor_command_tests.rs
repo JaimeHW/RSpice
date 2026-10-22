@@ -358,7 +358,7 @@ fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
         let (ctx, mut app, _) = veriloga_with_focused_editor();
         ctx.set_os(os);
         Command::CommandPalette.execute(&mut app);
-        app.state.dialogs.command_palette.query = "Toggle line comment".to_owned();
+        app.state.workbench.command_palette.query = "Toggle line comment".to_owned();
         let mut output = frame(&ctx, &mut app, DESKTOP);
         for _ in 0..6 {
             output = frame(&ctx, &mut app, DESKTOP);

@@ -1069,7 +1069,7 @@ fn queued_shape_input_cannot_edit_a_replaced_gesture_or_changed_context() {
                     .kind = DocumentationShapeKind::Rectangle
             }
             "tool" => state.model.schematic.session.editor.tool = Tool::Select,
-            "modal" => state.dialogs.about = true,
+            "modal" => state.shell.about = true,
             _ => unreachable!(),
         }
         let drawing_before = state
@@ -1845,7 +1845,7 @@ fn double_click_property_dispatch_selects_taps_before_their_source_bus() {
         Some(21)
     );
     assert!(matches!(
-        state.dialogs.object_properties.draft,
+        state.design.object_properties.draft,
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::BusTap(_))
     ));
 }
@@ -1903,9 +1903,9 @@ fn net_label_text_bounds_are_a_first_class_pointer_target() {
         &viewport,
         hit,
     );
-    assert!(state.dialogs.object_properties.open);
+    assert!(state.design.object_properties.open);
     assert!(matches!(
-        state.dialogs.object_properties.draft.as_ref(),
+        state.design.object_properties.draft.as_ref(),
         Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(draft))
             if draft.original.id == label.id
     ));

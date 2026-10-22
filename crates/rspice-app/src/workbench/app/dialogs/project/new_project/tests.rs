@@ -10,7 +10,7 @@ use super::*;
 fn opened() -> NewProjectDialogState {
     let mut state = AppState::default();
     open_new_project_dialog(&mut state);
-    state.dialogs.new_project.clone()
+    state.project.new_project.clone()
 }
 
 #[test]

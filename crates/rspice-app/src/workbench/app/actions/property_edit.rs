@@ -566,8 +566,8 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
 /// views — the editor is an edit path.
 pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
     if state.tabbed_property_dialog.open
-        || state.dialogs.object_properties.open
-        || state.dialogs.rename_selection.open
+        || state.design.object_properties.open
+        || state.design.rename_selection.open
     {
         return;
     }
@@ -693,8 +693,8 @@ pub(in crate::workbench) fn stimulus_preview_timing(state: &AppState) -> Preview
 /// transaction specified by the workbench mockup.
 pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
     if state.tabbed_property_dialog.open
-        || state.dialogs.object_properties.open
-        || state.dialogs.rename_selection.open
+        || state.design.object_properties.open
+        || state.design.rename_selection.open
     {
         return false;
     }
@@ -750,7 +750,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             .iter()
             .find(|label| label.id == label_id)
     {
-        state.dialogs.object_properties.open_net_label(
+        state.design.object_properties.open_net_label(
             label,
             source,
             state.model.workspace.content.active_view.display_path(),
@@ -766,7 +766,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
         .has_any_wire_selection()
         && let Some(target) = crate::workbench::app::selected_named_net_target(state)
     {
-        state.dialogs.object_properties.open_named_net(
+        state.design.object_properties.open_named_net(
             target,
             source,
             state.model.workspace.content.active_view.display_path(),
@@ -788,7 +788,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             .iter()
             .find(|note| note.id == note_id)
     {
-        state.dialogs.object_properties.open_design_note(
+        state.design.object_properties.open_design_note(
             note,
             source,
             state.model.workspace.content.active_view.display_path(),
@@ -810,7 +810,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             .iter()
             .find(|shape| shape.id == shape_id)
     {
-        state.dialogs.object_properties.open_documentation_shape(
+        state.design.object_properties.open_documentation_shape(
             shape,
             source,
             state.model.workspace.content.active_view.display_path(),
@@ -832,7 +832,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             .iter()
             .find(|tap| tap.id == tap_id)
     {
-        state.dialogs.object_properties.open_bus_tap(
+        state.design.object_properties.open_bus_tap(
             tap,
             source,
             state.model.workspace.content.active_view.display_path(),
@@ -848,7 +848,7 @@ pub(crate) fn open_selected_object_properties(state: &mut AppState) -> bool {
             .iter()
             .find(|bus| bus.id == bus_id)
     {
-        state.dialogs.object_properties.open_bus(
+        state.design.object_properties.open_bus(
             bus,
             source,
             state.model.workspace.content.active_view.display_path(),
@@ -1160,16 +1160,16 @@ mod tests {
             .select_only_bus(41);
         assert!(open_selected_object_properties(&mut state));
         assert_eq!(
-            state.dialogs.object_properties.source,
+            state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
                 &state
             ))
         );
         assert!(matches!(
-            state.dialogs.object_properties.draft,
+            state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(_))
         ));
-        state.dialogs.object_properties.close();
+        state.design.object_properties.close();
 
         state
             .model
@@ -1180,13 +1180,13 @@ mod tests {
             .select_only_bus_tap(42);
         assert!(open_selected_object_properties(&mut state));
         assert_eq!(
-            state.dialogs.object_properties.source,
+            state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
                 &state
             ))
         );
         assert!(matches!(
-            state.dialogs.object_properties.draft,
+            state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::BusTap(_))
         ));
     }
@@ -1211,13 +1211,13 @@ mod tests {
 
         assert!(open_selected_object_properties(&mut state));
         assert_eq!(
-            state.dialogs.object_properties.source,
+            state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
                 &state
             ))
         );
         assert!(matches!(
-            state.dialogs.object_properties.draft,
+            state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NetLabel(ref draft))
                 if draft.original == label
                     && draft.name == "afe.out"
@@ -1252,20 +1252,20 @@ mod tests {
         assert!(selected_object_properties_available(&state));
         assert!(open_selected_object_properties(&mut state));
         assert_eq!(
-            state.dialogs.object_properties.source,
+            state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
                 &state
             ))
         );
         assert!(matches!(
-            state.dialogs.object_properties.draft,
+            state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::NamedNet(ref draft))
                 if draft.original.name == "sense"
                     && draft.original.labels.iter().map(|label| label.id).collect::<Vec<_>>() == [72]
                     && draft.name == "sense"
         ));
 
-        state.dialogs.object_properties.close();
+        state.design.object_properties.close();
         state
             .model
             .schematic
@@ -1299,7 +1299,7 @@ mod tests {
         assert!(selected_object_properties_available(&state));
         assert!(open_selected_object_properties(&mut state));
         assert!(state.tabbed_property_dialog.open);
-        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.design.object_properties.open);
         assert_eq!(
             state.tabbed_property_dialog.draft.component_type,
             Some(ComponentType::Port)
@@ -1332,13 +1332,13 @@ mod tests {
 
         assert!(open_selected_object_properties(&mut state));
         assert_eq!(
-            state.dialogs.object_properties.source,
+            state.design.object_properties.source,
             Some(crate::workbench::app::schematic_editor_request_source(
                 &state
             ))
         );
         assert!(matches!(
-            state.dialogs.object_properties.draft,
+            state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::DesignNote(ref draft))
                 if draft.original == note
                     && draft.kind == DesignNoteKind::ReviewNote
@@ -1365,7 +1365,7 @@ mod tests {
         state.model.schematic.session.read_only = true;
 
         assert!(!open_selected_object_properties(&mut state));
-        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.design.object_properties.open);
     }
 
     #[test]
@@ -1391,7 +1391,7 @@ mod tests {
             state.workbench.drawer,
             Some(crate::workbench::state::Drawer::Inspector)
         );
-        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.design.object_properties.open);
         assert!(!state.tabbed_property_dialog.open);
     }
 
@@ -1406,7 +1406,7 @@ mod tests {
             .selection
             .select_only_bus(9001);
         assert!(!open_selected_object_properties(&mut state));
-        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.design.object_properties.open);
 
         state
             .model
@@ -1416,7 +1416,7 @@ mod tests {
             .selection
             .select_only_bus_tap(9002);
         assert!(!open_selected_object_properties(&mut state));
-        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.design.object_properties.open);
 
         state
             .model
@@ -1426,7 +1426,7 @@ mod tests {
             .selection
             .select_only_net_label(9003);
         assert!(!open_selected_object_properties(&mut state));
-        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.design.object_properties.open);
 
         state
             .model
@@ -1436,7 +1436,7 @@ mod tests {
             .selection
             .select_only_design_note(9004);
         assert!(!open_selected_object_properties(&mut state));
-        assert!(!state.dialogs.object_properties.open);
+        assert!(!state.design.object_properties.open);
     }
 
     #[test]
@@ -1473,7 +1473,7 @@ mod tests {
             .select_only_bus(999);
         assert!(!open_selected_object_properties(&mut state));
         assert!(matches!(
-            state.dialogs.object_properties.draft,
+            state.design.object_properties.draft,
             Some(rspice_schematic_editor::object_properties::ObjectPropertiesDraft::Bus(ref draft)) if draft.original.id == 1
         ));
     }

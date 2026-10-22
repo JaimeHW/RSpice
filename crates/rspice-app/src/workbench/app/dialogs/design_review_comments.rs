@@ -160,7 +160,7 @@ pub(crate) fn open_design_review_comments(state: &mut AppState) {
         .iter()
         .find(|note| note.kind == DesignNoteKind::ReviewNote)
         .map(|note| note.id);
-    state.dialogs.design_review_comments = DesignReviewCommentsDialogState {
+    state.design.design_review_comments = DesignReviewCommentsDialogState {
         open: true,
         selected_note_id,
         authority: Some(SchematicEditAuthority::capture(state)),
@@ -175,15 +175,15 @@ fn reply_id() -> egui::Id {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.design_review_comments.open {
+        if !self.state.design.design_review_comments.open {
             return;
         }
-        self.state.dialogs.design_review_comments.actor = self.review_actor();
+        self.state.design.design_review_comments.actor = self.review_actor();
 
         let current_revision = current_revision_identity(&self.state);
         normalize_selected_thread(
             &self.state.model.schematic.document().design_notes,
-            &mut self.state.dialogs.design_review_comments,
+            &mut self.state.design.design_review_comments,
             current_revision.as_deref(),
         );
         let stale = review_authority_error(&self.state);
@@ -199,12 +199,12 @@ impl RSpiceApp {
             && selected.is_some()
             && !self
                 .state
-                .dialogs
+                .design
                 .design_review_comments
                 .reply
                 .trim()
                 .is_empty();
-        let mut body_scroll_offset = self.state.dialogs.design_review_comments.body_scroll_offset;
+        let mut body_scroll_offset = self.state.design.design_review_comments.body_scroll_offset;
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(
                 "Review comments attached to the active schematic, its validated revisions, and saved results.",
@@ -222,7 +222,7 @@ impl RSpiceApp {
             .body_scroll_offset(&mut body_scroll_offset);
         let transaction_error = self
             .state
-            .dialogs
+            .design
             .design_review_comments
             .error
             .clone()
@@ -255,11 +255,11 @@ impl RSpiceApp {
                 &evidence,
                 current_revision.as_deref(),
                 write_allowed && stale.is_none(),
-                &mut self.state.dialogs.design_review_comments,
+                &mut self.state.design.design_review_comments,
             );
             reply_focus
         });
-        self.state.dialogs.design_review_comments.body_scroll_offset = body_scroll_offset;
+        self.state.design.design_review_comments.body_scroll_offset = body_scroll_offset;
         self.handle_design_review_action(action);
 
         match choice {
@@ -267,7 +267,7 @@ impl RSpiceApp {
                 self.handle_design_review_action(ReviewAction::Reply);
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.design_review_comments.close();
+                self.state.design.design_review_comments.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -285,19 +285,19 @@ impl RSpiceApp {
         match action {
             ReviewAction::None => {}
             ReviewAction::Select(id) => {
-                let dialog = &mut self.state.dialogs.design_review_comments;
+                let dialog = &mut self.state.design.design_review_comments;
                 dialog.selected_note_id = Some(id);
                 dialog.reset_thread_draft();
             }
             ReviewAction::NewComment => {
-                self.state.dialogs.design_review_comments.close();
+                self.state.design.design_review_comments.close();
                 let source = crate::workbench::app::schematic_editor_request_source(&self.state);
-                self.state.dialogs.design_note.open(source);
-                self.state.dialogs.design_note.kind = DesignNoteKind::ReviewNote;
-                self.state.dialogs.design_note.text = "Review comment".to_owned();
+                self.state.design.design_note.open(source);
+                self.state.design.design_note.kind = DesignNoteKind::ReviewNote;
+                self.state.design.design_note.text = "Review comment".to_owned();
             }
             ReviewAction::GoToAnchor(id, point) => {
-                self.state.dialogs.design_review_comments.close();
+                self.state.design.design_review_comments.close();
                 self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
                 self.state
                     .model
@@ -314,7 +314,7 @@ impl RSpiceApp {
             ReviewAction::AttachEvidence(index) => {
                 let candidates = evidence_candidates(&self.state);
                 let Some(candidate) = candidates.get(index) else {
-                    self.state.dialogs.design_review_comments.error =
+                    self.state.design.design_review_comments.error =
                         Some("The selected result no longer exists.".to_owned());
                     return;
                 };
@@ -328,12 +328,12 @@ impl RSpiceApp {
                 let created_unix_ms = match checked_unix_time_ms() {
                     Ok(timestamp) => timestamp,
                     Err(error) => {
-                        self.state.dialogs.design_review_comments.error =
+                        self.state.design.design_review_comments.error =
                             Some(format!("Review update could not be timestamped: {error}"));
                         return;
                     }
                 };
-                let body = self.state.dialogs.design_review_comments.reply.clone();
+                let body = self.state.design.design_review_comments.reply.clone();
                 let author = self.review_actor();
                 self.apply_review_mutation(if matches!(action, ReviewAction::Resolve) {
                     DesignReviewMutation::Resolve {
@@ -361,13 +361,13 @@ impl RSpiceApp {
             }
             let id = self
                 .state
-                .dialogs
+                .design
                 .design_review_comments
                 .selected_note_id
                 .ok_or_else(|| "Select a review thread.".to_owned())?;
             let expected = self
                 .state
-                .dialogs
+                .design
                 .design_review_comments
                 .expected_design_notes
                 .clone();
@@ -383,7 +383,7 @@ impl RSpiceApp {
         match result {
             Ok(()) => {
                 let authority = SchematicEditAuthority::capture(&self.state);
-                let dialog = &mut self.state.dialogs.design_review_comments;
+                let dialog = &mut self.state.design.design_review_comments;
                 dialog.authority = Some(authority);
                 dialog.expected_design_notes =
                     self.state.model.schematic.document().design_notes.clone();
@@ -395,14 +395,14 @@ impl RSpiceApp {
                 // The thread above now holds the update that was published.
                 dialog.error = None;
             }
-            Err(error) => self.state.dialogs.design_review_comments.error = Some(error),
+            Err(error) => self.state.design.design_review_comments.error = Some(error),
         }
     }
 }
 
 fn review_authority_error(state: &AppState) -> Option<String> {
     state
-        .dialogs
+        .design
         .design_review_comments
         .authority
         .as_ref()
@@ -440,7 +440,7 @@ fn normalize_selected_thread(
 }
 
 fn selected_review_note(state: &AppState) -> Option<&DesignNote> {
-    let id = state.dialogs.design_review_comments.selected_note_id?;
+    let id = state.design.design_review_comments.selected_note_id?;
     state
         .model
         .schematic
@@ -1090,7 +1090,7 @@ mod tests {
                 .design_notes
                 .push(review_note(1));
             open_design_review_comments(&mut app.state);
-            app.state.dialogs.design_review_comments.reply = "Check the bias point".to_owned();
+            app.state.design.design_review_comments.reply = "Check the bias point".to_owned();
             let notes = app.state.model.schematic.document().design_notes.clone();
             let dirty = app.state.model.schematic.session.is_dirty;
             for epoch in [
@@ -1104,12 +1104,12 @@ mod tests {
                 assert_eq!(app.state.model.schematic.document().design_notes, notes);
                 assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
                 assert_eq!(
-                    app.state.dialogs.design_review_comments.reply,
+                    app.state.design.design_review_comments.reply,
                     "Check the bias point"
                 );
                 assert!(
                     app.state
-                        .dialogs
+                        .design
                         .design_review_comments
                         .error
                         .as_deref()
@@ -1118,8 +1118,8 @@ mod tests {
                 );
             }
             app.handle_design_review_action(action);
-            assert!(app.state.dialogs.design_review_comments.error.is_none());
-            assert!(app.state.dialogs.design_review_comments.reply.is_empty());
+            assert!(app.state.design.design_review_comments.error.is_none());
+            assert!(app.state.design.design_review_comments.reply.is_empty());
             assert_eq!(
                 app.state.model.schematic.document().design_notes[0]
                     .review
@@ -1158,7 +1158,7 @@ mod tests {
             |ui| app.render_frame_dialogs(ui),
         );
         assert_eq!(
-            app.state.dialogs.design_review_comments.reply,
+            app.state.design.design_review_comments.reply,
             "Check the bias point"
         );
         assert_eq!(app.state.model.schematic.document().design_notes, notes);
@@ -1210,7 +1210,7 @@ mod tests {
                 |ui| app.render_frame_dialogs(ui),
             );
             assert!(
-                app.state.dialogs.design_review_comments.reply.is_empty(),
+                app.state.design.design_review_comments.reply.is_empty(),
                 "{case}"
             );
             assert!(!ctx.memory(|memory| memory.has_focus(reply_id())), "{case}");
@@ -1309,10 +1309,10 @@ mod tests {
                 egui::Event::Paste("Browser recovery qualification".to_owned()),
             ],
         );
-        assert!(!app.state.dialogs.design_review_comments.open);
-        assert!(app.state.dialogs.design_note.open);
+        assert!(!app.state.design.design_review_comments.open);
+        assert!(app.state.design.design_note.open);
         assert_eq!(
-            app.state.dialogs.design_note.text,
+            app.state.design.design_note.text,
             "Browser recovery qualification"
         );
         assert!(app.state.model.schematic.document().design_notes.is_empty());
@@ -1358,7 +1358,7 @@ mod tests {
             .design_notes
             .push(review_note(1));
         open_design_review_comments(&mut app.state);
-        app.state.dialogs.design_review_comments.reply = "Bias point checked.".to_owned();
+        app.state.design.design_review_comments.reply = "Bias point checked.".to_owned();
 
         app.handle_design_review_action(ReviewAction::Reply);
 

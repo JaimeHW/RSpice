@@ -186,7 +186,7 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
                     if advisories == 1 { "y" } else { "ies" }
                 ),
             );
-            state.dialogs.check_and_save.open(report);
+            state.project.check_and_save.open(report);
         }
         Err(error) => {
             state.record(
@@ -200,11 +200,11 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_check_and_save_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.check_and_save.open {
+        if !self.state.project.check_and_save.open {
             return;
         }
-        let Some(report) = self.state.dialogs.check_and_save.report.clone() else {
-            self.state.dialogs.check_and_save.validation_error = Some(
+        let Some(report) = self.state.project.check_and_save.report.clone() else {
+            self.state.project.check_and_save.validation_error = Some(
                 "Validation results are unavailable; close and reopen Check and save.".to_owned(),
             );
             return;
@@ -218,19 +218,19 @@ impl RSpiceApp {
             .display_name()
             .to_owned();
         let revision = report.project_revision().to_string();
-        let note_error = revision_note_error(&self.state.dialogs.check_and_save.revision_note);
+        let note_error = revision_note_error(&self.state.project.check_and_save.revision_note);
         let displayed_note_error = self
             .state
-            .dialogs
+            .project
             .check_and_save
             .revision_note_touched
             .then(|| note_error.clone())
             .flatten();
-        let discard_confirm = self.state.dialogs.check_and_save.discard_confirm;
-        let pending = self.state.dialogs.check_and_save.is_pending();
-        let saved = self.state.dialogs.check_and_save.saved;
-        let saved_with_newer_changes = self.state.dialogs.check_and_save.saved_with_newer_changes;
-        let validation_error = self.state.dialogs.check_and_save.validation_error.clone();
+        let discard_confirm = self.state.project.check_and_save.discard_confirm;
+        let pending = self.state.project.check_and_save.is_pending();
+        let saved = self.state.project.check_and_save.saved;
+        let saved_with_newer_changes = self.state.project.check_and_save.saved_with_newer_changes;
+        let validation_error = self.state.project.check_and_save.validation_error.clone();
         let has_transaction = discard_confirm
             || pending
             || validation_error.is_some()
@@ -313,7 +313,7 @@ impl RSpiceApp {
             let response = check_and_save_body(
                 ui,
                 &report,
-                &mut self.state.dialogs.check_and_save.revision_note,
+                &mut self.state.project.check_and_save.revision_note,
                 displayed_note_error.as_deref(),
                 pending || saved,
                 preconditions,
@@ -326,19 +326,19 @@ impl RSpiceApp {
             Some(response.id)
         });
         if note_changed {
-            self.state.dialogs.check_and_save.mark_edited();
+            self.state.project.check_and_save.mark_edited();
         }
         if let Some(instance) = repair_instance.filter(|_| repair_requested) {
             self.repair_stale_instance_interface(&instance);
         }
         match response.choice {
             DialogChoice::Primary if saved => {
-                self.state.dialogs.check_and_save.close();
+                self.state.project.check_and_save.close();
             }
             DialogChoice::Primary => self.commit_check_and_save(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.check_and_save.attempt_close();
-                if self.state.dialogs.check_and_save.open {
+                self.state.project.check_and_save.attempt_close();
+                if self.state.project.check_and_save.open {
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 }
             }
@@ -387,9 +387,9 @@ impl RSpiceApp {
         });
         run_design_checks(&mut self.state);
         match CheckAndSaveValidationReport::collect(&self.state) {
-            Ok(report) => self.state.dialogs.check_and_save.report = Some(report),
+            Ok(report) => self.state.project.check_and_save.report = Some(report),
             Err(error) => {
-                self.state.dialogs.check_and_save.validation_error = Some(error);
+                self.state.project.check_and_save.validation_error = Some(error);
             }
         }
     }
@@ -398,20 +398,20 @@ impl RSpiceApp {
         // A cancelled destination, a transient publication failure, or a stale
         // validation receipt must remain retryable without forcing the user to
         // manufacture an edit to the revision note first.
-        self.state.dialogs.check_and_save.validation_error = None;
+        self.state.project.check_and_save.validation_error = None;
         let note = self
             .state
-            .dialogs
+            .project
             .check_and_save
             .revision_note
             .trim()
             .to_owned();
         if let Some(error) = revision_note_error(&note) {
-            self.state.dialogs.check_and_save.validation_error = Some(error);
+            self.state.project.check_and_save.validation_error = Some(error);
             return;
         }
-        let Some(opened_report) = self.state.dialogs.check_and_save.report.clone() else {
-            self.state.dialogs.check_and_save.validation_error =
+        let Some(opened_report) = self.state.project.check_and_save.report.clone() else {
+            self.state.project.check_and_save.validation_error =
                 Some("Validation results are unavailable; nothing was saved.".to_owned());
             return;
         };
@@ -421,22 +421,22 @@ impl RSpiceApp {
         let fresh_report = match CheckAndSaveValidationReport::collect(&self.state) {
             Ok(report) => report,
             Err(error) => {
-                self.state.dialogs.check_and_save.validation_error = Some(format!(
+                self.state.project.check_and_save.validation_error = Some(format!(
                     "Validation could not be re-derived before save: {error}"
                 ));
                 return;
             }
         };
         if fresh_report.receipt_digest() != opened_report.receipt_digest() {
-            self.state.dialogs.check_and_save.report = Some(fresh_report);
-            self.state.dialogs.check_and_save.validation_error = Some(
+            self.state.project.check_and_save.report = Some(fresh_report);
+            self.state.project.check_and_save.validation_error = Some(
                 "The project changed after validation. Review the refreshed findings before saving."
                     .to_owned(),
             );
             return;
         }
         if !fresh_report.can_save() {
-            self.state.dialogs.check_and_save.validation_error =
+            self.state.project.check_and_save.validation_error =
                 Some(fresh_report.blockers().first().map_or_else(
                     || "Validation blockers remain.".to_owned(),
                     |item| item.message.clone(),
@@ -465,7 +465,7 @@ impl RSpiceApp {
                 &fresh_report.active_view().key(),
             )
         {
-            self.state.dialogs.check_and_save.validation_error = Some(format!(
+            self.state.project.check_and_save.validation_error = Some(format!(
                 "The accepted revision baseline could not be retained: {error}"
             ));
             return;
@@ -494,7 +494,7 @@ impl RSpiceApp {
         {
             Ok(recorded) => recorded,
             Err(error) => {
-                self.state.dialogs.check_and_save.validation_error = Some(error);
+                self.state.project.check_and_save.validation_error = Some(error);
                 return;
             }
         };
@@ -508,17 +508,17 @@ impl RSpiceApp {
             }
             #[cfg(target_arch = "wasm32")]
             SaveRequestOutcome::CanonicalPending(transaction) => {
-                self.state.dialogs.check_and_save.pending_transaction = Some(transaction);
-                self.state.dialogs.check_and_save.pending_revision_id = Some(revision_id);
-                self.state.dialogs.check_and_save.pending_view_key = Some(target_view_key);
-                self.state.dialogs.check_and_save.pending_original_journal = Some(original_journal);
-                self.state.dialogs.check_and_save.pending_expected_journal = Some(expected_journal);
+                self.state.project.check_and_save.pending_transaction = Some(transaction);
+                self.state.project.check_and_save.pending_revision_id = Some(revision_id);
+                self.state.project.check_and_save.pending_view_key = Some(target_view_key);
+                self.state.project.check_and_save.pending_original_journal = Some(original_journal);
+                self.state.project.check_and_save.pending_expected_journal = Some(expected_journal);
                 self.state
-                    .dialogs
+                    .project
                     .check_and_save
                     .pending_expected_design_digest = Some(expected_design_digest);
-                self.state.dialogs.check_and_save.pending_original_dirty = original_dirty;
-                self.state.dialogs.check_and_save.validation_error = None;
+                self.state.project.check_and_save.pending_original_dirty = original_dirty;
+                self.state.project.check_and_save.validation_error = None;
             }
             SaveRequestOutcome::Cancelled => rollback_validated_save(
                 &mut self.state,
@@ -567,7 +567,7 @@ impl RSpiceApp {
         &mut self,
         event: &rspice_project::lifecycle::SaveContinuationEvent,
     ) -> bool {
-        let dialog = &self.state.dialogs.check_and_save;
+        let dialog = &self.state.project.check_and_save;
         let Some(expected) = dialog.pending_transaction else {
             return false;
         };
@@ -642,12 +642,12 @@ fn revision_note_error(note: &str) -> Option<String> {
 
 fn complete_validated_save(state: &mut AppState, newer_changes: bool) {
     clear_pending_save_state(state);
-    state.dialogs.check_and_save.saved = true;
-    state.dialogs.check_and_save.saved_with_newer_changes = newer_changes;
-    state.dialogs.check_and_save.validation_error = None;
-    state.dialogs.check_and_save.dirty = false;
-    state.dialogs.check_and_save.discard_confirm = false;
-    let message = match state.dialogs.check_and_save.report.as_ref() {
+    state.project.check_and_save.saved = true;
+    state.project.check_and_save.saved_with_newer_changes = newer_changes;
+    state.project.check_and_save.validation_error = None;
+    state.project.check_and_save.dirty = false;
+    state.project.check_and_save.discard_confirm = false;
+    let message = match state.project.check_and_save.report.as_ref() {
         Some(report) => format!(
             "Saved a validated revision of {}.",
             report.document_scope_label()
@@ -709,7 +709,7 @@ fn rollback_validated_save(
             "{message} The revision could not be taken back because {error}; close and reopen the project before retrying."
         ),
     };
-    state.dialogs.check_and_save.validation_error = Some(detail.clone());
+    state.project.check_and_save.validation_error = Some(detail.clone());
     state.record(LogSeverity::Warning, LogSource::Studio, detail);
 }
 
@@ -730,7 +730,7 @@ fn rollback_exact_journal(
 
 #[cfg(target_arch = "wasm32")]
 fn rollback_pending_validated_save(state: &mut AppState, message: &str) {
-    let dialog = &mut state.dialogs.check_and_save;
+    let dialog = &mut state.project.check_and_save;
     let pending = (
         dialog.pending_view_key.take(),
         dialog.pending_original_journal.take(),
@@ -744,11 +744,11 @@ fn rollback_pending_validated_save(state: &mut AppState, message: &str) {
         let detail = format!(
             "{message} The revision could not be taken back because the save that held it is gone; close and reopen the project before retrying."
         );
-        state.dialogs.check_and_save.validation_error = Some(detail.clone());
+        state.project.check_and_save.validation_error = Some(detail.clone());
         state.record(LogSeverity::Warning, LogSource::Studio, detail);
         return;
     };
-    let dirty = state.dialogs.check_and_save.pending_original_dirty;
+    let dirty = state.project.check_and_save.pending_original_dirty;
     rollback_validated_save(
         state,
         &view_key,
@@ -763,13 +763,13 @@ fn rollback_pending_validated_save(state: &mut AppState, message: &str) {
 fn clear_pending_save_state(state: &mut AppState) {
     #[cfg(target_arch = "wasm32")]
     {
-        state.dialogs.check_and_save.pending_transaction = None;
-        state.dialogs.check_and_save.pending_revision_id = None;
-        state.dialogs.check_and_save.pending_view_key = None;
-        state.dialogs.check_and_save.pending_original_journal = None;
-        state.dialogs.check_and_save.pending_expected_journal = None;
-        state.dialogs.check_and_save.pending_expected_design_digest = None;
-        state.dialogs.check_and_save.pending_original_dirty = false;
+        state.project.check_and_save.pending_transaction = None;
+        state.project.check_and_save.pending_revision_id = None;
+        state.project.check_and_save.pending_view_key = None;
+        state.project.check_and_save.pending_original_journal = None;
+        state.project.check_and_save.pending_expected_journal = None;
+        state.project.check_and_save.pending_expected_design_digest = None;
+        state.project.check_and_save.pending_original_dirty = false;
     }
     #[cfg(not(target_arch = "wasm32"))]
     let _ = state;
@@ -1203,7 +1203,7 @@ mod tests {
             &mut app.state.model.schematic,
         );
         open_check_and_save_dialog(&mut app.state);
-        assert!(app.state.dialogs.check_and_save.open);
+        assert!(app.state.project.check_and_save.open);
 
         let mut render = || {
             ctx.run_ui(
@@ -1311,7 +1311,7 @@ mod tests {
                 &mut app.state.model.schematic,
             );
             open_check_and_save_dialog(&mut app.state);
-            assert!(app.state.dialogs.check_and_save.open);
+            assert!(app.state.project.check_and_save.open);
             let canvas = crate::ui::raster::render(size, |ui, _| {
                 app.prepare_frame(ui.ctx());
                 app.render_frame_chrome(ui);

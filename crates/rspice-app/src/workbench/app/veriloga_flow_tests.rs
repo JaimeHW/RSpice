@@ -224,18 +224,18 @@ fn wired_device() -> (User, Device) {
     // 1. File → New project, not keeping the session's unsaved scratch work.
     Command::NewProject.execute(&mut user.app);
     user.settle();
-    if user.app.state.dialogs.confirmation_dialog.visible {
+    if user.app.state.workbench.confirmation_dialog.visible {
         user.click("Don't save");
     }
     assert!(
-        user.app.state.dialogs.new_project.open,
+        user.app.state.project.new_project.open,
         "New project asks for the project's identity"
     );
-    user.app.state.dialogs.new_project.name = "Verilog-A flow".to_owned();
+    user.app.state.project.new_project.name = "Verilog-A flow".to_owned();
     user.settle();
     user.click("Create project");
     assert!(
-        !user.app.state.dialogs.new_project.open,
+        !user.app.state.project.new_project.open,
         "the project is created"
     );
     let project = &user.app.state.model.workspace.content.project;
@@ -249,7 +249,7 @@ fn wired_device() -> (User, Device) {
     user.press(canvas.center(), egui::PointerButton::Secondary);
     user.settle();
     user.click("New Verilog-A device…");
-    let form = &mut user.app.state.dialogs.new_veriloga_device;
+    let form = &mut user.app.state.code.new_veriloga_device;
     assert!(form.open, "the canvas row opens the form");
     assert_eq!(
         form.library, library,
@@ -260,7 +260,7 @@ fn wired_device() -> (User, Device) {
     user.settle();
     user.click("Create");
     let view = CellViewRef::new(&library, CELL, "veriloga");
-    assert!(!user.app.state.dialogs.new_veriloga_device.open);
+    assert!(!user.app.state.code.new_veriloga_device.open);
     assert_eq!(user.app.state.model.workspace.content.active_view, view);
     assert_eq!(user.app.state.workbench.workspace, Workspace::Design);
 

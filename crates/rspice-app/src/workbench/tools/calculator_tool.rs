@@ -25,7 +25,7 @@ const TOOL_MARGIN: f32 = 24.0;
 /// stays live, so cursors can be placed and traces read while an expression
 /// is being composed.
 pub fn show(ctx: &Context, app: &mut RSpiceApp) {
-    if !app.state.dialogs.waveform_calculator_dialog {
+    if !app.state.results.waveform_calculator_dialog {
         return;
     }
     let t = Tokens::get(ctx);
@@ -56,7 +56,7 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp) {
         )
         .show(ctx, |ui| body(ui, app));
     if !open {
-        app.state.dialogs.waveform_calculator_dialog = false;
+        app.state.results.waveform_calculator_dialog = false;
     }
 }
 
@@ -210,7 +210,7 @@ mod tests {
         run.add_analysis(analysis);
         app.state.model.simulation.retained.runs = vec![run].into();
         assert!(app.state.model.simulation.select_run(0));
-        app.state.dialogs.waveform_calculator_dialog = true;
+        app.state.results.waveform_calculator_dialog = true;
         app.state.calculator_panel.expression = "V(out)/V(in)".to_owned();
 
         plot_expression(&mut app);
@@ -243,7 +243,7 @@ mod tests {
                 .visualization_documents_dirty
         );
         assert!(
-            app.state.dialogs.waveform_calculator_dialog,
+            app.state.results.waveform_calculator_dialog,
             "plotting must not close a modeless tool"
         );
     }

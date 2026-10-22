@@ -327,12 +327,12 @@ enum DraftResolutionSource {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_object_properties_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.object_properties.open {
+        if !self.state.design.object_properties.open {
             return;
         }
-        let Some(draft) = self.state.dialogs.object_properties.draft.as_ref() else {
+        let Some(draft) = self.state.design.object_properties.draft.as_ref() else {
             // Fail closed instead of retaining an invisible modal owner.
-            self.state.dialogs.object_properties.close();
+            self.state.design.object_properties.close();
             self.state
                 .prompt("Object properties closed: the edit was no longer open.");
             return;
@@ -356,14 +356,14 @@ impl RSpiceApp {
         // form, so it goes in the status slot.
         let refusal = self
             .state
-            .dialogs
+            .design
             .object_properties
             .validation_error
             .clone()
             .or_else(|| validation.message().map(str::to_owned));
         let invalid_field = validation.field();
         let form_refusal = refusal.clone().filter(|_| invalid_field.is_none());
-        let can_commit = self.state.dialogs.object_properties.dirty
+        let can_commit = self.state.design.object_properties.dirty
             && !self.state.schematic_edit_read_only()
             && validation.can_commit();
         let multiline_body = matches!(draft, ObjectPropertiesDraft::DesignNote(_));
@@ -381,7 +381,7 @@ impl RSpiceApp {
             .show(ctx, |rows| {
                 let draft = self
                     .state
-                    .dialogs
+                    .design
                     .object_properties
                     .draft
                     .as_mut()
@@ -398,12 +398,12 @@ impl RSpiceApp {
                 focus
             });
         if edited {
-            self.state.dialogs.object_properties.mark_edited();
+            self.state.design.object_properties.mark_edited();
         }
 
         match choice {
             DialogChoice::Primary => {
-                let Some(draft) = self.state.dialogs.object_properties.draft.as_ref() else {
+                let Some(draft) = self.state.design.object_properties.draft.as_ref() else {
                     return;
                 };
                 let validation = object_property_session_error(&self.state).map_or_else(
@@ -433,22 +433,22 @@ impl RSpiceApp {
                             // landed, next to the canvas that now shows it,
                             // is one more thing to read and nothing to act on.
                             Ok(_) => {
-                                self.state.dialogs.object_properties.close();
+                                self.state.design.object_properties.close();
                             }
                             Err(error) => {
-                                self.state.dialogs.object_properties.validation_error =
+                                self.state.design.object_properties.validation_error =
                                     Some(error.to_string());
                             }
                         }
                     }
                     DraftValidation::Incomplete { message, .. }
                     | DraftValidation::Invalid { message, .. } => {
-                        self.state.dialogs.object_properties.validation_error = Some(message);
+                        self.state.design.object_properties.validation_error = Some(message);
                     }
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.object_properties.close();
+                self.state.design.object_properties.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -600,7 +600,7 @@ fn draft_resolution_key(
 }
 
 fn object_property_session_error(state: &crate::workbench::app_state::AppState) -> Option<String> {
-    let dialog = &state.dialogs.object_properties;
+    let dialog = &state.design.object_properties;
     if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
@@ -1106,7 +1106,7 @@ mod tests {
     }
 
     fn open_bus_dialog(app: &mut RSpiceApp, bus: &Bus) {
-        app.state.dialogs.object_properties.open_bus(
+        app.state.design.object_properties.open_bus(
             bus,
             crate::workbench::app::schematic_editor_request_source(&app.state),
             app.state.model.workspace.content.active_view.display_path(),
@@ -1557,12 +1557,12 @@ mod tests {
             open_bus_dialog(&mut app, &bus);
             assert!(object_property_session_error(&app.state).is_none());
             let Some(ObjectPropertiesDraft::Bus(draft)) =
-                app.state.dialogs.object_properties.draft.as_mut()
+                app.state.design.object_properties.draft.as_mut()
             else {
                 panic!("bus draft")
             };
             draft.declaration = "ADDR[7:0]".to_owned();
-            app.state.dialogs.object_properties.mark_edited();
+            app.state.design.object_properties.mark_edited();
             let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
                 app.render_object_properties_dialog(ctx)
             });
@@ -1647,7 +1647,7 @@ mod tests {
                     },
                     "object-properties test".to_owned(),
                 ),
-                "missing" => app.state.dialogs.object_properties.source = None,
+                "missing" => app.state.design.object_properties.source = None,
                 _ => unreachable!(),
             }
             assert!(
@@ -1655,7 +1655,7 @@ mod tests {
                 "{change}"
             );
             if !matches!(change, "read-only" | "safe-mode" | "missing") {
-                let draft = app.state.dialogs.object_properties.draft.as_ref().unwrap();
+                let draft = app.state.design.object_properties.draft.as_ref().unwrap();
                 assert_ne!(
                     draft_resolution_key(&app.state, draft),
                     cached.key,
@@ -1675,7 +1675,7 @@ mod tests {
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 app.render_object_properties_dialog(ctx)
             });
-            assert!(app.state.dialogs.object_properties.open, "{change}");
+            assert!(app.state.design.object_properties.open, "{change}");
             assert!(
                 before.is_equal_document(app.state.model.schematic.document()),
                 "{change}"
@@ -1713,12 +1713,12 @@ mod tests {
         app.state.model.schematic.clear_undo_history();
         open_bus_dialog(&mut app, &bus);
         let Some(ObjectPropertiesDraft::Bus(draft)) =
-            app.state.dialogs.object_properties.draft.as_mut()
+            app.state.design.object_properties.draft.as_mut()
         else {
             panic!("bus draft")
         };
         draft.declaration = "ADDR<0:15>".to_owned();
-        app.state.dialogs.object_properties.mark_edited();
+        app.state.design.object_properties.mark_edited();
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_object_properties_dialog(ctx)
@@ -1727,8 +1727,8 @@ mod tests {
             app.render_object_properties_dialog(ctx)
         });
 
-        assert!(!app.state.dialogs.object_properties.open);
-        assert!(app.state.dialogs.object_properties.source.is_none());
+        assert!(!app.state.design.object_properties.open);
+        assert!(app.state.design.object_properties.source.is_none());
         assert_eq!(
             app.state.model.schematic.document().buses[0].declaration,
             Some(BusDeclaration::parse("ADDR<0:15>").unwrap())
@@ -1755,12 +1755,12 @@ mod tests {
             .push(bus.clone());
         open_bus_dialog(&mut app, &bus);
         let Some(ObjectPropertiesDraft::Bus(draft)) =
-            app.state.dialogs.object_properties.draft.as_mut()
+            app.state.design.object_properties.draft.as_mut()
         else {
             panic!("bus draft")
         };
         draft.declaration = "ADDR[7:0]".to_owned();
-        app.state.dialogs.object_properties.mark_edited();
+        app.state.design.object_properties.mark_edited();
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_object_properties_dialog(ctx)
@@ -1769,7 +1769,7 @@ mod tests {
             app.render_object_properties_dialog(ctx)
         });
 
-        assert!(!app.state.dialogs.object_properties.open);
+        assert!(!app.state.design.object_properties.open);
         assert_eq!(app.state.model.schematic.document().buses[0], bus);
     }
 
@@ -1789,7 +1789,7 @@ mod tests {
         open_bus_dialog(&mut app, &bus);
         let draft = app
             .state
-            .dialogs
+            .design
             .object_properties
             .draft
             .as_ref()

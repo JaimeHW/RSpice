@@ -48,9 +48,9 @@ fn hold_drawing_still(ui: &Ui, state: &mut AppState, height: f32) {
 
 fn options(ui: &mut Ui, state: &mut AppState) {
     match state.model.schematic.session.editor.tool {
-        Tool::MoveSelection if state.dialogs.move_selection.armed => {
+        Tool::MoveSelection if state.design.move_selection.armed => {
             strip(ui, "Move", |ui| {
-                let mode = &mut state.dialogs.move_selection.mode;
+                let mode = &mut state.design.move_selection.mode;
                 let mut selected = MoveSelectionMode::ALL
                     .iter()
                     .position(|candidate| candidate == mode)
@@ -67,9 +67,9 @@ fn options(ui: &mut Ui, state: &mut AppState) {
                 }
             });
         }
-        Tool::StretchSelection if state.dialogs.stretch_selection.armed => {
+        Tool::StretchSelection if state.design.stretch_selection.armed => {
             strip(ui, "Stretch", |ui| {
-                let policy = &mut state.dialogs.stretch_selection.policy;
+                let policy = &mut state.design.stretch_selection.policy;
                 let mut orthogonal = *policy == StretchOrthogonalPolicy::PreserveOrthogonal;
                 if ui
                     .checkbox(&mut orthogonal, "Keep wires orthogonal")

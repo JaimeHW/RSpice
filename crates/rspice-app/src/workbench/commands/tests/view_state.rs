@@ -450,7 +450,7 @@ fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
 
     Command::ToggleFullScreen.execute(&mut app);
 
-    assert!(!app.state.dialogs.application_modal_open());
+    assert!(!app.state.dialog_modal_open());
     assert!(app.state.workbench.full_screen_presentation);
     assert!(app.state.workbench.full_screen);
     assert_eq!(app.state.ui.take_full_screen_request(), Some(true));
@@ -469,7 +469,7 @@ fn reset_active_view_command_resets_and_reports_in_the_same_frame() {
 
     Command::ResetActiveView.execute(&mut app);
 
-    assert!(!app.state.dialogs.application_modal_open());
+    assert!(!app.state.dialog_modal_open());
     assert_eq!(app.state.prompt_text(), Some("Design view reset."));
 }
 

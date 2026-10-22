@@ -210,7 +210,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         .validated_revisions
         .validate()
     {
-        state.dialogs.project_revision_history = ProjectRevisionHistoryDialogState {
+        state.project.project_revision_history = ProjectRevisionHistoryDialogState {
             open: true,
             expected_journal: state.model.schematic.document().validated_revisions.clone(),
             authority: Some(SchematicEditAuthority::capture(state)),
@@ -230,7 +230,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         .last()
         .map(|record| vec![schematic_row_key(record.id())])
         .unwrap_or_default();
-    state.dialogs.project_revision_history = ProjectRevisionHistoryDialogState {
+    state.project.project_revision_history = ProjectRevisionHistoryDialogState {
         open: true,
         selected,
         authority: Some(SchematicEditAuthority::capture(state)),
@@ -241,18 +241,18 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_project_revision_history_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.project_revision_history.open {
+        if !self.state.project.project_revision_history.open {
             return;
         }
         let rows = project_audit_rows(&self.state);
-        retain_existing_revision_selection(&mut self.state.dialogs.project_revision_history, &rows);
+        retain_existing_revision_selection(&mut self.state.project.project_revision_history, &rows);
         let stale = history_authority_error(&self.state);
         let write_allowed = !self.state.model.schematic.session.read_only
             && !self.state.active_view_read_only()
             && !self.state.model.safe_mode.project_read_only();
         let mut body_scroll_offset = self
             .state
-            .dialogs
+            .project
             .project_revision_history
             .body_scroll_offset;
         let mut dialog = Dialog::new(TITLE, "Close")
@@ -267,7 +267,7 @@ impl RSpiceApp {
             .body_scroll_offset(&mut body_scroll_offset);
         let transaction_error = self
             .state
-            .dialogs
+            .project
             .project_revision_history
             .error
             .clone()
@@ -292,12 +292,12 @@ impl RSpiceApp {
                 ui,
                 &rows,
                 write_allowed && stale.is_none(),
-                &mut self.state.dialogs.project_revision_history,
+                &mut self.state.project.project_revision_history,
             );
             None
         });
         self.state
-            .dialogs
+            .project
             .project_revision_history
             .body_scroll_offset = body_scroll_offset;
         self.handle_revision_history_action(action, &rows);
@@ -305,7 +305,7 @@ impl RSpiceApp {
             choice,
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
         ) {
-            self.state.dialogs.project_revision_history.close();
+            self.state.project.project_revision_history.close();
         }
     }
 
@@ -313,7 +313,7 @@ impl RSpiceApp {
         match action {
             HistoryAction::None => {}
             HistoryAction::ToggleSelection(key, additive) => {
-                let dialog = &mut self.state.dialogs.project_revision_history;
+                let dialog = &mut self.state.project.project_revision_history;
                 dialog.restore_confirmation = false;
                 dialog.comparison = None;
                 if let Some(index) = dialog.selected.iter().position(|selected| *selected == key) {
@@ -334,24 +334,24 @@ impl RSpiceApp {
     }
 
     fn compare_selected_revisions(&mut self, rows: &[ProjectAuditRow]) {
-        let selected = self.state.dialogs.project_revision_history.selected.clone();
+        let selected = self.state.project.project_revision_history.selected.clone();
         if selected.len() != 2 {
-            self.state.dialogs.project_revision_history.error =
+            self.state.project.project_revision_history.error =
                 Some("Select exactly two retained records to compare.".to_owned());
             return;
         }
         let Some(first) = rows.iter().find(|row| row.key == selected[0]) else {
-            self.state.dialogs.project_revision_history.error =
+            self.state.project.project_revision_history.error =
                 Some("The first selected record no longer exists.".to_owned());
             return;
         };
         let Some(second) = rows.iter().find(|row| row.key == selected[1]) else {
-            self.state.dialogs.project_revision_history.error =
+            self.state.project.project_revision_history.error =
                 Some("The second selected record no longer exists.".to_owned());
             return;
         };
         if first.kind != second.kind {
-            self.state.dialogs.project_revision_history.error = Some(
+            self.state.project.project_revision_history.error = Some(
                 "Semantic comparison requires two records from the same project-artifact family."
                     .to_owned(),
             );
@@ -362,13 +362,13 @@ impl RSpiceApp {
             (Some(first_id), Some(second_id)) => {
                 let Some(first_record) = find_project_schematic_revision(&self.state, first_id)
                 else {
-                    self.state.dialogs.project_revision_history.error =
+                    self.state.project.project_revision_history.error =
                         Some("The first selected schematic revision no longer exists.".to_owned());
                     return;
                 };
                 let Some(second_record) = find_project_schematic_revision(&self.state, second_id)
                 else {
-                    self.state.dialogs.project_revision_history.error =
+                    self.state.project.project_revision_history.error =
                         Some("The second selected schematic revision no longer exists.".to_owned());
                     return;
                 };
@@ -386,13 +386,13 @@ impl RSpiceApp {
                 ProjectAuditComparison::between(first, second),
             ),
             _ => {
-                self.state.dialogs.project_revision_history.error = Some(
+                self.state.project.project_revision_history.error = Some(
                     "The selected records do not expose compatible semantic identities.".to_owned(),
                 );
                 return;
             }
         };
-        let dialog = &mut self.state.dialogs.project_revision_history;
+        let dialog = &mut self.state.project.project_revision_history;
         dialog.comparison = Some(comparison);
         dialog.error = None;
     }
@@ -406,7 +406,7 @@ impl RSpiceApp {
             {
                 return Err("The active schematic or project is read-only.".to_owned());
             }
-            let dialog = &self.state.dialogs.project_revision_history;
+            let dialog = &self.state.project.project_revision_history;
             if dialog.selected.len() != 1 {
                 return Err(
                     "Select exactly one validated schematic revision to restore.".to_owned(),
@@ -444,7 +444,7 @@ impl RSpiceApp {
         match result {
             Ok(()) => {
                 let authority = SchematicEditAuthority::capture(&self.state);
-                let dialog = &mut self.state.dialogs.project_revision_history;
+                let dialog = &mut self.state.project.project_revision_history;
                 dialog.authority = Some(authority);
                 dialog.expected_journal = self
                     .state
@@ -458,7 +458,7 @@ impl RSpiceApp {
                 dialog.error = None;
             }
             Err(error) => {
-                let dialog = &mut self.state.dialogs.project_revision_history;
+                let dialog = &mut self.state.project.project_revision_history;
                 dialog.restore_confirmation = false;
                 dialog.error = Some(error);
             }
@@ -468,7 +468,7 @@ impl RSpiceApp {
 
 fn history_authority_error(state: &AppState) -> Option<String> {
     state
-        .dialogs
+        .project
         .project_revision_history
         .authority
         .as_ref()

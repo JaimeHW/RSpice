@@ -51,12 +51,12 @@ const DESCRIPTION: &str = "Connect one bit or a range of a bus.";
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_bus_tap_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.bus_tap.open {
+        if !self.state.design.bus_tap.open {
             return;
         }
 
         let validation = match placement_source(&self.state) {
-            Ok(_) => self.state.dialogs.bus_tap.fields.validate(),
+            Ok(_) => self.state.design.bus_tap.fields.validate(),
             Err(message) => DraftValidation::Invalid(message),
         };
         // The sheet this tap goes on: the one thing about the form that is not
@@ -69,7 +69,7 @@ impl RSpiceApp {
             .active_view
             .display_path();
 
-        let fields = &mut self.state.dialogs.bus_tap.fields;
+        let fields = &mut self.state.design.bus_tap.fields;
         let choice = CommandForm::new(TITLE, PRIMARY)
             .context(Some(view_path.as_str()))
             .describe(DESCRIPTION)
@@ -88,16 +88,16 @@ impl RSpiceApp {
                 // changed to an invalid value.
                 if let Ok(source) = placement_source(&self.state)
                     && let DraftValidation::Valid(pending) =
-                        self.state.dialogs.bus_tap.fields.validate()
+                        self.state.design.bus_tap.fields.validate()
                 {
                     let placement = PendingBusTapPlacement::new(pending, source.clone());
                     self.state.model.schematic.session.editor.pending_bus_tap = Some(placement);
                     self.state.model.schematic.arm_tool(Tool::BusTap);
-                    self.state.dialogs.bus_tap.close();
+                    self.state.design.bus_tap.close();
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.bus_tap.close();
+                self.state.design.bus_tap.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -107,7 +107,7 @@ impl RSpiceApp {
 pub(crate) fn open_bus_tap(state: &mut AppState) {
     let source = crate::workbench::app::schematic_editor_request_source(state);
     let bus = sole_declared_bus(state);
-    state.dialogs.bus_tap.open(source, bus);
+    state.design.bus_tap.open(source, bus);
 }
 
 /// The bus a tap starts from when the sheet leaves no doubt: the one
@@ -139,7 +139,7 @@ fn placement_source(state: &AppState) -> Result<&EditorRequestSource, String> {
     if state.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    let source = state.dialogs.bus_tap.source.as_ref().ok_or_else(|| {
+    let source = state.design.bus_tap.source.as_ref().ok_or_else(|| {
         "The bus-tap placement context is unavailable. Close and reopen Place bus tap.".to_owned()
     })?;
     if source != &crate::workbench::app::schematic_editor_request_source(state) {
@@ -206,8 +206,8 @@ mod tests {
 
     /// Type a complete tap into the open form.
     fn fill(state: &mut AppState, bus: &str, slice: &str) {
-        state.dialogs.bus_tap.fields.bus = bus.to_owned();
-        state.dialogs.bus_tap.fields.slice = slice.to_owned();
+        state.design.bus_tap.fields.bus = bus.to_owned();
+        state.design.bus_tap.fields.slice = slice.to_owned();
     }
 
     #[test]
@@ -226,7 +226,7 @@ mod tests {
             app.render_bus_tap_dialog(ctx)
         });
 
-        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "DATA[31:0]");
+        assert_eq!(app.state.design.bus_tap.fields.bus, "DATA[31:0]");
         assert!(
             app.state
                 .model
@@ -245,25 +245,25 @@ mod tests {
     fn an_untouched_form_taps_nothing_and_prefills_only_the_one_declared_bus() {
         let mut app = RSpiceApp::test_instance();
         open_bus_tap(&mut app.state);
-        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "");
-        assert_eq!(app.state.dialogs.bus_tap.fields.slice, "");
-        assert!(!app.state.dialogs.bus_tap.fields.validate().can_commit());
+        assert_eq!(app.state.design.bus_tap.fields.bus, "");
+        assert_eq!(app.state.design.bus_tap.fields.slice, "");
+        assert!(!app.state.design.bus_tap.fields.validate().can_commit());
 
         // One declared bus is the only answer, so the field starts there. The
         // slice is still the reader's, so the form still cannot commit.
-        app.state.dialogs.bus_tap.close();
+        app.state.design.bus_tap.close();
         declare_bus(&mut app.state, "DATA[15:0]");
         open_bus_tap(&mut app.state);
-        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "DATA[15:0]");
-        assert_eq!(app.state.dialogs.bus_tap.fields.slice, "");
-        assert!(!app.state.dialogs.bus_tap.fields.validate().can_commit());
+        assert_eq!(app.state.design.bus_tap.fields.bus, "DATA[15:0]");
+        assert_eq!(app.state.design.bus_tap.fields.slice, "");
+        assert!(!app.state.design.bus_tap.fields.validate().can_commit());
 
         // Two declarations are a choice, and a form does not choose for the
         // reader.
-        app.state.dialogs.bus_tap.close();
+        app.state.design.bus_tap.close();
         declare_bus(&mut app.state, "ADDR[7:0]");
         open_bus_tap(&mut app.state);
-        assert_eq!(app.state.dialogs.bus_tap.fields.bus, "");
+        assert_eq!(app.state.design.bus_tap.fields.bus, "");
     }
 
     #[test]
@@ -300,7 +300,7 @@ mod tests {
             app.render_bus_tap_dialog(ctx)
         });
 
-        assert!(!app.state.dialogs.bus_tap.open);
+        assert!(!app.state.design.bus_tap.open);
         assert!(
             app.state
                 .model
@@ -328,7 +328,7 @@ mod tests {
             app.render_bus_tap_dialog(ctx)
         });
 
-        assert!(!app.state.dialogs.bus_tap.open);
+        assert!(!app.state.design.bus_tap.open);
         assert_eq!(app.state.model.schematic.session.editor.tool, Tool::BusTap);
         let pending = app
             .state
@@ -430,7 +430,7 @@ mod tests {
                     },
                     "bus-tap test".to_owned(),
                 ),
-                "missing" => app.state.dialogs.bus_tap.source = None,
+                "missing" => app.state.design.bus_tap.source = None,
                 _ => unreachable!(),
             }
             assert!(placement_source(&app.state).is_err(), "{change}");
@@ -439,7 +439,7 @@ mod tests {
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
                 app.render_bus_tap_dialog(ctx)
             });
-            assert!(app.state.dialogs.bus_tap.open, "{change}");
+            assert!(app.state.design.bus_tap.open, "{change}");
             assert_eq!(
                 app.state.model.schematic.session.editor.tool,
                 Tool::Select,

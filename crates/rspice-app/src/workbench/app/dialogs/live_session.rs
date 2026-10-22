@@ -74,7 +74,7 @@ impl RSpiceApp {
             Some(LiveSessionState::Hosting(summary)) => Some(summary.policy),
             _ => None,
         };
-        self.state.dialogs.live_session = LiveSessionDialogState {
+        self.state.cloud.live_session = LiveSessionDialogState {
             open: true,
             policy_draft,
             ..Default::default()
@@ -86,7 +86,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn render_live_session_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.live_session.open {
+        if !self.state.cloud.live_session.open {
             return;
         }
 
@@ -135,7 +135,7 @@ impl RSpiceApp {
                 Some(LiveSessionState::Hosting(summary)) => {
                     let draft = self
                         .state
-                        .dialogs
+                        .cloud
                         .live_session
                         .policy_draft
                         .unwrap_or(summary.policy);
@@ -187,7 +187,7 @@ impl RSpiceApp {
         }
 
         let mut actions: Vec<LiveDialogAction> = Vec::new();
-        let dialog_state = &mut self.state.dialogs.live_session;
+        let dialog_state = &mut self.state.cloud.live_session;
         let choice = dialog.show(ctx, |ui| {
             let t = Tokens::get(ui.ctx());
             let c = t.color;
@@ -279,7 +279,7 @@ impl RSpiceApp {
             DialogChoice::Cancelled | DialogChoice::Ghost => {
                 // The session (hosted or joined) keeps running; the dialog
                 // is a control surface, not the session's lifetime.
-                self.state.dialogs.live_session.open = false;
+                self.state.cloud.live_session.open = false;
             }
             DialogChoice::Secondary => match &session {
                 Some(LiveSessionState::Hosting(_)) => self.cloud_account.end_live_session(),
@@ -293,20 +293,20 @@ impl RSpiceApp {
                 None | Some(LiveSessionState::Failed { .. }) => {
                     let policy = self
                         .state
-                        .dialogs
+                        .cloud
                         .live_session
                         .policy_draft
                         .unwrap_or_else(default_policy);
                     self.cloud_account.start_live_session(policy, circuit_id);
                 }
                 Some(LiveSessionState::Hosting(_)) => {
-                    if let Some(policy) = self.state.dialogs.live_session.policy_draft {
+                    if let Some(policy) = self.state.cloud.live_session.policy_draft {
                         self.cloud_account.apply_live_session_policy(policy);
                     }
                 }
                 Some(LiveSessionState::Participating(_)) => {
                     if mirroring {
-                        self.state.dialogs.live_session.open = false;
+                        self.state.cloud.live_session.open = false;
                     } else {
                         #[cfg(not(target_arch = "wasm32"))]
                         self.live_session.request_mirror_entry(&mut self.state);

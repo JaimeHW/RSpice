@@ -440,8 +440,8 @@ fn the_list_minis_are_evaluated_once_per_definition_revision() {
 fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
     let (mut app, id) = fixture();
     open_stimulus_link(&mut app.state, id, StimulusLinkMode::Extract).expect("opens");
-    assert_eq!(app.state.dialogs.stimulus_link.name, "v1_pulse");
-    app.state.dialogs.stimulus_link.purpose = "bench clock".to_owned();
+    assert_eq!(app.state.design.stimulus_link.name, "v1_pulse");
+    app.state.design.stimulus_link.purpose = "bench clock".to_owned();
 
     let line = commit_extraction(&mut app.state, id).expect("the extraction commits");
     assert!(line.contains("v1_pulse"), "{line}");
@@ -486,14 +486,14 @@ fn a_refused_extraction_leaves_both_the_library_and_the_instance_as_they_were() 
     let held = app.state.model.workspace.content.stimulus_library.clone();
 
     // A name the library already holds is refused before anything moves.
-    app.state.dialogs.stimulus_link.name = "sensor_drive".to_owned();
+    app.state.design.stimulus_link.name = "sensor_drive".to_owned();
     let refusal = commit_extraction(&mut app.state, id).expect_err("the name is taken");
     assert!(refusal.contains("already defines"), "{refusal}");
     assert_eq!(app.state.model.workspace.content.stimulus_library, held);
 
     // An instance transaction the schematic refuses takes the definition back
     // out, so the two halves cannot land apart.
-    app.state.dialogs.stimulus_link.name = "v1_pulse".to_owned();
+    app.state.design.stimulus_link.name = "v1_pulse".to_owned();
     app.state
         .model
         .schematic
@@ -578,7 +578,7 @@ fn adopt_refuses_to_open_over_an_empty_library() {
         refusal.contains("holds no stimulus definitions"),
         "{refusal}"
     );
-    assert!(!app.state.dialogs.stimulus_link.open);
+    assert!(!app.state.design.stimulus_link.open);
 }
 
 /// Opening adopt lands on the definition the instance already adopted.
@@ -598,12 +598,12 @@ fn adopt_opens_on_the_definition_the_instance_already_carries() {
 
     open_stimulus_link(&mut app.state, id, StimulusLinkMode::Adopt).expect("opens");
     assert_eq!(
-        app.state.dialogs.stimulus_link.pick.as_deref(),
+        app.state.design.stimulus_link.pick.as_deref(),
         Some("sensor_drive")
     );
-    assert_eq!(app.state.dialogs.stimulus_link.chip, "adopted \u{00b7} r1");
+    assert_eq!(app.state.design.stimulus_link.chip, "adopted \u{00b7} r1");
     assert_eq!(
-        app.state.dialogs.stimulus_link.provenance,
+        app.state.design.stimulus_link.provenance,
         ProvenanceState::Adopted { revision: 1 }
     );
 }
@@ -879,9 +879,9 @@ impl Scene {
         };
         open_stimulus_link(&mut app.state, id, mode).expect("opens");
         match self {
-            Self::Adopt(pick) => app.state.dialogs.stimulus_link.pick = pick.map(str::to_owned),
+            Self::Adopt(pick) => app.state.design.stimulus_link.pick = pick.map(str::to_owned),
             Self::Save(Some(name)) => {
-                app.state.dialogs.stimulus_link.name = name.to_owned();
+                app.state.design.stimulus_link.name = name.to_owned();
             }
             _ => {}
         }

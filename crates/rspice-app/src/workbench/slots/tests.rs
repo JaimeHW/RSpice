@@ -6,6 +6,7 @@
 //! named hole rather than an unstated pattern.
 
 use super::*;
+use crate::workbench::app::HelpCenterPage;
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app::dialogs::library::pending_deletions::LibraryDeletionTarget;
 use crate::workbench::app::dialogs::object_properties::ObjectPropertiesDialogState;
@@ -15,67 +16,73 @@ use crate::workbench::app::dialogs::selection::commands::floating::{
     FloatingPaste, FloatingPasteOrigin,
 };
 use crate::workbench::app::dialogs::window_session::WindowSessionPage;
+use crate::workbench::docks::RunDetailsDialogState;
+use crate::workbench::menu_bar::DatasetExportPicker;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
 
 fn edit_authority() -> SchematicEditAuthority {
     SchematicEditAuthority::capture(&crate::workbench::app_state::AppState::default())
 }
 
-fn assert_blocks_shortcuts(configure: impl FnOnce(&mut DialogState)) {
-    let mut dialogs = DialogState::default();
-    assert!(!dialogs.application_modal_open());
+fn assert_blocks_shortcuts(configure: impl FnOnce(&mut AppState)) {
+    let mut dialogs = AppState::default();
+    assert!(!dialogs.dialog_modal_open());
     configure(&mut dialogs);
-    assert!(dialogs.application_modal_open());
+    assert!(dialogs.dialog_modal_open());
 }
 
 #[test]
 fn every_retained_dialog_owner_blocks_background_shortcuts() {
-    assert_blocks_shortcuts(|dialogs| dialogs.about = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.shortcuts_help = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.help_center.open(HelpCenterPage::Help));
-    assert_blocks_shortcuts(|dialogs| {
-        dialogs.window_session.open(WindowSessionPage::Documents);
-    });
-    assert_blocks_shortcuts(|dialogs| dialogs.new_cell_dialog = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.new_view_dialog = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.copy_cell_dialog = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.rename_cell_dialog = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.rename_selection.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.design_management.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.create_model_bound_symbol.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.symbol_import.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.symbol_parameter_form.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.engineering_table.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.preferences_open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_support.manager.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.shell.about = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.shell.shortcuts_help = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.shell.help_center.open(HelpCenterPage::Help));
     assert_blocks_shortcuts(|dialogs| {
         dialogs
+            .workbench
+            .window_session_dialog
+            .open(WindowSessionPage::Documents);
+    });
+    assert_blocks_shortcuts(|dialogs| dialogs.project.new_cell_dialog = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.project.new_view_dialog = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.project.copy_cell_dialog = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.project.rename_cell_dialog = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.rename_selection.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.project.design_management.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.create_model_bound_symbol.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.symbol_import.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.symbol_parameter_form.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.engineering_table.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.settings.preferences_open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.sheets.drawing_sheet_support.manager.open = true);
+    assert_blocks_shortcuts(|dialogs| {
+        dialogs
+            .settings
             .workspace_layout_manager
             .open(crate::workbench::WorkspacePreset::Engineering);
     });
-    assert_blocks_shortcuts(|dialogs| dialogs.shortcut_portability.open_import());
-    assert_blocks_shortcuts(|dialogs| dialogs.shortcut_portability.open_export());
-    assert_blocks_shortcuts(|dialogs| dialogs.shortcut_editor.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.license_dialog.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.publish_web.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.live_session.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.unpublish_web.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.command_palette.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.settings.shortcut_portability.open_import());
+    assert_blocks_shortcuts(|dialogs| dialogs.settings.shortcut_portability.open_export());
+    assert_blocks_shortcuts(|dialogs| dialogs.settings.shortcut_editor.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.cloud.license_dialog.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.cloud.publish_web.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.cloud.live_session.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.cloud.unpublish_web.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.workbench.command_palette.open = true);
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.bus_tap.open(
+        dialogs.design.bus_tap.open(
             crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
             String::new(),
         );
     });
-    assert_blocks_shortcuts(|dialogs| dialogs.builtin_xspice_placement.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.net_label_placement.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.schematic_visibility.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.drawing_sheet_overflow_open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.grid_snap_routing.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.builtin_xspice_placement.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.net_label_placement.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.schematic_visibility_dialog.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.sheets.drawing_sheet_overflow_open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.grid_snap_routing.open = true);
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.pin_port.open(
+        dialogs.design.pin_port.open(
             "EN".to_owned(),
             crate::state::PlacementAuthority::new(
                 crate::workbench::app::schematic_editor_request_source(
@@ -86,13 +93,14 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
     });
     assert_blocks_shortcuts(|dialogs| {
         dialogs
+            .design
             .design_note
             .open(crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ));
     });
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.documentation_shape.open(
+        dialogs.design.documentation_shape.open(
             crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
@@ -100,14 +108,14 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         );
     });
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.array_selection.open(
+        dialogs.design.array_selection.open(
             edit_authority(),
             "8 \u{00d7} 1".to_owned(),
             "U4\u{2026}U11 \u{00b7} DATA[0]\u{2026}DATA[7]".to_owned(),
         );
     });
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.replace_instance.open(ReplaceInstanceOpen {
+        dialogs.design.replace_instance.open(ReplaceInstanceOpen {
             authority: edit_authority(),
             replacement_authority: {
                 let mut schematic = crate::state::SchematicState::default();
@@ -143,32 +151,33 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         )
         .unwrap();
         dialogs
+            .design
             .object_properties
             .open_bus(&bus, edit_authority().source, String::new());
     });
-    assert_blocks_shortcuts(|dialogs| dialogs.selection_bulk_edit.open = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.technology_attachment.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.design.selection_bulk_edit.open = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.project.technology_attachment.open = true);
     assert_blocks_shortcuts(|dialogs| {
-        dialogs.library_deletion_review.target = Some(LibraryDeletionTarget::Cell {
+        dialogs.project.library_deletion_review.target = Some(LibraryDeletionTarget::Cell {
             library: "work".to_owned(),
             cell: "filter".to_owned(),
         });
     });
-    assert_blocks_shortcuts(|dialogs| dialogs.confirmation_dialog.visible = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.project_review_dialog.show_close_project());
+    assert_blocks_shortcuts(|dialogs| dialogs.workbench.confirmation_dialog.visible = true);
+    assert_blocks_shortcuts(|dialogs| dialogs.workbench.project_review_dialog.show_close_project());
 }
 
-fn open_drawing_sheet_presets_alone(dialogs: &mut DialogState) {
+fn open_drawing_sheet_presets_alone(dialogs: &mut AppState) {
     let mut state = crate::workbench::app_state::AppState::default();
     assert!(
         crate::workbench::app::dialogs::drawing_sheet_presets::open_custom_sheet_size_library(
             &mut state
         )
     );
-    dialogs.drawing_sheet_presets = state.dialogs.drawing_sheet_presets.clone();
+    dialogs.sheets.drawing_sheet_presets = state.sheets.drawing_sheet_presets.clone();
 }
 
-fn open_veriloga_build_settings_alone(dialogs: &mut DialogState) {
+fn open_veriloga_build_settings_alone(dialogs: &mut AppState) {
     use crate::workbench::app::veriloga_design_tests::{
         add_veriloga_cell, open_in_design, open_project_app,
     };
@@ -178,105 +187,124 @@ fn open_veriloga_build_settings_alone(dialogs: &mut DialogState) {
     open_in_design(&mut app.state, &reference);
     crate::workbench::app::dialogs::veriloga_build_settings::open_veriloga_build_settings(&mut app)
         .expect("Build settings opens on a Verilog-A view");
-    dialogs.veriloga_build_settings = app.state.dialogs.veriloga_build_settings.take();
+    dialogs.code.veriloga_build_settings = app.state.code.veriloga_build_settings.take();
 }
 
 /// A dialog by name, and the least that opens it on a closed dialog state.
-type DialogRow = (&'static str, fn(&mut DialogState));
+type DialogRow = (&'static str, fn(&mut AppState));
 
-/// One row per term of [`DialogState::application_modal_open`], in the order
+/// One row per term of [`AppState::dialog_modal_open`], in the order
 /// the gate lists them.
 const DIALOG_GATE: &[DialogRow] = &[
-    ("about", |dialogs| dialogs.about = true),
-    ("shortcuts_help", |dialogs| dialogs.shortcuts_help = true),
+    ("about", |dialogs| dialogs.shell.about = true),
+    ("shortcuts_help", |dialogs| {
+        dialogs.shell.shortcuts_help = true
+    }),
     ("help_center", |dialogs| {
-        dialogs.help_center.open(HelpCenterPage::Help);
+        dialogs.shell.help_center.open(HelpCenterPage::Help);
     }),
     ("window_session", |dialogs| {
-        dialogs.window_session.open(WindowSessionPage::Documents);
+        dialogs
+            .workbench
+            .window_session_dialog
+            .open(WindowSessionPage::Documents);
     }),
-    ("new_cell_dialog", |dialogs| dialogs.new_cell_dialog = true),
-    ("new_view_dialog", |dialogs| dialogs.new_view_dialog = true),
+    ("new_cell_dialog", |dialogs| {
+        dialogs.project.new_cell_dialog = true
+    }),
+    ("new_view_dialog", |dialogs| {
+        dialogs.project.new_view_dialog = true
+    }),
     ("new_veriloga_device", |dialogs| {
-        dialogs.new_veriloga_device.open = true;
+        dialogs.code.new_veriloga_device.open = true;
     }),
     (
         "veriloga_build_settings",
         open_veriloga_build_settings_alone,
     ),
     ("copy_cell_dialog", |dialogs| {
-        dialogs.copy_cell_dialog = true
+        dialogs.project.copy_cell_dialog = true
     }),
     ("rename_cell_dialog", |dialogs| {
-        dialogs.rename_cell_dialog = true
+        dialogs.project.rename_cell_dialog = true
     }),
     ("rename_view_dialog", |dialogs| {
-        dialogs.rename_view_dialog = true
+        dialogs.project.rename_view_dialog = true
     }),
     ("new_library_dialog", |dialogs| {
-        dialogs.new_library_dialog = true
+        dialogs.project.new_library_dialog = true
     }),
     ("rename_library_dialog", |dialogs| {
-        dialogs.rename_library_dialog = true;
+        dialogs.project.rename_library_dialog = true;
     }),
     ("delete_library_dialog", |dialogs| {
-        dialogs.delete_library_dialog = true;
+        dialogs.project.delete_library_dialog = true;
     }),
     ("library_deletion_review", |dialogs| {
-        dialogs.library_deletion_review.target = Some(LibraryDeletionTarget::Cell {
+        dialogs.project.library_deletion_review.target = Some(LibraryDeletionTarget::Cell {
             library: "work".to_owned(),
             cell: "filter".to_owned(),
         });
     }),
     ("plan_removal_review", |dialogs| {
-        dialogs.plan_removal_review.target = Some(PlanRemovalTarget::Analysis(
+        dialogs.simulate.plan_removal_review.target = Some(PlanRemovalTarget::Analysis(
             crate::product::AnalysisInstanceId::new(),
         ));
     }),
     ("plan_removal_refusal", |dialogs| {
-        dialogs.plan_removal_refusal.analysis = Some(crate::product::AnalysisInstanceId::new());
+        dialogs.simulate.plan_removal_refusal.analysis =
+            Some(crate::product::AnalysisInstanceId::new());
     }),
     ("dataset_export", |dialogs| {
-        dialogs.dataset_export = Some(DatasetExportPicker {
+        dialogs.results.dataset_export = Some(DatasetExportPicker {
             format: 0,
             several_analyses: false,
         });
     }),
     ("preferences_open", |dialogs| {
-        dialogs.preferences_open = true
+        dialogs.settings.preferences_open = true
     }),
-    ("hardcopy", |dialogs| dialogs.hardcopy.open = true),
+    ("hardcopy", |dialogs| dialogs.hardcopy.hardcopy.open = true),
     ("drawing_sheet_defaults", |dialogs| {
-        dialogs.drawing_sheet_defaults.open = true;
+        dialogs.sheets.drawing_sheet_defaults.open = true;
     }),
     ("drawing_sheet_presets", open_drawing_sheet_presets_alone),
     ("drawing_sheet_support", |dialogs| {
-        dialogs.drawing_sheet_support.manager.open = true;
+        dialogs.sheets.drawing_sheet_support.manager.open = true;
     }),
     ("workspace_layout_manager", |dialogs| {
         dialogs
+            .settings
             .workspace_layout_manager
             .open(crate::workbench::WorkspacePreset::Engineering);
     }),
     ("shortcut_portability (import)", |dialogs| {
-        dialogs.shortcut_portability.open_import();
+        dialogs.settings.shortcut_portability.open_import();
     }),
     ("shortcut_portability (export)", |dialogs| {
-        dialogs.shortcut_portability.open_export();
+        dialogs.settings.shortcut_portability.open_export();
     }),
     ("shortcut_editor", |dialogs| {
-        dialogs.shortcut_editor.open = true
+        dialogs.settings.shortcut_editor.open = true
     }),
     ("license_dialog", |dialogs| {
-        dialogs.license_dialog.open = true
+        dialogs.cloud.license_dialog.open = true
     }),
-    ("new_project", |dialogs| dialogs.new_project.open = true),
-    ("publish_web", |dialogs| dialogs.publish_web.open = true),
-    ("live_session", |dialogs| dialogs.live_session.open = true),
-    ("unpublish_web", |dialogs| dialogs.unpublish_web.open = true),
+    ("new_project", |dialogs| {
+        dialogs.project.new_project.open = true
+    }),
+    ("publish_web", |dialogs| {
+        dialogs.cloud.publish_web.open = true
+    }),
+    ("live_session", |dialogs| {
+        dialogs.cloud.live_session.open = true
+    }),
+    ("unpublish_web", |dialogs| {
+        dialogs.cloud.unpublish_web.open = true
+    }),
     ("run_details", |dialogs| {
         let run = crate::state::SimulationRun::new(1);
-        dialogs.run_details = Some(RunDetailsDialogState {
+        dialogs.simulate.run_details = Some(RunDetailsDialogState {
             run_id: run.id,
             manifest: crate::workbench::documents::result_document::manifest::manifest_for_run(
                 &run,
@@ -284,10 +312,10 @@ const DIALOG_GATE: &[DialogRow] = &[
         });
     }),
     ("command_palette", |dialogs| {
-        dialogs.command_palette.open = true
+        dialogs.workbench.command_palette.open = true
     }),
     ("bus_tap", |dialogs| {
-        dialogs.bus_tap.open(
+        dialogs.design.bus_tap.open(
             crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
@@ -295,25 +323,25 @@ const DIALOG_GATE: &[DialogRow] = &[
         );
     }),
     ("builtin_xspice_placement", |dialogs| {
-        dialogs.builtin_xspice_placement.open = true;
+        dialogs.design.builtin_xspice_placement.open = true;
     }),
     ("net_label_placement", |dialogs| {
-        dialogs.net_label_placement.open = true;
+        dialogs.design.net_label_placement.open = true;
     }),
     ("schematic_visibility", |dialogs| {
-        dialogs.schematic_visibility.open = true;
+        dialogs.design.schematic_visibility_dialog.open = true;
     }),
     ("drawing_sheet_overflow_open", |dialogs| {
-        dialogs.drawing_sheet_overflow_open = true;
+        dialogs.sheets.drawing_sheet_overflow_open = true;
     }),
     ("grid_snap_routing", |dialogs| {
-        dialogs.grid_snap_routing.open = true
+        dialogs.design.grid_snap_routing.open = true
     }),
     ("engineering_table", |dialogs| {
-        dialogs.engineering_table.open = true
+        dialogs.design.engineering_table.open = true
     }),
     ("pin_port", |dialogs| {
-        dialogs.pin_port.open(
+        dialogs.design.pin_port.open(
             "EN".to_owned(),
             crate::state::PlacementAuthority::new(
                 crate::workbench::app::schematic_editor_request_source(
@@ -324,13 +352,14 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("design_note", |dialogs| {
         dialogs
+            .design
             .design_note
             .open(crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ));
     }),
     ("documentation_shape", |dialogs| {
-        dialogs.documentation_shape.open(
+        dialogs.design.documentation_shape.open(
             crate::workbench::app::schematic_editor_request_source(
                 &crate::workbench::app_state::AppState::default(),
             ),
@@ -338,7 +367,7 @@ const DIALOG_GATE: &[DialogRow] = &[
         );
     }),
     ("array_selection", |dialogs| {
-        dialogs.array_selection.open(
+        dialogs.design.array_selection.open(
             edit_authority(),
             "8 \u{00d7} 1".to_owned(),
             "U4\u{2026}U11".to_owned(),
@@ -355,7 +384,7 @@ const DIALOG_GATE: &[DialogRow] = &[
                 crate::state::Point::origin(),
             ));
         schematic.session.editor.selection.select_only_component(1);
-        dialogs.replace_instance.open(ReplaceInstanceOpen {
+        dialogs.design.replace_instance.open(ReplaceInstanceOpen {
             authority: edit_authority(),
             replacement_authority: schematic
                 .replacement_authority()
@@ -370,18 +399,20 @@ const DIALOG_GATE: &[DialogRow] = &[
             mapping: "5 / 5 pins".to_owned(),
         });
     }),
-    ("stimulus_link", |dialogs| dialogs.stimulus_link.open = true),
+    ("stimulus_link", |dialogs| {
+        dialogs.design.stimulus_link.open = true
+    }),
     ("create_hierarchy", |dialogs| {
-        dialogs.create_hierarchy.open = true
+        dialogs.design.create_hierarchy.open = true
     }),
     ("check_and_save", |dialogs| {
-        dialogs.check_and_save.open = true
+        dialogs.project.check_and_save.open = true
     }),
     ("connectivity_manager", |dialogs| {
-        dialogs.connectivity_manager.open = true;
+        dialogs.design.connectivity_manager.open = true;
     }),
     ("delete_sheet", |dialogs| {
-        dialogs.delete_sheet = Some(
+        dialogs.sheets.delete_sheet = Some(
             crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete {
                 sheet: crate::state::SheetId::new(),
                 name: "Sheet 2".to_owned(),
@@ -392,28 +423,32 @@ const DIALOG_GATE: &[DialogRow] = &[
         );
     }),
     ("design_management", |dialogs| {
-        dialogs.design_management.open = true;
+        dialogs.project.design_management.open = true;
     }),
     ("selection_bulk_edit", |dialogs| {
-        dialogs.selection_bulk_edit.open = true;
+        dialogs.design.selection_bulk_edit.open = true;
     }),
     ("design_review_comments", |dialogs| {
-        dialogs.design_review_comments.open = true;
+        dialogs.design.design_review_comments.open = true;
     }),
     ("project_revision_history", |dialogs| {
-        dialogs.project_revision_history.open = true;
+        dialogs.project.project_revision_history.open = true;
     }),
     ("create_model_bound_symbol", |dialogs| {
-        dialogs.create_model_bound_symbol.open = true;
+        dialogs.design.create_model_bound_symbol.open = true;
     }),
-    ("symbol_import", |dialogs| dialogs.symbol_import.open = true),
+    ("symbol_import", |dialogs| {
+        dialogs.design.symbol_import.open = true
+    }),
     ("symbol_parameter_form", |dialogs| {
-        dialogs.symbol_parameter_form.open = true;
+        dialogs.design.symbol_parameter_form.open = true;
     }),
     ("configuration_sets", |dialogs| {
-        dialogs.configuration_sets.open = true;
+        dialogs.simulate.configuration_sets.open = true;
     }),
-    ("rule_setup", |dialogs| dialogs.rule_setup.open = true),
+    ("rule_setup", |dialogs| {
+        dialogs.design.rule_setup.open = true
+    }),
     ("object_properties", |dialogs| {
         let bus = crate::state::Bus::segment(
             1,
@@ -423,24 +458,27 @@ const DIALOG_GATE: &[DialogRow] = &[
         )
         .expect("a valid bus fixture");
         dialogs
+            .design
             .object_properties
             .open_bus(&bus, edit_authority().source, String::new());
     }),
     ("rename_selection", |dialogs| {
-        dialogs.rename_selection.open = true
+        dialogs.design.rename_selection.open = true
     }),
-    ("find_replace", |dialogs| dialogs.find_replace.open = true),
+    ("find_replace", |dialogs| {
+        dialogs.design.find_replace.open = true
+    }),
     ("shared_properties", |dialogs| {
-        dialogs.shared_properties.open = true;
+        dialogs.design.shared_properties.open = true;
     }),
     ("technology_attachment", |dialogs| {
-        dialogs.technology_attachment.open = true;
+        dialogs.project.technology_attachment.open = true;
     }),
     ("confirmation_dialog", |dialogs| {
-        dialogs.confirmation_dialog.visible = true;
+        dialogs.workbench.confirmation_dialog.visible = true;
     }),
     ("project_review_dialog", |dialogs| {
-        dialogs.project_review_dialog.show_close_project();
+        dialogs.workbench.project_review_dialog.show_close_project();
     }),
 ];
 
@@ -451,7 +489,7 @@ const NATIVE_DIALOG_GATE: &[DialogRow] = &[("pending_autosave_restore", |dialogs
     use crate::workbench::lifecycle::recovery_checkpoint::{
         AutosaveRestoreCandidate, CheckpointBinding, CheckpointIdentity, CheckpointOwnership,
     };
-    dialogs.pending_autosave_restore = Some(AutosaveRestoreCandidate {
+    dialogs.platform.pending_autosave_restore = Some(AutosaveRestoreCandidate {
         source: std::path::PathBuf::from("afe.rspiceproj"),
         checkpoint: std::path::PathBuf::from("afe.rspiceproj.autosave"),
         binding: CheckpointBinding {
@@ -479,14 +517,14 @@ const NATIVE_DIALOG_GATE: &[DialogRow] = &[];
 #[test]
 fn each_term_of_the_dialog_gate_makes_the_application_modal_on_its_own() {
     assert!(
-        !DialogState::default().application_modal_open(),
+        !AppState::default().dialog_modal_open(),
         "with every dialog closed nothing is modal"
     );
     for (term, open) in DIALOG_GATE.iter().chain(NATIVE_DIALOG_GATE) {
-        let mut dialogs = DialogState::default();
+        let mut dialogs = AppState::default();
         open(&mut dialogs);
         assert!(
-            dialogs.application_modal_open(),
+            dialogs.dialog_modal_open(),
             "`{term}` alone makes the application modal"
         );
     }
@@ -498,22 +536,22 @@ fn each_term_of_the_dialog_gate_makes_the_application_modal_on_its_own() {
 /// behaviour change and is made on purpose.
 const OUTSIDE_THE_DIALOG_GATE: &[DialogRow] = &[
     ("waveform_calculator_dialog", |dialogs| {
-        dialogs.waveform_calculator_dialog = true;
+        dialogs.results.waveform_calculator_dialog = true;
     }),
     ("expression_diagnostics_dialog", |dialogs| {
-        dialogs.expression_diagnostics_dialog = true;
+        dialogs.results.expression_diagnostics_dialog = true;
     }),
     ("descend_hierarchy", |dialogs| {
-        dialogs.descend_hierarchy.open = true;
+        dialogs.design.descend_hierarchy.open = true;
     }),
     ("move_selection", |dialogs| {
-        dialogs.move_selection.armed = true
+        dialogs.design.move_selection.armed = true
     }),
     ("stretch_selection", |dialogs| {
-        dialogs.stretch_selection.armed = true;
+        dialogs.design.stretch_selection.armed = true;
     }),
     ("floating_paste", |dialogs| {
-        dialogs.floating_paste = Some(FloatingPaste {
+        dialogs.design.floating_paste = Some(FloatingPaste {
             objects: rspice_design::schematic::clipboard::ClipboardData::default(),
             start: crate::state::Point::origin(),
             grab: None,
@@ -529,10 +567,10 @@ const OUTSIDE_THE_DIALOG_GATE: &[DialogRow] = &[
 #[test]
 fn what_is_drawn_outside_the_dialog_gate_leaves_the_application_modeless() {
     for (term, open) in OUTSIDE_THE_DIALOG_GATE {
-        let mut dialogs = DialogState::default();
+        let mut dialogs = AppState::default();
         open(&mut dialogs);
         assert!(
-            !dialogs.application_modal_open(),
+            !dialogs.dialog_modal_open(),
             "`{term}` is not a term of the gate today"
         );
     }
@@ -540,10 +578,10 @@ fn what_is_drawn_outside_the_dialog_gate_leaves_the_application_modeless() {
 
 #[test]
 fn modeless_waveform_calculator_does_not_block_workspace_shortcuts() {
-    let mut dialogs = DialogState::default();
-    dialogs.waveform_calculator_dialog = true;
+    let mut dialogs = AppState::default();
+    dialogs.results.waveform_calculator_dialog = true;
     assert!(
-        !dialogs.application_modal_open(),
+        !dialogs.dialog_modal_open(),
         "the modeless calculator must leave plot and workspace shortcuts active"
     );
 }

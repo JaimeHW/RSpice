@@ -10,7 +10,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, switch_row
 
 impl RSpiceApp {
     pub(in crate::workbench) fn process_new_cell_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.new_cell_dialog {
+        if !self.state.project.new_cell_dialog {
             return;
         }
 
@@ -27,16 +27,16 @@ impl RSpiceApp {
             .filter(|lib| !lib.read_only)
             .map(|lib| lib.name.clone())
             .collect();
-        if self.state.dialogs.new_cell_library.is_empty() && !lib_names.is_empty() {
-            self.state.dialogs.new_cell_library = lib_names[0].clone();
+        if self.state.project.new_cell_library.is_empty() && !lib_names.is_empty() {
+            self.state.project.new_cell_library = lib_names[0].clone();
         }
         let catalog_current = self.state.model.library_manager.revision()
-            == self.state.dialogs.new_cell_library_revision;
+            == self.state.project.new_cell_library_revision;
         if !catalog_current {
-            self.state.dialogs.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            self.state.project.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
 
-        let dialogs = &mut self.state.dialogs;
+        let dialogs = &mut self.state.project;
         let choice = Dialog::new("New cell", "Create")
             .description(
                 "Create a named cell in a writable library with the selected initial views.",
@@ -129,43 +129,43 @@ impl RSpiceApp {
         }
 
         if should_close {
-            self.state.dialogs.new_cell_dialog = false;
-            self.state.dialogs.new_cell_name.clear();
-            self.state.dialogs.new_cell_description.clear();
-            self.state.dialogs.new_cell_error = None;
-            self.state.dialogs.new_cell_create_schematic = true;
-            self.state.dialogs.new_cell_create_symbol = false;
-            self.state.dialogs.new_cell_create_testbench = false;
-            self.state.dialogs.new_cell_create_veriloga = false;
+            self.state.project.new_cell_dialog = false;
+            self.state.project.new_cell_name.clear();
+            self.state.project.new_cell_description.clear();
+            self.state.project.new_cell_error = None;
+            self.state.project.new_cell_create_schematic = true;
+            self.state.project.new_cell_create_symbol = false;
+            self.state.project.new_cell_create_testbench = false;
+            self.state.project.new_cell_create_veriloga = false;
         }
     }
 
     pub(super) fn handle_new_cell_create_action(&mut self) -> DialogActionOutcome {
         let mut outcome = DialogActionOutcome::default();
-        let name = self.state.dialogs.new_cell_name.trim().to_string();
-        let library = self.state.dialogs.new_cell_library.clone();
+        let name = self.state.project.new_cell_name.trim().to_string();
+        let library = self.state.project.new_cell_library.clone();
 
         if self.state.model.library_manager.revision()
-            != self.state.dialogs.new_cell_library_revision
+            != self.state.project.new_cell_library_revision
         {
-            self.state.dialogs.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            self.state.project.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
             return outcome;
         }
         if let Some(error) = validate_lcv_name(&name, "Cell name") {
-            self.state.dialogs.new_cell_error = Some(error);
+            self.state.project.new_cell_error = Some(error);
             return outcome;
         }
         if library.is_empty() {
-            self.state.dialogs.new_cell_error = Some("Please select a library".to_string());
+            self.state.project.new_cell_error = Some("Please select a library".to_string());
             return outcome;
         }
 
         let Some(lib_ro) = self.state.model.library_manager.get_library(&library) else {
-            self.state.dialogs.new_cell_error = Some(format!("Library '{}' not found", library));
+            self.state.project.new_cell_error = Some(format!("Library '{}' not found", library));
             return outcome;
         };
         if lib_ro.read_only {
-            self.state.dialogs.new_cell_error = Some(format!(
+            self.state.project.new_cell_error = Some(format!(
                 "Library '{library}' is read only; create the cell in an editable library"
             ));
             return outcome;
@@ -175,7 +175,7 @@ impl RSpiceApp {
             crate::state::canonical_cell_view_owner_key(&library, &cell.name, "")
                 == requested_identity
         }) {
-            self.state.dialogs.new_cell_error = Some(format!(
+            self.state.project.new_cell_error = Some(format!(
                 "Cell '{}' clashes with an existing cell in library '{}' (cell names ignore letter case)",
                 name, library
             ));
@@ -185,23 +185,23 @@ impl RSpiceApp {
         use crate::state::{Cell, View, ViewType};
 
         let mut cell = Cell::new(&name);
-        cell.description = self.state.dialogs.new_cell_description.clone();
+        cell.description = self.state.project.new_cell_description.clone();
 
-        if self.state.dialogs.new_cell_create_schematic {
+        if self.state.project.new_cell_create_schematic {
             cell.add_view(View::new("schematic", ViewType::Schematic));
         }
-        if self.state.dialogs.new_cell_create_symbol {
+        if self.state.project.new_cell_create_symbol {
             // A cell created here starts on an empty schematic, so its symbol
             // starts empty too and grows with the interface the user draws.
             match super::new_view_dialog::seeded_symbol_view("symbol", &[]) {
                 Ok(view) => cell.add_view(view),
                 Err(error) => {
-                    self.state.dialogs.new_cell_error = Some(error);
+                    self.state.project.new_cell_error = Some(error);
                     return outcome;
                 }
             }
         }
-        if self.state.dialogs.new_cell_create_testbench {
+        if self.state.project.new_cell_create_testbench {
             cell.add_view(View::new("testbench", ViewType::Testbench));
         }
 
@@ -209,13 +209,13 @@ impl RSpiceApp {
         // compiled interface included, so a refusal anywhere creates nothing.
         let mut candidate_libraries = self.state.model.library_manager.clone();
         let Some(mut candidate_library) = candidate_libraries.edit_library(&library) else {
-            self.state.dialogs.new_cell_error = Some(format!("Library '{}' not found", library));
+            self.state.project.new_cell_error = Some(format!("Library '{}' not found", library));
             return outcome;
         };
         candidate_library.add_cell(cell);
         let veriloga =
             crate::state::CellViewRef::new(&library, &name, crate::state::workspace::VERILOGA_VIEW);
-        let seeded_veriloga = if self.state.dialogs.new_cell_create_veriloga {
+        let seeded_veriloga = if self.state.project.new_cell_create_veriloga {
             let mut candidate_sources = self.state.model.workspace.content.project_sources.clone();
             match super::new_veriloga_device::seed_veriloga_view(
                 &self.state,
@@ -226,7 +226,7 @@ impl RSpiceApp {
             ) {
                 Ok(receipt) => Some((candidate_sources, receipt)),
                 Err(error) => {
-                    self.state.dialogs.new_cell_error = Some(error);
+                    self.state.project.new_cell_error = Some(error);
                     return outcome;
                 }
             }
@@ -242,7 +242,7 @@ impl RSpiceApp {
         ) {
             Ok(prepared) => prepared,
             Err(error) => {
-                self.state.dialogs.new_cell_error = Some(error);
+                self.state.project.new_cell_error = Some(error);
                 return outcome;
             }
         };
@@ -256,11 +256,11 @@ impl RSpiceApp {
             });
             for view_name in [
                 self.state
-                    .dialogs
+                    .project
                     .new_cell_create_schematic
                     .then_some("schematic"),
                 self.state
-                    .dialogs
+                    .project
                     .new_cell_create_testbench
                     .then_some("testbench"),
             ]
@@ -282,13 +282,13 @@ impl RSpiceApp {
             );
             // A schematic defines the cell's ports, so it opens first; a
             // Verilog-A view without one is the module to write next.
-            let view_to_open = if self.state.dialogs.new_cell_create_schematic {
+            let view_to_open = if self.state.project.new_cell_create_schematic {
                 Some("schematic")
             } else if receipt.is_some() {
                 Some(veriloga.view.as_str())
-            } else if self.state.dialogs.new_cell_create_symbol {
+            } else if self.state.project.new_cell_create_symbol {
                 Some("symbol")
-            } else if self.state.dialogs.new_cell_create_testbench {
+            } else if self.state.project.new_cell_create_testbench {
                 Some("testbench")
             } else {
                 None
@@ -309,7 +309,7 @@ impl RSpiceApp {
                     .activate(crate::workbench::state::Workspace::Design);
                 self.state.ui.code_workspace.veriloga.receipt = Some(receipt);
             }
-            self.state.dialogs.new_cell_error = None;
+            self.state.project.new_cell_error = None;
             outcome.close = true;
             outcome.persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
         }
@@ -355,11 +355,11 @@ mod tests {
             .preferences
             .set_choice(ChoicePreference::NetNamingPolicy, 1)
             .unwrap();
-        app.state.dialogs.new_cell_library = "policy_test".to_owned();
-        app.state.dialogs.new_cell_name = "amp".to_owned();
-        app.state.dialogs.new_cell_create_schematic = true;
-        app.state.dialogs.new_cell_create_testbench = true;
-        app.state.dialogs.new_cell_library_revision = app.state.model.library_manager.revision();
+        app.state.project.new_cell_library = "policy_test".to_owned();
+        app.state.project.new_cell_name = "amp".to_owned();
+        app.state.project.new_cell_create_schematic = true;
+        app.state.project.new_cell_create_testbench = true;
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let project_revision_before = app.state.model.workspace.content.project.revision().get();
 
         let outcome = app.handle_new_cell_create_action();
@@ -412,11 +412,11 @@ mod tests {
             .model
             .library_manager
             .add_library(Library::new("tracking_test"));
-        app.state.dialogs.new_cell_library = "tracking_test".to_owned();
-        app.state.dialogs.new_cell_name = "amp".to_owned();
-        app.state.dialogs.new_cell_create_schematic = true;
-        app.state.dialogs.new_cell_create_symbol = true;
-        app.state.dialogs.new_cell_library_revision = app.state.model.library_manager.revision();
+        app.state.project.new_cell_library = "tracking_test".to_owned();
+        app.state.project.new_cell_name = "amp".to_owned();
+        app.state.project.new_cell_create_schematic = true;
+        app.state.project.new_cell_create_symbol = true;
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
 
         let outcome = app.handle_new_cell_create_action();
 
@@ -480,16 +480,16 @@ mod tests {
             .model
             .library_manager
             .add_library(Library::new("behavioral"));
-        app.state.dialogs.new_cell_library = "behavioral".to_owned();
-        app.state.dialogs.new_cell_name = "comparator".to_owned();
-        app.state.dialogs.new_cell_create_schematic = false;
-        app.state.dialogs.new_cell_create_veriloga = true;
-        app.state.dialogs.new_cell_library_revision = app.state.model.library_manager.revision();
+        app.state.project.new_cell_library = "behavioral".to_owned();
+        app.state.project.new_cell_name = "comparator".to_owned();
+        app.state.project.new_cell_create_schematic = false;
+        app.state.project.new_cell_create_veriloga = true;
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let project_revision_before = app.state.model.workspace.content.project.revision().get();
 
         let outcome = app.handle_new_cell_create_action();
 
-        assert!(outcome.close, "{:?}", app.state.dialogs.new_cell_error);
+        assert!(outcome.close, "{:?}", app.state.project.new_cell_error);
         assert_eq!(
             app.state.model.workspace.content.project.revision().get(),
             project_revision_before + 1
@@ -541,10 +541,10 @@ mod tests {
         let mut library = Library::new("identity_test");
         library.add_cell(crate::state::Cell::new("\u{c9}tage"));
         app.state.model.library_manager.add_library(library);
-        app.state.dialogs.new_cell_library = "identity_test".to_owned();
-        app.state.dialogs.new_cell_name = "\u{e9}TAGE".to_owned();
-        app.state.dialogs.new_cell_create_schematic = true;
-        app.state.dialogs.new_cell_library_revision = app.state.model.library_manager.revision();
+        app.state.project.new_cell_library = "identity_test".to_owned();
+        app.state.project.new_cell_name = "\u{e9}TAGE".to_owned();
+        app.state.project.new_cell_create_schematic = true;
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let buffers_before = app.state.model.workspace.content.schematic_buffers.len();
 
         let outcome = app.handle_new_cell_create_action();
@@ -564,7 +564,7 @@ mod tests {
         );
         assert!(
             app.state
-                .dialogs
+                .project
                 .new_cell_error
                 .as_deref()
                 .is_some_and(|error| error.contains("clashes with an existing cell"))
@@ -577,9 +577,9 @@ mod tests {
         let mut library = Library::new("read_only_test");
         library.read_only = true;
         app.state.model.library_manager.add_library(library);
-        app.state.dialogs.new_cell_library = "read_only_test".to_owned();
-        app.state.dialogs.new_cell_name = "amp".to_owned();
-        app.state.dialogs.new_cell_library_revision = app.state.model.library_manager.revision();
+        app.state.project.new_cell_library = "read_only_test".to_owned();
+        app.state.project.new_cell_name = "amp".to_owned();
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let revision_before = app.state.model.workspace.content.project.revision();
 
         let outcome = app.handle_new_cell_create_action();
@@ -598,7 +598,7 @@ mod tests {
         );
         assert!(
             app.state
-                .dialogs
+                .project
                 .new_cell_error
                 .as_deref()
                 .is_some_and(|error| error.contains("read only"))
@@ -612,9 +612,9 @@ mod tests {
             .model
             .library_manager
             .add_library(Library::new("stale_test"));
-        app.state.dialogs.new_cell_library = "stale_test".to_owned();
-        app.state.dialogs.new_cell_name = "amp".to_owned();
-        app.state.dialogs.new_cell_library_revision = app.state.model.library_manager.revision();
+        app.state.project.new_cell_library = "stale_test".to_owned();
+        app.state.project.new_cell_name = "amp".to_owned();
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         app.state
             .model
             .library_manager
@@ -636,7 +636,7 @@ mod tests {
             project_revision_before
         );
         assert_eq!(
-            app.state.dialogs.new_cell_error.as_deref(),
+            app.state.project.new_cell_error.as_deref(),
             Some(LIBRARY_CATALOG_STALE_MESSAGE)
         );
     }

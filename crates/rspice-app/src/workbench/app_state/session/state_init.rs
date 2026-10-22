@@ -3,7 +3,6 @@
 //! The initial [`AppState`], and the default model library and analysis
 //! viewers behind it.
 
-use crate::workbench::app::DialogState;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
 
@@ -194,11 +193,19 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
             live_write_locks: crate::state::write_policy::LiveWriteLocks::default(),
         },
         problems_view: crate::workbench::app_state::problems_view::ProblemsView::default(),
-        dialogs: Box::new(DialogState::default()),
+        shell: Default::default(),
+        platform: Box::default(),
+        design: Box::default(),
+        code: Box::default(),
+        simulate: Box::default(),
+        project: Box::default(),
+        results: Box::default(),
+        hardcopy: Box::default(),
+        settings: Box::default(),
+        cloud: Box::default(),
+        sheets: Box::default(),
         manual_run: Box::default(),
         project_lifecycle: Box::default(),
-        pending_delete_cell: None,
-        pending_delete_view: None,
         tabbed_property_dialog: crate::properties::TabbedPropertyDialogState::default(),
         property_registry: crate::properties::PropertyEditorSchema::new(),
         calculator_panel: super::calculator::CalculatorPanel::new(),

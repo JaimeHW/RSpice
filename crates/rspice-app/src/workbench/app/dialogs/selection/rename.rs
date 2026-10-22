@@ -146,8 +146,8 @@ pub(crate) fn rename_selection_available(state: &AppState) -> bool {
 
 /// Capture the current selection into an isolated stable-identity draft.
 pub(crate) fn open_selected_object_rename(state: &mut AppState) -> bool {
-    if state.dialogs.rename_selection.open
-        || state.dialogs.object_properties.open
+    if state.design.rename_selection.open
+        || state.design.object_properties.open
         || state.tabbed_property_dialog.open
         || state.schematic_edit_read_only()
     {
@@ -156,7 +156,7 @@ pub(crate) fn open_selected_object_rename(state: &mut AppState) -> bool {
     let Some(target) = selected_rename_target(state) else {
         return false;
     };
-    state.dialogs.rename_selection.open(
+    state.design.rename_selection.open(
         target,
         state.model.design_execution_epoch,
         state.model.active_schematic_epoch,
@@ -204,11 +204,11 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_rename_selection_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.rename_selection.open {
+        if !self.state.design.rename_selection.open {
             return;
         }
-        let Some(target) = self.state.dialogs.rename_selection.target.as_ref() else {
-            self.state.dialogs.rename_selection.close();
+        let Some(target) = self.state.design.rename_selection.target.as_ref() else {
+            self.state.design.rename_selection.close();
             self.state
                 .prompt("Rename closed: the object it was renaming is gone.");
             return;
@@ -220,7 +220,7 @@ impl RSpiceApp {
                 validate_draft(
                     &self.state.model.schematic,
                     target,
-                    &self.state.dialogs.rename_selection.draft,
+                    &self.state.design.rename_selection.draft,
                     &|id| object_is_on_active_sheet(&self.state, id),
                 )
             },
@@ -231,7 +231,7 @@ impl RSpiceApp {
         let scope = rename_scope(&self.state.model.schematic, target);
         let validation_message = self
             .state
-            .dialogs
+            .design
             .rename_selection
             .validation_error
             .as_deref()
@@ -247,7 +247,7 @@ impl RSpiceApp {
                 let response = rows.text(
                     "New name",
                     field,
-                    &mut self.state.dialogs.rename_selection.draft,
+                    &mut self.state.design.rename_selection.draft,
                     "A SPICE-safe name",
                 );
                 // A prior publication error belongs to an older candidate;
@@ -265,12 +265,12 @@ impl RSpiceApp {
                 Some(field)
             });
         if edited {
-            self.state.dialogs.rename_selection.validation_error = None;
+            self.state.design.rename_selection.validation_error = None;
         }
 
         match choice {
             DialogChoice::Primary => {
-                let Some(target) = self.state.dialogs.rename_selection.target.clone() else {
+                let Some(target) = self.state.design.rename_selection.target.clone() else {
                     return;
                 };
                 let validation = rename_session_error(&self.state).map_or_else(
@@ -278,7 +278,7 @@ impl RSpiceApp {
                         validate_draft(
                             &self.state.model.schematic,
                             &target,
-                            &self.state.dialogs.rename_selection.draft,
+                            &self.state.design.rename_selection.draft,
                             &|id| object_is_on_active_sheet(&self.state, id),
                         )
                     },
@@ -292,28 +292,28 @@ impl RSpiceApp {
                             // canvas does not show.
                             Ok(true) => {
                                 let renamed =
-                                    self.state.dialogs.rename_selection.draft.trim().to_owned();
+                                    self.state.design.rename_selection.draft.trim().to_owned();
                                 self.state
                                     .prompt(format!("Renamed {previous} to {renamed}."));
-                                self.state.dialogs.rename_selection.close();
+                                self.state.design.rename_selection.close();
                             }
                             Ok(false) => {
-                                self.state.dialogs.rename_selection.validation_error =
+                                self.state.design.rename_selection.validation_error =
                                     Some("That is already its name.".to_owned());
                             }
                             Err(error) => {
-                                self.state.dialogs.rename_selection.validation_error = Some(error);
+                                self.state.design.rename_selection.validation_error = Some(error);
                             }
                         }
                     }
                     RenameValidation::Invalid(message) => {
-                        self.state.dialogs.rename_selection.validation_error = Some(message);
+                        self.state.design.rename_selection.validation_error = Some(message);
                     }
                     RenameValidation::Unchanged => {}
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.rename_selection.close();
+                self.state.design.rename_selection.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -381,7 +381,7 @@ fn clause(left: Option<String>, right: Option<String>) -> Option<String> {
 }
 
 fn rename_session_error(state: &AppState) -> Option<String> {
-    let dialog = &state.dialogs.rename_selection;
+    let dialog = &state.design.rename_selection;
     if state.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no name can be changed.".to_owned());
     }
@@ -673,11 +673,11 @@ mod tests {
             .select_only_wire(81);
         assert!(open_selected_object_rename(&mut app.state));
         assert!(matches!(
-            app.state.dialogs.rename_selection.target,
+            app.state.design.rename_selection.target,
             Some(RenameSelectionTarget::NamedNet(ref target))
                 if target.name == "sense" && target.labels[0].id == 82
         ));
-        app.state.dialogs.rename_selection.close();
+        app.state.design.rename_selection.close();
 
         let port = Component::new(83, ComponentType::Port, Point::new(0, 0))
             .with_name_value("P83", "sense");
@@ -696,7 +696,7 @@ mod tests {
             .select_only_component(83);
         assert!(open_selected_object_rename(&mut app.state));
         assert!(matches!(
-            app.state.dialogs.rename_selection.target,
+            app.state.design.rename_selection.target,
             Some(RenameSelectionTarget::NamedNet(ref target))
                 if target.name == "sense"
                     && target.ports.iter().any(|port| port.id == 83)
@@ -767,7 +767,7 @@ mod tests {
             .name
             .clone();
         assert!(open_selected_object_rename(&mut app.state));
-        let target = app.state.dialogs.rename_selection.target.clone().unwrap();
+        let target = app.state.design.rename_selection.target.clone().unwrap();
         let commit = match validate_draft(&app.state.model.schematic, &target, "R_GAIN", &|_| true)
         {
             RenameValidation::Valid(commit) => commit,
@@ -802,8 +802,8 @@ mod tests {
         let (mut app, id) = component_app();
         let original = app.state.model.schematic.document().components[0].clone();
         assert!(open_selected_object_rename(&mut app.state));
-        app.state.dialogs.rename_selection.draft = "R_CANCELLED".to_owned();
-        app.state.dialogs.rename_selection.close();
+        app.state.design.rename_selection.draft = "R_CANCELLED".to_owned();
+        app.state.design.rename_selection.close();
         assert_eq!(app.state.model.schematic.document().components[0], original);
         assert!(!app.state.model.schematic.can_undo());
 
@@ -815,7 +815,7 @@ mod tests {
             .selection
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
-        let target = app.state.dialogs.rename_selection.target.clone().unwrap();
+        let target = app.state.design.rename_selection.target.clone().unwrap();
         let pending_commit =
             match validate_draft(&app.state.model.schematic, &target, "R_STALE", &|_| true) {
                 RenameValidation::Valid(commit) => commit,
@@ -921,14 +921,14 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let (mut app, id) = component_app();
         assert!(open_selected_object_rename(&mut app.state));
-        app.state.dialogs.rename_selection.draft = "R_ENTER".to_owned();
+        app.state.design.rename_selection.draft = "R_ENTER".to_owned();
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
-        assert!(!app.state.dialogs.rename_selection.open);
+        assert!(!app.state.design.rename_selection.open);
         assert_eq!(app.state.model.schematic.document().components[0].id, id);
         assert_eq!(
             app.state.model.schematic.document().components[0].name,
@@ -943,14 +943,14 @@ mod tests {
             .selection
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
-        app.state.dialogs.rename_selection.draft = "R_ESCAPE".to_owned();
+        app.state.design.rename_selection.draft = "R_ESCAPE".to_owned();
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_rename_selection_dialog(ctx)
         });
-        assert!(!app.state.dialogs.rename_selection.open);
+        assert!(!app.state.design.rename_selection.open);
         assert_eq!(
             app.state.model.schematic.document().components[0].name,
             "R_ENTER"
@@ -1019,7 +1019,7 @@ mod tests {
             .selection
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
-        let target = app.state.dialogs.rename_selection.target.clone().unwrap();
+        let target = app.state.design.rename_selection.target.clone().unwrap();
         let commit = match validate_draft(&app.state.model.schematic, &target, "RLOAD", &|_| true) {
             RenameValidation::Valid(commit) => commit,
             other => panic!("expected valid rename, got {other:?}"),

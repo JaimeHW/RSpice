@@ -300,7 +300,7 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
     };
     let current = current_display(replacement_authority.source_component());
     let mapping = mapping_summary(&resolved.preview);
-    state.dialogs.replace_instance.open(ReplaceInstanceOpen {
+    state.design.replace_instance.open(ReplaceInstanceOpen {
         authority: SchematicEditAuthority::capture(state),
         replacement_authority: replacement_authority.clone(),
         source_component_id: replacement_authority.component_id(),
@@ -314,11 +314,11 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_replace_instance_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.replace_instance.open {
+        if !self.state.design.replace_instance.open {
             return;
         }
         let validation = validation_for_repaint(ctx, &self.state);
-        self.state.dialogs.replace_instance.mapping = validation
+        self.state.design.replace_instance.mapping = validation
             .mapping()
             .unwrap_or_else(|| "Unavailable".to_owned());
         let project = self
@@ -338,7 +338,7 @@ impl RSpiceApp {
             .revision()
             .get()
             .to_string();
-        let discard_confirm = self.state.dialogs.replace_instance.discard_confirm;
+        let discard_confirm = self.state.design.replace_instance.discard_confirm;
         let validation_error = validation.error().map(str::to_owned);
         let has_transaction = discard_confirm || validation_error.is_some();
         let mut dialog = Dialog::new(TITLE, PRIMARY)
@@ -381,9 +381,9 @@ impl RSpiceApp {
         let mut response = dialog.show_transaction(ctx, |ui| {
             let focus = replacement_body(
                 ui,
-                &self.state.dialogs.replace_instance.current,
-                &mut self.state.dialogs.replace_instance.replacement,
-                &self.state.dialogs.replace_instance.mapping,
+                &self.state.design.replace_instance.current,
+                &mut self.state.design.replace_instance.replacement,
+                &self.state.design.replace_instance.mapping,
                 validation.error(),
                 evidence.as_ref(),
                 &catalog,
@@ -394,13 +394,13 @@ impl RSpiceApp {
             Some(focus.id)
         });
         if replacement_changed {
-            self.state.dialogs.replace_instance.mark_edited();
+            self.state.design.replace_instance.mark_edited();
         }
         match response.choice {
             DialogChoice::Primary => self.commit_instance_replacement(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.replace_instance.attempt_close();
-                if self.state.dialogs.replace_instance.open {
+                self.state.design.replace_instance.attempt_close();
+                if self.state.design.replace_instance.open {
                     response.retain_cancel_focus(DialogInitialFocus::Ghost);
                 }
             }
@@ -415,7 +415,7 @@ impl RSpiceApp {
         };
         let Some(authority) = self
             .state
-            .dialogs
+            .design
             .replace_instance
             .replacement_authority
             .clone()
@@ -446,10 +446,10 @@ impl RSpiceApp {
                     "Replaced {replaced} with {}; {} connections and {} parameter values kept.",
                     resolved.identity, impact.preserved_connections, impact.preserved_parameters,
                 ));
-                self.state.dialogs.replace_instance.close();
+                self.state.design.replace_instance.close();
             }
             Err(error) => {
-                self.state.dialogs.replace_instance.preview_error = Some(error.to_string());
+                self.state.design.replace_instance.preview_error = Some(error.to_string());
             }
         }
     }
@@ -713,7 +713,7 @@ fn replacement_form(
 }
 
 fn validate_draft(state: &AppState) -> ReplacementValidation {
-    let draft = &state.dialogs.replace_instance;
+    let draft = &state.design.replace_instance;
     if let Some(error) = draft.preview_error.as_ref() {
         return ReplacementValidation::Invalid(error.clone());
     }
@@ -758,7 +758,7 @@ fn validate_draft(state: &AppState) -> ReplacementValidation {
 }
 
 fn validation_for_repaint(ctx: &Context, state: &AppState) -> ReplacementValidation {
-    let draft = &state.dialogs.replace_instance;
+    let draft = &state.design.replace_instance;
     let key = ValidationCacheKey {
         source_component_id: draft.source_component_id,
         selected_component_id: state
@@ -1144,9 +1144,9 @@ mod tests {
         assert!(replace_instance_available(&state));
         open_replace_instance_dialog(&mut state);
 
-        assert!(state.dialogs.replace_instance.open);
-        assert_eq!(state.dialogs.replace_instance.source_component_id, id);
-        assert!(!state.dialogs.replace_instance.replacement.is_empty());
+        assert!(state.design.replace_instance.open);
+        assert_eq!(state.design.replace_instance.source_component_id, id);
+        assert!(!state.design.replace_instance.replacement.is_empty());
         assert!(validate_draft(&state).can_commit());
     }
 
@@ -1165,10 +1165,10 @@ mod tests {
             .selection
             .select_only_component(id);
         open_replace_instance_dialog(&mut state);
-        assert!(state.dialogs.replace_instance.open);
+        assert!(state.design.replace_instance.open);
 
-        state.dialogs.replace_instance.replacement = "voltage".to_owned();
-        state.dialogs.replace_instance.mark_edited();
+        state.design.replace_instance.replacement = "voltage".to_owned();
+        state.design.replace_instance.mark_edited();
 
         let validation = validate_draft(&state);
         assert!(validation.mapping().is_none());
@@ -1234,7 +1234,7 @@ mod tests {
             .selection
             .select_only_component(id);
         open_replace_instance_dialog(&mut state);
-        assert!(state.dialogs.replace_instance.open);
+        assert!(state.design.replace_instance.open);
 
         let validation = validate_draft(&state);
         assert!(
@@ -1284,7 +1284,7 @@ mod tests {
         let context = Context::default();
         assert!(validation_for_repaint(&context, &state).can_commit());
 
-        state.dialogs.replace_instance.preview_error =
+        state.design.replace_instance.preview_error =
             Some("The validated replacement could not be committed.".to_owned());
         assert!(matches!(
             validation_for_repaint(&context, &state),

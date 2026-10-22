@@ -34,7 +34,7 @@ enum OverflowReviewAction {
 
 /// Open the live, itemized outside-sheet review from the inspector.
 pub(crate) fn open_drawing_sheet_overflow_review(state: &mut AppState) -> bool {
-    if state.dialogs.drawing_sheet_overflow_open
+    if state.sheets.drawing_sheet_overflow_open
         || !matches!(
             state.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
@@ -42,13 +42,13 @@ pub(crate) fn open_drawing_sheet_overflow_review(state: &mut AppState) -> bool {
     {
         return false;
     }
-    state.dialogs.drawing_sheet_overflow_open = true;
+    state.sheets.drawing_sheet_overflow_open = true;
     true
 }
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_drawing_sheet_overflow_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.drawing_sheet_overflow_open {
+        if !self.state.sheets.drawing_sheet_overflow_open {
             return;
         }
 
@@ -75,18 +75,18 @@ impl RSpiceApp {
 
         match choice {
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.drawing_sheet_overflow_open = false;
+                self.state.sheets.drawing_sheet_overflow_open = false;
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
         match action {
             OverflowReviewAction::None => {}
             OverflowReviewAction::Show(target) => {
-                self.state.dialogs.drawing_sheet_overflow_open = false;
+                self.state.sheets.drawing_sheet_overflow_open = false;
                 show_drawing_sheet_overflow_target(&mut self.state, target);
             }
             OverflowReviewAction::FitContent => {
-                self.state.dialogs.drawing_sheet_overflow_open = false;
+                self.state.sheets.drawing_sheet_overflow_open = false;
                 self.state.model.schematic.session.editor.needs_fit = true;
                 self.state
                     .model
@@ -96,11 +96,11 @@ impl RSpiceApp {
                     .needs_drawing_sheet_fit = false;
             }
             OverflowReviewAction::SheetProperties => {
-                self.state.dialogs.drawing_sheet_overflow_open = false;
+                self.state.sheets.drawing_sheet_overflow_open = false;
                 crate::workbench::app::reveal_sheet_properties(&mut self.state);
             }
             OverflowReviewAction::Hardcopy => {
-                self.state.dialogs.drawing_sheet_overflow_open = false;
+                self.state.sheets.drawing_sheet_overflow_open = false;
                 crate::workbench::app::open_hardcopy_workflow(self, HardcopyWorkflow::Print);
             }
         }
@@ -457,7 +457,7 @@ mod tests {
         let mut state = AppState::default();
         assert!(open_drawing_sheet_overflow_review(&mut state));
         assert!(!open_drawing_sheet_overflow_review(&mut state));
-        assert!(state.dialogs.drawing_sheet_overflow_open);
-        assert!(state.dialogs.application_modal_open());
+        assert!(state.sheets.drawing_sheet_overflow_open);
+        assert!(state.dialog_modal_open());
     }
 }

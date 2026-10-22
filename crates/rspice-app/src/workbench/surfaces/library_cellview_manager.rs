@@ -1293,7 +1293,7 @@ mod tests {
         );
         assert_eq!(
             app.state
-                .dialogs
+                .design
                 .symbol_parameter_form
                 .target
                 .as_ref()
@@ -1302,7 +1302,7 @@ mod tests {
         );
         assert_eq!(
             app.state
-                .dialogs
+                .design
                 .symbol_parameter_form
                 .draft_form
                 .as_ref()

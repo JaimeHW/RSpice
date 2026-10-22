@@ -105,9 +105,9 @@ fn draw_bus_arms_directly_but_bus_tap_waits_for_its_validated_dialog() {
 
     app.state.model.schematic.session.editor.tool = Tool::Select;
     Command::PlaceBusTap.execute(&mut app);
-    assert!(app.state.dialogs.bus_tap.open);
+    assert!(app.state.design.bus_tap.open);
     assert_eq!(
-        app.state.dialogs.bus_tap.source,
+        app.state.design.bus_tap.source,
         Some(crate::workbench::app::schematic_editor_request_source(
             &app.state
         ))
@@ -135,15 +135,15 @@ fn place_pin_opens_the_isolated_mockup_transaction_without_mutating_the_document
 
     Command::PlacePin.execute(&mut app);
 
-    assert!(app.state.dialogs.pin_port.open);
+    assert!(app.state.design.pin_port.open);
     // Empty on first use: the form used to open holding a sample name.
-    assert_eq!(app.state.dialogs.pin_port.fields.names, "");
+    assert_eq!(app.state.design.pin_port.fields.names, "");
     assert_eq!(
-        app.state.dialogs.pin_port.fields.direction,
+        app.state.design.pin_port.fields.direction,
         crate::state::PortDirection::In
     );
     assert_eq!(
-        app.state.dialogs.pin_port.fields.signal_type,
+        app.state.design.pin_port.fields.signal_type,
         crate::state::PortSignalType::Analog
     );
     assert_eq!(app.state.model.schematic.document().components, components);
@@ -173,10 +173,10 @@ fn place_text_opens_the_isolated_mockup_transaction_without_mutating_the_documen
 
     Command::PlaceText.execute(&mut app);
 
-    assert!(app.state.dialogs.design_note.open);
+    assert!(app.state.design.design_note.open);
     // The form opens empty. The sample it used to open holding was written
     // into the field as a value, so an untouched form placed a note saying it.
-    assert_eq!(app.state.dialogs.design_note.text, "");
+    assert_eq!(app.state.design.design_note.text, "");
     assert_eq!(app.state.model.schematic.document().design_notes, notes);
     assert_eq!(app.state.model.schematic.topology_version(), topology);
     assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
@@ -210,9 +210,9 @@ fn place_shape_opens_the_isolated_mockup_transaction_without_mutating_the_docume
 
     Command::PlaceShape.execute(&mut app);
 
-    assert!(app.state.dialogs.documentation_shape.open);
+    assert!(app.state.design.documentation_shape.open);
     assert_eq!(
-        app.state.dialogs.documentation_shape.kind,
+        app.state.design.documentation_shape.kind,
         crate::state::DocumentationShapeKind::Rectangle
     );
     assert_eq!(
@@ -241,7 +241,7 @@ fn every_raw_port_command_route_is_projected_through_the_same_dialog() {
 
     Command::Place(ComponentType::Port).execute(&mut app);
 
-    assert!(app.state.dialogs.pin_port.open);
+    assert!(app.state.design.pin_port.open);
     assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Select);
     assert!(
         app.state

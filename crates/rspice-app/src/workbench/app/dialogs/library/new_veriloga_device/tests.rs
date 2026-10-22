@@ -16,7 +16,7 @@ fn app_with_draft(name: &str, ports: &str) -> RSpiceApp {
     library.add_cell(Cell::new("taken"));
     app.state.model.library_manager.add_library(library);
     open_new_veriloga_device_form(&mut app.state);
-    let form = &mut app.state.dialogs.new_veriloga_device;
+    let form = &mut app.state.code.new_veriloga_device;
     form.library = LIBRARY.to_owned();
     form.name = name.to_owned();
     form.ports = ports.to_owned();
@@ -57,7 +57,7 @@ fn lines(app: &RSpiceApp) -> (Line, Line) {
     let messages = app.state.ui.messages();
     (
         cell_line(&app.state, &messages),
-        ports_line(&app.state.dialogs.new_veriloga_device.ports, &messages),
+        ports_line(&app.state.code.new_veriloga_device.ports, &messages),
     )
 }
 
@@ -76,7 +76,7 @@ fn a_cell_name_the_library_already_holds_is_refused_under_its_field() {
         )
     );
     // The same cell under another case is the same canonical identity.
-    app.state.dialogs.new_veriloga_device.name = "TAKEN".to_owned();
+    app.state.code.new_veriloga_device.name = "TAKEN".to_owned();
     assert_eq!(refusal(&app), "behavioral already has a cell named TAKEN.");
     let revision = app.state.model.workspace.content.project.revision();
 
@@ -88,11 +88,11 @@ fn a_cell_name_the_library_already_holds_is_refused_under_its_field() {
 
     // A cell name is letters, digits and underscores; one the module cannot
     // carry as it is names a module made from it.
-    app.state.dialogs.new_veriloga_device.name = "amp-v2".to_owned();
+    app.state.code.new_veriloga_device.name = "amp-v2".to_owned();
     assert_eq!(refusal(&app), "Letters, digits and underscores only.");
-    app.state.dialogs.new_veriloga_device.name = "2stage".to_owned();
+    app.state.code.new_veriloga_device.name = "2stage".to_owned();
     assert_eq!(lines(&app).0, Line::Derived("module _2stage".to_owned()));
-    app.state.dialogs.new_veriloga_device.name = String::new();
+    app.state.code.new_veriloga_device.name = String::new();
     assert_eq!(draft(&app.state), Draft::Empty);
     assert_eq!(lines(&app).0, Line::Blank);
 }
@@ -241,7 +241,7 @@ fn creating_a_device_makes_the_cell_its_module_and_its_generated_symbol_at_once(
         crate::workbench::state::Workspace::Design
     );
     assert!(app.state.ui.code_workspace.veriloga.receipt.is_some());
-    assert!(!app.state.dialogs.new_veriloga_device.open);
+    assert!(!app.state.code.new_veriloga_device.open);
 }
 
 /// The second step, retaining the module's source, fails: the cell made in
@@ -355,7 +355,7 @@ fn nothing_moves_while_the_draft_is_typed() {
     let screen = egui::vec2(1024.0, 640.0);
     let paint = |name: &str, ports: &str, error: Option<&str>| {
         let mut app = app_with_draft(name, ports);
-        app.state.dialogs.new_veriloga_device.error = error.map(str::to_owned);
+        app.state.code.new_veriloga_device.error = error.map(str::to_owned);
         painted_runs(screen, Mode::Dark, 3, |ctx| {
             app.render_new_veriloga_device_form(ctx);
         })
@@ -424,7 +424,7 @@ fn the_form_opens_on_the_active_designs_library() {
         .library
         .clone();
     open_new_veriloga_device_form(&mut app.state);
-    assert_eq!(app.state.dialogs.new_veriloga_device.library, active);
+    assert_eq!(app.state.code.new_veriloga_device.library, active);
 
     app.state
         .model
@@ -433,5 +433,5 @@ fn the_form_opens_on_the_active_designs_library() {
         .expect("the active design's library")
         .read_only = true;
     open_new_veriloga_device_form(&mut app.state);
-    assert_eq!(app.state.dialogs.new_veriloga_device.library, LIBRARY);
+    assert_eq!(app.state.code.new_veriloga_device.library, LIBRARY);
 }

@@ -29,8 +29,8 @@ pub(super) fn start_browser_publication(
         &source,
         metadata,
         package_multi_part,
-        app.state.dialogs.hardcopy.source_resolution_generation,
-        app.state.dialogs.hardcopy.preview_generation,
+        app.state.hardcopy.hardcopy.source_resolution_generation,
+        app.state.hardcopy.hardcopy.preview_generation,
         repaint_context(),
     )?;
     PUBLICATION.with(|active| {
@@ -64,7 +64,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     let Some((publication, result)) = completed else {
         return;
     };
-    let current = &app.state.dialogs.hardcopy;
+    let current = &app.state.hardcopy.hardcopy;
     if !current.open
         || current.source_resolution_generation != publication.ticket.epoch
         || current.preview_generation != publication.ticket.generation
@@ -79,9 +79,9 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
             .map(|source| source.authority().content_digest())
             != Some(publication.ticket_source_digest())
     {
-        app.state.dialogs.hardcopy.busy = false;
-        if app.state.dialogs.hardcopy.open {
-            app.state.dialogs.hardcopy.error = Some(
+        app.state.hardcopy.hardcopy.busy = false;
+        if app.state.hardcopy.hardcopy.open {
+            app.state.hardcopy.hardcopy.error = Some(
                 "The hardcopy source or plan changed before browser publication completed."
                     .to_owned(),
             );
@@ -93,8 +93,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     let buffers = match result {
         Ok(buffers) => buffers,
         Err(error) => {
-            app.state.dialogs.hardcopy.busy = false;
-            app.state.dialogs.hardcopy.error = Some(record_render_failure(app, &plan, error));
+            app.state.hardcopy.hardcopy.busy = false;
+            app.state.hardcopy.hardcopy.error = Some(record_render_failure(app, &plan, error));
             return;
         }
     };
@@ -196,20 +196,20 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
             }
         }
     };
-    app.state.dialogs.hardcopy.busy = false;
+    app.state.hardcopy.hardcopy.busy = false;
     match completion {
         Ok(message) => {
-            let message = if app.state.dialogs.hardcopy.last_receipt.is_some() {
+            let message = if app.state.hardcopy.hardcopy.last_receipt.is_some() {
                 format!("{message} It is recorded in the project history.")
             } else {
                 message
             };
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, message);
-            app.state.dialogs.hardcopy.close();
+            app.state.hardcopy.hardcopy.close();
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.error = Some(error);
+            app.state.hardcopy.hardcopy.error = Some(error);
         }
     }
 }
@@ -249,7 +249,7 @@ pub(super) fn start_native_publication(
         plan.clone(),
         source.clone(),
         metadata,
-        app.state.dialogs.hardcopy.preview_generation,
+        app.state.hardcopy.hardcopy.preview_generation,
         operation,
         repaint_context(),
     )?;
@@ -286,7 +286,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
     let Some((publication, result)) = completed else {
         return;
     };
-    let current = &app.state.dialogs.hardcopy;
+    let current = &app.state.hardcopy.hardcopy;
     if current.open
         && (current.preview_generation != publication.ticket.generation
             || current
@@ -300,9 +300,9 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                 .map(|source| source.authority().content_digest())
                 != Some(publication.ticket.source_digest))
     {
-        app.state.dialogs.hardcopy.busy = false;
-        if app.state.dialogs.hardcopy.open {
-            app.state.dialogs.hardcopy.error = Some(
+        app.state.hardcopy.hardcopy.busy = false;
+        if app.state.hardcopy.hardcopy.open {
+            app.state.hardcopy.hardcopy.error = Some(
                 "The hardcopy source or plan changed before native rendering completed.".to_owned(),
             );
         }
@@ -386,8 +386,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
                 ) {
                     Ok(ticket) => ticket,
                     Err(error) => {
-                        app.state.dialogs.hardcopy.busy = false;
-                        app.state.dialogs.hardcopy.error = Some(
+                        app.state.hardcopy.hardcopy.busy = false;
+                        app.state.hardcopy.hardcopy.error = Some(
                             record_native_finalization_failure(app, &plan, &destination, error),
                         );
                         return;
@@ -404,8 +404,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(app: &mut R
             });
         }
         Err(error) => {
-            app.state.dialogs.hardcopy.busy = false;
-            app.state.dialogs.hardcopy.error = Some(error);
+            app.state.hardcopy.hardcopy.busy = false;
+            app.state.hardcopy.hardcopy.error = Some(error);
         }
     }
 }

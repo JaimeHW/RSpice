@@ -431,8 +431,8 @@ pub(crate) fn open_design_management_dialog(state: &mut AppState) {
 /// navigated to the Design management route first.
 pub(crate) fn open_design_management_on(state: &mut AppState, tab: DesignManagementTab) {
     open_design_management_dialog_state(state);
-    if state.dialogs.design_management.open {
-        state.dialogs.design_management.active_tab = tab;
+    if state.project.design_management.open {
+        state.project.design_management.active_tab = tab;
     }
 }
 
@@ -460,7 +460,7 @@ fn open_design_management_dialog_state(state: &mut AppState) {
     let selection_summary = selected_object_summary(&state.model.schematic, &selection_object_ids);
     let default_sheet_name = state.model.workspace.content.active_view.cell.clone();
     let catalog = (*state.model.workspace.content.design_management).clone();
-    if let Err(error) = state.dialogs.design_management.open(
+    if let Err(error) = state.project.design_management.open(
         &catalog,
         owner_key.clone(),
         selection_object_ids.clone(),
@@ -468,7 +468,7 @@ fn open_design_management_dialog_state(state: &mut AppState) {
         selection_summary.clone(),
         default_sheet_name.clone(),
     ) {
-        state.dialogs.design_management = DesignManagementDialogState {
+        state.project.design_management = DesignManagementDialogState {
             open: true,
             owner_key,
             original: Some(catalog),

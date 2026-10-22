@@ -99,11 +99,11 @@ impl WorkspaceLayoutManagerState {
 }
 
 pub(super) fn render(ctx: &Context, state: &mut AppState) {
-    if !state.dialogs.workspace_layout_manager.open {
+    if !state.settings.workspace_layout_manager.open {
         return;
     }
 
-    let mut draft = state.dialogs.workspace_layout_manager.clone();
+    let mut draft = state.settings.workspace_layout_manager.clone();
     let choice = Dialog::new("Workspace layout manager", "Apply selected layout")
         .description(
             "Apply a device-local dock and console composition without changing project data.",
@@ -118,10 +118,10 @@ pub(super) fn render(ctx: &Context, state: &mut AppState) {
     match choice {
         DialogChoice::Primary => {
             apply_layout(state, draft.template, draft.scope);
-            state.dialogs.workspace_layout_manager.close();
+            state.settings.workspace_layout_manager.close();
         }
-        DialogChoice::Cancelled => state.dialogs.workspace_layout_manager.close(),
-        _ => state.dialogs.workspace_layout_manager = draft,
+        DialogChoice::Cancelled => state.settings.workspace_layout_manager.close(),
+        _ => state.settings.workspace_layout_manager = draft,
     }
 }
 

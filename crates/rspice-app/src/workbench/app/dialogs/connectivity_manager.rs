@@ -270,7 +270,7 @@ pub(crate) fn open_connectivity_manager(state: &mut AppState) {
         Ok(report) => (report, None),
         Err(error) => (ConnectivityReport::default(), Some(error)),
     };
-    state.dialogs.connectivity_manager = ConnectivityManagerDialogState {
+    state.design.connectivity_manager = ConnectivityManagerDialogState {
         open: true,
         authority: Some(SchematicEditAuthority::capture(state)),
         report,
@@ -1035,23 +1035,23 @@ fn cell_view_reference_from_key(key: &str) -> Option<CellViewRef> {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_connectivity_manager_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.connectivity_manager.open {
+        if !self.state.design.connectivity_manager.open {
             return;
         }
-        let page = self.state.dialogs.connectivity_manager.page;
+        let page = self.state.design.connectivity_manager.page;
         let stale = connectivity_authority_error(&self.state);
         let write_allowed = !self.state.model.schematic.session.read_only
             && !self.state.active_view_read_only()
             && !self.state.model.safe_mode.project_read_only();
         let selected = self
             .state
-            .dialogs
+            .design
             .connectivity_manager
             .selected_actionable_count();
-        let bus_validation = validate_bus_draft(&self.state.dialogs.connectivity_manager);
-        let policy_changed = self.state.dialogs.connectivity_manager.policy_changed();
+        let bus_validation = validate_bus_draft(&self.state.design.connectivity_manager);
+        let policy_changed = self.state.design.connectivity_manager.policy_changed();
         let policy_authority_error = validate_policy_authority(
-            &self.state.dialogs.connectivity_manager.policy,
+            &self.state.design.connectivity_manager.policy,
             &self.state.model.workspace.content.connectivity,
         )
         .err();
@@ -1071,7 +1071,7 @@ impl RSpiceApp {
         };
         let error = self
             .state
-            .dialogs
+            .design
             .connectivity_manager
             .error
             .as_deref()
@@ -1086,7 +1086,7 @@ impl RSpiceApp {
             };
             let choice = create_bus_form(
                 ctx,
-                &mut self.state.dialogs.connectivity_manager,
+                &mut self.state.design.connectivity_manager,
                 write_allowed,
                 primary_enabled,
                 status,
@@ -1094,19 +1094,19 @@ impl RSpiceApp {
             match choice {
                 DialogChoice::Primary => {
                     if let Err(error) = self.commit_connectivity_bus() {
-                        self.state.dialogs.connectivity_manager.error = Some(error);
+                        self.state.design.connectivity_manager.error = Some(error);
                     }
                 }
                 DialogChoice::Ghost | DialogChoice::Cancelled => {
-                    self.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::Manager;
-                    self.state.dialogs.connectivity_manager.error = None;
-                    self.state.dialogs.connectivity_manager.body_scroll_offset = 0.0;
+                    self.state.design.connectivity_manager.page = ConnectivityManagerPage::Manager;
+                    self.state.design.connectivity_manager.error = None;
+                    self.state.design.connectivity_manager.body_scroll_offset = 0.0;
                 }
                 DialogChoice::None | DialogChoice::Secondary => {}
             }
             return;
         }
-        let mut body_scroll_offset = self.state.dialogs.connectivity_manager.body_scroll_offset;
+        let mut body_scroll_offset = self.state.design.connectivity_manager.body_scroll_offset;
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(DESCRIPTION)
             .size(DialogSize::SimulationWorkflow)
@@ -1140,23 +1140,23 @@ impl RSpiceApp {
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = connectivity_manager_body(
                 ui,
-                &mut self.state.dialogs.connectivity_manager,
+                &mut self.state.design.connectivity_manager,
                 write_allowed,
                 stale.is_none(),
             );
             None
         });
-        self.state.dialogs.connectivity_manager.body_scroll_offset = body_scroll_offset;
+        self.state.design.connectivity_manager.body_scroll_offset = body_scroll_offset;
         self.handle_connectivity_body_action(ctx, action);
 
         match choice {
             DialogChoice::Primary => {
                 if let Err(error) = self.apply_selected_connectivity_repairs() {
-                    self.state.dialogs.connectivity_manager.error = Some(error);
+                    self.state.design.connectivity_manager.error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.connectivity_manager.close();
+                self.state.design.connectivity_manager.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -1168,16 +1168,16 @@ impl RSpiceApp {
             ConnectivityBodyAction::Refresh => {
                 self.state.sync_active_schematic_to_workspace();
                 let contract_changed = *self.state.model.workspace.content.connectivity
-                    != self.state.dialogs.connectivity_manager.contract_at_open;
+                    != self.state.design.connectivity_manager.contract_at_open;
                 if contract_changed {
                     let contract = (*self.state.model.workspace.content.connectivity).clone();
-                    self.state.dialogs.connectivity_manager.policy = contract.policy.clone();
-                    self.state.dialogs.connectivity_manager.contract_at_open = contract;
+                    self.state.design.connectivity_manager.policy = contract.policy.clone();
+                    self.state.design.connectivity_manager.contract_at_open = contract;
                 }
-                let policy = self.state.dialogs.connectivity_manager.policy.clone();
+                let policy = self.state.design.connectivity_manager.policy.clone();
                 let refreshed = build_report(&self.state, &policy);
                 let authority = SchematicEditAuthority::capture(&self.state);
-                let dialog = &mut self.state.dialogs.connectivity_manager;
+                let dialog = &mut self.state.design.connectivity_manager;
                 dialog.authority = Some(authority);
                 dialog.selected_repairs.clear();
                 match refreshed {
@@ -1195,12 +1195,12 @@ impl RSpiceApp {
                 }
             }
             ConnectivityBodyAction::CreateBus => {
-                self.state.dialogs.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
-                self.state.dialogs.connectivity_manager.error = None;
-                self.state.dialogs.connectivity_manager.body_scroll_offset = 0.0;
+                self.state.design.connectivity_manager.page = ConnectivityManagerPage::CreateBus;
+                self.state.design.connectivity_manager.error = None;
+                self.state.design.connectivity_manager.body_scroll_offset = 0.0;
             }
             ConnectivityBodyAction::ReviewAliases => {
-                let dialog = &mut self.state.dialogs.connectivity_manager;
+                let dialog = &mut self.state.design.connectivity_manager;
                 dialog.active_tab = ConnectivityManagerTab::RepairPreview;
                 dialog.selected_repairs.extend(
                     dialog
@@ -1219,11 +1219,11 @@ impl RSpiceApp {
             ConnectivityBodyAction::Reveal(target) => self.reveal_connectivity_target(target),
             ConnectivityBodyAction::RouteRepair(repair_id) => {
                 if let Err(error) = self.arm_explicit_endpoint_route(ctx, &repair_id) {
-                    self.state.dialogs.connectivity_manager.error = Some(error);
+                    self.state.design.connectivity_manager.error = Some(error);
                 }
             }
             ConnectivityBodyAction::OpenSourceMap => {
-                self.state.dialogs.connectivity_manager.close();
+                self.state.design.connectivity_manager.close();
                 self.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
                 self.state.workbench.navigator_visible = true;
                 self.state.workbench.drawer = Some(crate::workbench::state::Drawer::Navigator);
@@ -1297,7 +1297,7 @@ impl RSpiceApp {
             }
             other => other,
         };
-        self.state.dialogs.connectivity_manager.close();
+        self.state.design.connectivity_manager.close();
         self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
         if let RevealTarget::Label { view_key, .. } = &target
             && *view_key
@@ -1373,7 +1373,7 @@ impl RSpiceApp {
         {
             return Err("The active schematic or project is read-only.".to_owned());
         }
-        let dialog = &self.state.dialogs.connectivity_manager;
+        let dialog = &self.state.design.connectivity_manager;
         let selected = dialog
             .report
             .repairs
@@ -1435,7 +1435,7 @@ impl RSpiceApp {
         let authority = SchematicEditAuthority::capture(&self.state);
         self.state
             .publish_active_design_check_result(report.drc.clone())?;
-        let dialog = &mut self.state.dialogs.connectivity_manager;
+        let dialog = &mut self.state.design.connectivity_manager;
         dialog.report = report;
         dialog.authority = Some(authority);
         dialog.contract_at_open = (*self.state.model.workspace.content.connectivity).clone();
@@ -1464,9 +1464,9 @@ impl RSpiceApp {
         {
             return Err("The active schematic or project is read-only.".to_owned());
         }
-        let declaration = validate_bus_draft(&self.state.dialogs.connectivity_manager)?;
+        let declaration = validate_bus_draft(&self.state.design.connectivity_manager)?;
         let mut contract = (*self.state.model.workspace.content.connectivity).clone();
-        contract.policy = self.state.dialogs.connectivity_manager.policy.clone();
+        contract.policy = self.state.design.connectivity_manager.policy.clone();
         validate_policy_authority(&contract.policy, &contract)?;
         contract.validate()?;
         *self.state.model.workspace.content.connectivity = contract;
@@ -1486,7 +1486,7 @@ impl RSpiceApp {
             .bus_drawing
             .declaration = Some(declaration);
         self.state.model.schematic.session.editor.tool = Tool::Bus;
-        self.state.dialogs.connectivity_manager.close();
+        self.state.design.connectivity_manager.close();
         self.state
             .prompt("Bus placement armed. Click the first point, route the bus, then finish it.");
         Ok(())
@@ -1504,7 +1504,7 @@ impl RSpiceApp {
         {
             return Err("The active schematic or project is read-only.".to_owned());
         }
-        let dialog = &self.state.dialogs.connectivity_manager;
+        let dialog = &self.state.design.connectivity_manager;
         let repair = dialog
             .report
             .repairs
@@ -1526,7 +1526,7 @@ impl RSpiceApp {
         if choice.start == choice.destination {
             return Err("The selected source and destination are identical.".to_owned());
         }
-        self.state.dialogs.connectivity_manager.close();
+        self.state.design.connectivity_manager.close();
         self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
         self.state.model.schematic.arm_tool(Tool::Wire);
         self.state.start_canvas_wire(ctx, choice.start);
@@ -1541,7 +1541,7 @@ impl RSpiceApp {
 }
 
 fn connectivity_authority_error(state: &AppState) -> Option<String> {
-    let authority = state.dialogs.connectivity_manager.authority.as_ref()?;
+    let authority = state.design.connectivity_manager.authority.as_ref()?;
     let stale = !authority.matches_source(&crate::workbench::app::schematic_editor_request_source(
         state,
     )) || authority.view_path
@@ -1551,7 +1551,7 @@ fn connectivity_authority_error(state: &AppState) -> Option<String> {
         || !authority
             .snapshot
             .is_equal_document(state.model.schematic.document())
-        || state.dialogs.connectivity_manager.contract_at_open
+        || state.design.connectivity_manager.contract_at_open
             != *state.model.workspace.content.connectivity;
     stale.then(|| {
         "The design changed after this report was extracted. Refresh the report before applying repairs or creating a bus.".to_owned()

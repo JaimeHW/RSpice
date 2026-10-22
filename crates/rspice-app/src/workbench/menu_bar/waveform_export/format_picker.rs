@@ -11,8 +11,16 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select_with_disabled};
 use crate::workbench::ChoicePreference;
-use crate::workbench::app::DatasetExportPicker;
 use crate::workbench::app_state::AppState;
+
+/// The open "Export dataset…" format picker: the format chosen so far, by
+/// its stored index, and whether the view it exports shows more than one
+/// analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DatasetExportPicker {
+    pub(crate) format: usize,
+    pub(crate) several_analyses: bool,
+}
 
 /// Every format the export writes, in the order the stored choice numbers
 /// them, and whether it can hold only one analysis.
@@ -56,7 +64,7 @@ pub(crate) fn open_dataset_export_picker(state: &mut AppState) {
     } else {
         last
     };
-    state.dialogs.dataset_export = Some(DatasetExportPicker {
+    state.results.dataset_export = Some(DatasetExportPicker {
         format,
         several_analyses,
     });
@@ -66,7 +74,7 @@ pub(crate) fn open_dataset_export_picker(state: &mut AppState) {
 /// chooses Export, with the chosen format already stored as the one the
 /// export writes and the one the picker offers next time.
 pub(crate) fn show_dataset_export_picker(ctx: &Context, state: &mut AppState) -> bool {
-    let Some(mut picker) = state.dialogs.dataset_export else {
+    let Some(mut picker) = state.results.dataset_export else {
         return false;
     };
     let labels = FORMATS
@@ -115,7 +123,7 @@ pub(crate) fn show_dataset_export_picker(ctx: &Context, state: &mut AppState) ->
         });
     match choice {
         DialogChoice::Primary => {
-            state.dialogs.dataset_export = None;
+            state.results.dataset_export = None;
             state
                 .model
                 .preferences
@@ -124,11 +132,11 @@ pub(crate) fn show_dataset_export_picker(ctx: &Context, state: &mut AppState) ->
             true
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.dialogs.dataset_export = None;
+            state.results.dataset_export = None;
             false
         }
         DialogChoice::Secondary | DialogChoice::None => {
-            state.dialogs.dataset_export = Some(picker);
+            state.results.dataset_export = Some(picker);
             false
         }
     }
@@ -180,7 +188,7 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut state = AppState::default();
-        state.dialogs.dataset_export = Some(DatasetExportPicker {
+        state.results.dataset_export = Some(DatasetExportPicker {
             format: 2,
             several_analyses: false,
         });
@@ -199,14 +207,14 @@ mod tests {
             exported |= show_dataset_export_picker(ctx, &mut state);
         });
         assert!(
-            state.dialogs.dataset_export.is_some(),
+            state.results.dataset_export.is_some(),
             "the picker stays open until it is answered"
         );
         let _ = ctx.run_ui(escape, |ctx| {
             exported |= show_dataset_export_picker(ctx, &mut state);
         });
         assert!(!exported);
-        assert!(state.dialogs.dataset_export.is_none());
+        assert!(state.results.dataset_export.is_none());
         assert_eq!(
             state
                 .model

@@ -268,7 +268,7 @@ pub(super) fn capture_groups(
     // in the modal, and nothing else is coming to repaint the row it removed.
     plan.and_then(|plan| {
         state
-            .dialogs
+            .simulate
             .plan_removal_review
             .take_confirmed_capture_group(plan)
     })
@@ -342,7 +342,7 @@ fn stage_group_removal(
         PlanRemovalConsequence::stated("Rules it resolves by", group.rules.len().to_string())
             .explained(PlanRemovalTone::Aside, "Its outputs are still captured."),
     ];
-    state.dialogs.plan_removal_review.open(
+    state.simulate.plan_removal_review.open(
         PlanRemovalTarget::CaptureGroup { plan, id },
         group.name.clone(),
         consequences,

@@ -208,7 +208,7 @@ pub(crate) fn open_stimulus_link(
         .stimulus_library
         .provenance_state(&component);
 
-    state.dialogs.stimulus_link = StimulusLinkDialogState {
+    state.design.stimulus_link = StimulusLinkDialogState {
         open: true,
         mode,
         component_id,
@@ -381,11 +381,11 @@ fn family_line(component: &Component) -> String {
 /// are only put back while the dialog is still open: a closed dialog holds no
 /// samples for a library it is no longer showing.
 pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
-    if !state.dialogs.stimulus_link.open {
+    if !state.design.stimulus_link.open {
         return;
     }
-    let mut minis = std::mem::take(&mut state.dialogs.stimulus_link.minis);
-    let session = state.dialogs.stimulus_link.clone();
+    let mut minis = std::mem::take(&mut state.design.stimulus_link.minis);
+    let session = state.design.stimulus_link.clone();
     let Some(component) = state
         .model
         .schematic
@@ -395,7 +395,7 @@ pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
         .find(|component| component.id == session.component_id)
         .cloned()
     else {
-        state.dialogs.stimulus_link.close();
+        state.design.stimulus_link.close();
         return;
     };
 
@@ -403,8 +403,8 @@ pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
         StimulusLinkMode::Adopt => adopt::render(ctx, state, &session, &component, &mut minis),
         StimulusLinkMode::Extract => extract::render(ctx, state, &session, &component),
     }
-    if state.dialogs.stimulus_link.open {
-        state.dialogs.stimulus_link.minis = minis;
+    if state.design.stimulus_link.open {
+        state.design.stimulus_link.minis = minis;
     }
 }
 
@@ -520,7 +520,7 @@ pub(crate) fn commit_readoption(
 /// Publish the instance's card as a new `r1` definition and point the instance
 /// at it.
 fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, String> {
-    let session = state.dialogs.stimulus_link.clone();
+    let session = state.design.stimulus_link.clone();
     let expected = state
         .model
         .schematic

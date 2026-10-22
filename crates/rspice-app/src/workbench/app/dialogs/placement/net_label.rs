@@ -119,7 +119,7 @@ impl DraftValidation {
 /// Returning `false` means the active document does not currently own edit
 /// authority or another application modal already owns the interaction.
 pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> bool {
-    if state.dialogs.application_modal_open() {
+    if state.dialog_modal_open() {
         return false;
     }
     if state.schematic_edit_read_only() {
@@ -136,7 +136,7 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
     };
     let authority = SchematicEditAuthority::capture(state);
     state
-        .dialogs
+        .design
         .net_label_placement
         .open(anchor, authority, kind);
     true
@@ -144,21 +144,21 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_net_label_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.net_label_placement.open {
+        if !self.state.design.net_label_placement.open {
             return;
         }
 
         let validation = validate_draft(&self.state);
         let refusal = self
             .state
-            .dialogs
+            .design
             .net_label_placement
             .validation_error
             .clone()
             .or_else(|| validation.refusal().map(str::to_owned));
         let off_sheet = self
             .state
-            .dialogs
+            .design
             .net_label_placement
             .kind
             .off_sheet_direction()
@@ -166,13 +166,13 @@ impl RSpiceApp {
         // The pointer is still where the click that opened this was, so the
         // entry can take its place from it without the canvas having to hand
         // one over.
-        let anchor = self.state.dialogs.net_label_placement.screen_anchor_or(
+        let anchor = self.state.design.net_label_placement.screen_anchor_or(
             ctx.pointer_latest_pos()
                 .unwrap_or_else(|| ctx.viewport_rect().center()),
         );
 
-        let typed_before = self.state.dialogs.net_label_placement.name.clone();
-        let draft = &mut self.state.dialogs.net_label_placement;
+        let typed_before = self.state.design.net_label_placement.name.clone();
+        let draft = &mut self.state.design.net_label_placement;
         let choice = CanvasEntry::new(
             "place-net-label",
             if off_sheet { CONNECTOR_TITLE } else { TITLE },
@@ -187,8 +187,8 @@ impl RSpiceApp {
             net_label_placement::show(rows, &mut draft.name, &mut draft.kind)
         });
         // Typing answers the refusal the last attempt recorded.
-        if self.state.dialogs.net_label_placement.name != typed_before {
-            self.state.dialogs.net_label_placement.validation_error = None;
+        if self.state.design.net_label_placement.name != typed_before {
+            self.state.design.net_label_placement.validation_error = None;
         }
 
         match choice {
@@ -200,30 +200,30 @@ impl RSpiceApp {
                         match apply_commit(&mut self.state, *commit) {
                             // The label is on the sheet: the drawing is the
                             // report, and a second one would only cover it.
-                            Ok(_) => self.state.dialogs.net_label_placement.close(),
+                            Ok(_) => self.state.design.net_label_placement.close(),
                             Err(error) => {
-                                self.state.dialogs.net_label_placement.validation_error =
+                                self.state.design.net_label_placement.validation_error =
                                     Some(error);
                             }
                         }
                     }
                     DraftValidation::Incomplete(message) => {
-                        self.state.dialogs.net_label_placement.validation_error =
+                        self.state.design.net_label_placement.validation_error =
                             Some(message.to_owned());
                     }
                     DraftValidation::Invalid(message) => {
-                        self.state.dialogs.net_label_placement.validation_error = Some(message);
+                        self.state.design.net_label_placement.validation_error = Some(message);
                     }
                 }
             }
-            CanvasEntryChoice::Cancelled => self.state.dialogs.net_label_placement.close(),
+            CanvasEntryChoice::Cancelled => self.state.design.net_label_placement.close(),
             CanvasEntryChoice::None => {}
         }
     }
 }
 
 fn validate_draft(state: &AppState) -> DraftValidation {
-    let draft = &state.dialogs.net_label_placement;
+    let draft = &state.design.net_label_placement;
     let Some(authority) = draft.authority.as_ref() else {
         return DraftValidation::Invalid(
             "The placement authority is unavailable. Cancel and select the anchor again."
@@ -297,7 +297,7 @@ pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> 
             .pending_net_label_sequence = None;
         return false;
     };
-    if state.dialogs.application_modal_open() {
+    if state.dialog_modal_open() {
         return true;
     }
     if state.schematic_edit_read_only() {
@@ -439,7 +439,7 @@ mod tests {
                     app.render_net_label_dialog(ctx);
                 },
             );
-            assert_eq!(app.state.dialogs.net_label_placement.name, "BUSY");
+            assert_eq!(app.state.design.net_label_placement.name, "BUSY");
             assert!(app.state.model.schematic.document().net_labels.is_empty());
         }
     }
@@ -456,7 +456,7 @@ mod tests {
             topology_before
         );
 
-        app.state.dialogs.net_label_placement.name = "DATA[7]".to_owned();
+        app.state.design.net_label_placement.name = "DATA[7]".to_owned();
         let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
             panic!("valid typed label draft");
         };
@@ -476,13 +476,13 @@ mod tests {
     fn invalid_name_cannot_produce_a_commit_or_history() {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::origin());
-        app.state.dialogs.net_label_placement.name = "bell\u{7}node".to_owned();
+        app.state.design.net_label_placement.name = "bell\u{7}node".to_owned();
         assert!(matches!(
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
         ));
         // One bad name in a list refuses the whole entry, naming it.
-        app.state.dialogs.net_label_placement.name = "a DATA[7 c".to_owned();
+        app.state.design.net_label_placement.name = "a DATA[7 c".to_owned();
         match validate_draft(&app.state) {
             DraftValidation::Invalid(message) => assert!(message.starts_with("DATA[7:")),
             other => panic!("a list with a bad name was accepted: {other:?}"),
@@ -490,7 +490,7 @@ mod tests {
         assert!(app.state.model.schematic.document().net_labels.is_empty());
         assert!(!app.state.model.schematic.can_undo());
 
-        app.state.dialogs.net_label_placement.name = "DATA[7".to_owned();
+        app.state.design.net_label_placement.name = "DATA[7".to_owned();
         assert!(matches!(
             validate_draft(&app.state),
             DraftValidation::Invalid(_)
@@ -503,12 +503,12 @@ mod tests {
     fn commit_entry(state: &mut AppState, anchor: Point, entry: &str) {
         state.model.schematic.session.editor.tool = Tool::Label;
         assert!(open_net_label_placement(state, anchor));
-        state.dialogs.net_label_placement.name = entry.to_owned();
+        state.design.net_label_placement.name = entry.to_owned();
         let DraftValidation::Valid(commit) = validate_draft(state) else {
             panic!("{entry} is a valid entry");
         };
         apply_commit(state, *commit).expect("placement");
-        state.dialogs.net_label_placement.close();
+        state.design.net_label_placement.close();
     }
 
     fn label_names(app: &RSpiceApp) -> Vec<String> {
@@ -543,7 +543,7 @@ mod tests {
 
         assert!(place_sequenced_net_label(&mut app.state, Point::new(0, 20)));
         assert!(place_sequenced_net_label(&mut app.state, Point::new(0, 40)));
-        assert!(!app.state.dialogs.net_label_placement.open);
+        assert!(!app.state.design.net_label_placement.open);
         assert_eq!(label_names(&app), ["D0", "D1", "D2"]);
         assert_eq!(next_name(&app).as_deref(), Some("D3"));
         assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
@@ -598,9 +598,9 @@ mod tests {
     fn closing_the_entry_leaves_schematic_and_history_untouched() {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::new(10, 20));
-        app.state.dialogs.net_label_placement.name = "sense".to_owned();
-        app.state.dialogs.net_label_placement.close();
-        assert!(!app.state.dialogs.net_label_placement.open);
+        app.state.design.net_label_placement.name = "sense".to_owned();
+        app.state.design.net_label_placement.close();
+        assert!(!app.state.design.net_label_placement.open);
         assert!(app.state.model.schematic.document().net_labels.is_empty());
         assert!(!app.state.model.schematic.can_undo());
         assert_eq!(app.state.model.schematic.session.editor.tool, Tool::Label);
@@ -610,7 +610,7 @@ mod tests {
     fn read_only_and_stale_authority_fail_closed() {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::origin());
-        app.state.dialogs.net_label_placement.name = "sense".to_owned();
+        app.state.design.net_label_placement.name = "sense".to_owned();
         app.state.model.schematic.session.read_only = true;
         assert!(matches!(
             validate_draft(&app.state),
@@ -638,7 +638,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::new(30, 50));
-        app.state.dialogs.net_label_placement.name = "sense_out".to_owned();
+        app.state.design.net_label_placement.name = "sense_out".to_owned();
 
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_net_label_dialog(ctx)
@@ -646,7 +646,7 @@ mod tests {
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
             app.render_net_label_dialog(ctx)
         });
-        assert!(!app.state.dialogs.net_label_placement.open);
+        assert!(!app.state.design.net_label_placement.open);
         assert_eq!(
             app.state.model.schematic.document().net_labels[0].name,
             "sense_out"
@@ -654,14 +654,14 @@ mod tests {
         assert!(app.state.model.schematic.can_undo());
 
         open_at(&mut app, Point::new(60, 50));
-        app.state.dialogs.net_label_placement.name = "discard_me".to_owned();
+        app.state.design.net_label_placement.name = "discard_me".to_owned();
         let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
             app.render_net_label_dialog(ctx)
         });
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
             app.render_net_label_dialog(ctx)
         });
-        assert!(!app.state.dialogs.net_label_placement.open);
+        assert!(!app.state.design.net_label_placement.open);
         assert_eq!(app.state.model.schematic.document().net_labels.len(), 1);
     }
 
@@ -679,7 +679,7 @@ mod tests {
         let _ = ctx.run_ui(input, |ctx| app.render_net_label_dialog(ctx));
         let anchored = app
             .state
-            .dialogs
+            .design
             .net_label_placement
             .screen_anchor
             .expect("the entry took its place from the click");
@@ -690,7 +690,7 @@ mod tests {
             |ctx| app.render_net_label_dialog(ctx),
         );
         assert_eq!(
-            app.state.dialogs.net_label_placement.screen_anchor,
+            app.state.design.net_label_placement.screen_anchor,
             Some(anchored),
             "the card does not chase the pointer"
         );
@@ -700,7 +700,7 @@ mod tests {
     fn committed_label_is_synchronized_to_the_project_owned_cell_view() {
         let mut app = RSpiceApp::test_instance();
         open_at(&mut app, Point::new(80, 30));
-        app.state.dialogs.net_label_placement.name = "project_net".to_owned();
+        app.state.design.net_label_placement.name = "project_net".to_owned();
         let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
             panic!("valid label draft");
         };
@@ -732,14 +732,14 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         open_connector_at(&mut app, Point::new(60, -40));
         assert_eq!(
-            app.state.dialogs.net_label_placement.kind,
+            app.state.design.net_label_placement.kind,
             NetLabelKind::OffSheet {
                 direction: CrossSheetPortDirection::default()
             }
         );
 
-        app.state.dialogs.net_label_placement.name = "BIAS".to_owned();
-        app.state.dialogs.net_label_placement.kind = NetLabelKind::OffSheet {
+        app.state.design.net_label_placement.name = "BIAS".to_owned();
+        app.state.design.net_label_placement.kind = NetLabelKind::OffSheet {
             direction: CrossSheetPortDirection::Output,
         };
         let DraftValidation::Valid(commit) = validate_draft(&app.state) else {
@@ -767,10 +767,10 @@ mod tests {
         // The plain label tool still publishes a local label through the same
         // transaction. The primary action closes the dialog after a commit,
         // and no placement opens over a modal that is still up.
-        app.state.dialogs.net_label_placement.close();
+        app.state.design.net_label_placement.close();
         open_at(&mut app, Point::new(10, 10));
         assert_eq!(
-            app.state.dialogs.net_label_placement.kind,
+            app.state.design.net_label_placement.kind,
             NetLabelKind::Local
         );
     }

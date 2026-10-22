@@ -696,11 +696,11 @@ fn move_preview() -> FrameTimes {
             .select_component(*id);
     }
     crate::workbench::app::arm_move_selection(state);
-    assert!(state.dialogs.move_selection.armed, "the move arms");
-    state.dialogs.move_selection.canvas.preview_delta = Point::new(40, 0);
+    assert!(state.design.move_selection.armed, "the move arms");
+    state.design.move_selection.canvas.preview_delta = Point::new(40, 0);
     time_scenario("move preview, delta (40, 0)", 8.0, fixture.state, |state| {
-        assert!(state.dialogs.move_selection.armed);
-        assert_eq!(state.dialogs.move_selection.canvas.preview_error, None);
+        assert!(state.design.move_selection.armed);
+        assert_eq!(state.design.move_selection.canvas.preview_error, None);
     })
 }
 
@@ -736,16 +736,16 @@ fn stretch_preview() -> FrameTimes {
         .selection
         .select_only_wire_segment(wire, 1);
     crate::workbench::app::arm_stretch_selection(state);
-    assert!(state.dialogs.stretch_selection.armed, "the stretch arms");
-    state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(20, 0);
+    assert!(state.design.stretch_selection.armed, "the stretch arms");
+    state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(20, 0);
     time_scenario(
         "stretch preview, delta (20, 0)",
         8.0,
         fixture.state,
         |state| {
-            assert!(state.dialogs.stretch_selection.armed);
+            assert!(state.design.stretch_selection.armed);
             assert_eq!(
-                state.dialogs.stretch_selection.canvas.gesture.preview_error,
+                state.design.stretch_selection.canvas.gesture.preview_error,
                 None
             );
         },
@@ -938,7 +938,7 @@ fn site_cost_table() -> String {
     };
     let pointer = egui::pos2(SCREEN.x * 0.5, SCREEN.y * 0.5);
     let near = Point::new(ORIGIN + PITCH * 3, ORIGIN + 100);
-    let mode = state.dialogs.move_selection.mode;
+    let mode = state.design.move_selection.mode;
     // The badges at 100 %, each about a dozen mono characters on one line.
     let badges = super::scene::operating_point_annotations(state);
     let badge_sizes = vec![egui::vec2(66.0, 12.0); badges.len()];

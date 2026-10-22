@@ -24,21 +24,21 @@ impl RSpiceApp {
         &mut self,
         response: ConfirmationResponse,
     ) {
-        let pending = self.state.dialogs.confirmation_dialog.pending_action;
-        let pending_path = self.state.dialogs.confirmation_dialog.pending_path.take();
+        let pending = self.state.workbench.confirmation_dialog.pending_action;
+        let pending_path = self.state.workbench.confirmation_dialog.pending_path.take();
         let pending_recent_kind = self
             .state
-            .dialogs
+            .workbench
             .confirmation_dialog
             .pending_recent_kind
             .take();
         let pending_example = self
             .state
-            .dialogs
+            .workbench
             .confirmation_dialog
             .pending_example
             .take();
-        self.state.dialogs.confirmation_dialog.close();
+        self.state.workbench.confirmation_dialog.close();
 
         match response {
             ConfirmationResponse::Cancel => {
@@ -102,12 +102,12 @@ impl RSpiceApp {
                             "The pending action remains blocked because the model candidate could not be saved: {error}"
                         ),
                     );
-                    self.state.dialogs.confirmation_dialog.visible = pending.is_some();
-                    self.state.dialogs.confirmation_dialog.pending_action = pending;
-                    self.state.dialogs.confirmation_dialog.pending_path = pending_path;
-                    self.state.dialogs.confirmation_dialog.pending_recent_kind =
+                    self.state.workbench.confirmation_dialog.visible = pending.is_some();
+                    self.state.workbench.confirmation_dialog.pending_action = pending;
+                    self.state.workbench.confirmation_dialog.pending_path = pending_path;
+                    self.state.workbench.confirmation_dialog.pending_recent_kind =
                         pending_recent_kind;
-                    self.state.dialogs.confirmation_dialog.pending_example = pending_example;
+                    self.state.workbench.confirmation_dialog.pending_example = pending_example;
                     return;
                 }
                 let outcome = if project_action {
@@ -143,7 +143,7 @@ impl RSpiceApp {
                         transaction,
                     ) => {
                         if let Some(action) = pending {
-                            self.state.dialogs.confirmation_dialog.await_canonical_save(
+                            self.state.workbench.confirmation_dialog.await_canonical_save(
                                 transaction,
                                 action,
                                 pending_path,
@@ -158,12 +158,12 @@ impl RSpiceApp {
                             LogSource::Studio,
                             "Downloaded a copy, but the project itself was not saved. The pending action did not continue and unsaved work remains open.",
                         );
-                        self.state.dialogs.confirmation_dialog.visible = pending.is_some();
-                        self.state.dialogs.confirmation_dialog.pending_action = pending;
-                        self.state.dialogs.confirmation_dialog.pending_path = pending_path;
-                        self.state.dialogs.confirmation_dialog.pending_recent_kind =
+                        self.state.workbench.confirmation_dialog.visible = pending.is_some();
+                        self.state.workbench.confirmation_dialog.pending_action = pending;
+                        self.state.workbench.confirmation_dialog.pending_path = pending_path;
+                        self.state.workbench.confirmation_dialog.pending_recent_kind =
                             pending_recent_kind;
-                        self.state.dialogs.confirmation_dialog.pending_example = pending_example;
+                        self.state.workbench.confirmation_dialog.pending_example = pending_example;
                     }
                     crate::workbench::workflows::project_workflow::SaveRequestOutcome::CopyPending
                     | crate::workbench::workflows::project_workflow::SaveRequestOutcome::Cancelled
@@ -186,7 +186,7 @@ impl RSpiceApp {
         }
         let Some(pending) = self
             .state
-            .dialogs
+            .workbench
             .confirmation_dialog
             .take_canonical_save(event.transaction())
         else {
@@ -201,7 +201,7 @@ impl RSpiceApp {
             );
         } else if event.needs_another_save() {
             self.state
-                .dialogs
+                .workbench
                 .confirmation_dialog
                 .restore_continuation_for_review(pending);
             self.state.record(
@@ -211,7 +211,7 @@ impl RSpiceApp {
             );
         } else {
             self.state
-                .dialogs
+                .workbench
                 .confirmation_dialog
                 .restore_continuation_for_review(pending);
             // The save path has already recorded why the save did not
@@ -239,14 +239,14 @@ impl RSpiceApp {
         }
         match crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state) {
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
-                self.state.dialogs.project_review_dialog.close();
+                self.state.workbench.project_review_dialog.close();
                 crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
             }
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
                 transaction,
             ) => {
-                self.state.dialogs.project_review_dialog.close();
-                self.state.dialogs.confirmation_dialog.await_canonical_save(
+                self.state.workbench.project_review_dialog.close();
+                self.state.workbench.confirmation_dialog.await_canonical_save(
                     transaction,
                     ConfirmationAction::CloseProject,
                     None,
@@ -341,7 +341,7 @@ impl RSpiceApp {
                 && self.state.workbench.model_editor_has_unsaved_changes())
         {
             self.state
-                .dialogs
+                .workbench
                 .confirmation_dialog
                 .show_recent(recent.path, recent.kind);
         } else {
@@ -725,7 +725,7 @@ mod tests {
         assert_eq!(
             project_app
                 .state
-                .dialogs
+                .workbench
                 .confirmation_dialog
                 .pending_recent_kind,
             Some(crate::services::recent_files::RecentKind::Project)
@@ -804,7 +804,7 @@ mod tests {
         assert_eq!(
             schematic_app
                 .state
-                .dialogs
+                .workbench
                 .confirmation_dialog
                 .pending_recent_kind,
             Some(crate::services::recent_files::RecentKind::Schematic)
@@ -882,7 +882,7 @@ mod tests {
         );
         assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
         assert!(matches!(
-            state.dialogs.project_review_dialog.request.as_ref(),
+            state.workbench.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
         ));
 
@@ -892,13 +892,13 @@ mod tests {
         assert!(state.project_lifecycle.is_open());
         assert_eq!(state.model.workspace.content.project.id(), project_id);
         assert!(matches!(
-            state.dialogs.project_review_dialog.request.as_ref(),
+            state.workbench.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
         ));
 
         // Cancel closes only the review; every project-owned draft remains.
-        state.dialogs.project_review_dialog.close();
-        assert!(state.dialogs.project_review_dialog.request.is_none());
+        state.workbench.project_review_dialog.close();
+        assert!(state.workbench.project_review_dialog.request.is_none());
         assert!(state.project_lifecycle.is_open());
         assert_eq!(
             crate::workbench::lifecycle::project_lifecycle::dirty_document_count(&state),
@@ -929,7 +929,7 @@ mod tests {
 
         assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
 
-        assert!(state.dialogs.project_review_dialog.request.is_none());
+        assert!(state.workbench.project_review_dialog.request.is_none());
         assert!(!state.project_lifecycle.is_open());
         assert!(!state.workbench.project_launcher_open);
         assert_eq!(
@@ -978,7 +978,7 @@ mod tests {
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Project
         );
-        assert!(app.state.dialogs.project_review_dialog.request.is_none());
+        assert!(app.state.workbench.project_review_dialog.request.is_none());
         assert!(saved_paths.borrow().is_empty());
         let persisted = crate::io::load_project_file(&path).expect("reload closed project");
         assert_eq!(
@@ -1043,7 +1043,7 @@ mod tests {
         assert!(app.state.project_lifecycle.is_open());
         assert_eq!(app.state.model.schematic.document().components.len(), 1);
         assert!(matches!(
-            app.state.dialogs.project_review_dialog.request.as_ref(),
+            app.state.workbench.project_review_dialog.request.as_ref(),
             Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
         ));
         assert!(crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state));

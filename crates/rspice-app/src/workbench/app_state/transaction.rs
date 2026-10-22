@@ -23,7 +23,10 @@ impl AppState {
     /// and the notices reported and not yet toasted, ahead of any the
     /// transaction reported itself. Everything else is the candidate's.
     pub(crate) fn commit_candidate(&mut self, mut candidate: AppState) {
-        std::mem::swap(&mut candidate.dialogs.hardcopy, &mut self.dialogs.hardcopy);
+        std::mem::swap(
+            &mut candidate.hardcopy.hardcopy,
+            &mut self.hardcopy.hardcopy,
+        );
         candidate
             .model
             .notices

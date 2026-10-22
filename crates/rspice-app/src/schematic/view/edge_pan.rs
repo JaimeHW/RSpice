@@ -36,9 +36,9 @@ pub(super) fn edge_pan(ui: &Ui, response: &Response, canvas: Rect, state: &mut A
 /// Whether a gesture is carrying something across the canvas.
 fn carrying(state: &AppState) -> bool {
     let editor = &state.model.schematic.session.editor;
-    let move_draft = &state.dialogs.move_selection;
-    let stretch_draft = &state.dialogs.stretch_selection;
-    state.dialogs.floating_paste.is_some()
+    let move_draft = &state.design.move_selection;
+    let stretch_draft = &state.design.stretch_selection;
+    state.design.floating_paste.is_some()
         || state.schematic_drag_in_progress()
         || editor.wire_drawing.active
         || editor.bus_drawing.active

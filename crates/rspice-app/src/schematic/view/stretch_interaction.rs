@@ -27,7 +27,7 @@ pub(super) fn handle_armed_stretch_selection(
 ) {
     if state.application_modal_open()
         || state.model.schematic.session.editor.tool != Tool::StretchSelection
-        || !state.dialogs.stretch_selection.armed
+        || !state.design.stretch_selection.armed
     {
         return;
     }
@@ -43,8 +43,8 @@ pub(super) fn handle_armed_stretch_selection(
         StretchInputView {
             design: super::schematic_design_view(state),
             selection: &state.model.schematic.session.editor.selection,
-            canvas: &state.dialogs.stretch_selection.canvas,
-            policy: state.dialogs.stretch_selection.policy,
+            canvas: &state.design.stretch_selection.canvas,
+            policy: state.design.stretch_selection.policy,
             snap_engine: &state.model.schematic.session.editor.snap_engine,
         },
     ) {
@@ -60,14 +60,14 @@ fn capture(
     StretchInputRequest {
         source: editor_request_source(state),
         selection: state.model.schematic.session.editor.selection.clone(),
-        generation: state.dialogs.stretch_selection.generation,
-        policy: state.dialogs.stretch_selection.policy,
+        generation: state.design.stretch_selection.generation,
+        policy: state.design.stretch_selection.policy,
         transition,
     }
 }
 
 fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: StretchInputRequest) {
-    let draft = &state.dialogs.stretch_selection;
+    let draft = &state.design.stretch_selection;
     if request.source != editor_request_source(state)
         || request.selection != state.model.schematic.session.editor.selection
         || request.generation != draft.generation
@@ -80,7 +80,7 @@ fn apply(state: &mut AppState, symbols: &SchematicSymbolContext, request: Stretc
     {
         return;
     }
-    state.dialogs.stretch_selection.canvas = request.transition.next;
+    state.design.stretch_selection.canvas = request.transition.next;
     if request.transition.commit {
         commit_armed_stretch_selection(state, symbols);
     }
@@ -96,22 +96,22 @@ pub(super) fn commit_armed_stretch_selection(
         return;
     }
     if let Some(message) = state
-        .dialogs
+        .design
         .stretch_selection
         .canvas
         .gesture
         .preview_error
         .clone()
     {
-        let draft = &mut state.dialogs.stretch_selection;
+        let draft = &mut state.design.stretch_selection;
         draft.canvas.gesture.reset_candidate();
         state.prompt(format!("Stretch not committed: {message}"));
         return;
     }
-    let delta = state.dialogs.stretch_selection.canvas.gesture.preview_delta;
-    let policy = state.dialogs.stretch_selection.policy;
+    let delta = state.design.stretch_selection.canvas.gesture.preview_delta;
+    let policy = state.design.stretch_selection.policy;
     let target = state
-        .dialogs
+        .design
         .stretch_selection
         .canvas
         .target
@@ -158,7 +158,7 @@ pub(super) fn commit_armed_stretch_selection(
         }
         Err(error) => {
             state.model.schematic.cancel_operation();
-            let draft = &mut state.dialogs.stretch_selection;
+            let draft = &mut state.design.stretch_selection;
             draft.canvas.gesture.preview_error = Some(error.to_string());
             draft.canvas.gesture.reset_candidate();
             state.prompt(format!("Stretch not committed: {error}"));
@@ -204,14 +204,14 @@ mod tests {
 
     fn arm_test_stretch(state: &mut AppState) {
         crate::workbench::app::arm_stretch_selection(state);
-        assert!(state.dialogs.stretch_selection.armed);
+        assert!(state.design.stretch_selection.armed);
     }
 
     #[test]
     fn commit_records_once_syncs_workspace_and_retains_selection() {
         let mut state = selected_stretch_wire();
         arm_test_stretch(&mut state);
-        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::origin();
+        state.design.stretch_selection.canvas.gesture.preview_delta = Point::origin();
         let symbols = schematic_symbol_context(&state);
 
         let ctx = egui::Context::default();
@@ -293,7 +293,7 @@ mod tests {
             state.model.schematic.session.editor.tool,
             crate::state::Tool::Select
         );
-        assert!(!state.dialogs.stretch_selection.armed);
+        assert!(!state.design.stretch_selection.armed);
         assert_eq!(
             state
                 .model
@@ -321,7 +321,7 @@ mod tests {
         let mut state = selected_stretch_wire();
         let baseline = state.model.schematic.document().wires[0].clone();
         arm_test_stretch(&mut state);
-        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
 
         crate::workbench::app::cancel_armed_stretch_selection(&mut state);
 
@@ -357,7 +357,7 @@ mod tests {
             .junctions
             .push(hidden);
         arm_test_stretch(&mut state);
-        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_stretch_selection(&mut state, &symbols);
@@ -394,7 +394,7 @@ mod tests {
             .select_only_wire_segment(7, 0);
         state.model.schematic.init_undo_history();
         arm_test_stretch(&mut state);
-        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_stretch_selection(&mut state, &symbols);
@@ -463,7 +463,7 @@ mod tests {
             .push(Junction::new(1, Point::new(10, 20)));
         let baseline = state.model.schematic.document().wires[0].clone();
         arm_test_stretch(&mut state);
-        state.dialogs.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
+        state.design.stretch_selection.canvas.gesture.preview_delta = Point::new(0, 10);
         let symbols = schematic_symbol_context(&state);
 
         commit_armed_stretch_selection(&mut state, &symbols);
@@ -482,10 +482,10 @@ mod tests {
             state.model.schematic.session.editor.tool,
             crate::state::Tool::StretchSelection
         );
-        assert!(state.dialogs.stretch_selection.armed);
+        assert!(state.design.stretch_selection.armed);
         assert!(
             state
-                .dialogs
+                .design
                 .stretch_selection
                 .canvas
                 .gesture
@@ -510,7 +510,7 @@ mod tests {
         ] {
             let mut state = selected_stretch_wire();
             arm_test_stretch(&mut state);
-            let expected = state.dialogs.stretch_selection.canvas.clone();
+            let expected = state.design.stretch_selection.canvas.clone();
             let mut next = expected.clone();
             next.gesture.preview_delta = Point::new(0, 10);
             let request = capture(
@@ -524,15 +524,15 @@ mod tests {
             match change {
                 "document" => state.model.active_schematic_epoch += 1,
                 "selection" => state.model.schematic.session.editor.selection.clear(),
-                "target" => state.dialogs.stretch_selection.canvas.target = None,
+                "target" => state.design.stretch_selection.canvas.target = None,
                 "policy" => {
-                    state.dialogs.stretch_selection.policy =
+                    state.design.stretch_selection.policy =
                         crate::state::StretchOrthogonalPolicy::AllowDiagonal
                 }
                 "draft" => {
-                    state.dialogs.stretch_selection.canvas.gesture.anchor = Some(Point::new(10, 0))
+                    state.design.stretch_selection.canvas.gesture.anchor = Some(Point::new(10, 0))
                 }
-                "modal" => state.dialogs.preferences_open = true,
+                "modal" => state.settings.preferences_open = true,
                 "read-only" => state.model.schematic.session.read_only = true,
                 "tool" => state.model.schematic.arm_tool(Tool::Select),
                 "replacement" => {
@@ -540,18 +540,18 @@ mod tests {
                     arm_test_stretch(&mut state);
                     assert_eq!(
                         request.transition.expected,
-                        state.dialogs.stretch_selection.canvas
+                        state.design.stretch_selection.canvas
                     );
                     assert_eq!(request.source, editor_request_source(&state));
                     assert_ne!(
                         request.generation,
-                        state.dialogs.stretch_selection.generation
+                        state.design.stretch_selection.generation
                     );
                 }
                 "none" => {}
                 _ => unreachable!(),
             }
-            let canvas = state.dialogs.stretch_selection.canvas.clone();
+            let canvas = state.design.stretch_selection.canvas.clone();
             let symbols = schematic_symbol_context(&state);
             apply(&mut state, &symbols, request);
             if change == "none" {
@@ -570,8 +570,8 @@ mod tests {
                     "{change}"
                 );
                 assert!(!state.model.schematic.can_undo(), "{change}");
-                assert_eq!(state.dialogs.stretch_selection.canvas, canvas, "{change}");
-                assert!(state.dialogs.stretch_selection.armed, "{change}");
+                assert_eq!(state.design.stretch_selection.canvas, canvas, "{change}");
+                assert!(state.design.stretch_selection.armed, "{change}");
             }
         }
     }

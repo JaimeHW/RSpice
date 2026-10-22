@@ -85,14 +85,14 @@ pub(crate) fn shared_properties_available(state: &AppState) -> bool {
 
 /// Open the form on the selection. Returns whether it opened.
 pub(crate) fn open_shared_properties(state: &mut AppState) -> bool {
-    if state.dialogs.application_modal_open() || state.deny_read_only_edit() {
+    if state.dialog_modal_open() || state.deny_read_only_edit() {
         return false;
     }
     let Some(ids) = selected_instances(state) else {
         return false;
     };
     let fields = shared_fields(state, &ids);
-    state.dialogs.shared_properties = SharedPropertiesDialogState {
+    state.design.shared_properties = SharedPropertiesDialogState {
         open: true,
         ids,
         fields,
@@ -191,7 +191,7 @@ fn retyped(current: &PropertyValue, text: &str) -> PropertyValue {
 /// Write every edited field to every instance, as one undo step. Returns
 /// how many instances changed, or which one refused and why.
 pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, String> {
-    let form = state.dialogs.shared_properties.clone();
+    let form = state.design.shared_properties.clone();
     if form.content_version != state.model.schematic.content_version() {
         return Err(
             "The drawing changed while the form was open. Close it and press Q again.".to_owned(),
@@ -243,15 +243,15 @@ pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, Str
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_shared_properties_dialog(&mut self, ctx: &Context) {
-        if !self.state.dialogs.shared_properties.open {
+        if !self.state.design.shared_properties.open {
             return;
         }
-        let names: Vec<String> = instances(&self.state, &self.state.dialogs.shared_properties.ids)
+        let names: Vec<String> = instances(&self.state, &self.state.design.shared_properties.ids)
             .into_iter()
             .map(|component| component.name.clone())
             .collect();
         let context = format!("{} instances \u{b7} {}", names.len(), names.join(" "));
-        let form = &mut self.state.dialogs.shared_properties;
+        let form = &mut self.state.design.shared_properties;
         let any_edited = form.fields.iter().any(SharedField::edited);
         let status = match (&form.error, form.fields.is_empty()) {
             (Some(error), _) => Err(error.as_str()),
@@ -279,17 +279,17 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => match apply_shared_properties(&mut self.state) {
                 Ok(changed) => {
-                    self.state.dialogs.shared_properties.open = false;
+                    self.state.design.shared_properties.open = false;
                     self.state.prompt(match changed {
                         0 => "Nothing changed.".to_owned(),
                         1 => "Changed 1 instance.".to_owned(),
                         count => format!("Changed {count} instances."),
                     });
                 }
-                Err(error) => self.state.dialogs.shared_properties.error = Some(error),
+                Err(error) => self.state.design.shared_properties.error = Some(error),
             },
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.dialogs.shared_properties.open = false;
+                self.state.design.shared_properties.open = false;
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -323,7 +323,7 @@ mod tests {
 
     fn field<'a>(state: &'a mut AppState, key: &str) -> &'a mut SharedField {
         state
-            .dialogs
+            .design
             .shared_properties
             .fields
             .iter_mut()
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(field(&mut state, "m").common.as_deref(), Some(""));
         assert!(
             !state
-                .dialogs
+                .design
                 .shared_properties
                 .fields
                 .iter()
@@ -397,7 +397,7 @@ mod tests {
         document.components[1].kind = ComponentType::Capacitor;
         assert!(open_shared_properties(&mut state));
         let keys: Vec<&str> = state
-            .dialogs
+            .design
             .shared_properties
             .fields
             .iter()

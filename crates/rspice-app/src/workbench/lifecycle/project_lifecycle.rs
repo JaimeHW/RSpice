@@ -532,7 +532,7 @@ pub(crate) fn accept_loaded_project(
 ) {
     state.workbench.clear_project_model_editor();
     state.clear_project_design_history();
-    state.dialogs.check_and_save.close();
+    state.project.check_and_save.close();
     #[cfg(not(target_arch = "wasm32"))]
     let native_receipt = binding
         .as_ref()
@@ -571,7 +571,7 @@ pub(crate) fn accept_loaded_project(
 pub(crate) fn reset_for_new_project(state: &mut AppState) {
     state.workbench.clear_project_model_editor();
     state.clear_project_design_history();
-    state.dialogs.check_and_save.close();
+    state.project.check_and_save.close();
     state.native_project_binding_receipt = None;
     state.browser_project_binding_receipt = None;
     #[cfg(target_arch = "wasm32")]
@@ -600,7 +600,7 @@ pub(crate) fn mark_project_closed(state: &mut AppState) {
     state.workbench.stimulus_editor.clear();
     state.workbench.stimulus_browser.clear();
     state.clear_project_design_history();
-    state.dialogs.check_and_save.close();
+    state.project.check_and_save.close();
     state.native_project_binding_receipt = None;
     state.browser_project_binding_receipt = None;
     #[cfg(target_arch = "wasm32")]

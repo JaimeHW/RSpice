@@ -21,7 +21,7 @@ use crate::workbench::state::Workspace;
 const LIBRARY: &str = "behavioral";
 
 /// A library cell whose `veriloga` view owns a one-file bundle at `root`.
-pub(super) fn add_veriloga_cell(
+pub(in crate::workbench) fn add_veriloga_cell(
     state: &mut AppState,
     cell: &str,
     root: &str,
@@ -73,14 +73,14 @@ fn module_source(module: &str, extra: &str) -> String {
     )
 }
 
-pub(super) fn open_project_app() -> RSpiceApp {
+pub(in crate::workbench) fn open_project_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app
 }
 
 /// Open `reference` the way the library and the schematic do, then show it.
-pub(super) fn open_in_design(state: &mut AppState, reference: &CellViewRef) {
+pub(in crate::workbench) fn open_in_design(state: &mut AppState, reference: &CellViewRef) {
     state.open_workspace_view(reference.clone());
     state.workbench.activate(Workspace::Design);
 }
@@ -365,7 +365,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
         clicked.bundle().closure_digest(),
         "the compile is of the closure the click took"
     );
-    assert!(app.state.dialogs.veriloga_build_settings.is_none());
+    assert!(app.state.code.veriloga_build_settings.is_none());
     assert!(
         !app.state.application_modal_open(),
         "nothing modal stands between the click and the compiler"

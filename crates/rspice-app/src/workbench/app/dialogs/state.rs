@@ -1,14 +1,8 @@
 //! App Dialog State
 //!
-//! Modal/dialog payload used by `AppState`. Analysis configuration lives
-//! in `SimSetupState`, not here.
-
-use crate::workbench::app::{
-    ConfigurationSetsDialogState, ConfirmationDialogState, ConnectivityManagerDialogState,
-    CreateModelBoundSymbolDialogState, DesignManagementDialogState,
-    DesignReviewCommentsDialogState, ProjectReviewDialogState, ProjectRevisionHistoryDialogState,
-    SelectionBulkEditDialogState, SymbolImportDialogState, SymbolParameterFormDialogState,
-};
+//! Choices the dialogs share: the grid-snap spacing and the Help Center's
+//! pages. Each feature's open dialogs live in its slot in
+//! [`crate::workbench::slots`].
 
 /// Governed snap-spacing choices shown by the upgraded schematic toolbar
 /// transaction. `Free` disables snapping without replacing the document's
@@ -52,5 +46,4 @@ impl GridSnapSpacingChoice {
 
 mod sessions;
 
-pub use sessions::DialogState;
-pub(crate) use sessions::{DatasetExportPicker, HelpCenterPage, RunDetailsDialogState};
+pub(crate) use sessions::HelpCenterPage;

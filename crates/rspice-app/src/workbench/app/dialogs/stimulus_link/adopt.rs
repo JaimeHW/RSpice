@@ -316,10 +316,10 @@ pub(super) fn render(
         focus
     });
 
-    state.dialogs.stimulus_link.pick = pick;
-    state.dialogs.stimulus_link.filter = filter;
+    state.design.stimulus_link.pick = pick;
+    state.design.stimulus_link.filter = filter;
     if closed {
-        state.dialogs.stimulus_link.close();
+        state.design.stimulus_link.close();
         return;
     }
     match choice {
@@ -328,12 +328,12 @@ pub(super) fn render(
             match super::commit_adoption(state, session.component_id, &definition) {
                 Ok(line) => {
                     state.prompt(line);
-                    state.dialogs.stimulus_link.close();
+                    state.design.stimulus_link.close();
                 }
-                Err(refusal) => state.dialogs.stimulus_link.error = Some(refusal),
+                Err(refusal) => state.design.stimulus_link.error = Some(refusal),
             }
         }
-        DialogChoice::Ghost | DialogChoice::Cancelled => state.dialogs.stimulus_link.close(),
+        DialogChoice::Ghost | DialogChoice::Cancelled => state.design.stimulus_link.close(),
         DialogChoice::None | DialogChoice::Secondary => {}
     }
 }

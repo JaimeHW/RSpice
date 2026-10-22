@@ -189,7 +189,7 @@ fn canvas_accessibility_view(state: &AppState) -> canvas::CanvasAccessibilityVie
     canvas::CanvasAccessibilityView {
         design: schematic_design_view(state),
         editor: &state.model.schematic.session.editor,
-        keyboard_focus: state.dialogs.interaction.schematic_keyboard_focus,
+        keyboard_focus: state.workbench.interaction.schematic_keyboard_focus,
         filter: state.ui.schematic_selection_filter,
         traversal_enabled: state
             .model
@@ -354,7 +354,7 @@ fn set_canvas_cursor(
         pan_armed: pan_modifier && !any_down,
         zoom_box: editor.zoom_box.armed || editor.zoom_box.drag.is_some(),
         shelf_drop,
-        moving_selection: state.dialogs.interaction.drag.drag_type
+        moving_selection: state.workbench.interaction.drag.drag_type
             == rspice_schematic_editor::session::drag::DragType::MoveSelection,
         tool: editor.tool,
     };
@@ -450,7 +450,7 @@ pub fn render_schematic_view(
         state.application_modal_open() || state.workbench.drawer.is_some()
     });
     if response.clicked() || response.secondary_clicked() || response.drag_started() {
-        state.dialogs.interaction.schematic_keyboard_focus = None;
+        state.workbench.interaction.schematic_keyboard_focus = None;
     }
     ui.advance_cursor_after_rect(available);
     let painter = ui.painter_at(available);
@@ -1280,12 +1280,12 @@ mod tests {
         right.model.preferences.choose_right_button_pan();
         right_drag(&mut right, from, to);
         assert_eq!(right.model.schematic.session.editor.pan, (40.0, 0.0));
-        assert!(right.dialogs.interaction.context_target.is_none());
+        assert!(right.workbench.interaction.context_target.is_none());
 
         right_drag(&mut right, from, from);
         assert_eq!(right.model.schematic.session.editor.pan, (0.0, 0.0));
         assert!(
-            right.dialogs.interaction.context_target.is_some(),
+            right.workbench.interaction.context_target.is_some(),
             "a right click that stays put opens the context menu"
         );
     }

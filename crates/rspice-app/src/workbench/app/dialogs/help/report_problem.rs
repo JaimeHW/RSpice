@@ -97,8 +97,8 @@ fn session_log_file() -> Option<String> {
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_report_problem_dialog(&mut self, ctx: &Context) {
-        let mut include_session_log = self.state.dialogs.help_center.include_session_log;
-        let mut reviewed = self.state.dialogs.help_center.disclosure_reviewed;
+        let mut include_session_log = self.state.shell.help_center.include_session_log;
+        let mut reviewed = self.state.shell.help_center.disclosure_reviewed;
         let entries = self.state.model.log_buffer.len();
         let log_file = session_log_file();
         let mut open_folder = false;
@@ -147,8 +147,8 @@ impl RSpiceApp {
             });
         });
 
-        self.state.dialogs.help_center.include_session_log = include_session_log;
-        self.state.dialogs.help_center.disclosure_reviewed = reviewed;
+        self.state.shell.help_center.include_session_log = include_session_log;
+        self.state.shell.help_center.disclosure_reviewed = reviewed;
         if open_folder {
             #[cfg(not(target_arch = "wasm32"))]
             if let Err(error) =

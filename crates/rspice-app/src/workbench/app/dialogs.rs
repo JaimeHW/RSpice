@@ -1,9 +1,10 @@
 //! Modal dialogs.
 //!
 //! One module per dialog, each owning its own state struct and rendering.
-//! `DialogState` in [`state`] aggregates the visibility flags so a single
-//! read answers whether any modal owns input this frame; the dialogs
-//! themselves never inspect each other.
+//! Each feature keeps its dialogs' state in its slot
+//! ([`crate::workbench::slots`]), and `AppState::dialog_modal_open` reads
+//! them all so a single read answers whether any modal owns input this
+//! frame; the dialogs themselves never inspect each other.
 
 pub(in crate::workbench) mod check_and_save;
 pub(in crate::workbench) mod check_and_save_validation;

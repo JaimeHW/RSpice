@@ -467,7 +467,7 @@ pub(super) fn handle_context_menu(
     if !opening.needs_contents() {
         context_surface::close(response);
         forget_choices(&response.ctx);
-        state.dialogs.interaction.context_target = None;
+        state.workbench.interaction.context_target = None;
         return;
     }
     let anchor = if opening.secondary_clicked {
@@ -476,7 +476,7 @@ pub(super) fn handle_context_menu(
         if opening.keyboard_open {
             forget_choices(&response.ctx);
             let (target, click_pos) = keyboard_target(state, viewport, response.rect.center());
-            state.dialogs.interaction.context_target = Some((target, (click_pos.x, click_pos.y)));
+            state.workbench.interaction.context_target = Some((target, (click_pos.x, click_pos.y)));
         }
         None
     };
@@ -495,7 +495,7 @@ pub(super) fn handle_context_menu(
     }
     if !output.open {
         forget_choices(&response.ctx);
-        state.dialogs.interaction.context_target = None;
+        state.workbench.interaction.context_target = None;
     }
 }
 
@@ -532,7 +532,7 @@ fn capture_pointer_target(
             pos,
         )
     };
-    state.dialogs.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
+    state.workbench.interaction.context_target = Some((target, (grid_pos.x, grid_pos.y)));
     Some(pos)
 }
 
@@ -901,7 +901,7 @@ fn keyboard_target(
     {
         return (ContextTarget::Canvas, component.pos);
     }
-    if let Some((x, y)) = state.dialogs.interaction.last_click_pos {
+    if let Some((x, y)) = state.workbench.interaction.last_click_pos {
         return (ContextTarget::Canvas, Point::new(x, y));
     }
     (
@@ -1614,7 +1614,7 @@ fn operating_point_available(state: &AppState) -> bool {
 }
 
 fn context_menu_binding(state: &AppState) -> Option<ContextMenuBinding> {
-    let (target, (x, y)) = state.dialogs.interaction.context_target?;
+    let (target, (x, y)) = state.workbench.interaction.context_target?;
     Some(ContextMenuBinding {
         source: super::requests::editor_request_source(state),
         selection: state.model.schematic.session.editor.selection.clone(),

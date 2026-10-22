@@ -71,11 +71,11 @@ fn incompatible_result_viewer_command_is_disabled_and_cannot_navigate() {
 #[test]
 fn exposed_results_calculator_opens_the_real_editor_dialog() {
     let mut app = RSpiceApp::test_instance();
-    assert!(!app.state.dialogs.waveform_calculator_dialog);
+    assert!(!app.state.results.waveform_calculator_dialog);
 
     Command::WaveformCalculator.execute(&mut app);
 
-    assert!(app.state.dialogs.waveform_calculator_dialog);
+    assert!(app.state.results.waveform_calculator_dialog);
 }
 
 #[test]

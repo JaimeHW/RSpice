@@ -165,7 +165,7 @@ fn recent_operation_timestamps_fail_closed_and_format_relative_age() {
 fn overview_new_cell_action_opens_the_real_creation_workflow() {
     let mut app = RSpiceApp::test_instance();
     OverviewIntent::Command(Command::NewCell).execute(&mut app);
-    assert!(app.state.dialogs.new_cell_dialog);
+    assert!(app.state.project.new_cell_dialog);
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn overview_history_action_preserves_project_context() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(app.state.model.workspace.content.active_view, active);
-    assert!(app.state.dialogs.project_revision_history.open);
+    assert!(app.state.project.project_revision_history.open);
 }
 
 #[test]
