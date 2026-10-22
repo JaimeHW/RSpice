@@ -69,8 +69,15 @@ fn inspection_key_catalog() -> (ModelLibraryManager, String) {
     let library = manager
         .get_library_mut(&library_name)
         .expect("the imported library is retained");
-    for corner in ProcessCorner::standard_corners() {
-        library.corners.insert(corner.name.clone(), corner);
+    for (name, is_default) in [("tt", true), ("ff", false)] {
+        library.corners.insert(
+            name.to_owned(),
+            ProcessCorner {
+                name: name.to_owned(),
+                is_default,
+                ..Default::default()
+            },
+        );
     }
     (manager, library_name)
 }
@@ -209,7 +216,7 @@ fn design_inspection_catalog_key_moves_with_every_catalogue_input_the_deck_reads
                     .corners
                     .values_mut()
                     .next()
-                    .expect("standard corners exist");
+                    .expect("fixture corners exist");
                 corner.section_bindings.clear();
                 corner.description = "rebound".to_owned();
             }),

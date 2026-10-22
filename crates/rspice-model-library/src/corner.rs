@@ -428,62 +428,6 @@ impl ProcessCorner {
             Err(errors)
         }
     }
-
-    /// Standard corners for a PDK
-    pub fn standard_corners() -> Vec<ProcessCorner> {
-        vec![
-            ProcessCorner {
-                name: "tt".to_string(),
-                description: "Typical-Typical".to_string(),
-                nmos_corner: "typical".to_string(),
-                pmos_corner: "typical".to_string(),
-                temperature: 27.0,
-                vdd_factor: 1.0,
-                is_default: true,
-                ..Default::default()
-            },
-            ProcessCorner {
-                name: "ff".to_string(),
-                description: "Fast-Fast".to_string(),
-                nmos_corner: "fast".to_string(),
-                pmos_corner: "fast".to_string(),
-                temperature: -40.0,
-                vdd_factor: 1.1,
-                is_default: false,
-                ..Default::default()
-            },
-            ProcessCorner {
-                name: "ss".to_string(),
-                description: "Slow-Slow".to_string(),
-                nmos_corner: "slow".to_string(),
-                pmos_corner: "slow".to_string(),
-                temperature: 125.0,
-                vdd_factor: 0.9,
-                is_default: false,
-                ..Default::default()
-            },
-            ProcessCorner {
-                name: "sf".to_string(),
-                description: "Slow-Fast".to_string(),
-                nmos_corner: "slow".to_string(),
-                pmos_corner: "fast".to_string(),
-                temperature: 27.0,
-                vdd_factor: 1.0,
-                is_default: false,
-                ..Default::default()
-            },
-            ProcessCorner {
-                name: "fs".to_string(),
-                description: "Fast-Slow".to_string(),
-                nmos_corner: "fast".to_string(),
-                pmos_corner: "slow".to_string(),
-                temperature: 27.0,
-                vdd_factor: 1.0,
-                is_default: false,
-                ..Default::default()
-            },
-        ]
-    }
 }
 
 #[cfg(test)]
