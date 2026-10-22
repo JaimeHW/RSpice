@@ -12,15 +12,11 @@
 //! -- turning a dialog or a deck line into that card, and projecting the
 //! complete spectrum onto the modes the sheet is asked to display.
 
-#[cfg(test)]
-use super::parse_runner_netlist_with_abort;
 use super::{ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
 use crate::periodic::PstbRunConfig;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-#[cfg(test)]
-use std::path::Path;
 
 /// PSTB analysis data.
 #[derive(Debug, Clone)]
@@ -181,56 +177,8 @@ fn build_pstb_data(
     })
 }
 
-/// Run PSTB standalone -- computing its own PSS carrier rather than receiving
-/// one -- with cooperative cancellation.
-///
-/// Test-only. PSTB ships as a dependent task: the frequency spec runs PSS
-/// first and hands the authenticated operating point to
-/// [`run_pstb_analysis_on_materialized_with_abort`], so nothing in the
-/// product takes this path.
-#[cfg(test)]
-pub fn run_pstb_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &PstbRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    run_pstb_analysis_impl(netlist_text, config, None, None, abort)
-}
-
-#[cfg(test)]
-fn run_pstb_analysis_impl(
-    netlist_text: &str,
-    config: &PstbRunConfig,
-    source_path: Option<&Path>,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    ensure_not_aborted(abort)?;
-    config.validate().map_err(ServiceRunError::Failure)?;
-
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pstb_analysis_on_materialized_with_abort(&netlist, config, operating_point, abort)
-}
-
-#[cfg(test)]
-pub(crate) fn run_pstb_analysis_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PstbRunConfig,
-    operating_point: Option<&rspice_core::engine::PssOperatingPoint>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PstbData> {
-    run_pstb_analysis_on_materialized_with_context(
-        netlist,
-        config,
-        operating_point,
-        super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
+/// Run PSTB around the authenticated PSS operating point the frequency spec
+/// hands over, or, with none, around a carrier this run states itself.
 pub(crate) fn run_pstb_analysis_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &PstbRunConfig,
@@ -291,6 +239,7 @@ pub(crate) fn run_pstb_analysis_on_materialized_with_context(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_entry::{ctx, parse};
     use super::*;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
     use rspice_core::analysis::pstb::{PstbAnalyzer, PstbConfig};
@@ -335,8 +284,12 @@ mod tests {
             ..Default::default()
         };
 
-        let result =
-            run_pstb_analysis_with_config_and_abort("not a netlist", &config, &ImmediateAbort);
+        let result = run_pstb_analysis_on_materialized_with_context(
+            &parse("not a netlist\n.end\n"),
+            &config,
+            None,
+            ctx(&ImmediateAbort),
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
