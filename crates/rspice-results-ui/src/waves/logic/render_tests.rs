@@ -102,6 +102,8 @@ fn render() -> Render {
             left_margin: LEFT,
             right_margin: RIGHT,
             selected: &[],
+            cursor: Some(55.0 * NS),
+            significant_digits: 4,
         };
         let lanes_top = ui.cursor().top();
         let lanes_rect = Rect::from_min_size(

@@ -296,3 +296,103 @@ fn the_real_step_holds_then_steps_and_never_slopes() {
     assert_eq!(lane.value_at(9.0 * NS), Some(0.75), "right-continuous");
     assert_eq!(lane.value_at(8.999 * NS), Some(0.25));
 }
+
+/// `p` toggles every 7 ns from 0: at 21 ns it has just risen, so it reads 1,
+/// and the next edge from there is 28 ns exactly.
+#[test]
+fn the_cursor_reads_right_continuously_and_steps_onto_event_instants() {
+    let lanes = fixture_lanes();
+    let p = EventLane::Logic(lanes.logic("p").unwrap());
+    let read = |t: f64| p.readout_at(t, 4).map(|readout| readout.text);
+    assert_eq!(read(21.0 * NS).as_deref(), Some("1"));
+    assert_eq!(read(20.0 * NS).as_deref(), Some("0"));
+    assert_eq!(read(14.0 * NS).as_deref(), Some("0"));
+    assert_eq!(read(-NS), None, "not yet observed");
+    assert_eq!(p.step_from(21.0 * NS, EdgeStep::Next), Some(28.0 * NS));
+    assert_eq!(p.step_from(21.0 * NS, EdgeStep::Previous), Some(14.0 * NS));
+
+    // Stepping from instant to instant visits every recorded edge, exactly.
+    let mut visited = Vec::new();
+    let mut t = 0.0;
+    while let Some(next) = p.step_from(t, EdgeStep::Next) {
+        visited.push(next);
+        t = next;
+    }
+    assert_eq!(visited, lanes.logic("p").unwrap().times()[1..]);
+
+    let b = EventLane::Bus(lanes.bus("b").unwrap(), BusRadix::Unsigned);
+    assert_eq!(
+        b.readout_at(55.0 * NS, 4),
+        Some(LaneReadout {
+            text: "3".to_owned(),
+            fallback: None
+        })
+    );
+    assert_eq!(b.step_from(55.0 * NS, EdgeStep::Next), Some(70.0 * NS));
+    assert_eq!(b.step_from(55.0 * NS, EdgeStep::Previous), Some(50.0 * NS));
+}
+
+fn lane_frame(
+    ctx: &egui::Context,
+    rows: &[LaneRow<'_>],
+    cursor: Option<f64>,
+    events: Vec<egui::Event>,
+) -> LaneStackResponse {
+    let mut response = None;
+    let input = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 60.0))),
+        events,
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(input, |ui| {
+        response = Some(show_lanes(
+            ui,
+            &LaneStackInput {
+                rows,
+                x_range: (0.0, 100.0 * NS),
+                left_margin: 64.0,
+                right_margin: 14.0,
+                selected: &[0],
+                cursor,
+                significant_digits: 4,
+            },
+        ));
+    });
+    response.expect("the lanes were shown")
+}
+
+#[test]
+fn right_and_left_on_the_focused_lanes_step_the_cursor_along_the_selected_lane() {
+    let lanes = fixture_lanes();
+    let rows = [LaneRow::Logic {
+        lane: lanes.logic("p").unwrap(),
+        color: Color32::WHITE,
+    }];
+    let ctx = egui::Context::default();
+    rspice_ui_kit::Theme::default().apply(&ctx);
+    let at = egui::pos2(200.0, 9.0);
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::default(),
+    };
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::default(),
+    };
+    let cursor = Some(21.0 * NS);
+    // egui hit-tests against the previous frame's widgets, so the lanes are
+    // laid out once before the pointer reaches them.
+    lane_frame(&ctx, &rows, cursor, vec![egui::Event::PointerMoved(at)]);
+    lane_frame(&ctx, &rows, cursor, vec![button(true)]);
+    let clicked = lane_frame(&ctx, &rows, cursor, vec![button(false)]);
+    assert_eq!(clicked.select, Some((0, false)));
+    let right = lane_frame(&ctx, &rows, cursor, vec![key(egui::Key::ArrowRight)]);
+    assert_eq!(right.cursor_to, Some(28.0 * NS));
+    let left = lane_frame(&ctx, &rows, cursor, vec![key(egui::Key::ArrowLeft)]);
+    assert_eq!(left.cursor_to, Some(14.0 * NS));
+}

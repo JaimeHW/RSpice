@@ -10,11 +10,13 @@
 //! the visualization document); the widget reports what the reader asked for
 //! in [`LaneStackResponse`] and the host applies it.
 
+pub mod cursor;
 pub mod model;
 pub mod paint;
 pub mod plan;
 pub mod real;
 
+pub use cursor::{EdgeStep, EventLane, LaneReadout};
 pub use model::{BusLane, BusOrigin, EventLanes, LogicLane, LogicLevel, RealLane};
 pub use paint::{LaneLevels, LaneStyle, paint_bus_lane, paint_logic_lane};
 pub use plan::{LaneStroke, TimeMapping, plan_lane};
@@ -60,7 +62,15 @@ pub enum LaneRow<'a> {
     },
 }
 
-impl LaneRow<'_> {
+impl<'a> LaneRow<'a> {
+    /// The lane the cursor reads and steps along on this row.
+    pub fn event_lane(&self) -> EventLane<'a> {
+        match self {
+            Self::Logic { lane, .. } => EventLane::Logic(lane),
+            Self::Bus { lane, radix, .. } => EventLane::Bus(lane, *radix),
+        }
+    }
+
     pub fn name(&self) -> &str {
         match self {
             Self::Logic { lane, .. } => lane.name(),
@@ -96,8 +106,13 @@ pub struct LaneStackInput<'a> {
     pub left_margin: f32,
     /// The panes' right margin, so lane and pane X agree to the pixel.
     pub right_margin: f32,
-    /// Row indices the reader selected.
+    /// Row indices the reader selected. The first is the lane the cursor
+    /// steps along.
     pub selected: &'a [usize],
+    /// The strip's time cursor, shared with its panes.
+    pub cursor: Option<f64>,
+    /// Significant digits a real value is read out to.
+    pub significant_digits: usize,
 }
 
 /// What the reader asked of the lane stack this frame.
@@ -105,6 +120,9 @@ pub struct LaneStackInput<'a> {
 pub struct LaneStackResponse {
     /// Select a row; `true` adds it to the selection instead.
     pub select: Option<(usize, bool)>,
+    /// Move the time cursor to this exact event instant: the selected lane's
+    /// previous or next edge (Left and Right while the lanes have focus).
+    pub cursor_to: Option<f64>,
     /// Expand or collapse a bus row.
     pub toggle_expanded: Option<usize>,
     /// Read a bus row in another radix.
@@ -166,11 +184,29 @@ fn paint_chevron(ui: &Ui, centre: egui::Pos2, expanded: bool, color: Color32) {
     ));
 }
 
-/// Paint one row's gutter name, elided to the gutter.
-fn paint_name(ui: &Ui, rect: Rect, left: f32, name: &str, tokens: &Tokens) {
+/// Paint one row's gutter: its value at the cursor right-aligned, and its
+/// name elided to the space the value leaves.
+fn paint_gutter(
+    ui: &Ui,
+    rect: Rect,
+    left: f32,
+    name: &str,
+    readout: Option<&str>,
+    tokens: &Tokens,
+) {
     let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
-    let width = (rect.right() - left - GUTTER_PAD).max(0.0);
     let painter = ui.painter();
+    let mut right = rect.right() - GUTTER_PAD;
+    if let Some(readout) = readout {
+        let value = painter.layout_no_wrap(readout.to_owned(), font.clone(), tokens.color.text);
+        let origin = pos2(
+            (right - value.size().x).max(left),
+            rect.center().y - value.size().y * 0.5,
+        );
+        right = origin.x - GUTTER_PAD;
+        painter.galley(origin, value, tokens.color.text);
+    }
+    let width = (right - left).max(0.0);
     let mut galley = painter.layout_no_wrap(name.to_owned(), font.clone(), tokens.color.text_dim);
     let chars = name.chars().count().max(1);
     if galley.size().x > width {
@@ -198,6 +234,12 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
     let gutter_width = input.left_margin - GUTTER_PAD;
     let lane_clip = Rect::from_x_y_ranges(map.left..=map.right, rect.y_range());
     let lane_painter = ui.painter().with_clip_rect(lane_clip);
+    let readout = |lane: EventLane<'_>| {
+        input
+            .cursor
+            .and_then(|t| lane.readout_at(t, input.significant_digits))
+            .map(|readout| readout.text)
+    };
 
     let mut top = rect.top();
     for (index, row) in input.rows.iter().enumerate() {
@@ -212,7 +254,14 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                 let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, row_rect.y_range());
                 let gutter =
                     Rect::from_min_size(row_rect.min, vec2(gutter_width, LOGIC_ROW_HEIGHT));
-                paint_name(ui, gutter, gutter.left() + GUTTER_PAD, lane.name(), &tokens);
+                paint_gutter(
+                    ui,
+                    gutter,
+                    gutter.left() + GUTTER_PAD,
+                    lane.name(),
+                    readout(EventLane::Logic(lane)).as_deref(),
+                    &tokens,
+                );
                 paint_logic_lane(
                     &lane_painter,
                     lane_rect,
@@ -239,11 +288,12 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                         tokens.color.text_dim,
                     );
                 }
-                paint_name(
+                paint_gutter(
                     ui,
                     gutter,
                     gutter.left() + GUTTER_PAD + CHEVRON_WIDTH,
                     lane.name(),
+                    readout(EventLane::Bus(lane, *radix)).as_deref(),
                     &tokens,
                 );
                 let style = LaneStyle::new(&tokens, *color);
@@ -260,11 +310,12 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
                             member_rect.min,
                             vec2(gutter_width, LOGIC_ROW_HEIGHT),
                         );
-                        paint_name(
+                        paint_gutter(
                             ui,
                             member_gutter,
                             member_gutter.left() + GUTTER_PAD + MEMBER_INDENT,
                             member.name(),
+                            readout(EventLane::Logic(member)).as_deref(),
                             &tokens,
                         );
                         let member_lane =
@@ -276,6 +327,15 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
             }
         }
         top += row.height();
+    }
+    if let Some(t) = input.cursor
+        && (input.x_range.0..=input.x_range.1).contains(&t)
+    {
+        lane_painter.vline(
+            map.x(t),
+            rect.y_range(),
+            egui::Stroke::new(1.0, tokens.color.accent),
+        );
     }
 
     let pointer_row = response
@@ -292,6 +352,51 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
             let extend = ui.input(|i| i.modifiers.command || i.modifiers.shift);
             output.select = Some((index, extend));
         }
+        // Focus is what routes Left and Right here; a pointer press takes it
+        // without showing a ring.
+        response.request_focus();
+    }
+    if response.has_focus() {
+        ui.memory_mut(|memory| {
+            memory.set_focus_lock_filter(
+                response.id,
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let step = ui.input(|i| {
+            if i.key_pressed(egui::Key::ArrowLeft) {
+                Some(EdgeStep::Previous)
+            } else if i.key_pressed(egui::Key::ArrowRight) {
+                Some(EdgeStep::Next)
+            } else {
+                None
+            }
+        });
+        if let Some(step) = step
+            && let Some(lane) = input
+                .selected
+                .first()
+                .and_then(|index| input.rows.get(*index))
+                .map(LaneRow::event_lane)
+        {
+            let from = input.cursor.unwrap_or(match step {
+                EdgeStep::Previous => input.x_range.1,
+                EdgeStep::Next => input.x_range.0,
+            });
+            output.cursor_to = lane.step_from(from, step);
+        }
+    }
+    if let (Some(t), Some((_, (index, false)))) = (input.cursor, pointer_row)
+        && let Some(fallback) = input
+            .rows
+            .get(index)
+            .and_then(|row| row.event_lane().readout_at(t, input.significant_digits))
+            .and_then(|readout| readout.fallback)
+    {
+        response.clone().on_hover_text(fallback);
     }
     let menu_row = response.id.with("menu-row");
     if response.secondary_clicked()
