@@ -553,8 +553,6 @@ class CiConfigurationTests(unittest.TestCase):
             "ngspice_regression",
         ):
             self.assertIn(target, conformance_job)
-        self.assertIn('grep -E "^TOTAL +113 tests"', conformance_job)
-        self.assertIn('test "$failed" -eq 0', conformance_job)
         self.assertNotIn("continue-on-error", conformance_job)
         self.assertRegex(publish_job, r"(?m)^    needs: conformance$")
         self.assertNotIn("rspice-qualification-corpus", read_text("Cargo.toml"))

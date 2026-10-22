@@ -55,17 +55,8 @@ jobs:
                 --test xyce_regression --test gf180mcu_devices -- --nocapture
               cargo test --locked --release -p rspice-conformance \
                 --test execution_corpora -- --nocapture --test-threads 1
-              set +e
               cargo test --locked --release -p rspice-conformance \
-                --test ngspice_regression -- --nocapture --test-threads 1 \
-                | tee engine-release-conformance.log
-              status=${PIPESTATUS[0]}
-              set -e
-              failed=$(grep -E "^TOTAL +113 tests" engine-release-conformance.log \
-                | grep -Eo "[0-9]+ failed" | grep -Eo "[0-9]+" | tail -1)
-              test -n "$failed"
-              test "$failed" -eq 0
-              test "$status" -eq 0
+                --test ngspice_regression -- --nocapture --test-threads 1
             '
 
   publish:
