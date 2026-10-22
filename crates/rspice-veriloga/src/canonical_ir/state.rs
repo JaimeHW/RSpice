@@ -111,34 +111,6 @@ pub enum CanonicalStateFamily {
 }
 
 impl CanonicalStateFamily {
-    /// The accepted-state field this family occupies, or `None` when the family
-    /// owns no checkpointed record.
-    ///
-    /// Named rather than described so that a consumer can check its own
-    /// serialization against the layout by field name instead of by comment.
-    pub fn checkpoint_field(self) -> Option<&'static str> {
-        match self {
-            Self::Integration => Some("state_values_prev"),
-            Self::DelayBuffer => Some("delay_buffers"),
-            Self::TransitionFilter => Some("transition_filters"),
-            Self::SlewFilter => Some("slew_filters"),
-            Self::CrossDetector => Some("cross_detectors"),
-            Self::LaplaceFilter => Some("laplace_filters"),
-            Self::ZiFilter => Some("zi_filters"),
-            Self::TimerEvent => Some("timer_event_bound"),
-            Self::LookupTable => None,
-        }
-    }
-
-    /// Whether the family stores one record per slot.
-    ///
-    /// False only for [`Self::TimerEvent`], where every site in the module
-    /// folds into one earliest-event bound. A slot allocator has to ask before
-    /// reserving storage, or it reserves an array for a scalar.
-    pub fn has_per_slot_record(self) -> bool {
-        !matches!(self, Self::TimerEvent)
-    }
-
     /// Whether repeated conversion of a source site can allocate extra slots.
     ///
     /// Integration slots are keyed by the DeviceIR arena node; repeated AD
@@ -153,27 +125,6 @@ impl CanonicalStateFamily {
             self,
             Self::Integration | Self::CrossDetector | Self::TimerEvent
         )
-    }
-
-    /// Whether the family's per-slot record has a length fixed at compile time.
-    ///
-    /// The distinction a slot allocator needs: a fixed record can be laid out
-    /// as a stride, a variable one needs indirection. `absdelay` and
-    /// `transition` keep queues whose length is a function of the accepted
-    /// trajectory; `laplace` and `zi` keep vectors whose length is fixed by the
-    /// transfer function's degree, which is syntactic — see the coefficient
-    /// contract on [`super::cfg::CfgValueKind::Zi`].
-    pub fn has_fixed_record(self) -> bool {
-        match self {
-            Self::Integration
-            | Self::SlewFilter
-            | Self::CrossDetector
-            | Self::LaplaceFilter
-            | Self::ZiFilter
-            | Self::TimerEvent
-            | Self::LookupTable => true,
-            Self::DelayBuffer | Self::TransitionFilter => false,
-        }
     }
 }
 
@@ -1101,18 +1052,6 @@ mod tests {
     }
 
     #[test]
-    fn timer_is_the_only_family_without_a_per_slot_record() {
-        for operator in CanonicalStateOperator::ALL {
-            assert_eq!(
-                operator.family().has_per_slot_record(),
-                operator != CanonicalStateOperator::Timer,
-                "{} disagrees with the runtime about owning per-slot storage",
-                operator.name()
-            );
-        }
-    }
-
-    #[test]
     fn classification_partitions_the_state_bearing_calls() {
         // `slew` with one argument is a passthrough and owns nothing; with a
         // rate it owns a filter.
@@ -1212,84 +1151,5 @@ mod tests {
             [ExprId::from(1usize), ExprId::from(99usize)],
         );
         assert_eq!(layout.family_len(CanonicalStateFamily::Integration), 1);
-    }
-
-    /// Each family names the accepted-state field it occupies, and the two
-    /// answers a slot allocator reads before reserving anything.
-    ///
-    /// Written out against `crate::vm::VmAcceptedCheckpoint`'s own field names
-    /// rather than described in prose: a family added without a storage decision
-    /// would compile, and this is what refuses it. The lookup tables are the one
-    /// entry with no checkpoint field, because compiled table data is read-only
-    /// and no accepted state at all.
-    #[test]
-    fn every_family_names_the_runtime_record_it_occupies() {
-        let expected = [
-            (
-                CanonicalStateFamily::Integration,
-                Some("state_values_prev"),
-                true,
-                true,
-            ),
-            (
-                CanonicalStateFamily::DelayBuffer,
-                Some("delay_buffers"),
-                true,
-                false,
-            ),
-            (
-                CanonicalStateFamily::TransitionFilter,
-                Some("transition_filters"),
-                true,
-                false,
-            ),
-            (
-                CanonicalStateFamily::SlewFilter,
-                Some("slew_filters"),
-                true,
-                true,
-            ),
-            (
-                CanonicalStateFamily::CrossDetector,
-                Some("cross_detectors"),
-                true,
-                true,
-            ),
-            (
-                CanonicalStateFamily::LaplaceFilter,
-                Some("laplace_filters"),
-                true,
-                true,
-            ),
-            (
-                CanonicalStateFamily::ZiFilter,
-                Some("zi_filters"),
-                true,
-                true,
-            ),
-            (
-                CanonicalStateFamily::TimerEvent,
-                Some("timer_event_bound"),
-                false,
-                true,
-            ),
-            (CanonicalStateFamily::LookupTable, None, true, true),
-        ];
-        for (family, field, per_slot, fixed) in expected {
-            assert_eq!(family.checkpoint_field(), field, "{family:?}");
-            assert_eq!(family.has_per_slot_record(), per_slot, "{family:?}");
-            assert_eq!(family.has_fixed_record(), fixed, "{family:?}");
-        }
-        // Every operator's family is one of the nine above, so a new family
-        // cannot slip in without an entry here.
-        for operator in CanonicalStateOperator::ALL {
-            assert!(
-                expected
-                    .iter()
-                    .any(|(family, ..)| *family == operator.family()),
-                "{}'s family is not described",
-                operator.name()
-            );
-        }
     }
 }
