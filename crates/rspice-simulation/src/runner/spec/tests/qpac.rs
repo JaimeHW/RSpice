@@ -41,11 +41,11 @@ fn qpac_controls_survive_draft_worker_native_card_and_dependency_dispatch() {
         ..Default::default()
     };
     let deck = "QPAC Studio\nV1 in 0 DC 1\nR1 in out 1k\nC1 out 0 100n\n.temp 42\n.end\n";
-    let point = svc_runner::run_qpss_analysis_with_source_path_and_abort(
-        deck,
+    let point = svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+        &svc_runner::test_entry::parse(deck),
         producer.to_spec().unwrap().driven_qpss_config().unwrap(),
         None,
-        &rspice_core::abort_signal::NoAbort,
+        svc_runner::test_entry::ctx(&rspice_core::abort_signal::NoAbort),
     )
     .unwrap()
     .operating_point;

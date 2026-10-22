@@ -28,11 +28,11 @@ fn autonomous_qpnoise_preserves_options_correlations_worker_and_retained_results
     }
     .to_spec()
     .unwrap();
-    let point = svc_runner::run_qpss_analysis_with_source_path_and_abort(
-        deck,
+    let point = svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+        &svc_runner::test_entry::parse(deck),
         producer.qpss_config().unwrap(),
         None,
-        &rspice_core::NoAbort,
+        svc_runner::test_entry::ctx(&rspice_core::NoAbort),
     )
     .unwrap()
     .operating_point;
@@ -158,11 +158,11 @@ fn qpnoise_result_dependency_dispatch_requires_exact_retained_qpss_state() {
     }
     .to_spec()
     .unwrap();
-    let point = svc_runner::run_qpss_analysis_with_source_path_and_abort(
-        deck,
+    let point = svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+        &svc_runner::test_entry::parse(deck),
         producer.driven_qpss_config().unwrap(),
         None,
-        &rspice_core::NoAbort,
+        svc_runner::test_entry::ctx(&rspice_core::NoAbort),
     )
     .unwrap()
     .operating_point;

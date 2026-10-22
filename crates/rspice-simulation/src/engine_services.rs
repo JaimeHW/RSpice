@@ -30,8 +30,6 @@ mod qpss;
 mod qpxf;
 pub(crate) use qpac::run_qpac_analysis_from_qpss_on_materialized_with_context;
 pub(crate) use qpnoise::run_qpnoise_analysis_from_qpss_on_materialized_with_context;
-#[cfg(test)]
-pub use qpnoise::run_qpnoise_analysis_from_qpss_with_source_path_and_abort;
 pub(crate) use qpss::run_qpss_analysis_with_dc_seed_on_materialized_with_context;
 pub(crate) use qpxf::run_qpxf_analysis_from_qpss_on_materialized_with_context;
 mod soa;
@@ -110,8 +108,6 @@ pub use pss::PssRunConfig;
 pub(crate) use pss::{PssData, run_pss_analysis_on_materialized_with_context};
 pub(crate) use pss::{PssSeedEnvironment, run_pss_analysis_with_dc_seed_and_context};
 pub(crate) use pstb::{PstbData, run_pstb_analysis_on_materialized_with_context};
-#[cfg(test)]
-pub use qpss::run_qpss_analysis_with_source_path_and_abort;
 // DC sweep, noise, pole-zero, and sensitivity have no entry here, and that is
 // the module boundary rather than an omission. The seven fundamental analyses
 // -- DC op, DC sweep, transient, AC, noise, pole-zero, sensitivity -- ship

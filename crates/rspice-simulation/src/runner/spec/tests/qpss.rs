@@ -51,11 +51,11 @@ fn autonomous_qpac_qpxf_dependency_worker_and_retention_preserve_phase_response(
     .to_spec()
     .unwrap();
     let deck = "QP phase response\nCx x 0 1\nCy y 0 1\nIprobe 0 x DC 0\nBx 0 x I={(1+.1*cos(sqrt(2)*time))*(1-v(x)^2-v(y)^2)*v(x)-v(y)}\nBy 0 y I={(1+.1*cos(sqrt(2)*time))*(1-v(x)^2-v(y)^2)*v(y)+v(x)}\n.end\n";
-    let point = svc_runner::run_qpss_analysis_with_source_path_and_abort(
-        deck,
+    let point = svc_runner::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+        &svc_runner::test_entry::parse(deck),
         producer.qpss_config().unwrap(),
         None,
-        &rspice_core::NoAbort,
+        svc_runner::test_entry::ctx(&rspice_core::NoAbort),
     )
     .unwrap()
     .operating_point;

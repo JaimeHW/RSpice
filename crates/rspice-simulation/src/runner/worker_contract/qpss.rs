@@ -38,12 +38,13 @@ pub(super) fn validate_worker_qpss_result(result: &WorkerSimulationResult) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_services::test_entry::{ctx, parse};
 
     fn result() -> SimulationResult {
-        let data = crate::engine_services::run_qpss_analysis_with_source_path_and_abort(
-            "QPSS transfer\nV1 in 0 SIN(.1 .2 1k)\nR1 in out 1k\nC1 out 0 1u\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n.end\n",
+        let data = crate::engine_services::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+            &parse("QPSS transfer\nV1 in 0 SIN(.1 .2 1k)\nR1 in out 1k\nC1 out 0 1u\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n.end\n"),
             rspice_core::engine::QpssConfig::new(vec![1000.0, 1414.213562373095], vec![1, 1]),
-            None, &rspice_core::NoAbort,
+            None, ctx(&rspice_core::NoAbort),
         ).unwrap();
         SimulationResult::from_qpss_operating_point(data.operating_point).unwrap()
     }

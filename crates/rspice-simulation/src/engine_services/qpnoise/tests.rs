@@ -1,4 +1,5 @@
 //! Studio authoring, native interchange and exact producer service integration.
+use crate::engine_services::test_entry::{ctx, parse};
 use rspice_core::analysis::quasi_periodic::QuasiPeriodicLinearMethod;
 use rspice_core::engine::{QpnoiseIntegrationMethod, QpnoiseLattices};
 use rspice_core::engine::{QpnoiseRequest, QpnoiseValue};
@@ -68,23 +69,24 @@ fn qpnoise_studio_controls_survive_draft_worker_native_and_service_boundaries() 
         ..Default::default()
     };
     let deck = "Studio noise\nV1 in 0 SIN(1 .1 1k)\nRs in out 1k\nRl out 0 2k\nC1 out 0 1n\n.temp 42\n.end\n";
-    let service = &crate::engine_services::run_qpss_analysis_with_source_path_and_abort;
-    let point = service(
-        deck,
-        producer.to_spec().unwrap().driven_qpss_config().unwrap(),
-        None,
-        &rspice_core::NoAbort,
-    )
-    .unwrap()
-    .operating_point;
-    let result = crate::engine_services::run_qpnoise_analysis_from_qpss_with_source_path_and_abort(
-        deck,
-        &card,
-        &point,
-        None,
-        &rspice_core::NoAbort,
-    )
-    .unwrap();
+    let netlist = parse(deck);
+    let point =
+        crate::engine_services::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+            &netlist,
+            producer.to_spec().unwrap().driven_qpss_config().unwrap(),
+            None,
+            ctx(&rspice_core::NoAbort),
+        )
+        .unwrap()
+        .operating_point;
+    let result =
+        crate::engine_services::run_qpnoise_analysis_from_qpss_on_materialized_with_context(
+            &netlist,
+            &card,
+            &point,
+            ctx(&rspice_core::NoAbort),
+        )
+        .unwrap();
     assert_eq!(
         result.metadata.operating_point_identity,
         point.retained_identity()
@@ -114,12 +116,11 @@ fn qpnoise_studio_controls_survive_draft_worker_native_and_service_boundaries() 
     );
     let changed = deck.replace("Rs in out 1k", "Rs in out 2k");
     assert!(
-        crate::engine_services::run_qpnoise_analysis_from_qpss_with_source_path_and_abort(
-            &changed,
+        crate::engine_services::run_qpnoise_analysis_from_qpss_on_materialized_with_context(
+            &parse(&changed),
             &card,
             &point,
-            None,
-            &rspice_core::NoAbort
+            ctx(&rspice_core::NoAbort)
         )
         .is_err()
     );

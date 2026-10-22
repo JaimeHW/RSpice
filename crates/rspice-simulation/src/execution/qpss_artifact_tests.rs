@@ -1,5 +1,6 @@
 //! QPSS service integration with authenticated dependency artifacts.
 
+use crate::engine_services::test_entry::{ctx, parse};
 use crate::execution_artifact::{
     ExecutionArtifactEnvelope, PreparedDependencyBinding, ResolvedExecutionDependencies,
 };
@@ -24,9 +25,9 @@ fn setup() -> (
         ..Default::default()
     };
     let spec = draft.to_spec().unwrap();
-    let data = crate::engine_services::run_qpss_analysis_with_source_path_and_abort(
-        "QPSS artifact\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n.end\n",
-        spec.qpss_config().unwrap(), None, &rspice_core::NoAbort,
+    let data = crate::engine_services::run_qpss_analysis_with_dc_seed_on_materialized_with_context(
+        &parse("QPSS artifact\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\nI1 0 out SIN(0 .001 1414.213562373095)\nBmemory memory 0 V=1k*sdt(v(out)-v(memory))\nRmemory memory 0 1k\n.end\n"),
+        spec.qpss_config().unwrap(), None, ctx(&rspice_core::NoAbort),
     ).unwrap();
     let result = SimulationResult::from_qpss_operating_point(data.operating_point).unwrap();
     let snapshot = ContentDigest::from_bytes([19; 32]);
