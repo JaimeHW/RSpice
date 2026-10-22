@@ -143,9 +143,6 @@ pub struct ParamResolver {
     /// Subcircuit default parameters (name -> params)
     subcircuit_defaults: HashMap<String, HashMap<String, Value>>,
 
-    /// Instance-level overrides indexed by full path string
-    instance_overrides: HashMap<String, HashMap<String, Value>>,
-
     /// Complete real-valued snapshots captured by hierarchy expansion. An absent
     /// name in a snapshot must not fall back to an outer, shadowed binding.
     resolved_scopes: HashMap<Vec<String>, HashMap<String, Value>>,
@@ -203,7 +200,6 @@ impl ParamResolver {
     /// Clear data belonging to the previous expansion, retaining definitions.
     pub(crate) fn clear_expansion(&mut self) {
         self.global_params.clear();
-        self.instance_overrides.clear();
         self.local_overrides.clear();
         self.resolved_scopes.clear();
     }
@@ -219,7 +215,7 @@ impl ParamResolver {
     ///
     /// Resolution order (highest to lowest precedence):
     /// 1. Local override at exact path
-    /// 2. Instance override or captured effective scope at path or ancestor
+    /// 2. Captured effective scope at path or nearest ancestor
     /// 3. Library parameter (if active library set)
     /// 4. Global parameter
     ///
@@ -237,15 +233,9 @@ impl ParamResolver {
             return Some(value);
         }
 
-        // 2. Check instance overrides (path and ancestors)
+        // 2. Check captured scopes (path and ancestors)
         let mut current = Some(path.clone());
         while let Some(p) = current {
-            let p_str = p.to_string().to_uppercase();
-            if let Some(params) = self.instance_overrides.get(&p_str)
-                && let Some(&value) = params.get(&name_upper)
-            {
-                return Some(value);
-            }
             let key: Vec<_> = p.segments().iter().map(|s| s.to_uppercase()).collect();
             if let Some(params) = self.resolved_scopes.get(&key) {
                 return params.get(&name_upper).copied();
@@ -287,10 +277,9 @@ impl ParamResolver {
         let global = self.global_params.len();
         let library: usize = self.library_params.values().map(|m| m.len()).sum();
         let subckt: usize = self.subcircuit_defaults.values().map(|m| m.len()).sum();
-        let instance: usize = self.instance_overrides.values().map(|m| m.len()).sum();
         let local: usize = self.local_overrides.values().map(|m| m.len()).sum();
         let resolved: usize = self.resolved_scopes.values().map(|m| m.len()).sum();
-        global + library + subckt + instance + local + resolved
+        global + library + subckt + local + resolved
     }
 }
 
