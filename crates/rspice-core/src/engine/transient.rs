@@ -5409,12 +5409,17 @@ impl Engine {
                 breakpoints.next_after(resume_time),
             )
         } else {
+            // A resume without a continuation restarts at its checkpoint as a
+            // run starts at t = 0, sitting on a breakpoint: the cap is the gap
+            // to the next breakpoint, not that breakpoint's absolute time.
             configured_initial_step
                 .map(|step| step.max(1e-30))
                 .unwrap_or_else(|| {
                     Self::ngspice_t0_breakpoint_limited_initial_timestep(
                         Self::ngspice_initial_timestep(tstop, tran_step_hint, hinted_max_step),
-                        breakpoints.next_after(resume_time),
+                        breakpoints
+                            .next_after(resume_time)
+                            .map(|breakpoint| breakpoint - resume_time),
                     )
                 })
         };

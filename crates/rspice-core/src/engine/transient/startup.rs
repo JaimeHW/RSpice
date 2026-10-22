@@ -987,15 +987,17 @@ impl Engine {
         requested.min(restart_bound).min(maximum).max(1.0e-30)
     }
 
+    /// `breakpoint_gap` is the distance from the start to the first
+    /// breakpoint after it, which at t = 0 is that breakpoint's time.
     #[inline]
     pub(super) fn ngspice_t0_breakpoint_limited_initial_timestep(
         initial_step: Value,
-        first_breakpoint_after_zero: Option<Value>,
+        breakpoint_gap: Option<Value>,
     ) -> Value {
-        let Some(first_breakpoint_after_zero) = first_breakpoint_after_zero else {
+        let Some(breakpoint_gap) = breakpoint_gap else {
             return initial_step;
         };
-        if !(first_breakpoint_after_zero.is_finite() && first_breakpoint_after_zero > 0.0) {
+        if !(breakpoint_gap.is_finite() && breakpoint_gap > 0.0) {
             return initial_step;
         }
 
@@ -1003,7 +1005,7 @@ impl Engine {
         // accept hooks have inserted the first source corner, ngspice limits
         // the first solved timestep to one-tenth of that gap and then applies
         // the first-timepoint divide-by-ten, for an effective gap / 100 cap.
-        initial_step.min(first_breakpoint_after_zero / 100.0)
+        initial_step.min(breakpoint_gap / 100.0)
     }
 
     #[inline]

@@ -1116,6 +1116,76 @@ fn segmented_run_continues_the_unsegmented_trajectory() {
     );
 }
 
+fn first_step(result: &rspice_core::engine::TransientResult) -> f64 {
+    result.time[1] - result.time[0]
+}
+
+/// A run checkpointed at its stop time resumes as a restart there, and a
+/// restart caps its first step as a run starting at t = 0 does: by the gap to
+/// the next breakpoint. A source edge 2 ps past a 1 ns seam caps the first
+/// step at 2 ps / 100, as the same edge 2 ps after t = 0 does, and not at the
+/// edge's absolute time over 100, which is about 1 ns / 100.
+#[test]
+fn an_endpoint_restart_caps_its_first_step_by_the_gap_to_the_next_breakpoint() {
+    let deck = |delay: &str, stop: &str| {
+        Netlist::parse(&format!(
+            "* restart before a source edge\n\
+             vin in 0 pulse(0 1 {delay} 1p 1p 1n 4n)\n\
+             r1 in out 1k\n\
+             c1 out 0 1p\n\
+             .tran 10n {stop}\n\
+             .end\n"
+        ))
+        .expect("edge deck parses")
+    };
+    let engine = Engine::new(SimulationConfig::default());
+    let netlist = deck("1.002n", "1n");
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 1.0e-9, 10.0e-9)
+        .expect("the segment before the edge completes");
+    assert_eq!(checkpoint.time.to_bits(), 1.0e-9_f64.to_bits());
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 4.0e-9, 10.0e-9)
+        .expect("the restart completes");
+    let started = engine
+        .run_tran(&deck("2p", "3n"), 3.0e-9, 10.0e-9)
+        .expect("the start before the same edge completes");
+
+    let gap_cap = 2.0e-12 / 100.0;
+    for (label, step) in [
+        ("restart", first_step(&resumed)),
+        ("start", first_step(&started)),
+    ] {
+        assert!(
+            (step - gap_cap).abs() <= 1.0e-6 * gap_cap,
+            "the {label}'s first step is the 2 ps gap over 100 ({gap_cap:e} s), got {step:e} s"
+        );
+    }
+}
+
+/// A restart late in a run, with no breakpoint near it, takes the first step
+/// the run's start took: its seed is the analysis's, not a fraction of how
+/// far into the run it sits.
+#[test]
+fn a_late_endpoint_restart_takes_the_first_step_of_the_start() {
+    let netlist = Netlist::parse(DECK).expect("deck parses");
+    let engine = Engine::new(SimulationConfig::default());
+    let started = engine
+        .run_tran(&netlist, 2e-6, TAU_STEP)
+        .expect("full run completes");
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, 1.9e-6, TAU_STEP)
+        .expect("the segment to late in the run completes");
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, 2e-6, TAU_STEP)
+        .expect("the late restart completes");
+    let (start, restart) = (first_step(&started), first_step(&resumed));
+    assert!(
+        (restart - start).abs() <= 1.0e-6 * start,
+        "a late restart's first step {restart:e} s is the start's {start:e} s"
+    );
+}
+
 #[test]
 fn fixed_gear2_resume_uses_be_before_real_history_bdf2() {
     const TAU: f64 = 1.0e-3;
