@@ -250,7 +250,7 @@ impl UiSessionWire {
             .into_iter()
             .filter(|(key, _)| key.is_persistable())
             .collect();
-        state.model.preferences = Box::new(preferences);
+        *state.model.preferences = preferences;
     }
 }
 
