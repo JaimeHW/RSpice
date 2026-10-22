@@ -211,6 +211,33 @@ fn xyce_y_device_families_are_refused_by_the_grammar_with_their_span() {
 }
 
 #[test]
+fn a_pspice_file_stimulus_is_refused_naming_the_vcd_stimulus_instead() {
+    let error = Netlist::parse(
+        "fstim capability\n\
+         R1 out 0 1k\n\
+         U1 FSTIM(1) $G_DPWR $G_DGND out IO_STM FILE=pattern.stl\n\
+         .tran 1n 10n\n\
+         .end\n",
+    )
+    .expect_err("a PSpice stimulus file has no reader");
+
+    let ParseError::UnsupportedCapability {
+        origin,
+        capability,
+        detail,
+    } = &error
+    else {
+        panic!("FSTIM must be a capability refusal, got {error}");
+    };
+    assert_eq!(*capability, "netlist.pspice.u.fstim");
+    assert_eq!(origin.line, 3, "the refusal must name the authoring line");
+    assert!(
+        detail.contains("'U1'") && detail.contains("FSTIM") && detail.contains("d_vcd"),
+        "the refusal must name the device and the d_vcd alternative: {detail}"
+    );
+}
+
+#[test]
 fn a_checkpoint_request_this_deck_cannot_satisfy_is_refused_before_the_run() {
     // A VDMOS accumulates accepted integration history that the checkpoint
     // format does not carry, so asking for a checkpoint is a capability gap —
