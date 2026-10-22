@@ -7,16 +7,6 @@ use super::cells::*;
 use super::circuits::{bits, design, ports, provenance};
 use super::netlist::{Builder, Design, Gate};
 
-/// The sixteen functions of the shared ALU core, in select order.
-///
-/// The first four run through the adder with a different second operand each
-/// (`b`, `~b`, zero, all-ones), which is how one carry chain serves add,
-/// subtract, increment and decrement.
-pub const ALU16_FUNCTIONS: [&str; 16] = [
-    "add", "sub", "addz", "subz", "and", "or", "xor", "xnor", "nand", "nor", "pass_a", "pass_b",
-    "not_a", "not_b", "shl", "shr",
-];
-
 /// Everything one ALU core produces.
 pub struct AluCore {
     pub y: Vec<String>,

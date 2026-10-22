@@ -473,10 +473,6 @@ pub fn secded16() -> Design {
 // alu8
 // ===========================================================================
 
-/// The eight functions of [`alu8`], in `f` order.
-pub const ALU8_FUNCTIONS: [&str; 8] =
-    ["add", "sub", "and", "or", "xor", "xnor", "pass_a", "pass_b"];
-
 /// An 8-bit arithmetic and logic unit.
 ///
 /// `f` selects one of eight functions; the carry chain runs on every one of

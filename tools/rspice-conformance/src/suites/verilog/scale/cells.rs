@@ -41,11 +41,6 @@ pub fn xor2(b: &mut Builder, p: &str, a: &str, c: &str) -> String {
     b.two(Gate::Xor, p, a, c)
 }
 
-/// `~(a ^ c)` as one `xnor` primitive.
-pub fn xnor2(b: &mut Builder, p: &str, a: &str, c: &str) -> String {
-    b.two(Gate::Xnor, p, a, c)
-}
-
 /// `a ^ c` from four NANDs.
 ///
 /// The classic four-gate expansion: `n0 = ~(a&c)`, then `~(a & n0)` and

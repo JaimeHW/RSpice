@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use super::{OracleAbsent, Producer, Table, column_name};
+use super::{OracleAbsent, Table, column_name};
 use crate::suites::ngspice::reference::live::{RawReferencePlot, parse_ngspice_raw_plots};
 
 pub const DEFAULT_EXE: &str =
@@ -468,8 +468,6 @@ fn complex_table(plot: &RawReferencePlot) -> Result<Table, String> {
     }
     Ok(table)
 }
-
-pub const PRODUCER: Producer = Producer::Ngspice;
 
 #[cfg(test)]
 mod tests {
