@@ -990,6 +990,36 @@ pub struct HirModel {
     pub expressions: Vec<HirExpression>,
     pub internal_nodes: Vec<HirInternalNode>,
     pub ground_nodes: Vec<SmolStr>,
+    /// SPICE cells the design instantiates, one per occurrence, for the host
+    /// to build from its own netlist ([`crate::CompilerOptions::external_cells`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_leaves: Vec<HirExternalLeaf>,
+}
+
+/// One SPICE leaf of the design: an instance of a deck cell, or of an Annex E
+/// passive primitive, inside the HDL hierarchy.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HirExternalLeaf {
+    /// The cell, as the host's table spells it: a `.subckt` or model-card
+    /// name, or `resistor`, `capacitor` or `inductor`.
+    pub cell: SmolStr,
+    /// The instance's path below the selected root, `xldo` or `xa.r1`.
+    pub instance: SmolStr,
+    /// What each of the cell's ports connects, in the cell's port order.
+    pub connections: Vec<HirExternalNet>,
+    /// Numeric overrides by the cell's parameter names, as written.
+    pub parameters: Vec<(SmolStr, f64)>,
+}
+
+/// The circuit node one leaf port, or one hoisted discrete port, lands on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HirExternalNet {
+    Ground,
+    /// The node the instance binds to this port of the selected root.
+    Port(PortId),
+    /// A net inside the design. The host names its node `<instance>.<net>`:
+    /// the analog half's internal node of that name when it has one.
+    Net(SmolStr),
 }
 
 impl HirModel {
@@ -1245,6 +1275,7 @@ impl HirModel {
                 })
                 .collect(),
             ground_nodes: module.ground_nodes.clone(),
+            external_leaves: module.external_leaves.clone(),
             digital_observations: Vec::new(),
             discrete_selections: module
                 .discrete_selections

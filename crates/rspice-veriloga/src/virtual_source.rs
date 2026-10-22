@@ -789,6 +789,19 @@ pub(crate) fn compiler_contract_identity(
         hasher.field(b"wreal-resolution");
         hasher.field(options.wreal_resolution.keyword().as_bytes());
     }
+    if let Some(cells) = &options.external_cells {
+        hasher.field(b"external-cells");
+        hasher.usize(cells.len());
+        for cell in cells {
+            hasher.field(cell.name.as_bytes());
+            for names in [&cell.ports, &cell.parameters] {
+                hasher.usize(names.len());
+                for name in names {
+                    hasher.field(name.as_bytes());
+                }
+            }
+        }
+    }
     hasher.byte(match options.integration_order {
         IntegrationOrder::First => 1,
         IntegrationOrder::Second => 2,

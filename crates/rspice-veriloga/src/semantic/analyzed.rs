@@ -158,6 +158,9 @@ pub struct AnalyzedModule {
     pub internal_nodes: Vec<AnalyzedInternalNode>,
     /// Names of nets declared `ground` (they map to the global reference)
     pub ground_nodes: Vec<SmolStr>,
+    /// SPICE leaves of the elaborated hierarchy, one per occurrence; see
+    /// [`crate::canonical_ir::HirModel::external_leaves`].
+    pub external_leaves: Vec<crate::canonical_ir::HirExternalLeaf>,
     /// Array variables: name -> contiguous element storage layout
     pub arrays: HashMap<SmolStr, AnalyzedArray>,
     pub symbol_table: SymbolTable,

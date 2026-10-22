@@ -14,6 +14,10 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 177 carries the SPICE leaves a design instantiates
+/// (`HirModel::external_leaves`). An earlier artifact has none, so a host
+/// would build the design without them.
+///
 /// Version 176 carries a port's `supplySensitivity` and `groundSensitivity`
 /// attributes (`HirPort::supply_sensitivity`, `HirPort::ground_sensitivity`),
 /// which bind the converter on that port to a net. Earlier artifacts dropped
@@ -204,7 +208,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 176;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 177;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

@@ -269,6 +269,10 @@ pub struct Module {
     pub analog_final: Option<AnalogBlock>,
     /// Module instances
     pub instances: Vec<ModuleInstance>,
+    /// SPICE cells this module instantiates, taken out of `instances` when
+    /// the host builds them from its own netlist
+    /// (`CompilerOptions::external_cells`).
+    pub(crate) external_leaves: Vec<crate::external_cells::ExternalLeafInstance>,
     /// `defparam` assignments as written (IEEE 1364-2005 section 12.2.1).
     /// Folded into instance overrides before analysis, so no later pass
     /// reads them.
@@ -414,6 +418,7 @@ impl Module {
             analog_initial: None,
             analog_final: None,
             instances: Vec::new(),
+            external_leaves: Vec::new(),
             defparams: Vec::new(),
             functions: Vec::new(),
             digital_nets: Vec::new(),

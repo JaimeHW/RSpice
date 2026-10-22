@@ -23,6 +23,8 @@ use smol_str::SmolStr;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+#[path = "elaboration_external.rs"]
+mod external;
 #[path = "elaboration_parameters.rs"]
 pub(super) mod parameters;
 #[path = "elaboration_references.rs"]
@@ -46,6 +48,7 @@ pub(crate) fn elaborate_executable_module<'a>(
         ))
     })?;
     if root.instances.is_empty()
+        && root.external_leaves.is_empty()
         && root.generate_template.is_none()
         && root.foreign_physical.is_empty()
     {
@@ -106,6 +109,7 @@ pub(crate) fn elaborate_executable_module<'a>(
     elaborator
         .parameter_hierarchy
         .register(root, selected, &root_scope, None)?;
+    elaborator.resolve_external_leaves(root, &root_scope, "")?;
     elaborator.append_instances(root, root_scope, selected.name.as_str())?;
     Ok(Cow::Owned(elaborator.finish()?))
 }
@@ -653,6 +657,13 @@ impl<'a> HierarchyElaborator<'a> {
             )?;
             instances += 1;
             let next = self.append_instance(&instance, &stack, &path)?;
+            if !next.module.source().external_leaves.is_empty() {
+                let relative = path
+                    .strip_prefix(self.flattened.name.as_str())
+                    .and_then(|suffix| suffix.strip_prefix('.'))
+                    .unwrap_or(&path);
+                self.resolve_external_leaves(next.module.source(), &next.scope, relative)?;
+            }
             stack.push(next);
         }
         Ok(())

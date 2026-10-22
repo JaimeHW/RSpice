@@ -102,6 +102,7 @@ mod connection_configuration;
 pub mod disciplines;
 pub mod error;
 pub mod expr_converter;
+mod external_cells;
 pub mod four_state;
 pub mod generated_source;
 mod integer_runtime;
@@ -162,6 +163,7 @@ mod parameter_override;
 pub use ast::{Module, SourceFile};
 pub use codegen::{CodeGenerator, CompiledModel};
 pub use error::{CompileError, CompileResult};
+pub use external_cells::ExternalCell;
 pub use lexer::{Lexer, Token, TokenKind};
 pub use metrics::{
     CfgStructureMetrics, Measured, NoPipelineControl, PerformanceBudget, PerformanceBudgetExceeded,
@@ -369,6 +371,17 @@ pub struct CompilerOptions {
     ///
     /// [`DigitalRealResolution::Single`]: canonical_ir::digital::DigitalRealResolution::Single
     pub wreal_resolution: canonical_ir::digital::DigitalRealResolution,
+    /// The SPICE cells a design may instantiate as leaves, for a host that
+    /// builds them from its own netlist.
+    ///
+    /// `None` by default: an instance of a module no source declares is
+    /// refused as undefined. A SPICE host names its deck's `.subckt`s and
+    /// model cards here; an instance of an undeclared module that names one,
+    /// or Verilog-AMS LRM 2.4 Annex E's `resistor`, `capacitor` or
+    /// `inductor`, then compiles as an external leaf, which the canonical IR
+    /// lists with the nets it connects (`HirModel::external_leaves`) for the
+    /// host to build.
+    pub external_cells: Option<Vec<ExternalCell>>,
 }
 
 /// Read every plain `wreal` declaration as the resolution `resolution`
@@ -1523,6 +1536,7 @@ impl VerilogACompiler {
         }
         semantic::defparam::apply_to_roots(&mut source_file, &root_defparams)?;
         apply_wreal_resolution(&mut source_file, self.options.wreal_resolution);
+        external_cells::extract(&mut source_file, self.options.external_cells.as_deref())?;
         measurements.record(PipelinePhase::Parse, phase_started.elapsed())?;
         measurements.metrics_mut().top_level_item_count =
             metrics::usize_to_u64(source_file.items.len());

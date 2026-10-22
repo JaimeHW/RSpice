@@ -981,6 +981,9 @@ fn hir_summary(hir: &HirModel) -> String {
         write_hir_internal_node(&mut out, node);
     }
     writeln!(out, "ground_nodes={}", join_smol(&hir.ground_nodes)).expect("write to string");
+    for leaf in &hir.external_leaves {
+        write_hir_external_leaf(&mut out, leaf);
+    }
     for expression in &hir.expressions {
         write_hir_expression(&mut out, expression);
     }
@@ -1175,6 +1178,32 @@ fn write_hir_internal_node(out: &mut String, node: &HirInternalNode) {
         node.is_state
     )
     .expect("write to string");
+}
+
+fn write_hir_external_leaf(out: &mut String, leaf: &super::HirExternalLeaf) {
+    write!(
+        out,
+        "external_leaf cell={} instance={} connections=",
+        enc_str(&leaf.cell),
+        enc_str(&leaf.instance)
+    )
+    .expect("write to string");
+    for net in &leaf.connections {
+        write!(out, "{};", external_net(net)).expect("write to string");
+    }
+    out.push_str(" parameters=");
+    for (name, value) in &leaf.parameters {
+        write!(out, "{}:{:016x};", enc_str(name), value.to_bits()).expect("write to string");
+    }
+    out.push('\n');
+}
+
+fn external_net(net: &super::HirExternalNet) -> String {
+    match net {
+        super::HirExternalNet::Ground => "ground".to_owned(),
+        super::HirExternalNet::Port(port) => format!("port:{}", port.index()),
+        super::HirExternalNet::Net(name) => format!("net:{}", enc_str(name)),
+    }
 }
 
 fn write_hir_contribution(out: &mut String, contribution: &HirContribution) {

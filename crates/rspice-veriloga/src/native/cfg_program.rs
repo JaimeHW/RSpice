@@ -2091,6 +2091,7 @@ mod tests {
             expressions: Vec::new(),
             internal_nodes: Vec::new(),
             ground_nodes: Vec::new(),
+            external_leaves: Vec::new(),
         };
         let function = {
             let mut builder = SsaBuilder::new();
