@@ -48,10 +48,14 @@ pub(crate) use tf::run_tf_analysis_with_bias;
 mod transient;
 mod transient_state;
 pub(crate) use transient_state::{
-    Bias, StateCard, StateRunError, TransientStateHandoff, TransientStateRole, TransientStateStore,
+    Bias, StateCard, StateRunError, TransientStateHandoff, TransientStateRole,
     install_transient_state_handoff, linearize_at_state, publish_transient_states,
     state_capture_times,
 };
+// Only a native runner keeps a store; the browser worker runs each card's own
+// transient.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use transient_state::TransientStateStore;
 // Each analysis re-exports the request types a caller must construct and the
 // entry point it calls. Result types are not re-exported: callers receive them
 // from the entry point and never name them here.

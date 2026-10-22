@@ -88,6 +88,7 @@ pub(crate) struct TransientStateHandoff {
 }
 
 impl TransientStateHandoff {
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) const fn new(store: Arc<TransientStateStore>, role: TransientStateRole) -> Self {
         Self { store, role }
     }
