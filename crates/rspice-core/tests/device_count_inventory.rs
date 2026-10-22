@@ -91,6 +91,11 @@ const EXCLUDED_FROM_DEVICE_COUNT: &[(&str, &str)] = &[
         "the kind of quantity each net carries, a node fact with no element",
     ),
     (
+        "port_sensitivities",
+        "the supplySensitivity and groundSensitivity attributes on mixed modules' \
+         ports, a port fact the converter insertions read, not a device",
+    ),
+    (
         "xspice_event_loads",
         "the total load on each event net, summed from the counted XSPICE \
          instances' input loads -- a node fact, not a device",
