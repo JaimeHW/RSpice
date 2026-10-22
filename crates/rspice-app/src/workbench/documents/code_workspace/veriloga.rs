@@ -910,18 +910,51 @@ fn start_veriloga_compile(
         return;
     }
     let token = selected.token(app.state.model.workspace.content.project.id());
+    // A design may instantiate the SPICE cells of the netlist its project's
+    // run would build: a manual deck's as its run expands it, else the
+    // configured design's. While that netlist cannot be built the design is
+    // compiled against no cells, and a run compiles it again against its own.
+    // A name nothing in the project defines stays undefined.
+    let cells = {
+        use crate::simulation::controller::{SimulationController, prepared_run};
+        let state = &app.state;
+        match state.model.simulation.execution.run_intent {
+            crate::state::SimulationRunIntent::ManualDeck => {
+                prepared_run::manual_source_inputs(state)
+                    .and_then(|manual| {
+                        rspice_simulation::execution::preparation::manual_deck_external_cells(
+                            &prepared_run::run_preparation_inputs(state),
+                            manual,
+                        )
+                    })
+                    .ok()
+            }
+            crate::state::SimulationRunIntent::SimulateRunSet => {
+                SimulationController::prepare_design_netlist_for_inspection(state)
+                    .ok()
+                    .map(|netlist| {
+                        rspice_simulation::project_veriloga::preparation::deck_external_cells(
+                            &netlist,
+                        )
+                    })
+            }
+        }
+    }
+    .map(Arc::<[_]>::from);
     let (sender, receiver) = mpsc::channel();
     Arc::make_mut(&mut app.state.code.code_workspace.veriloga.last_failure).clear();
     app.state.code.code_workspace.veriloga.last_failure_token = None;
     app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
         token,
         receiver: Arc::new(Mutex::new(receiver)),
+        cells: cells.clone(),
     });
 
     let wake = repaint.clone();
     if let Err(error) = rspice_simulation::project_veriloga::compile_service::start_compile(
         selected.bundle,
         selected.selected_module,
+        cells,
         sender.clone(),
         move || wake.request_repaint(),
     ) {
@@ -1006,8 +1039,12 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 .project_sources
                 .get_bundle(pending.token.bundle_id)
                 .cloned();
-            let receipt = match receipt_from_report(pending.token, &report, receipt_bundle.as_ref())
-            {
+            let receipt = match receipt_from_report(
+                pending.token,
+                &report,
+                receipt_bundle.as_ref(),
+                pending.cells.as_deref(),
+            ) {
                 Ok(receipt) => receipt,
                 Err(error) => {
                     let diagnostic = diagnostic_capacity_failure(pending.token, error);
@@ -1368,6 +1405,7 @@ fn compile_selected_source(selected: &SelectedVerilogASource) -> VerilogACompile
     rspice_simulation::project_veriloga::compile_service::compile_source(
         selected.bundle(),
         selected.selected_module(),
+        None,
     )
 }
 
@@ -1418,10 +1456,11 @@ fn receipt_from_report(
     token: VerilogASourceOperationToken,
     report: &RuntimeCompileReport,
     bundle: Option<&ProjectSourceBundle>,
+    cells: Option<&[rspice_veriloga::ExternalCell]>,
 ) -> Result<VerilogACompileReceipt, String> {
     let (compilation, diagnostics) =
-        rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt::from_report(
-            token, report, bundle,
+        rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt::from_report_against(
+            token, report, bundle, cells,
         )?;
     receipt_projection(compilation, diagnostics)
 }
@@ -1645,7 +1684,7 @@ mod tests {
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("legacy source must compile")
         };
-        let receipt = receipt_from_report(token, &report, Some(selected.bundle())).unwrap();
+        let receipt = receipt_from_report(token, &report, Some(selected.bundle()), None).unwrap();
 
         let first = record_veriloga_qualification(
             &mut app,
@@ -2007,7 +2046,7 @@ mod tests {
         };
         assert_eq!(report.diagnostics.len(), 1);
 
-        let receipt = receipt_from_report(token, &report, Some(selected.bundle())).unwrap();
+        let receipt = receipt_from_report(token, &report, Some(selected.bundle()), None).unwrap();
         let warning = receipt
             .diagnostics
             .iter()
@@ -2028,6 +2067,7 @@ mod tests {
         app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
+            cells: None,
         });
 
         poll_veriloga_compile(&mut app);
@@ -2105,7 +2145,7 @@ mod tests {
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("a retained variable is legal Verilog-A and must not fail the compile")
         };
-        let receipt = receipt_from_report(token, &report, Some(selected.bundle())).unwrap();
+        let receipt = receipt_from_report(token, &report, Some(selected.bundle()), None).unwrap();
         let retained: Vec<_> = receipt
             .diagnostics
             .iter()
@@ -2128,6 +2168,7 @@ mod tests {
         app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
+            cells: None,
         });
         poll_veriloga_compile(&mut app);
 
@@ -2178,6 +2219,7 @@ mod tests {
         app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
+            cells: None,
         });
         app.state
             .model
@@ -2219,6 +2261,7 @@ mod tests {
         app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
+            cells: None,
         });
         app.state
             .model

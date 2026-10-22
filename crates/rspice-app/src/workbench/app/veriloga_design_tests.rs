@@ -388,6 +388,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
         token: receipt.compilation.token(),
         receiver: Arc::new(Mutex::new(receiver)),
+        cells: None,
     });
     frame(&ctx, &mut app, DESKTOP);
 
@@ -414,6 +415,84 @@ pub(super) fn wait_for_compile(ctx: &egui::Context, app: &mut RSpiceApp) {
         std::thread::sleep(std::time::Duration::from_millis(5));
         frame(ctx, app, DESKTOP);
     }
+}
+
+/// A design over a `.subckt` of the manual deck its project runs: the editor
+/// compiles it against the deck's cells, which validates it, and the run
+/// builds it over that cell.
+#[test]
+fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
+    let mut app = open_project_app();
+    let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "top", "top.va", "top");
+    open_in_design(&mut app.state, &reference);
+    let selected = code_workspace::selected_veriloga_source(&app).unwrap();
+    assert!(
+        code_workspace::replace_selected_veriloga_file(
+            &mut app,
+            &selected,
+            "top.va",
+            "module top(p, n);\n  inout p, n;\n  electrical p, n;\n  half xu(p, n);\nendmodule\n"
+                .to_owned(),
+        )
+        .unwrap()
+    );
+    // The deck names the design by the key of its bundle's current closure,
+    // which the first compile changes when it writes the build profile.
+    let deck = |app: &RSpiceApp| {
+        let bundle = app
+            .state
+            .model
+            .workspace
+            .content
+            .project_sources
+            .get_bundle(bundle_id)
+            .unwrap();
+        let key = rspice_design::project_sources::project_veriloga_bundle_source_key(
+            app.state.model.workspace.content.project.id(),
+            bundle,
+            "top",
+        )
+        .unwrap();
+        format!(
+            "* a design over a deck cell\n\
+             .subckt half a b\nr1 a b 1k\n.ends\n\
+             {}\n\
+             vin in 0 dc 1\n\
+             rload out 0 1k\n\
+             xtop in out top\n\
+             .tran 1n 10n\n\
+             .meas tran vout max v(out)\n\
+             .end\n",
+            rspice_simulation::netlist_preparation::project_veriloga_directive(&key, "top")
+        )
+    };
+    app.state.model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
+    app.state.model.workspace.content.netlist_source = Some(deck(&app));
+
+    let ctx = themed_context();
+    Command::CompileVerilogA.execute(&mut app);
+    frame(&ctx, &mut app, DESKTOP);
+    wait_for_compile(&ctx, &mut app);
+    app.state.model.workspace.content.netlist_source = Some(deck(&app));
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .project_sources
+            .get_bundle(bundle_id)
+            .unwrap()
+            .root()
+            .validation_is_current(),
+        "the editor validates the design against the deck's cells"
+    );
+
+    let result = crate::simulation::controller::test_execution::run_manual_deck_of(&app.state);
+    let vout = result.measurement("vout").expect("v(out) is measured");
+    assert!(
+        (vout - 0.5).abs() < 1e-9,
+        "`half` and the load divide 1 V: {vout}"
+    );
 }
 
 /// Whether the frame stated `value` for the property row labelled `label`.

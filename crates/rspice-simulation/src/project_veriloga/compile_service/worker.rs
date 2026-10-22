@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use super::{VerilogACompileOutcome, project_compile_outcome, transport_failure_outcome};
 use crate::project_veriloga::worker::WasmJitWorkerArtifact;
 use rspice_design::project_sources::ProjectSourceBundle;
+use rspice_veriloga::ExternalCell;
 
-const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 2;
+/// 3: a request carries the cells the design is compiled against.
+const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 3;
 const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,6 +25,11 @@ pub(crate) struct VerilogAWorkerRequest {
     id: u32,
     bundle: ProjectSourceBundle,
     selected_module: Option<String>,
+    /// The cells of the netlist the project's run builds, which the design
+    /// may instantiate as leaves. Absent from an earlier protocol's request,
+    /// which the protocol check refuses.
+    #[serde(default)]
+    cells: Option<Vec<ExternalCell>>,
 }
 
 impl VerilogAWorkerRequest {
@@ -30,12 +37,14 @@ impl VerilogAWorkerRequest {
         id: u32,
         bundle: &ProjectSourceBundle,
         selected_module: Option<&str>,
+        cells: Option<&[ExternalCell]>,
     ) -> Result<Self, String> {
         let request = Self {
             protocol: VERILOGA_WORKER_PROTOCOL_VERSION,
             id,
             bundle: bundle.clone(),
             selected_module: selected_module.map(str::to_owned),
+            cells: cells.map(<[_]>::to_vec),
         };
         request.validated_source()?;
         Ok(request)
@@ -52,6 +61,7 @@ impl VerilogAWorkerRequest {
             return Err("Verilog-A worker request id must be non-zero.".to_owned());
         }
         WorkerCompileRequest::try_new(&self.bundle, self.selected_module.as_deref())
+            .map(|request| request.against(self.cells.as_deref()))
             .map_err(|error| error.to_string())
     }
 }
@@ -158,7 +168,7 @@ mod browser {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::prelude::*;
 
-    use super::{ProjectSourceBundle, VerilogACompileOutcome, VerilogAWorkerRequest};
+    use super::{ExternalCell, ProjectSourceBundle, VerilogACompileOutcome, VerilogAWorkerRequest};
 
     struct ActiveCompileWorker {
         id: u32,
@@ -185,6 +195,7 @@ mod browser {
     pub(crate) fn start(
         bundle: &ProjectSourceBundle,
         selected_module: Option<&str>,
+        cells: Option<&[ExternalCell]>,
         sender: mpsc::Sender<VerilogACompileOutcome>,
         wake: Rc<dyn Fn()>,
     ) -> Result<(), String> {
@@ -193,7 +204,7 @@ mod browser {
         }
 
         let id = allocate_request_id();
-        let request = VerilogAWorkerRequest::try_new(id, bundle, selected_module)?;
+        let request = VerilogAWorkerRequest::try_new(id, bundle, selected_module, cells)?;
         let request = serde_wasm_bindgen::to_value(&request)
             .map_err(|error| format!("Could not encode Verilog-A worker request: {error}"))?;
         let worker_url = worker_url()?;
@@ -463,7 +474,7 @@ mod tests {
     #[test]
     fn request_and_response_round_trip_exact_compiled_artifacts() {
         let request =
-            VerilogAWorkerRequest::try_new(7, &selected_source(), Some("worker")).unwrap();
+            VerilogAWorkerRequest::try_new(7, &selected_source(), Some("worker"), None).unwrap();
         let request: VerilogAWorkerRequest =
             serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
         let response =
@@ -481,7 +492,7 @@ mod tests {
     #[test]
     fn stale_worker_response_ids_are_rejected() {
         let request =
-            VerilogAWorkerRequest::try_new(9, &selected_source(), Some("worker")).unwrap();
+            VerilogAWorkerRequest::try_new(9, &selected_source(), Some("worker"), None).unwrap();
         let response =
             VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         assert!(response.into_outcome(10).is_err());
@@ -490,7 +501,7 @@ mod tests {
     #[test]
     fn malformed_transferred_target_matrix_is_rejected_without_panicking() {
         let request =
-            VerilogAWorkerRequest::try_new(11, &selected_source(), Some("worker")).unwrap();
+            VerilogAWorkerRequest::try_new(11, &selected_source(), Some("worker"), None).unwrap();
         let response =
             VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         let mut encoded = serde_json::to_value(response).unwrap();
@@ -503,9 +514,13 @@ mod tests {
 
     #[test]
     fn transferred_build_profile_is_revalidated_after_deserialization() {
-        let request =
-            VerilogAWorkerRequest::try_new(12, &selected_source_with_profile(), Some("worker"))
-                .unwrap();
+        let request = VerilogAWorkerRequest::try_new(
+            12,
+            &selected_source_with_profile(),
+            Some("worker"),
+            None,
+        )
+        .unwrap();
         let mut encoded = serde_json::to_value(request).unwrap();
         encoded["bundle"]["files"][0]["content"] =
             serde_json::json!("schema = \"untrusted.profile/v99\"");
@@ -519,7 +534,7 @@ mod tests {
     #[test]
     fn malformed_transferred_specialist_evidence_is_rejected() {
         let request =
-            VerilogAWorkerRequest::try_new(13, &selected_source(), Some("worker")).unwrap();
+            VerilogAWorkerRequest::try_new(13, &selected_source(), Some("worker"), None).unwrap();
         let response =
             VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         let mut encoded = serde_json::to_value(response).unwrap();
@@ -529,6 +544,106 @@ mod tests {
 
         let error = response.into_outcome(13).unwrap_err();
         assert!(error.contains("specialist report"), "{error}");
+    }
+
+    /// A design over `half`, a cell its project's deck defines, and over
+    /// `missing`, which nothing defines.
+    fn design_over(cell: &str) -> ProjectSourceBundle {
+        ProjectSourceBundle::try_new(
+            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+            ProjectSourceLanguage::VerilogA,
+            "top.va",
+            format!("module top(p, n); inout p, n; electrical p, n; {cell} xu(p, n); endmodule\n"),
+            [],
+            [],
+        )
+        .unwrap()
+    }
+
+    fn deck_cells() -> Vec<ExternalCell> {
+        let cells = crate::project_veriloga::preparation::deck_external_cells(
+            "* deck\n.subckt half a b\nr1 a b 1k\n.ends\n.end\n",
+        );
+        assert_eq!(cells.len(), 1, "the deck offers `half`");
+        cells
+    }
+
+    fn assert_undefined(outcome: VerilogACompileOutcome, module: &str) {
+        let VerilogACompileOutcome::Failure(diagnostics) = outcome else {
+            panic!("`{module}` is defined nowhere in the project");
+        };
+        let reported = format!("{diagnostics:?}");
+        assert!(
+            reported.contains("Undefined module") && reported.contains(module),
+            "{reported}"
+        );
+    }
+
+    /// The editor compiles a design against the cells of the netlist its
+    /// project's run builds, in-process on the desktop and in the browser's
+    /// worker alike; a name nothing in the project defines is still refused,
+    /// by name.
+    #[test]
+    fn both_editor_compiles_offer_the_project_cells_and_refuse_an_undefined_name() {
+        let cells = deck_cells();
+        let over_half = design_over("half");
+
+        let VerilogACompileOutcome::Success(report) =
+            super::super::compile_source(&over_half, Some("top"), Some(&cells))
+        else {
+            panic!("the desktop compile builds `half` from the project's cells");
+        };
+        assert_eq!(report.canonical_ir.hir.external_leaves.len(), 1);
+        assert_undefined(
+            super::super::compile_source(&over_half, Some("top"), None),
+            "half",
+        );
+        assert_undefined(
+            super::super::compile_source(&design_over("missing"), Some("top"), Some(&cells)),
+            "missing",
+        );
+
+        let through_worker = |id, bundle: &ProjectSourceBundle| {
+            let request =
+                VerilogAWorkerRequest::try_new(id, bundle, Some("top"), Some(&cells)).unwrap();
+            let request: VerilogAWorkerRequest =
+                serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+            let response =
+                VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode)
+                    .unwrap();
+            let response: VerilogAWorkerResponse =
+                serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
+            response.into_outcome(id).unwrap()
+        };
+        let VerilogACompileOutcome::Success(report) = through_worker(21, &over_half) else {
+            panic!("the worker compile builds `half` from the transferred cells");
+        };
+        assert_eq!(report.canonical_ir.hir.external_leaves.len(), 1);
+        assert_undefined(through_worker(22, &design_over("missing")), "missing");
+    }
+
+    /// A request of the protocol before the cell table is refused by its
+    /// protocol, as every earlier protocol's request is.
+    #[test]
+    fn a_request_without_the_cell_table_protocol_is_refused() {
+        let request = VerilogAWorkerRequest::try_new(
+            23,
+            &design_over("half"),
+            Some("top"),
+            Some(&deck_cells()),
+        )
+        .unwrap();
+        let mut encoded = serde_json::to_value(request).unwrap();
+        encoded["protocol"] = serde_json::json!(2);
+        encoded.as_object_mut().unwrap().remove("cells");
+        let request: VerilogAWorkerRequest = serde_json::from_value(encoded).unwrap();
+
+        let error = VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode)
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "Unsupported Verilog-A worker protocol 2; expected 3."
+        );
     }
 
     #[test]

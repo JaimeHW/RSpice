@@ -13,12 +13,17 @@ pub(crate) fn start_manual_deck(source: &str) -> SimulationRunner {
     let mut state = AppState::default();
     state.model.simulation.execution.run_intent = SimulationRunIntent::ManualDeck;
     state.model.workspace.content.netlist_source = Some(source.to_owned());
+    start_manual_deck_of(&state)
+}
+
+/// Validate and start the manual deck of `state`, as Run does.
+fn start_manual_deck_of(state: &AppState) -> SimulationRunner {
     let mut controller = SimulationController::new();
     controller
-        .validate_manual_deck_document(&state)
+        .validate_manual_deck_document(state)
         .expect("fixture source passes complete preparation");
     let dispatch = controller
-        .consume_snapshot_for_dispatch(&state)
+        .consume_snapshot_for_dispatch(state)
         .expect("authorize the unchanged fixture source");
     let mut tasks = dispatch.into_tasks();
     assert_eq!(tasks.len(), 1, "fixture requires one independent analysis");
@@ -47,7 +52,16 @@ pub(crate) fn wait_until_finished_unpolled(runner: &SimulationRunner) {
 }
 
 pub(crate) fn run_manual_deck(source: &str) -> SimulationResult {
-    let mut runner = start_manual_deck(source);
+    finish(start_manual_deck(source))
+}
+
+/// Validate and run the manual deck of `state`, the project it belongs to
+/// and its editor's compile among what it reads.
+pub(crate) fn run_manual_deck_of(state: &AppState) -> SimulationResult {
+    finish(start_manual_deck_of(state))
+}
+
+fn finish(mut runner: SimulationRunner) -> SimulationResult {
     wait_until_finished_unpolled(&runner);
     runner
         .poll_result()

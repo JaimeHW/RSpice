@@ -30,6 +30,16 @@ impl ProjectCompileReceipt {
         report: &RuntimeCompileReport,
         bundle: Option<&ProjectSourceBundle>,
     ) -> Result<(Self, Vec<ProjectCompileDiagnostic>), String> {
+        Self::from_report_against(token, report, bundle, None)
+    }
+
+    /// [`Self::from_report`] for a report compiled against `cells`.
+    pub fn from_report_against(
+        token: VerilogASourceOperationToken,
+        report: &RuntimeCompileReport,
+        bundle: Option<&ProjectSourceBundle>,
+        cells: Option<&[ExternalCell]>,
+    ) -> Result<(Self, Vec<ProjectCompileDiagnostic>), String> {
         let mut diagnostics = compiler_diagnostics(report);
         diagnostics.extend(
             bundle
@@ -49,7 +59,7 @@ impl ProjectCompileReceipt {
             Self {
                 token,
                 report: Arc::new(report.clone()),
-                cells: None,
+                cells: cells.map(Arc::from),
             },
             diagnostics,
         ))
@@ -117,26 +127,17 @@ pub fn compile_project_bundle_receipt_against(
         compile_project_bundle_source_against(bundle, selected_module, cells),
     ) {
         Ok(report) => {
-            let receipt = ProjectCompileReceipt::from_report(token, &report, Some(bundle)).map(
-                |(receipt, diagnostics)| {
-                    (
-                        ProjectCompileReceipt {
-                            cells: cells.map(Arc::from),
-                            ..receipt
-                        },
-                        diagnostics,
-                    )
+            ProjectCompileReceipt::from_report_against(token, &report, Some(bundle), cells).map_err(
+                |detail| {
+                    vec![ProjectCompileDiagnostic::new(
+                        "rspice.diagnostics",
+                        "DIAGNOSTIC-CAPACITY",
+                        ProjectDiagnosticSeverity::Error,
+                        "Diagnostic collection exceeded the supported maximum",
+                        detail,
+                    )]
                 },
-            );
-            receipt.map_err(|detail| {
-                vec![ProjectCompileDiagnostic::new(
-                    "rspice.diagnostics",
-                    "DIAGNOSTIC-CAPACITY",
-                    ProjectDiagnosticSeverity::Error,
-                    "Diagnostic collection exceeded the supported maximum",
-                    detail,
-                )]
-            })
+            )
         }
         Err(diagnostics) => Err(diagnostics),
     }

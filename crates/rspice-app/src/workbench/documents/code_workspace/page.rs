@@ -122,6 +122,8 @@ pub struct SourceOperationToken {
 pub struct PendingVerilogACompile {
     pub token: VerilogASourceOperationToken,
     pub receiver: Arc<Mutex<mpsc::Receiver<VerilogACompileOutcome>>>,
+    /// The cells the design is compiled against, which its receipt names.
+    pub cells: Option<Arc<[rspice_veriloga::ExternalCell]>>,
 }
 
 impl Clone for PendingVerilogACompile {
@@ -129,6 +131,7 @@ impl Clone for PendingVerilogACompile {
         Self {
             token: self.token,
             receiver: Arc::clone(&self.receiver),
+            cells: self.cells.clone(),
         }
     }
 }

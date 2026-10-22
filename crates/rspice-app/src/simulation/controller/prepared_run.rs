@@ -72,7 +72,7 @@ type RunPreparationInputs<'a> = crate::simulation::execution::preparation::RunPr
     crate::state::AnalysisResult,
 >;
 
-pub(super) fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
+pub(crate) fn run_preparation_inputs(state: &AppState) -> RunPreparationInputs<'_> {
     run_preparation_inputs_reading(state, &crate::simulation::table_route::SourceFiles)
 }
 
@@ -1184,7 +1184,7 @@ impl SimulationController {
 
 /// The deck a manual run is prepared from: the netlist document the session
 /// shows, the file it came from, and what composing it reads.
-pub(super) fn manual_source_inputs(
+pub(crate) fn manual_source_inputs(
     state: &AppState,
 ) -> Result<crate::simulation::execution::preparation::ManualSourceInputs<'_>, PreparationError> {
     if state.code.netlist.active_document_initialized

@@ -607,10 +607,33 @@ where
     )
 }
 
-pub fn build_prepared_manual_deck<R, A>(
+/// A manual deck composed and expanded as its run executes it, before the
+/// project Verilog-A designs it names are prepared.
+struct ExpandedManualDeck {
+    expanded: String,
+    canonical_origin: Option<String>,
+    sealed_source_dependencies: Vec<rspice_core::netlist::ResolvedIncludeDependency>,
+    sealed_models: crate::model_sources::SealedModelExecutionSources,
+    model_execution_plan: Option<rspice_model_library::ModelExecutionPlan>,
+    model_cards: Vec<String>,
+    external_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
+    has_project_technology: bool,
+}
+
+/// The cells the manual deck `manual` offers its project's HDL designs as
+/// leaves: those of the deck as its run expands it, which the run compiles
+/// each design it names against. The editor compiles a design against them.
+pub fn manual_deck_external_cells<R, A>(
     inputs: &RunPreparationInputs<'_, R, A>,
     manual: ManualSourceInputs<'_>,
-) -> Result<PreparedRunSnapshot, PreparationError> {
+) -> Result<Vec<rspice_veriloga::ExternalCell>, PreparationError> {
+    expand_manual_deck(inputs, &manual).map(|deck| deck_external_cells(&deck.expanded))
+}
+
+fn expand_manual_deck<R, A>(
+    inputs: &RunPreparationInputs<'_, R, A>,
+    manual: &ManualSourceInputs<'_>,
+) -> Result<ExpandedManualDeck, PreparationError> {
     let source = manual.source;
     let owned_active = manual.owned;
     if source.trim().is_empty() {
@@ -695,6 +718,34 @@ pub fn build_prepared_manual_deck<R, A>(
         inputs.project_sources,
         expanded,
     );
+    Ok(ExpandedManualDeck {
+        expanded,
+        canonical_origin,
+        sealed_source_dependencies,
+        sealed_models,
+        model_execution_plan,
+        model_cards,
+        external_veriloga_runtimes,
+        has_project_technology,
+    })
+}
+
+pub fn build_prepared_manual_deck<R, A>(
+    inputs: &RunPreparationInputs<'_, R, A>,
+    manual: ManualSourceInputs<'_>,
+) -> Result<PreparedRunSnapshot, PreparationError> {
+    let source = manual.source;
+    let origin = manual.origin;
+    let ExpandedManualDeck {
+        expanded,
+        canonical_origin,
+        sealed_source_dependencies,
+        sealed_models,
+        model_execution_plan,
+        model_cards,
+        external_veriloga_runtimes,
+        has_project_technology,
+    } = expand_manual_deck(inputs, &manual)?;
     // One parse serves the model check and the deck's own warnings (a dropped
     // control command, a shadowed definition), which the run advises as a
     // headless run of the same deck does. It is the parse the deck's queue is

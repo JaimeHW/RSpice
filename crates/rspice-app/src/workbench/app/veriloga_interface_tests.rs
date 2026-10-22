@@ -107,6 +107,7 @@ pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
     app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
         token: receipt.compilation.token(),
         receiver: Arc::new(Mutex::new(receiver)),
+        cells: None,
     });
     code_workspace::poll_veriloga_compile(app);
     assert!(
