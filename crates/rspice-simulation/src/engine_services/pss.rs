@@ -6,16 +6,13 @@
 
 #![allow(clippy::type_complexity)]
 
-use super::{
-    ServiceRunError, ServiceRunResult, build_engine_config, parse_runner_netlist_with_abort,
-};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::{Engine, PssDcOperatingPointSeed};
-use std::path::Path;
 use std::sync::Arc;
 
 mod output;
@@ -34,105 +31,11 @@ pub struct PssData {
 pub use crate::periodic::PssRunConfig;
 use crate::periodic::{build_core_pss_config, validate_pss_config};
 
-/// Run PSS analysis with cooperative cancellation and no source path.
-///
-/// Test-only. PSS ships through
-/// [`run_pss_analysis_with_dc_seed_and_context`], which the
-/// periodic spec calls with the operating point its dependency produced.
-#[cfg(test)]
-pub fn run_pss_analysis_with_abort(
-    netlist_text: &str,
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    tolerance: Value,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PssData> {
-    run_pss_analysis_with_source_path_and_abort(
-        netlist_text,
-        fundamental_freq,
-        num_harmonics,
-        tolerance,
-        None,
-        abort,
-    )
-}
-
-/// Run PSS analysis with source-path resolution and cooperative cancellation.
-///
-/// Finds the periodic steady-state solution of a circuit with autonomous or
-/// driven oscillations, using the shooting method with Newton iteration.
-#[allow(
-    dead_code,
-    reason = "retained PSS source-path adapter for callers and tests"
-)]
-pub fn run_pss_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    fundamental_freq: Value,
-    num_harmonics: usize,
-    tolerance: Value,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PssData> {
-    ensure_not_aborted(abort)?;
-    // The compatibility API predates authored Tones. Its historical semantic
-    // is the complete set of circuit drives, so resolve that set explicitly
-    // and feed it through the same strict periodic validator as the typed path.
-    let parsed = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let engine = Engine::new(build_engine_config(&parsed, None));
-    let tone_sources = engine
-        .transient_source_names_with_abort(&parsed, abort)
-        .map_err(|error| ServiceRunError::from_core("PSS source discovery failed", error))?;
-    let config = PssRunConfig::new(fundamental_freq, tone_sources, num_harmonics, tolerance);
-    run_pss_analysis_with_config_and_source_path_and_abort(
-        netlist_text,
-        &config,
-        source_path,
-        abort,
-    )
-}
-
-/// Run a fully materialized shooting-PSS request with source-path resolution
-/// and cooperative cancellation.
-#[allow(dead_code, reason = "retained configured PSS source-path adapter")]
-pub fn run_pss_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &PssRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PssData> {
-    run_pss_analysis_internal(
-        netlist_text,
-        config,
-        None,
-        super::ServiceContext {
-            source_path,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
 /// Run shooting PSS from the exact operating-point state authenticated by
 /// the prepared dependency graph. The source is the producer's exact
 /// process-bound source; its voltage corner is applied once before both basis
 /// validation and shooting, and its temperature is propagated to the core
 /// engine in Kelvin.
-#[cfg(test)]
-pub(crate) fn run_pss_analysis_with_dc_seed_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &PssRunConfig,
-    source_path: Option<&Path>,
-    seed_environment: PssSeedEnvironment<'_>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PssData> {
-    run_pss_analysis_with_dc_seed_and_context(
-        netlist_text,
-        config,
-        seed_environment,
-        super::ServiceContext::with_defaults(source_path, abort),
-    )
-}
-
 pub(crate) fn run_pss_analysis_with_dc_seed_and_context(
     netlist_text: &str,
     config: &PssRunConfig,
@@ -353,6 +256,7 @@ fn apply_seed_environment(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::test_entry::{ctx, parse};
     use super::*;
 
     struct AbortOnPoll {
@@ -391,7 +295,12 @@ mod tests {
             polls: AtomicUsize::new(0),
         };
 
-        let result = run_pss_analysis_with_abort("invalid", -1.0, 0, -1.0, &abort);
+        let result = run_pss_analysis_internal(
+            "invalid",
+            &PssRunConfig::new(-1.0, Vec::new(), 0, -1.0),
+            None,
+            ctx(&abort),
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -470,10 +379,9 @@ mod tests {
             max_period_change: 0.1,
             verbose: false,
         };
-        let result = run_pss_analysis_with_dc_seed_and_source_path_and_abort(
+        let result = run_pss_analysis_with_dc_seed_and_context(
             source,
             &config,
-            None,
             PssSeedEnvironment {
                 dc_seed: &seed,
                 temperature_celsius: 125.0,
@@ -481,7 +389,7 @@ mod tests {
                 nominal_supply_voltage: None,
                 supply_source_names: &[],
             },
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .expect("seeded PSS solves with the OP environment");
         assert_eq!(
@@ -527,8 +435,12 @@ mod tests {
             verbose: false,
         };
 
-        let error = run_pss_analysis_with_config_and_source_path_and_abort(
-            netlist, &config, None, &NoAbort,
+        let error = run_pss_analysis_on_materialized_with_context(
+            &parse(netlist),
+            &config,
+            None,
+            None,
+            ctx(&NoAbort),
         )
         .expect_err("DC-only sources cannot authenticate a periodic solve");
         assert!(error.to_string().contains("tone-source validation"));
@@ -566,8 +478,12 @@ mod tests {
                 max_period_change: 0.1,
                 verbose: false,
             };
-            let result = run_pss_analysis_with_config_and_source_path_and_abort(
-                source, &config, None, &NoAbort,
+            let result = run_pss_analysis_on_materialized_with_context(
+                &parse(source),
+                &config,
+                None,
+                None,
+                ctx(&NoAbort),
             );
             assert_eq!(result.is_ok(), periodic, "{points}: {:?}", result.err());
         }
@@ -603,11 +519,12 @@ mod tests {
             verbose: false,
         };
 
-        let data = run_pss_analysis_with_config_and_source_path_and_abort(
-            NEGATIVE_RESISTANCE_OSCILLATOR,
+        let data = run_pss_analysis_on_materialized_with_context(
+            &parse(NEGATIVE_RESISTANCE_OSCILLATOR),
             &config,
             None,
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("the autonomous carrier converges through the Studio's own runner");
 

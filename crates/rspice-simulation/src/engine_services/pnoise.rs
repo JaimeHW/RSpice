@@ -4,13 +4,10 @@
 //! This is the analysis that gives oscillator phase noise and mixer noise
 //! figure, where noise at every sideband folds onto the output.
 
-#[cfg(test)]
-use super::build_resolved_periodic_engine;
 use super::periodic_carrier::PeriodicCarrierState;
 use super::{
     ServiceRunError, ServiceRunResult, is_ground_like,
-    netlist_has_independent_source_named_with_abort, parse_runner_netlist_with_abort,
-    run_pss_analysis_with_source_path_and_abort,
+    netlist_has_independent_source_named_with_abort,
 };
 use crate::error::{ensure_not_aborted, poll_periodically};
 use crate::periodic::{PnoiseReference, PnoiseRunConfig, PnoiseRunError};
@@ -19,7 +16,6 @@ use rspice_core::abort_signal::AbortSignal;
 #[cfg(test)]
 use rspice_core::abort_signal::NoAbort;
 use rspice_core::engine::Engine;
-use std::path::Path;
 
 /// PNoise analysis data.
 #[derive(Debug, Clone)]
@@ -54,121 +50,13 @@ pub struct PnoiseData {
     pub timing_jitter_rms_s: Option<Value>,
 }
 
-/// Run PNoise analysis standalone -- computing its own periodic solution
-/// rather than receiving one -- with explicit configuration and cancellation.
+/// Run PNOISE about the exact retained carrier the plan handed over.
 ///
-/// Test-only. PNOISE ships as a dependent task through
-/// [`run_pnoise_analysis_from_pss_with_source_path_and_abort`].
-#[cfg(test)]
-pub fn run_pnoise_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_impl(netlist_text, config, None, None, abort)
-}
-
-/// Run PNOISE from an exact retained PSS state while resolving any unsealed
-/// direct-call source references relative to `source_path`.
-#[cfg(test)]
-pub fn run_pnoise_analysis_from_pss_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_impl(
-        netlist_text,
-        config,
-        source_path,
-        Some(PeriodicCarrierState::Shooting(operating_point)),
-        abort,
-    )
-}
-
-/// Run PNOISE from an exact retained harmonic-balance state.
-///
-/// Driven periodic noise about the other carrier the engine accepts, through
-/// `Engine::run_pnoise_from_hb_with_abort`. There is no oscillator arm here:
-/// a harmonic-balance orbit's period is its authored tone rather than a solver
-/// unknown, so it has no free phase to diffuse, and a phase-referred request
-/// is refused before this point by the plan's dependency contract and by the
-/// engine's own `check_pnoise_card_carrier`.
-#[allow(
-    dead_code,
-    reason = "retained HB carrier PNOISE adapter for callers and tests"
-)]
-pub fn run_pnoise_analysis_from_hb_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-    operating_point: &rspice_core::engine::HbOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_impl(
-        netlist_text,
-        config,
-        source_path,
-        Some(PeriodicCarrierState::HarmonicBalance(operating_point)),
-        abort,
-    )
-}
-
-#[allow(dead_code, reason = "retained source-path PNOISE adapter")]
-fn run_pnoise_analysis_impl(
-    netlist_text: &str,
-    config: &PnoiseRunConfig,
-    source_path: Option<&Path>,
-    carrier: Option<PeriodicCarrierState<'_>>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    ensure_not_aborted(abort)?;
-    config.validate()?;
-    if let Some(carrier) = carrier {
-        carrier
-            .accepted_by(config.carrier, ".PNOISE")
-            .map_err(ServiceRunError::Failure)?;
-    }
-    ensure_not_aborted(abort)?;
-
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    let owned;
-    let carrier = match carrier {
-        Some(carrier) => carrier,
-        None => {
-            owned = run_pss_analysis_with_source_path_and_abort(
-                netlist_text,
-                config.pss_fundamental_freq,
-                config.pss_num_harmonics,
-                config.pss_tolerance,
-                source_path,
-                abort,
-            )?;
-            PeriodicCarrierState::Shooting(&owned.operating_point)
-        }
-    };
-    run_pnoise_analysis_on_materialized_with_abort(&netlist, config, carrier, abort)
-}
-
-pub(crate) fn run_pnoise_analysis_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PnoiseRunConfig,
-    carrier: PeriodicCarrierState<'_>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PnoiseData> {
-    run_pnoise_analysis_on_materialized_with_context(
-        netlist,
-        config,
-        carrier,
-        super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
+/// About a harmonic-balance carrier there is no oscillator arm: an HB orbit's
+/// period is its authored tone rather than a solver unknown, so it has no free
+/// phase to diffuse, and a phase-referred request is refused before this point
+/// by the plan's dependency contract and by the engine's own
+/// `check_pnoise_card_carrier`.
 pub(crate) fn run_pnoise_analysis_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &PnoiseRunConfig,
@@ -503,14 +391,47 @@ fn integrate_psd_power_with_abort(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_services::test_entry::{ctx, driven_pss_config, parse};
+    use crate::engine_services::{PssData, run_pss_analysis_on_materialized_with_context};
     use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
+
+    /// A driven PSS of the whole deck at the configuration's own PSS settings:
+    /// the carrier a PNOISE run without a producer stands on.
+    fn own_carrier(netlist: &rspice_core::Netlist, config: &PnoiseRunConfig) -> PssData {
+        run_pss_analysis_on_materialized_with_context(
+            netlist,
+            &driven_pss_config(
+                netlist,
+                config.pss_fundamental_freq,
+                config.pss_num_harmonics,
+                config.pss_tolerance,
+            ),
+            None,
+            None,
+            ctx(&NoAbort),
+        )
+        .expect("the deck's own carrier converges")
+    }
 
     #[test]
     fn pnoise_service_preserves_typed_entry_abort() {
-        let result = run_pnoise_analysis_with_config_and_abort(
-            "not a netlist",
+        let netlist = parse(
+            "* pnoise abort fixture\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nC1 out 0 1n\n.end\n",
+        );
+        let carrier = own_carrier(
+            &netlist,
+            &PnoiseRunConfig {
+                pss_fundamental_freq: 1.0e6,
+                pss_num_harmonics: 3,
+                pss_tolerance: 1.0e-6,
+                ..PnoiseRunConfig::default()
+            },
+        );
+        let result = run_pnoise_analysis_on_materialized_with_context(
+            &netlist,
             &PnoiseRunConfig::default(),
-            &ImmediateAbort,
+            PeriodicCarrierState::Shooting(&carrier.operating_point),
+            ctx(&ImmediateAbort),
         );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
@@ -552,7 +473,6 @@ mod tests {
         use crate::engine_services::hb::{
             HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
-        use crate::engine_services::test_entry::{ctx, parse};
 
         // R = 1 kOhm, C = 159.154943091895 pF, corner at 1 MHz.
         const DECK: &str = "pnoise carrier agreement fixture\n\
@@ -583,9 +503,9 @@ mod tests {
             ..PnoiseRunConfig::default()
         };
 
-        let netlist =
-            parse_runner_netlist_with_abort(DECK, None, &NoAbort).expect("the deck parses");
-        let engine = build_resolved_periodic_engine(&netlist, config.pss_tolerance, "fixture")
+        let netlist = parse(DECK);
+        let engine = ctx(&NoAbort)
+            .periodic_engine(&netlist, config.pss_tolerance, "fixture")
             .expect("the fixture engine resolves");
         let shooting = engine
             .run_pss_operating_point_with_abort(
@@ -599,7 +519,7 @@ mod tests {
             )
             .expect("the driven RC orbit converges");
         let harmonic_balance = run_hb_analysis_with_dc_seed_on_materialized_with_context(
-            &parse(DECK),
+            &netlist,
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(FUNDAMENTAL, HARMONICS)],
                 reltol: 1.0e-10,
@@ -623,16 +543,18 @@ mod tests {
                 config.input_sideband = sideband;
                 config.input_source = "V1".into();
             }
-            let from_pss = run_pnoise_analysis_from_pss_with_source_path_and_abort(
-                DECK, &config, &shooting, None, &NoAbort,
+            let from_pss = run_pnoise_analysis_on_materialized_with_context(
+                &netlist,
+                &config,
+                PeriodicCarrierState::Shooting(&shooting),
+                ctx(&NoAbort),
             )
             .expect("the shooting-carried run completes");
-            let from_hb = run_pnoise_analysis_from_hb_with_source_path_and_abort(
-                DECK,
+            let from_hb = run_pnoise_analysis_on_materialized_with_context(
+                &netlist,
                 &config,
-                harmonic_balance.as_ref(),
-                None,
-                &NoAbort,
+                PeriodicCarrierState::HarmonicBalance(harmonic_balance.as_ref()),
+                ctx(&NoAbort),
             )
             .expect("the harmonic-balance-carried run completes");
 
@@ -690,15 +612,15 @@ mod tests {
         use crate::engine_services::hb::{
             HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
-        use crate::engine_services::test_entry::{ctx, parse};
 
         const DECK: &str = "pnoise phase refusal fixture\n\
                             V1 in 0 SIN(0 0.001 1Meg)\n\
                             R1 in out 1k\n\
                             C1 out 0 1n\n\
                             .end\n";
+        let netlist = parse(DECK);
         let harmonic_balance = run_hb_analysis_with_dc_seed_on_materialized_with_context(
-            &parse(DECK),
+            &netlist,
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(1.0e6, 8)],
                 ..HbRunConfig::default()
@@ -709,8 +631,8 @@ mod tests {
         .expect("the harmonic-balance carrier converges")
         .operating_point;
 
-        let error = run_pnoise_analysis_from_hb_with_source_path_and_abort(
-            DECK,
+        let error = run_pnoise_analysis_on_materialized_with_context(
+            &netlist,
             &PnoiseRunConfig {
                 pss_fundamental_freq: 1.0e6,
                 pss_num_harmonics: 8,
@@ -723,9 +645,8 @@ mod tests {
                 noise_ref: PnoiseReference::Phase,
                 ..PnoiseRunConfig::default()
             },
-            harmonic_balance.as_ref(),
-            None,
-            &NoAbort,
+            PeriodicCarrierState::HarmonicBalance(harmonic_balance.as_ref()),
+            ctx(&NoAbort),
         )
         .expect_err("a driven orbit has no free phase to diffuse");
         let detail = error.to_string();
@@ -762,17 +683,26 @@ mod tests {
             ..PnoiseRunConfig::default()
         };
 
-        let plain = run_pnoise_analysis_with_config_and_abort(DECK, &base, &NoAbort)
-            .expect("the periodic-noise fixture runs");
+        let netlist = parse(DECK);
+        let carrier = own_carrier(&netlist, &base);
+        let carrier = PeriodicCarrierState::Shooting(&carrier.operating_point);
+        let plain = run_pnoise_analysis_on_materialized_with_context(
+            &netlist,
+            &base,
+            carrier,
+            ctx(&NoAbort),
+        )
+        .expect("the periodic-noise fixture runs");
         assert_eq!(plain.output_rms, None);
 
-        let integrating = run_pnoise_analysis_with_config_and_abort(
-            DECK,
+        let integrating = run_pnoise_analysis_on_materialized_with_context(
+            &netlist,
             &PnoiseRunConfig {
                 integrated_noise: true,
                 ..base
             },
-            &NoAbort,
+            carrier,
+            ctx(&NoAbort),
         )
         .expect("the periodic-noise fixture runs");
         let total = integrating

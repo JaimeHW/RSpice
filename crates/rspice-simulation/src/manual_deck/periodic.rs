@@ -402,9 +402,7 @@ pub(super) fn parse_periodic_tasks(
 /// The engine's `.PSS` card carries no tone list, and it needs none:
 /// [`Engine::validate_periodic_source_contract`] accepts exactly the deck's
 /// complete elaborated source set and refuses any proper subset, so the deck's
-/// own sources *are* the tone list. Reading them here is the same resolution
-/// the compatibility PSS entry point makes for the same reason
-/// (`services::simulation_runner::pss::run_pss_analysis_with_source_path_and_abort`).
+/// own sources *are* the tone list.
 ///
 /// Reading them elaborates the circuit, so the run's sealed Verilog-A and HDL
 /// runtimes are installed first: a deck that names one by its sealed key

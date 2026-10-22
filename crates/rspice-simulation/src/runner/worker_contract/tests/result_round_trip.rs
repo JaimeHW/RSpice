@@ -1112,9 +1112,8 @@ fn monte_carlo_mean_confidence_survives_worker_transport_and_rejects_wrong_popul
 
 #[test]
 fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
-    use crate::engine_services::{
-        PssRunConfig, run_pss_analysis_with_config_and_source_path_and_abort,
-    };
+    use crate::engine_services::test_entry::{ctx, parse};
+    use crate::engine_services::{PssRunConfig, run_pss_analysis_on_materialized_with_context};
     use rspice_core::NoAbort;
 
     let deck = "PSS reporting\nV1 in 0 SIN(0 1 1k)\nR1 in out 1k\nC1 out 0 159.15494309189535n\n";
@@ -1122,11 +1121,12 @@ fn pss_reporting_schedules_preserve_the_authenticated_orbit() {
     config.tstab_periods = 0;
     config.points_per_period = 512;
     let run = |options: &str| {
-        run_pss_analysis_with_config_and_source_path_and_abort(
-            &format!("{deck}{options}\n.end\n"),
+        run_pss_analysis_on_materialized_with_context(
+            &parse(&format!("{deck}{options}\n.end\n")),
             &config,
             None,
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .unwrap()
     };

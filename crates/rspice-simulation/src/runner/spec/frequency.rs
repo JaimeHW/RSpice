@@ -735,9 +735,9 @@ fn sampled_pnoise_studio_runs_retained_hb_and_reports_timing_and_input_units() {
     use rspice_core::analysis::pnoise::{PeriodicNoiseEdge, PeriodicNoiseSampling};
     use svc_runner::test_entry::{ctx, parse};
     use svc_runner::{HbRunConfig, HbToneRunConfig};
-    let deck = "sampled studio\nI1 0 out SIN(0 1m 1k) AC 1\nR1 out 0 1k\n.end\n";
+    let netlist = parse("sampled studio\nI1 0 out SIN(0 1m 1k) AC 1\nR1 out 0 1k\n.end\n");
     let hb = svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_context(
-        &parse(deck),
+        &netlist,
         &HbRunConfig {
             tones: vec![HbToneRunConfig::new(1000.0, 4)],
             ..Default::default()
@@ -782,12 +782,11 @@ fn sampled_pnoise_studio_runs_retained_hb_and_reports_timing_and_input_units() {
             integrated_noise: true,
             ..Default::default()
         };
-        let data = svc_runner::run_pnoise_analysis_from_hb_with_source_path_and_abort(
-            deck,
+        let data = svc_runner::run_pnoise_analysis_on_materialized_with_context(
+            &netlist,
             &config,
-            hb.operating_point.as_ref(),
-            None,
-            &rspice_core::NoAbort,
+            svc_runner::PeriodicCarrierState::HarmonicBalance(hb.operating_point.as_ref()),
+            ctx(&rspice_core::NoAbort),
         )
         .unwrap();
         let result = pnoise_result(data, config.noise_ref, &rspice_core::NoAbort).unwrap();

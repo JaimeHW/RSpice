@@ -654,14 +654,15 @@ pub(in crate::runner) mod tests {
     pub(in crate::runner) fn transferred_pss_dependencies(
         netlist: &str,
     ) -> ResolvedExecutionDependencies {
+        use svc_runner::test_entry::{ctx, driven_pss_config, parse};
         let producer_spec = pss_producer_spec();
-        let produced = svc_runner::run_pss_analysis_with_source_path_and_abort(
-            netlist,
-            1.0e6,
-            8,
-            1.0e-7,
+        let netlist = parse(netlist);
+        let produced = svc_runner::run_pss_analysis_on_materialized_with_context(
+            &netlist,
+            &driven_pss_config(&netlist, 1.0e6, 8, 1.0e-7),
             None,
-            &rspice_core::abort_signal::NoAbort,
+            None,
+            ctx(&rspice_core::abort_signal::NoAbort),
         )
         .expect("the PSS producer converges through the resolved service path");
         let result = SimulationResult::Transient {
