@@ -276,6 +276,62 @@ fn retained_variables_are_listed_at_their_authored_lines() {
     );
 }
 
+/// A virtual runtime compile places a module's processes, system calls and
+/// analog tasks in the included file and on the line they were written, not
+/// on a line of the expanded text under the bundle's root.
+#[test]
+fn virtual_runtime_places_processes_and_tasks_where_they_were_written() {
+    let root = "`include \"disciplines.vams\"\n`include \"body.vams\"\n";
+    let body = "module ticker(p);\n\
+                inout p; electrical p;\n\
+                reg q;\n\
+                initial begin\n\
+                #1 $display(\"tick\"); q = 1;\n\
+                end\n\
+                analog begin\n\
+                $strobe(\"level\");\n\
+                V(p) <+ 0;\n\
+                end\n\
+                endmodule\n";
+    let bundle =
+        VirtualSourceBundle::from_sources("root.vams", [("root.vams", root), ("body.vams", body)])
+            .unwrap();
+    let compilation = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    })
+    .compile_virtual_runtime(&bundle, "ticker", VirtualCompileLimits::default())
+    .unwrap();
+    let runtime = &compilation.runtime;
+    let digital = &runtime.canonical_ir.digital;
+    let placed = |file: &str, line: u32| (file.ends_with("body.vams"), line);
+    let processes: Vec<_> = digital
+        .processes
+        .iter()
+        .map(|process| {
+            let origin = process.origin.as_ref().expect("the process is placed");
+            placed(&origin.file, origin.line)
+        })
+        .collect();
+    let calls: Vec<_> = digital
+        .system_calls
+        .iter()
+        .map(|call| {
+            let origin = call.origin.as_ref().expect("the system call is placed");
+            placed(&origin.file, origin.line)
+        })
+        .collect();
+    let tasks: Vec<_> = runtime
+        .model
+        .analog_task_origins
+        .iter()
+        .map(|origin| placed(&origin.file, origin.line))
+        .collect();
+    assert_eq!(processes, [(true, 4)], "the initial is on body.vams:4");
+    assert_eq!(calls, [(true, 5)], "the $display is on body.vams:5");
+    assert_eq!(tasks, [(true, 8)], "the $strobe is on body.vams:8");
+}
+
 #[test]
 fn include_graph_contains_only_conditionally_active_resolutions() {
     let bundle = VirtualSourceBundle::from_sources(

@@ -227,6 +227,7 @@ impl PreparedVirtualSource {
                 Some(module_name),
                 qualifications,
                 &mut measurements,
+                Some(&self.prepared.source_map),
                 None,
             )
             .map_err(|error| match configuration {
