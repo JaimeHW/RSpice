@@ -14,6 +14,10 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 178's digital plan identity covers the net types and drive
+/// strengths (`CanonicalDigitalPlan::strength`). Earlier identities left them
+/// out, so two plans differing only there shared one identity.
+///
 /// Version 177 carries the SPICE leaves a design instantiates
 /// (`HirModel::external_leaves`) and the discrete ports it links on circuit
 /// nodes (`HirModel::hoisted_ports`). An earlier artifact has neither, so a
@@ -210,7 +214,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 177;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 178;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

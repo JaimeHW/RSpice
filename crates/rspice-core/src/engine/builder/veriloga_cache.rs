@@ -483,7 +483,11 @@ use super::*;
 // keyed by the cells the deck offers a design (its `.subckt`s and model
 // cards), which decide what an instance of an undeclared module compiles to;
 // a deck that offers none keys its records as before.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 167;
+//
+// Version 168 follows the canonical IR's schema to 178, whose digital plan
+// identity covers the strength table. A version-167 record carries an
+// identity that left it out.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 168;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

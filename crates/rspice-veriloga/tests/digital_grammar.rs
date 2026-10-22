@@ -2990,6 +2990,28 @@ fn a_trireg_lowers_its_decay_time_to_design_ticks() {
     assert!(error.contains("rounds to no time"), "{error}");
 }
 
+/// Two plans that differ only in a net's charge strength (section 7.14.1)
+/// are different designs, so they carry different content identities.
+#[test]
+fn a_nets_strength_is_part_of_the_plan_identity() {
+    let plan = |charge: &str| {
+        VerilogACompiler::default()
+            .compile_canonical_ir(&format!("module g;\n  trireg ({charge}) t;\nendmodule\n"))
+            .unwrap()
+            .digital
+    };
+    let (large, small) = (plan("large"), plan("small"));
+    assert_ne!(large.content_identity, small.content_identity);
+    // Nothing else differs: given the large net's strength table, the small
+    // net's plan validates under the large one's identity.
+    let mut swapped = small;
+    swapped.content_identity = large.content_identity;
+    swapped.strength = large.strength;
+    swapped
+        .validate()
+        .expect("the plans differ only in strength");
+}
+
 /// An array of gate instances (section 7.1.5) becomes one driver per element,
 /// each taking its bit of a terminal as wide as the array and the whole of a
 /// one-bit terminal (section 7.1.6).

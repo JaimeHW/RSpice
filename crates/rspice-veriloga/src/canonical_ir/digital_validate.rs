@@ -242,7 +242,7 @@ impl CanonicalDigitalPlan {
                 &self.system_calls,
                 &self.observers,
                 &self.routines,
-                &self.overrides,
+                (&self.overrides, &self.strength),
             ),
         )
         .map_err(|detail| error(format!("cannot hash digital plan: {detail}")))?;
