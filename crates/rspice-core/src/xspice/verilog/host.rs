@@ -58,6 +58,7 @@
 
 #[cfg(test)]
 mod analog_sample_tests;
+mod charge;
 pub(crate) mod checkpoint;
 mod coupled;
 mod image;
@@ -492,6 +493,9 @@ pub(crate) struct DigitalHost {
     /// One stable wakeup identity, with captured payloads owned by their due tick.
     /// No process slot or driver identity is allocated per delayed assignment.
     nba_target: TargetId,
+    /// Pending `trireg` charge decays under their own stable wakeup;
+    /// `None` for a design without a `trireg` that decays.
+    charge: Option<charge::ChargeTimers>,
     external_targets: Vec<TargetId>,
     external_real_targets: Vec<TargetId>,
     elaboration_closed: bool,
@@ -698,9 +702,11 @@ impl DigitalHost {
             driver_index: 0,
             instance: "NBA".to_string(),
         });
+        let charge = charge::ChargeTimers::for_plan(&plan, &mut scheduler);
         Self {
             checkpoint_failed: false,
             nba_target,
+            charge,
             external_targets: Vec::new(),
             external_real_targets: Vec::new(),
             elaboration_closed: false,
@@ -1248,6 +1254,14 @@ impl DigitalHost {
                         }
                         continue;
                     }
+                    if self
+                        .charge
+                        .as_ref()
+                        .is_some_and(|timers| timers.target == *target)
+                    {
+                        self.fire_charge(tick)?;
+                        continue;
+                    }
                     let index = self.process_of_target[usize::from(*target)];
                     if self.withdrawn.remove(&index) {
                         continue;
@@ -1699,6 +1713,10 @@ impl DigitalHost {
             self.store.settle_overrides().map_err(|error| {
                 evaluation_error("a procedural continuous assignment".into(), error)
             })?;
+            // A `trireg` bit its drivers let go of starts its charge decay,
+            // and one they take back cancels it (IEEE 1364-2005 section
+            // 7.14.2).
+            self.schedule_charge_changes(tick)?;
             self.store.drain_transitions_into(drained);
             if drained.is_empty() {
                 return Ok(());

@@ -214,6 +214,20 @@ impl DigitalSignalStore {
                         member.bit
                     ));
                 }
+                // A joined net resolves without a `trireg`'s charge (IEEE
+                // 1364-2005 section 4.6.3), so the join is refused.
+                if self
+                    .strengths
+                    .charges
+                    .get(signal)
+                    .is_some_and(Option::is_some)
+                {
+                    return Err(format!(
+                        "`{}` is a `trireg`, and a charge storage net joined to a circuit net \
+                         has no lowered form yet",
+                        super::signal_name(&self.plan, member.signal)
+                    ));
+                }
                 if let Some(&previous) = claimed.get(&member) {
                     let left = root(&mut parents, previous);
                     let right = root(&mut parents, group);

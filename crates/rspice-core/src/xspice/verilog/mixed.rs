@@ -8643,6 +8643,40 @@ endmodule
         );
     }
 
+    /// IEEE 1364-2005 section 7.14.2 under a rejected trial: a trial that
+    /// reaches a `trireg`'s charge decay decays it, and rejecting the trial
+    /// restores the held value and the pending decay, which the analog
+    /// stepper still sees as its next breakpoint.
+    #[test]
+    fn a_rejected_trial_restores_a_pending_charge_decay() {
+        let source = "`timescale 1ns/1ns
+            module cap(p); inout p; electrical p;
+            reg d, en; trireg (large) #(0, 0, 5) t;
+            bufif1 (t, d, en);
+            initial begin d = 1; en = 1; #1 en = 0; #6 en = 1; end
+            analog I(p) <+ 0.0;
+            endmodule";
+        let mut host =
+            MixedSignalHost::compile(source, None, "cap", &[1], SchedulerLimits::default())
+                .unwrap();
+        begin(&mut host, 0);
+        settle_and_accept(&mut host, &[0.0, 0.0]);
+        begin(&mut host, 1);
+        settle_and_accept(&mut host, &[0.0, 0.0]);
+        let next = |host: &MixedSignalHost| host.next_event_time().unwrap().unwrap();
+        assert!((next(&host) - 6e-9).abs() < 1e-20);
+        assert_eq!(host.read_digital("t").unwrap(), "1");
+        begin(&mut host, 6);
+        assert_eq!(host.read_digital("t").unwrap(), "x");
+        host.reject_trial().unwrap();
+        assert_eq!(host.read_digital("t").unwrap(), "1");
+        assert!((next(&host) - 6e-9).abs() < 1e-20);
+        begin(&mut host, 6);
+        settle_and_accept(&mut host, &[0.0, 0.0]);
+        assert_eq!(host.read_digital("t").unwrap(), "x");
+        assert!((next(&host) - 7e-9).abs() < 1e-20);
+    }
+
     /// A rejected trial leaves the analog device's accepted record untouched.
     ///
     /// This is the property that lets the device sit outside the rollback

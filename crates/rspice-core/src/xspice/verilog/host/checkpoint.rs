@@ -61,7 +61,25 @@ pub(crate) struct HostCheckpoint {
     /// none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     forces: Option<ForcesSection>,
+    /// The pending `trireg` charge decays (IEEE 1364-2005 section 7.14.2);
+    /// absent when none is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    strength: Option<StrengthSection>,
 }
+
+/// The strength section, tagged with its own version: each pending charge
+/// decay's due tick and the `trireg` bits that decay then, in tick order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StrengthSection {
+    version: u32,
+    decays: Vec<(
+        u64,
+        Vec<rspice_veriloga::canonical_ir::digital::DigitalNetBit>,
+    )>,
+}
+
+const STRENGTH_SECTION_VERSION: u32 = 1;
 
 /// The forces section, tagged with its own version.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -229,6 +247,9 @@ impl DigitalHost {
         limits: HostCheckpointLimits,
     ) -> Result<HostCheckpoint, String> {
         self.checkpoint_boundary()?;
+        if self.store.has_charge_changes() {
+            return Err("host has unscheduled charge decays".into());
+        }
         check_size(
             self.slots.len(),
             self.delayed_updates
@@ -292,6 +313,15 @@ impl DigitalHost {
                 .map(|image| ForcesSection {
                     version: FORCES_SECTION_VERSION,
                     image,
+                }),
+            strength: self
+                .charge
+                .as_ref()
+                .map(charge::ChargeTimers::image)
+                .filter(|decays| !decays.is_empty())
+                .map(|decays| StrengthSection {
+                    version: STRENGTH_SECTION_VERSION,
+                    decays,
                 }),
             delayed: self
                 .delayed_updates
@@ -427,6 +457,7 @@ impl DigitalHost {
         let base_targets = self.targets[..processes]
             .iter()
             .chain([&self.nba_target])
+            .chain(self.charge.as_ref().map(|timers| &timers.target))
             .chain(&self.external_targets)
             .chain(&self.external_real_targets)
             .map(|target| usize::from(*target) + 1)
@@ -462,6 +493,13 @@ impl DigitalHost {
         restored.store = self
             .store
             .restored_checkpoint(&image.store, forces, &mut reader)?;
+        match &image.strength {
+            Some(section) if section.version != STRENGTH_SECTION_VERSION => {
+                return Err("host strength section version differs".into());
+            }
+            Some(section) => restored.restore_charge_timers(&section.decays)?,
+            None => {}
+        }
         restored.elaboration_closed = true;
         if let Some(section) = &image.effects {
             if section.version != EFFECTS_SECTION_VERSION {
@@ -723,10 +761,12 @@ impl DigitalHost {
             .enumerate()
             .map(|(index, target)| (target, index))
             .collect();
+        let charge_target = self.charge.as_ref().map(|timers| timers.target);
         let known: BTreeSet<_> = self
             .targets
             .iter()
             .chain([&self.nba_target])
+            .chain(charge_target.as_ref())
             .chain(&self.external_targets)
             .chain(&self.external_real_targets)
             .copied()
@@ -734,9 +774,13 @@ impl DigitalHost {
         if known.len() != scheduler.target_count()
             || processes.len() != self.slots.len()
             || processes.contains_key(&self.nba_target)
+            || charge_target.is_some_and(|target| processes.contains_key(&target))
         {
             return Err("scheduler target registration differs from the host".into());
         }
+        // The decay wakeup sits at the earliest pending decay, once.
+        let next_decay = self.charge.as_ref().and_then(charge::ChargeTimers::next);
+        let mut decay_wakeups = 0usize;
         let mut activations = vec![0usize; self.slots.len()];
         let mut buckets = BTreeSet::new();
         for (at, region, target, value) in scheduler.live_events() {
@@ -753,6 +797,11 @@ impl DigitalHost {
                 if !self.delayed_updates.contains_key(&tick) || !buckets.insert(tick) {
                     return Err("NBA wakeup has no unique delayed bucket".into());
                 }
+            } else if Some(target) == charge_target {
+                decay_wakeups += 1;
+                if decay_wakeups != 1 || next_decay != Some(tick) {
+                    return Err("charge decay wakeup differs from the pending decays".into());
+                }
             } else if let Some(index) = processes.get(&target) {
                 activations[*index] += 1;
                 if activations[*index] != 1 {
@@ -764,6 +813,9 @@ impl DigitalHost {
         }
         if buckets.len() != self.delayed_updates.len() {
             return Err("delayed update bucket has no wakeup".into());
+        }
+        if next_decay.is_some() && decay_wakeups == 0 {
+            return Err("pending charge decay has no wakeup".into());
         }
         for (slot, count) in self.slots.iter().zip(activations) {
             if count != usize::from(matches!(slot.status, ProcessStatus::Queued)) {
@@ -947,6 +999,64 @@ endmodule
         finish(&mut original);
         finish(&mut restored);
         assert_eq!(image(&restored), image(&original));
+    }
+
+    /// IEEE 1364-2005 section 7.14.2: an image taken while two `trireg`s
+    /// decay carries their decays in its `strength` section, and the restored
+    /// host decays each at the tick the original does. An image whose
+    /// section disagrees with its scheduler is refused whole.
+    #[test]
+    fn host_checkpoint_resumes_trireg_charge_decay_mid_decay() {
+        const TRIREG: &str = "`timescale 1ns/1ns\nmodule cap;\n  reg d, en;\n  \
+             trireg (large) #(0, 0, 5) t;\n  trireg #(0, 0, 8) u;\n  bufif1 (t, d, en);\n  \
+             bufif1 (u, d, en);\n  initial begin d = 1; en = 1; #1 en = 0; end\nendmodule\n";
+        let mut original = host(TRIREG);
+        original.start().unwrap();
+        original.advance_to(3).unwrap();
+        let saved = transport(&image(&original));
+        let section = serde_json::to_value(&saved).unwrap()["strength"].clone();
+        assert_eq!(section["version"], json!(1), "{section}");
+        let ticks: Vec<_> = section["decays"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|bucket| bucket[0].as_u64().unwrap())
+            .collect();
+        assert_eq!(ticks, [6, 9]);
+        let mut restored = host(TRIREG);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            let held = |host: &DigitalHost| {
+                ["t", "u"]
+                    .map(|name| host.read(signal(host, name)).unwrap().spelling())
+                    .concat()
+            };
+            assert_eq!(host.next_tick(), Some(6));
+            host.advance_to(5).unwrap();
+            assert_eq!(held(host), "11");
+            host.advance_to(6).unwrap();
+            assert_eq!(held(host), "x1");
+            assert_eq!(host.next_tick(), Some(9));
+            host.advance_to(9).unwrap();
+            assert_eq!(held(host), "xx");
+            assert_eq!(host.next_tick(), None);
+        }
+        let base = serde_json::to_value(&saved).unwrap();
+        for edit in [
+            |value: &mut Value| value["strength"] = Value::Null,
+            |value: &mut Value| value["strength"]["decays"][0][0] = json!(7),
+        ] {
+            let mut value = base.clone();
+            edit(&mut value);
+            let bad: HostCheckpoint = serde_json::from_value(value).unwrap();
+            let error = host(TRIREG)
+                .restore_checkpoint(&bad, HostCheckpointLimits::default())
+                .unwrap_err();
+            assert!(error.contains("charge decay"), "{error}");
+        }
     }
 
     /// Design P2 section 5.4: a version 1 image (per-process slots, no

@@ -884,6 +884,32 @@ pub enum DigitalNetType {
     Supply0,
     /// `supply1`: a constant 1 at supply strength.
     Supply1,
+    /// `trireg` (section 4.6.3): a bit no driver drives holds its last value
+    /// at the charge strength, `Small`, `Medium` or `Large` (section 7.13.2),
+    /// and after its charge decay time it decays to `x` (section 7.14.2).
+    /// `None` holds the charge for ever (section 4.6.3.2).
+    Trireg {
+        charge: DigitalStrengthLevel,
+        decay: Option<DigitalChargeDecay>,
+    },
+}
+
+/// A `trireg`'s charge decay time: `ticks` of `10^exponent` seconds, the
+/// precision of the design it was lowered in. Carried with its exponent so a
+/// linked design, whose precision may be finer, reads it exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalChargeDecay {
+    pub ticks: u64,
+    pub exponent: i8,
+}
+
+impl DigitalChargeDecay {
+    /// The decay time in ticks of `10^precision` seconds, or `None` when it
+    /// is not a whole number of them or does not fit.
+    pub fn ticks_at(self, precision: i8) -> Option<u64> {
+        let finer = u32::try_from(i32::from(self.exponent) - i32::from(precision)).ok()?;
+        self.ticks.checked_mul(10_u64.checked_pow(finer)?)
+    }
 }
 
 /// One net whose type is not `wire`.

@@ -2870,6 +2870,79 @@ fn an_illegal_drive_strength_pair_is_refused_by_name() {
     }
 }
 
+/// `trireg` (IEEE 1364-2005 sections 4.4.1, 4.6.3 and 7.14.2): a charge
+/// strength, `medium` by default, and the charge decay time as the third
+/// delay. A rise or fall delay other than 0, and a decay time that is not a
+/// positive number, are refused by name.
+#[test]
+fn trireg_declarations_parse_their_charge_strength_and_decay_time() {
+    use rspice_veriloga::canonical_ir::digital::DigitalStrengthLevel::{Large, Medium, Small};
+    let file = parse(
+        "module g;\n\
+         \x20   trireg t0;\n     trireg (large) #(0, 0, 50) t1;\n\
+         \x20   trireg (small) [3:0] t2;\n     trireg #(0, 0, 2.5) t3;\n\
+         endmodule\n",
+    );
+    let kinds: Vec<_> = parsed_module(&file)
+        .digital_nets
+        .iter()
+        .map(|net| net.kind)
+        .collect();
+    let trireg = |charge, decay: Option<f64>| DigitalNetKind::Trireg {
+        charge,
+        decay: decay.and_then(ChargeDecay::new),
+    };
+    assert_eq!(
+        kinds,
+        [
+            trireg(Medium, None),
+            trireg(Large, Some(50.0)),
+            trireg(Small, None),
+            trireg(Medium, Some(2.5)),
+        ]
+    );
+    for (declaration, found) in [
+        ("trireg #5 t;", "a rise or fall delay other than 0"),
+        ("trireg #(1, 0, 5) t;", "a rise or fall delay other than 0"),
+        ("trireg #(0, 0, 0) t;", "not a positive decimal number"),
+        ("trireg #(0, 0, d) t;", "not a positive decimal number"),
+        ("trireg #(0, 0, 5, 1) t;", "more than three delays"),
+    ] {
+        let error = parse_error(&format!(
+            "module g;\n    parameter d = 5;\n    {declaration}\nendmodule\n"
+        ));
+        assert!(error.contains(found), "{declaration}: {error}");
+    }
+}
+
+/// Section 7.14.2: the decay time is a delay in module units, rounded at the
+/// module's precision; one that rounds to nothing is refused by name.
+#[test]
+fn a_trireg_lowers_its_decay_time_to_design_ticks() {
+    use rspice_veriloga::canonical_ir::digital::{
+        DigitalChargeDecay, DigitalNetType, DigitalStrengthLevel,
+    };
+    let plan = VerilogACompiler::default()
+        .compile_canonical_ir(
+            "`timescale 1ns/100ps\nmodule g;\n  trireg (large) #(0, 0, 2.5) t;\nendmodule\n",
+        )
+        .unwrap()
+        .digital;
+    assert_eq!(
+        plan.strength.nets[0].net_type,
+        DigitalNetType::Trireg {
+            charge: DigitalStrengthLevel::Large,
+            decay: Some(DigitalChargeDecay {
+                ticks: 25,
+                exponent: -10
+            }),
+        }
+    );
+    let error =
+        lowering_error("`timescale 1ns/1ns\nmodule g;\n  trireg #(0, 0, 0.25) t;\nendmodule\n");
+    assert!(error.contains("rounds to no time"), "{error}");
+}
+
 /// An array of gate instances (section 7.1.5) becomes one driver per element,
 /// each taking its bit of a terminal as wide as the array and the whole of a
 /// one-bit terminal (section 7.1.6).

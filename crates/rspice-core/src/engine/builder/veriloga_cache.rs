@@ -468,7 +468,10 @@ use super::*;
 //
 // Version 161 follows the canonical IR's schema to 173, whose digital plan
 // carries the bidirectional switches. A version-160 record refused them.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 161;
+//
+// Version 164 follows the canonical IR's schema to 175, whose digital plan
+// carries `trireg` nets. A version-161 record refused them.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 164;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

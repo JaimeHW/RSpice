@@ -79,6 +79,7 @@
 //! already holds produces no transition, which is what stops a level-sensitive
 //! `@*` process from re-triggering itself forever.
 
+mod charge;
 pub(crate) mod checkpoint;
 mod image;
 mod islands;
@@ -419,6 +420,9 @@ pub(crate) struct DigitalSignalStore {
     /// Per bidirectional switch direction, what its island passes through it
     /// (`store/islands.rs`). Derived like `passed`.
     bridged: Vec<StrengthBit>,
+    /// Which `trireg` bits hold charge, and what has changed about that for
+    /// the host's decay timers (`store/charge.rs`).
+    charge: charge::ChargeState,
 }
 
 /// The plan's net types and drive strengths, indexed as the store is.
@@ -438,6 +442,8 @@ struct StrengthTables {
     readers: std::collections::HashMap<DigitalSignalId, Vec<usize>>,
     /// The bidirectional switches' islands.
     islands: islands::Islands,
+    /// Per signal, a `trireg` net's charge. Empty for a plan without one.
+    charges: Vec<Option<charge::Charge>>,
     /// Whether any net resolves by strength.
     any: bool,
 }
@@ -456,6 +462,7 @@ impl StrengthTables {
             switches: Vec::new(),
             readers: std::collections::HashMap::new(),
             islands: islands::Islands::default(),
+            charges: Vec::new(),
             any: false,
         };
         if !plan.strength.gates.is_empty() {
@@ -539,7 +546,16 @@ impl StrengthTables {
             if let Some(entry) = tables.nets.get_mut(usize::from(net.signal)) {
                 *entry = NetResolution::of(net.net_type);
             }
+            if let Some(charge) = charge::Charge::of(net.net_type, plan.timing.precision_exponent) {
+                if tables.charges.is_empty() {
+                    tables.charges = vec![None; plan.signals.len()];
+                }
+                if let Some(entry) = tables.charges.get_mut(usize::from(net.signal)) {
+                    *entry = Some(charge);
+                }
+            }
         }
+        tables.islands.mark_charged(&tables.charges);
         for driver in &plan.strength.drivers {
             let signal = usize::from(driver.driver.signal);
             let (Some(span), Some(net)) = (spans.get(signal), tables.nets.get_mut(signal)) else {
@@ -767,12 +783,14 @@ impl DigitalSignalStore {
                 values[index] = FourStateValue::splat(widths[index], implicit.value());
             }
         }
+        let charge = charge::ChargeState::new(&strengths, &widths, &mut values);
         let connected_reals =
             (!plan.real_aliases.is_empty()).then(|| Arc::new(RealConnections::new(&plan)));
         let mut store = Self {
             strengths,
             passed,
             bridged,
+            charge,
             connected_reals,
             values,
             reals,
@@ -1266,6 +1284,18 @@ impl DigitalSignalStore {
     /// value: the bit at the driver's drive strength, or for a gated driver
     /// what its gate makes of the data bit under the enable above the data.
     fn contribution_bit(&self, slot: usize, value: &FourStateValue, offset: u32) -> StrengthBit {
+        self.contribution_bit_as(slot, value, offset, false)
+    }
+
+    /// [`Self::contribution_bit`]; `free` reads what a switch passes with no
+    /// `trireg`'s charge counted (`store/charge.rs`).
+    fn contribution_bit_as(
+        &self,
+        slot: usize,
+        value: &FourStateValue,
+        offset: u32,
+        free: bool,
+    ) -> StrengthBit {
         let data = value.bit(offset);
         match self.slot_gate(slot) {
             None => StrengthBit::driven(data, self.strengths.slots[slot]),
@@ -1284,38 +1314,66 @@ impl DigitalSignalStore {
                     .unwrap_or(StrengthBit::strong(data));
                 strength::mos(passed, enable, resistive)
             }
-            Some(strength::SlotGate::Tran { bridge }) => bridge
-                .filter(|_| offset == 0)
-                .map_or(StrengthBit::HIGH_Z, |bridge| self.bridged(bridge)),
+            Some(strength::SlotGate::Tran { bridge }) => {
+                bridge
+                    .filter(|_| offset == 0)
+                    .map_or(StrengthBit::HIGH_Z, |bridge| {
+                        if free {
+                            self.charge.bridged_free(bridge)
+                        } else {
+                            self.bridged(bridge)
+                        }
+                    })
+            }
         }
     }
 
     /// Fold one strength net's contributions, and the driver its type adds,
-    /// into a strength range per bit (IEEE 1364-2005 section 7.10).
+    /// into a strength range per bit (IEEE 1364-2005 section 7.10). A
+    /// `trireg`'s charge is one of them while its own drivers are all `z`
+    /// (`store/charge.rs`).
     fn resolve_strengths(&self, signal: DigitalSignalId) -> Vec<StrengthBit> {
+        self.resolve_strengths_as(signal, false)
+    }
+
+    /// [`Self::resolve_strengths`]; `free` leaves every `trireg`'s charge
+    /// out, which is what the net's drivers alone make of it.
+    fn resolve_strengths_as(&self, signal: DigitalSignalId, free: bool) -> Vec<StrengthBit> {
         let index = usize::from(signal);
         let width = self.widths[index];
         let span = self.spans[index];
         let mut bits = vec![StrengthBit::HIGH_Z; width as usize];
+        // A `trireg`'s own drivers, without what a switch island passes it,
+        // decide whether its charge counts.
+        let charged = !free && self.charge_of(signal).is_some();
+        let mut own = vec![StrengthBit::HIGH_Z; if charged { width as usize } else { 0 }];
         for slot in span.start..span.start + span.count {
             let contribution = &self.contributions[slot];
             let ContributionValue::FourState(Some(value)) = &contribution.value else {
                 continue;
             };
-            let gated = self.slot_gate(slot).is_some();
-            for offset in 0..value.width() - u32::from(gated) {
+            let gate = self.slot_gate(slot);
+            let bridge = matches!(gate, Some(strength::SlotGate::Tran { .. }));
+            for offset in 0..value.width() - u32::from(gate.is_some()) {
                 let position = contribution.low + i64::from(offset);
                 if position < 0 || position >= i64::from(width) {
                     continue;
                 }
+                let passed = self.contribution_bit_as(slot, value, offset, free);
                 let bit = &mut bits[position as usize];
-                *bit = bit.resolve(self.contribution_bit(slot, value, offset));
+                *bit = bit.resolve(passed);
+                if let Some(own) = own.get_mut(position as usize).filter(|_| !bridge) {
+                    *own = own.resolve(passed);
+                }
             }
         }
         if let NetResolution::Strength(Some(implicit)) = self.strengths.nets[index] {
             for bit in &mut bits {
                 *bit = bit.resolve(implicit);
             }
+        }
+        if charged {
+            self.resolve_charge(signal, &own, &mut bits);
         }
         bits
     }
@@ -1390,6 +1448,7 @@ impl DigitalSignalStore {
         }
         let resolved = self.resolve(signal);
         self.publish_connected(signal, resolved);
+        self.note_holding(signal);
         self.pass_strengths(signal, depth);
     }
 

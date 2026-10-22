@@ -414,16 +414,32 @@ impl Parser<'_> {
         if self.check(TokenKind::Wreal) {
             return self.parse_wreal_net_decl(module);
         }
-        let kind = self
+        // IEEE 1364-2005 section 4.6.3: `trireg` stays a reserved digital
+        // keyword, so it is read here rather than as a `wire` spelling.
+        let trireg = self.digital_keyword_is("trireg");
+        let mut kind = self
             .current()
             .text
             .as_deref()
             .and_then(DigitalNetKind::from_keyword)
             .unwrap_or(DigitalNetKind::Wire);
-        self.expect(TokenKind::Wire)?;
+        if trireg {
+            self.advance();
+        } else {
+            self.expect(TokenKind::Wire)?;
+        }
+        // `trireg (large) t;` (section 4.4.1): the charge strength.
+        let charge = if trireg && self.check(TokenKind::LParen) {
+            self.parse_charge_strength()?
+        } else {
+            None
+        };
         // `wire (weak1, weak0) w = a;` (section 6.1.4): the strength of the
         // declaration assignment.
-        let strength = if self.check(TokenKind::LParen) && self.strength_specification_follows() {
+        let strength = if charge.is_none()
+            && self.check(TokenKind::LParen)
+            && self.strength_specification_follows()
+        {
             Some(self.parse_drive_strength("net declaration")?)
         } else {
             None
@@ -448,6 +464,17 @@ impl Parser<'_> {
                 "`{keyword}` declares a vector net, so a range must follow it (IEEE 1364-2005 \
                  section 4.3.2)"
             ))));
+        }
+        if trireg {
+            let decay = if self.check(TokenKind::Hash) {
+                self.parse_trireg_delay()?
+            } else {
+                None
+            };
+            kind = DigitalNetKind::Trireg {
+                charge: charge.unwrap_or(DigitalStrengthLevel::Medium),
+                decay,
+            };
         }
         let mut items = self.parse_digital_decl_items()?;
         Self::retain_discrete_discipline(
@@ -948,6 +975,98 @@ impl Parser<'_> {
             .get(self.pos + 1)
             .and_then(|token| token.text.as_deref())
             .is_some_and(|text| strength_level(text).is_some())
+    }
+
+    /// `(small)`, `(medium)` or `(large)` after `trireg` (IEEE 1364-2005
+    /// section 4.4.1); `None`, consuming nothing, when the parenthesis opens
+    /// something else.
+    fn parse_charge_strength(&mut self) -> Result<Option<DigitalStrengthLevel>, ParseError> {
+        let level = match self
+            .tokens
+            .get(self.pos + 1)
+            .and_then(|token| token.text.as_deref())
+        {
+            Some("small") => DigitalStrengthLevel::Small,
+            Some("medium") => DigitalStrengthLevel::Medium,
+            Some("large") => DigitalStrengthLevel::Large,
+            _ => return Ok(None),
+        };
+        self.expect(TokenKind::LParen)?;
+        self.advance();
+        self.expect(TokenKind::RParen)?;
+        Ok(Some(level))
+    }
+
+    /// A `trireg`'s `#delay`, `#(rise, fall)` or `#(rise, fall, decay)`
+    /// (IEEE 1364-2005 sections 7.14 and 7.14.2).
+    ///
+    /// The third delay is the charge decay time. The rise and fall delays of
+    /// a net have no lowered form, so they are accepted only as zero, and the
+    /// decay time only as a positive number, which is what a scheduled decay
+    /// needs.
+    fn parse_trireg_delay(&mut self) -> Result<Option<ChargeDecay>, ParseError> {
+        let start = self.current_span();
+        self.expect(TokenKind::Hash)?;
+        let mut delays = Vec::new();
+        if self.match_token(TokenKind::LParen) {
+            loop {
+                delays.push(self.parse_expression()?);
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+            }
+            self.expect(TokenKind::RParen)?;
+        } else {
+            delays.push(self.parse_primary()?);
+        }
+        let span = start.extend(self.previous_span());
+        let refuse = |found: &str| {
+            Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "`trireg` declaration".to_string(),
+                    found: found.to_string(),
+                },
+                span,
+            ))
+        };
+        // A decimal number, not a based, sized or scaled one.
+        let number = |delay: &Expression| match delay {
+            Expression::Number(number)
+                if number.raw.chars().all(|ch| {
+                    ch.is_ascii_digit() || matches!(ch, '.' | '_' | 'e' | 'E' | '+' | '-')
+                }) =>
+            {
+                Some(number.value)
+            }
+            _ => None,
+        };
+        if delays.len() > 3 {
+            return refuse(
+                "more than three delays; a `trireg` takes a rise, a fall and a charge \
+                           decay time (IEEE 1364-2005 section 7.14.2)",
+            );
+        }
+        if delays
+            .iter()
+            .take(2)
+            .any(|delay| number(delay) != Some(0.0))
+        {
+            return refuse(
+                "a rise or fall delay other than 0; a net's transition delays (IEEE \
+                           1364-2005 section 7.14) have no lowered form, and only the charge \
+                           decay time, the third delay, does",
+            );
+        }
+        match delays.get(2) {
+            None => Ok(None),
+            Some(delay) => match number(delay).and_then(ChargeDecay::new) {
+                Some(decay) => Ok(Some(decay)),
+                None => refuse(
+                    "a charge decay time that is not a positive decimal number \
+                                (IEEE 1364-2005 section 7.14.2)",
+                ),
+            },
+        }
     }
 
     /// Turn one gate instance's terminal list into its driving assignments.

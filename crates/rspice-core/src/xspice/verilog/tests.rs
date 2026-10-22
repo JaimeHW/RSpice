@@ -1456,6 +1456,7 @@ mod overrides;
 mod ports;
 mod strengths;
 mod threads;
+mod trireg;
 mod udps;
 mod values;
 

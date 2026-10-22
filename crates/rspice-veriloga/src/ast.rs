@@ -2267,10 +2267,15 @@ impl WrealResolution {
 /// Net type keyword.
 ///
 /// `wire` / `tri` and the other IEEE 1364-2005 section 4.6 net types;
-/// [`Self::Wreal`] is Verilog-AMS LRM 2.4 section 3.7's real net. `trireg` is
-/// still refused by name at the keyword.
+/// [`Self::Wreal`] is Verilog-AMS LRM 2.4 section 3.7's real net.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DigitalNetKind {
+    /// `trireg` (section 4.6.3): a charge storage net, with its charge
+    /// strength (section 4.4.1) and its charge decay time (section 7.14.2).
+    Trireg {
+        charge: crate::canonical_ir::digital::DigitalStrengthLevel,
+        decay: Option<ChargeDecay>,
+    },
     Wire,
     /// `wand` / `triand`.
     Wand,
@@ -2297,6 +2302,7 @@ impl DigitalNetKind {
             Self::Supply0 => "supply0",
             Self::Supply1 => "supply1",
             Self::Uwire => "uwire",
+            Self::Trireg { .. } => "trireg",
             Self::Wreal(resolution) => resolution.keyword(),
         }
     }
@@ -2327,6 +2333,23 @@ impl DigitalNetKind {
             Self::Wreal(resolution) => Some(resolution),
             _ => None,
         }
+    }
+}
+
+/// A `trireg`'s charge decay time (IEEE 1364-2005 section 7.14.2), the third
+/// delay of its declaration, in its module's time units. Kept as the bits of
+/// the number so that the net kind stays `Copy` and `Eq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChargeDecay(u64);
+
+impl ChargeDecay {
+    /// A decay time, if it is a positive finite number of units.
+    pub fn new(units: f64) -> Option<Self> {
+        (units.is_finite() && units > 0.0).then(|| Self(units.to_bits()))
+    }
+
+    pub const fn units(self) -> f64 {
+        f64::from_bits(self.0)
     }
 }
 

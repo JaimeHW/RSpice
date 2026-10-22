@@ -48,6 +48,8 @@ pub(super) struct Islands {
     bridges: Vec<Bridge>,
     islands: Vec<Island>,
     by_signal: HashMap<DigitalSignalId, Vec<usize>>,
+    /// Per island, whether a `trireg` bit is in it (`store/charge.rs`).
+    charged: Vec<bool>,
 }
 
 /// One switch direction as the plan gives it, before islands are found.
@@ -126,6 +128,25 @@ impl Islands {
     pub(super) fn bridge_count(&self) -> usize {
         self.bridges.len()
     }
+
+    /// Note which islands hold a `trireg` bit, given each signal's charge.
+    pub(super) fn mark_charged<T>(&mut self, charges: &[Option<T>]) {
+        self.charged = self
+            .islands
+            .iter()
+            .map(|island| {
+                island.signals.iter().any(|signal| {
+                    charges
+                        .get(usize::from(*signal))
+                        .is_some_and(Option::is_some)
+                })
+            })
+            .collect();
+    }
+
+    fn charged(&self, island: usize) -> bool {
+        self.charged.get(island).copied().unwrap_or(false)
+    }
 }
 
 impl DigitalSignalStore {
@@ -152,6 +173,7 @@ impl DigitalSignalStore {
             for &member in &tables.islands.islands[island].signals {
                 let resolved = self.resolve(member);
                 self.publish_connected(member, resolved);
+                self.note_holding(member);
                 self.pass_strengths(member, depth);
             }
         }
@@ -170,14 +192,23 @@ impl DigitalSignalStore {
 
     /// Resolve one island to its least fixed point; see the module
     /// documentation.
+    ///
+    /// An island holding a `trireg` bit is resolved twice: with every charge
+    /// in it, which is what its nets carry, and with none, which says which
+    /// bits only charge reaches (`store/charge.rs`).
     fn solve_island(&mut self, index: usize) {
         let tables = Arc::clone(&self.strengths);
         let island = &tables.islands.islands[index];
+        let charged = tables.islands.charged(index);
         for &bridge in &island.bridges {
             self.bridged[bridge] = StrengthBit::HIGH_Z;
+            if charged {
+                self.charge.clear_bridged_free(bridge);
+            }
         }
-        let mut resolved: Vec<(DigitalSignalId, Vec<StrengthBit>)> = Vec::new();
+        let mut resolved: Vec<(DigitalSignalId, Vec<StrengthBit>, Vec<StrengthBit>)> = Vec::new();
         let mut base = Vec::with_capacity(island.nodes.len());
+        let mut base_free = Vec::with_capacity(island.nodes.len());
         // A forced bit (section 9.3.2) holds its value whatever the island
         // passes it, and drives the island with that value at strong.
         let mut pinned = vec![false; island.nodes.len()];
@@ -185,22 +216,28 @@ impl DigitalSignalStore {
             if let Some(forced) = self.forced_bit(signal, bit) {
                 pinned[node] = true;
                 base.push(StrengthBit::strong(forced));
+                base_free.push(StrengthBit::strong(forced));
                 continue;
             }
-            let at = match resolved.iter().position(|(seen, _)| *seen == signal) {
+            let at = match resolved.iter().position(|(seen, _, _)| *seen == signal) {
                 Some(at) => at,
                 None => {
-                    resolved.push((signal, self.resolve_strengths(signal)));
+                    let free = if charged {
+                        self.resolve_strengths_as(signal, true)
+                    } else {
+                        Vec::new()
+                    };
+                    resolved.push((signal, self.resolve_strengths(signal), free));
                     resolved.len() - 1
                 }
             };
-            base.push(
-                resolved[at]
-                    .1
-                    .get(bit as usize)
+            let at_bit = |bits: &[StrengthBit]| {
+                bits.get(bit as usize)
                     .copied()
-                    .unwrap_or(StrengthBit::HIGH_Z),
-            );
+                    .unwrap_or(StrengthBit::HIGH_Z)
+            };
+            base.push(at_bit(&resolved[at].1));
+            base_free.push(at_bit(&resolved[at].2));
         }
         // A switch whose driver has not yet run is off.
         let enables: Vec<FourStateBit> = island
@@ -215,23 +252,33 @@ impl DigitalSignalStore {
                 },
             )
             .collect();
-        // Every step can only strengthen or widen a bit, so the walk settles;
-        // the bound is a backstop against a resolution that does not.
-        let mut values = base.clone();
-        for _ in 0..4 * island.nodes.len() + 8 {
-            let mut next = base.clone();
-            for (&bridge, &enable) in island.bridges.iter().zip(&enables) {
-                let direction = tables.islands.bridges[bridge];
-                let passed = strength::mos(values[direction.source], enable, direction.resistive);
-                self.bridged[bridge] = passed;
-                if !pinned[direction.target] {
-                    next[direction.target] = next[direction.target].resolve(passed);
+        let walk = |base: &[StrengthBit], passes: &mut dyn FnMut(usize, StrengthBit)| {
+            // Every step can only strengthen or widen a bit, so the walk
+            // settles; the bound is a backstop against a resolution that does
+            // not.
+            let mut values = base.to_vec();
+            for _ in 0..4 * island.nodes.len() + 8 {
+                let mut next = base.to_vec();
+                for (&bridge, &enable) in island.bridges.iter().zip(&enables) {
+                    let direction = tables.islands.bridges[bridge];
+                    let passed =
+                        strength::mos(values[direction.source], enable, direction.resistive);
+                    passes(bridge, passed);
+                    if !pinned[direction.target] {
+                        next[direction.target] = next[direction.target].resolve(passed);
+                    }
                 }
+                if next == values {
+                    break;
+                }
+                values = next;
             }
-            if next == values {
-                break;
-            }
-            values = next;
+        };
+        walk(&base, &mut |bridge, passed| self.bridged[bridge] = passed);
+        if charged {
+            walk(&base_free, &mut |bridge, passed| {
+                self.charge.set_bridged_free(bridge, passed);
+            });
         }
     }
 }

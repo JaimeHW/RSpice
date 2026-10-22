@@ -22,6 +22,7 @@ impl Clone for DigitalHost {
             scheduler,
             resolution,
             nba_target,
+            charge,
             external_targets,
             external_real_targets,
             elaboration_closed,
@@ -56,6 +57,7 @@ impl Clone for DigitalHost {
             scheduler: scheduler.clone(),
             resolution: *resolution,
             nba_target: *nba_target,
+            charge: charge.clone(),
             external_targets: external_targets.clone(),
             external_real_targets: external_real_targets.clone(),
             elaboration_closed: *elaboration_closed,
@@ -102,6 +104,7 @@ impl Clone for DigitalHost {
             scheduler,
             resolution,
             nba_target,
+            charge,
             external_targets,
             external_real_targets,
             elaboration_closed,
@@ -136,6 +139,7 @@ impl Clone for DigitalHost {
             scheduler: source_scheduler,
             resolution: source_resolution,
             nba_target: source_nba_target,
+            charge: source_charge,
             external_targets: source_external_targets,
             external_real_targets: source_external_real_targets,
             elaboration_closed: source_elaboration_closed,
@@ -169,6 +173,7 @@ impl Clone for DigitalHost {
         scheduler.clone_from(source_scheduler);
         *resolution = *source_resolution;
         *nba_target = *source_nba_target;
+        charge.clone_from(source_charge);
         external_targets.clone_from(source_external_targets);
         external_real_targets.clone_from(source_external_real_targets);
         *elaboration_closed = *source_elaboration_closed;

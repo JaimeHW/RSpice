@@ -355,6 +355,9 @@ impl NetResolution {
             DigitalNetType::Tri1 => Self::Strength(Some(level(false, Pull))),
             DigitalNetType::Supply0 => Self::Strength(Some(level(true, Supply))),
             DigitalNetType::Supply1 => Self::Strength(Some(level(false, Supply))),
+            // Section 4.6.3: a charge, which follows the net's own value
+            // (`store/charge.rs`) rather than a fixed implicit driver.
+            DigitalNetType::Trireg { .. } => Self::Strength(None),
         }
     }
 }

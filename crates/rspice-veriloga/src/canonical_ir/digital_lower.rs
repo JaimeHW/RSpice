@@ -598,11 +598,12 @@ fn lower_with_analog_variables(
     // each declaration lowered to; `uwire`s are checked once drivers exist.
     let mut typed_nets = Vec::new();
     let mut uwires = Vec::new();
-    for (declared, id) in digital
+    for (declared, id, time_scale) in digital
         .signals
         .iter()
         .zip(&root_signal_ids)
         .filter(|(declared, _)| !references::is_reference(root_references, &declared.name))
+        .map(|(declared, id)| (declared, id, digital.time_scale))
         .chain(
             digital
                 .instances
@@ -615,6 +616,7 @@ fn lower_with_analog_variables(
                         .map(|signal| &signal.declared)
                         .zip(ids)
                         .filter(|(declared, _)| declared.element_alias.is_none())
+                        .map(|(declared, id)| (declared, id, instance.time_scale))
                 }),
         )
     {
@@ -623,6 +625,32 @@ fn lower_with_analog_variables(
         };
         use super::digital::DigitalNetType;
         let net_type = match kind {
+            crate::ast::DigitalNetKind::Trireg { charge, decay } => {
+                // Section 7.14.2: the decay time in module units, rounded at
+                // the module's precision like any delay. One no run reaches
+                // never decays.
+                let ticks = decay
+                    .map(|decay| time_scale.delay_ticks(decay.units(), timing.precision_exponent));
+                let decay = match ticks {
+                    None | Some(Ok(crate::time_scale::DELAY_BEYOND_HORIZON)) => None,
+                    Some(Ok(ticks)) if ticks > 0 => Some(super::digital::DigitalChargeDecay {
+                        ticks: ticks as u64,
+                        exponent: timing.precision_exponent,
+                    }),
+                    Some(_) => {
+                        diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                            format!(
+                                "the charge decay time of `{}` rounds to no time at its \
+                                 module's precision (IEEE 1364-2005 section 7.14.2)",
+                                declared.name
+                            ),
+                            declared.span.into(),
+                        ));
+                        continue;
+                    }
+                };
+                DigitalNetType::Trireg { charge, decay }
+            }
             crate::ast::DigitalNetKind::Wand => DigitalNetType::Wand,
             crate::ast::DigitalNetKind::Wor => DigitalNetType::Wor,
             crate::ast::DigitalNetKind::Tri0 => DigitalNetType::Tri0,
@@ -1207,6 +1235,29 @@ fn lower_with_analog_variables(
                     signals[usize::from(uwire)].name
                 ),
                 second.span,
+            ));
+        }
+    }
+
+    // A `trireg` joined to another net would resolve as part of that net,
+    // without its charge (IEEE 1364-2005 section 4.6.3), so it is refused
+    // rather than run as a plain wire.
+    for net in &typed_nets {
+        if !matches!(net.net_type, super::digital::DigitalNetType::Trireg { .. }) {
+            continue;
+        }
+        if let Some(alias) = bit_aliases
+            .iter()
+            .find(|alias| alias.left.signal == net.signal || alias.right.signal == net.signal)
+        {
+            diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                format!(
+                    "`{}` is a `trireg` connected to another net through a port; a charge \
+                     storage net joined to another net has no lowered form yet, so keep the \
+                     `trireg` and what drives it in one module",
+                    signals[usize::from(net.signal)].name
+                ),
+                alias.span,
             ));
         }
     }

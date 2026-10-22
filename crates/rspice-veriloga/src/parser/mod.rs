@@ -905,6 +905,11 @@ impl<'a> Parser<'a> {
             TokenKind::AmsDigital if self.digital_keyword_is("defparam") => {
                 self.parse_defparam(module)?;
             }
+            // IEEE 1364-2005 section 4.6.3.
+            TokenKind::AmsDigital if self.digital_keyword_is("trireg") => {
+                let net = self.parse_digital_net_decl(module)?;
+                module.digital_nets.push(net);
+            }
             TokenKind::AmsDigital
                 if self.digital_keyword_is("time") || self.digital_keyword_is("event") =>
             {

@@ -195,9 +195,8 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         // not: a real net that can also hold `x` and `z` is a different type
         // with no Accellera definition, so it stays refused by name.
         ("wreal4state", "wreal4state w;"),
-        // The IEEE 1364-2005 section 4.6 net types have productions now,
-        // pinned by `tests/digital_grammar.rs`; `trireg` does not yet.
-        ("trireg", "trireg t;"),
+        // The IEEE 1364-2005 section 4.6 net types, `trireg` among them, have
+        // productions now, pinned by `tests/digital_grammar.rs`.
         // `time`, `realtime`, `event` and `task` have productions now (IEEE
         // 1364-2005 sections 4.8, 9.7.3 and 10.2), pinned by
         // `tests/digital_grammar.rs`.

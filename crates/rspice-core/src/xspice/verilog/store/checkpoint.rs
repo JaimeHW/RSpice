@@ -277,6 +277,7 @@ impl DigitalSignalStore {
             restored.restore_overrides(forces)?;
         }
         restored.rederive_passed_strengths();
+        restored.rederive_holding();
         restored.validate_checkpoint_resolution()?;
         Ok(restored)
     }

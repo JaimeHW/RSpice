@@ -395,6 +395,8 @@ impl DigitalSignalStore {
         // A forced net bit drives the switch island it is in, and a released
         // one rejoins it.
         self.settle_islands(signal, 0);
+        // A forced `trireg` bit is driven, and a released one may hold.
+        self.note_holding(signal);
     }
 
     /// A write is arriving at an overridden signal: record it beneath the
