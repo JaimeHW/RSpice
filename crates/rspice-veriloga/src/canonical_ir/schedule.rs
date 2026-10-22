@@ -9,8 +9,8 @@
 //!
 //! This pass says which is which, and the emitter turns that into separate
 //! functions with separate caches. That is the *only* reason to split a body —
-//! never because it got large. Splitting for compile time was measured and
-//! costs 52% runtime (`tools/perf-probes/archive/split`).
+//! never because it got large. Splitting for compile time was measured with a
+//! split-probe prototype (commit 3e270c95b9) and costs 52% runtime.
 //!
 //! ## Control dependence, not just data
 //!
