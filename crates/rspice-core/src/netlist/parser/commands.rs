@@ -13,6 +13,7 @@ use crate::solver::RealSolverBackend;
 use super::*;
 
 pub(super) mod analysis;
+mod assertion;
 mod options;
 pub(super) use options::parse_options_command;
 
@@ -42,6 +43,7 @@ pub(super) fn parse_command(
         node_sets,
         global_nodes,
         measurements,
+        assertions,
         saves,
         output_requests,
         startup_directives,
@@ -274,6 +276,33 @@ pub(super) fn parse_command(
                 &authored_source,
             ));
             measurements.push(statement);
+        }
+        ".ASSERT" => {
+            let Some(assertions) = assertions else {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: ".ASSERT checks a deck's result; it cannot be written inside a \
+                              .SUBCKT body"
+                        .to_string(),
+                }
+                .into());
+            };
+            let statement = assertion::parse_assert_command(stream, line_num, params, origin)?;
+            if let Some(previous) = assertions
+                .iter()
+                .find(|candidate| candidate.name.eq_ignore_ascii_case(&statement.name))
+            {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        ".ASSERT {} repeats the name of the assertion at {}; each assertion \
+                         reports under its own name",
+                        statement.name, previous.origin
+                    ),
+                }
+                .into());
+            }
+            assertions.push(statement);
         }
         ".SAVE" | ".PROBE" => {
             let directive = if cmd == ".SAVE" {

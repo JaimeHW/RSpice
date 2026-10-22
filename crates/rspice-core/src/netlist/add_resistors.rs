@@ -786,6 +786,7 @@ fn clone_netlist_with_abort(
     let startup_directives = clone_slice(&source.startup_directives, abort)?;
     let global_nodes = clone_string_set(&source.global_nodes, abort)?;
     let measurements = clone_slice(&source.measurements, abort)?;
+    let assertions = clone_slice(&source.assertions, abort)?;
     check_abort(abort)?;
     let saves = source.saves.clone();
     check_abort(abort)?;
@@ -821,6 +822,7 @@ fn clone_netlist_with_abort(
         startup_directives,
         global_nodes,
         measurements,
+        assertions,
         saves,
         output_requests,
         options,

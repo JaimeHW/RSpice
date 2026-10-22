@@ -315,8 +315,14 @@ use rspice_core::analysis::harmonic_balance::{
 // may instantiate as SPICE leaves, which a caller compiling the deck's HDL
 // ahead of the build (the conformance harness's sealed project runtimes)
 // hands the Verilog-A compiler, as the builder does. The census was 5,757.
-// Deleting public items nothing used brings it to 5,685, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5685;
+// Deleting public items nothing used brings it to 5,685.
+// The `.ASSERT` card adds six: `netlist::AssertStatement` (the element type of
+// the public `Netlist::assertions`) with the `AssertCheck`, `AssertTarget`,
+// `AssertLevel` and `AssertAnalysis` its fields are typed by, and the
+// re-export that names them under `netlist`. The assertion evaluator
+// (`analysis::assertions`) reads all five, and the CLI's report and exit
+// status read the level. The census is 5,691, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5691;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

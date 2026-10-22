@@ -14,6 +14,8 @@
 use crate::config::ExpressionDialect;
 
 mod add_resistors;
+mod assertion;
+pub use assertion::{AssertAnalysis, AssertCheck, AssertLevel, AssertStatement, AssertTarget};
 mod ast;
 mod control_source;
 pub use control_source::ControlScriptSource;
@@ -1108,6 +1110,10 @@ pub struct Netlist {
     pub global_nodes: HashSet<String>,
     /// Measurement statements from .MEAS commands
     pub measurements: Vec<MeasureStatement>,
+    /// `.ASSERT` cards in deck order. Observation only: they read the
+    /// published result after an analysis and are not part of a checkpoint's
+    /// identity.
+    pub assertions: Vec<AssertStatement>,
     /// Output selection from .SAVE/.PROBE/.PRINT/.PLOT commands
     pub saves: SaveSet,
     /// Typed source/provenance sidecar for every output-producing directive.
@@ -3862,6 +3868,7 @@ impl Default for Netlist {
             startup_directives: Vec::new(),
             global_nodes: HashSet::new(),
             measurements: Vec::new(),
+            assertions: Vec::new(),
             saves: SaveSet::default(),
             output_requests: Vec::new(),
             options: SimulationOptions::default(),
