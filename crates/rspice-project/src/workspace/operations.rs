@@ -315,17 +315,6 @@ impl ProjectWorkspace {
         self.netlist_source_dirty = dirty;
     }
 
-    /// Add a source document to a legacy/empty project and enter the ordinary
-    /// project dirty lifecycle. Duplicate language identities are rejected.
-    pub fn add_project_source(
-        &mut self,
-        document: ProjectSourceDocument,
-    ) -> Result<(), ProjectSourceError> {
-        self.project_sources.insert(document)?;
-        self.project_sources_dirty = true;
-        Ok(())
-    }
-
     /// Replace exact source bytes and enter the ordinary project dirty
     /// lifecycle. An unchanged write is a no-op and retains validation.
     pub fn replace_project_source(
@@ -495,23 +484,6 @@ impl ProjectWorkspace {
             expected_current,
             retained_revision,
         )?;
-        if changed {
-            self.project_sources_dirty = true;
-        }
-        Ok(changed)
-    }
-
-    /// Replace one language slot from an explicitly imported UTF-8 file while
-    /// preserving monotonic slot revision and invalidating old validation.
-    pub fn replace_imported_project_source(
-        &mut self,
-        language: ProjectSourceLanguage,
-        file_name: String,
-        content: String,
-    ) -> Result<bool, ProjectSourceError> {
-        let changed = self
-            .project_sources
-            .replace_imported(language, file_name, content)?;
         if changed {
             self.project_sources_dirty = true;
         }
