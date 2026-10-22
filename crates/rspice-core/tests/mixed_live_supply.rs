@@ -469,6 +469,50 @@ fn an_inferred_rail_binds_live_in_a_sweep_of_the_rail() {
     }
 }
 
+/// `rspice_track_fast` against an inferred rail, swept from 1.8 V down to
+/// 1.2 V in 1 mV steps. The input is held at 1.0 V by an `E` source, which is
+/// neither a rail nor a path, so its 1 Meg tie to `vdd` makes `V1` the one
+/// rail reaching it, as `rpull` makes it the output's. The A/D reads 1 once
+/// 0.7*V(vdd) falls to 1.0 V, at V(vdd) = 1/0.7 = 1.428571 V; from there the
+/// D/A drives V(vdd) into a node `rpull` also holds at V(vdd), so v(y) =
+/// V(vdd) exactly, and above it the input sits inside the 0.3-0.7 band and
+/// `y` is nowhere near the rail. The flip falls between the sweep points
+/// 1.429 V and 1.428 V.
+#[test]
+fn the_tracking_shipped_set_switches_at_its_fraction_of_an_inferred_rail() {
+    let module = SourceFile::new("v", BUFFER);
+    let deck = parse(&format!(
+        "* rspice_track_fast against an inferred rail\n\
+         .options connectrules=rspice_track_fast\n\
+         V1 vdd 0 DC 1.8\n\
+         vhold hold 0 DC 1.0\n\
+         e1 a 0 hold 0 1\n\
+         rtie a vdd 1meg\n\
+         rpull y vdd 10k\n\
+         xb a y buf1\n\
+         .hdl \"{}\"\n\
+         .dc V1 1.8 1.2 -0.001\n\
+         .end\n",
+        module.path()
+    ));
+    let points = sweep(&deck, "y");
+    assert!(points.len() >= 600, "every sweep point solves: {points:?}");
+    let flip = 1.0 / 0.7;
+    for (supply, level) in points {
+        if supply < flip - 1.0e-4 {
+            assert!(
+                (level - supply).abs() <= 1.0e-9 + 1.0e-9 * supply,
+                "past the flip v(y) = V(vdd) = {supply} V, got {level}"
+            );
+        } else if supply > flip + 1.0e-4 {
+            assert!(
+                (level - supply).abs() > 0.1,
+                "before the flip v(y) is not V(vdd) = {supply} V, got {level}"
+            );
+        }
+    }
+}
+
 /// A supply ripple reaches a held 1's output through its live level: the
 /// held level's gain from V(sup) is 1, behind 20 ohm into 1k, so
 /// v(q)/v(vdd) = 1000/1020 at every frequency, with no phase. Static, the
