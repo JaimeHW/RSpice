@@ -200,7 +200,7 @@ pub fn evaluate_tran_continuous_measurements_with_limits_and_abort(
             abort,
         );
     }
-    let signals = transient_signal_map(result);
+    let signals = retained_transient_signal_map(result);
     let mut failures = Vec::new();
     let mut supported = Vec::new();
     for statement in &statements {

@@ -123,3 +123,32 @@ fn an_analog_period_measures_without_saving_the_converter_endpoint() {
         "V(q) rises 20 ns apart: {period:e}"
     );
 }
+
+/// A real output steps to 0.25 at 5 ns and to 0.75 at 9 ns.
+const REAL_STEPS: &str = "`include \"disciplines.vams\"\n\
+`timescale 1ns/1ps\n\
+module steps(w);\n\
+  output w; wreal w; real v;\n\
+  assign w = v;\n\
+  initial begin v = 0.0; #5 v = 0.25; #4 v = 0.75; end\n\
+endmodule\n";
+
+/// A real output with no reader reaches its deck net through a converter the
+/// builder inserts, whose branch the run does not retain: the net's voltage
+/// measures without it.
+#[test]
+fn a_converted_real_output_measures_on_its_voltage() {
+    let scratch = Scratch::new("lone_real");
+    let module = scratch.write("steps.vams", REAL_STEPS);
+    let netlist = parse(&format!(
+        "* lone real\n.hdl \"{module}\"\nx1 w steps\n.tran 0.1n 20n\n\
+         .measure tran settled FIND V(w) AT=20n\n.end\n"
+    ));
+    let result = run(&netlist);
+    let results = evaluate_tran_measurements(&netlist, &result);
+    let settled = value(&results, "settled");
+    assert!(
+        (settled - 0.75).abs() <= 1e-9,
+        "V(w) holds the last real value: {settled}"
+    );
+}

@@ -612,6 +612,20 @@ pub fn transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value
     signals
 }
 
+/// The transient signal table a `.MEASURE` reads: only the columns the run
+/// retained. A builder-inserted converter's branch
+/// (`i(__rspice_auto_real_to_v_2#out)`) keeps an empty column, and the
+/// table's length check would fail every card over a name no card asked for.
+/// An output column still sees such a branch: `N(x1:iinp)` is a current
+/// because the result solved the meter branch `x1:iinp`, retained or not.
+pub(crate) fn retained_transient_signal_map(result: &TransientResult) -> HashMap<String, &[Value]> {
+    let mut signals = transient_signal_map(result);
+    if !result.time.is_empty() {
+        signals.retain(|_, values| !values.is_empty());
+    }
+    signals
+}
+
 /// One continuous Xyce `PARAM`/`EQN` measurement evaluated at every
 /// transient result point.
 #[derive(Debug, Clone, PartialEq)]
@@ -1505,7 +1519,7 @@ pub fn evaluate_tran_equation_measurements(
 ) -> Result<Vec<EquationMeasureTrace>, String> {
     let alias_projection =
         InterfaceNodeAliasProjection::new(netlist, OutputAnalysisKind::Tran, result.time.len())?;
-    let mut signals = transient_signal_map(result);
+    let mut signals = retained_transient_signal_map(result);
     alias_projection.augment(&mut signals)?;
     let evaluation = evaluate_equation_measurements_with_observations(
         netlist,
@@ -6473,7 +6487,7 @@ pub fn evaluate_tran_measurements_with_abort(
     if abort.is_aborted() {
         return Err(SimulationError::Aborted);
     }
-    let signals = transient_signal_map(result);
+    let signals = retained_transient_signal_map(result);
     let mut measurements = evaluate_tran_measurements_with_signals_and_abort(
         netlist,
         &result.time,
