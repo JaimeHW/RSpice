@@ -105,24 +105,6 @@ impl SnapTargetType {
             SnapTargetType::Grid => 4,
         }
     }
-
-    /// Check if this is a terminal snap
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, SnapTargetType::Terminal { .. })
-    }
-
-    /// Check if this is a wire-related snap
-    pub fn is_wire_related(&self) -> bool {
-        matches!(
-            self,
-            SnapTargetType::WireEndpoint { .. } | SnapTargetType::WireSegment { .. }
-        )
-    }
-
-    /// Check if this creates an electrical connection
-    pub fn creates_connection(&self) -> bool {
-        !matches!(self, SnapTargetType::Grid)
-    }
 }
 
 // =============================================================================
@@ -223,18 +205,6 @@ impl SnapTarget {
     pub fn priority(&self) -> u8 {
         self.target_type.priority()
     }
-
-    /// Compare two targets for selection
-    ///
-    /// Returns true if self should be preferred over other.
-    /// Uses priority first, then distance as tiebreaker.
-    pub fn is_better_than(&self, other: &SnapTarget) -> bool {
-        if self.priority() != other.priority() {
-            self.priority() < other.priority()
-        } else {
-            self.distance < other.distance
-        }
-    }
 }
 
 // =============================================================================
@@ -298,29 +268,9 @@ impl SnapResult {
         }
     }
 
-    /// Check if this result snapped to a real target (not grid)
-    pub fn has_target(&self) -> bool {
-        self.target.is_some() && self.show_indicator
-    }
-
-    /// Check if snapped to a terminal
-    pub fn is_terminal_snap(&self) -> bool {
-        self.target
-            .as_ref()
-            .is_some_and(|t| t.target_type.is_terminal())
-    }
-
     /// Get the target type if present
     pub fn target_type(&self) -> Option<&SnapTargetType> {
         self.target.as_ref().map(|t| &t.target_type)
-    }
-
-    /// Get the component ID if snapped to a terminal
-    pub fn terminal_component_id(&self) -> Option<u64> {
-        match self.target_type() {
-            Some(SnapTargetType::Terminal { component_id, .. }) => Some(*component_id),
-            _ => None,
-        }
     }
 
     /// Get the terminal name if snapped to a terminal
@@ -389,18 +339,6 @@ impl SnapEngine {
     /// Create a new snap engine with default settings
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// Create a snap engine with only terminal snapping
-    pub fn terminals_only() -> Self {
-        Self {
-            snap_to_terminals: true,
-            snap_to_wire_endpoints: false,
-            snap_to_wire_segments: false,
-            snap_to_junctions: false,
-            snap_to_grid: true,
-            ..Default::default()
-        }
     }
 
     /// Create a snap engine with all snapping disabled
@@ -689,54 +627,6 @@ impl SnapEngine {
         let gs = self.grid_size.max(1);
         Point::new(((pos.x + gs / 2) / gs) * gs, ((pos.y + gs / 2) / gs) * gs)
     }
-
-    /// Find the nearest terminal to a position
-    ///
-    /// Convenience method that only searches terminals.
-    pub fn find_nearest_terminal(
-        &self,
-        pos: Point,
-        components: &[Component],
-    ) -> Option<SnapTarget> {
-        let mut candidates = Vec::new();
-        self.collect_terminal_targets(pos, components, &mut candidates);
-
-        candidates
-            .into_iter()
-            .filter(|t| t.distance <= self.snap_radius as f64)
-            .min_by(|a, b| {
-                a.distance
-                    .partial_cmp(&b.distance)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-    }
-
-    /// Check if a position is at a terminal
-    ///
-    /// Returns the terminal info if the position exactly matches a terminal.
-    pub fn is_at_terminal(&self, pos: Point, components: &[Component]) -> Option<(u64, String)> {
-        for comp in components {
-            for (name, term_pos) in comp.terminal_positions() {
-                if term_pos == pos {
-                    return Some((comp.id, name.to_string()));
-                }
-            }
-        }
-        None
-    }
-
-    /// Get all terminals in the schematic
-    ///
-    /// Returns a list of (component_id, terminal_name, position) tuples.
-    pub fn get_all_terminals(&self, components: &[Component]) -> Vec<(u64, String, Point)> {
-        let mut terminals = Vec::new();
-        for comp in components {
-            for (name, pos) in comp.terminal_positions() {
-                terminals.push((comp.id, name.to_string(), pos));
-            }
-        }
-        terminals
-    }
 }
 
 // =============================================================================
@@ -882,7 +772,6 @@ mod tests {
         let result = engine.find_snap_target(Point::new(13, 17), &[], &[], &[]);
         assert_eq!(result.snapped_position, Point::new(10, 20));
         assert!(!result.show_indicator);
-        assert!(!result.has_target());
         assert_eq!(result.target_type(), Some(&SnapTargetType::Grid));
     }
 
@@ -921,19 +810,6 @@ mod tests {
         assert!(segment.priority() < SnapTargetType::Grid.priority());
     }
 
-    /// Higher priority wins regardless of distance; distance breaks ties.
-    #[test]
-    fn is_better_than_prefers_priority_then_distance() {
-        let far_terminal = SnapTarget::terminal(Point::origin(), 1, "+", 1.9);
-        let near_junction = SnapTarget::junction(Point::origin(), 0.1);
-        assert!(far_terminal.is_better_than(&near_junction));
-        assert!(!near_junction.is_better_than(&far_terminal));
-
-        let near = SnapTarget::junction(Point::origin(), 0.3);
-        let far = SnapTarget::junction(Point::origin(), 0.5);
-        assert!(near.is_better_than(&far));
-    }
-
     /// A terminal one unit away beats a junction at zero distance.
     #[test]
     fn terminal_beats_closer_junction() {
@@ -941,11 +817,15 @@ mod tests {
         let comps = [resistor(1, Point::origin())]; // "-" terminal at (20, 0)
         let junctions = [Junction::new(7, Point::new(21, 0))];
         let result = engine.find_snap_target(Point::new(21, 0), &comps, &[], &junctions);
-        assert!(result.is_terminal_snap());
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::Terminal {
+                component_id: 1,
+                terminal_name: "-".to_string()
+            })
+        );
         assert_eq!(result.snapped_position, Point::new(20, 0));
-        assert_eq!(result.terminal_component_id(), Some(1));
-        assert_eq!(result.terminal_name(), Some("-"));
-        assert!(result.has_target());
+        assert!(result.show_indicator);
     }
 
     /// A junction one unit away beats a wire endpoint at zero distance.
@@ -1064,26 +944,15 @@ mod tests {
         assert!(result.target.is_none());
     }
 
-    /// terminals_only() snaps to terminals but ignores wire endpoints.
-    #[test]
-    fn terminals_only_ignores_wires() {
-        let engine = SnapEngine::terminals_only();
-        let comps = [resistor(1, Point::origin())];
-        let wires = [Wire::segment(3, Point::new(21, 0), Point::new(30, 0))];
-        // Terminal at (20,0) dist 1, wire start at (21,0) dist 0.
-        let result = engine.find_snap_target(Point::new(21, 0), &comps, &wires, &[]);
-        assert!(result.is_terminal_snap());
-        assert_eq!(result.snapped_position, Point::new(20, 0));
-
-        let result = engine.find_snap_target(Point::new(29, 0), &[], &wires, &[]);
-        assert!(result.target.is_none());
-    }
-
     /// Resolved-aware snapping uses authored symbol pin offsets instead of the
     /// generated fallback block geometry.
     #[test]
     fn resolved_instance_terminal_snap_uses_authored_offsets() {
-        let engine = SnapEngine::terminals_only();
+        let engine = engine_with(|e| {
+            e.snap_to_wire_endpoints = false;
+            e.snap_to_wire_segments = false;
+            e.snap_to_junctions = false;
+        });
         let comps = [amp_instance(7, Point::new(100, 50))];
         let resolved = resolved_amp_symbol();
 
@@ -1092,10 +961,14 @@ mod tests {
                 (component.id == 7).then_some(&resolved)
             });
 
-        assert!(result.is_terminal_snap());
+        assert_eq!(
+            result.target_type(),
+            Some(&SnapTargetType::Terminal {
+                component_id: 7,
+                terminal_name: "IN".to_string()
+            })
+        );
         assert_eq!(result.snapped_position, Point::new(60, 40));
-        assert_eq!(result.terminal_component_id(), Some(7));
-        assert_eq!(result.terminal_name(), Some("IN"));
     }
 
     // -------------------------------------------------------------------------
@@ -1225,58 +1098,5 @@ mod tests {
             })
         );
         assert_eq!(result.snapped_position, Point::new(5, 5));
-    }
-
-    // -------------------------------------------------------------------------
-    // Terminal convenience queries
-    // -------------------------------------------------------------------------
-
-    /// find_nearest_terminal picks the closest terminal within radius,
-    /// and returns None when everything is out of range.
-    #[test]
-    fn find_nearest_terminal_respects_radius() {
-        let engine = SnapEngine::default();
-        let comps = [resistor(1, Point::origin()), resistor(2, Point::new(43, 0))];
-        // Cursor at (21,0): R1 "-" at (20,0) dist 1; R2 "+" at (23,0) dist 2.
-        let nearest = engine
-            .find_nearest_terminal(Point::new(21, 0), &comps)
-            .unwrap();
-        assert_eq!(nearest.position, Point::new(20, 0));
-        assert!(matches!(
-            nearest.target_type,
-            SnapTargetType::Terminal {
-                component_id: 1,
-                ..
-            }
-        ));
-
-        assert!(
-            engine
-                .find_nearest_terminal(Point::new(100, 100), &comps)
-                .is_none()
-        );
-    }
-
-    /// is_at_terminal matches exact positions only.
-    #[test]
-    fn is_at_terminal_exact_match_only() {
-        let engine = SnapEngine::default();
-        let comps = [resistor(1, Point::origin())];
-        assert_eq!(
-            engine.is_at_terminal(Point::new(-20, 0), &comps),
-            Some((1, "+".to_string()))
-        );
-        assert_eq!(engine.is_at_terminal(Point::new(-19, 0), &comps), None);
-    }
-
-    /// get_all_terminals enumerates every terminal of every component.
-    #[test]
-    fn get_all_terminals_enumerates_components() {
-        let engine = SnapEngine::default();
-        let comps = [resistor(1, Point::origin()), resistor(2, Point::new(0, 40))];
-        let terms = engine.get_all_terminals(&comps);
-        assert_eq!(terms.len(), 4);
-        assert!(terms.contains(&(1, "+".to_string(), Point::new(-20, 0))));
-        assert!(terms.contains(&(2, "-".to_string(), Point::new(20, 40))));
     }
 }
