@@ -10,7 +10,7 @@
 
 mod common;
 
-use common::{TestDirectory, test_dir};
+use common::{TestDirectory, csv_column, test_dir};
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -58,24 +58,6 @@ fn header_columns(csv: &str) -> Vec<String> {
         .expect("CSV header")
         .split(',')
         .map(str::to_string)
-        .collect()
-}
-
-fn csv_column(csv: &str, name: &str) -> Vec<f64> {
-    let mut lines = common::delimited_data_text(csv, b',').lines();
-    let header = lines.next().expect("CSV header");
-    let index = header
-        .split(',')
-        .position(|column| column.eq_ignore_ascii_case(name))
-        .unwrap_or_else(|| panic!("missing column {name} in {header}"));
-    lines
-        .map(|line| {
-            line.split(',')
-                .nth(index)
-                .expect("CSV cell")
-                .parse()
-                .expect("numeric CSV value")
-        })
         .collect()
 }
 

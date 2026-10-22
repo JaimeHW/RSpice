@@ -1,9 +1,9 @@
 //! Text waveform admission must not turn a nonzero value into zero.
 mod common;
 
+use common::{assert_underflow, convert_with_flags as convert};
 use rspice_core::io::{VcdValue, parse_vcd_file};
-use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Command;
 
 fn raw(literal: &str, complex: bool) -> String {
     let (flags, first, second) = if complex {
@@ -20,25 +20,6 @@ fn vcd(literal: &str) -> String {
     format!(
         "$timescale 1 s $end\n$var real 1 ! out $end\n$var wire 1 % keep $end\n$enddefinitions $end\n#0\nr{literal} !\n0%\n#1\nr2 !\n1%\n"
     )
-}
-
-fn convert(input: &Path, output: &Path, format: &str, extra: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(input)
-        .arg(output)
-        .args(["--to", format])
-        .args(extra)
-        .output()
-        .unwrap()
-}
-
-fn assert_underflow(result: Output) {
-    assert_eq!(result.status.code(), Some(1), "{result:?}");
-    assert!(
-        String::from_utf8_lossy(&result.stderr).contains("underflow"),
-        "{result:?}"
-    );
 }
 
 #[test]

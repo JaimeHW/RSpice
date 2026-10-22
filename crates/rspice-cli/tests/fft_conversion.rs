@@ -1,17 +1,9 @@
 //! FFT conversion must preserve provenance, metrics, and unavailable requests.
 mod common;
 
-use common::{read_json, test_dir};
+use common::{quiet as cli, read_json, test_dir};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-
-fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .arg("--quiet")
-        .args(args)
-        .output()
-        .unwrap()
-}
+use std::process::Output;
 
 fn convert(source: &Path, destination: &Path, from: &str, to: &str, extra: &[&str]) -> Output {
     let mut args = vec![

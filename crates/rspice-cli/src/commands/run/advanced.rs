@@ -23,7 +23,7 @@ use crate::cli::{CliError, map_atomic_output_error};
 use crate::commands::export_table::ExportTable;
 use crate::commands::{publish, truncate};
 
-fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
+pub(super) fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
     if crate::abort::reason().is_some() {
         Err(super::cancellation_cli_error(ctx.args.timeout))
     } else {

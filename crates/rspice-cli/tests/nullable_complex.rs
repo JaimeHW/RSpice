@@ -1,20 +1,10 @@
 //! Complex missingness survives typed projection, table conversion and comparison.
 mod common;
 
+use common::convert_with_flags as convert;
 use serde_json::{Value, json};
 use std::path::Path;
 use std::process::{Command, Output};
-
-fn convert(input: &Path, output: &Path, format: &str, flags: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(input)
-        .arg(output)
-        .args(["--to", format])
-        .args(flags)
-        .output()
-        .unwrap()
-}
 
 fn compare(result: &Path, golden: &Path, flags: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rspice"))

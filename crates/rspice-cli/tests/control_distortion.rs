@@ -1,21 +1,10 @@
 //! Scripted distortion uses the same typed results and atomic exports as decks.
 mod common;
+use common::run_to_json as run;
 use rspice_core::execution::AnalysisResultDocument;
-use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Command;
 
 const DECK: &str = "Distortion control\nV1 out 0 DC .5 DISTOF1 1m 30 DISTOF2 .5m -20\nD1 out 0 DM\n.model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n";
-
-fn run(deck: &Path, output: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "run"])
-        .arg(deck)
-        .arg("-o")
-        .arg(output)
-        .args(["-f", "json"])
-        .output()
-        .unwrap()
-}
 
 #[test]
 fn direct_explicit_and_run_routes_preserve_physical_spectra_and_presentations() {

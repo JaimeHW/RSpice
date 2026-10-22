@@ -3,17 +3,10 @@
 
 mod common;
 
-use common::test_dir;
+use common::{run_rspice, test_dir};
 
 use std::io::Write;
 use std::process::{Command, Stdio};
-
-fn run_rspice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(args)
-        .output()
-        .expect("run rspice")
-}
 
 #[test]
 fn run_reads_netlist_from_stdin() {

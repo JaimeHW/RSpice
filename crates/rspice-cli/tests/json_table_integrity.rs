@@ -1,16 +1,8 @@
 //! Numeric representations must be unambiguous before any selection or output.
 mod common;
 
-use common::{read_json, test_dir};
-use std::process::{Command, Output};
-
-fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .arg("--quiet")
-        .args(args)
-        .output()
-        .unwrap()
-}
+use common::{quiet as cli, read_json, test_dir};
+use std::process::Output;
 
 fn source() -> serde_json::Value {
     serde_json::json!({

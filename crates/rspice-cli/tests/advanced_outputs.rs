@@ -4,17 +4,9 @@
 
 mod common;
 
-use common::test_dir;
+use common::{run_rspice, test_dir};
 
 use std::path::PathBuf;
-use std::process::Command;
-
-fn run_rspice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(args)
-        .output()
-        .expect("run rspice")
-}
 
 /// One named scalar from a typed result document.
 ///

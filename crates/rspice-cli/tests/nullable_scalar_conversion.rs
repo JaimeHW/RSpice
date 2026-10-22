@@ -1,17 +1,8 @@
 mod common;
 
-use common::{read_json, test_dir};
+use common::{quiet_json_errors as cli, read_json, test_dir};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-
-fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "--error-format", "json"])
-        .args(args)
-        .output()
-        .unwrap()
-}
 
 fn source(dir: &Path) -> PathBuf {
     let deck = dir.join("source.cir");

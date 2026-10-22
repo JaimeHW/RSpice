@@ -10,7 +10,7 @@
 
 mod common;
 
-use common::{AxisRunSet, TestDirectory, read_json, test_dir};
+use common::{AxisRunSet, TestDirectory, csv_column, read_json, test_dir};
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -46,24 +46,6 @@ fn assert_success(output: &Output) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-}
-
-fn csv_column(csv: &str, name: &str) -> Vec<f64> {
-    let mut lines = common::delimited_data_text(csv, b',').lines();
-    let header = lines.next().expect("CSV header");
-    let index = header
-        .split(',')
-        .position(|column| column.eq_ignore_ascii_case(name))
-        .unwrap_or_else(|| panic!("missing column {name} in {header}"));
-    lines
-        .map(|line| {
-            line.split(',')
-                .nth(index)
-                .expect("CSV cell")
-                .parse()
-                .expect("numeric CSV value")
-        })
-        .collect()
 }
 
 fn op_csv_value(csv: &str, name: &str) -> f64 {

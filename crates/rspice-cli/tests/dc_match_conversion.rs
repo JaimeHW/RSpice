@@ -1,10 +1,11 @@
 //! Equal total spread must not hide a change in its statistical contributors.
 mod common;
 
+use common::{column, compare, convert, convert_with_flags};
 use serde_json::{Value, json};
 use std::{
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Command,
 };
 
 const FORMATS: [(&str, &str); 6] = [
@@ -52,41 +53,6 @@ fn source(dir: &Path, name: &str, changed: bool) -> PathBuf {
         "json",
         "json",
     )
-}
-
-fn compare(result: &Path, golden: &Path, flags: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "compare"])
-        .arg(result)
-        .arg(golden)
-        .arg("--json")
-        .args(flags)
-        .output()
-        .unwrap()
-}
-
-fn conversion(source: &Path, destination: &Path, format: &str) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(source)
-        .arg(destination)
-        .args(["--to", format])
-        .output()
-        .unwrap()
-}
-
-fn convert(source: &Path, destination: &Path, format: &str) {
-    let output = conversion(source, destination, format);
-    assert!(output.status.success(), "{output:?}");
-}
-
-fn column<'a>(table: &'a Value, name: &str) -> &'a Value {
-    table["signals"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|column| column["name"] == name)
-        .unwrap_or_else(|| panic!("missing {name}: {table}"))
 }
 
 #[test]
@@ -290,7 +256,7 @@ fn mismatch_projection_limits_precision_and_name_collisions_preserve_output() {
             document["scalars"].as_array_mut().unwrap().push(json!({"name":"sigma_multiplier", "displayName":"collision", "unit":{"unit":"dimensionless"}, "value":{"representation":"real", "value":3.0}}));
         }
         std::fs::write(&source, document.to_string()).unwrap();
-        let output = conversion(&source, &destination, "csv");
+        let output = convert_with_flags(&source, &destination, "csv", &[]);
         assert_eq!(output.status.code(), Some(1), "{case}: {output:?}");
         assert_eq!(std::fs::read_to_string(&destination).unwrap(), "previous");
     }
@@ -536,7 +502,7 @@ fn contradictory_mismatch_documents_cannot_be_exported_compared_or_blessed() {
         for (format, extension) in FORMATS {
             let destination = dir.join(format!("protected.{extension}"));
             std::fs::write(&destination, "previous").unwrap();
-            let output = conversion(&altered, &destination, format);
+            let output = convert_with_flags(&altered, &destination, format, &[]);
             assert_eq!(output.status.code(), Some(1), "{case}/{format}: {output:?}");
             assert_eq!(std::fs::read_to_string(destination).unwrap(), "previous");
         }

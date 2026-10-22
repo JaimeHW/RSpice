@@ -1,17 +1,8 @@
 //! Selecting a result must never hide malformed data elsewhere in its container.
 mod common;
 
-use common::test_dir;
+use common::{quiet_json_errors as cli, test_dir};
 use std::path::Path;
-use std::process::{Command, Output};
-
-fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "--error-format", "json"])
-        .args(args)
-        .output()
-        .unwrap()
-}
 
 fn raw_plot(name: &str, value: f64) -> String {
     format!(

@@ -1,9 +1,10 @@
 //! A root set alone does not describe the retained transfer or its qualification.
 mod common;
 
+use common::{column, compare, convert};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 
 const FORMATS: [(&str, &str); 6] = [
     ("json", "json"),
@@ -184,37 +185,6 @@ fn original(directory: &Path) -> PathBuf {
         "original",
         &RC.replace("RESISTANCE", "1k").replace("CAPACITANCE", "1u"),
     )
-}
-
-fn compare(result: &Path, golden: &Path, flags: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "compare"])
-        .arg(result)
-        .arg(golden)
-        .arg("--json")
-        .args(flags)
-        .output()
-        .unwrap()
-}
-
-fn convert(source: &Path, destination: &Path, format: &str) {
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(source)
-        .arg(destination)
-        .args(["--to", format])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-}
-
-fn column<'a>(table: &'a Value, name: &str) -> &'a Value {
-    table["signals"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|column| column["name"] == name)
-        .unwrap()
 }
 
 #[test]

@@ -1,14 +1,7 @@
 //! Invalid RF inputs must fail before conversion and baseline publication.
 mod common;
-use std::process::{Command, Output};
-
-fn assert_underflow(result: Output) {
-    assert_eq!(result.status.code(), Some(1), "{result:?}");
-    assert!(
-        String::from_utf8_lossy(&result.stderr).contains("underflow"),
-        "{result:?}"
-    );
-}
+use common::assert_underflow;
+use std::process::Command;
 
 #[test]
 fn touchstone_underflow_cannot_replace_outputs_or_bless_baselines() {

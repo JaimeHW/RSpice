@@ -1,15 +1,7 @@
 mod common;
-use common::test_dir;
+use common::{quiet_json_errors as cli, test_dir};
 use std::path::Path;
-use std::process::{Command, Output};
-
-fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "--error-format", "json"])
-        .args(args)
-        .output()
-        .unwrap()
-}
+use std::process::Output;
 
 fn convert(path: &Path, output: &Path, flags: &[&str]) -> Output {
     let mut args = vec![

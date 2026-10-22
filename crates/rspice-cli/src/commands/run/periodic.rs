@@ -20,6 +20,7 @@ use rspice_core::netlist::{
 };
 
 use super::RunContext;
+use super::advanced::ensure_not_cancelled;
 use super::context::PeriodicArtifact;
 use crate::cli::{CliError, OutputFormat};
 use crate::commands::export_table::{ColumnData, ExportColumn, ExportTable};
@@ -984,14 +985,6 @@ fn missing_carrier(
         ),
         card.trim_start_matches('.'),
     )
-}
-
-fn ensure_not_cancelled(ctx: &RunContext<'_>) -> Result<(), CliError> {
-    if crate::abort::reason().is_some() {
-        Err(super::cancellation_cli_error(ctx.args.timeout))
-    } else {
-        Ok(())
-    }
 }
 
 fn map_periodic_error(

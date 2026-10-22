@@ -3,17 +3,9 @@
 
 mod common;
 
-use common::test_dir;
+use common::{run_rspice, test_dir};
 
 use std::path::Path;
-use std::process::Command;
-
-fn run_rspice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(args)
-        .output()
-        .expect("run rspice")
-}
 
 /// Read V(out) from a DC OP csv export (`signal,value` rows).
 fn read_op_voltage(path: &Path, signal: &str) -> f64 {

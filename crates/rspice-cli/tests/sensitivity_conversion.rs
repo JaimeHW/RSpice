@@ -1,9 +1,10 @@
 //! Nominal output agreement must not hide changed parameter derivatives.
 mod common;
 
+use common::{column, compare, convert};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Command;
 
 const FORMATS: [(&str, &str); 6] = [
     ("json", "json"),
@@ -56,37 +57,6 @@ fn source(directory: &Path, name: &str, ac: bool, changed: bool) -> PathBuf {
             "* divider\nV1 in 0 DC 1 AC 1\nR1 in out {r}\nR2 out 0 {r}\nC1 out 0 {c}\n.sens V(out) R1{sweep}\n.end\n"
         ),
     )
-}
-
-fn compare(result: &Path, golden: &Path, flags: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "compare"])
-        .arg(result)
-        .arg(golden)
-        .arg("--json")
-        .args(flags)
-        .output()
-        .unwrap()
-}
-
-fn convert(source: &Path, destination: &Path, format: &str) {
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(source)
-        .arg(destination)
-        .args(["--to", format])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-}
-
-fn column<'a>(table: &'a Value, name: &str) -> &'a Value {
-    table["signals"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|column| column["name"] == name)
-        .unwrap_or_else(|| panic!("missing {name}: {table}"))
 }
 
 #[test]

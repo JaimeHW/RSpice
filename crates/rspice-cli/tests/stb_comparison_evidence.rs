@@ -1,9 +1,10 @@
 //! Equal return ratios do not imply equal natural circuit stability.
 mod common;
 
+use common::{compare, convert};
 use serde_json::json;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Command;
 
 const LOOP: &str = "* hidden circuit mode\nE1 EO 0 CTRL 0 -1000\nVP EO X 0\nR1 X CTRL 1k\nC1 CTRL 0 159.154943091895n\nGhidden hidden 0 hidden 0 CONDUCTANCE\nChidden hidden 0 1\n.stb dec 10 10 10meg probe=VP\n.end\n";
 
@@ -27,28 +28,6 @@ fn run(
         .unwrap();
     assert!(output.status.success(), "{output:?}");
     path
-}
-
-fn compare(result: &Path, golden: &Path, flags: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "compare"])
-        .arg(result)
-        .arg(golden)
-        .arg("--json")
-        .args(flags)
-        .output()
-        .unwrap()
-}
-
-fn convert(source: &Path, destination: &Path, format: &str) {
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(source)
-        .arg(destination)
-        .args(["--to", format])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
 }
 
 #[test]

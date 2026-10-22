@@ -4,9 +4,7 @@
 
 mod common;
 
-use common::test_dir;
-
-use std::process::Command;
+use common::{run_rspice, test_dir};
 
 /// RC low-pass with tau = 100ns: risetime (10%..90% of a 5V step) is
 /// ln(9)*tau ~= 219.7ns, far below fixed-point display resolution.
@@ -19,13 +17,6 @@ const SUB_MICROSECOND_DECK: &str = "* RC low-pass\n\
      .END\n";
 
 const EXPECTED_RISETIME: f64 = 2.197e-7;
-
-fn run_rspice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(args)
-        .output()
-        .expect("run rspice")
-}
 
 #[test]
 fn meas_summary_displays_sub_microsecond_values() {

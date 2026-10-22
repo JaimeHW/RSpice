@@ -1,20 +1,8 @@
 //! Delimited headers must not turn separate scalar results into complex pairs.
 mod common;
 
-use common::{read_json, test_dir};
-use std::path::Path;
-use std::process::{Command, Output};
-
-fn convert(input: &Path, output: &Path, format: &str, flags: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(input)
-        .arg(output)
-        .args(["--to", format])
-        .args(flags)
-        .output()
-        .unwrap()
-}
+use common::{convert_with_flags as convert, read_json, test_dir};
+use std::process::Command;
 
 #[test]
 fn scalar_component_names_keep_their_identity_and_availability() {

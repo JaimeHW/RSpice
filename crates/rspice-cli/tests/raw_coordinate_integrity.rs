@@ -1,17 +1,9 @@
 //! A RAW coordinate cannot silently lose its imaginary component at admission.
 mod common;
 
-use common::{read_json, test_dir};
+use common::{quiet as cli, read_json, test_dir};
 use std::path::Path;
-use std::process::{Command, Output};
-
-fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .arg("--quiet")
-        .args(args)
-        .output()
-        .unwrap()
-}
+use std::process::Output;
 
 fn raw(plot: &str, imaginary: [f64; 2], binary: bool) -> Vec<u8> {
     let mut bytes = format!("Title: coordinate\nPlotname: {plot}\nFlags: complex double\nNo. Variables: 2\nNo. Points: 2\nVariables:\n0 frequency frequency\n1 V(out) voltage\n").into_bytes();

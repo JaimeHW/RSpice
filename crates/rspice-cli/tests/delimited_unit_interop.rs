@@ -1,21 +1,10 @@
 //! Delimited conversions retain declared quantities, units and physical samples.
 mod common;
 
+use common::convert;
 use rspice_formats::delimited::{DelimitedReadLimits, decode_delimited_waveforms};
 use serde_json::json;
-use std::path::Path;
 use std::process::Command;
-
-fn convert(source: &Path, destination: &Path, format: &str) {
-    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(source)
-        .arg(destination)
-        .args(["--to", format])
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-}
 
 fn source() -> serde_json::Value {
     json!({

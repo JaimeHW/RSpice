@@ -1,8 +1,8 @@
 //! Independent-tone execution, retained carrier binding, and native exports.
 mod common;
-use common::{read_json, test_dir};
+use common::{quiet as cli, read_json, test_dir};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 const CIRCUIT: &str = "QP CLI integration\n.param resistance=1k\nV1 in 0 SIN(1 .1 1k)\nR1 in out {resistance}\nR2 out 0 1k\nC1 out 0 100n\n";
 const QPSS: &str = ".QPSS 1k 1.4142135623730951k HARMS=1\n";
@@ -12,13 +12,6 @@ const QPXF: &str = ".QPXF LIN 2 10 100 SOURCES=(V1) OUT=V(out) INLATTICES=((0,0)
 const QPNOISE: &str =
     ".QPNOISE LIN 2 10 100 OUT=V(out) OUTLATTICE=(0,0) SOURCE=V1 INLATTICE=(0,0)\n";
 
-fn cli(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .arg("--quiet")
-        .args(args)
-        .output()
-        .unwrap()
-}
 fn run(dir: &Path, cards: &str, format: &str, extra: &[&str]) -> Output {
     let input = dir.join("deck.cir");
     let output = dir.join(format!("result.{format}"));

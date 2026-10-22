@@ -14,6 +14,7 @@
 //! allowance.
 
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A directory that exists for one test and is removed when it ends.
@@ -156,6 +157,132 @@ pub fn delimited_data_text(text: &str, delimiter: u8) -> &str {
         }
     }
     &text[..end.unwrap_or(text.len())]
+}
+
+/// One numeric column of a CSV the CLI wrote, by case-insensitive header.
+// Not every test binary reads a CSV column.
+#[allow(dead_code)]
+pub fn csv_column(csv: &str, name: &str) -> Vec<f64> {
+    let mut lines = delimited_data_text(csv, b',').lines();
+    let header = lines.next().expect("CSV header");
+    let index = header
+        .split(',')
+        .position(|column| column.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("missing column {name} in {header}"));
+    lines
+        .map(|line| {
+            line.split(',')
+                .nth(index)
+                .expect("CSV cell")
+                .parse()
+                .expect("numeric CSV value")
+        })
+        .collect()
+}
+
+/// One named signal of a JSON table the CLI wrote.
+// Not every test binary reads a JSON table.
+#[allow(dead_code)]
+pub fn column<'a>(table: &'a serde_json::Value, name: &str) -> &'a serde_json::Value {
+    table["signals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|column| column["name"] == name)
+        .unwrap_or_else(|| panic!("missing {name}: {table}"))
+}
+
+/// `rspice <args>`.
+// Each test binary drives the CLI through the one helper its cases need.
+#[allow(dead_code)]
+pub fn run_rspice(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(args)
+        .output()
+        .expect("run rspice")
+}
+
+/// `rspice --quiet <args>`.
+#[allow(dead_code)]
+pub fn quiet(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("--quiet")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// `rspice --quiet --error-format json <args>`.
+#[allow(dead_code)]
+pub fn quiet_json_errors(args: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json"])
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+/// `rspice --quiet run <deck> -o <output> -f <format>`.
+#[allow(dead_code)]
+pub fn run_to(deck: &Path, output: &Path, format: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "run"])
+        .arg(deck)
+        .arg("-o")
+        .arg(output)
+        .args(["-f", format])
+        .output()
+        .unwrap()
+}
+
+/// [`run_to`] a JSON result.
+#[allow(dead_code)]
+pub fn run_to_json(deck: &Path, output: &Path) -> Output {
+    run_to(deck, output, "json")
+}
+
+/// `rspice --quiet convert <input> <output> --to <format> <flags>`.
+#[allow(dead_code)]
+pub fn convert_with_flags(input: &Path, output: &Path, format: &str, flags: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "convert"])
+        .arg(input)
+        .arg(output)
+        .args(["--to", format])
+        .args(flags)
+        .output()
+        .unwrap()
+}
+
+/// Convert `source` to `destination` as `format`, which must succeed.
+#[allow(dead_code)]
+pub fn convert(source: &Path, destination: &Path, format: &str) {
+    let output = convert_with_flags(source, destination, format, &[]);
+    assert!(output.status.success(), "{output:?}");
+}
+
+/// `rspice --quiet compare <result> <golden> --json <flags>`.
+#[allow(dead_code)]
+pub fn compare(result: &Path, golden: &Path, flags: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "compare"])
+        .arg(result)
+        .arg(golden)
+        .arg("--json")
+        .args(flags)
+        .output()
+        .unwrap()
+}
+
+/// The CLI refused a value that would underflow its output format.
+// Not every test binary writes a precision-limited format.
+#[allow(dead_code)]
+pub fn assert_underflow(result: Output) {
+    assert_eq!(result.status.code(), Some(1), "{result:?}");
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("underflow"),
+        "{result:?}"
+    );
 }
 
 /// Where an axis run commits the manifest that names its complete coordinate

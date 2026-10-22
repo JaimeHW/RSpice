@@ -1,20 +1,9 @@
 //! Flattening integer VCD ticks must not change their event times.
 mod common;
 
-use common::test_dir;
+use common::{convert_with_flags as convert, test_dir};
 use std::path::Path;
-use std::process::{Command, Output};
-
-fn convert(input: &Path, output: &Path, format: &str, extra: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "convert"])
-        .arg(input)
-        .arg(output)
-        .args(["--to", format])
-        .args(extra)
-        .output()
-        .unwrap()
-}
+use std::process::Command;
 
 fn dump(path: &Path, timescale: &str, ticks: &[u64]) {
     let mut text =

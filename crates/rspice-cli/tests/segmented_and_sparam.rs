@@ -2,16 +2,9 @@
 
 mod common;
 
-use common::test_dir;
+use common::{run_rspice, test_dir};
 
 use std::process::Command;
-
-fn run_rspice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(args)
-        .output()
-        .expect("run rspice")
-}
 
 #[test]
 fn unusable_explicit_checkpoint_is_refused_before_write_and_preserves_destination() {

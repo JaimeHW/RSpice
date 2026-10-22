@@ -1,22 +1,11 @@
 //! Scripted STB publishes the solver's typed margins and natural-pole evidence.
 mod common;
+use common::run_to_json as run;
 use rspice_core::execution::AnalysisResultDocument;
 use rspice_core::execution::result_document::{ResultScalar, ScalarUnavailability, ScalarValue};
-use std::path::Path;
-use std::process::{Command, Output};
+use std::process::Command;
 
 const DECK: &str = "Stability control\nE1 out 0 sense 0 -100\nVprobe out drive 0\nR1 drive sense 1k\nC1 sense 0 159.154943091895n\n";
-
-fn run(deck: &Path, output: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(["--quiet", "run"])
-        .arg(deck)
-        .arg("-o")
-        .arg(output)
-        .args(["-f", "json"])
-        .output()
-        .unwrap()
-}
 
 #[test]
 fn direct_explicit_and_run_routes_preserve_stability_evidence_and_presentations() {

@@ -4,17 +4,9 @@
 
 mod common;
 
-use common::{AxisRunSet, test_dir};
+use common::{AxisRunSet, run_rspice, test_dir};
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
-
-fn run_rspice(args: &[&str]) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_rspice"))
-        .args(args)
-        .output()
-        .expect("run rspice")
-}
 
 /// The artifact one coordinate of a completed axis run published.
 ///
