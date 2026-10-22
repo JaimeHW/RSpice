@@ -913,6 +913,32 @@ impl MixedDigitalCoordinator {
                 .iter()
                 .map(|&(node, signal)| (node, TraceSource::Real(signal))),
         );
+        // A real port moved onto a converter's endpoint records its value on
+        // the deck net as well, with a driver ahead of a reader.
+        let mut real_claims = Vec::new();
+        for host in hosts {
+            host.real_boundary_trace_bindings(|node, endpoint, source| {
+                let priority = match source {
+                    BoundaryBitSource::Driven => 1u8,
+                    BoundaryBitSource::Sampled => 2,
+                };
+                if let Some(&(_, signal)) = self
+                    .real_event_nodes
+                    .iter()
+                    .find(|(event_node, _)| *event_node == endpoint)
+                {
+                    real_claims.push((node, priority, TraceSource::Real(signal)));
+                }
+            });
+        }
+        real_claims.sort_by_key(|&(node, priority, _)| (node, priority));
+        real_claims.dedup_by_key(|entry| entry.0);
+        let deck_reals: Vec<_> = real_claims
+            .into_iter()
+            .filter(|(node, _, _)| sources.iter().all(|(claimed, _)| claimed != node))
+            .map(|(node, _, source)| (node, source))
+            .collect();
+        sources.extend(deck_reals);
         self.digital.make_mut().configure_traces(&sources, retained);
     }
 

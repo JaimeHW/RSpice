@@ -7402,3 +7402,68 @@ fn a_real_event_net_is_a_held_e_column_a_save_can_select() {
         }
     }
 }
+
+/// A `wreal` output no HDL module reads leaves its deck net analog: a
+/// converter drives the net from a private endpoint. The value is recorded
+/// under the deck net's own name, as a converted digital bit is, so `E(w)`
+/// reads it there.
+#[test]
+fn a_real_output_with_no_hdl_reader_is_recorded_on_its_deck_net() {
+    use rspice_core::execution::{
+        AnalysisResultKind, ProjectionSource, SignalProjection, transient_projection_signals,
+    };
+    let model = ModelFile::new(
+        "real_on_deck_net",
+        "`include \"disciplines.vams\"\n`timescale 1ns/1ps\n\
+         module src(d, w);\n  output d; reg d;\n  output w; wreal w; real wv;\n\
+         assign w = wv;\n  initial begin d = 0; wv = 0.5; #2 d = 1; wv = 1.5; end\n\
+         endmodule\n",
+    );
+    let netlist = Netlist::parse(&format!(
+        "* a real boundary on an analog net\n.hdl \"{}\"\nX1 d w src\nR1 d 0 1k\nR2 w 0 1k\n\
+         .save E(w)\n.end\n",
+        model.deck_path()
+    ))
+    .expect("the deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 4e-9, 1e-9)
+        .expect("the run completes");
+    let points: Vec<(f64, f64)> = result
+        .real_trace_named("w")
+        .unwrap_or_else(|| {
+            panic!(
+                "no real trace on the deck net among {:?}",
+                result
+                    .real_traces
+                    .iter()
+                    .map(|trace| &trace.node_name)
+                    .collect::<Vec<_>>()
+            )
+        })
+        .iter()
+        .map(|point| (point.time, point.value))
+        .collect();
+    assert_eq!(points, [(0.0, 0.5), (2e-9, 1.5)]);
+    let source = ProjectionSource::new(AnalysisResultKind::Transient, "TRAN")
+        .with_axis(result.time.as_slice())
+        .with_signals(transient_projection_signals(&result).expect("the inventory"));
+    let projected = SignalProjection::from_netlist(&netlist)
+        .expect("the projection builds")
+        .project(&netlist.params, &source, &rspice_core::NoAbort)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let column = projected
+        .signals()
+        .iter()
+        .find(|signal| {
+            signal
+                .descriptor()
+                .display_name()
+                .eq_ignore_ascii_case("E(w)")
+        })
+        .expect("E(w) is projected");
+    let values = column.real().expect("a real column");
+    for (time, value) in result.time.iter().zip(values) {
+        let expected = if *time >= 2e-9 { 1.5 } else { 0.5 };
+        assert_eq!(*value, expected, "E(w) at {time:e} s");
+    }
+}

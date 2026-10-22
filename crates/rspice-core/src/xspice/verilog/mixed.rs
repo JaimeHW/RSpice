@@ -972,6 +972,8 @@ pub(crate) struct EventPort {
     pub(crate) direction: rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection,
     /// Existing unidirectional trace/bus label, independent of the private
     /// converter endpoint. Qualified event traces remain available as well.
+    /// A real port has one too: the deck net its value is recorded under
+    /// when elaboration moves the port onto a converter's endpoint.
     trace_node: Option<usize>,
     /// Whether this is a real input whose event net only a sample of the
     /// analog solution moves: every driver of the net is a code model that
@@ -2841,9 +2843,8 @@ impl MixedSignalHost {
             bit,
             node,
             direction,
-            trace_node: (bit.is_some()
-                && direction
-                    != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Inout)
+            trace_node: (direction
+                != rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Inout)
                 .then_some(node),
             solution_sample: false,
             converter: None,
@@ -2967,6 +2968,34 @@ impl MixedSignalHost {
                 bridge.bit,
                 BoundaryBitSource::Driven,
             );
+        }
+    }
+
+    /// The deck net of each real port elaboration moved onto a converter's
+    /// private endpoint, with that endpoint and whether the module drove or
+    /// read the net there: the real counterpart of
+    /// [`Self::boundary_trace_bindings`], so a real boundary records its
+    /// value under the author's net name as a digital one does. The value is
+    /// the endpoint's event net, which holds the port's value from the first
+    /// instant.
+    pub(crate) fn real_boundary_trace_bindings(
+        &self,
+        mut sink: impl FnMut(usize, usize, BoundaryBitSource),
+    ) {
+        for port in self.event_ports.iter().filter(|port| port.bit.is_none()) {
+            let Some(deck) = port
+                .trace_node
+                .filter(|deck| *deck != port.node && *deck > 0)
+            else {
+                continue;
+            };
+            let source = match port.direction {
+                rspice_veriloga::canonical_ir::digital_link::DigitalLinkDirection::Input => {
+                    BoundaryBitSource::Sampled
+                }
+                _ => BoundaryBitSource::Driven,
+            };
+            sink(deck, port.node, source);
         }
     }
 

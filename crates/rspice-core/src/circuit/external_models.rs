@@ -960,11 +960,13 @@ impl CircuitData {
         }
     }
 
-    /// The deck nets a mixed module's boundary bits are recorded on.
+    /// The deck nets a mixed module's boundary bits and real values are
+    /// recorded on.
     ///
     /// A converted boundary net keeps its voltage and also carries the bit
-    /// the module drove or read there, so the run publishes a digital trace
-    /// under the net's own name although the net is not event-only. These
+    /// or real value the module drove or read there, so the run publishes an
+    /// event trace under the net's own name although the net is not
+    /// event-only. These
     /// are the nets that are digital without being [event-only], and the
     /// event-net selection has to know them to be able to name them.
     ///
@@ -978,6 +980,9 @@ impl CircuitData {
                     if node > 0 {
                         nodes.insert(node);
                     }
+                });
+                host.real_boundary_trace_bindings(|node, _endpoint, _| {
+                    nodes.insert(node);
                 });
             }
             nodes
@@ -2077,6 +2082,20 @@ impl CircuitData {
         #[cfg(feature = "veriloga")]
         if let Some(digital) = &self.scheduler.mixed_digital_coordinator {
             snapshot.extend(digital.real_event_values());
+            // A real port moved onto a converter's endpoint publishes the
+            // endpoint's value on its deck net too, a driver ahead of a reader.
+            let mut deck = Vec::new();
+            for host in &self.mixed_signal_hosts {
+                host.real_boundary_trace_bindings(|node, endpoint, source| {
+                    if let Some(&(_, value)) = snapshot.iter().find(|(id, _)| *id == endpoint) {
+                        let sampled = source == crate::xspice::verilog::BoundaryBitSource::Sampled;
+                        deck.push((node, sampled, value));
+                    }
+                });
+            }
+            deck.sort_by_key(|&(node, sampled, _)| (node, sampled));
+            deck.dedup_by_key(|entry| entry.0);
+            snapshot.extend(deck.into_iter().map(|(node, _, value)| (node, value)));
         }
         snapshot.sort_unstable_by_key(|(node_id, _)| *node_id);
     }
