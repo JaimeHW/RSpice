@@ -142,54 +142,6 @@ pub(super) fn validate_step_sweep(sweep: &rspice_core::netlist::StepSweep) -> Re
     Ok(())
 }
 
-#[cfg(test)]
-fn generate_step_values(
-    sweep: &rspice_core::netlist::StepSweep,
-    timeout_seconds: Option<f64>,
-) -> Result<Vec<f64>, CliError> {
-    use rspice_core::netlist::{StepSweep, SweepPointGenerationError};
-
-    const MAX_STEP_POINTS: usize = 1_000_000;
-
-    validate_step_sweep(sweep)?;
-    if matches!(sweep, StepSweep::Data { .. }) {
-        return Ok(Vec::new());
-    }
-
-    sweep
-        .values_bounded_with_abort(MAX_STEP_POINTS, &crate::abort::ProcessAbort)
-        .map_err(|error| match error {
-            SweepPointGenerationError::LimitExceeded { requested, limit } => {
-                CliError::SimulationError {
-                    message: format!(
-                        ".STEP sweep requires at least {requested} points, exceeding the {limit}-point resource limit"
-                    ),
-                    analysis: Some("Step".to_string()),
-                }
-            }
-            SweepPointGenerationError::Aborted => super::cancellation_cli_error(timeout_seconds),
-            SweepPointGenerationError::UnrepresentableSpacing => CliError::SimulationError {
-                message: format!(".STEP {error}"),
-                analysis: Some("Step".to_owned()),
-            },
-            _ => CliError::InternalError {
-                message: format!("unrecognized sweep generation failure: {error}"),
-            },
-        })
-}
-
-#[cfg(test)]
-fn assert_linear_grid(actual: &[f64], expected: &[f64]) {
-    assert_eq!(actual.len(), expected.len());
-    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
-        let tolerance = expected.abs().max(1.0e-300) * 1.0e-14;
-        assert!(
-            (actual - expected).abs() <= tolerance,
-            "linear grid point {index}: actual={actual:.17e}, expected={expected:.17e}"
-        );
-    }
-}
-
 pub(super) fn generate_frequency_sweep(
     variation: rspice_core::netlist::FreqVariation,
     points: usize,
@@ -467,7 +419,7 @@ mod tests {
     }
 
     fn assert_step_error_contains(sweep: StepSweep, expected: &str) {
-        let err = generate_step_values(&sweep, None).expect_err("invalid step sweep must fail");
+        let err = validate_step_sweep(&sweep).expect_err("invalid step sweep must fail");
         let CliError::SimulationError { message, analysis } = err else {
             panic!("expected a step simulation error");
         };
@@ -478,131 +430,71 @@ mod tests {
         );
     }
 
+    /// The grid cases core does not pin: an exact log-grid stop is included,
+    /// an off-grid octave stop is not appended, and linear grids keep their
+    /// points at femto scale and descending below the atto range.
     #[test]
-    fn logarithmic_step_values_follow_core_geometric_grid_without_appending_stop() {
-        let dec = generate_step_values(
-            &StepSweep::Decade {
-                points_per_decade: 5,
-                start: 1.0,
-                stop: 10_001.0,
-            },
-            None,
-        )
-        .expect("valid DEC sweep");
-        assert_eq!(dec.len(), 21);
-        assert!((dec[20] - 10_000.0).abs() <= 1.0e-10);
-        assert!(dec.iter().all(|value| *value != 10_001.0));
+    fn validated_step_sweeps_generate_the_core_grid() {
+        for (sweep, expected) in [
+            (
+                StepSweep::Decade {
+                    points_per_decade: 1,
+                    start: 1.0,
+                    stop: 10_000.0,
+                },
+                vec![1.0, 10.0, 100.0, 1_000.0, 10_000.0],
+            ),
+            (
+                StepSweep::Octave {
+                    points_per_octave: 1,
+                    start: 1.0,
+                    stop: 8.0,
+                },
+                vec![1.0, 2.0, 4.0, 8.0],
+            ),
+            (
+                StepSweep::Octave {
+                    points_per_octave: 1,
+                    start: 1.0,
+                    stop: 9.0,
+                },
+                vec![1.0, 2.0, 4.0, 8.0],
+            ),
+        ] {
+            validate_step_sweep(&sweep).expect("valid sweep");
+            assert_eq!(sweep.values(), expected, "{sweep:?}");
+        }
 
-        let octave = generate_step_values(
-            &StepSweep::Octave {
-                points_per_octave: 1,
-                start: 1.0,
-                stop: 9.0,
-            },
-            None,
-        )
-        .expect("valid OCT sweep");
-        assert_eq!(octave, vec![1.0, 2.0, 4.0, 8.0]);
-    }
-
-    #[test]
-    fn linear_step_values_use_the_core_scale_aware_grid() {
-        let femto = generate_step_values(
-            &StepSweep::Linear {
-                start: 100.0e-15,
-                stop: 150.0e-15,
-                step: 10.0e-15,
-            },
-            None,
-        )
-        .expect("valid femto-scale sweep");
-        assert_linear_grid(
-            &femto,
-            &[
-                100.0e-15, 110.0e-15, 120.0e-15, 130.0e-15, 140.0e-15, 150.0e-15,
-            ],
-        );
-
-        let sub_atto = generate_step_values(
-            &StepSweep::Linear {
-                start: 1.0e-20,
-                stop: 3.0e-20,
-                step: 1.0e-20,
-            },
-            None,
-        )
-        .expect("valid sub-atto sweep");
-        assert_linear_grid(&sub_atto, &[1.0e-20, 2.0e-20, 3.0e-20]);
-
-        let descending = generate_step_values(
-            &StepSweep::Linear {
-                start: 3.0e-20,
-                stop: 1.0e-20,
-                step: -1.0e-20,
-            },
-            None,
-        )
-        .expect("valid descending sub-atto sweep");
-        assert_linear_grid(&descending, &[3.0e-20, 2.0e-20, 1.0e-20]);
-
-        assert_step_error_contains(
-            StepSweep::Linear {
-                start: 0.0,
-                stop: 1_000_000.0,
-                step: 1.0,
-            },
-            "resource limit",
-        );
-    }
-
-    #[test]
-    fn logarithmic_step_values_include_an_exact_grid_stop() {
-        let dec = generate_step_values(
-            &StepSweep::Decade {
-                points_per_decade: 1,
-                start: 1.0,
-                stop: 10_000.0,
-            },
-            None,
-        )
-        .expect("valid exact-grid DEC sweep");
-        assert_eq!(dec, vec![1.0, 10.0, 100.0, 1_000.0, 10_000.0]);
-
-        let octave = generate_step_values(
-            &StepSweep::Octave {
-                points_per_octave: 1,
-                start: 1.0,
-                stop: 8.0,
-            },
-            None,
-        )
-        .expect("valid exact-grid OCT sweep");
-        assert_eq!(octave, vec![1.0, 2.0, 4.0, 8.0]);
-    }
-
-    #[test]
-    fn descending_logarithmic_step_values_match_core_one_start_semantics() {
-        let dec = generate_step_values(
-            &StepSweep::Decade {
-                points_per_decade: 5,
-                start: 100.0,
-                stop: 1.0,
-            },
-            None,
-        )
-        .expect("valid descending DEC sweep");
-        assert_eq!(dec, vec![100.0]);
-
-        let octave = generate_step_values(
-            &StepSweep::Octave {
-                points_per_octave: 3,
-                start: 8.0,
-                stop: 1.0,
-            },
-            None,
-        )
-        .expect("valid descending OCT sweep");
-        assert_eq!(octave, vec![8.0]);
+        for (sweep, expected) in [
+            (
+                StepSweep::Linear {
+                    start: 100.0e-15,
+                    stop: 150.0e-15,
+                    step: 10.0e-15,
+                },
+                vec![
+                    100.0e-15, 110.0e-15, 120.0e-15, 130.0e-15, 140.0e-15, 150.0e-15,
+                ],
+            ),
+            (
+                StepSweep::Linear {
+                    start: 3.0e-20,
+                    stop: 1.0e-20,
+                    step: -1.0e-20,
+                },
+                vec![3.0e-20, 2.0e-20, 1.0e-20],
+            ),
+        ] {
+            validate_step_sweep(&sweep).expect("valid sweep");
+            let actual = sweep.values();
+            assert_eq!(actual.len(), expected.len(), "{sweep:?}");
+            for (index, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+                assert!(
+                    (actual - expected).abs() <= expected.abs() * 1.0e-14,
+                    "linear grid point {index}: actual={actual:.17e}, expected={expected:.17e}"
+                );
+            }
+        }
     }
 
     #[test]
