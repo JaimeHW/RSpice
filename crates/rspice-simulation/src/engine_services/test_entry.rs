@@ -18,6 +18,21 @@ pub(crate) fn parse(text: &str) -> Netlist {
     ctx(&NoAbort).parse(text).expect("the test deck parses")
 }
 
+/// Parse `text` as one Monte Carlo trial does: statistical parameters
+/// sampled under `seed`.
+pub(crate) fn parse_sampled(text: &str, seed: u64) -> super::ServiceRunResult<Netlist> {
+    crate::netlist_preparation::parse_runner_netlist_with_options_and_abort(
+        text,
+        None,
+        rspice_core::netlist::NetlistParseOptions {
+            statistical_mode: rspice_core::netlist::StatisticalParamMode::Sample,
+            statistical_seed: Some(seed),
+            ..Default::default()
+        },
+        &NoAbort,
+    )
+}
+
 /// A driven PSS whose tones are every time-varying source the circuit
 /// drives, the complete set the periodic source contract accepts.
 pub(crate) fn driven_pss_config(

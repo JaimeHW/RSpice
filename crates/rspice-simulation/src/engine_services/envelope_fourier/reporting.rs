@@ -125,9 +125,12 @@ mod tests {
                 "Envelope reporting\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nR2 out 0 1k\n.save V(out) I(R1)\n{}\n.end\n",
                 options.to_spice_options()
             );
-            let data =
-                run_envelope_analysis_with_source_path_and_abort(&deck, &config, None, &NoAbort)
-                    .unwrap();
+            let data = run_envelope_analysis_with_context(
+                &deck,
+                &config,
+                crate::engine_services::test_entry::ctx(&NoAbort),
+            )
+            .unwrap();
             assert_eq!(data.time.len(), expected.len());
             for (&actual, expected) in data.time.iter().zip(expected) {
                 assert!((actual - expected * 1e-6).abs() < 1e-18);

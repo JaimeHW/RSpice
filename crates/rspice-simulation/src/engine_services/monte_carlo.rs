@@ -151,10 +151,8 @@ fn validate_monte_carlo_data(data: &MonteCarloData) -> ServiceRunResult<()> {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::super::{
-        ServiceContext, build_engine_config,
-        parse_runner_netlist_with_statistical_sampling_and_abort,
-    };
+    use super::super::test_entry::parse_sampled;
+    use super::super::{ServiceContext, build_engine_config};
     use super::*;
     use crate::error::SimulationError;
     use crate::runner::study::monte_carlo::voltages;
@@ -416,13 +414,7 @@ R2 out 0 1k
 
     #[test]
     fn trial_seed_override_preserves_the_authored_source() {
-        let parsed = parse_runner_netlist_with_statistical_sampling_and_abort(
-            NO_STATISTICS_DECK,
-            None,
-            41,
-            &NoAbort,
-        )
-        .unwrap();
+        let parsed = parse_sampled(NO_STATISTICS_DECK, 41).unwrap();
         assert_eq!(parsed.source_text.as_deref(), Some(NO_STATISTICS_DECK));
         assert_eq!(parsed.options.seed, Some(41));
     }
@@ -439,10 +431,7 @@ R2 out 0 1k
         ] {
             let source =
                 format!("{title}\n.options seed=7\n.param sample={{aunif(0,1)}}\n{ending}\n");
-            let parsed = parse_runner_netlist_with_statistical_sampling_and_abort(
-                &source, None, 41, &NoAbort,
-            )
-            .unwrap();
+            let parsed = parse_sampled(&source, 41).unwrap();
             assert_eq!(parsed.title, title);
             assert_eq!(parsed.options.seed, Some(41), "{source}");
             assert_eq!(parsed.params.random().seed(), 41, "{source}");
@@ -462,9 +451,7 @@ R2 out 0 1k
     #[test]
     fn a_deck_without_a_terminal_end_still_receives_the_seed() {
         let source = "title\nV1 in 0 1\n";
-        let parsed =
-            parse_runner_netlist_with_statistical_sampling_and_abort(source, None, 9, &NoAbort)
-                .unwrap();
+        let parsed = parse_sampled(source, 9).unwrap();
         assert_eq!(parsed.options.seed, Some(9));
         assert_eq!(parsed.source_text.as_deref(), Some(source));
     }
@@ -626,13 +613,8 @@ R2 out 0 1k
 
             // Re-run this one trial exactly as the driver would have, without
             // running any other.
-            let netlist = parse_runner_netlist_with_statistical_sampling_and_abort(
-                MODEL_CARD_STATISTICS_DECK,
-                None,
-                seed,
-                &NoAbort,
-            )
-            .expect("the trial deck reparses");
+            let netlist =
+                parse_sampled(MODEL_CARD_STATISTICS_DECK, seed).expect("the trial deck reparses");
             let engine = Engine::new(build_engine_config(&netlist, None));
             let solved = engine
                 .run_dc_op_with_abort(&netlist, &NoAbort)

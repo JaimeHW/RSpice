@@ -77,8 +77,6 @@ pub(crate) use hbnoise::{
     integrate_psd, run_hbnoise_analysis_from_hb_on_materialized_with_context,
 };
 pub(crate) use helpers::parse_runner_netlist_with_abort;
-#[cfg(test)]
-use helpers::parse_runner_netlist_with_statistical_sampling_and_abort;
 use helpers::{
     build_voltage_output_expr, is_ground_like, netlist_has_independent_source_named_with_abort,
     normalize_voltage_signal_name,

@@ -24,8 +24,6 @@ pub use initialization::EnvelopeInitializationConfig;
 #[cfg(test)]
 pub use initialization::EnvelopeShootingIntegration;
 use rspice_core::engine::Engine;
-#[cfg(test)]
-use std::path::Path;
 use trajectory::EnvelopeTrajectory;
 
 /// Conservative upper bound for dense least-squares work performed by one
@@ -154,27 +152,8 @@ pub struct EnvelopeData {
         Option<std::sync::Arc<rspice_results::convergence_quality::TransientConvergenceEvidence>>,
 }
 
-/// Run envelope analysis with source-path resolution and cooperative
-/// cancellation through initialization, transient solving, and projection
-/// extraction.
-#[cfg(test)]
-pub fn run_envelope_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &EnvelopeRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<EnvelopeData> {
-    run_envelope_analysis_with_context(
-        netlist_text,
-        config,
-        ServiceContext {
-            source_path,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
+/// Run envelope analysis with cooperative cancellation through
+/// initialization, transient solving, and projection extraction.
 pub fn run_envelope_analysis_with_context(
     netlist_text: &str,
     config: &EnvelopeRunConfig,
@@ -1542,6 +1521,7 @@ mod tests {
     use std::f64::consts::PI;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::test_entry::ctx;
     use super::*;
 
     struct AbortOnPoll {
@@ -1574,7 +1554,7 @@ mod tests {
             let deck = format!(
                 "Selected carrier output\nV1 in 0 SIN(0 1 1Meg)\nR1 in out 1k\nR2 out 0 1k\n{selection}\n.end\n"
             );
-            run_envelope_analysis_with_source_path_and_abort(&deck, &config, None, &NoAbort)
+            run_envelope_analysis_with_context(&deck, &config, ctx(&NoAbort))
                 .expect("carrier extraction must honor the retained voltage selection")
         };
         let all = run("");
@@ -1650,11 +1630,10 @@ mod tests {
                 adaptive_mode: EnvelopeAdaptiveMode::FixedEnvelopeStep,
                 extraction_path: EnvelopeExtractionPath::Projection,
             };
-            let result = run_envelope_analysis_with_source_path_and_abort(
+            let result = run_envelope_analysis_with_context(
                 "Envelope convergence\nV1 in mod SIN(0 1 1Meg)\nVmod mod 0 PWL(0 0 10u 0.1)\nR1 in out 1k\nC1 out 0 10p\n.end\n",
                 &config,
-                None,
-                &NoAbort,
+                ctx(&NoAbort),
             )
             .unwrap();
             let quality = result

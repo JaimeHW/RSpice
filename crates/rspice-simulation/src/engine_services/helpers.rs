@@ -4,13 +4,8 @@
 //! expressions an analysis asks for, and the abort-aware wrappers every
 //! runner shares.
 
-#[cfg(test)]
-use std::path::Path;
-
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
-#[cfg(test)]
-use rspice_core::netlist::StatisticalParamMode;
 use rspice_core::netlist::{ElementKind, FreqVariation};
 
 use super::{ServiceRunError, ServiceRunResult};
@@ -19,25 +14,6 @@ use crate::error::ensure_not_aborted;
 pub(crate) use crate::netlist_preparation::parse_runner_netlist_with_abort;
 #[cfg(test)]
 use crate::netlist_preparation::parse_runner_netlist_with_resource_limits_and_abort;
-
-#[cfg(test)]
-pub(crate) fn parse_runner_netlist_with_statistical_sampling_and_abort(
-    netlist_text: &str,
-    source_path: Option<&Path>,
-    seed: u64,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<rspice_core::Netlist> {
-    crate::netlist_preparation::parse_runner_netlist_with_options_and_abort(
-        netlist_text,
-        source_path,
-        rspice_core::netlist::NetlistParseOptions {
-            statistical_mode: StatisticalParamMode::Sample,
-            statistical_seed: Some(seed),
-            ..Default::default()
-        },
-        abort,
-    )
-}
 
 pub(super) fn build_voltage_output_expr(
     netlist: &rspice_core::Netlist,
@@ -97,24 +73,6 @@ pub(super) fn normalize_voltage_signal_name(name: &str) -> String {
     trimmed.to_ascii_uppercase()
 }
 
-#[cfg(test)]
-fn generate_freq_points_with_abort(
-    start: Value,
-    stop: Value,
-    points: usize,
-    sweep_type: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Value>> {
-    generate_freq_points_with_limit_and_abort(
-        start,
-        stop,
-        points,
-        sweep_type,
-        rspice_core::ResourceLimits::default().max_analysis_points,
-        abort,
-    )
-}
-
 pub(crate) fn generate_freq_points_with_limit_and_abort(
     start: Value,
     stop: Value,
@@ -164,7 +122,13 @@ pub(crate) fn generate_freq_points_with_limit_and_abort(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::test_entry::parse_sampled;
     use super::*;
+
+    /// The run's default analysis-point ceiling.
+    fn default_points() -> usize {
+        rspice_core::ResourceLimits::default().max_analysis_points
+    }
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -193,7 +157,14 @@ mod tests {
     #[test]
     fn frequency_generation_polls_inside_the_point_loop() {
         let abort = AbortOnPoll::new(5);
-        let result = generate_freq_points_with_abort(1.0, 100.0, 100, "lin", &abort);
+        let result = generate_freq_points_with_limit_and_abort(
+            1.0,
+            100.0,
+            100,
+            "lin",
+            default_points(),
+            &abort,
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -201,7 +172,14 @@ mod tests {
     #[test]
     fn cancellation_precedes_invalid_frequency_configuration() {
         let abort = AbortOnPoll::new(2);
-        let result = generate_freq_points_with_abort(0.0, -1.0, 0, "invalid", &abort);
+        let result = generate_freq_points_with_limit_and_abort(
+            0.0,
+            -1.0,
+            0,
+            "invalid",
+            default_points(),
+            &abort,
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -241,9 +219,15 @@ mod tests {
             (FreqVariation::Lin, "lin", 1, 0.0, 0.0),
             (FreqVariation::Dec, "dec", 10, 1.0e3, 1.0e3),
         ] {
-            let service =
-                generate_freq_points_with_abort(start, stop, points, name, &rspice_core::NoAbort)
-                    .expect("valid service sweep");
+            let service = generate_freq_points_with_limit_and_abort(
+                start,
+                stop,
+                points,
+                name,
+                default_points(),
+                &rspice_core::NoAbort,
+            )
+            .expect("valid service sweep");
             let exported =
                 rspice_core::analysis::ac::ac_sweep_frequencies(variation, points, start, stop);
             assert_eq!(service, exported, "{name} sweep drifted from SPICE");
@@ -338,13 +322,7 @@ mod tests {
         let source = "statistical runner mode\n.options seed=7\n.param delta={agauss(2,1,1)}\nR1 in 0 {1k+delta}\n.end\n";
         let nominal = parse_runner_netlist_with_abort(source, None, &rspice_core::NoAbort)
             .expect("ordinary runner deck parses");
-        let sampled = parse_runner_netlist_with_statistical_sampling_and_abort(
-            source,
-            None,
-            7,
-            &rspice_core::NoAbort,
-        )
-        .expect("statistical Monte Carlo trial parses");
+        let sampled = parse_sampled(source, 7).expect("statistical Monte Carlo trial parses");
 
         assert_eq!(nominal.params.get("delta"), Some(2.0));
         assert_ne!(sampled.params.get("delta"), Some(2.0));

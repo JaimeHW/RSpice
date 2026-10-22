@@ -10,9 +10,10 @@ pub use rspice_simulation_contract::envelope_initialization::EnvelopeShootingInt
 mod tests {
     use super::super::{
         EnvelopeAdaptiveMode, EnvelopeExtractionPath, EnvelopeInitialPeriodicSolve,
-        EnvelopeRunConfig, run_envelope_analysis_with_source_path_and_abort,
+        EnvelopeRunConfig, run_envelope_analysis_with_context,
     };
     use super::*;
+    use crate::engine_services::test_entry::ctx;
     use rspice_core::NoAbort;
 
     #[test]
@@ -91,9 +92,7 @@ mod tests {
                 adaptive_mode: authored.adaptive_mode,
                 extraction_path: authored.extraction_path,
             };
-            let result =
-                run_envelope_analysis_with_source_path_and_abort(deck, &config, None, &NoAbort)
-                    .unwrap();
+            let result = run_envelope_analysis_with_context(deck, &config, ctx(&NoAbort)).unwrap();
             assert_eq!(result.waveforms.len(), 2);
             assert!(result.time.len() >= 5);
             assert!(
@@ -201,8 +200,7 @@ mod tests {
                 extraction_path: EnvelopeExtractionPath::Projection,
             };
             let completed =
-                run_envelope_analysis_with_source_path_and_abort(deck, &config, None, &NoAbort)
-                    .unwrap();
+                run_envelope_analysis_with_context(deck, &config, ctx(&NoAbort)).unwrap();
             let initialization = completed
                 .convergence
                 .as_ref()
@@ -225,8 +223,7 @@ mod tests {
             if method == EnvelopeInitialPeriodicSolve::PeriodicSteadyState {
                 assert!(initialization.solver_iterations > 1, "{initialization:?}");
                 config.initialization.max_iterations = 1;
-                let failed =
-                    run_envelope_analysis_with_source_path_and_abort(deck, &config, None, &NoAbort);
+                let failed = run_envelope_analysis_with_context(deck, &config, ctx(&NoAbort));
                 assert!(failed.is_err(), "PSS ignored the one-iteration budget");
             } else {
                 // The currently supported linear HB envelope circuits admit an
