@@ -1,6 +1,6 @@
 //! Stimulus provenance carried by an armed independent-source placement.
 
-use rspice_design::schematic::{component::Component, component_type::ComponentType};
+use rspice_design::schematic::component_type::ComponentType;
 use rspice_design::stimulus_library::{
     definition::StimulusDefinition, provenance::StimulusProvenance,
 };
@@ -41,14 +41,5 @@ impl PendingStimulusPlacement {
     #[must_use]
     pub const fn revision(&self) -> u32 {
         self.receipt.revision
-    }
-
-    /// Write the copy and its receipt onto a freshly placed instance.
-    ///
-    /// The same two fields adoption writes, from the same record, so an
-    /// instance placed from a definition and one adopted onto afterwards carry
-    /// byte-identical cards.
-    pub fn stamp_onto(&self, component: &mut Component) {
-        self.receipt.stamp_onto(component);
     }
 }

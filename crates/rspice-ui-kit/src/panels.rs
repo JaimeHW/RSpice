@@ -885,21 +885,6 @@ pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Col
     property_row_with_tone(ui, label, value, value_tone, None, tokens::FS_0, elide_text)
 }
 
-/// Property row whose value is quieter than a plain [`property_row`]'s: a
-/// qualifier, or a value that is absent. The ink is one of the neutral ramp.
-pub fn property_row_ink(ui: &mut Ui, label: &str, value: &str, ink: Ink) -> Response {
-    let palette = Tokens::get(ui.ctx()).color;
-    property_row_with_tone(
-        ui,
-        label,
-        value,
-        ink.color(&palette),
-        None,
-        tokens::FS_0,
-        elide_text,
-    )
-}
-
 /// Property row whose value may carry a problem.
 ///
 /// The value is always primary text. A [`Problem`] paints its mark in front of
@@ -950,25 +935,6 @@ fn property_row_with_problem(
         });
     }
     response
-}
-
-/// Property row with a font-independent semantic mark before its value.
-pub fn property_row_status(
-    ui: &mut Ui,
-    label: &str,
-    value: &str,
-    value_tone: Color32,
-    mark: StatusMark,
-) -> Response {
-    property_row_with_tone(
-        ui,
-        label,
-        value,
-        value_tone,
-        Some((mark, value_tone)),
-        tokens::FS_0,
-        elide_text,
-    )
 }
 
 /// Gap between a property row's label and value columns.

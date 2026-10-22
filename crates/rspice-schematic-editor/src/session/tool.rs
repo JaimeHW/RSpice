@@ -136,21 +136,6 @@ impl Tool {
         )
     }
 
-    /// Check if this is the select tool
-    pub fn is_select(&self) -> bool {
-        matches!(self, Tool::Select)
-    }
-
-    /// Check if this is the wire tool
-    pub fn is_wire(&self) -> bool {
-        matches!(self, Tool::Wire)
-    }
-
-    /// Check if this is the bus drawing tool.
-    pub fn is_bus(&self) -> bool {
-        matches!(self, Tool::Bus)
-    }
-
     /// Get the component type being placed (if any)
     pub fn placing(&self) -> Option<ComponentType> {
         match self {

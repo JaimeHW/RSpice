@@ -303,22 +303,6 @@ impl Toasts {
         self.notify(ctx, NotificationCategory::System, ToastKind::Info, message);
     }
 
-    /// Queue a titled informational toast.
-    pub fn info_with_title(
-        &mut self,
-        ctx: &Context,
-        title: impl Into<String>,
-        message: impl Into<String>,
-    ) {
-        self.notify_with_title(
-            ctx,
-            NotificationCategory::System,
-            ToastKind::Info,
-            title,
-            message,
-        );
-    }
-
     /// Queue a warning toast.
     #[cfg(test)]
     pub fn warn(&mut self, ctx: &Context, message: impl Into<String>) {

@@ -49,29 +49,11 @@ impl WireRoutingMode {
         }
     }
 
-    /// Toggle only between orthogonal modes (for compatibility)
-    pub fn toggle_orthogonal(self) -> Self {
-        match self {
-            WireRoutingMode::HorizontalFirst => WireRoutingMode::VerticalFirst,
-            WireRoutingMode::VerticalFirst => WireRoutingMode::HorizontalFirst,
-            // Non-orthogonal modes default to HorizontalFirst
-            _ => WireRoutingMode::HorizontalFirst,
-        }
-    }
-
     /// Check if this mode is orthogonal-only (no diagonals)
     pub fn is_orthogonal(&self) -> bool {
         matches!(
             self,
             WireRoutingMode::HorizontalFirst | WireRoutingMode::VerticalFirst
-        )
-    }
-
-    /// Check if this mode allows diagonal segments
-    pub fn allows_diagonal(&self) -> bool {
-        matches!(
-            self,
-            WireRoutingMode::Diagonal | WireRoutingMode::FortyFiveDegree
         )
     }
 
@@ -82,16 +64,6 @@ impl WireRoutingMode {
             WireRoutingMode::VerticalFirst => "Orthogonal (V→H)",
             WireRoutingMode::Diagonal => "Diagonal",
             WireRoutingMode::FortyFiveDegree => "45° Routing",
-        }
-    }
-
-    /// Get a short keyboard hint for this mode
-    pub fn keyboard_hint(&self) -> &'static str {
-        match self {
-            WireRoutingMode::HorizontalFirst => "H→V",
-            WireRoutingMode::VerticalFirst => "V→H",
-            WireRoutingMode::Diagonal => "Diag",
-            WireRoutingMode::FortyFiveDegree => "45°",
         }
     }
 

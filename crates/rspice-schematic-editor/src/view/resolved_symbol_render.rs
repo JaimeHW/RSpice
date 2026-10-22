@@ -97,14 +97,6 @@ pub fn resolved_symbol_world_bounds(
     bounds.finish()
 }
 
-/// The symbol's own extent in its upright frame, pins and body only: what a
-/// thumbnail fits, where the instance's name and value are not drawn.
-pub fn resolved_symbol_artwork_bounds(symbol: &ResolvedCellSymbol) -> Option<(Point, Point)> {
-    let mut bounds = BoundsAccumulator::default();
-    fold_symbol_artwork_points(symbol, |point| bounds.include(point));
-    bounds.finish()
-}
-
 fn draw_symbol_body(
     painter: &Painter,
     origin: Pos2,

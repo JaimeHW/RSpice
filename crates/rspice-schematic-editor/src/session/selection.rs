@@ -178,18 +178,6 @@ impl SelectionRect {
         let (min_x, min_y, max_x, max_y) = self.bounds();
         point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
     }
-
-    /// Check if a rectangle (min_x, min_y, max_x, max_y) intersects the selection
-    pub fn intersects_rect(&self, rect: (i32, i32, i32, i32)) -> bool {
-        let (sel_min_x, sel_min_y, sel_max_x, sel_max_y) = self.bounds();
-        let (rect_min_x, rect_min_y, rect_max_x, rect_max_y) = rect;
-
-        // Check for non-intersection
-        !(rect_max_x < sel_min_x
-            || rect_min_x > sel_max_x
-            || rect_max_y < sel_min_y
-            || rect_min_y > sel_max_y)
-    }
 }
 
 // =============================================================================

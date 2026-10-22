@@ -163,13 +163,6 @@ impl DecimationCache {
         self.tick = self.tick.wrapping_add(1);
     }
 
-    /// Configure the hard resident cache budget. Existing least-recently-used
-    /// entries are evicted immediately when the budget shrinks.
-    pub fn set_memory_budget_mib(&mut self, mebibytes: u32) {
-        self.byte_capacity = (mebibytes.clamp(64, 16_384) as usize).saturating_mul(1024 * 1024);
-        self.evict_to_fit(0);
-    }
-
     fn evict_to_fit(&mut self, incoming_bytes: usize) {
         while (!self.map.is_empty())
             && (self.map.len() >= CACHE_CAP
@@ -883,7 +876,6 @@ mod tests {
     #[test]
     fn invalidating_retained_data_rebuilds_envelopes_without_resetting_the_budget() {
         let mut cache = DecimationCache::default();
-        cache.set_memory_budget_mib(64);
         let budget = cache.byte_capacity;
         let x = [0.0, 1.0, 2.0];
         let first = cache.series(

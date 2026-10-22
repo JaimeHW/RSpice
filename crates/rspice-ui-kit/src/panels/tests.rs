@@ -770,18 +770,6 @@ fn a_problem_row_keeps_its_value_neutral_and_only_marks_a_problem() {
         );
     }
 
-    for (ink, expected) in [
-        (Ink::Text, palette.text),
-        (Ink::Dim, palette.text_dim),
-        (Ink::Faint, palette.text_faint),
-    ] {
-        let inked = render(&|ui| {
-            property_row_ink(ui, "Terminal", "unplaced", ink);
-        });
-        assert_eq!(value(&inked).fallback_color, expected, "{ink:?}");
-        assert_eq!(value(&inked).pos, value(&plain).pos, "{ink:?}");
-    }
-
     // The schematic inspector's variant sets its value a size up, and is its
     // own plain row when there is nothing to mark.
     let schematic = render(&|ui| {

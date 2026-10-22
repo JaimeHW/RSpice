@@ -25,7 +25,6 @@ anything. The crate stands apart so that boundary can be enforced:
 | `component_properties`, `object_properties` | Component-parameter and object-property drafts and their forms, which prepare a validated field delta without mutating the design |
 | `property_values` | Typed value editors for property rows: mono inputs for numbers, strings and expressions, chips for small enums, checks for booleans |
 | `pwl_editor` | The piecewise-linear point table shared by source-property surfaces |
-| `selection_forms` | The Move and Stretch command forms |
 | `annotations`, `bus_tap_placement`, `net_label_placement`, `pin_placement`, `xspice_placement` | Placement forms for design notes and documentation shapes, bus taps, net labels and off-sheet connectors, pins, and built-in XSPICE vector widths |
 | `bus_geometry` | The angled bus-tap breakout shared by the canvas, hit testing, selection and SVG export |
 | `vector_preview` | The deck bit names a declared pin or tap range expands to, shown while the range is still a draft |
