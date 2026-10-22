@@ -1,7 +1,4 @@
-//! Selection.
-//!
-//! What is selected, and the set operations over it — rubber band, add,
-//! toggle, and select-all-of-kind.
+//! Deleting the selection as one undoable edit.
 
 use super::super::deletion::DeletionSelection;
 #[cfg(test)]
@@ -9,225 +6,6 @@ use super::super::{BusDeclaration, BusSlice, BusTapOrientation, DesignNoteKind};
 use super::*;
 
 impl SchematicState {
-    // =========================================================================
-    // Selection Management
-    // =========================================================================
-
-    /// Select all complete schematic objects within a rectangular region.
-    ///
-    /// This is used for rubber-band box selection. The user drags to create
-    /// a selection rectangle, and all items within the rectangle are selected.
-    ///
-    /// # Arguments
-    /// * `min_x`, `min_y`, `max_x`, `max_y` - The selection rectangle bounds (in grid coordinates)
-    /// * `add_to_selection` - If true, add to existing selection; if false, replace selection
-    ///
-    /// # Returns
-    /// The number of items selected
-    pub fn select_in_rect(
-        &mut self,
-        min_x: i32,
-        min_y: i32,
-        max_x: i32,
-        max_y: i32,
-        add_to_selection: bool,
-    ) -> usize {
-        if !add_to_selection {
-            self.session.editor.selection.clear();
-        }
-
-        let mut count = 0;
-
-        // Select components whose center is within the rectangle
-        for comp in &self.design.document().components {
-            if comp.pos.x >= min_x
-                && comp.pos.x <= max_x
-                && comp.pos.y >= min_y
-                && comp.pos.y <= max_y
-                && !self.session.editor.selection.has_component(comp.id)
-            {
-                self.session.editor.selection.select_component(comp.id);
-                count += 1;
-            }
-        }
-
-        // Select wires whose routed polyline intersects the rectangle.
-        for wire in &self.design.document().wires {
-            let wire_in_rect = polyline_intersects_rect(&wire.points, min_x, min_y, max_x, max_y);
-            if wire_in_rect && !self.session.editor.selection.has_wire(wire.id) {
-                self.session.editor.selection.select_wire(wire.id);
-                count += 1;
-            }
-        }
-
-        // Select junctions within the rectangle
-        for junction in &self.design.document().junctions {
-            if junction.pos.x >= min_x
-                && junction.pos.x <= max_x
-                && junction.pos.y >= min_y
-                && junction.pos.y <= max_y
-                && !self.session.editor.selection.has_junction(junction.pos)
-            {
-                self.session.editor.selection.select_junction(junction.pos);
-                count += 1;
-            }
-        }
-
-        // Net labels are complete, stable-ID objects whose attachment anchor
-        // determines the named electrical node.
-        for label in &self.design.document().net_labels {
-            if label.pos.x >= min_x
-                && label.pos.x <= max_x
-                && label.pos.y >= min_y
-                && label.pos.y <= max_y
-                && !self.session.editor.selection.has_net_label(label.id)
-            {
-                self.session.editor.selection.select_net_label(label.id);
-                count += 1;
-            }
-        }
-
-        for note in &self.design.document().design_notes {
-            if note.pos.x >= min_x
-                && note.pos.x <= max_x
-                && note.pos.y >= min_y
-                && note.pos.y <= max_y
-                && !self.session.editor.selection.has_design_note(note.id)
-            {
-                self.session.editor.selection.select_design_note(note.id);
-                count += 1;
-            }
-        }
-
-        for probe in &self.design.document().probes {
-            if probe.position.x >= min_x
-                && probe.position.x <= max_x
-                && probe.position.y >= min_y
-                && probe.position.y <= max_y
-                && !self.session.editor.selection.has_probe(probe.id)
-            {
-                self.session.editor.selection.select_probe(probe.id);
-                count += 1;
-            }
-        }
-
-        // Select buses whose routed polyline intersects the rectangle, even
-        // when both segment endpoints are outside it.
-        for bus in &self.design.document().buses {
-            let in_rect = polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y);
-            if in_rect && !self.session.editor.selection.has_bus(bus.id) {
-                self.session.editor.selection.select_bus(bus.id);
-                count += 1;
-            }
-        }
-
-        // A tap is included when either end of its connection is inside.
-        for tap in &self.design.document().bus_taps {
-            let in_rect = segment_intersects_rect(
-                tap.bus_point,
-                tap.connection_point,
-                min_x,
-                min_y,
-                max_x,
-                max_y,
-            );
-            if in_rect && !self.session.editor.selection.has_bus_tap(tap.id) {
-                self.session.editor.selection.select_bus_tap(tap.id);
-                count += 1;
-            }
-        }
-
-        count
-    }
-
-    /// Preview selection in rectangle during drag (live highlight feedback)
-    ///
-    /// This updates the selection to show what would be selected when the drag
-    /// is released. It replaces the current selection with items in the rect.
-    pub fn preview_selection_in_rect(&mut self, min_x: i32, min_y: i32, max_x: i32, max_y: i32) {
-        // Clear and rebuild selection based on current rect
-        self.session.editor.selection.clear();
-
-        // Select components whose center is within the rectangle
-        for comp in &self.design.document().components {
-            if comp.pos.x >= min_x
-                && comp.pos.x <= max_x
-                && comp.pos.y >= min_y
-                && comp.pos.y <= max_y
-            {
-                self.session.editor.selection.select_component(comp.id);
-            }
-        }
-
-        // Select wires whose routed polyline intersects the rectangle.
-        for wire in &self.design.document().wires {
-            let wire_in_rect = polyline_intersects_rect(&wire.points, min_x, min_y, max_x, max_y);
-            if wire_in_rect {
-                self.session.editor.selection.select_wire(wire.id);
-            }
-        }
-
-        // Select junctions within the rectangle
-        for junction in &self.design.document().junctions {
-            if junction.pos.x >= min_x
-                && junction.pos.x <= max_x
-                && junction.pos.y >= min_y
-                && junction.pos.y <= max_y
-            {
-                self.session.editor.selection.select_junction(junction.pos);
-            }
-        }
-
-        for label in &self.design.document().net_labels {
-            if label.pos.x >= min_x
-                && label.pos.x <= max_x
-                && label.pos.y >= min_y
-                && label.pos.y <= max_y
-            {
-                self.session.editor.selection.select_net_label(label.id);
-            }
-        }
-
-        for note in &self.design.document().design_notes {
-            if note.pos.x >= min_x
-                && note.pos.x <= max_x
-                && note.pos.y >= min_y
-                && note.pos.y <= max_y
-            {
-                self.session.editor.selection.select_design_note(note.id);
-            }
-        }
-
-        for probe in &self.design.document().probes {
-            if probe.position.x >= min_x
-                && probe.position.x <= max_x
-                && probe.position.y >= min_y
-                && probe.position.y <= max_y
-            {
-                self.session.editor.selection.select_probe(probe.id);
-            }
-        }
-
-        for bus in &self.design.document().buses {
-            if polyline_intersects_rect(&bus.points, min_x, min_y, max_x, max_y) {
-                self.session.editor.selection.select_bus(bus.id);
-            }
-        }
-
-        for tap in &self.design.document().bus_taps {
-            if segment_intersects_rect(
-                tap.bus_point,
-                tap.connection_point,
-                min_x,
-                min_y,
-                max_x,
-                max_y,
-            ) {
-                self.session.editor.selection.select_bus_tap(tap.id);
-            }
-        }
-    }
-
     /// Atomically remove selected complete objects, including net labels.
     ///
     /// This state-layer entry point owns the undo transaction so keyboard,
@@ -262,126 +40,6 @@ impl SchematicState {
         self.finish_document_edit(edit.committed);
         edit.committed
     }
-
-    /// Select every complete design object in the schematic.
-    pub fn select_all_objects(&mut self) {
-        self.session.editor.selection.clear();
-        self.session.editor.selection.components = self
-            .design
-            .document()
-            .components
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        self.session.editor.selection.wires = self
-            .design
-            .document()
-            .wires
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        self.session.editor.selection.buses = self
-            .design
-            .document()
-            .buses
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        self.session.editor.selection.bus_taps = self
-            .design
-            .document()
-            .bus_taps
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        self.session.editor.selection.net_labels = self
-            .design
-            .document()
-            .net_labels
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        self.session.editor.selection.design_notes = self
-            .design
-            .document()
-            .design_notes
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        self.session.editor.selection.documentation_shapes = self
-            .design
-            .document()
-            .documentation_shapes
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        self.session.editor.selection.probes = self
-            .design
-            .document()
-            .probes
-            .iter()
-            .map(|item| item.id)
-            .collect();
-        for position in self.design.document().junctions.iter().map(|item| item.pos) {
-            self.session.editor.selection.select_junction(position);
-        }
-    }
-}
-
-fn polyline_intersects_rect(
-    points: &[Point],
-    min_x: i32,
-    min_y: i32,
-    max_x: i32,
-    max_y: i32,
-) -> bool {
-    points
-        .windows(2)
-        .any(|pair| segment_intersects_rect(pair[0], pair[1], min_x, min_y, max_x, max_y))
-}
-
-fn segment_intersects_rect(
-    start: Point,
-    end: Point,
-    min_x: i32,
-    min_y: i32,
-    max_x: i32,
-    max_y: i32,
-) -> bool {
-    let inside =
-        |point: Point| point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y;
-    if inside(start) || inside(end) {
-        return true;
-    }
-    let corners = [
-        Point::new(min_x, min_y),
-        Point::new(max_x, min_y),
-        Point::new(max_x, max_y),
-        Point::new(min_x, max_y),
-    ];
-    (0..4).any(|index| segments_intersect(start, end, corners[index], corners[(index + 1) % 4]))
-}
-
-fn segments_intersect(a: Point, b: Point, c: Point, d: Point) -> bool {
-    fn orientation(a: Point, b: Point, c: Point) -> i128 {
-        (i128::from(b.x) - i128::from(a.x)) * (i128::from(c.y) - i128::from(a.y))
-            - (i128::from(b.y) - i128::from(a.y)) * (i128::from(c.x) - i128::from(a.x))
-    }
-    fn on_segment(a: Point, b: Point, point: Point) -> bool {
-        point.x >= a.x.min(b.x)
-            && point.x <= a.x.max(b.x)
-            && point.y >= a.y.min(b.y)
-            && point.y <= a.y.max(b.y)
-    }
-    let o1 = orientation(a, b, c);
-    let o2 = orientation(a, b, d);
-    let o3 = orientation(c, d, a);
-    let o4 = orientation(c, d, b);
-    (o1.signum() != o2.signum() && o3.signum() != o4.signum())
-        || (o1 == 0 && on_segment(a, b, c))
-        || (o2 == 0 && on_segment(a, b, d))
-        || (o3 == 0 && on_segment(c, d, a))
-        || (o4 == 0 && on_segment(c, d, b))
 }
 
 #[cfg(test)]
@@ -509,42 +167,6 @@ mod tests {
     }
 
     #[test]
-    fn crossing_bus_and_tap_are_box_selected_without_vertices_inside() {
-        let declaration = BusDeclaration::parse("DATA[3:0]").unwrap();
-        let bus =
-            Bus::segment(11, Point::new(-10, 0), Point::new(10, 0), Some(declaration)).unwrap();
-        let tap = BusTap::new(
-            12,
-            &bus,
-            Point::new(0, 0),
-            Point::new(0, 10),
-            BusSlice::parse("DATA[2]").unwrap(),
-            BusTapOrientation::Down,
-        )
-        .unwrap();
-        let mut schematic = SchematicState::default();
-        schematic
-            .design
-            .document_mut_for_test()
-            .wires
-            .push(Wire::segment(13, Point::new(-10, -1), Point::new(10, -1)));
-        schematic.design.document_mut_for_test().buses.push(bus);
-        schematic.design.document_mut_for_test().bus_taps.push(tap);
-        assert_eq!(schematic.select_in_rect(-1, -1, 1, 1, false), 3);
-        assert!(schematic.session.editor.selection.has_wire(13));
-        assert!(schematic.session.editor.selection.has_bus(11));
-        assert!(schematic.session.editor.selection.has_bus_tap(12));
-        assert!(segment_intersects_rect(
-            Point::new(i32::MIN, i32::MIN),
-            Point::new(i32::MAX, i32::MAX),
-            -1,
-            -1,
-            1,
-            1,
-        ));
-    }
-
-    #[test]
     fn deleting_bus_cascades_taps_and_undo_restores_both() {
         let declaration = BusDeclaration::parse("DATA[3:0]").unwrap();
         let bus = Bus::segment(21, Point::new(0, 0), Point::new(10, 0), Some(declaration)).unwrap();
@@ -569,44 +191,6 @@ mod tests {
         assert!(schematic.undo());
         assert_eq!(schematic.design.document().buses.len(), 1);
         assert_eq!(schematic.design.document().bus_taps.len(), 1);
-    }
-
-    #[test]
-    fn rectangle_preview_commit_and_select_all_include_label_ids() {
-        let mut schematic = SchematicState::default();
-        schematic
-            .design
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(31, Point::new(5, 6), "inside"));
-        schematic
-            .design
-            .document_mut_for_test()
-            .net_labels
-            .push(NetLabel::new(32, Point::new(50, 60), "outside"));
-        schematic.design.document_mut_for_test().design_notes.push(
-            DesignNote::new(
-                33,
-                Point::new(100, 100),
-                DesignNoteKind::PlainText,
-                "documentation",
-            )
-            .unwrap(),
-        );
-
-        schematic.preview_selection_in_rect(0, 0, 10, 10);
-        assert!(schematic.session.editor.selection.has_net_label(31));
-        assert!(!schematic.session.editor.selection.has_net_label(32));
-
-        assert_eq!(schematic.select_in_rect(45, 55, 55, 65, false), 1);
-        assert!(!schematic.session.editor.selection.has_net_label(31));
-        assert!(schematic.session.editor.selection.has_net_label(32));
-
-        schematic.select_all_objects();
-        assert!(schematic.session.editor.selection.has_net_label(31));
-        assert!(schematic.session.editor.selection.has_net_label(32));
-        assert!(schematic.session.editor.selection.has_design_note(33));
-        assert_eq!(schematic.session.editor.selection.count(), 3);
     }
 
     #[test]
@@ -685,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn documentation_shape_select_all_delete_and_undo_are_non_electrical() {
+    fn documentation_shape_delete_and_undo_are_non_electrical() {
         let retained = DocumentationShape::new(
             43,
             DocumentationShapeGeometry::Line {
@@ -714,23 +298,6 @@ mod tests {
             .document_mut_for_test()
             .junctions
             .push(Junction::new(7, marker));
-
-        schematic.select_all_objects();
-        assert!(
-            schematic
-                .session
-                .editor
-                .selection
-                .has_documentation_shape(retained.id)
-        );
-        assert!(
-            schematic
-                .session
-                .editor
-                .selection
-                .has_documentation_shape(removed.id)
-        );
-        assert_eq!(schematic.session.editor.selection.count(), 3);
 
         schematic
             .session
@@ -765,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn probe_select_all_delete_and_undo_are_non_electrical() {
+    fn probe_delete_and_undo_are_non_electrical() {
         let probe =
             SchematicProbe::new(45, Point::new(10, 20), "V(out)", Some("V(out)".to_owned()))
                 .unwrap();
@@ -781,10 +348,6 @@ mod tests {
             .document_mut_for_test()
             .junctions
             .push(Junction::new(7, marker));
-
-        schematic.select_all_objects();
-        assert!(schematic.session.editor.selection.has_probe(probe.id));
-        assert_eq!(schematic.session.editor.selection.count(), 2);
 
         schematic
             .session

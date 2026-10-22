@@ -731,4 +731,51 @@ mod tests {
         );
         assert!(selection.has_wire(wire_id));
     }
+
+    #[test]
+    fn intersecting_selection_takes_a_bus_and_tap_crossing_with_no_vertex_inside() {
+        use rspice_design::schematic::bus::{
+            Bus, BusDeclaration, BusSlice, BusTap, BusTapOrientation,
+        };
+        let declaration = BusDeclaration::parse("DATA[3:0]").unwrap();
+        let bus =
+            Bus::segment(11, Point::new(-10, 0), Point::new(10, 0), Some(declaration)).unwrap();
+        let tap = BusTap::new(
+            12,
+            &bus,
+            Point::new(0, 0),
+            Point::new(0, 10),
+            BusSlice::parse("DATA[2]").unwrap(),
+            BusTapOrientation::Down,
+        )
+        .unwrap();
+        let mut document = SchematicDocument::default();
+        document
+            .wires
+            .push(Wire::segment(13, Point::new(-10, -1), Point::new(10, -1)));
+        document.buses.push(bus);
+        document.bus_taps.push(tap);
+        let mut selection = Selection::default();
+
+        assert_eq!(
+            SchematicSymbolContext::default().select_in_rect(
+                &document,
+                &mut selection,
+                SelectionWindow::new(-1, -1, 1, 1, false),
+                false,
+            ),
+            3
+        );
+        assert!(selection.has_wire(13));
+        assert!(selection.has_bus(11));
+        assert!(selection.has_bus_tap(12));
+        assert!(segment_intersects_rect(
+            Point::new(i32::MIN, i32::MIN),
+            Point::new(i32::MAX, i32::MAX),
+            -1,
+            -1,
+            1,
+            1,
+        ));
+    }
 }
