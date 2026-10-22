@@ -892,9 +892,10 @@ fn prepared_waveforms_distinguish_inline_names_from_file_inputs() {
 }
 
 /// A validated manual deck is dispatched without reading again any file its
-/// sources would open, because no such file survives validation: a Touchstone
-/// table a code model would open at run time is refused as the deck is
-/// prepared, as a file-backed PWL source is.
+/// sources would open: a Touchstone table a code model reads is sealed into
+/// the run as it is prepared. A manual deck has no directory of its own, so a
+/// relative table has nowhere to be read from, and preparation refuses it,
+/// naming the instance and the file.
 #[test]
 fn a_manual_deck_that_would_open_a_touchstone_table_is_refused_when_prepared() {
     let source = "deck\nV1 in 0 DC 0 AC 1\nA1 in out dut\n\
@@ -902,10 +903,11 @@ fn a_manual_deck_that_would_open_a_touchstone_table_is_refused_when_prepared() {
     let state = manual_deck_state(source);
     let error =
         SimulationController::build_prepared_snapshot(&state, SimulationRunIntent::ManualDeck)
-            .expect_err("an unsealed Touchstone table cannot reach dispatch");
+            .expect_err("a Touchstone table with nowhere to be read from cannot reach dispatch");
     assert_eq!(error.stage(), PreparationStage::SourceChecks, "{error}");
     assert!(
-        error.message().contains("unsealed external dependency"),
+        error.message().contains("instance 'A1' reads file=\"dut.s2p\"")
+            && error.message().contains("no directory of its own"),
         "{error}"
     );
 }
