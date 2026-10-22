@@ -91,7 +91,7 @@ comes from.
 - `VerilogADevice::try_new(name, model, nodes)`: the instance the simulator
   drives directly, with no trait indirection: set parameters and simulation
   state, then `evaluate()` / `stamp()` / `stamp_reactive()` /
-  `compute_jacobian()` inside the Newton loop, and `noise_sources()` for noise.
+  `try_compute_jacobian()` inside the Newton loop, and `noise_sources()` for noise.
   `try_new_with_canonical_ir` is the form that admits the native JIT. The
   compiled model is shared, so a thousand instances of one model compile once.
 - `rust_backend::RustTranspiler`: the offline emitter; `rspice-veriloga-gen`

@@ -335,10 +335,6 @@ impl WasmJitModelArtifact {
     pub fn stamp_kernel_export(&self) -> Option<&str> {
         self.stamp_kernel_export.as_deref()
     }
-
-    pub fn into_module(self) -> WasmJitArtifact {
-        self.module
-    }
 }
 
 impl WasmJitPlanSummary {

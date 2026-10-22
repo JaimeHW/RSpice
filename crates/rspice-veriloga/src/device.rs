@@ -8118,20 +8118,10 @@ impl VerilogADevice {
         Ok(())
     }
 
-    /// Compute Jacobian entries
+    /// Compute Jacobian entries, surfacing runtime model errors as
+    /// diagnostics instead of panicking.
     ///
     /// Returns (value, row_terminal, col_terminal, is_current) for each derivative.
-    pub fn compute_jacobian(&mut self) -> Vec<JacobianEntry> {
-        self.try_compute_jacobian().unwrap_or_else(|err| {
-            panic!(
-                "Verilog-A device '{}' model '{}' Jacobian evaluation failed: {}",
-                self.name, self.model.name, err
-            )
-        })
-    }
-
-    /// Checked Jacobian evaluation path for callers that can surface
-    /// runtime model errors as diagnostics instead of panicking.
     pub fn try_compute_jacobian(&mut self) -> Result<Vec<JacobianEntry>, VmError> {
         self.try_initialize_analysis()?;
         let replay = !self.context.numerical_evaluation_valid;

@@ -305,12 +305,6 @@ impl X64Encoder {
         self.emit_modrm(0b11, src.code(), dst.code());
     }
 
-    pub(crate) fn or_r64_r64(&mut self, dst: Gpr, src: Gpr) {
-        self.emit_rex(true, src.code(), 0, dst.code());
-        self.emit_u8(0x09);
-        self.emit_modrm(0b11, src.code(), dst.code());
-    }
-
     pub(crate) fn xor_r64_r64(&mut self, dst: Gpr, src: Gpr) {
         self.emit_rex(true, src.code(), 0, dst.code());
         self.emit_u8(0x31);
@@ -321,13 +315,6 @@ impl X64Encoder {
         self.emit_rex(true, 0, 0, reg.code());
         self.emit_all(&[0xC1]);
         self.emit_modrm(0b11, 0b100, reg.code());
-        self.emit_u8(value);
-    }
-
-    pub(crate) fn sar_r64_imm8(&mut self, reg: Gpr, value: u8) {
-        self.emit_rex(true, 0, 0, reg.code());
-        self.emit_all(&[0xC1]);
-        self.emit_modrm(0b11, 0b111, reg.code());
         self.emit_u8(value);
     }
 
@@ -345,18 +332,6 @@ impl X64Encoder {
         self.emit_modrm(mode, dst.code(), 0b100);
         self.emit_sib(0b11, index.code(), base.code());
         self.emit_displacement(mode, disp);
-    }
-
-    pub(crate) fn shl_r64_cl(&mut self, reg: Gpr) {
-        self.emit_rex(true, 0, 0, reg.code());
-        self.emit_u8(0xD3);
-        self.emit_modrm(0b11, 0b100, reg.code());
-    }
-
-    pub(crate) fn sar_r64_cl(&mut self, reg: Gpr) {
-        self.emit_rex(true, 0, 0, reg.code());
-        self.emit_u8(0xD3);
-        self.emit_modrm(0b11, 0b111, reg.code());
     }
 
     pub(crate) fn mov_r64_m64_base_disp32(&mut self, dst: Gpr, base: Gpr, disp: i32) {

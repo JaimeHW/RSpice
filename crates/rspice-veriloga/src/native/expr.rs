@@ -9,8 +9,6 @@
 //! Keeping this stage architecture-neutral is what makes a second backend a
 //! matter of writing an encoder rather than a second compiler.
 
-#![allow(dead_code)]
-
 use super::{JitError, JitResult};
 use crate::array_index::checked_array_slot;
 use crate::ast::AccessKind;
@@ -2641,6 +2639,7 @@ impl NativeProgram {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn from_mir_expression_derivative(
         model: impl Into<SmolStr>,
         entry_kind: EntryKind,
@@ -2680,6 +2679,7 @@ impl NativeProgram {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn from_mir_expression_second_derivative(
         model: impl Into<SmolStr>,
         entry_kind: EntryKind,
@@ -5882,14 +5882,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         self.append_arithmetic("Mul")
     }
 
-    fn lower_arg_cube(&mut self, arg: ExprId) -> JitResult<()> {
-        self.lower(arg)?;
-        self.lower(arg)?;
-        self.append_arithmetic("Mul")?;
-        self.lower(arg)?;
-        self.append_arithmetic("Mul")
-    }
-
     fn lower_arg_square_plus_const(&mut self, arg: ExprId, constant: f64) -> JitResult<()> {
         self.lower_arg_square(arg)?;
         self.push(NativeOp::Const(constant))?;
@@ -6262,41 +6254,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             self.limits.zi_filter_count,
         )?;
         Ok(slot)
-    }
-
-    fn constant_expr_value(&self, expr_id: ExprId) -> JitResult<f64> {
-        match &self.expression(expr_id)?.kind {
-            HirExprKind::Number { value, .. } => Ok(*value),
-            HirExprKind::Unary { op, operand } => {
-                let value = self.constant_expr_value(*operand)?;
-                match op.as_str() {
-                    "Pos" | FROZEN_DERIVATIVE_UNARY => Ok(value),
-                    "Neg" => Ok(-value),
-                    "ToInteger" => crate::integer_runtime::real_to_integer(value)
-                        .map(f64::from)
-                        .map_err(|error| self.unsupported(error.to_string())),
-                    _ => Err(self.unsupported(format!("constant coefficient unary operator {op}"))),
-                }
-            }
-            HirExprKind::Binary { op, left, right } => {
-                let left = self.constant_expr_value(*left)?;
-                let right = self.constant_expr_value(*right)?;
-                match op.as_str() {
-                    "Add" => Ok(left + right),
-                    "Sub" => Ok(left - right),
-                    "Mul" => Ok(left * right),
-                    "Div" => Ok(left / right),
-                    "Pow" => Ok(left.powf(right)),
-                    _ => {
-                        Err(self.unsupported(format!("constant coefficient binary operator {op}")))
-                    }
-                }
-            }
-            other => Err(self.unsupported(format!(
-                "constant coefficient expected, found {}",
-                expression_kind_name(other)
-            ))),
-        }
     }
 
     fn constant_number(&self, expr_id: ExprId) -> Option<f64> {
@@ -8226,19 +8183,6 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         Ok(())
     }
 
-    fn append_ternary(&mut self, op: NativeOp) -> JitResult<()> {
-        require_stack(
-            self.model.clone(),
-            self.entry_kind,
-            "canonical ternary",
-            self.depth,
-            3,
-        )?;
-        self.depth -= 2;
-        self.ops.push(op);
-        Ok(())
-    }
-
     fn append_ifelse(&mut self) -> JitResult<()> {
         require_stack(
             self.model.clone(),
@@ -8483,13 +8427,6 @@ fn expression_kind_name(kind: &HirExprKind) -> &'static str {
         HirExprKind::ArrayLiteral { .. } => "array literal",
         HirExprKind::AnalogOperator { .. } => "analog operator",
         HirExprKind::NoiseSource { .. } => "noise source",
-    }
-}
-
-fn analog_operator_name(op: &HirAnalogOperator) -> &'static str {
-    match op {
-        HirAnalogOperator::Limit { .. } => "limit",
-        HirAnalogOperator::LimiterArgument { .. } => "limiter_argument",
     }
 }
 
@@ -9736,6 +9673,7 @@ fn lower_voltage_node(
     ))
 }
 
+#[cfg(test)]
 fn current_pair_index(
     model: SmolStr,
     pos: usize,
