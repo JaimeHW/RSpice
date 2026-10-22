@@ -227,6 +227,7 @@ impl PreparedVirtualSource {
                 Some(module_name),
                 qualifications,
                 &mut measurements,
+                None,
             )
             .map_err(|error| match configuration {
                 Some(configuration) => self.diagnose_with_connections(error, Some(configuration)),

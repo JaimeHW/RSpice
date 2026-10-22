@@ -890,6 +890,7 @@ impl VerilogACompiler {
             Some(module),
             RuntimeQualificationOptions::default(),
             &mut measurements,
+            None,
         )
     }
 
@@ -978,6 +979,9 @@ impl VerilogACompiler {
         if let Some(configuration) = artifact.connections.configuration() {
             analyzed = configuration.apply(source, &analyzed, &mut measurements)?;
         }
+        // The source is the artifact's retained expanded text, so a process or
+        // system call is placed where the artifact's own plan placed it, in
+        // the file and on the line it was written, as a replay places it.
         self.compile_runtime_analyzed_measured(
             &artifact.metadata.source_package,
             source,
@@ -986,6 +990,9 @@ impl VerilogACompiler {
             Some(&artifact.hir.module_name),
             RuntimeQualificationOptions::default(),
             &mut measurements,
+            Some(&canonical_ir::digital::DigitalSourceOrigins::of(
+                &artifact.digital,
+            )),
         )
     }
 
@@ -1014,6 +1021,7 @@ impl VerilogACompiler {
             module_name,
             qualifications,
             measurements,
+            None,
         )
     }
 
@@ -1026,6 +1034,7 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
+        replay_origins: Option<&canonical_ir::digital::DigitalSourceOrigins>,
     ) -> CompileResult<RuntimeCompileReport> {
         compile_stack::run(|| {
             self.compile_runtime_analyzed_measured_inline(
@@ -1036,10 +1045,14 @@ impl VerilogACompiler {
                 module_name,
                 qualifications,
                 measurements,
+                replay_origins,
             )
         })
     }
 
+    /// `replay_origins` places the processes and system calls of a compile
+    /// whose `preprocessed` text is an artifact's retained text; see
+    /// [`canonical_ir::digital::DigitalSourceOrigins`].
     fn compile_runtime_analyzed_measured_inline(
         &self,
         source_package: &str,
@@ -1049,6 +1062,7 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
+        replay_origins: Option<&canonical_ir::digital::DigitalSourceOrigins>,
     ) -> CompileResult<RuntimeCompileReport> {
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let executable = self.select_executable_module(&analyzed, module_name)?;
@@ -1069,7 +1083,7 @@ impl VerilogACompiler {
             &executable,
             measurements,
             None,
-            None,
+            replay_origins,
         )?;
         let mut model = model;
         Self::renumber_state_slots(&mut model, &canonical_ir)?;

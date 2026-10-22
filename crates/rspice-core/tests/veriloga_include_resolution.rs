@@ -649,3 +649,62 @@ fn an_unusable_library_map_is_refused_by_name() {
         "{error}"
     );
 }
+
+/// A mixed module whose instance overrides a parameter is elaborated again
+/// from its artifact's retained text, with the `` `include``s already
+/// expanded. Its processes and system calls keep the file and line they were
+/// written on, as the module compiled without an override does, and not the
+/// line of the expanded text.
+#[test]
+fn an_included_module_keeps_its_lines_when_an_instance_overrides_a_parameter() {
+    use rspice_core::SimulationConfig;
+    use rspice_core::config::{HdlOutputCollector, HdlStream};
+    let fixture = Fixture::new("specialized_origins");
+    fixture.write(
+        "sub/top.vams",
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         `include \"body.vams\"\n",
+    );
+    // The `$display` is on line 7 of `body.vams`.
+    fixture.write(
+        "sub/body.vams",
+        "module ticker(out);\n\
+         output out;\n\
+         electrical out;\n\
+         parameter integer n = 1;\n\
+         reg q;\n\
+         initial begin\n\
+         #1 $display(\"n=%0d\", n); q = 1;\n\
+         end\n\
+         analog V(out) <+ 1.0;\n\
+         endmodule\n",
+    );
+    for (instance, printed) in [("X1 out ticker", "n=1"), ("X1 out ticker n=3", "n=3")] {
+        let deck = fixture.write(
+            "sub/deck.cir",
+            &format!(
+                "* an included mixed module\n.hdl \"top.vams\"\n{instance}\nR1 out 0 1k\n.tran 1n 4n\n.end\n"
+            ),
+        );
+        let collector = std::sync::Arc::new(HdlOutputCollector::new());
+        let mut config = SimulationConfig::default();
+        config.hdl.output = Some(collector.clone());
+        let netlist = Netlist::parse_file(&deck).unwrap_or_else(|error| panic!("{error}"));
+        Engine::new(config)
+            .run_tran(&netlist, 4.0e-9, 1.0e-9)
+            .unwrap_or_else(|error| panic!("{instance}: {error}"));
+        let records = collector.take();
+        let display = records
+            .iter()
+            .find(|record| matches!(record.stream, HdlStream::Stdout))
+            .unwrap_or_else(|| panic!("{instance}: no $display record in {records:?}"));
+        assert_eq!(display.text.trim_end(), printed, "{instance}");
+        assert!(
+            display.origin.file.ends_with("body.vams") && display.origin.line == 7,
+            "{instance}: the $display is on body.vams:7, the record says {}:{}",
+            display.origin.file,
+            display.origin.line
+        );
+    }
+}
