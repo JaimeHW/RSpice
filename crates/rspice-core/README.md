@@ -187,8 +187,9 @@ shooting `.PSS` and takes none.
   bundled by `ConvergencePreset` as `fast`, `default` and `robust`. An aid
   returns only the unmodified circuit's solution, certified by the residual
   test a direct solve faces, never a deformed stage.
-- **Damping** (`solver/damping.rs`): line search, junction voltage limiting,
-  Bank-Rose, and the combined default, selected by `DampingStrategy`.
+- **Damping** (`engine/convergence/damping.rs`): line search, junction voltage
+  limiting, Bank-Rose, and limiting plus line search, selected by
+  `DampingStrategy`.
 - **Transient integration**: backward Euler, trapezoidal, Gear-2, and the
   trapezoidal/Gear-2 hybrid default (`IntegrationMethod`), with LTE-based
   timestep control and breakpoint handling. Integration order is 1 or 2, and
