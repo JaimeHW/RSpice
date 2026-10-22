@@ -3,11 +3,19 @@ schema = "rspice-mixed-tolerance/1"
 time_precision = 1e-12
 
 # --- protocol: SDA at every SCL rise (bus observers sda_d / scl_d) --------
+#
+# Not `set`: rspice_3v3_fast gives the A/D a 1 ns X timeout, and an
+# open-drain release rises with Rp*Cbus = 440 ns, spending about 370 ns in the
+# 0.99-2.31 V band. The bus nets read X there, and 0 -> X is a posedge
+# (IEEE 1364-2005 Table 9-2), so the modules' edge-triggered processes fire at
+# the X rather than at the 1. That is the set's law, not a fault: the same
+# rules with txdel = inf give these codes exactly. The set's analog timing
+# below still holds.
 
 [[q]]
 id = "proto"
 analysis = "tran"
-variants = ["flat", "tasks", "set"]
+variants = ["flat", "tasks"]
 kind = "codes"
 nets = ["sda_d"]
 strobe = "scl_d"
