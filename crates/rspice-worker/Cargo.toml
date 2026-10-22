@@ -38,4 +38,5 @@ serde-wasm-bindgen = "0.6"
 uuid = { workspace = true, features = ["js"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+rspice-vocabulary.workspace = true
 wasm-bindgen-test.workspace = true

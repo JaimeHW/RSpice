@@ -6362,6 +6362,7 @@ dependencies = [
  "rspice-hardcopy",
  "rspice-simulation",
  "rspice-veriloga",
+ "rspice-vocabulary",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

@@ -46,6 +46,7 @@ fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
         source_path: None,
         project_veriloga_runtimes: Default::default(),
         measurement_references: references,
+        data_files: Default::default(),
         dependencies: Default::default(),
         environment: None,
         stream_transient_samples: false,
@@ -85,6 +86,102 @@ fn studio_measurement_reference_worker_validates_and_executes_captured_data() {
     assert!((result.measurement("fit").unwrap() - 0.5).abs() < 1e-8);
     definition.measurement_reference.as_mut().unwrap().contents = "TIME,V(out)\n1,1\n0,2\n".into();
     assert!(PreparedMeasurementReferences::capture(source, &[definition]).is_err());
+}
+
+/// A worker has no file system, so the dump a `d_vcd` replays travels in the
+/// request as preparation sealed it, checked against its digest before the
+/// worker registers it, and the run replays it after the file is gone.
+#[test]
+fn sealed_code_model_data_files_travel_with_the_worker_request() {
+    use rspice_core::xspice::DigitalValue;
+    let directory = std::env::temp_dir().join(format!(
+        "rspice-worker-data-files-{}",
+        rspice_vocabulary::product::AnalysisInstanceId::new()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let vcd = "$timescale 1ps $end\n$scope module tb $end\n$var wire 1 ! clk $end\n\
+               $upscope $end\n$enddefinitions $end\n#0\n$dumpvars\n0!\n$end\n\
+               #500\n1!\n#1000\n0!\n#1500\n1!\n";
+    // A path of its own: tests share the process's data-file registry.
+    std::fs::write(directory.join("worker-clk.vcd"), vcd).unwrap();
+    let source = "Worker VCD\nV1 in 0 1\nR1 in 0 1k\na_stim [clk] vstim\n\
+                  .model vstim d_vcd (file=\"worker-clk.vcd\" signals=\"tb.clk\")\n.end\n";
+    let limits = rspice_core::ResourceLimits::default();
+    let data_files = crate::data_files::PreparedDataFiles::capture(
+        source,
+        Some(&directory),
+        limits,
+        &rspice_core::NoAbort,
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&directory).unwrap();
+    let input = NetlistInput {
+        netlist: source.into(),
+        source_path: None,
+        project_veriloga_runtimes: Default::default(),
+        measurement_references: Default::default(),
+        data_files,
+        dependencies: Default::default(),
+        environment: None,
+        stream_transient_samples: false,
+        execution_limits: limits,
+    };
+    let request = SimulationRequest::Config(Box::new(AnalysisConfig::Transient(
+        TransientAnalysisConfig {
+            stop_time: 2e-9,
+            step_time: 2e-11,
+            max_timestep: Some(2e-11),
+            ..Default::default()
+        },
+    )));
+    let wire = WorkerRequest::from_runner_parts(19, &request, &input).unwrap();
+    assert_eq!(wire.data_files, input.data_files);
+    let mut transport = WorkerRequestTransport::from_request(wire.clone()).unwrap();
+    transport.request =
+        serde_json::from_str(&serde_json::to_string(&transport.request).unwrap()).unwrap();
+
+    let mut tampered = transport.clone();
+    let mut json = serde_json::to_value(&tampered.request).unwrap();
+    json["request"]["data_files"]["files"][0]["contents"] =
+        serde_json::json!(vcd.replace("#1500\n1!\n", ""));
+    tampered.request = serde_json::from_value(json).unwrap();
+    let refusal = tampered.into_request().unwrap_err();
+    assert!(refusal.contains("does not match its digest"), "{refusal}");
+
+    let restored = transport.into_request().unwrap();
+    assert_eq!(restored, wire);
+    let SimulationResult::Transient { events, .. } = worker_response_from_request(restored)
+        .into_result()
+        .unwrap()
+    else {
+        panic!("transient result required")
+    };
+    let clk = events
+        .digital
+        .iter()
+        .find(|history| history.node_name.eq_ignore_ascii_case("clk"))
+        .unwrap_or_else(|| panic!("no clk history: {:?}", events.digital));
+    let document = rspice_core::io::parse_vcd_reader(vcd.as_bytes()).unwrap();
+    let expected = document.signals[0]
+        .changes
+        .iter()
+        .enumerate()
+        .map(|(index, change)| {
+            let time = document.timescale.seconds_at_tick(change.tick).unwrap();
+            let level = if index % 2 == 1 {
+                DigitalValue::one()
+            } else {
+                DigitalValue::zero()
+            };
+            (time.to_bits(), level.event_code())
+        })
+        .collect::<Vec<_>>();
+    let replayed = clk
+        .points
+        .iter()
+        .map(|point| (point.time_s.to_bits(), point.value_code))
+        .collect::<Vec<_>>();
+    assert_eq!(replayed, expected);
 }
 
 #[test]
@@ -467,6 +564,7 @@ use std::collections::HashMap;
 fn worker_request_round_trips_through_json() {
     let request = WorkerRequest {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         id: 7,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
@@ -742,6 +840,7 @@ fn fourier_worker_consumes_exact_transient_dependency_artifact() {
     .unwrap();
     let request = WorkerRequest {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         id: 9,
         request: WorkerSimulationRequest::Spec {
             spec: Box::new(WorkerAnalysisSpec::Fourier {
@@ -840,6 +939,7 @@ fn standalone_connection_worker_transport_retains_selected_physics() {
     let (sources, deck) = crate::veriloga::tests::standalone_connection_fixture();
     let request = WorkerRequest {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         id: 18,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 2e-9,
@@ -922,6 +1022,7 @@ fn worker_request_round_trips_project_veriloga_runtime_artifacts() {
     let runtime = compilation.prepare_runtime(project_id, &bundle).unwrap();
     let request = WorkerRequest {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         id: 8,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::Transient {
             stop_time: 1e-6,
@@ -973,6 +1074,7 @@ fn worker_request_detaches_and_authenticates_op_previous_state() {
         config.initial_guess = initial_guess;
         let request = WorkerRequest {
             measurement_references: Default::default(),
+            data_files: Default::default(),
             id: 10,
             request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(config))),
             netlist: "V1 out 0 1\n.op\n.end\n".to_owned(),
@@ -2317,6 +2419,7 @@ fn configured_study_worker_transfers_and_authenticates_nested_op_seed() {
     };
     let request = WorkerRequest {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         id: 11,
         request: WorkerSimulationRequest::Spec {
             spec: Box::new(WorkerAnalysisSpec::MonteCarlo {

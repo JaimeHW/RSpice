@@ -110,6 +110,10 @@ pub(crate) struct WorkerRequest {
     pub project_veriloga_runtimes: crate::veriloga::PreparedVerilogARuntimeSet,
     #[serde(default)]
     pub measurement_references: crate::measurement_references::PreparedMeasurementReferences,
+    /// The code-model data files preparation sealed: a worker has no file
+    /// system to read them from.
+    #[serde(default)]
+    pub(crate) data_files: crate::data_files::PreparedDataFiles,
     #[serde(default)]
     pub(crate) dependencies: crate::execution_artifact::ResolvedExecutionDependencies,
     #[serde(default)]
@@ -225,6 +229,7 @@ impl WorkerRequestTransport {
         request
             .measurement_references
             .validate_source(&request.netlist)?;
+        request.data_files.validate(request.execution_limits)?;
         if request.dependencies != Default::default() {
             return Err("worker request metadata carries duplicate inline dependencies".to_owned());
         }
@@ -381,6 +386,7 @@ impl WorkerRequest {
                 .map(|path| path.to_string_lossy().into_owned()),
             project_veriloga_runtimes: input.project_veriloga_runtimes.clone(),
             measurement_references: input.measurement_references.clone(),
+            data_files: input.data_files.clone(),
             dependencies: input.dependencies.clone(),
             environment: input.environment.clone(),
             stream_transient_samples: input.stream_transient_samples,
@@ -396,7 +402,7 @@ impl WorkerRequest {
                 source_path: self.source_path.map(PathBuf::from),
                 project_veriloga_runtimes: self.project_veriloga_runtimes,
                 measurement_references: self.measurement_references,
-                data_files: Default::default(),
+                data_files: self.data_files,
                 dependencies: self.dependencies,
                 environment: self.environment,
                 stream_transient_samples: self.stream_transient_samples,

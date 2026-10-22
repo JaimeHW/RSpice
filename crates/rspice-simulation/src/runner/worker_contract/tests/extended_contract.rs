@@ -1006,6 +1006,7 @@ fn dc_op_worker_result_round_trip_preserves_exact_mna_state_and_contract() {
 fn worker_request_runs_dc_op() {
     let request = WorkerRequest {
         measurement_references: Default::default(),
+        data_files: Default::default(),
         id: 12,
         request: WorkerSimulationRequest::Config(Box::new(WorkerAnalysisConfig::DcOp(
             rspice_simulation_contract::config::OpConfig::default(),

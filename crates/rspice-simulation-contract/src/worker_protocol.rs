@@ -25,7 +25,8 @@ pub struct AnalysisExecutionEnvironment {
 /// 43: transient dependencies retain singular voltage histories and coverage.
 /// 44: immutable execution resource policy is required in request metadata.
 /// 45: transient continuation carries authenticated checkpoint bytes and a schedule.
-pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 45;
+/// 46: sealed code-model data files travel with the request.
+pub const WORKER_REQUEST_TRANSPORT_PROTOCOL: u8 = 46;
 
 /// Browser response protocol revisions.
 /// 18: transient-source convergence evidence survives result transport.

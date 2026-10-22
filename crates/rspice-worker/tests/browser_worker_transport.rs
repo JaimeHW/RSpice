@@ -15,13 +15,17 @@ extern "C" {
 /// The request revision this worker accepts and the response revision it
 /// answers with. The worker-contract tests in `rspice-simulation` pin both to
 /// the Rust transport constants, so a protocol bump fails natively first.
-const REQUEST_PROTOCOL: u8 = 45;
+const REQUEST_PROTOCOL: u8 = 46;
 const RESPONSE_PROTOCOL: u8 = 37;
 
 /// One analysis request as the browser host transfers it: the shipping
 /// default execution resource policy, no dependencies and no buffers.
 fn worker_request(id: u64, spec: serde_json::Value, netlist: &str) -> JsValue {
-    let request = serde_json::json!({
+    js_sys::JSON::parse(&worker_request_json(id, spec, netlist).to_string()).unwrap()
+}
+
+fn worker_request_json(id: u64, spec: serde_json::Value, netlist: &str) -> serde_json::Value {
+    serde_json::json!({
         "protocolVersion": REQUEST_PROTOCOL,
         "request": {
             "request": {
@@ -36,8 +40,7 @@ fn worker_request(id: u64, spec: serde_json::Value, netlist: &str) -> JsValue {
             "dependency_buffer_count": 0
         },
         "buffers": [], "byteBuffers": []
-    });
-    js_sys::JSON::parse(&request.to_string()).unwrap()
+    })
 }
 
 fn response_protocol(response: &JsValue) -> Option<f64> {
@@ -430,4 +433,86 @@ fn optimization_rejects_failed_and_overflowed_costs_through_the_worker() {
     assert!((result["best_cost"].as_f64().unwrap() / (1e40 * (1.0 + x)) - 1.0).abs() < 1e-12);
     let overflow = run("1e200*V(in)", "Target", -1e200);
     assert!(overflow["outcome"].get("Failure").is_some(), "{overflow}");
+}
+
+/// The worker has no file system, so the dump a `d_vcd` replays travels in
+/// the request, sealed as preparation read it: the model replays its edges at
+/// exactly the times the VCD reader gives their ticks. Without the bytes the
+/// worker has nothing to read the file from.
+#[wasm_bindgen_test]
+fn a_sealed_vcd_dump_travels_with_the_request_and_replays_in_the_worker() {
+    const VCD: &str = "$timescale 1ps $end\n$scope module tb $end\n$var wire 1 ! clk $end\n\
+                       $upscope $end\n$enddefinitions $end\n#0\n$dumpvars\n0!\n$end\n\
+                       #500\n1!\n#1000\n0!\n#1500\n1!\n";
+    let mut request = worker_request_json(
+        9,
+        serde_json::json!({"Transient": {
+            "stop_time": 2e-9, "step_time": 2e-11, "start_time": 0.0,
+            "max_timestep": 2e-11, "uic": false
+        }}),
+        "Worker VCD\nV1 in 0 1\nR1 in 0 1k\na_stim [clk] vstim\n\
+         .model vstim d_vcd (file=\"clk.vcd\" signals=\"tb.clk\")\n.end\n",
+    );
+    request["request"]["request"]["data_files"] = serde_json::json!({"files": [{
+        "path": "clk.vcd",
+        "contents": VCD,
+        "digest": rspice_vocabulary::canonical::content_digest(
+            "rspice.code-model-data-file/v1",
+            VCD.as_bytes(),
+        ),
+    }]});
+    let run = |request: &serde_json::Value| {
+        let response = rspice_worker::run_rspice_ui_worker_request(
+            js_sys::JSON::parse(&request.to_string()).unwrap(),
+        )
+        .expect("a well-formed request is answered");
+        let response = structured_clone(&response);
+        serde_wasm_bindgen::from_value::<serde_json::Value>(
+            js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+        )
+        .unwrap()
+    };
+
+    let replayed = run(&request);
+    let digital = replayed["outcome"]["Success"]["Transient"]["events"]["digital"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{replayed}"));
+    let clk = digital
+        .iter()
+        .find(|trace| {
+            trace["node_name"]
+                .as_str()
+                .is_some_and(|name| name.eq_ignore_ascii_case("clk"))
+        })
+        .unwrap_or_else(|| panic!("{replayed}"));
+    let document = rspice_core::io::parse_vcd_reader(VCD.as_bytes()).unwrap();
+    let expected: Vec<(u64, u64)> = document.signals[0]
+        .changes
+        .iter()
+        .enumerate()
+        .map(|(index, change)| {
+            let time = document.timescale.seconds_at_tick(change.tick).unwrap();
+            (time.to_bits(), u64::from(index % 2 == 1))
+        })
+        .collect();
+    let actual: Vec<(u64, u64)> = clk["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|point| {
+            (
+                point["time_s"].as_f64().unwrap().to_bits(),
+                point["value_code"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(actual, expected);
+
+    request["request"]["request"]
+        .as_object_mut()
+        .unwrap()
+        .remove("data_files");
+    let unsealed = run(&request);
+    let failure = unsealed["outcome"]["Failure"].to_string();
+    assert!(failure.contains("clk.vcd"), "{unsealed}");
 }
