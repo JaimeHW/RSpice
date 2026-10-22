@@ -221,10 +221,6 @@ impl From<crate::device::BehavioralReferenceError> for CircuitError {
     }
 }
 
-/// Pre-computed index into the matrix values array for O(1) stamping
-#[derive(Debug, Clone, Copy)]
-pub struct MatrixIndex(pub usize);
-
 /// Pre-computed stamp location (row, col) - used during setup
 #[derive(Debug, Clone, Copy)]
 pub struct StampLocation {

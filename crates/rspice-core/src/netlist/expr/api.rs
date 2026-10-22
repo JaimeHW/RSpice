@@ -142,11 +142,6 @@ pub fn eval_simple(input: &str) -> Result<Value, ExprError> {
     eval_expression(input, &ParamContext::new())
 }
 
-/// Evaluate a simple expression without parameters, preserving complex values.
-pub fn eval_simple_complex(input: &str) -> Result<ComplexValue, ExprError> {
-    eval_expression_complex(input, &ParamContext::new())
-}
-
 /// Known scalar bindings and builtin functions cannot introduce a missing name.
 /// Keep their common path free of full parameter-environment snapshots. User
 /// functions and retained bindings are conservatively probed because their

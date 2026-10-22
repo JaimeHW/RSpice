@@ -53,9 +53,7 @@ pub use api::{
     parse_control_expression_prefix_with_abort, parse_control_expression_with_abort,
     parse_expression_with_abort,
 };
-pub use api::{
-    eval_expression, eval_expression_complex, eval_simple, eval_simple_complex, parse_expression,
-};
+pub use api::{eval_expression, eval_expression_complex, eval_simple, parse_expression};
 pub(crate) use api::{eval_expression_complex_with_probe_and_abort, needs_forward_reference_probe};
 #[doc(hidden)]
 pub use behavioral::{
@@ -68,8 +66,7 @@ pub use behavioral::{
     behavioral_expression_references_frequency, behavioral_expression_references_runtime_quantity,
     behavioral_expression_references_unbound_frequency, expand_output_user_functions,
     finalize_parameter_expressions, materialize_available_parameter_expressions,
-    parameter_expression_circuit_probe, prepare_behavioral_expression,
-    prepare_behavioral_expression_preserving_spelling, runtime_special_quantity,
+    parameter_expression_circuit_probe, prepare_behavioral_expression, runtime_special_quantity,
     validate_global_parameter_expressions, validate_parameter_expressions,
 };
 pub(crate) use behavioral::{

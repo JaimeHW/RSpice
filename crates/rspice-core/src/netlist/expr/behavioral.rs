@@ -305,6 +305,12 @@ pub(crate) fn prepare_behavioral_expression_preserving_parameters_with_abort(
     prepare_behavioral_expression_impl(expression, params, false, Some(preserved_parameters), abort)
 }
 
+/// Prepare a behavioral expression while retaining its original spelling when
+/// expansion leaves the parsed AST unchanged.
+///
+/// This is intended for element metadata whose textual representation is part
+/// of the flattened-netlist contract. Expressions that actually expand a
+/// parameter or user function still receive the normal canonical serialization.
 pub(crate) fn prepare_behavioral_expression_preserving_spelling_with_abort(
     expression: &str,
     params: &ParamContext,
@@ -333,25 +339,6 @@ pub fn prepare_behavioral_expression_with_abort(
     abort: &dyn AbortSignal,
 ) -> Result<String, BehavioralPreparationError> {
     prepare_behavioral_expression_impl(expression, params, false, None, abort)
-}
-
-/// Prepare a behavioral expression while retaining its original spelling when
-/// expansion leaves the parsed AST unchanged.
-///
-/// This is intended for element metadata whose textual representation is part
-/// of the flattened-netlist contract. Expressions that actually expand a
-/// parameter or user function still receive the normal canonical serialization.
-pub fn prepare_behavioral_expression_preserving_spelling(
-    expression: &str,
-    params: &ParamContext,
-) -> Result<String, String> {
-    match prepare_behavioral_expression_impl(expression, params, true, None, &NoAbort) {
-        Ok(expression) => Ok(expression),
-        Err(BehavioralPreparationError::Semantic(error)) => Err(error),
-        Err(BehavioralPreparationError::Aborted) => {
-            unreachable!("NoAbort cannot cancel behavioral preparation")
-        }
-    }
 }
 
 /// Expand `.FUNC` calls while preserving ordinary and global parameter leaves.

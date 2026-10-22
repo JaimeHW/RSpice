@@ -24,43 +24,6 @@ fn store_f64x4(v: f64x4, dst: &mut [Value]) {
 }
 
 //=============================================================================
-// Fill Operations
-//=============================================================================
-
-/// Fill a slice with zeros using SIMD.
-///
-/// This is a drop-in replacement for `slice.fill(0.0)` that guarantees
-/// vectorization for slices above the SIMD threshold.
-///
-/// # Performance
-///
-/// - O(n/4) SIMD operations for the bulk
-/// - O(n%4) scalar operations for remainder
-/// - ~2-4x faster than scalar for large slices
-#[inline]
-pub fn fill_zero(slice: &mut [Value]) {
-    if !should_use_simd(slice.len()) {
-        slice.fill(0.0);
-        return;
-    }
-
-    let zero = f64x4::ZERO;
-    let aligned_len = slice.len() - (slice.len() % SIMD_WIDTH);
-
-    // Process SIMD chunks
-    let mut i = 0;
-    while i < aligned_len {
-        store_f64x4(zero, &mut slice[i..i + SIMD_WIDTH]);
-        i += SIMD_WIDTH;
-    }
-
-    // Process remainder
-    for val in &mut slice[aligned_len..] {
-        *val = 0.0;
-    }
-}
-
-//=============================================================================
 // Copy Operations
 //=============================================================================
 

@@ -26,8 +26,9 @@
 //! ```ignore
 //! use rspice_core::simd;
 //!
-//! let mut vec = vec![1.0; 1000];
-//! simd::fill_zero(&mut vec);
+//! let src = vec![1.0; 1000];
+//! let mut dst = vec![0.0; 1000];
+//! simd::copy(&src, &mut dst);
 //! ```
 
 mod integrate;
@@ -59,12 +60,6 @@ pub const SIMD_THRESHOLD: usize = 16;
 #[inline]
 pub fn should_use_simd(len: usize) -> bool {
     len >= SIMD_THRESHOLD
-}
-
-/// Align a slice length down to SIMD width boundary.
-#[inline]
-pub const fn align_down(len: usize) -> usize {
-    len - (len % SIMD_WIDTH)
 }
 
 //=============================================================================

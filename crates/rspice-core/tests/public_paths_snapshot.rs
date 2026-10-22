@@ -734,7 +734,6 @@ use rspice_core::circuit::InductorIcMode as _;
 use rspice_core::circuit::InductorProbeInfo as _;
 use rspice_core::circuit::Inductors as _;
 use rspice_core::circuit::JilesAthertonBinding as _;
-use rspice_core::circuit::MatrixIndex as _;
 use rspice_core::circuit::ModelSafetyValue as _;
 use rspice_core::circuit::MosModelSafety as _;
 use rspice_core::circuit::MosModelSafetyFamily as _;
@@ -1873,7 +1872,6 @@ use rspice_core::io::ltspice_raw::raw_table_has_coordinate as _;
 use rspice_core::io::ltspice_raw::raw_table_units as _;
 use rspice_core::io::ltspice_raw::write_raw_metadata_options as _;
 use rspice_core::io::ltspice_raw::write_raw_table_layout_metadata as _;
-use rspice_core::io::ltspice_raw::write_raw_table_metadata as _;
 use rspice_core::io::ltspice_raw::write_raw_table_metadata_with_text as _;
 use rspice_core::io::ltspice_raw::write_raw_table_metadata_with_units as _;
 use rspice_core::io::parse_raw_file as _;
@@ -2220,7 +2218,6 @@ use rspice_core::netlist::expr::behavioral_expression_references_unbound_frequen
 use rspice_core::netlist::expr::eval_expression as _;
 use rspice_core::netlist::expr::eval_expression_complex as _;
 use rspice_core::netlist::expr::eval_simple as _;
-use rspice_core::netlist::expr::eval_simple_complex as _;
 use rspice_core::netlist::expr::evaluate as _;
 use rspice_core::netlist::expr::evaluate_complex as _;
 use rspice_core::netlist::expr::expand_output_user_functions as _;
@@ -2230,7 +2227,6 @@ use rspice_core::netlist::expr::materialize_available_parameter_expressions as _
 use rspice_core::netlist::expr::parameter_expression_circuit_probe as _;
 use rspice_core::netlist::expr::parse_expression as _;
 use rspice_core::netlist::expr::prepare_behavioral_expression as _;
-use rspice_core::netlist::expr::prepare_behavioral_expression_preserving_spelling as _;
 use rspice_core::netlist::expr::runtime_special_quantity as _;
 use rspice_core::netlist::expr::validate_global_parameter_expressions as _;
 use rspice_core::netlist::expr::validate_parameter_expressions as _;
@@ -2608,7 +2604,6 @@ mod simd {
     use rspice_core::simd::SIMD_THRESHOLD as _;
     use rspice_core::simd::SIMD_WIDTH as _;
     use rspice_core::simd::add as _;
-    use rspice_core::simd::align_down as _;
     use rspice_core::simd::average as _;
     use rspice_core::simd::axpy as _;
     use rspice_core::simd::check_convergence as _;
@@ -2618,7 +2613,6 @@ mod simd {
     use rspice_core::simd::diode_iv as _;
     use rspice_core::simd::div_safe as _;
     use rspice_core::simd::exp_f64x4 as _;
-    use rspice_core::simd::fill_zero as _;
     use rspice_core::simd::limit_diode_voltage as _;
     use rspice_core::simd::max as _;
     use rspice_core::simd::max_abs as _;

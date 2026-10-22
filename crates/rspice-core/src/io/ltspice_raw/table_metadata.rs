@@ -170,19 +170,6 @@ pub fn raw_table_units(
     Ok(read_metadata(header)?.and_then(|metadata| metadata.units))
 }
 
-/// Write optional metadata for a mixed real/complex result table.
-/// Indices refer to the RAW variable order, including the independent variable.
-pub fn write_raw_table_metadata<W: std::io::Write + ?Sized>(
-    writer: &mut W,
-    real_variables: &[usize],
-) -> std::io::Result<()> {
-    #[derive(serde::Serialize)]
-    struct MetadataRef<'a> {
-        real_variables: &'a [usize],
-    }
-    super::metadata_options::write_table(writer, 1, &MetadataRef { real_variables })
-}
-
 pub(super) fn restore_table_metadata(
     header: &mut RawFileHeader,
     variables: &mut [RawVariable],
