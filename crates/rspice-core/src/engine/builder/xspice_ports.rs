@@ -581,12 +581,13 @@ fn pack_scalar_vector_port(
             XspicePort::DigitalInverted(name) => {
                 nodes.push(crate::netlist::XspiceDigitalNode::new(name.clone(), true))
             }
+            // A real vector packs as the bracket form, which carries no type:
+            // an `AnalogVector` would read as an explicit voltage connection
+            // and be refused on the real port it was packed for.
             XspicePort::AnalogVector(names) | XspicePort::DigitalVector(names)
                 if parsed_ports.len() == 1 =>
             {
-                return Ok(if expects_real {
-                    XspicePort::AnalogVector(names.clone())
-                } else if expects_event {
+                return Ok(if expects_event {
                     XspicePort::DigitalVector(names.clone())
                 } else {
                     XspicePort::AnalogVector(names.clone())
@@ -605,7 +606,7 @@ fn pack_scalar_vector_port(
     }
 
     Ok(if expects_real {
-        XspicePort::AnalogVector(nodes.into_iter().map(|node| node.name).collect())
+        XspicePort::DigitalVector(nodes.into_iter().map(|node| node.name).collect())
     } else if expects_event {
         if nodes.iter().any(|node| node.inverted) {
             XspicePort::DigitalVectorMixed(nodes)
@@ -1281,6 +1282,54 @@ mod tests {
             &connections[0],
             PortConnection::AnalogVector(nodes) if nodes.len() == 1 && nodes[0] > 0
         ));
+    }
+
+    #[test]
+    fn real_vector_ports_connect_through_bracket_vectors() {
+        use crate::xspice::{CmContext, CmResult, CodeModel, ParamSpec, XspiceInstance};
+        use std::sync::Arc;
+
+        struct RealVectors(Vec<PortSpec>);
+        impl CodeModel for RealVectors {
+            fn name(&self) -> &str {
+                "real_vectors"
+            }
+            fn ports(&self) -> &[PortSpec] {
+                &self.0
+            }
+            fn parameters(&self) -> &[ParamSpec] {
+                &[]
+            }
+            fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
+                Ok(())
+            }
+            fn evaluate(&self, _ctx: &mut CmContext) -> CmResult<()> {
+                Ok(())
+            }
+        }
+
+        let model = Arc::new(RealVectors(vec![
+            PortSpec::vector_input("in", PortType::Real),
+            PortSpec::vector_output("out", PortType::Real),
+        ]));
+        let netlist = Netlist::parse("Real vectors\nA1 [r] [q1 q2] real_vectors\n.end\n").unwrap();
+        let crate::netlist::ElementKind::Xspice { ports: parsed, .. } = &netlist.elements[0].kind
+        else {
+            panic!("XSPICE element");
+        };
+        let mut circuit = CircuitData::new();
+        let connections =
+            coerce_xspice_connections(&mut circuit, model.ports(), parsed, "A1", "real_vectors")
+                .expect("a bracket vector connects a real vector port");
+
+        assert!(matches!(
+            &connections[..],
+            [PortConnection::RealVector(input), PortConnection::RealVector(output)]
+                if input.len() == 1 && output.len() == 2
+        ));
+        let mut instance = XspiceInstance::new("A1", model, connections, &[], &[], &[], &[])
+            .expect("the real vector connections construct an instance");
+        instance.init().expect("the instance initializes");
     }
 
     #[test]
