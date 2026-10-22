@@ -12817,7 +12817,6 @@ use super::deadline::DeadlineAbort;
 
 mod analysis_support;
 mod comparison;
-mod contract_fs;
 mod contracts;
 mod contracts_bug1025;
 mod contracts_bug1035_son;

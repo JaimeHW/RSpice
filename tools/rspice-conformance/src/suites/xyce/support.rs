@@ -339,6 +339,14 @@ impl XyceTestRunner {
         }
     }
 
+    /// Read a vendored corpus text file with CRLF folded to LF, so the parsers
+    /// see the same bytes on every checkout.
+    pub(super) fn read_corpus_canonical(label: &str, path: &Path) -> Result<Vec<u8>, String> {
+        let bytes = fs::read(path)
+            .map_err(|error| format!("{label} cannot read {}: {error}", path.display()))?;
+        Self::canonical_lf_text_identity(label, &bytes)
+    }
+
     /// Return the canonical byte representation used for textual provenance.
     ///
     /// Git and the Release 7.10 artifacts use LF. A Windows checkout may

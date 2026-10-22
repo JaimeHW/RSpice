@@ -291,7 +291,7 @@ impl XyceTestRunner {
             && role.is_qualified_owner()
         {
             let contract = role.contract();
-            let result = match self.validate_bug456_oracle(deck, role, start) {
+            let result = match self.validate_bug456_oracle(role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };

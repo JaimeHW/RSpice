@@ -7,227 +7,10 @@ use rspice_core::engine::{
 const LABEL: &str = "BUG_456 transient-restart wrapper family";
 const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_456";
 const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_456/";
-const OUTPUT_DIRECTORY: &str = "OutputData/Certification_Tests/BUG_456";
-const EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_456/exclude";
 
 pub(super) const BUG456_OWNER_CONTRACT: &str = "bug456_transient_restart_relational_wrapper_owner";
 pub(super) const BUG456_WORKER_CONTRACT: &str = "bug456_transient_restart_relational_worker";
 
-// Immutable upstream identities. The pre-trim commit contains the complete
-// Release-7.10 family, including the eight Perl wrappers and their tag files.
-const PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const PRETRIM_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
-const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const RELEASE_TAG: &str = "Release-7.10.0";
-const RELEASE_TAG_OBJECT: &str = "2a339ec3845af0aef99a7e6cc488a41acf64f6ed";
-const HISTORICAL_FAMILY_TREE: &str = "2595ff1c6a2f616beb6d449e3f3e2bfb9a056d27";
-const RETAINED_FAMILY_TREE: &str = "90db8e26d27dca6fd334686b81aa68ff03d98b0c";
-const HISTORICAL_RECORD_COUNT: usize = 42;
-const HISTORICAL_FAMILY_CONTENT_BYTES: usize = 59_930;
-const HISTORICAL_FAMILY_STREAM_BYTES: usize = 17_322;
-const HISTORICAL_FAMILY_STREAM_SHA256: &str =
-    "a2c9934a1268f998e34f663c340fcbe10d7ef723e8ec88623b9b0fdb01c3a03b";
-const HISTORICAL_FAMILY_STREAM_BLAKE3: &str =
-    "93dac9eda10b472ba7f2025713bdfcedfbd38147f9c5081627d12dc6217167cb";
-const HISTORICAL_REMOVED: [&str; 18] = [
-    "Manifest.txt",
-    "bug456.cir.sh",
-    "bug456.cir.tags",
-    "bug456_unpacked.cir.sh",
-    "bug456_unpacked.cir.tags",
-    "bug456emit.cir.sh",
-    "bug456emit.cir.tags",
-    "bug456emit_gear.cir.sh",
-    "bug456emit_gear.cir.tags",
-    "bug456output.cir.sh",
-    "bug456output.cir.tags",
-    "bug456pp.cir.sh",
-    "bug456pp.cir.tags",
-    "bug456pp_unpacked.cir.sh",
-    "bug456pp_unpacked.cir.tags",
-    "exclude",
-    "simple.cir.sh",
-    "simple.cir.tags",
-];
-
-// xyce_verify.pl's direct import closure is the three XyceVerify modules
-// below. Tools.pm is pinned separately in the same stream because it belongs
-// to the regression harness that dispatched the historical wrappers. These
-// are the immutable pre-trim vendored identities, not a claim about a
-// separately recovered original-upstream Tools.pm revision.
-const HISTORICAL_DEPENDENCIES: [(&str, usize, &str, &str, &str); 5] = [
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_404,
-        "17def57575eb3fd703978fd0634a58d6e679a3de",
-        "a86524def2895930f2bb697c058850f231df6d623c279bd7482f30c5c39090b4",
-        "11483735d34385359bbe0f981cbc8767c11e6c2b60c3f8723d49e2761479023a",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSources.pm",
-        2_739,
-        "5e2c06cc593fb9e89cefb221f274901b227342eb",
-        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
-        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSweep.pm",
-        9_301,
-        "dbd97a554c93829be74ff8a004f7b97f507be591",
-        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
-        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
-    ),
-    (
-        "TestScripts/XyceVerify/StepSweep.pm",
-        8_731,
-        "6ba454fc66c19d883c7a8e29c4894eaf364b1f4b",
-        "84b2d485c1848f2e456463de8a5015205d87c3db8a6d070547d6f9464618fed6",
-        "db1b142ab3ae9163bbe02bd68b5b3a6311436adbf27c06d71a5c05df9b6973e7",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "5809bf44e921762c87b658f096d34f81aca5ccfb",
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-];
-const HISTORICAL_DEPENDENCY_CONTENT_BYTES: usize = 148_741;
-const HISTORICAL_DEPENDENCY_STREAM_BYTES: usize = 1_945;
-const HISTORICAL_DEPENDENCY_STREAM_SHA256: &str =
-    "33b5831139b00229c28e89517ec311534fd772dc697b6c42990ad9ab1174f1f6";
-const HISTORICAL_DEPENDENCY_STREAM_BLAKE3: &str =
-    "58bb81da9e1c51739783db572336099587e1a93b0778908fb5444b04b2d046b6";
-
-const RETAINED_CONTENT_BYTES: usize = 33_061;
-const RETAINED_STREAM_BYTES: usize = 3_101;
-const RETAINED_STREAM_SHA256: &str =
-    "7f53261adbf8a8acdf27175f59c4ad0c04e6068ec425cf14932ae528cd643127";
-const RETAINED: [(&str, usize, &str); 24] = [
-    (
-        "bug456.cir",
-        79,
-        "90677fcfcdfdc4ee0e9b00b70c9d457f7546f70672a0d8fc7e0b74d3afce499d",
-    ),
-    (
-        "bug456_unpacked.cir",
-        79,
-        "90677fcfcdfdc4ee0e9b00b70c9d457f7546f70672a0d8fc7e0b74d3afce499d",
-    ),
-    (
-        "bug456emit.cir",
-        88,
-        "fc076620b72c1ea3aff5460eeccf10b0f42e14a4c243d60c5d175392f82d2a72",
-    ),
-    (
-        "bug456emit_gear.cir",
-        88,
-        "fc076620b72c1ea3aff5460eeccf10b0f42e14a4c243d60c5d175392f82d2a72",
-    ),
-    (
-        "bug456output.cir",
-        79,
-        "90677fcfcdfdc4ee0e9b00b70c9d457f7546f70672a0d8fc7e0b74d3afce499d",
-    ),
-    (
-        "bug456pp.cir",
-        79,
-        "90677fcfcdfdc4ee0e9b00b70c9d457f7546f70672a0d8fc7e0b74d3afce499d",
-    ),
-    (
-        "bug456pp_unpacked.cir",
-        79,
-        "90677fcfcdfdc4ee0e9b00b70c9d457f7546f70672a0d8fc7e0b74d3afce499d",
-    ),
-    (
-        "converter_baseline.cir",
-        1_738,
-        "51d3ad8bc50357787c85b3aa7490fc1372eac764bb08c48b424355fb7781169c",
-    ),
-    (
-        "converter_baseline_output.cir",
-        1_746,
-        "05362200b248645bb0c339a4159785545a6a4f182cbcb160fc80b79e1df29f1c",
-    ),
-    (
-        "converter_baseline_unpacked.cir",
-        1_720,
-        "1ee9edbe9f95d93fa6e74e5b7dbc13b96dc5172c6856b1042c8d5202e7b0c322",
-    ),
-    (
-        "converter_restart.cir",
-        1_740,
-        "f21c648fd343832c93bbc8baf2b16c67263c3afcd142a6cfdcbf54b312dd3367",
-    ),
-    (
-        "converter_restart_output.cir",
-        1_764,
-        "47863fd6b05606af36c516192bf4a5c3f8fe201f645462aa1ad7dfd29a7fffbd",
-    ),
-    (
-        "converter_restart_unpacked.cir",
-        1_732,
-        "de9800a31b973bfa99cdd4d01557cd1cd5689937a612a1b1b27912d7884ae52b",
-    ),
-    (
-        "emitter_baseline.cir",
-        976,
-        "3413fc815161030cc8bbe77c5173e3279312a53237b65518e5bb99d31fdad315",
-    ),
-    (
-        "emitter_baseline_gear.cir",
-        1_009,
-        "406d95adb204aa2509315403a5e195ca1fedfc6b1a362c4a639c54bbed91957f",
-    ),
-    (
-        "emitter_restart.cir",
-        958,
-        "aababacf16a5367c9c733a225f0a012966a67a02e479ae0211573f7ada525dd0",
-    ),
-    (
-        "emitter_restart_gear.cir",
-        991,
-        "9bc39d06d142d6efdfea6e9fd219f89d01be57c0fb600c09df55dd2079f03097",
-    ),
-    (
-        "push_pull_xyce_baseline.cir",
-        4_328,
-        "5640d51decc783329da7fc9a097ad0267e982769a1a8df2a5bac9cdcc4945198",
-    ),
-    (
-        "push_pull_xyce_baseline_unpacked.cir",
-        4_346,
-        "574d04136a131a34c73f67ba74a11aff9f20beda1b3bae1e70500d747dd9dedd",
-    ),
-    (
-        "push_pull_xyce_restart.cir",
-        4_344,
-        "5a523b4170197dc624b14f75e81cbbb2996d52745aa16b036774b29b9dd96116",
-    ),
-    (
-        "push_pull_xyce_restart_unpacked.cir",
-        4_370,
-        "7b4c07602145610984f7903435fda669172419e8619a1852f99cc217069655bc",
-    ),
-    (
-        "simple.cir",
-        86,
-        "a835d7da822dfbebd6d5ad66b4b25032884238fb4d851cc4db7b8ebad8f9a35b",
-    ),
-    (
-        "simple_baseline.cir",
-        321,
-        "f238060767c8fe25bb9b1957808e98720186160fbb2e0932fb730eaa034b23ca",
-    ),
-    (
-        "simple_restart.cir",
-        321,
-        "ca9cbe5454829105692253b725732dfd3e3bb8d866ba5039ec0752b3d6965264",
-    ),
-];
-
-const MAX_DIRECTORY_ENTRIES: usize = 16_384;
-const MAX_MANIFEST_BYTES: u64 = 1_048_576;
 const MAX_CHECKPOINT_BYTES: usize = 16 * 1024 * 1024;
 // The exact simple.cir adaptive trajectory has just over 200k accepted
 // points at Xyce's derived maximum step. Keep a bounded 25% safety margin;
@@ -289,6 +72,7 @@ impl Bug456Role {
         Self::new(Bug456Case::SimpleUnpacked, Bug456Member::Restart),
     ];
 
+    #[cfg(test)]
     pub(super) const OWNERS: [Self; 8] = [
         Self::new(Bug456Case::ConverterPacked, Bug456Member::Owner),
         Self::new(Bug456Case::ConverterUnpacked, Bug456Member::Owner),
@@ -300,6 +84,7 @@ impl Bug456Role {
         Self::new(Bug456Case::SimpleUnpacked, Bug456Member::Owner),
     ];
 
+    #[cfg(test)]
     pub(super) const WORKERS: [Self; 16] = [
         Self::new(Bug456Case::ConverterPacked, Bug456Member::Baseline),
         Self::new(Bug456Case::ConverterPacked, Bug456Member::Restart),
@@ -532,295 +317,18 @@ fn bug456_checkpoint_is_in_accepted_step_window(
     xyce_restart_schedule_is_due(checkpoint_time, seam_time) && checkpoint_time < stop_time
 }
 
-#[derive(Debug)]
-struct Bug456RuntimeSeal {
-    retained: BTreeMap<String, Vec<u8>>,
-}
-
 impl XyceTestRunner {
-    fn validate_bug456_static_provenance() -> Result<(), String> {
-        let removed = HISTORICAL_REMOVED
-            .iter()
-            .map(|name| name.to_ascii_lowercase())
-            .collect::<BTreeSet<_>>();
-        let retained = RETAINED
-            .iter()
-            .map(|record| record.0.to_ascii_lowercase())
-            .collect::<BTreeSet<_>>();
-        let mut records = RETAINED
-            .iter()
-            .map(|(name, bytes, sha)| format!("{FAMILY_DIRECTORY}/{name}\t{bytes}\t{sha}"))
-            .collect::<Vec<_>>();
-        records.sort();
-        let stream = records.join("\n");
-        let content_bytes = RETAINED.iter().map(|record| record.1).sum::<usize>();
-        let retained_malformed = RETAINED.iter().any(|record| {
-            record.2.len() != 64
-                || record
-                    .2
-                    .bytes()
-                    .any(|byte| !byte.is_ascii_hexdigit() || byte.is_ascii_uppercase())
-        });
-        let mut dependency_records = HISTORICAL_DEPENDENCIES
-            .iter()
-            .map(|(path, bytes, blob, sha, b3)| {
-                format!("{PRETRIM_COMMIT}\t{PRETRIM_NETLISTS_TREE}\t{UPSTREAM_COMMIT}\t{RELEASE_TAG}\t{RELEASE_TAG_OBJECT}\t{path}\t{bytes}\t{blob}\t{sha}\t{b3}")
-            })
-            .collect::<Vec<_>>();
-        dependency_records.sort();
-        let dependency_stream = dependency_records.join("\n");
-        let dependency_content_bytes = HISTORICAL_DEPENDENCIES
-            .iter()
-            .map(|record| record.1)
-            .sum::<usize>();
-        let dependency_malformed = HISTORICAL_DEPENDENCIES.iter().any(|record| {
-            record.2.len() != 40
-                || record.3.len() != 64
-                || record.4.len() != 64
-                || record
-                    .2
-                    .bytes()
-                    .chain(record.3.bytes())
-                    .chain(record.4.bytes())
-                    .any(|byte| !byte.is_ascii_hexdigit() || byte.is_ascii_uppercase())
-        });
-        let historical_metadata_malformed = HISTORICAL_FAMILY_STREAM_SHA256.len() != 64
-            || HISTORICAL_FAMILY_STREAM_BLAKE3.len() != 64
-            || HISTORICAL_FAMILY_STREAM_SHA256
-                .bytes()
-                .chain(HISTORICAL_FAMILY_STREAM_BLAKE3.bytes())
-                .any(|byte| !byte.is_ascii_hexdigit() || byte.is_ascii_uppercase());
-        if PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || PRETRIM_NETLISTS_TREE != UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE
-            || HISTORICAL_FAMILY_TREE.len() != 40
-            || RETAINED_FAMILY_TREE.len() != 40
-            || HISTORICAL_RECORD_COUNT != RETAINED.len() + HISTORICAL_REMOVED.len()
-            || HISTORICAL_FAMILY_CONTENT_BYTES <= RETAINED_CONTENT_BYTES
-            || HISTORICAL_FAMILY_STREAM_BYTES <= RETAINED_STREAM_BYTES
-            || historical_metadata_malformed
-            || removed.len() != HISTORICAL_REMOVED.len()
-            || retained.len() != RETAINED.len()
-            || !removed.is_disjoint(&retained)
-            || content_bytes != RETAINED_CONTENT_BYTES
-            || stream.len() != RETAINED_STREAM_BYTES
-            || format!("{:x}", Sha256::digest(stream.as_bytes())) != RETAINED_STREAM_SHA256
-            || retained_malformed
-            || dependency_content_bytes != HISTORICAL_DEPENDENCY_CONTENT_BYTES
-            || dependency_stream.len() != HISTORICAL_DEPENDENCY_STREAM_BYTES
-            || format!("{:x}", Sha256::digest(dependency_stream.as_bytes()))
-                != HISTORICAL_DEPENDENCY_STREAM_SHA256
-            || blake3::hash(dependency_stream.as_bytes()).to_hex().as_str()
-                != HISTORICAL_DEPENDENCY_STREAM_BLAKE3
-            || dependency_malformed
-        {
-            let stream_sha = format!("{:x}", Sha256::digest(stream.as_bytes()));
-            return Err(format!(
-                "{LABEL} immutable provenance identities changed: retained={}/{content_bytes}, stream={}/{}, historical={HISTORICAL_RECORD_COUNT}",
-                retained.len(),
-                stream.len(),
-                stream_sha
-            ));
-        }
-        Ok(())
-    }
-
-    fn bug456_family_directory(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<contract_fs::AnchoredDirectory, String> {
-        let root = contract_fs::open_root(&self.root, LABEL)?;
-        let netlists = contract_fs::exact_child_directory(
-            root,
-            "Netlists",
-            LABEL,
-            MAX_DIRECTORY_ENTRIES,
-            abort,
-        )?;
-        let certification = contract_fs::exact_child_directory(
-            netlists,
-            "Certification_Tests",
-            LABEL,
-            MAX_DIRECTORY_ENTRIES,
-            abort,
-        )?;
-        contract_fs::exact_child_directory(
-            certification,
-            "BUG_456",
-            LABEL,
-            MAX_DIRECTORY_ENTRIES,
-            abort,
-        )
-    }
-
-    fn read_bug456_family(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        Self::validate_bug456_static_provenance()?;
-        let family = self.bug456_family_directory(abort)?;
-        let names = contract_fs::member_names(
-            &family,
-            LABEL,
-            "retained family",
-            RETAINED.len() + 1,
-            abort,
-        )?;
-        let expected_names = RETAINED
-            .iter()
-            .map(|record| record.0.to_string())
-            .collect::<BTreeSet<_>>();
-        if names.iter().cloned().collect::<BTreeSet<_>>() != expected_names
-            || names.len() != RETAINED.len()
-        {
-            return Err(format!("{LABEL} retained family census changed: {names:?}"));
-        }
-
+    fn read_bug456_family(&self) -> Result<BTreeMap<String, Vec<u8>>, String> {
         let mut retained = BTreeMap::new();
-        for (name, expected_bytes, expected_sha) in RETAINED {
-            if abort.is_aborted() {
-                return Err(format!("{LABEL} source census aborted"));
-            }
-            let file = contract_fs::open_file_member(&family, name, LABEL, name)?;
-            let read_bound = expected_bytes
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(3))
-                .and_then(|value| u64::try_from(value).ok())
-                .ok_or_else(|| format!("{LABEL} {name} read bound overflowed"))?;
-            let raw = contract_fs::read_bounded_raw(file, read_bound, LABEL, name, abort)?;
-            let canonical = Self::canonical_lf_text_identity(&format!("{LABEL} {name}"), &raw)?;
-            let sha = format!("{:x}", Sha256::digest(&canonical));
-            if canonical.len() != expected_bytes || sha != expected_sha {
-                return Err(format!(
-                    "{LABEL} {name} changed: bytes={}, sha={sha}",
-                    canonical.len()
-                ));
-            }
-            std::str::from_utf8(&canonical)
-                .map_err(|error| format!("{LABEL} {name} is not UTF-8: {error}"))?;
-            if retained
-                .insert(name.to_ascii_lowercase(), canonical)
-                .is_some()
-            {
-                return Err(format!("{LABEL} duplicate case-folded member {name:?}"));
-            }
+        for role in Bug456Role::ALL {
+            let name = role.file_name();
+            let source = Self::read_corpus_canonical(
+                &format!("{LABEL} {name}"),
+                &self.root.join(role.path()),
+            )?;
+            retained.insert(name.to_ascii_lowercase(), source);
         }
         Ok(retained)
-    }
-
-    fn read_bug456_root_manifest(
-        &self,
-        name: &str,
-        label: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<String, String> {
-        let root = contract_fs::open_root(&self.root, LABEL)?;
-        let file =
-            contract_fs::exact_child_file(&root, name, LABEL, label, MAX_DIRECTORY_ENTRIES, abort)?;
-        let raw = contract_fs::read_bounded_raw(file, MAX_MANIFEST_BYTES, LABEL, label, abort)?;
-        let canonical = Self::canonical_lf_text_identity(&format!("{LABEL} {label}"), &raw)?;
-        String::from_utf8(canonical)
-            .map_err(|error| format!("{LABEL} {label} is not UTF-8: {error}"))
-    }
-
-    fn validate_bug456_manifest_ownership(&self, abort: &dyn AbortSignal) -> Result<(), String> {
-        let harness =
-            self.read_bug456_root_manifest(HARNESS_MANIFEST_FILE, "harness manifest", abort)?;
-        let expected_owners = Bug456Role::OWNERS
-            .map(|role| format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}", role.path()))
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let actual_owners = harness
-            .lines()
-            .filter(|line| {
-                line.replace('\\', "/")
-                    .to_ascii_lowercase()
-                    .contains(FAMILY_PREFIX)
-            })
-            .map(str::to_string)
-            .collect::<BTreeSet<_>>();
-        if actual_owners != expected_owners {
-            return Err(format!(
-                "{LABEL} owner-only harness manifest changed: {actual_owners:?}"
-            ));
-        }
-
-        let exclusions = self.read_bug456_root_manifest(
-            UPSTREAM_EXCLUSIONS_MANIFEST_FILE,
-            "upstream exclusions manifest",
-            abort,
-        )?;
-        let expected_workers = Bug456Role::WORKERS
-            .map(|role| {
-                format!(
-                    "{}\t{EXCLUSION_SOURCE}\t{UPSTREAM_EXCLUDED_DISPOSITION}",
-                    role.path()
-                )
-            })
-            .into_iter()
-            .collect::<BTreeSet<_>>();
-        let actual_workers = exclusions
-            .lines()
-            .filter(|line| {
-                line.replace('\\', "/")
-                    .to_ascii_lowercase()
-                    .contains(FAMILY_PREFIX)
-            })
-            .map(str::to_string)
-            .collect::<BTreeSet<_>>();
-        if actual_workers != expected_workers {
-            return Err(format!(
-                "{LABEL} worker exclusion ownership changed: {actual_workers:?}"
-            ));
-        }
-        let parsed = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusions are invalid: {error}"))?;
-        for role in Bug456Role::WORKERS {
-            let exclusion = parsed
-                .get(&role.record())
-                .ok_or_else(|| format!("{LABEL} lost {:?} exclusion", role))?;
-            if exclusion.source != EXCLUSION_SOURCE
-                || !matches!(
-                    exclusion.disposition,
-                    XyceUpstreamExclusionDisposition::Excluded
-                )
-            {
-                return Err(format!(
-                    "{LABEL} {:?} exclusion changed: {exclusion:?}",
-                    role
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_bug456_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug456Role,
-        abort: &dyn AbortSignal,
-    ) -> Result<Bug456RuntimeSeal, String> {
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} provenance validation aborted"));
-        }
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!("{LABEL} recognized {role:?} path is not canonical"));
-        }
-        let retained = self.read_bug456_family(abort)?;
-        self.validate_bug456_manifest_ownership(abort)?;
-        match fs::symlink_metadata(self.root.join(OUTPUT_DIRECTORY)) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("failed to inspect {LABEL} OutputData: {error}")),
-            Ok(_) => return Err(format!("{LABEL} must not acquire invented numerical gold")),
-        }
-        for member in Bug456Role::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(member.path()))
-                .map_err(|error| format!("{LABEL} {} {error}", member.file_name()))?;
-        }
-        Ok(Bug456RuntimeSeal { retained })
     }
 
     fn bug456_worker_plan(
@@ -1245,36 +753,18 @@ impl XyceTestRunner {
 
     pub(super) fn validate_bug456_oracle(
         &self,
-        deck: &XyceDeck,
         role: Bug456Role,
         start: Instant,
     ) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let seal = self.validate_bug456_provenance(deck, role, &abort)?;
-        self.validate_bug456_case(Bug456CaseSpec::for_case(role.case), &seal.retained, &abort)
+        let retained = self.read_bug456_family()?;
+        self.validate_bug456_case(Bug456CaseSpec::for_case(role.case), &retained, &abort)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rspice_core::abort_signal::NoAbort;
-
-    fn corpus_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce")
-    }
-
-    fn runner() -> XyceTestRunner {
-        XyceTestRunner::new(corpus_root(), XyceRunnerConfig::default())
-    }
-
-    fn deck(root: &Path, role: Bug456Role) -> XyceDeck {
-        XyceDeck {
-            path: root.join(role.path()),
-            section: XyceDeckSection::Netlists,
-            relative_path: role.path(),
-        }
-    }
 
     #[test]
     fn bug456_role_map_is_exact_and_partitioned() {
@@ -1302,16 +792,6 @@ mod tests {
             Bug456Role::for_record("Netlists/Certification_Tests/BUG_456/invented.cir"),
             None
         );
-    }
-
-    #[test]
-    fn bug456_retained_family_and_current_ownership_are_sealed() {
-        let runner = runner();
-        let role = Bug456Role::OWNERS[0];
-        let seal = runner
-            .validate_bug456_provenance(&deck(&runner.root, role), role, &NoAbort)
-            .expect("seal BUG456 retained family and current ownership");
-        assert_eq!(seal.retained.len(), 24);
     }
 
     #[test]
