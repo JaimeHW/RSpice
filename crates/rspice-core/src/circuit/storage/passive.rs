@@ -269,21 +269,6 @@ impl ThermalResistorState {
         self.reported_resistance * self.scale / self.multiplicity
     }
 
-    /// Advance the explicit Xyce thermal state after an accepted electrical
-    /// solution; the resulting material is used by the next electrical load.
-    pub fn advance_after_accepted_step(
-        &mut self,
-        voltage: Value,
-        conductance: Value,
-        step_size: Value,
-    ) -> Result<(), String> {
-        let candidate = self
-            .prepare_accepted_step(voltage, conductance, step_size, &NoAbort)
-            .map_err(|error| error.to_string())?;
-        self.apply_accepted_step(candidate);
-        Ok(())
-    }
-
     fn prepare_accepted_step(
         &self,
         voltage: Value,
@@ -1842,15 +1827,6 @@ impl Capacitors {
             .ic_branch_indices
             .last_mut()
             .expect("capacitor IC branch storage follows capacitor storage") = Some(branch_ordinal);
-    }
-
-    /// Apply initial conditions to v_prev
-    pub fn apply_initial_conditions(&mut self) {
-        for (i, ic) in self.ic.iter().enumerate() {
-            if let Some(v) = ic {
-                self.v_prev[i] = *v;
-            }
-        }
     }
 
     pub fn len(&self) -> usize {

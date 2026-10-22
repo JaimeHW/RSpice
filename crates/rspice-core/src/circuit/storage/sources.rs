@@ -495,11 +495,6 @@ impl VoltageSources {
         }
     }
 
-    /// Clear transient context and use static waveform defaults.
-    pub fn clear_transient_context(&mut self) {
-        self.transient_context = None;
-    }
-
     pub fn len(&self) -> usize {
         self.names.len()
     }
@@ -2425,11 +2420,6 @@ impl CurrentSources {
             context.xyce_breakpoint_tolerance =
                 (tolerance.is_finite() && tolerance >= 0.0).then_some(tolerance);
         }
-    }
-
-    /// Clear transient context and use static waveform defaults.
-    pub fn clear_transient_context(&mut self) {
-        self.transient_context = None;
     }
 
     pub fn len(&self) -> usize {

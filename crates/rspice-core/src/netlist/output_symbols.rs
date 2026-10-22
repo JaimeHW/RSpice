@@ -716,16 +716,6 @@ pub enum OutputExpressionIssue {
 }
 
 impl OutputExpressionIssue {
-    pub fn unresolved_identifier(&self) -> Option<&str> {
-        match self {
-            Self::UnresolvedIdentifier { identifier } => Some(identifier),
-            Self::UnknownFunction { .. }
-            | Self::InvalidAccessor { .. }
-            | Self::UnresolvedDeviceParameter { .. }
-            | Self::Syntax { .. } => None,
-        }
-    }
-
     pub fn reason(&self) -> String {
         match self {
             Self::UnresolvedIdentifier { identifier } => {

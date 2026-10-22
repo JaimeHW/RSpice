@@ -667,11 +667,6 @@ impl B3SoiDd {
             && (cbhat - op.cb).abs() < reltol * cbhat.abs().max(op.cb.abs()) + abstol
     }
 
-    /// Internal body node (used by the harness `@m1[vbs]` probe resolution).
-    pub fn body_node(&self) -> NodeId {
-        self.node_body
-    }
-
     /// Terminal NodeIds in (drain, gate, source, e, body) order.
     pub fn charge_nodes(&self) -> (NodeId, NodeId, NodeId, NodeId, NodeId) {
         (

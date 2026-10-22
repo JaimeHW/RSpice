@@ -400,11 +400,6 @@ impl B3SoiFd {
             && (cbhat - op.cb).abs() < reltol * cbhat.abs().max(op.cb.abs()) + abstol
     }
 
-    /// Body node (0 when floating). Used by the harness `@m1[vbs]` probe.
-    pub fn body_node(&self) -> NodeId {
-        self.node_body
-    }
-
     /// Terminal NodeIds in (drain, gate, source, e, body) order. The body slot is
     /// the (possibly 0) contact node; FD does not treat it as a charge node.
     pub fn charge_nodes(&self) -> (NodeId, NodeId, NodeId, NodeId, NodeId) {

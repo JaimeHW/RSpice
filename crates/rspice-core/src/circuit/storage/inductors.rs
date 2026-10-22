@@ -89,15 +89,6 @@ impl Inductors {
         self.ic.push(Some(ic));
     }
 
-    /// Apply initial conditions to i_prev
-    pub fn apply_initial_conditions(&mut self) {
-        for (i, ic) in self.ic.iter().enumerate() {
-            if let Some(current) = ic {
-                self.i_prev[i] = *current;
-            }
-        }
-    }
-
     pub fn len(&self) -> usize {
         self.names.len()
     }

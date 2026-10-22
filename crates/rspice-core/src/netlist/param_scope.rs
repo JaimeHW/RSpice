@@ -19,12 +19,11 @@
 //! let path = HierarchyPath::root().child("X1");
 //! let mut resolver = ParamResolver::new();
 //!
-//! // Define parameters at different scopes
+//! // A global parameter is visible from every hierarchy path
 //! resolver.set_global("R", 1000.0);
-//! resolver.set_instance(&path, "R", 3000.0);
 //!
-//! // Resolve - higher precedence wins
-//! assert_eq!(resolver.resolve("R", &path), Some(3000.0));
+//! // Resolve - the highest-precedence scope that defines the name wins
+//! assert_eq!(resolver.resolve("R", &path), Some(1000.0));
 //! ```
 
 use super::hierarchy_path::HierarchyPath;
@@ -182,15 +181,6 @@ impl ParamResolver {
         for (name, value) in params {
             entry.insert(name.to_uppercase(), *value);
         }
-    }
-
-    /// Set an instance-level parameter override
-    pub fn set_instance(&mut self, path: &HierarchyPath, name: &str, value: Value) {
-        let path_key = path.to_string().to_uppercase();
-        self.instance_overrides
-            .entry(path_key)
-            .or_default()
-            .insert(name.to_uppercase(), value);
     }
 
     /// Replace the values recorded for one completed parameter scope without

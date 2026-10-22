@@ -1766,21 +1766,6 @@ impl Netlist {
         finish_non_aborting_parse(Self::parse_with_path_and_abort(input, file_path, &NoAbort))
     }
 
-    /// Parse with include resolution, validate output requests, and observe
-    /// cooperative cancellation.
-    pub fn parse_validated_with_path_and_abort(
-        input: &str,
-        file_path: &std::path::Path,
-        abort: &dyn AbortSignal,
-    ) -> Result<Self, ParseWithAbortError> {
-        Self::parse_validated_with_path_and_options_and_abort(
-            input,
-            file_path,
-            NetlistParseOptions::default(),
-            abort,
-        )
-    }
-
     /// Parse a netlist with include resolution and cooperative cancellation.
     pub fn parse_with_path_and_abort(
         input: &str,

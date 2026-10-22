@@ -185,41 +185,6 @@ impl ParsedModel {
         }
     }
 
-    /// Check if this model matches the given geometry (W, L)
-    /// Returns true if the geometry falls within this model's bin range
-    pub fn matches_geometry(&self, width: f64, length: f64) -> bool {
-        // Check length bounds
-        if let Some(lmin) = self.lmin
-            && length < lmin
-        {
-            return false;
-        }
-        if let Some(lmax) = self.lmax
-            && length > lmax
-        {
-            return false;
-        }
-
-        // Check width bounds
-        if let Some(wmin) = self.wmin
-            && width < wmin
-        {
-            return false;
-        }
-        if let Some(wmax) = self.wmax
-            && width > wmax
-        {
-            return false;
-        }
-
-        true
-    }
-
-    /// Check if this model has any binning constraints
-    pub fn has_binning(&self) -> bool {
-        self.lmin.is_some() || self.lmax.is_some() || self.wmin.is_some() || self.wmax.is_some()
-    }
-
     /// Extract bin prefix from model name (e.g., "nch.1" -> "nch")
     pub fn extract_bin_prefix(&self) -> Option<String> {
         // Common PDK naming: prefix.binnum (e.g., nch.1, nch_hvt.2)

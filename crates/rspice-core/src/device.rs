@@ -408,11 +408,6 @@ impl DeviceModel {
         }
     }
 
-    pub fn with_param(mut self, key: &str, value: Value) -> Self {
-        self.params.insert(key.to_string(), value);
-        self
-    }
-
     pub fn get_param(&self, key: &str, default: Value) -> Value {
         self.params.get(key).copied().unwrap_or(default)
     }

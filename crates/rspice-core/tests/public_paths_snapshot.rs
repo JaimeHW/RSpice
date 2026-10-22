@@ -1117,8 +1117,6 @@ use rspice_core::device::thermal::CTH_DEFAULT as _;
 use rspice_core::device::thermal::KELVIN_OFFSET as _;
 use rspice_core::device::thermal::RTH_DEFAULT as _;
 use rspice_core::device::thermal::TAMB_DEFAULT as _;
-use rspice_core::device::thermal::THERMAL_MAX_ITERS as _;
-use rspice_core::device::thermal::THERMAL_TOLERANCE as _;
 use rspice_core::device::thermal::TREF as _;
 use rspice_core::device::thermal::TemperatureCoefficients as _;
 use rspice_core::device::thermal::ThermalNetwork as _;

@@ -54,10 +54,6 @@ pub const RTH_DEFAULT: Value = 100.0;
 pub const CTH_DEFAULT: Value = 1e-3;
 /// Default ambient temperature (°C)
 pub const TAMB_DEFAULT: Value = 27.0;
-/// Maximum temperature iterations for self-consistency
-pub const THERMAL_MAX_ITERS: usize = 20;
-/// Temperature convergence tolerance (°C)
-pub const THERMAL_TOLERANCE: Value = 0.1;
 
 //=============================================================================
 // Thermal Network Types
@@ -105,42 +101,10 @@ impl ThermalRcElement {
         }
     }
 
-    /// Single-pole DC response: ΔT = P · Rth
-    #[inline]
-    pub fn dc_temperature_rise(&self, power: Value) -> Value {
-        power * self.rth
-    }
-
     /// Thermal time constant τ = Rth × Cth
     #[inline]
     pub fn time_constant(&self) -> Value {
         self.rth * self.cth
-    }
-
-    /// Update temperature for transient analysis using backward Euler
-    ///
-    /// dT/dt = (P - (T - T_in)) / (Rth × Cth)
-    ///
-    /// Returns new temperature after timestep dt
-    pub fn transient_update(&mut self, power: Value, t_in: Value, dt: Value) -> Value {
-        let tau = self.time_constant();
-
-        if tau < 1e-15 {
-            // Very fast thermal, treat as instantaneous
-            self.temperature = t_in + power * self.rth;
-            return self.temperature;
-        }
-
-        // Backward Euler: T_n+1 = T_n + dt * dT/dt_n+1
-        // (T_n+1 - T_n) / dt = (P * Rth - (T_n+1 - T_in)) / tau
-        // T_n+1 * (1 + dt/tau) = T_n + dt * P * Rth / tau + dt * T_in / tau
-        // T_n+1 = (T_n + dt * (P * Rth + T_in) / tau) / (1 + dt/tau)
-
-        let alpha = dt / tau;
-        self.temperature =
-            (self.temperature_prev + alpha * (power * self.rth + t_in)) / (1.0 + alpha);
-
-        self.temperature
     }
 
     /// Accept current temperature as previous for next step
@@ -238,25 +202,6 @@ impl ThermalNetwork {
         for elem in &mut self.elements {
             elem.reset(self.t_ambient);
         }
-    }
-
-    /// Calculate temperature-dependent mobility factor
-    ///
-    /// μ(T) = μ(T_ref) × (T/T_ref)^(-BEX)
-    /// where BEX ≈ 1.5-2.5 for silicon
-    #[inline]
-    pub fn mobility_factor(&self, bex: Value) -> Value {
-        let t_k = self.junction_temperature_kelvin();
-        (t_k / TREF).powf(-bex)
-    }
-
-    /// Calculate temperature-dependent threshold voltage shift
-    ///
-    /// ΔVth = KT1 × (T - T_ref) + KT2 × (T - T_ref)²
-    #[inline]
-    pub fn vth_shift(&self, kt1: Value, kt2: Value) -> Value {
-        let dt = self.t_junction - (TREF - KELVIN_OFFSET);
-        kt1 * dt + kt2 * dt * dt
     }
 
     /// Calculate temperature-dependent saturation current scaling

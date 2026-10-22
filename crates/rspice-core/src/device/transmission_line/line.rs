@@ -2067,11 +2067,6 @@ impl TransmissionLine {
         self.delayed_forward_at(self.current_time)
     }
 
-    /// Get delayed backward wave (arrives at port 1)
-    pub fn delayed_backward(&self) -> Value {
-        self.delayed_backward_at(self.current_time)
-    }
-
     /// Get delayed forward wave at an explicit simulation time.
     pub fn delayed_forward_at(&self, time: Value) -> Value {
         self.delayed_forward_raw_at(time) * self.attenuation

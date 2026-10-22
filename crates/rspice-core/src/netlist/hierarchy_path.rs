@@ -232,18 +232,6 @@ impl HierarchyPath {
         self.separator
     }
 
-    /// Check if this path is an ancestor of another path
-    pub fn is_ancestor_of(&self, other: &Self) -> bool {
-        if self.depth() >= other.depth() {
-            return false;
-        }
-
-        self.segments
-            .iter()
-            .zip(other.segments.iter())
-            .all(|(a, b)| a == b)
-    }
-
     /// Check if this path starts with another path (is equal or descendant)
     pub fn starts_with(&self, prefix: &Self) -> bool {
         if prefix.depth() > self.depth() {
@@ -270,20 +258,6 @@ impl HierarchyPath {
         } else {
             format!("{}{}{}", self, self.separator, element_name)
         }
-    }
-
-    /// Check if a node name is a global node (ground variants)
-    ///
-    /// Global nodes are never prefixed with hierarchy path.
-    pub fn is_global_node(node: &str) -> bool {
-        // Standard ground representations
-        crate::naming::is_spice_ground_name(node)
-            || node.eq_ignore_ascii_case("vss")
-            // Common global supply names
-            || node.eq_ignore_ascii_case("vdd")
-            || node.eq_ignore_ascii_case("vcc")
-            // Global prefix
-            || node.starts_with('!')
     }
 }
 

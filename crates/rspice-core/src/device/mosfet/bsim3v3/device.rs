@@ -687,25 +687,6 @@ impl Bsim3v3Device {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn stamp_trnqs_charge_companion(
-        &self,
-        charge: &Bsim3v3Charge,
-        mode: i32,
-        ag0: Value,
-        cqg: Value,
-        cqb: Value,
-        cqd: Value,
-        cqcheq: Value,
-        cqcdump: Value,
-        voltages: &[Value],
-        matrix: &mut impl MatrixStamper,
-    ) {
-        self.stamp_trnqs_charge_companion_with_probe(
-            charge, mode, ag0, cqg, cqb, cqd, cqcheq, cqcdump, voltages, matrix, false,
-        );
-    }
-
-    #[allow(clippy::too_many_arguments)]
     #[doc(hidden)]
     pub fn stamp_trnqs_charge_companion_with_probe(
         &self,

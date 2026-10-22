@@ -221,37 +221,6 @@ impl Default for JilesAthertonParams {
 }
 
 impl JilesAthertonParams {
-    /// Create parameters for nickel-iron (permalloy-like)
-    pub fn permalloy() -> Self {
-        Self {
-            ms: 0.8,
-            a: 50.0,
-            k: 30.0,
-            c: 0.2,
-            alpha: 1e-5,
-            area: 1e-4,
-            length: 0.1,
-            n_turns: 100.0,
-            gap: 0.0,
-            xyce_core: false,
-            xyce_core_level2: false,
-            xyce_core_clim: 0.005,
-            xyce_core_include_m_equation: true,
-            delta_v: 0.1,
-            v_inf: 1.0,
-            delta_v_scaling: 1.0e3,
-            const_delta_v_scaling: false,
-            factor_ms: false,
-            m_var_scaling: 1.0,
-            r_var_scaling: 1.0,
-            m_eq_scaling: 1.0,
-            r_eq_scaling: 1.0,
-            beta_h: 0.0001,
-            beta_m: 3.125e-5,
-            p_zero_tol: 0.1,
-        }
-    }
-
     /// Calculate base inductance (at Ms = 0)
     /// L = μ₀ * N² * A / l
     pub fn base_inductance(&self) -> Value {
