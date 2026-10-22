@@ -20,7 +20,7 @@ use crate::canonical_ir::{
 };
 
 use super::emit::compact_generated_indentation;
-use super::expr::comparison_operator;
+use super::expr::{comparison_operator, format_f64, negate_condition};
 
 use super::{GeneratedRustDevice, RustBackendError, RustTranspileOptions};
 
@@ -3180,18 +3180,6 @@ fn validate_parameter_value_for_codegen(
     Ok(())
 }
 
-fn format_f64(value: f64) -> String {
-    if value.is_nan() {
-        "f64::NAN".to_string()
-    } else if value == f64::INFINITY {
-        "f64::INFINITY".to_string()
-    } else if value == f64::NEG_INFINITY {
-        "f64::NEG_INFINITY".to_string()
-    } else {
-        format!("{value:?}")
-    }
-}
-
 fn lower_parameter_default_condition(
     artifact: &CanonicalIrArtifact,
     expr: ExprId,
@@ -3250,28 +3238,6 @@ fn lower_parameter_default_condition(
             Ok(format!("({value} != 0.0)"))
         }
     }
-}
-
-fn negate_condition(condition: &str) -> String {
-    let condition = condition.trim();
-    if let Some(inner) = condition
-        .strip_prefix("(!")
-        .and_then(|inner| inner.strip_suffix(')'))
-    {
-        return inner.to_string();
-    }
-    if let Some(inner) = condition
-        .strip_prefix('(')
-        .and_then(|inner| inner.strip_suffix(')'))
-    {
-        if let Some(value) = inner.strip_suffix(" != 0.0") {
-            return format!("({value} == 0.0)");
-        }
-        if let Some(value) = inner.strip_suffix(" == 0.0") {
-            return format!("({value} != 0.0)");
-        }
-    }
-    format!("(!{condition})")
 }
 
 #[cfg(test)]

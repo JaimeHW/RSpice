@@ -81,7 +81,9 @@ use crate::metrics::{
     PipelinePhase,
 };
 
-use super::emit::{EmitBindings, emit_body, lane_runtime_types, math_runtime_imports};
+use super::emit::{
+    EmitBindings, back_edge_targets, emit_body, lane_runtime_types, math_runtime_imports,
+};
 use super::expr::parameter_field_names;
 use super::stamp_plan::{StampPlan, StampRow, split_row};
 use super::{GeneratedRustDevice, GeneratedRustFile, RustBackendError, RustDeviceNames};
@@ -5233,7 +5235,7 @@ fn specialize_repeated_static_guards(
         controls_loop: bool,
     }
 
-    let loop_headers = cfg_loop_headers(function);
+    let loop_headers = back_edge_targets(function);
     let mut by_slot: HashMap<u32, Candidate> = HashMap::new();
     for block in &function.blocks {
         let CfgTerminator::Branch { condition, .. } = block.terminator else {
@@ -5371,33 +5373,6 @@ fn render_static_guard_variants(
     }
     out.push_str("    }\n");
     out
-}
-
-fn cfg_loop_headers(function: &CfgFunction) -> HashSet<BlockId> {
-    let mut headers = HashSet::new();
-    let mut state: HashMap<BlockId, u8> = HashMap::new();
-    let mut stack = vec![(function.entry, 0usize)];
-    state.insert(function.entry, 1);
-    while let Some((block, index)) = stack.pop() {
-        let successors = function.block(block).successors();
-        if index < successors.len() {
-            stack.push((block, index + 1));
-            let successor = successors[index];
-            match state.get(&successor) {
-                Some(1) => {
-                    headers.insert(successor);
-                }
-                Some(_) => {}
-                None => {
-                    state.insert(successor, 1);
-                    stack.push((successor, 0));
-                }
-            }
-        } else {
-            state.insert(block, 2);
-        }
-    }
-    headers
 }
 
 fn retain_reachable_blocks(function: &mut CfgFunction) {

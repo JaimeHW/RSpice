@@ -2081,7 +2081,11 @@ fn immediate_post_dominators(function: &CfgFunction) -> Vec<Option<BlockId>> {
     }
 }
 
-fn reverse_postorder(successors: &[Vec<BlockId>], entry: BlockId, count: usize) -> Vec<BlockId> {
+pub(crate) fn reverse_postorder(
+    successors: &[Vec<BlockId>],
+    entry: BlockId,
+    count: usize,
+) -> Vec<BlockId> {
     let mut visited = vec![false; count];
     let mut postorder = Vec::with_capacity(count);
     let mut stack = vec![(entry, 0usize)];
@@ -2103,7 +2107,8 @@ fn reverse_postorder(successors: &[Vec<BlockId>], entry: BlockId, count: usize) 
     postorder
 }
 
-fn intersect(
+/// The nearest block that post-dominates both, walking up the partial tree.
+pub(crate) fn intersect(
     ipdom: &[Option<BlockId>],
     position: &[usize],
     mut left: BlockId,

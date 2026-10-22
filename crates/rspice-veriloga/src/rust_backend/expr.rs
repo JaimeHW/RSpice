@@ -1216,7 +1216,7 @@ fn boolean_numeric_condition(condition: String, operator: &str, expected: bool) 
     }
 }
 
-fn negate_condition(condition: &str) -> String {
+pub(super) fn negate_condition(condition: &str) -> String {
     let condition = condition.trim();
     if let Some(inner) = condition
         .strip_prefix("(!")
@@ -1462,7 +1462,7 @@ pub(crate) fn comparison_operator(op: &str) -> Option<&'static str> {
     }
 }
 
-fn format_f64(value: f64) -> String {
+pub(super) fn format_f64(value: f64) -> String {
     if value.is_nan() {
         "f64::NAN".to_string()
     } else if value == f64::INFINITY {

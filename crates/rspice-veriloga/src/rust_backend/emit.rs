@@ -54,6 +54,7 @@ use crate::canonical_ir::cfg::{
     CfgBinaryOp, CfgFunction, CfgIntegerBitwiseOp, CfgTerminator, CfgUnaryOp, CfgValueKind,
     CfgValueType,
 };
+use crate::canonical_ir::schedule::{intersect, reverse_postorder};
 use crate::canonical_ir::{BlockId, ValueId};
 
 /// Compact lexical indentation in generated code whose string literals escape
@@ -2620,55 +2621,8 @@ fn immediate_post_dominators(function: &CfgFunction) -> Vec<Option<BlockId>> {
     }
 }
 
-fn reverse_postorder(successors: &[Vec<BlockId>], entry: BlockId, count: usize) -> Vec<BlockId> {
-    let mut visited = vec![false; count];
-    let mut postorder = Vec::with_capacity(count);
-    let mut stack = vec![(entry, 0usize)];
-    visited[usize::from(entry)] = true;
-    while let Some((block, index)) = stack.pop() {
-        let edges = &successors[usize::from(block)];
-        if index < edges.len() {
-            stack.push((block, index + 1));
-            let next = edges[index];
-            if !visited[usize::from(next)] {
-                visited[usize::from(next)] = true;
-                stack.push((next, 0));
-            }
-        } else {
-            postorder.push(block);
-        }
-    }
-    postorder.reverse();
-    postorder
-}
-
-/// The nearest block that post-dominates both, walking up the partial tree.
-fn intersect(
-    ipdom: &[Option<BlockId>],
-    position: &[usize],
-    mut left: BlockId,
-    mut right: BlockId,
-    exit: BlockId,
-) -> BlockId {
-    while left != right {
-        while position[usize::from(left)] > position[usize::from(right)] {
-            match ipdom[usize::from(left)] {
-                Some(next) if next != left => left = next,
-                _ => return exit,
-            }
-        }
-        while position[usize::from(right)] > position[usize::from(left)] {
-            match ipdom[usize::from(right)] {
-                Some(next) if next != right => right = next,
-                _ => return exit,
-            }
-        }
-    }
-    left
-}
-
 /// Blocks that some edge jumps backwards into.
-fn back_edge_targets(function: &CfgFunction) -> HashSet<BlockId> {
+pub(super) fn back_edge_targets(function: &CfgFunction) -> HashSet<BlockId> {
     // Depth-first, tracking the stack: a successor already on the stack is
     // reached by a back edge and is therefore a loop header.
     let mut headers = HashSet::new();
