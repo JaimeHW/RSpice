@@ -320,6 +320,11 @@ fn probe_unit(name: &str, arguments: usize) -> Option<MeasurementUnit> {
     if matches!(name, "P" | "W") && arguments == 1 {
         return Some(known("W"));
     }
+    // A digital level or a bus word is a count, not a quantity. A real event
+    // net declares no unit, so `E()` stays unknown.
+    if name == "D" && arguments == 1 {
+        return Some(known("1"));
+    }
     if arguments == 2 {
         let (family, suffix) = name.split_at_checked(1)?;
         if matches!(family, "S" | "Y" | "Z") {

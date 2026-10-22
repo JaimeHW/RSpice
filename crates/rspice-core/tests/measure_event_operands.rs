@@ -1,12 +1,17 @@
 #![cfg(feature = "veriloga")]
 //! `.MEASURE TRAN` on a deck whose HDL drives event nets.
 //!
-//! Every expected value is a closed form of the fixture, never an RSpice
-//! output: `q` toggles every 10 ns from 0, so it rises at 10, 30, 50, 70 and
-//! 90 ns and its period is 20 ns.
+//! `D(n)` and `E(n)` read a net's event trace as a step function on the
+//! instants the run accepted its events at. Every expected value is a closed
+//! form of the fixture, never an RSpice output: `q` toggles every 10 ns from
+//! 0, so it rises at 10, 30, 50, 70 and 90 ns and its period is 20 ns; `p`
+//! toggles every 7 ns from 0. Event times agree to 4 ulp.
 
+use rspice_core::analysis::MeasurementUnit;
 use rspice_core::analysis::measure::MeasureResult;
-use rspice_core::analysis::measure_signals::evaluate_tran_measurements;
+use rspice_core::analysis::measure_signals::{
+    evaluate_dc_measurements, evaluate_tran_measurements,
+};
 use rspice_core::engine::{Engine, SimulationConfig, TransientResult};
 use rspice_core::netlist::{AnalysisCommand, Netlist};
 use std::fs;
@@ -59,6 +64,10 @@ fn parse(deck: &str) -> Netlist {
 }
 
 fn run(netlist: &Netlist) -> TransientResult {
+    try_run(netlist).unwrap_or_else(|error| panic!("transient runs: {error}"))
+}
+
+fn try_run(netlist: &Netlist) -> Result<TransientResult, rspice_core::SimulationError> {
     let (stop, max_step) = netlist
         .analyses
         .iter()
@@ -79,9 +88,7 @@ fn run(netlist: &Netlist) -> TransientResult {
             _ => None,
         })
         .expect("deck has a .tran card");
-    Engine::new(SimulationConfig::default())
-        .run_tran(netlist, stop, max_step)
-        .unwrap_or_else(|error| panic!("transient runs: {error}"))
+    Engine::new(SimulationConfig::default()).run_tran(netlist, stop, max_step)
 }
 
 fn measure<'a>(results: &'a [MeasureResult], name: &str) -> &'a MeasureResult {
@@ -124,6 +131,161 @@ fn an_analog_period_measures_without_saving_the_converter_endpoint() {
     );
 }
 
+/// The clock pair, plus a 4-bit `b` that counts on every rise of `q`: it
+/// reads 1 from 10 ns, 2 from 30 ns, 3 from 50 ns, 4 from 70 ns and 5 from
+/// 90 ns. Its bits drive no analog load.
+const COUNTER: &str = "`include \"disciplines.vams\"\n\
+`timescale 1ns/1ps\n\
+module counter(q, p, b);\n\
+  output q; reg q;\n\
+  output p; reg p;\n\
+  output [3:0] b; reg [3:0] b;\n\
+  initial begin q = 1'b0; p = 1'b0; b = 4'd0; end\n\
+  always #10 q = ~q;\n\
+  always #7 p = ~p;\n\
+  always @(posedge q) b <= b + 4'd1;\n\
+endmodule\n";
+
+/// The counter fixture with `cards` after `.tran`, measured.
+fn counter_measures(cards: &str) -> Vec<MeasureResult> {
+    let scratch = Scratch::new("counter");
+    let module = scratch.write("counter.vams", COUNTER);
+    let netlist = parse(&format!(
+        "* counter\n.hdl \"{module}\"\nx1 q p b3 b2 b1 b0 counter\nr1 q 0 1meg\n.param vcc=1\n.tran 0.1n 100n\n{cards}\n.end\n"
+    ));
+    let result = run(&netlist);
+    evaluate_tran_measurements(&netlist, &result)
+}
+
+/// Two event times agree to 4 ulp.
+fn assert_instant(actual: f64, expected: f64, what: &str) {
+    let ulp = expected.abs() * f64::EPSILON;
+    assert!(
+        (actual - expected).abs() <= 4.0 * ulp,
+        "{what}: {actual:e}, expected {expected:e}"
+    );
+}
+
+/// Why `name` failed, folded to lower case: the parser folds operand names.
+fn error(results: &[MeasureResult], name: &str) -> String {
+    let result = measure(results, name);
+    assert!(result.value.is_none(), "{name} fails: {result:?}");
+    result
+        .error
+        .as_deref()
+        .unwrap_or_else(|| panic!("{name} names why it fails"))
+        .to_ascii_lowercase()
+}
+
+/// `q` rises at 10, 30, 50, 70 and 90 ns: one period is 20 ns, the first
+/// rise to the last 80 ns.
+#[test]
+fn a_digital_period_is_exact() {
+    let results = counter_measures(
+        ".measure tran tq TRIG D(q) VAL=0.5 RISE=1 TARG D(q) VAL=0.5 RISE=2\n\
+         .measure tran tlast TRIG D(q) VAL=0.5 RISE=1 TARG D(q) VAL=0.5 RISE=LAST",
+    );
+    assert_instant(value(&results, "tq"), 20.0e-9, "one period");
+    assert_instant(value(&results, "tlast"), 80.0e-9, "first rise to last");
+    let units = measure(&results, "tq").units.as_ref().expect("units");
+    assert_eq!(units.value, MeasurementUnit::Known("s".to_string()));
+}
+
+/// `p` is 0 on [0, 7), 1 on [7, 14), 0 on [14, 21) and 1 from 21 ns: a value
+/// at an event instant is the new one.
+#[test]
+fn a_digital_value_is_right_continuous() {
+    let results = counter_measures(
+        ".measure tran f20 FIND D(p) AT=20n\n\
+         .measure tran f21 FIND D(p) AT=21n\n\
+         .measure tran f14 FIND D(p) AT=14n",
+    );
+    assert_eq!(value(&results, "f20"), 0.0);
+    assert_eq!(value(&results, "f21"), 1.0);
+    assert_eq!(value(&results, "f14"), 0.0);
+    let found = measure(&results, "f21");
+    assert_eq!(found.event_axis, Some(21.0e-9));
+    let units = found.units.as_ref().expect("units");
+    assert_eq!(units.value, MeasurementUnit::Known("1".to_string()));
+}
+
+/// `p` is 1 on [7, 14) and [21, 28): half of [0, 28), and 3 ns of [0, 10).
+#[test]
+fn a_digital_average_is_its_duty() {
+    let results = counter_measures(
+        ".measure tran duty AVG D(p) FROM=0 TO=28n\n\
+         .measure tran part AVG D(p) FROM=0 TO=10n\n\
+         .measure tran high INTEG D(p) FROM=0 TO=28n\n\
+         .measure tran rms RMS D(p) FROM=0 TO=10n\n\
+         .measure tran top MAX D(p) FROM=0 TO=10n OUTPUT=TIME\n\
+         .measure tran swing PP D(p) FROM=0 TO=10n",
+    );
+    assert!((value(&results, "duty") - 0.5).abs() <= 1e-15);
+    assert!((value(&results, "part") - 0.3).abs() <= 1e-15);
+    assert!((value(&results, "high") - 14.0e-9).abs() <= 1e-23);
+    assert!((value(&results, "rms") - 0.3f64.sqrt()).abs() <= 1e-15);
+    assert_instant(value(&results, "top"), 7.0e-9, "p first reaches 1");
+    assert_eq!(value(&results, "swing"), 1.0);
+}
+
+/// The bus word reads 3 on [50, 70) ns and crosses 2.5 when it steps from 2
+/// to 3, at 50 ns.
+#[test]
+fn a_bus_reads_its_word() {
+    let results = counter_measures(
+        ".measure tran word FIND D(x1.b) AT=55n\n\
+         .measure tran three WHEN D(x1.b)=2.5 CROSS=1",
+    );
+    assert_eq!(value(&results, "word"), 3.0);
+    assert_instant(value(&results, "three"), 50.0e-9, "the word reaches 3");
+}
+
+/// An HDL net that is X until 3 ns, 0 to 5 ns, X to 8 ns and 1 after; and
+/// one that returns to 0 at 8 ns instead.
+const UNDEFINED: &str = "`include \"disciplines.vams\"\n\
+`timescale 1ns/1ps\n\
+module undefined(r, s);\n\
+  output r; reg r;\n\
+  output s; reg s;\n\
+  initial begin r = 1'bx; s = 1'bx; #3 r = 1'b0; s = 1'b0; #2 r = 1'bx; s = 1'bx; #3 r = 1'b1; s = 1'b0; end\n\
+endmodule\n";
+
+/// A crossing looks through X to the next known value; an aggregate over X
+/// fails and names the stretch.
+#[test]
+fn an_undefined_stretch_is_transparent_to_a_crossing_and_fails_an_average() {
+    let scratch = Scratch::new("undefined");
+    let module = scratch.write("undefined.vams", UNDEFINED);
+    let netlist = parse(&format!(
+        "* undefined\n.hdl \"{module}\"\nx1 r s undefined\n.tran 0.1n 10n\n\
+         .measure tran rise WHEN D(r)=0.5 RISE=1\n\
+         .measure tran none WHEN D(s)=0.5 CROSS=1\n\
+         .measure tran mean AVG D(r) FROM=3n TO=10n\n\
+         .measure tran inside FIND D(r) AT=6n\n.end\n"
+    ));
+    let result = run(&netlist);
+    let results = evaluate_tran_measurements(&netlist, &result);
+    assert_instant(
+        value(&results, "rise"),
+        8.0e-9,
+        "0 -> x -> 1 rises at the x -> 1 step",
+    );
+    assert!(
+        error(&results, "none").contains("not found"),
+        "0 -> x -> 0 is no crossing: {results:?}"
+    );
+    let mean = error(&results, "mean");
+    assert!(
+        mean.contains("d(r)") && mean.contains("[5e-9 s, 8e-9 s)"),
+        "the first undefined stretch is named: {mean}"
+    );
+    let inside = error(&results, "inside");
+    assert!(
+        inside.contains("d(r) is x at 6e-9 s"),
+        "the state and the instant are named: {inside}"
+    );
+}
+
 /// A real output steps to 0.25 at 5 ns and to 0.75 at 9 ns.
 const REAL_STEPS: &str = "`include \"disciplines.vams\"\n\
 `timescale 1ns/1ps\n\
@@ -132,6 +294,39 @@ module steps(w);\n\
   assign w = v;\n\
   initial begin v = 0.0; #5 v = 0.25; #4 v = 0.75; end\n\
 endmodule\n";
+
+/// An HDL reader of the real net, which keeps it an event net.
+const REAL_SINK: &str = "`include \"disciplines.vams\"\n\
+`timescale 1ns/1ps\n\
+module sink(w, d);\n\
+  input w; wreal w;\n\
+  output d; reg d;\n\
+  initial d = 1'b0;\n\
+  always @(w) d = (w > 0.5);\n\
+endmodule\n";
+
+/// The real net crosses 0.5 at its 9 ns step and averages 0.5 over [5, 13).
+#[test]
+fn a_real_net_is_a_step_function() {
+    let scratch = Scratch::new("real");
+    let source = scratch.write("steps.vams", REAL_STEPS);
+    let sink = scratch.write("sink.vams", REAL_SINK);
+    let netlist = parse(&format!(
+        "* real\n.hdl \"{source}\"\n.hdl \"{sink}\"\nx1 w steps\nx2 w d sink\n.tran 0.1n 20n\n\
+         .measure tran half WHEN E(w)=0.5 CROSS=1\n\
+         .measure tran mean AVG E(w) FROM=5n TO=13n\n.end\n"
+    ));
+    let result = run(&netlist);
+    let results = evaluate_tran_measurements(&netlist, &result);
+    assert_instant(value(&results, "half"), 9.0e-9, "E(w) crosses 0.5");
+    assert!((value(&results, "mean") - 0.5).abs() <= 1e-15);
+    let units = measure(&results, "mean").units.as_ref().expect("units");
+    assert_eq!(
+        units.value,
+        MeasurementUnit::Unknown,
+        "a real net declares no unit"
+    );
+}
 
 /// A real output with no reader reaches its deck net through a converter the
 /// builder inserts, whose branch the run does not retain: the net's voltage
@@ -151,4 +346,49 @@ fn a_converted_real_output_measures_on_its_voltage() {
         (settled - 0.75).abs() <= 1e-9,
         "V(w) holds the last real value: {settled}"
     );
+}
+
+/// A solved point has no event values, and a converter's private endpoint
+/// sends the card to the deck net.
+#[test]
+fn an_event_operand_off_a_transient_and_a_private_endpoint_are_refused() {
+    let netlist =
+        parse("* dc\nv1 a 0 1\nr1 a 0 1k\n.dc v1 0 1 0.5\n.measure dc m FIND D(a) AT=0.5\n.end\n");
+    let sweep = Engine::new(SimulationConfig::default())
+        .run_dc_sweep(&netlist, "v1", 0.0, 1.0, 0.5)
+        .expect("the sweep runs");
+    let results = evaluate_dc_measurements(&netlist, &sweep);
+    let refusal = error(&results, "m");
+    assert!(
+        refusal.contains("d(a)") && refusal.contains(".measure dc"),
+        "{refusal}"
+    );
+
+    // The deck's output namespace refuses the endpoint's voltage before the
+    // run, naming it.
+    let scratch = Scratch::new("endpoint");
+    let module = scratch.write("counter.vams", COUNTER);
+    let netlist = parse(&format!(
+        "* endpoint\n.hdl \"{module}\"\nx1 q p b3 b2 b1 b0 counter\nr1 q 0 1meg\n.param vcc=1\n\
+         .tran 0.1n 100n\n.measure tran private FIND V(x1.q__event_0) AT=20n\n.end\n"
+    ));
+    let refusal = try_run(&netlist)
+        .expect_err("V() of a private endpoint is refused")
+        .to_string()
+        .to_ascii_lowercase();
+    assert!(refusal.contains("x1.q__event_0"), "{refusal}");
+
+    // A bare name and D() reach the measurement, which sends them to the
+    // deck net.
+    let results = counter_measures(
+        ".measure tran bare FIND x1.q__event_0 AT=20n\n\
+         .measure tran digital FIND D(x1.q__event_0) AT=20n",
+    );
+    for name in ["bare", "digital"] {
+        let refusal = error(&results, name);
+        assert!(
+            refusal.contains("x1.q__event_0") && refusal.contains("port q of x1"),
+            "{name}: {refusal}"
+        );
+    }
 }

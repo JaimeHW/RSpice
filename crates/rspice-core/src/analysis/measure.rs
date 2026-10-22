@@ -23,6 +23,7 @@ use crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
 use std::collections::HashMap;
 
 pub(crate) mod continuous;
+pub(crate) mod events;
 
 /// The waveform a `.MEASURE` statement is evaluated over: the independent axis
 /// it walks, the dependent signals it can name, and the index at which each
@@ -747,6 +748,9 @@ pub struct MeasureEngine {
     /// RiseFallDelay implementation. Modern TrigTarg remains mandatory for
     /// every other analysis and for all continuous measurement modes.
     use_legacy_tran_trig_targ: bool,
+    /// The `D()`/`E()` operands of a transient run's cards, read as step
+    /// functions on the run's exact event instants.
+    events: Option<std::sync::Arc<events::EventOperands>>,
 }
 
 impl MeasureEngine {
@@ -754,11 +758,19 @@ impl MeasureEngine {
         Self {
             measurements: Vec::new(),
             use_legacy_tran_trig_targ: false,
+            events: None,
         }
     }
 
     pub(crate) fn set_use_legacy_tran_trig_targ(&mut self, enabled: bool) {
         self.use_legacy_tran_trig_targ = enabled;
+    }
+
+    pub(crate) fn set_event_operands(
+        &mut self,
+        events: Option<std::sync::Arc<events::EventOperands>>,
+    ) {
+        self.events = events;
     }
 
     /// Add a measurement to be evaluated
@@ -807,10 +819,7 @@ impl MeasureEngine {
         else {
             return Err("raw file ERROR evaluation requires a FileError statement".to_string());
         };
-        let engine = Self {
-            measurements: Vec::new(),
-            use_legacy_tran_trig_targ: false,
-        };
+        let engine = Self::new();
         let signals = index_measure_signals(signals);
         engine.file_error_value(
             &statement.analysis,
@@ -977,8 +986,14 @@ impl MeasureEngine {
         measurement: &MeasureStatement,
         data: MeasureData<'_, '_>,
     ) -> MeasureResult {
-        self.evaluate_kind(measurement, data)
-            .check_contract(measurement)
+        events::evaluate(
+            measurement,
+            data,
+            self.events.as_deref(),
+            self.use_legacy_tran_trig_targ,
+        )
+        .unwrap_or_else(|| self.evaluate_kind(measurement, data))
+        .check_contract(measurement)
     }
 
     fn evaluate_kind(

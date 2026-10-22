@@ -25,6 +25,9 @@
 )]
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+
+use super::measure::events::EventOperands;
 
 mod parameters;
 pub(crate) use parameters::MeasureParameterSeries;
@@ -5710,6 +5713,7 @@ fn evaluate_noise_measurements_with_parameters(
                 global_default: netlist.options.measure_default_value,
                 equation_default: -1.0,
                 use_legacy_tran_trig_targ: false,
+                events: None,
             },
             abort,
         ),
@@ -5722,6 +5726,7 @@ fn evaluate_noise_measurements_with_parameters(
                 rows: parameters,
             },
             false,
+            None,
             abort,
         ),
     }?;
@@ -5781,6 +5786,7 @@ fn evaluate_statements(
     signals: &HashMap<String, &[Value]>,
     params: MeasureParameters<'_>,
     use_legacy_tran_trig_targ: bool,
+    events: Option<&Arc<EventOperands>>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
     evaluate_statements_with_segment_starts(
@@ -5790,10 +5796,12 @@ fn evaluate_statements(
         params,
         &[],
         use_legacy_tran_trig_targ,
+        events,
         abort,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn evaluate_statements_with_segment_starts(
     statements: &[&MeasureStatement],
     axis: &[Value],
@@ -5801,6 +5809,7 @@ fn evaluate_statements_with_segment_starts(
     params: MeasureParameters<'_>,
     segment_starts: &[usize],
     use_legacy_tran_trig_targ: bool,
+    events: Option<&Arc<EventOperands>>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
     let derived = materialize_measure_expression_signals_with_limits_and_abort(
@@ -5817,6 +5826,7 @@ fn evaluate_statements_with_segment_starts(
     }
     let mut engine = MeasureEngine::new();
     engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
+    engine.set_event_operands(events.cloned());
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -5835,10 +5845,12 @@ fn evaluate_statements_with_segment_starts(
 /// run supplies, the fallback an equation measurement supplies, and whether
 /// the legacy transient TRIG/TARG reading applies.
 #[derive(Clone, Copy)]
-struct MeasureEvaluationPolicy {
+struct MeasureEvaluationPolicy<'a> {
     global_default: Option<Value>,
     equation_default: Value,
     use_legacy_tran_trig_targ: bool,
+    /// A transient run's `D()`/`E()` operands; `None` for every other run.
+    events: Option<&'a Arc<EventOperands>>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5849,13 +5861,14 @@ fn evaluate_statements_with_equation_traces(
     params: MeasureParameters<'_>,
     segment_starts: &[usize],
     traces: &[EquationMeasureTrace],
-    policy: MeasureEvaluationPolicy,
+    policy: MeasureEvaluationPolicy<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
     let MeasureEvaluationPolicy {
         global_default,
         equation_default,
         use_legacy_tran_trig_targ,
+        events,
     } = policy;
     let statement_dependencies = statements
         .iter()
@@ -5950,6 +5963,7 @@ fn evaluate_statements_with_equation_traces(
 
     let mut engine = MeasureEngine::new();
     engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
+    engine.set_event_operands(events.cloned());
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -6496,15 +6510,33 @@ pub fn evaluate_tran_measurements_with_abort(
         abort,
     )?;
     for measurement in &mut measurements {
-        let refusal = measurement
-            .error
-            .as_deref()
-            .and_then(|error| event_only_signal_miss(error, result));
+        let refusal = measurement.error.as_deref().and_then(|error| {
+            event_only_signal_miss(error, result).or_else(|| private_endpoint_miss(error, result))
+        });
         if let Some(refusal) = refusal {
             measurement.error = Some(refusal);
         }
     }
     Ok(measurements)
+}
+
+/// Rewrite a measurement's "signal not found" into the private-endpoint
+/// refusal when the missing name is a converter's event endpoint the run did
+/// not record (`V(x1.q__event_0)` without an `.ESAVE` naming it).
+fn private_endpoint_miss(error: &str, result: &TransientResult) -> Option<String> {
+    let rest = error
+        .strip_prefix("Signal '")
+        .or_else(|| error.strip_prefix("When signal '"))?;
+    let name = rest.strip_suffix("' not found")?.trim();
+    let bare = name
+        .get(2..)
+        .filter(|_| {
+            name.get(..2)
+                .is_some_and(|accessor| accessor.eq_ignore_ascii_case("V("))
+        })
+        .and_then(|inner| inner.strip_suffix(')'))
+        .unwrap_or(name);
+    super::measure::events::private_endpoint_refusal(bare, result)
 }
 
 /// Rewrite a measurement's "signal not found" into the event-only refusal when
@@ -6728,6 +6760,9 @@ fn evaluate_tran_measurements_with_signals_and_abort(
         }
         Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
     };
+    // A card's `D()`/`E()` operands read the run's event traces as step
+    // functions; the sampled table above holds no event column.
+    let events = current_result.and_then(|result| EventOperands::new(&statements, result));
     let mut results = match &live_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -6740,6 +6775,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
                 global_default: netlist.options.measure_default_value,
                 equation_default: -1.0,
                 use_legacy_tran_trig_targ: netlist.options.measure_use_lttm(),
+                events: events.as_ref(),
             },
             abort,
         ),
@@ -6749,6 +6785,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             &signals,
             (&netlist.params).into(),
             netlist.options.measure_use_lttm(),
+            events.as_ref(),
             abort,
         ),
     }?;
@@ -6919,6 +6956,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
                 global_default: netlist.options.measure_default_value,
                 equation_default: 0.0,
                 use_legacy_tran_trig_targ: false,
+                events: None,
             },
             abort,
         ),
@@ -6929,6 +6967,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             (&netlist.params).into(),
             &segment_starts,
             false,
+            None,
             abort,
         ),
     }?;
@@ -7154,6 +7193,7 @@ fn evaluate_ac_measurements_with_parameters(
                 global_default: netlist.options.measure_default_value,
                 equation_default: -1.0,
                 use_legacy_tran_trig_targ: false,
+                events: None,
             },
             abort,
         ),
@@ -7166,6 +7206,7 @@ fn evaluate_ac_measurements_with_parameters(
                 rows: parameters,
             },
             false,
+            None,
             abort,
         ),
     }?;
