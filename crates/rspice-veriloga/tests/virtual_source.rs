@@ -334,6 +334,122 @@ fn virtual_runtime_places_processes_and_tasks_where_they_were_written() {
     assert_eq!(tasks, [(true, 8)], "the $strobe is on body.vams:8");
 }
 
+/// An included module with a parameter: a process on line 5, a digital
+/// `$display` on line 6 and an analog `$strobe` on line 9 of the included
+/// file.
+const PLACED_BODY: &str = "module ticker(p);\n\
+                           inout p; electrical p;\n\
+                           parameter real k = 1.0;\n\
+                           reg q;\n\
+                           initial begin\n\
+                           #1 $display(\"tick\"); q = 1;\n\
+                           end\n\
+                           analog begin\n\
+                           $strobe(\"level\");\n\
+                           V(p) <+ k * 0;\n\
+                           end\n\
+                           endmodule\n";
+
+/// Where a report placed its processes, system calls and analog tasks:
+/// whether each is in the file named `file`, and on which line.
+fn placements_in(
+    report: &rspice_veriloga::RuntimeCompileReport,
+    file: &str,
+) -> [Vec<(bool, u32)>; 3] {
+    let placed = |written: &str, line: u32| (written.ends_with(file), line);
+    let digital = &report.canonical_ir.digital;
+    [
+        digital
+            .processes
+            .iter()
+            .map(|process| {
+                let origin = process.origin.as_ref().expect("the process is placed");
+                placed(&origin.file, origin.line)
+            })
+            .collect(),
+        digital
+            .system_calls
+            .iter()
+            .map(|call| {
+                let origin = call.origin.as_ref().expect("the system call is placed");
+                placed(&origin.file, origin.line)
+            })
+            .collect(),
+        report
+            .model
+            .analog_task_origins
+            .iter()
+            .map(|origin| placed(&origin.file, origin.line))
+            .collect(),
+    ]
+}
+
+fn placements(report: &rspice_veriloga::RuntimeCompileReport) -> [Vec<(bool, u32)>; 3] {
+    placements_in(report, "body.vams")
+}
+
+fn placed_in_body() -> [Vec<(bool, u32)>; 3] {
+    [vec![(true, 5)], vec![(true, 6)], vec![(true, 9)]]
+}
+
+fn ams() -> VerilogACompiler {
+    VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    })
+}
+
+/// Text compiled in memory places what it declares on the line it was
+/// written, not on a line of the text the included standard header expanded
+/// it into, as a prepared compile does. In-memory text includes no file of
+/// its own, so the header is the include it can have.
+#[test]
+fn in_memory_runtime_places_processes_and_tasks_where_they_were_written() {
+    let root = format!("`include \"disciplines.vams\"\n{PLACED_BODY}");
+    let report = ams().compile_runtime(&root, Some("ticker")).unwrap();
+    assert_eq!(
+        placements_in(&report, "<input>"),
+        [vec![(true, 6)], vec![(true, 7)], vec![(true, 10)]],
+        "the module's lines follow the include on line 1"
+    );
+}
+
+/// A specialization compiles its artifact's expanded text, and still places
+/// every process, system call and analog task where the included file has it.
+#[test]
+fn a_specialized_module_keeps_the_places_of_its_included_sites() {
+    let bundle = VirtualSourceBundle::from_sources(
+        "root.vams",
+        [
+            (
+                "root.vams",
+                "`include \"disciplines.vams\"\n`include \"body.vams\"\n",
+            ),
+            ("body.vams", PLACED_BODY),
+        ],
+    )
+    .unwrap();
+    let compiler = ams();
+    let original = compiler
+        .compile_virtual_runtime(&bundle, "ticker", VirtualCompileLimits::default())
+        .unwrap()
+        .runtime;
+    assert_eq!(placements(&original), placed_in_body());
+    let mut specialized = compiler
+        .specialize_mixed_runtime(
+            &original.canonical_ir,
+            &[("k", 2.0)],
+            &rspice_veriloga::NoPipelineControl,
+        )
+        .unwrap();
+    println!(
+        "ATTRIBUTE analog tasks as specialized: {:?}",
+        placements(&specialized)[2]
+    );
+    specialized.model.locate_analog_tasks_as(&original.model);
+    assert_eq!(placements(&specialized), placed_in_body());
+}
+
 #[test]
 fn include_graph_contains_only_conditionally_active_resolutions() {
     let bundle = VirtualSourceBundle::from_sources(

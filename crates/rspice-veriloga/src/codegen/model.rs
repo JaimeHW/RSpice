@@ -1128,6 +1128,59 @@ impl CompiledModel {
         self.analog_task_origins = origins;
     }
 
+    /// Place each task call where `original`, compiled from the same text,
+    /// placed the call at the same span.
+    ///
+    /// A specialization compiles the expanded text its artifact retained,
+    /// not the files that text was expanded from, so it cannot place a task
+    /// itself; it places each where the model it specializes did, in the
+    /// file and on the line the call was written, as a replay places its
+    /// processes and system calls. A call `original` did not place keeps
+    /// the place it has.
+    pub fn locate_analog_tasks_as(&mut self, original: &Self) {
+        let placed: std::collections::HashMap<_, _> = original
+            .analog_task_spans()
+            .into_iter()
+            .filter_map(|(site, span)| {
+                let origin = original.analog_task_origin(site)?;
+                Some(((span.source_file_id, span.start), origin.clone()))
+            })
+            .collect();
+        let mut origins: Vec<_> = self
+            .analog_task_spans()
+            .into_iter()
+            .filter_map(|(site, span)| {
+                placed
+                    .get(&(span.source_file_id, span.start))
+                    .map(|origin| crate::analog_tasks::AnalogTaskOrigin {
+                        site,
+                        ..origin.clone()
+                    })
+                    .or_else(|| self.analog_task_origin(site).cloned())
+            })
+            .collect();
+        origins.sort_by_key(|origin| origin.site);
+        origins.dedup_by_key(|origin| origin.site);
+        self.analog_task_origins = origins;
+    }
+
+    /// Every task call's site and span.
+    fn analog_task_spans(&self) -> Vec<(u32, crate::canonical_ir::SourceSpanRef)> {
+        let mut spans = Vec::new();
+        let mut pending = vec![self.assignment_steps.as_slice()];
+        while let Some(steps) = pending.pop() {
+            for step in steps {
+                match step {
+                    AssignmentStep::Task(task) => spans.push((task.site, task.span)),
+                    AssignmentStep::Loop { body, .. }
+                    | AssignmentStep::Initialization { body, .. } => pending.push(body),
+                    _ => {}
+                }
+            }
+        }
+        spans
+    }
+
     /// Resolve the shared ordinary/noise assignment representation.
     pub(crate) fn noise_assignment_replay(&self) -> &[AssignmentStep] {
         if self.noise_assignment_steps.is_empty() {

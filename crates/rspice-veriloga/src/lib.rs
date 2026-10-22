@@ -689,12 +689,25 @@ impl VerilogACompiler {
         measurements.record(PipelinePhase::Preprocess, phase_started.elapsed())?;
         measurements.metrics_mut().preprocessed_bytes =
             metrics::usize_to_u64(preprocessed.source.len());
+        // The processes, system calls and analog tasks of the text, and of
+        // every file it includes, report the file and line they were written
+        // on, as a prepared compile's do, not a line of the expanded text.
+        let source_map = prepared_diagnostics::PreparedSourceMap::new(&preprocessed, |path| {
+            if path == std::path::Path::new("<input>") {
+                return Some(source);
+            }
+            pp.dependency_documents()
+                .iter()
+                .find(|document| document.logical_path == path)
+                .map(|document| document.source.as_str())
+        });
         self.compile_runtime_preprocessed_measured(
             "<input>",
             &preprocessed,
             module_name,
             qualifications,
             &mut measurements,
+            Some(&source_map),
         )
     }
 
@@ -778,6 +791,7 @@ impl VerilogACompiler {
         module_name: Option<&str>,
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
+        source_map: Option<&prepared_diagnostics::PreparedSourceMap>,
     ) -> CompileResult<RuntimeCompileReport> {
         self.compile_runtime_specialized_measured(
             source_package,
@@ -787,6 +801,7 @@ impl VerilogACompiler {
             &[],
             qualifications,
             measurements,
+            source_map,
         )
     }
 
@@ -992,6 +1007,7 @@ impl VerilogACompiler {
         parameters: &[(&str, ScalarParameterValue)],
         qualifications: RuntimeQualificationOptions,
         measurements: &mut metrics::MetricsRecorder,
+        source_map: Option<&prepared_diagnostics::PreparedSourceMap>,
     ) -> CompileResult<RuntimeCompileReport> {
         let analyzed = self.analyze_preprocessed_with_parameters(
             source_package,
@@ -1008,7 +1024,7 @@ impl VerilogACompiler {
             module_name,
             qualifications,
             measurements,
-            None,
+            source_map,
             None,
         )
     }

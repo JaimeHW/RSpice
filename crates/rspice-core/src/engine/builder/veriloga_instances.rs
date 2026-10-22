@@ -261,7 +261,7 @@ pub(super) fn prepare<'a>(
                     )
                 }))
                 .collect();
-            let runtime = compiler
+            let mut runtime = compiler
                 .specialize_mixed_runtime_typed(artifact, &typed, &VerilogACompileControl { abort })
                 .map_err(|error| {
                     if abort.is_aborted() {
@@ -275,6 +275,9 @@ pub(super) fn prepare<'a>(
                         )
                     }
                 })?;
+            // The specialization compiled the artifact's expanded text, so its
+            // analog tasks take the places the model it specializes gave them.
+            runtime.model.locate_analog_tasks_as(&entry.model);
             let specialized = (Arc::new(runtime.model), Arc::new(runtime.canonical_ir));
             specializations.insert(key, specialized.clone());
             specialized
