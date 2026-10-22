@@ -21,7 +21,7 @@ today = "runs"
 [[variant]]
 name = "top"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
-today = "refused:P3.6"
+today = "runs"
 
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.

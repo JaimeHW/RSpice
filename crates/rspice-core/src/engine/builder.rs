@@ -92,7 +92,7 @@ mod connect_modules;
 #[cfg(all(test, feature = "veriloga"))]
 mod elaboration_scan;
 #[cfg(feature = "veriloga")]
-mod hdl_spice_leaves;
+pub(super) mod hdl_spice_leaves;
 #[cfg(feature = "veriloga")]
 mod mixed_boundaries;
 #[cfg(feature = "veriloga")]
@@ -6406,7 +6406,7 @@ impl Engine {
                 wreal_resolution: veriloga_sources::wreal_resolution(
                     netlist.options.wreal_resolution,
                 ),
-                external_cells: Some(std::sync::Arc::new(hdl_spice_leaves::external_cells(
+                external_cells: Some(std::sync::Arc::new(hdl_spice_leaves::hdl_external_cells(
                     deck_netlist,
                 ))),
             };

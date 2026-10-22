@@ -131,8 +131,9 @@ pub use builder::{
     HeldVerilogASources, ProjectVerilogAConnectionLibraryRegistration,
     ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, VerilogACacheEntry,
     VerilogACachePruneReport, VerilogACacheStats, VerilogACacheTelemetry, clear_veriloga_cache,
-    hold_project_veriloga_sources_for_session, prune_veriloga_cache,
-    register_precompiled_veriloga_model, register_precompiled_veriloga_model_with_dependencies,
+    hdl_spice_leaves::hdl_external_cells, hold_project_veriloga_sources_for_session,
+    prune_veriloga_cache, register_precompiled_veriloga_model,
+    register_precompiled_veriloga_model_with_dependencies,
     register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_entries,
     veriloga_cache_stats, veriloga_cache_telemetry,
 };

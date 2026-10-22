@@ -8,6 +8,7 @@
 //! converter where the node is analog, and no converter where only XSPICE
 //! digital inputs read it.
 
+use rspice_core::circuit::{ConverterKind, ConverterSource};
 use rspice_core::engine::TransientResult;
 use rspice_core::xspice::DigitalState;
 use rspice_core::{Engine, Netlist};
@@ -277,6 +278,49 @@ fn a_leaf_port_reaching_digital_and_analog_elements_is_refused() {
         assert!(
             message.to_ascii_lowercase().contains(fragment),
             "the refusal names {fragment}: {message}"
+        );
+    }
+}
+
+/// The corpus LDO testbench with Verilog-AMS on top: the trim register's four
+/// `reg` outputs drive the `ldo` subcircuit's switch controls through
+/// electrical nets of `top`. Each is a discipline boundary inside the design,
+/// so the report lists one D/A per trim bit on `xtop.tr<k>`, supplied by the
+/// deck's `.param vcc` = 1.8 V.
+#[test]
+fn the_corpus_trim_register_converts_at_the_deck_supply() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/mixed-corpus/c12-ldo-tb/deck/top.op.cir");
+    let deck = Netlist::parse_file(&path)
+        .unwrap_or_else(|error| panic!("{} parses: {error}", path.display()));
+    let circuit = Engine::default()
+        .build_circuit(&deck)
+        .unwrap_or_else(|error| panic!("the deck builds: {error}"));
+    let mut trims: Vec<_> = circuit
+        .converter_insertions()
+        .iter()
+        .filter(|record| record.boundary.starts_with("xtop.tr"))
+        .collect();
+    trims.sort_by(|a, b| a.boundary.cmp(&b.boundary));
+    let boundaries: Vec<&str> = trims
+        .iter()
+        .map(|record| record.boundary.as_str())
+        .collect();
+    assert_eq!(
+        boundaries,
+        ["xtop.tr0", "xtop.tr1", "xtop.tr2", "xtop.tr3"],
+        "{:?}",
+        circuit.converter_insertions()
+    );
+    for record in trims {
+        println!("ATTRIBUTE {record:?}");
+        assert_eq!(record.kind, ConverterKind::D2a, "{record:?}");
+        let supply = record.supply.as_ref().expect("a D/A has a supply");
+        assert_eq!(supply.level, 1.8, "{record:?}");
+        assert_eq!(
+            supply.source,
+            ConverterSource::Parameter("vcc".into()),
+            "{record:?}"
         );
     }
 }

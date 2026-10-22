@@ -3,7 +3,7 @@
 //! A design may instantiate a deck `.subckt`, a device a deck model card
 //! makes, or Verilog-AMS LRM 2.4 Annex E's `resistor`, `capacitor` and
 //! `inductor`. The compiler takes the deck's cells as a table
-//! ([`external_cells`]) and lists each leaf of a compiled design with the
+//! ([`hdl_external_cells`]) and lists each leaf of a compiled design with the
 //! nets it connects. Once the deck's HDL is compiled, every leaf becomes a
 //! card at deck scope named `<instance>.<path>`: on the X-card's own nodes for
 //! the root's ports, and on `<instance>.<net>` for a net inside the design,
@@ -54,7 +54,13 @@ fn model_device(model_type: &str) -> Option<ModelDevice> {
 /// The cells `netlist` offers a design: its `.subckt`s, then the model cards
 /// whose devices a design may instantiate. A name both declare is the
 /// subcircuit's.
-pub(super) fn external_cells(netlist: &Netlist) -> Vec<ExternalCell> {
+///
+/// The builder gives this table to every HDL compile of the deck. A caller
+/// that compiles a deck's HDL ahead of the build, as a sealed project runtime
+/// is, gives the compiler the same table
+/// (`rspice_veriloga::CompilerOptions::external_cells`), so a design that
+/// instantiates the deck's cells compiles there too.
+pub fn hdl_external_cells(netlist: &Netlist) -> Vec<ExternalCell> {
     let mut cells: Vec<ExternalCell> = netlist
         .subcircuits
         .iter()

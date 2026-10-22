@@ -243,9 +243,9 @@ pub(super) fn prepare<'a>(
                         wreal_resolution: super::veriloga_sources::wreal_resolution(
                             netlist.options.wreal_resolution,
                         ),
-                        external_cells: Some(Arc::new(super::hdl_spice_leaves::external_cells(
-                            netlist,
-                        ))),
+                        external_cells: Some(Arc::new(
+                            super::hdl_spice_leaves::hdl_external_cells(netlist),
+                        )),
                     },
                 ),
             );

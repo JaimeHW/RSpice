@@ -301,9 +301,19 @@ fn seal_hdl(
         return Ok((circuit.to_owned(), PreparedVerilogARuntimeSet::default()));
     }
     let directory = origin.parent().unwrap_or(Path::new("."));
-    let compiler = rspice_veriloga::VerilogACompiler::new(
-        rspice_simulation::compilation::unified_runtime_compiler_options(),
-    );
+    // A design may instantiate the deck's own cells as SPICE leaves, so the
+    // compile sees the deck's table, as the engine's own compile does. A deck
+    // that does not parse here is refused, by the same parser, when it is
+    // prepared.
+    let external_cells = rspice_core::netlist::IncludeProcessor::new(directory)
+        .expand_content(circuit, origin)
+        .ok()
+        .and_then(|expanded| rspice_core::Netlist::parse(&expanded).ok())
+        .map(|netlist| rspice_core::engine::hdl_external_cells(&netlist));
+    let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        external_cells,
+        ..rspice_simulation::compilation::unified_runtime_compiler_options()
+    });
     let mut lines: Vec<String> = circuit.lines().map(str::to_owned).collect();
     let mut runtimes = Vec::new();
     let mut connections = Vec::new();

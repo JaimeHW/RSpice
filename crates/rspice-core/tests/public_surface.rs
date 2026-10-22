@@ -310,8 +310,13 @@ use rspice_core::analysis::harmonic_balance::{
 // code-model data-file parameter names into a prepared run, registering its
 // bytes under the path the model reads, so a prepared run, the app and the
 // browser worker replay `d_source`, `d_vcd` and the table models without a
-// file system. The census is 5,756, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5756;
+// file system. The census was 5,756, with no slack.
+// `engine::hdl_external_cells` adds one: the table of a deck's cells its HDL
+// may instantiate as SPICE leaves, which a caller compiling the deck's HDL
+// ahead of the build (the conformance harness's sealed project runtimes)
+// hands the Verilog-A compiler, as the builder does. The census is 5,757,
+// with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5757;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

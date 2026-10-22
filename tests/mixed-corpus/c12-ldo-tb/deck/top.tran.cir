@@ -7,5 +7,6 @@
 .hdl "../net/top.vams" module=top
 xtop vin vout ok meas top
 .param vcc=1.8
+.esave xtop.ok__event_0
 .tran 0.5u 1.65m
 .end
