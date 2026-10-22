@@ -86,7 +86,7 @@
 //! entries, not thousands, so it was never part of the explosion" was a count
 //! of entries; those tens were cones over the deepest part of a compact
 //! model's body, and on `hicumL2va` and `bsimcmg_va` they were most of the
-//! image. [`crate::native::cfg_cost_census`] measured them at 1.14, 1.65, 1.67
+//! image. A timing census measured them at 1.14, 1.65, 1.67
 //! and 1.30 times the shipped plan's evaluation on `asmesd`, `vbic13_4t`,
 //! `hicumL2va` and `bsimcmg_va` where the route alone cost 1.00, 1.05, 0.95 and
 //! 0.97, and they took `hicumL2va`'s image from 1.27 MB to 3.08 and
@@ -1786,9 +1786,9 @@ pub(crate) fn build_model_plan_from_canonical_cfg(
 ///   machine code. The flip moved it, which is what a route change is *supposed*
 ///   to do, and its documentation carries the per-module reading that
 ///   re-baselined it — every module moved except the two the fallback names.
-/// * [`crate::native::cfg_cost_census`] measures what it costs, which is the one
-///   thing the other three cannot say: 1.117, 1.089, 0.972, 0.887 and 0.876
-///   times the shipped plan's evaluation on the five modules it times, noise
+/// * A timing census measured what it costs, which is the one thing the other
+///   three cannot say: 1.117, 1.089, 0.972, 0.887 and 0.876
+///   times the shipped plan's evaluation on the five modules it timed, noise
 ///   included. It is free where it matters — the two largest models are the two
 ///   it is fastest on — and `asmesd`, the smallest, is the only one over unity.
 ///

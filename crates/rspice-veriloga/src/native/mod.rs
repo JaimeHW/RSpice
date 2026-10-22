@@ -36,13 +36,6 @@ mod cfg_census;
     feature = "rust-codegen",
     target_arch = "x86_64"
 ))]
-mod cfg_cost_census;
-#[cfg(all(
-    test,
-    feature = "native",
-    feature = "rust-codegen",
-    target_arch = "x86_64"
-))]
 mod cfg_mir_census;
 #[cfg(all(
     test,
@@ -65,13 +58,6 @@ mod cfg_prelude_census;
     target_arch = "x86_64"
 ))]
 mod cfg_prelude_round_trip;
-#[cfg(all(
-    test,
-    feature = "native",
-    feature = "rust-codegen",
-    target_arch = "x86_64"
-))]
-mod cfg_size_census;
 #[cfg(all(
     test,
     feature = "native",

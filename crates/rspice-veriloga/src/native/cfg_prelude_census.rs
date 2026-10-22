@@ -1,6 +1,6 @@
 //! Does the CFG prelude fit in a stack frame?
 //!
-//! [`the_cfg_route_plan_size_census`](super::cfg_size_census) measured the
+//! A plan-size census measured the
 //! problem: every entry the CFG route builds carries its own copy of the shared
 //! body, and `Σ cone / union` reaches 383 on asmhemt. The repair is a prelude —
 //! the union, lowered once, publishing each entry output into a per-evaluation
@@ -93,7 +93,7 @@ pub(super) struct PreludeInputs {
 /// Reproduce the CFG plan builder's traversal as far as the entry outputs.
 ///
 /// A second copy of that traversal rather than a hook inside it, for the same
-/// reason [`super::cfg_size_census`] keeps one: the production builder must
+/// reason the plan-size census kept one: the production builder must
 /// stay a builder. Shared with the round-trip fixture beside it so that the
 /// gate and the measurement are looking at the same entry set.
 pub(super) fn prelude_inputs(

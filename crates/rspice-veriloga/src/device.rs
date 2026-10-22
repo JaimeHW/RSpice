@@ -11283,8 +11283,6 @@ endmodule
 mod complex_small_signal_device_tests {
     use super::VerilogADevice;
     use crate::{CompilerOptions, VerilogACompiler};
-    use std::hint::black_box;
-    use std::time::{Duration, Instant};
 
     fn device(source: &str) -> VerilogADevice {
         let compiler = VerilogACompiler::new(CompilerOptions::default());
@@ -11487,117 +11485,6 @@ endmodule
         masked
             .execute_live_assignments(&device.model.assignment_steps, Some(mask))
             .expect("the masked replay skips the control write and completes");
-    }
-
-    /// Focused release benchmark for the complex frequency-domain path.
-    ///
-    /// The split real/reactive path is an exact reference for this deliberately
-    /// simple RC admittance, so the same process reports both the compatibility
-    /// baseline and the path required by nested filters. Run with:
-    /// `cargo test -p rspice-veriloga --release --all-features
-    /// complex_small_signal_stamp_microbenchmark -- --ignored --nocapture`.
-    #[test]
-    #[ignore = "manual release microbenchmark"]
-    fn complex_small_signal_stamp_microbenchmark() {
-        assert!(
-            !cfg!(debug_assertions),
-            "rerun the microbenchmark with --release"
-        );
-        let source = r#"
-`include "disciplines.vams"
-module ac_stamp_bench(p, n);
-    inout p, n;
-    electrical p, n;
-    analog I(p, n) <+ 1.0e-3 * V(p, n) + ddt(1.0e-6 * V(p, n));
-endmodule
-"#;
-        let frequency_hz = 1.0e3;
-        let omega = std::f64::consts::TAU * frequency_hz;
-        let iterations = std::env::var("RSPICE_SMALL_SIGNAL_BENCH_ITERATIONS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(50_000)
-            .max(1);
-        let samples = 5;
-        let mut complex = device(source);
-        let mut split = device(source);
-        complex.try_begin_analysis(1).unwrap();
-        split.try_begin_analysis(1).unwrap();
-
-        let run_complex = |device: &mut VerilogADevice| {
-            let start = Instant::now();
-            let mut checksum = 0.0;
-            for _ in 0..iterations {
-                device
-                    .try_stamp_small_signal_complex(&[0.0], frequency_hz, |row, col, re, im| {
-                        checksum += black_box((row + col + 1) as f64) * (re + im);
-                    })
-                    .unwrap();
-            }
-            (start.elapsed(), black_box(checksum))
-        };
-        let run_split = |device: &mut VerilogADevice| {
-            let start = Instant::now();
-            let mut checksum = 0.0;
-            for _ in 0..iterations {
-                device
-                    .try_stamp(
-                        &[0.0],
-                        |row, col, value| {
-                            checksum += black_box((row + col + 1) as f64) * value;
-                        },
-                        |_, _| {},
-                    )
-                    .unwrap();
-                device
-                    .try_stamp_reactive(&[0.0], |row, col, value| {
-                        checksum += black_box((row + col + 1) as f64) * omega * value;
-                    })
-                    .unwrap();
-            }
-            (start.elapsed(), black_box(checksum))
-        };
-
-        let _ = run_complex(&mut complex);
-        let _ = run_split(&mut split);
-        let mut complex_times = Vec::with_capacity(samples);
-        let mut split_times = Vec::with_capacity(samples);
-        let mut complex_checksum = 0.0;
-        let mut split_checksum = 0.0;
-        for sample in 0..samples {
-            let (first, second) = if sample % 2 == 0 {
-                let complex = run_complex(&mut complex);
-                let split = run_split(&mut split);
-                (complex, split)
-            } else {
-                let split = run_split(&mut split);
-                let complex = run_complex(&mut complex);
-                (complex, split)
-            };
-            complex_times.push(first.0);
-            split_times.push(second.0);
-            complex_checksum += first.1;
-            split_checksum += second.1;
-        }
-        let median = |times: &mut Vec<Duration>| {
-            times.sort_unstable();
-            times[times.len() / 2].as_secs_f64() * 1.0e9 / iterations as f64
-        };
-        let complex_ns = median(&mut complex_times);
-        let split_ns = median(&mut split_times);
-        let expected_checksum = samples as f64 * iterations as f64 * (1.0e-3 + omega * 1.0e-6);
-        assert!(
-            (complex_checksum - expected_checksum).abs() <= expected_checksum * 1.0e-9,
-            "complex checksum {complex_checksum:e}, expected {expected_checksum:e}"
-        );
-        assert!(
-            (split_checksum - expected_checksum).abs() <= expected_checksum * 1.0e-9,
-            "split checksum {split_checksum:e}, expected {expected_checksum:e}"
-        );
-        eprintln!(
-            "complex-small-signal-microbench iterations={iterations} samples={samples} complex_median_ns_per_stamp={complex_ns:.3} split_reference_median_ns_per_stamp={split_ns:.3} ratio={:.3} checksum={complex_checksum:.17e}",
-            complex_ns / split_ns
-        );
     }
 }
 

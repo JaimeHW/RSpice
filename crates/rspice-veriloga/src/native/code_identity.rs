@@ -137,7 +137,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// takes [`crate::native::SHIPPED_MODEL_NATIVE_CODE_SIZE_BUDGET_BYTES`] from 60
 /// MiB to 16, and `l_utsoi` −32.22 (7,414,136 to 5,025,336) — the module whose
 /// CFG plan was the estate's one size *and* time regression, and is now neither:
-/// [`crate::native::cfg_cost_census`] reads it at 0.644 of its postfix plan
+/// a timing census read it at 0.644 of its postfix plan
 /// where it read 1.734 with the pass in place.
 ///
 /// The time reading is the sharper half of this change and belongs here beside
@@ -277,7 +277,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// 2,861,548 bytes and `bsimsoi`
 /// (`cmc/BSIM_SOI_100.1.1_09152025/code/bsimsoi.va`) at 9,498,652 — and those
 /// are precisely the two the CFG route refuses, both on the W-D
-/// `Ddt`-under-condition class that [`crate::native::cfg_size_census`] reports as
+/// `Ddt`-under-condition class that a plan-size census reported as
 /// `lowering=refused … canonical analog operator Ddt runs under a condition and
 /// its operand cone contains BlockParameter`. The other forty-one all moved.
 ///
@@ -295,8 +295,8 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// what the digest before this one measured:
 /// `bsimcmg_va` 4,798,396 to 5,623,596, `asmhemt` 16,661,736 to 17,287,712 and
 /// `hicumL2va` 939,040 to 1,266,812 reproduce
-/// [`crate::native::cfg_size_census`]'s `image route=cfg` figures exactly, which
-/// is the cross-check that these are the images that census measures. Two
+/// the plan-size census's `image route=cfg` figures exactly, which
+/// was the cross-check that these are the images that census measured. Two
 /// readings are worth naming beyond it: `l_utsoi` grew 4.2x (2,926,408 to
 /// 12,356,892, and its `_nqs` sibling likewise), the largest factor in the
 /// corpus; and the three `hisimhv` variants — 65,119,620, 71,142,388 and

@@ -86,39 +86,6 @@ fn real_models_survive_the_whole_pipeline() {
     }
 }
 
-/// The same over the whole shipped tree. Slow, and the point is the census.
-#[test]
-#[ignore = "compiles every shipped model through the new pipeline; run with --ignored"]
-fn the_whole_corpus_reports_its_size() {
-    let root = model_root();
-    let candidates = discover_veriloga_sources(&root).expect("model tree must be discoverable");
-    for candidate in &candidates {
-        for module in &candidate.modules {
-            let report = std::panic::catch_unwind(|| run(&root, &candidate.path, module));
-            match report {
-                Ok(report) => report.print(),
-                // The reason, not just the fact. A census that reports "did not
-                // complete" for nine models leaves nine investigations to start
-                // from nothing; the panic payload already says which stage gave
-                // up and on what.
-                Err(payload) => eprintln!("{module:>24}  did not complete: {}", reason(&payload)),
-            }
-        }
-    }
-}
-
-/// What a caught panic was about. `run` panics with a formatted message naming
-/// the stage, so the payload is a `String` or a `&str` in practice.
-fn reason(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        return message.clone();
-    }
-    payload.downcast_ref::<&str>().map_or_else(
-        || "panicked with a payload of no known type".to_string(),
-        |message| (*message).to_string(),
-    )
-}
-
 struct Report {
     module: String,
     nodes: usize,

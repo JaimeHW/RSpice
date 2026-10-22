@@ -100,10 +100,6 @@ name = "cfg_emission"
 required-features = ["rust-codegen"]
 
 [[test]]
-name = "cfg_lane_census"
-required-features = ["rust-codegen"]
-
-[[test]]
 name = "cfg_lowering"
 required-features = ["rust-codegen"]
 
@@ -129,10 +125,6 @@ required-features = ["rust-codegen"]
 
 [[test]]
 name = "frontend_determinism"
-required-features = ["rust-codegen"]
-
-[[test]]
-name = "frontend_profile"
 required-features = ["rust-codegen"]
 
 [[test]]

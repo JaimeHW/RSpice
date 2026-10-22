@@ -1570,9 +1570,9 @@ impl NativeModel {
 
     /// The published image, for digesting a compiled model's machine code.
     ///
-    /// Gated like the two censuses that read it — `code_identity` and
-    /// `cfg_cost_census` — because they are its only callers, and an AArch64
-    /// test build compiles them out and then denies this as dead code.
+    /// Gated like `code_identity`, the census that reads it, because it is the
+    /// only caller, and an AArch64 test build compiles it out and then denies
+    /// this as dead code.
     #[cfg(all(
         test,
         feature = "native",
