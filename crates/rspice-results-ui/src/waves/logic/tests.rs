@@ -391,8 +391,40 @@ fn right_and_left_on_the_focused_lanes_step_the_cursor_along_the_selected_lane()
     lane_frame(&ctx, &rows, cursor, vec![button(true)]);
     let clicked = lane_frame(&ctx, &rows, cursor, vec![button(false)]);
     assert_eq!(clicked.select, Some((0, false)));
+    assert_eq!(
+        clicked.probe,
+        Some(LaneProbe::SelectNet {
+            signal: "D(p)".to_owned()
+        }),
+        "selecting a lane highlights its net"
+    );
     let right = lane_frame(&ctx, &rows, cursor, vec![key(egui::Key::ArrowRight)]);
     assert_eq!(right.cursor_to, Some(28.0 * NS));
     let left = lane_frame(&ctx, &rows, cursor, vec![key(egui::Key::ArrowLeft)]);
     assert_eq!(left.cursor_to, Some(14.0 * NS));
+}
+
+/// Cross-probes name the digital quantity of the lane's net: a bus by its
+/// name without its range, an expanded bus's member row by its member.
+#[test]
+fn a_lane_names_the_digital_quantity_of_its_net_for_cross_probing() {
+    let lanes = fixture_lanes();
+    let q = LaneRow::Logic {
+        lane: lanes.logic("q").unwrap(),
+        color: Color32::WHITE,
+    };
+    assert_eq!(lane_signal(&q, None).as_deref(), Some("D(q)"));
+    let bus = LaneRow::Bus {
+        lane: lanes.bus("b").unwrap(),
+        radix: BusRadix::Hex,
+        expanded: true,
+        members: ["b[3]", "b[2]", "b[1]", "b[0]"]
+            .into_iter()
+            .map(|member| lanes.logic(member).unwrap())
+            .collect(),
+        color: Color32::WHITE,
+    };
+    assert_eq!(lane_signal(&bus, None).as_deref(), Some("D(b)"));
+    assert_eq!(lane_signal(&bus, Some(1)).as_deref(), Some("D(b[2])"));
+    assert_eq!(lane_signal(&bus, Some(9)), None);
 }

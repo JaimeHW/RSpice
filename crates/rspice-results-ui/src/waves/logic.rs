@@ -131,6 +131,8 @@ pub struct LaneStackResponse {
     pub group: Option<Vec<usize>>,
     /// Ungroup a user bus row.
     pub ungroup: Option<usize>,
+    /// A cross-probe for the host to route.
+    pub probe: Option<LaneProbe>,
 }
 
 /// The time mapping of a lane stack occupying `rect`.
@@ -143,8 +145,9 @@ pub fn lane_mapping(rect: Rect, input: &LaneStackInput<'_>) -> TimeMapping {
     }
 }
 
-/// The row under screen Y `y`, and whether it is a member row of a bus.
-fn row_at(rows: &[LaneRow<'_>], top: f32, y: f32) -> Option<(usize, bool)> {
+/// The row under screen Y `y`, and which member of an expanded bus, if the
+/// pointer is on one of its member rows.
+fn row_at(rows: &[LaneRow<'_>], top: f32, y: f32) -> Option<(usize, Option<usize>)> {
     let mut row_top = top;
     for (index, row) in rows.iter().enumerate() {
         let height = row.height();
@@ -153,11 +156,40 @@ fn row_at(rows: &[LaneRow<'_>], top: f32, y: f32) -> Option<(usize, bool)> {
                 LaneRow::Logic { .. } => LOGIC_ROW_HEIGHT,
                 LaneRow::Bus { .. } => BUS_ROW_HEIGHT,
             };
-            return Some((index, y >= row_top + main));
+            let member =
+                (y >= row_top + main).then(|| ((y - row_top - main) / LOGIC_ROW_HEIGHT) as usize);
+            return Some((index, member));
         }
         row_top += height;
     }
     None
+}
+
+/// A cross-probe the reader asked for from a lane. The host routes it: to
+/// the HDL source, to the driving processes, or to the schematic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneProbe {
+    /// Open the HDL declaration of the lane's net.
+    GoToDeclaration { signal: String },
+    /// List the processes that drive the lane's net, each with its
+    /// `file:line`. Per-event attribution is not recorded, so at a transition
+    /// this is the same static driver set.
+    GoToDrivers { signal: String },
+    /// Select and highlight the lane's net on the schematic.
+    SelectNet { signal: String },
+}
+
+/// The digital quantity a lane draws, `D(net)`, as the result names it: a
+/// bus by its name without its range, a member row by its member net.
+pub fn lane_signal(row: &LaneRow<'_>, member: Option<usize>) -> Option<String> {
+    let net = match (row, member) {
+        (LaneRow::Logic { lane, .. }, _) => lane.name(),
+        (LaneRow::Bus { members, .. }, Some(member)) => members.get(member)?.name(),
+        (LaneRow::Bus { lane, .. }, None) => {
+            rspice_core::execution::split_bus_notation(lane.name()).0
+        }
+    };
+    Some(format!("D({net})"))
 }
 
 /// The expand control of a bus row: a small triangle painted as a vector,
@@ -346,15 +378,30 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
         && let Some((pointer, (index, member))) = pointer_row
     {
         let on_chevron = pointer.x < rect.left() + GUTTER_PAD + CHEVRON_WIDTH;
-        if !member && on_chevron && matches!(input.rows[index], LaneRow::Bus { .. }) {
+        if member.is_none() && on_chevron && matches!(input.rows[index], LaneRow::Bus { .. }) {
             output.toggle_expanded = Some(index);
         } else {
             let extend = ui.input(|i| i.modifiers.command || i.modifiers.shift);
             output.select = Some((index, extend));
+            // Selecting a lane highlights its net, as selecting an analog
+            // trace does.
+            if !extend {
+                output.probe = lane_signal(&input.rows[index], member)
+                    .map(|signal| LaneProbe::SelectNet { signal });
+            }
         }
         // Focus is what routes Left and Right here; a pointer press takes it
         // without showing a ring.
         response.request_focus();
+    }
+    // A double click on a lane, at a transition or between them, asks who
+    // drives it.
+    if response.double_clicked()
+        && let Some((pointer, (index, member))) = pointer_row
+        && pointer.x >= map.left
+    {
+        output.probe =
+            lane_signal(&input.rows[index], member).map(|signal| LaneProbe::GoToDrivers { signal });
     }
     if response.has_focus() {
         ui.memory_mut(|memory| {
@@ -389,7 +436,7 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
             output.cursor_to = lane.step_from(from, step);
         }
     }
-    if let (Some(t), Some((_, (index, false)))) = (input.cursor, pointer_row)
+    if let (Some(t), Some((_, (index, None)))) = (input.cursor, pointer_row)
         && let Some(fallback) = input
             .rows
             .get(index)
@@ -400,31 +447,65 @@ pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse 
     }
     let menu_row = response.id.with("menu-row");
     if response.secondary_clicked()
-        && let Some((_, (index, _))) = pointer_row
+        && let Some((_, row)) = pointer_row
     {
-        ui.ctx().data_mut(|data| data.insert_temp(menu_row, index));
+        ui.ctx().data_mut(|data| data.insert_temp(menu_row, row));
     }
     response.context_menu(|ui| {
-        let Some(index) = ui.ctx().data(|data| data.get_temp::<usize>(menu_row)) else {
+        let Some((index, member)) = ui
+            .ctx()
+            .data(|data| data.get_temp::<(usize, Option<usize>)>(menu_row))
+        else {
             ui.close();
             return;
         };
-        lane_menu(ui, input, index, &mut output);
+        lane_menu(ui, input, index, member, &mut output);
     });
     output
 }
 
-/// The row menu: a bus's radix and grouping, and grouping a logic selection.
+/// The row menu: the lane's cross-probes, a bus's radix and grouping, and
+/// grouping a logic selection.
 fn lane_menu(
     ui: &mut Ui,
     input: &LaneStackInput<'_>,
     index: usize,
+    member: Option<usize>,
     output: &mut LaneStackResponse,
 ) {
     let Some(row) = input.rows.get(index) else {
         ui.close();
         return;
     };
+    if let Some(signal) = lane_signal(row, member) {
+        let probes = [
+            (
+                "Go to declaration",
+                LaneProbe::GoToDeclaration {
+                    signal: signal.clone(),
+                },
+            ),
+            (
+                "Go to drivers",
+                LaneProbe::GoToDrivers {
+                    signal: signal.clone(),
+                },
+            ),
+            ("Select net", LaneProbe::SelectNet { signal }),
+        ];
+        for (label, probe) in probes {
+            if ui.button(label).clicked() {
+                output.probe = Some(probe);
+                ui.close();
+            }
+        }
+        if member.is_none() {
+            ui.separator();
+        }
+    }
+    if member.is_some() {
+        return;
+    }
     if let LaneRow::Bus { lane, radix, .. } = row {
         for (candidate, label) in BUS_RADIXES {
             if ui.radio(*radix == candidate, label).clicked() {

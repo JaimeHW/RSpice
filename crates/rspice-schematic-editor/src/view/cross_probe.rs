@@ -31,8 +31,8 @@ impl CrossProbeView<'_> {
     }
 }
 
-/// The name inside a `V(...)` or `I(...)` wrapper, or `None` when the text
-/// is anything else.
+/// The name inside a `V(...)`, `I(...)` or `D(...)` wrapper (any quantity
+/// letter `prefix` names), or `None` when the text is anything else.
 ///
 /// An expression such as `V(out)-V(in)` is deliberately rejected: it wraps
 /// two signals, not one, and treating its interior as a net name would name
@@ -45,6 +45,82 @@ pub fn wrapped_signal_name(name: &str, prefix: char) -> Option<&str> {
     }
     let inner = tail[..tail.len() - 1].trim();
     (!inner.is_empty() && !inner.contains(['(', ')'])).then_some(inner)
+}
+
+/// A quantity a net carries that cross-probing locates by the net itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetQuantity {
+    /// `V(net)`: the analog node voltage.
+    Voltage,
+    /// `D(net)`: the digital event trace, drawn as a logic or bus lane.
+    Digital,
+}
+
+impl NetQuantity {
+    pub const ALL: [Self; 2] = [Self::Voltage, Self::Digital];
+
+    /// The accessor letter that wraps a net into this quantity.
+    pub const fn prefix(self) -> char {
+        match self {
+            Self::Voltage => 'V',
+            Self::Digital => 'D',
+        }
+    }
+
+    /// This quantity of `net`, as a result names it.
+    pub fn of(self, net: &str) -> String {
+        format!("{}({net})", self.prefix())
+    }
+}
+
+/// The net a result signal is read on, and which of its quantities: `V(n)`
+/// and `D(n)` both locate the conductor `n`.
+pub fn probed_net(signal: &str) -> Option<(&str, NetQuantity)> {
+    NetQuantity::ALL.into_iter().find_map(|quantity| {
+        wrapped_signal_name(signal, quantity.prefix()).map(|net| (net, quantity))
+    })
+}
+
+/// Which carriers the last run produced for one net.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct NetCarriers {
+    /// The net has an analog node voltage.
+    pub analog: bool,
+    /// The net has a digital event trace.
+    pub digital: bool,
+}
+
+/// What probing a net on the schematic adds to the waveform.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetProbe {
+    /// The signal the probe adds: `V(n)` for an analog net and for a
+    /// converted boundary net, `D(n)` for a digital net, which the waveform
+    /// draws as a logic or bus lane.
+    pub adds: String,
+    /// A converted boundary net carries both sides; its digital side, `D(n)`,
+    /// is offered beside the voltage rather than added with it.
+    pub digital_side: Option<String>,
+}
+
+/// The probe one net offers, or `None` when the run traced no carrier of it.
+pub fn net_probe(net: &str, carriers: NetCarriers) -> Option<NetProbe> {
+    let voltage = NetQuantity::Voltage.of(net);
+    let digital = NetQuantity::Digital.of(net);
+    match (carriers.analog, carriers.digital) {
+        (true, true) => Some(NetProbe {
+            adds: voltage,
+            digital_side: Some(digital),
+        }),
+        (true, false) => Some(NetProbe {
+            adds: voltage,
+            digital_side: None,
+        }),
+        (false, true) => Some(NetProbe {
+            adds: digital,
+            digital_side: None,
+        }),
+        (false, false) => None,
+    }
 }
 
 /// Why a result signal could not be located on the schematic.
@@ -142,7 +218,9 @@ fn borrow_signal_conductor<'a>(
     view: &CrossProbeView<'a>,
     signal: &str,
 ) -> Result<(&'a str, &'a [Point]), LocateSignalError> {
-    let wrapped = wrapped_signal_name(signal, 'V').ok_or(LocateSignalError::NotANet)?;
+    // A node voltage and a digital lane both name their net; selecting either
+    // highlights the same conductor.
+    let (wrapped, _) = probed_net(signal).ok_or(LocateSignalError::NotANet)?;
     let target = ProbeTarget::parse_legacy(wrapped).map_err(|_| LocateSignalError::NotANet)?;
     let Some(net_to_points) = view.net_to_points else {
         return Err(LocateSignalError::NoCurrentMap);
@@ -326,6 +404,54 @@ mod tests {
         assert!(editor.selection.wires.contains(&1));
         assert!(editor.net_highlight.is_wire_highlighted(1));
         assert_eq!(editor.center_request, Some(Point::new(0, 0)));
+    }
+
+    #[test]
+    fn a_digital_lane_selects_the_conductor_of_its_net() {
+        let (document, points, mut editor) = fixture();
+        let occurrence = InstancePath::root();
+        let view = CrossProbeView {
+            document: &document,
+            sheet_catalog: None,
+            occurrence: &occurrence,
+            net_to_points: Some(&points),
+        };
+
+        let net = select_signal_conductor(&view, &mut editor, "D(out)").expect("net resolves");
+
+        assert_eq!(net, "OUT");
+        assert!(editor.net_highlight.is_wire_highlighted(1));
+        assert_eq!(probed_net("D(x1.q)"), Some(("x1.q", NetQuantity::Digital)));
+        assert_eq!(probed_net(" v(out) "), Some(("out", NetQuantity::Voltage)));
+        assert_eq!(probed_net("D(a)-D(b)"), None);
+        assert_eq!(probed_net("I(r1)"), None);
+    }
+
+    #[test]
+    fn a_converted_boundary_net_adds_its_voltage_and_offers_its_digital_side() {
+        let both = NetCarriers {
+            analog: true,
+            digital: true,
+        };
+        assert_eq!(
+            net_probe("q", both),
+            Some(NetProbe {
+                adds: "V(q)".to_owned(),
+                digital_side: Some("D(q)".to_owned()),
+            })
+        );
+        let digital = NetCarriers {
+            analog: false,
+            digital: true,
+        };
+        assert_eq!(net_probe("ok", digital).unwrap().adds, "D(ok)");
+        assert_eq!(net_probe("ok", digital).unwrap().digital_side, None);
+        let analog = NetCarriers {
+            analog: true,
+            digital: false,
+        };
+        assert_eq!(net_probe("out", analog).unwrap().adds, "V(out)");
+        assert_eq!(net_probe("none", NetCarriers::default()), None);
     }
 
     #[test]
