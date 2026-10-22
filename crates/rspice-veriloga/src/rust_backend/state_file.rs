@@ -415,9 +415,6 @@ pub(super) fn generate_state_file_with_extensions(
     ));
     emit_public_parameter_descriptors(artifact, &mut out);
     out.push_str(&format!(
-        "    pub const INTERNAL_NODE_COUNT: usize = {internal_node_count};\n"
-    ));
-    out.push_str(&format!(
         "    pub const NODE_COUNT: usize = {node_count};\n"
     ));
     out.push_str(&format!(

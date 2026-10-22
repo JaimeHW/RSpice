@@ -2879,7 +2879,6 @@ let instance = device::state::Instance::new(&[0, 1]);
 assert_eq!(instance.params.values[17], 18.0, "dependent defaults must finalize in source order across helper boundaries");
 assert_eq!(instance.transient_event_refinement_time(), None);
 assert_eq!(instance.transient_timer_event_time(), None);
-assert_eq!(instance.transient_timer_step_bound(), None);
 "#;
     run_generated_main("bounded dependent defaults", &state, &stamp, &noise, body)
         .unwrap_or_else(|report| panic!("generated bounded dependent defaults failed:\n{report}"));
@@ -5945,7 +5944,6 @@ assert_eq!(stamp(&mut instance, -1.0), 0.0);
 assert_eq!(instance.transient_event_refinement_time(), None);
 assert_eq!(instance.transient_timer_event_time(), None,
     "a speculative timer target must not become externally schedulable before acceptance");
-assert_eq!(instance.transient_timer_step_bound(), Some(1.0));
 let speculative_initial = instance.capture_persistent_state();
 assert_eq!(speculative_initial.event_variables[0], 0.0);
 assert_eq!(*speculative_initial.event_variables.last().unwrap(), f64::INFINITY,
@@ -5979,7 +5977,6 @@ let refinement = f64::from_bits(0.5f64.to_bits() + 1);
 assert_eq!(instance.transient_event_refinement_time(), Some(refinement));
 assert_eq!(instance.transient_timer_event_time(), Some(1.0),
     "a trial endpoint must not replace the accepted absolute timer target");
-assert_eq!(instance.transient_timer_step_bound(), Some(2.0));
 let positive_trial = instance.capture_rollback_state();
 assert_eq!(instance.capture_persistent_state(), accepted_initial,
     "cross/above/timer candidates changed the accepted checkpoint image");
@@ -5994,7 +5991,6 @@ instance.begin_stateful_evaluation();
 assert_eq!(stamp(&mut instance, -0.5), 100.0,
     "a rejected positive endpoint consumed cross/above state");
 assert_eq!(instance.transient_event_refinement_time(), None);
-assert_eq!(instance.transient_timer_step_bound(), Some(2.0));
 
 instance.restore_rollback_state(&accepted_endpoint);
 instance.begin_stateful_evaluation();
@@ -6009,7 +6005,6 @@ instance.set_timepoint(refinement, refinement, inactive);
 instance.begin_stateful_evaluation();
 assert_eq!(stamp(&mut instance, 0.0), 11.0);
 assert_eq!(instance.transient_event_refinement_time(), None);
-assert_eq!(instance.transient_timer_step_bound(), Some(1.0 - refinement));
 instance.validate_advance_state().unwrap();
 instance.apply_validated_advance_state();
 assert_eq!(instance.capture_persistent_state().event_variables[0], 11.0);
@@ -6018,7 +6013,6 @@ instance.set_timepoint(1.0, 1.0 - refinement, inactive);
 instance.begin_stateful_evaluation();
 assert_eq!(stamp(&mut instance, 1.0), 111.0);
 assert_eq!(instance.transient_event_refinement_time(), None);
-assert_eq!(instance.transient_timer_step_bound(), Some(2.0));
 instance.validate_advance_state().unwrap();
 instance.apply_validated_advance_state();
 let accepted = instance.capture_persistent_state();
@@ -6031,7 +6025,6 @@ restored.restore_persistent_state(&accepted).unwrap();
 assert_eq!(restored.transient_timer_event_time(), Some(3.0),
     "the persisted absolute timer target must be usable before evaluation time is re-primed on resume");
 restored.set_timepoint(1.0, 0.0, inactive);
-assert_eq!(restored.transient_timer_step_bound(), Some(2.0));
 assert_eq!(restored.capture_persistent_state(), accepted);
 assert_eq!(restored.capture_rollback_state(), accepted_rollback);
 "#;
@@ -6696,7 +6689,6 @@ instance.restore_persistent_state(&accepted).unwrap();
 assert!(instance.limiter_converged());
 assert!(!instance.discontinuity_rising());
 assert_eq!(instance.transient_step_bound().unwrap(),Some(1e-9));
-assert_eq!(instance.transient_timer_step_bound(),Some(1.0));
 let mut invalid=accepted.clone();
 invalid.event_variables[2]=2.0;
 assert!(instance.restore_persistent_state(&invalid).unwrap_err().contains("discontinuity"));
@@ -6768,7 +6760,6 @@ stamp(&mut instance,-1.0);
 assert_eq!(instance.transient_step_bound().unwrap(),None);
 instance.restore_persistent_state(&accepted).unwrap();
 assert_eq!(instance.transient_step_bound().unwrap(),Some(1e-9));
-assert_eq!(instance.transient_timer_step_bound(),Some(1.0));
 let mut invalid=accepted.clone();
 invalid.event_variables[1]=-1.0;
 assert!(instance.restore_persistent_state(&invalid).is_err());

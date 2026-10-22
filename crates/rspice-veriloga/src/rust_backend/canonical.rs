@@ -5176,19 +5176,12 @@ let idtmod_branch_derivative = |primal: f64, ic: f64, modulus: f64, offset: f64,
                 "    #[inline]\n\
                      pub fn transient_timer_event_time(&self) -> Option<f64> {\n\
                          (self.timer_event_bound_accepted != f64::INFINITY).then_some(self.timer_event_bound_accepted)\n\
-                     }\n\
-                     #[inline]\n\
-                     pub fn transient_timer_step_bound(&self) -> Option<f64> {\n\
-                         let bound = self.timer_event_bound_candidate - self.time;\n\
-                         (bound.is_finite() && bound > 0.0).then_some(bound)\n\
                      }\n",
             );
         } else {
             extensions.impl_methods.push_str(
                 "    #[inline]\n\
-                     pub fn transient_timer_event_time(&self) -> Option<f64> { None }\n\
-                     #[inline]\n\
-                     pub fn transient_timer_step_bound(&self) -> Option<f64> { None }\n",
+                     pub fn transient_timer_event_time(&self) -> Option<f64> { None }\n",
             );
         }
     }
