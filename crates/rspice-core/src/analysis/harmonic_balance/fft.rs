@@ -41,22 +41,13 @@ impl std::fmt::Debug for HbFft {
 }
 
 impl HbFft {
-    /// Create a new FFT processor
+    /// Create an FFT processor after checked grid arithmetic.
     ///
     /// # Arguments
     /// * `num_harmonics` - Number of harmonics (not including DC)
-    /// * `oversample` - Oversampling factor (typically 2 or 4)
-    ///
-    /// The caller must provide an oversampling factor of at least two; below
-    /// that the top harmonics collide with the conjugate half of the spectrum.
-    /// Untrusted callers should use [`Self::try_new`].
-    #[deprecated(note = "use HbFft::try_new so malformed grids return HbConfigError")]
-    pub fn new(num_harmonics: usize, oversample: usize) -> Self {
-        Self::try_new(num_harmonics, oversample)
-            .expect("HbFft::new requires a prevalidated harmonic-balance configuration")
-    }
-
-    /// Create an FFT processor after checked grid arithmetic.
+    /// * `oversample` - Oversampling factor (typically 2 or 4), at least two;
+    ///   below that the top harmonics collide with the conjugate half of the
+    ///   spectrum.
     pub fn try_new(num_harmonics: usize, oversample: usize) -> Result<Self, HbConfigError> {
         if oversample < 2 {
             return Err(HbConfigError::new(
@@ -81,13 +72,6 @@ impl HbFft {
         })?;
 
         Self::try_with_size(num_harmonics, fft_size)
-    }
-
-    /// Create a processor with an exact collocation-grid size.
-    #[deprecated(note = "use HbFft::try_with_size so malformed grids return HbConfigError")]
-    pub fn with_size(num_harmonics: usize, fft_size: usize) -> Self {
-        Self::try_with_size(num_harmonics, fft_size)
-            .expect("HbFft::with_size requires a prevalidated collocation grid")
     }
 
     /// Create a processor with an exact, checked collocation-grid size.
@@ -291,14 +275,6 @@ impl HbFft {
             }
         }
         buffer
-    }
-
-    /// Compute total signal power via Parseval's theorem
-    pub fn total_power(&self, spectrum: &[Complex64]) -> Value {
-        // For real signal: P = |X₀|² + 2*Σ|Xₖ|² for k > 0
-        let dc_power = spectrum.first().map(|c| c.norm_sqr()).unwrap_or(0.0);
-        let harmonic_power: Value = spectrum.iter().skip(1).map(|c| c.norm_sqr()).sum();
-        dc_power + 2.0 * harmonic_power
     }
 
     /// Generate time points for the FFT grid

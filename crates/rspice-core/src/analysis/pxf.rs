@@ -140,12 +140,6 @@ impl PxfConfig {
         self
     }
 
-    /// Set input source
-    pub fn with_input(mut self, source: &str) -> Self {
-        self.input_source = Some(source.to_uppercase());
-        self
-    }
-
     /// Set output node
     pub fn with_output(mut self, node: &str) -> Self {
         self.output_node = Some(node.to_uppercase());
@@ -413,14 +407,6 @@ impl PxfResult {
         self.points
             .iter()
             .map(|p| (p.freq_in, p.magnitude_db()))
-            .collect()
-    }
-
-    /// Get phase curve (frequency, phase_degrees)
-    pub fn phase_curve(&self) -> Vec<(Value, Value)> {
-        self.points
-            .iter()
-            .map(|p| (p.freq_in, p.phase_degrees()))
             .collect()
     }
 

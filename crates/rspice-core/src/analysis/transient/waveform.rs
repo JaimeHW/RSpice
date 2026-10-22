@@ -87,16 +87,6 @@ impl CompressionConfig {
             ..Self::default()
         }
     }
-
-    /// Aggressive compression (good for long simulations)
-    pub fn aggressive() -> Self {
-        Self {
-            abs_tol: 1e-5,
-            rel_tol: 1e-2, // 1%
-            enabled: true,
-            maximum_retained_interval: 0.0,
-        }
-    }
 }
 
 /// Schema version for the persisted transient-compression certificate.

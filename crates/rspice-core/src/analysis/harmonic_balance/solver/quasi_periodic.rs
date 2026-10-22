@@ -255,34 +255,6 @@ impl HbSolver {
             .collect()
     }
 
-    /// Adjoint sweep on the common offset axis (the zero tone tuple).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "numerical API keeps independent circuit, spectral, and resource inputs explicit"
-    )]
-    pub fn solve_quasi_periodic_adjoint_with_abort(
-        &mut self,
-        grid: Arc<QuasiPeriodicGrid>,
-        linear: &QuasiPeriodicLinearConfig,
-        orbit: &[Vec<Complex64>],
-        offsets_hz: &[Value],
-        observation: &[Vec<Complex64>],
-        limits: &ResourceLimits,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<QuasiPeriodicAdjointSolution>, Error> {
-        let anchor = vec![0; grid.dimensions().len()];
-        self.solve_quasi_periodic_adjoint_at_frequency_with_abort(
-            grid,
-            linear,
-            orbit,
-            offsets_hz,
-            &anchor,
-            observation,
-            limits,
-            abort,
-        )
-    }
-
     /// Solve Aᴴ λ = c once per offset for the observation y = cᴴ x.
     /// Every small-signal source/tuple transfer is then λᴴ b. Complete exact
     /// MNA and all signed tuples participate, including frequency-dependent

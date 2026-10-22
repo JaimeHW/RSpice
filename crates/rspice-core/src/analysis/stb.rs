@@ -628,19 +628,6 @@ impl StbResult {
         self.project_bode_curve_with_abort(|point| point.magnitude_db, abort)
     }
 
-    /// Get phase vs frequency data for a Bode plot.
-    pub fn phase_curve(&self) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
-        self.phase_curve_with_abort(&NoAbort)
-    }
-
-    /// Cancellable, fallible phase-curve projection.
-    pub(crate) fn phase_curve_with_abort(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
-        self.project_bode_curve_with_abort(|point| point.phase_deg, abort)
-    }
-
     fn project_bode_curve_with_abort(
         &self,
         ordinate: impl Fn(&BodePoint) -> Option<Value>,
@@ -1345,7 +1332,7 @@ mod tests {
 
         let abort = CountingAbort::new(2);
         assert_eq!(
-            result.phase_curve_with_abort(&abort),
+            result.magnitude_curve_with_abort(&abort),
             Err(StbAnalysisError::Aborted)
         );
         assert_eq!(abort.count(), 3);

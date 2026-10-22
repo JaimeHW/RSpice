@@ -785,11 +785,6 @@ impl HbConfig {
         !self.tones.is_empty()
     }
 
-    /// Get total number of spectral components per node
-    pub fn num_spectral_components(&self) -> usize {
-        self.checked_num_spectral_components().unwrap_or(usize::MAX)
-    }
-
     fn checked_num_spectral_components(&self) -> Result<usize, HbConfigError> {
         if self.is_multi_tone() {
             self.tones.iter().try_fold(1usize, |count, tone| {

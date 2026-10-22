@@ -599,26 +599,6 @@ impl HbSolver {
         branch_idx
     }
 
-    /// Add voltage source with arbitrary AC harmonic entries.
-    pub fn add_voltage_source_branch_harmonics(
-        &mut self,
-        node_pos: usize,
-        node_neg: usize,
-        dc_voltage: Value,
-        harmonics: &[(usize, Value, Value)],
-    ) -> usize {
-        let branch_idx = self.num_branches;
-        let mut branch = VoltageSourceBranch::new(node_pos, node_neg, branch_idx, dc_voltage);
-        for (harmonic, magnitude, phase) in harmonics {
-            branch = branch.with_harmonic(*harmonic, *magnitude, *phase);
-        }
-        self.voltage_source_branches.push(branch);
-        self.voltage_source_branch_names
-            .push(format!("V{}", branch_idx + 1));
-        self.num_branches += 1;
-        branch_idx
-    }
-
     /// Fallibly register one authored ideal voltage source for an exact MNA
     /// solve. Unlike the compatibility helpers above, this production
     /// boundary rejects malformed topology, names, spectra, and allocation
@@ -728,13 +708,6 @@ impl HbSolver {
         self.voltage_source_branch_names.push(owned_name);
         self.num_branches = next_branch_count;
         Ok(branch_idx)
-    }
-
-    /// Preserve the authored name for an already-added MNA branch.
-    pub fn set_voltage_source_branch_name(&mut self, branch_idx: usize, name: impl Into<String>) {
-        if let Some(slot) = self.voltage_source_branch_names.get_mut(branch_idx) {
-            *slot = name.into();
-        }
     }
 
     /// Get number of MNA branch currents

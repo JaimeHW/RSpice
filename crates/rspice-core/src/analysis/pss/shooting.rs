@@ -179,11 +179,6 @@ impl ShootingNewtonSolver {
         self
     }
 
-    /// Check if solver has converged
-    pub fn has_converged(&self) -> bool {
-        self.converged
-    }
-
     /// Get current iteration count
     pub fn iterations(&self) -> usize {
         self.iteration
