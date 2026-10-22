@@ -143,22 +143,6 @@ pub use sweeps::{
 };
 pub use tf::{TfAccuracy, TfQuantity, TfRunConfig, infer_tf_run_config};
 pub use transient::TransientData;
-#[cfg(test)]
-pub use transient::run_transient_analysis_with_source_path_and_abort;
-
-// =============================================================================
-// Platform-agnostic timing utilities
-// =============================================================================
-
-/// Get current time in milliseconds (for performance measurement)
-#[cfg(test)]
-fn now_ms() -> f64 {
-    web_time::SystemTime::now()
-        .duration_since(web_time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs_f64()
-        * 1000.0
-}
 
 #[allow(dead_code, reason = "retained by Monte Carlo compatibility runners")]
 const DEFAULT_MONTE_CARLO_SEED: u64 = 0x5EED_5EED;

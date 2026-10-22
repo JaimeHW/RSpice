@@ -4,8 +4,6 @@
 //! adaptive, or event-aligned schedules select output projection times;
 //! they do not skip RF cycles during transient integration.
 
-#[cfg(test)]
-use super::run_transient_analysis_with_source_path_and_abort;
 use super::{ServiceContext, ServiceRunError, ServiceRunResult, TransientData};
 use crate::error::{ensure_not_aborted, poll_periodically};
 use num_complex::Complex64;
@@ -1228,80 +1226,7 @@ pub struct FourierData {
     pub output_label: String,
 }
 
-/// Run Fourier analysis with cooperative cancellation and no source path.
-///
-/// Test-only. Fourier decomposition ships through
-/// [`run_fourier_from_signal_with_abort`], which reuses the waveform the
-/// producing analysis already computed instead of re-running transient.
-#[cfg(test)]
-pub fn run_fourier_analysis_with_abort(
-    netlist_text: &str,
-    config: &FourierRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<FourierData> {
-    run_fourier_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run Fourier analysis by executing transient and computing the harmonic
-/// decomposition, with source-path resolution and cooperative cancellation.
-///
-/// Test-only; see [`run_fourier_analysis_with_abort`].
-#[cfg(test)]
-pub fn run_fourier_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &FourierRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<FourierData> {
-    ensure_not_aborted(abort)?;
-    let validation = config.validate();
-    ensure_not_aborted(abort)?;
-    validation.map_err(ServiceRunError::Failure)?;
-
-    let window = config.stop_time - config.start_time;
-    let max_harmonic_freq = config.fundamental_freq * (config.num_harmonics as f64 + 1.0);
-    let nyquist_oversample = 8.0;
-    let fine_step = 1.0 / (max_harmonic_freq * nyquist_oversample);
-    let coarse_step = window / 1500.0;
-    let floor_step = window / 200_000.0;
-    let step_time = fine_step
-        .min(coarse_step)
-        .max(floor_step)
-        .min(config.stop_time);
-    if !step_time.is_finite() || step_time <= 0.0 {
-        return Err(ServiceRunError::Failure(
-            "Fourier sampling step could not be represented".to_string(),
-        ));
-    }
-    ensure_not_aborted(abort)?;
-
-    let transient = run_transient_analysis_with_source_path_and_abort(
-        netlist_text,
-        config.stop_time,
-        step_time,
-        source_path,
-        abort,
-    )?;
-    if transient.time.len() < 3 {
-        return Err(ServiceRunError::Failure(
-            "Fourier analysis requires at least 3 transient samples".to_string(),
-        ));
-    }
-
-    let signal = extract_transient_signal_with_abort(
-        &transient,
-        &config.output_node,
-        config.output_ref.as_deref(),
-        abort,
-    )?;
-    run_fourier_from_signal_with_abort(&transient.time, &signal, config, abort)
-}
-
 /// Compute a Fourier result from one already-authenticated transient signal.
-///
-/// Prepared dependency consumers use this path so they share the standalone
-/// Fourier implementation's validation, windowing, resource checks, and
-/// cooperative cancellation without launching a replacement transient solve.
 #[cfg(test)]
 pub(crate) fn run_fourier_from_signal_with_abort(
     time: &[Value],
@@ -1610,103 +1535,6 @@ fn analyze_fourier_with_abort(
         thd_percent: result.thd,
         dc_component: result.dc_component,
     })
-}
-
-#[cfg(test)]
-fn extract_transient_signal_with_abort(
-    transient: &TransientData,
-    output_node: &str,
-    output_ref: Option<&str>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Value>> {
-    ensure_not_aborted(abort)?;
-    let node = output_node.trim();
-    if node.is_empty() {
-        return Err(ServiceRunError::Failure(
-            "Fourier output node is empty".to_string(),
-        ));
-    }
-
-    let node_waveform =
-        find_transient_waveform_with_abort(transient, node, abort)?.ok_or_else(|| {
-            ServiceRunError::Failure(format!(
-                "Fourier output node '{}' not found in transient data",
-                node
-            ))
-        })?;
-
-    if let Some(ref_name) = output_ref {
-        let ref_name = ref_name.trim();
-        if ref_name.is_empty() || ref_name.eq_ignore_ascii_case("0") {
-            return copy_values_with_abort(node_waveform, abort);
-        }
-        let ref_waveform = find_transient_waveform_with_abort(transient, ref_name, abort)?
-            .ok_or_else(|| {
-                ServiceRunError::Failure(format!(
-                    "Fourier output reference node '{}' not found in transient data",
-                    ref_name
-                ))
-            })?;
-        if ref_waveform.len() != node_waveform.len() {
-            return Err(ServiceRunError::Failure(
-                "Fourier node/reference waveform length mismatch".to_string(),
-            ));
-        }
-        let mut differential = Vec::with_capacity(node_waveform.len());
-        for (sample_idx, (value, reference)) in node_waveform.iter().zip(ref_waveform).enumerate() {
-            poll_periodically(abort, sample_idx)?;
-            differential.push(value - reference);
-        }
-        ensure_not_aborted(abort)?;
-        return Ok(differential);
-    }
-
-    copy_values_with_abort(node_waveform, abort)
-}
-
-#[cfg(test)]
-fn copy_values_with_abort(
-    values: &[Value],
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Vec<Value>> {
-    ensure_not_aborted(abort)?;
-    let mut copied = Vec::with_capacity(values.len());
-    for (sample_idx, value) in values.iter().enumerate() {
-        poll_periodically(abort, sample_idx)?;
-        copied.push(*value);
-    }
-    ensure_not_aborted(abort)?;
-    Ok(copied)
-}
-
-#[cfg(test)]
-fn find_transient_waveform_with_abort<'a>(
-    transient: &'a TransientData,
-    node_name: &str,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<Option<&'a [Value]>> {
-    ensure_not_aborted(abort)?;
-    let target = normalize_waveform_node_name(node_name);
-    for (name, values) in &transient.voltages {
-        ensure_not_aborted(abort)?;
-        let wf_node = normalize_waveform_node_name(name);
-        if wf_node == target {
-            return Ok(Some(values));
-        }
-    }
-    Ok(None)
-}
-
-#[cfg(test)]
-fn normalize_waveform_node_name(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if trimmed.len() >= 3
-        && (trimmed.starts_with("V(") || trimmed.starts_with("v("))
-        && trimmed.ends_with(')')
-    {
-        return trimmed[2..trimmed.len() - 1].trim().to_ascii_uppercase();
-    }
-    trimmed.to_ascii_uppercase()
 }
 
 #[cfg(test)]
@@ -2314,29 +2142,6 @@ mod tests {
             assert!((value.re - expected_value.re).abs() < 1.0e-10);
             assert!((value.im - expected_value.im).abs() < 1.0e-10);
         }
-    }
-
-    #[test]
-    fn cancellation_precedes_invalid_fourier_configuration() {
-        let config = FourierRunConfig {
-            fundamental_freq: -1.0,
-            num_harmonics: 0,
-            num_periods: 1,
-            output_node: String::new(),
-            output_ref: None,
-            start_time: -1.0,
-            stop_time: -1.0,
-            compute_thd: true,
-            normalize: false,
-        };
-        let abort = AbortOnPoll {
-            abort_on: 2,
-            polls: AtomicUsize::new(0),
-        };
-
-        let result = run_fourier_analysis_with_abort("invalid", &config, &abort);
-
-        assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
 
     #[test]
