@@ -67,8 +67,7 @@ pub const VNTOL: Value = 1e-6;
 /// resolve to the same behavior as the engine defaults.
 pub const ABSTOL: Value = VNTOL;
 
-/// Default top-level simulator tolerance used by `SimulationConfig` and
-/// compatibility wrappers like `solver::Simulator`.
+/// Default top-level simulator tolerance used by `SimulationConfig`.
 pub const DEFAULT_TOLERANCE: Value = VNTOL;
 
 //=============================================================================

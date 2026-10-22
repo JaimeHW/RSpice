@@ -172,7 +172,7 @@ pub use engine::{
 };
 pub use netlist::Netlist;
 pub use resource::{ResourceKind, ResourceLimitError, ResourceLimits};
-pub use solver::{SimulationResult, Simulator, SparseLuSolver, StaticMatrix, TripletMatrix};
+pub use solver::{SimulationResult, SparseLuSolver, StaticMatrix, TripletMatrix};
 pub use transient_observation::{
     CurrentImpulseDerivative, CurrentImpulseOwner, CurrentImpulsePoint, CurrentImpulseTrace,
     ImpulseDerivative, ImpulsePointValue, ImpulseTraceRef, VoltageImpulseDerivative,

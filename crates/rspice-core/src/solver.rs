@@ -283,59 +283,6 @@ impl SimulationResult {
     }
 }
 
-/// Main simulator interface
-pub struct Simulator {
-    /// Convergence tolerance for Newton-Raphson
-    pub tolerance: Value,
-    /// Maximum Newton-Raphson iterations
-    pub max_iterations: usize,
-    /// Minimum timestep for transient analysis
-    pub min_timestep: Value,
-    /// Maximum timestep for transient analysis
-    pub max_timestep: Value,
-}
-
-impl Default for Simulator {
-    fn default() -> Self {
-        crate::config::SimulationConfig::default().into()
-    }
-}
-
-impl Simulator {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set convergence tolerance
-    pub fn with_tolerance(mut self, tol: Value) -> Self {
-        self.tolerance = tol;
-        self
-    }
-
-    /// Set maximum iterations
-    pub fn with_max_iterations(mut self, max: usize) -> Self {
-        self.max_iterations = max;
-        self
-    }
-}
-
-impl From<&crate::config::SimulationConfig> for Simulator {
-    fn from(config: &crate::config::SimulationConfig) -> Self {
-        Self {
-            tolerance: config.tolerance,
-            max_iterations: config.max_iterations,
-            min_timestep: config.min_timestep,
-            max_timestep: config.max_timestep,
-        }
-    }
-}
-
-impl From<crate::config::SimulationConfig> for Simulator {
-    fn from(config: crate::config::SimulationConfig) -> Self {
-        Self::from(&config)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::SimulationResult;
