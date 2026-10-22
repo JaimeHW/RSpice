@@ -66,7 +66,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-solver",
         page: SimulationPage::Solver,
-        fingerprint: "b4cc8e5d55ff07907c58e91dc26cdbbcb888cc0bf1ed2cce8db3a07cb5ef614b",
+        fingerprint: "a3857b870e01bb7b19b16cb77d44391c32440115d3c7ed6075edbfee6bd95509",
     },
     StudioBaseline {
         name: "studio-save",
