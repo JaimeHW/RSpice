@@ -13,8 +13,7 @@
 //! (`super::descriptor`). Only the dynamic operators differ between the two,
 //! and they are the [`DynamicOperators`] hooks.
 
-use super::{VmContext, VmError, idtmod_wrapped_value};
-use crate::array_index::{ArrayIndexError, checked_array_slot, saturated_array_upper};
+use super::{Vm, VmContext, VmError, idtmod_wrapped_value};
 use crate::codegen::assignment_liveness::{AssignmentEffects, assignment_step_is_live};
 use crate::codegen::{AssignmentStep, BytecodeProgram, Instruction, ZiRuntimeLayout};
 use crate::complex_arithmetic::FrequencyValue;
@@ -750,7 +749,7 @@ impl<'a, V: DynamicOperators> SmallSignalEngine<'a, V> {
                     V::begin_assignment(self, None);
                     let index_value = self.execute_value(index)?;
                     let raw = self.real_value(index_value, "array index")?;
-                    let slot = Self::array_slot(raw, *base, *len, *lower)?;
+                    let slot = Vm::array_slot(raw, *base, *len, *lower)?;
                     V::begin_assignment(self, Some(slot));
                     let value = self.execute_value(value)?;
                     let target = self.variables.get_mut(slot).ok_or(
@@ -781,28 +780,6 @@ impl<'a, V: DynamicOperators> SmallSignalEngine<'a, V> {
             }
         }
         Ok(())
-    }
-
-    fn array_slot(raw: f64, base: usize, len: usize, lower: i64) -> Result<usize, VmError> {
-        checked_array_slot(raw, base, len, lower).map_err(|error| match error {
-            ArrayIndexError::NonFinite { raw } => VmError::InvalidNumericResult(format!(
-                "runtime array index must be finite, got {raw}"
-            )),
-            ArrayIndexError::RoundedOutOfRange { raw } => VmError::InvalidRuntimeOperation(
-                format!("runtime array index {raw} rounds outside the signed 64-bit index range"),
-            ),
-            ArrayIndexError::OutOfBounds { index } => VmError::IndexOutOfBounds {
-                index,
-                lower,
-                upper: saturated_array_upper(lower, len),
-            },
-            ArrayIndexError::Empty => {
-                VmError::InvalidInstruction("zero-length dynamic variable range")
-            }
-            ArrayIndexError::SlotOverflow => {
-                VmError::InvalidInstruction("dynamic variable slot arithmetic overflow")
-            }
-        })
     }
 
     #[inline]
@@ -1231,7 +1208,7 @@ impl<V: DynamicOperators> SmallSignalEngine<'_, V> {
             }
             Instruction::PushVariableDyn { base, len, lower } => {
                 let raw = self.pop_real("PushVariableDyn")?;
-                let slot = Self::array_slot(raw, *base, *len, *lower)?;
+                let slot = Vm::array_slot(raw, *base, *len, *lower)?;
                 let value =
                     self.variables
                         .get(slot)
@@ -1284,8 +1261,8 @@ impl<V: DynamicOperators> SmallSignalEngine<'_, V> {
                 lower,
             } => {
                 let raw = self.pop_real("PushDiscreteVariableDyn")?;
-                let value_slot = Self::array_slot(raw, *base, *len, *lower)?;
-                let valid_slot = Self::array_slot(raw, *validity_base, *len, *lower)?;
+                let value_slot = Vm::array_slot(raw, *base, *len, *lower)?;
+                let valid_slot = Vm::array_slot(raw, *validity_base, *len, *lower)?;
                 let value = self
                     .variables
                     .get(value_slot)
@@ -1348,7 +1325,7 @@ impl<V: DynamicOperators> SmallSignalEngine<'_, V> {
             }
             Instruction::ArrayIndex { lower, len } => {
                 let raw = self.pop_real("array coordinate")?;
-                let offset = Self::array_slot(raw, 0, *len as usize, *lower)?;
+                let offset = Vm::array_slot(raw, 0, *len as usize, *lower)?;
                 self.stack.push(V::constant(offset as f64));
             }
             Instruction::CheckedValue => {

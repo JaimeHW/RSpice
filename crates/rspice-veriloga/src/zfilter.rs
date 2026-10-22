@@ -704,7 +704,7 @@ impl ZiFilter {
         direct_assignment: bool,
     ) -> Result<f64, ZiFilterError> {
         self.validate_integrity()?;
-        self.validate_runtime_readonly(input, time)?;
+        self.validate_runtime(input, time)?;
         validate_transition(transition)?;
         validate_direct_transition(transition, direct_assignment)?;
         if self.accepted_time.is_some_and(|accepted| time < accepted) {
@@ -774,7 +774,7 @@ impl ZiFilter {
         transition: f64,
         direct_assignment: bool,
     ) -> Result<f64, ZiFilterError> {
-        self.validate_runtime_readonly(operand_derivative, time)?;
+        self.validate_runtime(operand_derivative, time)?;
         validate_transition(transition)?;
         validate_direct_transition(transition, direct_assignment)?;
         if !transient {
@@ -972,21 +972,6 @@ impl ZiFilter {
     }
 
     fn validate_runtime(&self, input: f64, time: f64) -> Result<(), ZiFilterError> {
-        validate_definition(&self.num, &self.den, self.period, self.first_transition)?;
-        if !input.is_finite() {
-            return Err(ZiFilterError::InvalidEvaluation(format!(
-                "input must be finite, got {input}"
-            )));
-        }
-        if !time.is_finite() || time < 0.0 {
-            return Err(ZiFilterError::InvalidEvaluation(format!(
-                "simulation time must be finite and non-negative, got {time}"
-            )));
-        }
-        Ok(())
-    }
-
-    fn validate_runtime_readonly(&self, input: f64, time: f64) -> Result<(), ZiFilterError> {
         validate_definition(&self.num, &self.den, self.period, self.first_transition)?;
         if !input.is_finite() {
             return Err(ZiFilterError::InvalidEvaluation(format!(
