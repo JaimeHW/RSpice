@@ -48,7 +48,9 @@ use rspice_simulation_contract::analysis_spec::AnalysisSpec;
 use rspice_vocabulary::product::AnalysisInstanceId;
 
 use super::Route;
-use super::case::{CaseResult, ErrorRecord, MeasureRecord, Observation, canonical_signal};
+use super::case::{
+    AssertCheck, CaseResult, ErrorRecord, HdlCheck, MeasureRecord, Observation, canonical_signal,
+};
 use super::design::{Design, analysis_kind, at_transient_state, deck_cards};
 use super::measure::parse_expression;
 use crate::suites::deadline::DeadlineAbort;
@@ -158,8 +160,9 @@ pub fn retained_outputs(
             .into_iter()
             .flatten()
         {
-            if measure.kind == "meas" {
-                // A `.MEASURE` result is named by the deck, not retained.
+            if matches!(measure.kind.as_str(), "meas" | "checks") {
+                // A `.MEASURE` result and a check are named by the deck, not
+                // retained.
                 continue;
             }
             let mut expressions: Vec<String> = measure.signals.clone().unwrap_or_default();
@@ -823,12 +826,14 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
             waveforms,
             events,
             measurements,
+            hdl_output,
             ..
         } => {
             observation.kind = "tran".into();
             observation.axis = time.clone();
             waveforms_into(&mut observation, waveforms);
             record_measures(measurements, &mut observation);
+            record_hdl_checks(hdl_output, &mut observation);
             for history in &events.digital {
                 let trace = history
                     .points
@@ -1328,7 +1333,67 @@ fn run_transient(
     let measurements =
         rspice_core::analysis::measure_signals::evaluate_tran_measurements(netlist, &result);
     record_measures(&measurements, &mut observation);
+    let assertions = rspice_core::analysis::evaluate_tran_assertions(netlist, &result, abort)?;
+    record_assertions(&assertions, &mut observation);
     Ok(observation)
+}
+
+/// Record the HDL's severity-task records on `observation`, each site by its
+/// file name and line.
+fn record_hdl_checks(
+    records: &[rspice_core::config::HdlOutputRecord],
+    observation: &mut Observation,
+) {
+    use rspice_core::config::{HdlSeverity, HdlStream};
+    for record in records {
+        let HdlStream::Diagnostic { severity } = &record.stream else {
+            continue;
+        };
+        let severity = match severity {
+            HdlSeverity::Info => "info",
+            HdlSeverity::Warning => "warning",
+            HdlSeverity::Error => "error",
+            HdlSeverity::Fatal => "fatal",
+        };
+        let file = Path::new(&record.origin.file)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&record.origin.file);
+        observation.hdl_checks.push(HdlCheck {
+            severity: severity.to_owned(),
+            site: format!("{file}:{}", record.origin.line),
+            at: record.seconds,
+        });
+    }
+}
+
+/// Record the deck's `.ASSERT` reports on `observation`.
+fn record_assertions(
+    reports: &[rspice_core::analysis::AssertionReport],
+    observation: &mut Observation,
+) {
+    for report in reports {
+        let name = match &report.instance {
+            Some(instance) => format!("{}[{instance}]", report.name),
+            None => report.name.clone(),
+        };
+        observation.assertions.insert(
+            name.to_ascii_lowercase(),
+            AssertCheck {
+                starts: report
+                    .violations
+                    .iter()
+                    .map(|violation| violation.start.unwrap_or(0.0))
+                    .collect(),
+                extremes: report
+                    .violations
+                    .iter()
+                    .map(|violation| violation.extreme.filter(|value| value.is_finite()))
+                    .collect(),
+                error: report.error.clone(),
+            },
+        );
+    }
 }
 
 /// Record the deck's `.MEASURE` results on `observation`.

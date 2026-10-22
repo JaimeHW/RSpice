@@ -247,3 +247,16 @@ oracle = "O5-O1"
 ref = "ref/c15.op.O5-O1.out"
 abs = 1e-3
 why = "the testbench's reading of code 15, 92.5 us after its latch, against the code-15 operating point"
+
+# ---- tran, variant fail: the testbench's located $error records -------------
+
+[[q]]
+id = "errors"
+analysis = "tran"
+variants = ["fail"]
+kind = "checks"
+signal = "hdl:error@tb_ldo_fail.vams:40"
+oracle = "O6"
+expect = "c12::errors"
+abs = 1e-12
+why = "by the O5-O1 references every step lies 1.6 to 5.9 mV above the narrowed window's 7 mV, so codes 1..15 are each flagged once, at line 40, when the reading is taken: k 100 us + 99 us; one record per code, exact on the 1 ps tick"

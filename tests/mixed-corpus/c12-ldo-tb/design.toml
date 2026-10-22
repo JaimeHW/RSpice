@@ -23,11 +23,18 @@ name = "top"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
 today = "runs"
 
+# fail: full with its step window narrowed to [5 mV, 7 mV], so the testbench
+# flags every code with $error; the cell compares those records.
+[[variant]]
+name = "fail"
+families = ["spice", "vams-digital", "vams-analog", "wreal"]
+today = "runs"
+
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
 [[analysis]]
 id = "tran"
-variants = ["full", "unrolled", "top"]
+variants = ["full", "unrolled", "top", "fail"]
 oracles = ["O5", "O6", "O5-O1"]
 timeout_s = 30
 phase = "P3"

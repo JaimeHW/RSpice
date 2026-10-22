@@ -5,6 +5,8 @@ unrolled	tran	interp	pass	vk.15 (O5-O1) [0] |a−e|=4.105e-8 allowed 1.000e-3 (a
 unrolled	tran	native	pass	vk.15 (O5-O1) [0] |a−e|=4.105e-8 allowed 1.000e-3 (a=1.310611e0, e=1.310611e0)
 top	tran	interp	pass	vk.15 (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310611e0, e=1.310611e0)
 top	tran	native	pass	vk.15 (O5-O1) [0] |a−e|=4.107e-8 allowed 1.000e-3 (a=1.310611e0, e=1.310611e0)
+fail	tran	interp	pass	errors (O6) [5] |a−e|=1.084e-19 allowed 1.000e-12 (a=6.990000e-4, e=6.990000e-4)
+fail	tran	native	pass	errors (O6) [5] |a−e|=1.084e-19 allowed 1.000e-12 (a=6.990000e-4, e=6.990000e-4)
 full	op	interp	pass	op (O5-O1) [0] |a−e|=7.907e-11 allowed 2.151e-3 (a=1.151161e0, e=1.151161e0)
 full	op	native	pass	op (O5-O1) [0] |a−e|=7.907e-11 allowed 2.151e-3 (a=1.151161e0, e=1.151161e0)
 unrolled	op	interp	pass	op (O5-O1) [0] |a−e|=7.907e-11 allowed 2.151e-3 (a=1.151161e0, e=1.151161e0)

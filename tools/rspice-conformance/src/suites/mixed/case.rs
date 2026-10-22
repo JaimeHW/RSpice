@@ -165,6 +165,40 @@ pub struct Observation {
     /// reported them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub measures: BTreeMap<String, MeasureRecord>,
+    /// The HDL's severity-task records (`$info` … `$fatal`), in emission
+    /// order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hdl_checks: Vec<HdlCheck>,
+    /// The deck's `.ASSERT` reports, by lower-case name (`name[instance]` for
+    /// a device form).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub assertions: BTreeMap<String, AssertCheck>,
+}
+
+/// One HDL severity-task record.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HdlCheck {
+    /// `info`, `warning`, `error` or `fatal`.
+    pub severity: String,
+    /// The call's `file:line`, the file by its name alone.
+    pub site: String,
+    /// When the record was emitted, in seconds.
+    pub at: f64,
+}
+
+/// One `.ASSERT` report: its violations, or why it could not be evaluated.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AssertCheck {
+    /// Where each violation starts; an operating point's violation at 0.
+    #[serde(default)]
+    pub starts: Vec<f64>,
+    /// Each violation's extreme value, when the check has one.
+    #[serde(default)]
+    pub extremes: Vec<Option<f64>>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 /// One `.MEASURE` result: its value, and the product's error when it reported

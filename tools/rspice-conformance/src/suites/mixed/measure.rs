@@ -375,9 +375,75 @@ pub fn evaluate(
                 (None, None) => invalid(format!(".MEASURE {name}: no value")),
             }
         }
+        "checks" => checks(observation, &single_signal(spec, variant)?).map(Measured::Values),
         other => invalid(format!(
             "measure kind {other} is not evaluable on one observation"
         )),
+    }
+}
+
+/// A `checks` quantity's values. `hdl:<severity>[@<file>:<line>]` gives the
+/// times of the HDL records of that severity, each of which must be at the
+/// named site when one is named; `assert:<name>` gives where the assertion's
+/// violations start, and `extreme:<name>` their extreme values.
+fn checks(observation: &Observation, selector: &str) -> MeasureResult<Vec<f64>> {
+    let lower = selector.to_ascii_lowercase();
+    let Some((what, name)) = lower.split_once(':') else {
+        return invalid(format!("checks selector {selector} names no kind"));
+    };
+    match what {
+        "hdl" => {
+            let (severity, site) = match name.split_once('@') {
+                Some((severity, site)) => (severity, Some(site)),
+                None => (name, None),
+            };
+            if !matches!(severity, "info" | "warning" | "error" | "fatal") {
+                return invalid(format!(
+                    "checks selector {selector}: no HDL severity {severity}"
+                ));
+            }
+            let mut times = Vec::new();
+            for record in observation
+                .hdl_checks
+                .iter()
+                .filter(|record| record.severity == severity)
+            {
+                if let Some(site) = site
+                    && !record.site.eq_ignore_ascii_case(site)
+                {
+                    return invalid(format!(
+                        "an HDL {severity} record at {} (t = {:e} s), not at {site}",
+                        record.site, record.at
+                    ));
+                }
+                times.push(record.at);
+            }
+            Ok(times)
+        }
+        "assert" | "extreme" => {
+            let report = observation
+                .assertions
+                .get(name)
+                .ok_or_else(|| MeasureError::Missing(format!(".ASSERT {name}")))?;
+            if let Some(error) = &report.error {
+                return invalid(format!(".ASSERT {name}: {error}"));
+            }
+            if what == "assert" {
+                return Ok(report.starts.clone());
+            }
+            report
+                .extremes
+                .iter()
+                .map(|extreme| {
+                    extreme.ok_or_else(|| {
+                        MeasureError::Invalid(format!(
+                            ".ASSERT {name}: a violation without an extreme value"
+                        ))
+                    })
+                })
+                .collect()
+        }
+        _ => invalid(format!("checks selector {selector}: no kind {what}")),
     }
 }
 
@@ -1414,5 +1480,61 @@ mod tests {
             evaluate(&times, "x", &ramp()).unwrap(),
             Measured::Values(vec![0.0, 1.0, 2.0])
         );
+    }
+
+    #[test]
+    fn checks_select_hdl_records_by_severity_and_site_and_assertions_by_name() {
+        use crate::suites::mixed::case::{AssertCheck, HdlCheck};
+        let record = |severity: &str, site: &str, at: f64| HdlCheck {
+            severity: severity.into(),
+            site: site.into(),
+            at,
+        };
+        let mut observation = Observation {
+            hdl_checks: vec![
+                record("error", "tb.vams:40", 1e-3),
+                record("warning", "tb.vams:12", 2e-3),
+                record("error", "tb.vams:40", 3e-3),
+            ],
+            ..Default::default()
+        };
+        observation.assertions.insert(
+            "mpsat[mp]".into(),
+            AssertCheck {
+                starts: vec![0.0],
+                extremes: vec![Some(-0.649)],
+                error: None,
+            },
+        );
+        let checks = |selector: &str| {
+            let spec = MeasureSpec {
+                kind: "checks".into(),
+                signal: Some(PerVariant::All(selector.into())),
+                ..Default::default()
+            };
+            evaluate(&spec, "x", &observation)
+        };
+        assert_eq!(
+            checks("hdl:error@TB.vams:40").unwrap(),
+            Measured::Values(vec![1e-3, 3e-3])
+        );
+        assert_eq!(checks("hdl:fatal").unwrap(), Measured::Values(Vec::new()));
+        assert!(matches!(
+            checks("hdl:warning@tb.vams:40"),
+            Err(MeasureError::Invalid(why)) if why.contains("tb.vams:12")
+        ));
+        assert_eq!(
+            checks("extreme:mpsat[mp]").unwrap(),
+            Measured::Values(vec![-0.649])
+        );
+        assert_eq!(
+            checks("assert:mpsat[mp]").unwrap(),
+            Measured::Values(vec![0.0])
+        );
+        assert!(matches!(
+            checks("assert:known"),
+            Err(MeasureError::Missing(_))
+        ));
+        assert!(matches!(checks("hdl:loud"), Err(MeasureError::Invalid(_))));
     }
 }

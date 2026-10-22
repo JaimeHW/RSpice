@@ -334,7 +334,7 @@ pub fn check_quantity_keys(text: &str) -> Result<(), String> {
 }
 
 /// The measure kinds `tolerance.toml` may name.
-pub const MEASURE_KINDS: [&str; 23] = [
+pub const MEASURE_KINDS: [&str; 24] = [
     "op",
     "held_at",
     "interp_at",
@@ -358,6 +358,7 @@ pub const MEASURE_KINDS: [&str; 23] = [
     "codes",
     "identical",
     "meas",
+    "checks",
 ];
 
 /// The oracle identities a quantity may compare against.
@@ -725,6 +726,11 @@ fn check_quantity(design: &Design, quantity: &Quantity, findings: &mut Vec<Findi
     if kind == "meas" && quantity.measure.signal.is_none() {
         findings.push(format!(
             "{slug}: quantity {id}: meas needs the `signal` its deck's .MEASURE names"
+        ));
+    }
+    if kind == "checks" && quantity.measure.signal.is_none() {
+        findings.push(format!(
+            "{slug}: quantity {id}: checks needs the `signal` that selects its records"
         ));
     }
     if kind == "stat" && quantity.interval.is_none() && quantity.ratio.is_none() {

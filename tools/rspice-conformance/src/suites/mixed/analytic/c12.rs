@@ -11,10 +11,26 @@ use super::{Context, Registry};
 use crate::suites::mixed::compare::Expected;
 use crate::suites::mixed::measure::Measured;
 
-pub const REGISTRY: Registry = &[("ok", ok), ("okt", okt)];
+pub const REGISTRY: Registry = &[("ok", ok), ("okt", okt), ("errors", errors)];
 
 /// The verdict: 0 from the initial block, 1 at 1600 µs.
 const VERDICT_TIME: f64 = 1600e-6;
+
+/// Variant `fail`'s narrowed step window, in volts.
+#[cfg(test)]
+const FAIL_WINDOW: [f64; 2] = [5e-3, 7e-3];
+
+/// When variant `fail` flags code k: its reading, 92.5 µs after the 6.5 µs
+/// load that starts its 100 µs slot, at k·100 µs + 99 µs. Every step lies
+/// above the narrowed window (the test below derives it from the O5-O1
+/// references), so codes 1..15 are each flagged once.
+fn errors(_: &Context<'_>) -> Result<Expected, String> {
+    Ok(super::values(
+        (1..16)
+            .map(|code| f64::from(code) * 100e-6 + 99e-6)
+            .collect(),
+    ))
+}
 
 /// When `ok` rises: 16 trim steps of 100 µs, 1600 µs.
 fn okt(_: &Context<'_>) -> Result<Expected, String> {
@@ -48,5 +64,39 @@ mod tests {
             let step = vout(f64::from(code)) - vout(f64::from(code - 1));
             assert!((5e-3..=20e-3).contains(&step), "{code}: {step}");
         }
+    }
+
+    /// Variant `fail` flags exactly the codes whose O5-O1 step lies outside
+    /// its window, and every step is at least 1 mV from either limit, so the
+    /// record set does not hang on a reading's last millivolt.
+    #[test]
+    fn the_fail_window_flags_every_code_by_the_o5_o1_references() {
+        let refs = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/mixed-corpus/c12-ldo-tb/ref");
+        let vout = |code: usize| -> f64 {
+            let path = refs.join(format!("c{code}.op.O5-O1.out"));
+            let text = std::fs::read_to_string(&path).expect("the reference is captured");
+            let mut lines = text.lines().filter(|line| !line.starts_with('#'));
+            let header: Vec<&str> = lines.next().expect("a header").split_whitespace().collect();
+            let column = header
+                .iter()
+                .position(|name| *name == "v(vout)")
+                .expect("v(vout)");
+            let row: Vec<&str> = lines.next().expect("a row").split_whitespace().collect();
+            row[column].parse().expect("a number")
+        };
+        let [low, high] = super::FAIL_WINDOW;
+        let mut flagged = Vec::new();
+        for code in 1..16 {
+            let step = vout(code) - vout(code - 1);
+            assert!(
+                (step - low).abs() >= 1e-3 && (step - high).abs() >= 1e-3,
+                "code {code}: step {step} is within 1 mV of a limit"
+            );
+            if !(low..=high).contains(&step) {
+                flagged.push(code);
+            }
+        }
+        assert_eq!(flagged, (1..16).collect::<Vec<_>>());
     }
 }
