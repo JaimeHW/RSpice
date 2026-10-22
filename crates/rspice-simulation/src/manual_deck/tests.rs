@@ -1188,7 +1188,7 @@ fn periodic_op_handoff_manual_deck_inserts_one_unambiguous_seed() {
 fn an_hb_carrier_accepts_the_periodic_dependents_that_can_read_it() {
     use crate::engine_services::test_entry::{ctx, parse};
     use crate::engine_services::{
-        self as svc, HbRunConfig, HbToneRunConfig,
+        self as svc, HbRunConfig, HbToneRunConfig, PeriodicCarrierState,
         run_hb_analysis_with_dc_seed_on_materialized_with_context,
     };
     use rspice_core::abort_signal::NoAbort;
@@ -1201,9 +1201,9 @@ fn an_hb_carrier_accepts_the_periodic_dependents_that_can_read_it() {
 
     // One converged carrier for all three runs, as the plan hands the one
     // artifact to every dependent bound to that instance.
-    let carrier_deck = format!("{CIRCUIT}.end\n");
+    let carrier_netlist = parse(&format!("{CIRCUIT}.end\n"));
     let operating_point = run_hb_analysis_with_dc_seed_on_materialized_with_context(
-        &parse(&carrier_deck),
+        &carrier_netlist,
         &HbRunConfig {
             tones: vec![HbToneRunConfig::new(FUNDAMENTAL, 12)],
             reltol: 1.0e-10,
@@ -1276,34 +1276,32 @@ fn an_hb_carrier_accepts_the_periodic_dependents_that_can_read_it() {
 
             // And it runs. The service entries below are the ones the
             // dispatch calls once the plan has handed over the artifact.
+            let carrier = PeriodicCarrierState::HarmonicBalance(operating_point.as_ref());
             if let Some(config) = options.pac.as_ref() {
-                let data = svc::run_pac_analysis_from_hb_with_source_path_and_abort(
-                    &carrier_deck,
+                let data = svc::run_pac_analysis_on_materialized_with_context(
+                    &carrier_netlist,
                     config,
-                    operating_point.as_ref(),
-                    None,
-                    &NoAbort,
+                    Some(carrier),
+                    ctx(&NoAbort),
                 )
                 .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
                 assert!(!data.frequencies.is_empty(), "`{card}`");
                 assert!(!data.traces.is_empty(), "`{card}`");
             } else if let Some(config) = options.pxf.as_ref() {
-                let data = svc::run_pxf_analysis_from_hb_with_source_path_and_abort(
-                    &carrier_deck,
+                let data = svc::run_pxf_analysis_on_materialized_with_context(
+                    &carrier_netlist,
                     config,
-                    operating_point.as_ref(),
-                    None,
-                    &NoAbort,
+                    Some(carrier),
+                    ctx(&NoAbort),
                 )
                 .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
                 assert!(!data.transfer.is_empty(), "`{card}`");
             } else if let Some(config) = options.pnoise.as_ref() {
-                let data = svc::run_pnoise_analysis_from_hb_with_source_path_and_abort(
-                    &carrier_deck,
+                let data = svc::run_pnoise_analysis_on_materialized_with_context(
+                    &carrier_netlist,
                     config,
-                    operating_point.as_ref(),
-                    None,
-                    &NoAbort,
+                    carrier,
+                    ctx(&NoAbort),
                 )
                 .unwrap_or_else(|error| panic!("`{card}` must run: {error}"));
                 assert!(

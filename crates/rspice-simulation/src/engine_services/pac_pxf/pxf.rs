@@ -10,18 +10,11 @@
 //! line into that card, and turning the engine's result into the curves the
 //! sheet plots.
 
-use std::path::Path;
-
 use num_complex::Complex64;
 use rspice_core::Value;
-use rspice_core::abort_signal::AbortSignal;
 
-#[cfg(test)]
-use super::super::build_resolved_periodic_engine;
 use super::super::periodic_carrier::PeriodicCarrierState;
-use super::super::{
-    ServiceRunError, ServiceRunResult, build_voltage_output_expr, parse_runner_netlist_with_abort,
-};
+use super::super::{ServiceRunError, ServiceRunResult, build_voltage_output_expr};
 use crate::error::{ensure_not_aborted, poll_periodically};
 use crate::periodic::PxfRunConfig;
 // =============================================================================
@@ -57,97 +50,12 @@ pub struct PxfData {
     pub output_label: String,
 }
 
-/// Run PXF standalone -- solving its own periodic carrier rather than
-/// receiving one -- with explicit configuration and cancellation.
-///
-/// Test-only. PXF ships as a dependent task through
-/// [`run_pxf_analysis_from_pss_with_source_path_and_abort`].
-#[cfg(test)]
-pub fn run_pxf_analysis_with_config_and_abort(
-    netlist_text: &str,
-    config: &PxfRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    run_pxf_analysis_with_config_and_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run PXF from an exact retained PSS state with direct-call source-relative
-/// include and model resolution.
-#[cfg(test)]
-pub fn run_pxf_analysis_from_pss_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PxfRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pxf_analysis_on_materialized_with_abort(
-        &netlist,
-        config,
-        Some(PeriodicCarrierState::Shooting(operating_point)),
-        abort,
-    )
-}
-
-/// Run PXF from an exact retained harmonic-balance state.
+/// Run PXF on the materialized circuit, around the carrier the plan handed
+/// over or, with none, around a periodic carrier this run solves itself.
 ///
 /// `Engine::run_pxf_card_from_hb_with_abort` reads the same path through the
 /// same conversion matrix its shooting sibling reads; the readout below is
-/// therefore the one readout, not a second one for this carrier.
-#[allow(
-    dead_code,
-    reason = "retained HB carrier PXF adapter for callers and tests"
-)]
-pub fn run_pxf_analysis_from_hb_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PxfRunConfig,
-    operating_point: &rspice_core::engine::HbOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pxf_analysis_on_materialized_with_abort(
-        &netlist,
-        config,
-        Some(PeriodicCarrierState::HarmonicBalance(operating_point)),
-        abort,
-    )
-}
-
-/// Run PXF analysis with source-path resolution and cancellation, solving its
-/// own periodic carrier.
-///
-/// Test-only; see [`run_pxf_analysis_with_config_and_abort`].
-#[cfg(test)]
-pub fn run_pxf_analysis_with_config_and_source_path_and_abort(
-    netlist_text: &str,
-    config: &PxfRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pxf_analysis_on_materialized_with_abort(&netlist, config, None, abort)
-}
-
-pub(crate) fn run_pxf_analysis_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PxfRunConfig,
-    carrier: Option<PeriodicCarrierState<'_>>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PxfData> {
-    run_pxf_analysis_on_materialized_with_context(
-        netlist,
-        config,
-        carrier,
-        super::super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
+/// therefore the one readout for either carrier.
 pub(crate) fn run_pxf_analysis_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &PxfRunConfig,
@@ -238,6 +146,7 @@ pub(crate) fn run_pxf_analysis_on_materialized_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_services::test_entry::{ctx, parse};
     use crate::periodic::PxfFrequencySweep;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
     use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
@@ -283,9 +192,9 @@ mod tests {
         // perform: a retained operating point carries the semantic identity of
         // the circuit it was solved on, and the entry refuses one that does not
         // match the netlist it is handed.
-        let netlist = parse_runner_netlist_with_abort(FIXTURE_DECK, None, &NoAbort)
-            .expect("the fixture deck parses");
-        let engine = build_resolved_periodic_engine(&netlist, 1.0e-3, "fixture engine")
+        let netlist = parse(FIXTURE_DECK);
+        let engine = ctx(&NoAbort)
+            .periodic_engine(&netlist, 1.0e-3, "fixture engine")
             .expect("the fixture engine configuration resolves");
         let carrier = engine
             .run_pss_operating_point_with_abort(
@@ -298,12 +207,11 @@ mod tests {
             )
             .expect("the linear carrier converges");
 
-        run_pxf_analysis_from_pss_with_source_path_and_abort(
-            FIXTURE_DECK,
+        run_pxf_analysis_on_materialized_with_context(
+            &netlist,
             &fixture_config(input_sideband),
-            &carrier,
-            None,
-            &NoAbort,
+            Some(PeriodicCarrierState::Shooting(&carrier)),
+            ctx(&NoAbort),
         )
         .expect("the PXF run publishes a transfer")
     }
@@ -329,14 +237,14 @@ mod tests {
         use crate::engine_services::hb::{
             HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
-        use crate::engine_services::test_entry::{ctx, parse};
 
         const RESISTANCE: Value = 1.0e3;
         const CAPACITANCE: Value = 159.154_943_091_895e-12;
         const BOUND: Value = 1.0e-9;
 
+        let netlist = parse(FIXTURE_DECK);
         let harmonic_balance = run_hb_analysis_with_dc_seed_on_materialized_with_context(
-            &parse(FIXTURE_DECK),
+            &netlist,
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(FIXTURE_FUNDAMENTAL, 8)],
                 reltol: 1.0e-10,
@@ -350,12 +258,13 @@ mod tests {
 
         for input_sideband in [0, 1] {
             let from_pss = fixture_run(input_sideband);
-            let from_hb = run_pxf_analysis_from_hb_with_source_path_and_abort(
-                FIXTURE_DECK,
+            let from_hb = run_pxf_analysis_on_materialized_with_context(
+                &netlist,
                 &fixture_config(input_sideband),
-                harmonic_balance.as_ref(),
-                None,
-                &NoAbort,
+                Some(PeriodicCarrierState::HarmonicBalance(
+                    harmonic_balance.as_ref(),
+                )),
+                ctx(&NoAbort),
             )
             .expect("the harmonic-balance-carried run publishes a transfer");
 
@@ -496,10 +405,11 @@ mod tests {
 
     #[test]
     fn pxf_service_preserves_typed_entry_abort() {
-        let result = run_pxf_analysis_with_config_and_abort(
-            "not a netlist",
+        let result = run_pxf_analysis_on_materialized_with_context(
+            &parse("not a netlist\n.end\n"),
             &PxfRunConfig::default(),
-            &ImmediateAbort,
+            None,
+            ctx(&ImmediateAbort),
         );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));

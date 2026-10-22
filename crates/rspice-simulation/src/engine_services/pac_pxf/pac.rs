@@ -3,17 +3,14 @@
 //! Small-signal response about a periodic steady state, where a stimulus at
 //! one frequency produces a response at every sideband.
 
-#[cfg(test)]
-use super::super::build_resolved_periodic_engine;
 use std::collections::HashSet;
-use std::path::Path;
 
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 
 use super::super::periodic_carrier::PeriodicCarrierState;
-use super::super::{ServiceRunError, ServiceRunResult, parse_runner_netlist_with_abort};
+use super::super::{ServiceRunError, ServiceRunResult};
 use super::shared::resolve_pac_output_node_with_abort;
 use crate::error::{ensure_not_aborted, poll_periodically};
 use crate::periodic::PacRunConfig;
@@ -45,21 +42,6 @@ pub struct PacTrace {
 pub(crate) struct PacInternalResult {
     pub(crate) pac_result: rspice_core::analysis::pac::PacResult,
     pub(super) output_node_name: String,
-}
-
-#[cfg(test)]
-pub(crate) fn run_pac_internal_from_carrier_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PacRunConfig,
-    carrier: PeriodicCarrierState<'_>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacInternalResult> {
-    run_pac_internal_impl(
-        netlist,
-        config,
-        Some(carrier),
-        super::super::ServiceContext::with_defaults(None, abort),
-    )
 }
 
 fn run_pac_internal_impl(
@@ -325,110 +307,12 @@ fn checked_scale_pac_value(
     ))
 }
 
-/// Run PAC standalone -- solving its own PSS and then linearizing around that
-/// periodic solution -- with cooperative cancellation.
+/// Run PAC on the materialized circuit, around the carrier the plan handed
+/// over or, with none, around a PSS this run solves itself.
 ///
-/// Test-only. PAC ships as a dependent task through
-/// [`run_pac_analysis_from_pss_with_source_path_and_abort`].
-#[cfg(test)]
-pub fn run_pac_analysis_with_abort(
-    netlist_text: &str,
-    config: &PacRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    run_pac_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run PAC from an exact retained PSS state with direct-call source-relative
-/// include and model resolution.
-#[cfg(test)]
-pub fn run_pac_analysis_from_pss_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PacRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    run_pac_analysis_from_carrier_with_source_path_and_abort(
-        netlist_text,
-        config,
-        PeriodicCarrierState::Shooting(operating_point),
-        source_path,
-        abort,
-    )
-}
-
-/// Run PAC from an exact retained harmonic-balance state.
-///
-/// The same conversion analysis about the other carrier the engine accepts.
-/// One result-conversion path serves both: the engine's `.PAC` result is the
-/// same object with the same axes whichever family froze the large-signal
-/// solution, so the sideband traces below are assembled once.
-#[allow(
-    dead_code,
-    reason = "retained HB carrier PAC adapter for callers and tests"
-)]
-pub fn run_pac_analysis_from_hb_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PacRunConfig,
-    operating_point: &rspice_core::engine::HbOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    run_pac_analysis_from_carrier_with_source_path_and_abort(
-        netlist_text,
-        config,
-        PeriodicCarrierState::HarmonicBalance(operating_point),
-        source_path,
-        abort,
-    )
-}
-
-#[allow(dead_code, reason = "retained carrier PAC source-path adapter")]
-fn run_pac_analysis_from_carrier_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PacRunConfig,
-    carrier: PeriodicCarrierState<'_>,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pac_analysis_on_materialized_with_abort(&netlist, config, Some(carrier), abort)
-}
-
-/// Run PAC analysis with source-path resolution and cooperative cancellation,
-/// solving its own PSS.
-///
-/// Test-only; see [`run_pac_analysis_with_abort`].
-#[cfg(test)]
-pub fn run_pac_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PacRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_pac_analysis_on_materialized_with_abort(&netlist, config, None, abort)
-}
-
-pub(crate) fn run_pac_analysis_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &PacRunConfig,
-    carrier: Option<PeriodicCarrierState<'_>>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PacData> {
-    run_pac_analysis_on_materialized_with_context(
-        netlist,
-        config,
-        carrier,
-        super::super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
+/// The engine's `.PAC` result is the same object with the same axes whichever
+/// family froze the large-signal solution, so one result conversion serves a
+/// shooting and a harmonic-balance carrier.
 pub(crate) fn run_pac_analysis_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &PacRunConfig,
@@ -554,14 +438,19 @@ pub(crate) fn run_pac_analysis_on_materialized_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine_services::test_entry::{ctx, parse};
     use crate::periodic::PacFrequencySweep;
     use rspice_core::abort_signal::{ImmediateAbort, NoAbort};
     use rspice_simulation_contract::periodic_carrier::PeriodicCarrier;
 
     #[test]
     fn pac_service_preserves_typed_entry_abort() {
-        let result =
-            run_pac_analysis_with_abort("not a netlist", &PacRunConfig::default(), &ImmediateAbort);
+        let result = run_pac_analysis_on_materialized_with_context(
+            &parse("not a netlist\n.end\n"),
+            &PacRunConfig::default(),
+            None,
+            ctx(&ImmediateAbort),
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }
@@ -614,7 +503,6 @@ mod tests {
         use crate::engine_services::hb::{
             HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
-        use crate::engine_services::test_entry::{ctx, parse};
 
         // R = 1 kOhm, C = 159.154943091895 pF: the corner sits at 1 MHz, so
         // the swept offsets below cover both sides of it.
@@ -640,9 +528,9 @@ mod tests {
         config.sideband_min = -1;
         config.sideband_max = 1;
 
-        let netlist =
-            parse_runner_netlist_with_abort(DECK, None, &NoAbort).expect("the deck parses");
-        let engine = build_resolved_periodic_engine(&netlist, config.pss_tolerance, "fixture")
+        let netlist = parse(DECK);
+        let engine = ctx(&NoAbort)
+            .periodic_engine(&netlist, config.pss_tolerance, "fixture")
             .expect("the fixture engine resolves");
         let shooting = engine
             .run_pss_operating_point_with_abort(
@@ -668,16 +556,20 @@ mod tests {
         .expect("the harmonic-balance carrier converges")
         .operating_point;
 
-        let from_pss = run_pac_analysis_from_pss_with_source_path_and_abort(
-            DECK, &config, &shooting, None, &NoAbort,
+        let from_pss = run_pac_analysis_on_materialized_with_context(
+            &netlist,
+            &config,
+            Some(PeriodicCarrierState::Shooting(&shooting)),
+            ctx(&NoAbort),
         )
         .expect("the shooting-carried run completes");
-        let from_hb = run_pac_analysis_from_hb_with_source_path_and_abort(
-            DECK,
+        let from_hb = run_pac_analysis_on_materialized_with_context(
+            &netlist,
             &config,
-            harmonic_balance.as_ref(),
-            None,
-            &NoAbort,
+            Some(PeriodicCarrierState::HarmonicBalance(
+                harmonic_balance.as_ref(),
+            )),
+            ctx(&NoAbort),
         )
         .expect("the harmonic-balance-carried run completes");
 
@@ -724,10 +616,13 @@ mod tests {
 
     #[test]
     fn pac_service_emits_exact_unit_bearing_voltage_and_branch_current_traces() {
-        let data = run_pac_analysis_with_abort(
-            "* exact PAC branch-current fixture\nV1 out 0 DC 0 AC 17 31\nR1 out 0 1k\n.end\n",
+        let data = run_pac_analysis_on_materialized_with_context(
+            &parse(
+                "* exact PAC branch-current fixture\nV1 out 0 DC 0 AC 17 31\nR1 out 0 1k\n.end\n",
+            ),
             &one_point_config(),
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("PAC service completes");
 
@@ -857,9 +752,9 @@ mod tests {
              .end\n";
         const CARRIER_FUNDAMENTAL: Value = 1.0e6;
 
-        let netlist =
-            parse_runner_netlist_with_abort(DECK, None, &NoAbort).expect("the deck parses");
-        let engine = build_resolved_periodic_engine(&netlist, 1.0e-9, "fixture producer")
+        let netlist = parse(DECK);
+        let engine = ctx(&NoAbort)
+            .periodic_engine(&netlist, 1.0e-9, "fixture producer")
             .expect("the fixture engine resolves");
         let carrier = engine
             .run_pss_operating_point_with_abort(
@@ -884,11 +779,11 @@ mod tests {
             carrier.analysis().result.frequency.to_bits()
         );
 
-        let internal = run_pac_internal_from_carrier_with_abort(
+        let internal = run_pac_internal_impl(
             &netlist,
             &config,
-            PeriodicCarrierState::Shooting(&carrier),
-            &NoAbort,
+            Some(PeriodicCarrierState::Shooting(&carrier)),
+            ctx(&NoAbort),
         )
         .expect("a run against its own carrier is admitted");
 
