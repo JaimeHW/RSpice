@@ -15,8 +15,8 @@
 //! `tools/ci/core_family.py` checks the same agreement in the manifests.
 
 /// Whether each feature of the family is on in the crate that stated it: one
-/// flag per feature of `rspice-core`'s manifest except `default`, named for
-/// the feature with `-` spelled `_`.
+/// flag per feature of `rspice-core`'s manifest except `default` and
+/// `test-support`, named for the feature with `-` spelled `_`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[doc(hidden)]
 pub struct FamilyFeatures {
@@ -194,7 +194,8 @@ mod tests {
             .collect()
     }
 
-    /// Every feature `rspice-core`'s manifest declares, `default` aside.
+    /// Every feature `rspice-core`'s manifest declares, `default` and
+    /// `test-support` aside: neither is a flag (see the module docs).
     fn manifest_features() -> BTreeSet<&'static str> {
         let mut in_features = false;
         let mut features = BTreeSet::new();
@@ -207,6 +208,7 @@ mod tests {
             }
         }
         features.remove("default");
+        features.remove("test-support");
         features
     }
 
