@@ -56,10 +56,9 @@ They are excluded from RSpice, along with the decks that include them:
 | `digital/adder_behav.cir` | depends on `74HCng_short_2.lib` |
 | `optran/HiPass3opamps_optran.cir`, `optran/TLV6001-test.cir`, `optran/TLV9002-test.cir` | depend on `optran/models/` |
 
-Retained model files are parameter sets without a vendor copyright notice:
-`optran/F5models.lib` (Toshiba 2SJ74/2SK170 parameters extracted and
-published on a public forum) and `xspice/table/clc409*.sub` (a 1992
-application-note macromodel carrying no rights statement).
+The retained model file `optran/F5models.lib` is a parameter set without a
+vendor copyright notice (Toshiba 2SJ74/2SK170 parameters extracted and
+published on a public forum).
 
 If you re-vendor from upstream, re-run the exclusion scan rather than
 trusting this table — upstream adds vendor libraries over time.
