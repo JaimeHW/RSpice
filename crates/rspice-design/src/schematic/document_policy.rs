@@ -167,50 +167,6 @@ pub struct SchematicDocumentPolicy {
     pub page_orientation: SchematicPageOrientation,
 }
 
-impl SchematicDocumentPolicy {
-    #[must_use]
-    pub fn page_size_display(self) -> String {
-        let (name, portrait_width_um, portrait_height_um) =
-            if let Some(custom) = self.custom_page_size {
-                (
-                    "Custom",
-                    custom.portrait_width_um,
-                    custom.portrait_height_um,
-                )
-            } else {
-                let (width, height) = self.page_size.portrait_dimensions_tenth_mm();
-                (
-                    self.page_size.label(),
-                    u64::from(width) * 100,
-                    u64::from(height) * 100,
-                )
-            };
-        let (width, height) = match self.page_orientation {
-            SchematicPageOrientation::Portrait => (portrait_width_um, portrait_height_um),
-            SchematicPageOrientation::Landscape => (portrait_height_um, portrait_width_um),
-        };
-        format!(
-            "{} {} · {} × {} mm",
-            name,
-            self.page_orientation.label(),
-            format_micrometres_as_mm(width),
-            format_micrometres_as_mm(height)
-        )
-    }
-}
-
-fn format_micrometres_as_mm(value: u64) -> String {
-    let whole = value / 1_000;
-    let fraction = value % 1_000;
-    if fraction == 0 {
-        whole.to_string()
-    } else {
-        format!("{whole}.{fraction:03}")
-            .trim_end_matches('0')
-            .to_owned()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,7 +198,6 @@ mod tests {
         assert_eq!(policy.page_size, SchematicPageSize::A4);
         assert_eq!(policy.custom_page_size, None);
         assert_eq!(policy.page_orientation, SchematicPageOrientation::Landscape);
-        assert_eq!(policy.page_size_display(), "A4 landscape · 297 × 210 mm");
     }
 
     #[test]

@@ -289,21 +289,19 @@ fn automation_authoring_uses_persisted_roles_without_veriloga_include_injection(
     assert_eq!(bundle.root().content(), entry_before);
     assert!(!bundle.root().content().contains("`include"));
 
-    bundle
-        .bind_role("plans/signoff.data", ProjectSourceRole::AutomationRunPlan)
-        .unwrap();
-    bundle
-        .bind_role(
+    for (path, role) in [
+        ("plans/signoff.data", ProjectSourceRole::AutomationRunPlan),
+        (
             "environment/pinned.toml",
             ProjectSourceRole::AutomationEnvironmentLock,
-        )
-        .unwrap();
-    bundle
-        .bind_role(
+        ),
+        (
             "security/project-policy.toml",
             ProjectSourceRole::AutomationPermissionManifest,
-        )
-        .unwrap();
+        ),
+    ] {
+        assert!(bundle.set_non_entry_role(path, Some(role)).unwrap());
+    }
     let digest_before_rename = bundle.closure_digest();
 
     bundle
@@ -318,7 +316,11 @@ fn automation_authoring_uses_persisted_roles_without_veriloga_include_injection(
         bundle.remove_file("plans/release.data"),
         Err(ProjectSourceError::RoleBoundFile { .. })
     ));
-    assert!(bundle.unbind_role("plans/release.data").unwrap());
+    assert!(
+        bundle
+            .set_non_entry_role("plans/release.data", None)
+            .unwrap()
+    );
     assert!(bundle.remove_file("plans/release.data").unwrap());
     assert_eq!(bundle.root().content(), entry_before);
     bundle.validate().unwrap();

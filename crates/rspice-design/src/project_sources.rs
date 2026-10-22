@@ -1970,11 +1970,6 @@ pub enum ProjectSourceError {
         first: String,
         second: String,
     },
-    #[error("source file '{logical_path}' already has the {role:?} role")]
-    FileAlreadyHasRole {
-        logical_path: String,
-        role: ProjectSourceRole,
-    },
     #[error("source file '{logical_path}' is bound as {role:?}; unbind it before deletion")]
     RoleBoundFile {
         logical_path: String,

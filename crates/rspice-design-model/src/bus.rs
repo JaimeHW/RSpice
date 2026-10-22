@@ -177,25 +177,6 @@ impl BusDeclaration {
         // range, and ambiguity are validated by the tap transaction.
         Ok(())
     }
-
-    /// Validate a group of selectors and prove that each declared member is
-    /// owned by at most one selector.
-    pub fn validate_slices(&self, slices: &[BusSlice]) -> Result<(), BusParseError> {
-        let mut ranges = Vec::with_capacity(slices.len());
-        for slice in slices {
-            self.validate_slice(slice)?;
-            ranges.push((slice.msb.min(slice.lsb), slice.msb.max(slice.lsb)));
-        }
-        ranges.sort_unstable();
-        for pair in ranges.windows(2) {
-            let (_, previous_high) = pair[0];
-            let (next_low, _) = pair[1];
-            if next_low <= previous_high {
-                return Err(BusParseError::DuplicateMember(next_low));
-            }
-        }
-        Ok(())
-    }
 }
 
 impl fmt::Display for BusDeclaration {
@@ -301,7 +282,6 @@ pub enum BusParseError {
     MixedNotation,
     DirectionMismatch,
     SelectorOutOfRange,
-    DuplicateMember(u32),
     InvalidGeometry,
     InvalidBusReference,
     UndeclaredBus,
@@ -343,9 +323,6 @@ impl fmt::Display for BusParseError {
             Self::DirectionMismatch => formatter.write_str("selector direction does not match bus"),
             Self::SelectorOutOfRange => {
                 formatter.write_str("selector is outside the declared bus range")
-            }
-            Self::DuplicateMember(index) => {
-                write!(formatter, "bus member {index} is declared more than once")
             }
             Self::InvalidGeometry => formatter.write_str("invalid bus or bus-tap geometry"),
             Self::InvalidBusReference => {
@@ -608,19 +585,6 @@ mod tests {
         assert_eq!(
             declaration.validate_slice(&BusSlice::parse("DATA[20:16]").unwrap()),
             Err(BusParseError::SelectorOutOfRange)
-        );
-    }
-
-    #[test]
-    fn overlapping_selector_members_are_rejected() {
-        let declaration = BusDeclaration::parse("DATA[15:0]").unwrap();
-        let selectors = [
-            BusSlice::parse("DATA[7:4]").unwrap(),
-            BusSlice::parse("DATA[5]").unwrap(),
-        ];
-        assert_eq!(
-            declaration.validate_slices(&selectors),
-            Err(BusParseError::DuplicateMember(5))
         );
     }
 
