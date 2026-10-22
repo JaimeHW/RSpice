@@ -126,7 +126,8 @@ const WIDE_WORD_FALLBACK: &str = "the bus is wider than 64 bits, which no exact 
 /// The bits come from `rspice_core::execution::event_code_to_vcd_bit`, which
 /// is the one place a code becomes a bit — the same mapping the dump uses, so
 /// a word read here and a word read out of an exported VCD cannot disagree.
-fn bus_word(codes: &[Option<u8>], radix: BusRadix) -> BusWord {
+/// The Events sheet and the waveform's bus lanes both spell through it.
+pub fn bus_word(codes: &[Option<u8>], radix: BusRadix) -> BusWord {
     use rspice_core::execution::event_code_to_vcd_bit;
     use rspice_core::io::VcdBit;
 
@@ -275,6 +276,12 @@ impl EventValue {
 }
 
 impl BusWord {
+    /// The word as spelled: in the requested radix, or in binary or
+    /// hexadecimal when [`Self::fallback`] says why not.
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
     pub fn fallback(&self) -> Option<&'static str> {
         self.fallback
     }

@@ -1,0 +1,353 @@
+//! Logic and bus lanes in the waveform stack, drawn from exact event traces.
+//!
+//! The stack's panes plot interpolated values. Digital nets are not that: a
+//! net holds a level from one accepted event instant to the next. These lanes
+//! draw that, on the panes' own time axis, from the committed event history
+//! rather than from the `D()` columns resampled onto the analog grid.
+//!
+//! The widget is stateless. Which rows exist, which are selected, each bus's
+//! radix and whether it is expanded are the host's to hold (they persist in
+//! the visualization document); the widget reports what the reader asked for
+//! in [`LaneStackResponse`] and the host applies it.
+
+pub mod model;
+pub mod paint;
+pub mod plan;
+
+pub use model::{BusLane, BusOrigin, EventLanes, LogicLane, LogicLevel, RealLane};
+pub use paint::{LaneLevels, LaneStyle, paint_bus_lane, paint_logic_lane};
+pub use plan::{LaneStroke, TimeMapping, plan_lane};
+pub use rspice_results::events::projection::BusRadix;
+
+use super::header::elide;
+use egui::{Color32, Rect, Sense, Ui, pos2, vec2};
+use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens::{self, Tokens};
+
+/// Height of a logic lane's row, in points.
+pub const LOGIC_ROW_HEIGHT: f32 = 18.0;
+/// Height of a bus lane's row: a word label needs a little more than a level.
+pub const BUS_ROW_HEIGHT: f32 = 20.0;
+/// Width of a bus row's expand control in the gutter.
+const CHEVRON_WIDTH: f32 = 12.0;
+/// Indent of an expanded bus's member rows in the gutter.
+const MEMBER_INDENT: f32 = 12.0;
+const GUTTER_PAD: f32 = 4.0;
+
+/// The radixes a bus can be read in, in menu order, with their short names.
+pub const BUS_RADIXES: [(BusRadix, &str); 4] = [
+    (BusRadix::Binary, "BIN"),
+    (BusRadix::Hex, "HEX"),
+    (BusRadix::Unsigned, "DEC"),
+    (BusRadix::Signed, "±DEC"),
+];
+
+/// One row of the lane stack.
+pub enum LaneRow<'a> {
+    Logic {
+        lane: &'a LogicLane,
+        color: Color32,
+    },
+    Bus {
+        lane: &'a BusLane,
+        radix: BusRadix,
+        expanded: bool,
+        /// The member lanes an expanded bus shows under it, MSB first.
+        members: Vec<&'a LogicLane>,
+        color: Color32,
+    },
+}
+
+impl LaneRow<'_> {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Logic { lane, .. } => lane.name(),
+            Self::Bus { lane, .. } => lane.name(),
+        }
+    }
+
+    /// Height of this row with its member rows.
+    pub fn height(&self) -> f32 {
+        match self {
+            Self::Logic { .. } => LOGIC_ROW_HEIGHT,
+            Self::Bus {
+                expanded, members, ..
+            } => {
+                let shown = if *expanded { members.len() } else { 0 };
+                (shown as f32).mul_add(LOGIC_ROW_HEIGHT, BUS_ROW_HEIGHT)
+            }
+        }
+    }
+}
+
+/// Total height of a lane stack.
+pub fn stack_height(rows: &[LaneRow<'_>]) -> f32 {
+    rows.iter().map(LaneRow::height).sum()
+}
+
+/// Everything one frame of the lane stack draws from.
+pub struct LaneStackInput<'a> {
+    pub rows: &'a [LaneRow<'a>],
+    /// The shared time axis' visible range.
+    pub x_range: (f64, f64),
+    /// The panes' left gutter; lane names and readouts sit in it.
+    pub left_margin: f32,
+    /// The panes' right margin, so lane and pane X agree to the pixel.
+    pub right_margin: f32,
+    /// Row indices the reader selected.
+    pub selected: &'a [usize],
+}
+
+/// What the reader asked of the lane stack this frame.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LaneStackResponse {
+    /// Select a row; `true` adds it to the selection instead.
+    pub select: Option<(usize, bool)>,
+    /// Expand or collapse a bus row.
+    pub toggle_expanded: Option<usize>,
+    /// Read a bus row in another radix.
+    pub set_radix: Option<(usize, BusRadix)>,
+    /// Group these logic rows, MSB first, into a user bus.
+    pub group: Option<Vec<usize>>,
+    /// Ungroup a user bus row.
+    pub ungroup: Option<usize>,
+}
+
+/// The time mapping of a lane stack occupying `rect`.
+pub fn lane_mapping(rect: Rect, input: &LaneStackInput<'_>) -> TimeMapping {
+    TimeMapping {
+        t0: input.x_range.0,
+        t1: input.x_range.1,
+        left: rect.left() + input.left_margin,
+        right: rect.right() - input.right_margin,
+    }
+}
+
+/// The row under screen Y `y`, and whether it is a member row of a bus.
+fn row_at(rows: &[LaneRow<'_>], top: f32, y: f32) -> Option<(usize, bool)> {
+    let mut row_top = top;
+    for (index, row) in rows.iter().enumerate() {
+        let height = row.height();
+        if y >= row_top && y < row_top + height {
+            let main = match row {
+                LaneRow::Logic { .. } => LOGIC_ROW_HEIGHT,
+                LaneRow::Bus { .. } => BUS_ROW_HEIGHT,
+            };
+            return Some((index, y >= row_top + main));
+        }
+        row_top += height;
+    }
+    None
+}
+
+/// The expand control of a bus row: a small triangle painted as a vector,
+/// pointing right when collapsed and down when expanded.
+fn paint_chevron(ui: &Ui, centre: egui::Pos2, expanded: bool, color: Color32) {
+    let r = 3.0;
+    let points = if expanded {
+        vec![
+            pos2(centre.x - r, centre.y - r * 0.6),
+            pos2(centre.x + r, centre.y - r * 0.6),
+            pos2(centre.x, centre.y + r * 0.8),
+        ]
+    } else {
+        vec![
+            pos2(centre.x - r * 0.6, centre.y - r),
+            pos2(centre.x + r * 0.8, centre.y),
+            pos2(centre.x - r * 0.6, centre.y + r),
+        ]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(
+        points,
+        color,
+        egui::Stroke::NONE,
+    ));
+}
+
+/// Paint one row's gutter name, elided to the gutter.
+fn paint_name(ui: &Ui, rect: Rect, left: f32, name: &str, tokens: &Tokens) {
+    let font = theme::mono(tokens::FS_MICRO, FontWeight::Regular);
+    let width = (rect.right() - left - GUTTER_PAD).max(0.0);
+    let painter = ui.painter();
+    let mut galley = painter.layout_no_wrap(name.to_owned(), font.clone(), tokens.color.text_dim);
+    let chars = name.chars().count().max(1);
+    if galley.size().x > width {
+        // The gutter font is monospaced, so one glyph's advance is the
+        // whole name's over its length.
+        let advance = (galley.size().x / chars as f32).max(1.0);
+        let fit = (width / advance).floor().max(1.0) as usize;
+        galley = painter.layout_no_wrap(elide(name, fit), font, tokens.color.text_dim);
+    }
+    let top = rect.center().y - galley.size().y * 0.5;
+    painter.galley(pos2(left, top), galley, tokens.color.text_dim);
+}
+
+/// Draw the lane stack into the next `stack_height(rows)` points of `ui`.
+pub fn show_lanes(ui: &mut Ui, input: &LaneStackInput<'_>) -> LaneStackResponse {
+    let tokens = Tokens::get(ui.ctx());
+    let height = stack_height(input.rows);
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::click());
+    let map = lane_mapping(rect, input);
+    let mut output = LaneStackResponse::default();
+    if !ui.is_rect_visible(rect) {
+        return output;
+    }
+    let gutter_width = input.left_margin - GUTTER_PAD;
+    let lane_clip = Rect::from_x_y_ranges(map.left..=map.right, rect.y_range());
+    let lane_painter = ui.painter().with_clip_rect(lane_clip);
+
+    let mut top = rect.top();
+    for (index, row) in input.rows.iter().enumerate() {
+        let row_rect =
+            Rect::from_min_size(pos2(rect.left(), top), vec2(rect.width(), row.height()));
+        if input.selected.contains(&index) {
+            ui.painter()
+                .rect_filled(row_rect, 0.0, tokens.color.accent_dim);
+        }
+        match row {
+            LaneRow::Logic { lane, color } => {
+                let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, row_rect.y_range());
+                let gutter =
+                    Rect::from_min_size(row_rect.min, vec2(gutter_width, LOGIC_ROW_HEIGHT));
+                paint_name(ui, gutter, gutter.left() + GUTTER_PAD, lane.name(), &tokens);
+                paint_logic_lane(
+                    &lane_painter,
+                    lane_rect,
+                    lane,
+                    &map,
+                    &LaneStyle::new(&tokens, *color),
+                );
+            }
+            LaneRow::Bus {
+                lane,
+                radix,
+                expanded,
+                members,
+                color,
+            } => {
+                let main =
+                    Rect::from_min_size(row_rect.min, vec2(row_rect.width(), BUS_ROW_HEIGHT));
+                let gutter = Rect::from_min_size(main.min, vec2(gutter_width, BUS_ROW_HEIGHT));
+                if !members.is_empty() {
+                    paint_chevron(
+                        ui,
+                        pos2(gutter.left() + GUTTER_PAD + 3.0, gutter.center().y),
+                        *expanded,
+                        tokens.color.text_dim,
+                    );
+                }
+                paint_name(
+                    ui,
+                    gutter,
+                    gutter.left() + GUTTER_PAD + CHEVRON_WIDTH,
+                    lane.name(),
+                    &tokens,
+                );
+                let style = LaneStyle::new(&tokens, *color);
+                let lane_rect = Rect::from_x_y_ranges(map.left..=map.right, main.y_range());
+                paint_bus_lane(&lane_painter, lane_rect, lane, *radix, &map, &style);
+                if *expanded {
+                    let mut member_top = main.bottom();
+                    for member in members {
+                        let member_rect = Rect::from_x_y_ranges(
+                            rect.x_range(),
+                            member_top..=member_top + LOGIC_ROW_HEIGHT,
+                        );
+                        let member_gutter = Rect::from_min_size(
+                            member_rect.min,
+                            vec2(gutter_width, LOGIC_ROW_HEIGHT),
+                        );
+                        paint_name(
+                            ui,
+                            member_gutter,
+                            member_gutter.left() + GUTTER_PAD + MEMBER_INDENT,
+                            member.name(),
+                            &tokens,
+                        );
+                        let member_lane =
+                            Rect::from_x_y_ranges(map.left..=map.right, member_rect.y_range());
+                        paint_logic_lane(&lane_painter, member_lane, member, &map, &style);
+                        member_top += LOGIC_ROW_HEIGHT;
+                    }
+                }
+            }
+        }
+        top += row.height();
+    }
+
+    let pointer_row = response
+        .interact_pointer_pos()
+        .or_else(|| response.hover_pos())
+        .and_then(|pointer| row_at(input.rows, rect.top(), pointer.y).map(|row| (pointer, row)));
+    if response.clicked()
+        && let Some((pointer, (index, member))) = pointer_row
+    {
+        let on_chevron = pointer.x < rect.left() + GUTTER_PAD + CHEVRON_WIDTH;
+        if !member && on_chevron && matches!(input.rows[index], LaneRow::Bus { .. }) {
+            output.toggle_expanded = Some(index);
+        } else {
+            let extend = ui.input(|i| i.modifiers.command || i.modifiers.shift);
+            output.select = Some((index, extend));
+        }
+    }
+    let menu_row = response.id.with("menu-row");
+    if response.secondary_clicked()
+        && let Some((_, (index, _))) = pointer_row
+    {
+        ui.ctx().data_mut(|data| data.insert_temp(menu_row, index));
+    }
+    response.context_menu(|ui| {
+        let Some(index) = ui.ctx().data(|data| data.get_temp::<usize>(menu_row)) else {
+            ui.close();
+            return;
+        };
+        lane_menu(ui, input, index, &mut output);
+    });
+    output
+}
+
+/// The row menu: a bus's radix and grouping, and grouping a logic selection.
+fn lane_menu(
+    ui: &mut Ui,
+    input: &LaneStackInput<'_>,
+    index: usize,
+    output: &mut LaneStackResponse,
+) {
+    let Some(row) = input.rows.get(index) else {
+        ui.close();
+        return;
+    };
+    if let LaneRow::Bus { lane, radix, .. } = row {
+        for (candidate, label) in BUS_RADIXES {
+            if ui.radio(*radix == candidate, label).clicked() {
+                output.set_radix = Some((index, candidate));
+                ui.close();
+            }
+        }
+        if lane.origin() == BusOrigin::User {
+            ui.separator();
+            if ui.button("Ungroup").clicked() {
+                output.ungroup = Some(index);
+                ui.close();
+            }
+        }
+    }
+    let logic: Vec<usize> = input
+        .selected
+        .iter()
+        .copied()
+        .filter(|selected| matches!(input.rows.get(*selected), Some(LaneRow::Logic { .. })))
+        .collect();
+    if logic.len() >= 2 && logic.contains(&index) {
+        let mut ordered = logic;
+        ordered.sort_unstable();
+        if ui.button("Group as bus").clicked() {
+            output.group = Some(ordered);
+            ui.close();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

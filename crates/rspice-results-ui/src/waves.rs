@@ -18,6 +18,7 @@ pub mod dock;
 pub mod expression_editor;
 pub mod extent;
 pub mod header;
+pub mod logic;
 pub mod marker_dialog;
 pub mod navigation;
 pub mod pane;

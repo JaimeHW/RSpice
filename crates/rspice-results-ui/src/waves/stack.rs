@@ -64,6 +64,23 @@ pub trait StackHost {
     fn family_envelopes(&mut self, model: &StripModel, pane: &UnitPane) -> Arc<FamilyEnvelopePlan>;
     fn place_marker(&mut self, model: &StripModel, trace: &StripTrace, x: f64);
     fn note_sample_reads(&mut self, overview: usize, extrema: usize);
+    /// Height of the logic and bus lanes this strip shows above its panes;
+    /// zero when it shows none.
+    fn event_lane_height(&self, _model: &StripModel) -> f32 {
+        0.0
+    }
+    /// Draw the strip's logic and bus lanes ([`super::logic::show_lanes`])
+    /// on the panes' own time axis.
+    fn show_event_lanes(&mut self, _ui: &mut Ui, _model: &StripModel, _frame: EventLaneFrame) {}
+}
+
+/// The time axis an event-lane host draws its lanes on, aligned with the
+/// strip's panes to the pixel.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct EventLaneFrame {
+    pub x_range: (f64, f64),
+    pub left_margin: f32,
+    pub right_margin: f32,
 }
 
 // Mockup gutter geometry: a 64 px left gutter carries the Y ticks and the
@@ -562,7 +579,8 @@ fn show_strip_plot(
         return;
     };
     let panes = model.unit_panes();
-    if panes.is_empty() {
+    let wanted_lanes = host.event_lane_height(model).max(0.0);
+    if panes.is_empty() && wanted_lanes == 0.0 {
         well_hint(ui, "No visible traces — enable one in the legend");
         return;
     }
@@ -571,7 +589,8 @@ fn show_strip_plot(
     let exprs = host.resolve_expressions(model, &t);
     let available = ui.available_rect_before_wrap();
     let count = panes.len();
-    let geometry = wave_stack_geometry(available.height(), count);
+    let lane_height = event_lane_band(ui, host, model, x_domain, count, wanted_lanes, &t);
+    let geometry = wave_stack_geometry(available.height() - lane_height, count);
     let frame = StripFrame {
         model,
         x_domain,
@@ -608,7 +627,66 @@ fn show_strip_plot(
             },
         );
     }
-    show_shared_x_axis(ui, host, geometry.shared_x_height, frame);
+    let shared_x_height = if count == 0 {
+        WAVE_SHARED_X_HEIGHT.min((available.height() - lane_height).max(0.0))
+    } else {
+        geometry.shared_x_height
+    };
+    show_shared_x_axis(ui, host, shared_x_height, frame);
+}
+
+/// At most this share of a strip goes to event lanes when it also has panes;
+/// more lanes than fit scroll within it.
+const EVENT_LANE_SHARE: f32 = 0.5;
+
+/// Draw the strip's logic and bus lanes above its panes, on their time axis,
+/// and return the height they took, seam included.
+fn event_lane_band(
+    ui: &mut Ui,
+    host: &mut impl StackHost,
+    model: &StripModel,
+    x_domain: (f64, f64),
+    pane_count: usize,
+    wanted: f32,
+    t: &Tokens,
+) -> f32 {
+    if wanted <= 0.0 {
+        return 0.0;
+    }
+    let available = ui.available_rect_before_wrap().height().max(0.0);
+    let cap = if pane_count == 0 {
+        (available - WAVE_SHARED_X_HEIGHT).max(0.0)
+    } else {
+        available * EVENT_LANE_SHARE
+    };
+    let height = wanted.min(cap);
+    if height <= 0.0 {
+        return 0.0;
+    }
+    let frame = EventLaneFrame {
+        x_range: shared_x_view(host.session(), model.analysis_key, pane_count).unwrap_or(x_domain),
+        left_margin: wave_left_margin(host.session()),
+        right_margin: navigation::WAVE_SHARED_RIGHT_MARGIN,
+    };
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::top_down(egui::Align::Min),
+        |ui| {
+            ui.set_height(height);
+            egui::ScrollArea::vertical()
+                .id_salt(("event-lanes", model.analysis_index))
+                .max_height(height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| host.show_event_lanes(ui, model, frame));
+        },
+    );
+    if pane_count == 0 {
+        return height;
+    }
+    let (seam, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+    ui.painter().rect_filled(seam, 0.0, t.color.canvas_grid);
+    height + 1.0
 }
 
 fn show_unit_pane(
