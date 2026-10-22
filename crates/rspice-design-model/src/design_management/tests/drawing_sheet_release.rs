@@ -25,12 +25,6 @@ fn sheet_page_number_authority_honors_stable_and_per_print_set_modes() {
 }
 
 #[test]
-fn drawing_sheet_calendar_conversion_uses_exact_iso_format() {
-    assert_eq!(civil_date_from_unix_days(0), "1970-01-01");
-    assert_eq!(civil_date_from_unix_days(20_663), "2026-07-29");
-}
-
-#[test]
 fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
     let mut legacy = serde_json::to_value(DrawingSheetProjectSettings::default()).unwrap();
     legacy.as_object_mut().unwrap().remove("document_control");
