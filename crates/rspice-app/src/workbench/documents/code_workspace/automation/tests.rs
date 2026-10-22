@@ -26,6 +26,10 @@ fn source_workspace_runtime_transitions_have_no_production_panic_shortcuts() {
             include_str!("../../netlist_document.rs"),
         ),
         (
+            "Netlist import review",
+            include_str!("../../netlist_document/import_review.rs"),
+        ),
+        (
             "Netlist surface",
             include_str!("../../../surfaces/netlist.rs"),
         ),
