@@ -5,8 +5,6 @@
 //! cyclostationary adjoint solve to `rspice-core`.
 
 use std::collections::HashSet;
-#[cfg(test)]
-use std::path::Path;
 
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
@@ -15,8 +13,6 @@ use rspice_simulation_contract::config::validate_noise_sidebands;
 pub use rspice_simulation_contract::hbnoise_policy::HbNoiseReference;
 use rspice_simulation_contract::hbnoise_policy::validate_hbnoise_frequency_options;
 
-#[cfg(test)]
-use super::parse_runner_netlist_with_abort;
 use super::{
     ServiceContext, ServiceRunError, ServiceRunResult, is_ground_like,
     netlist_has_independent_source_named_with_abort,
@@ -113,40 +109,6 @@ pub struct HbnoiseData {
 }
 
 /// Run HBNOISE from an immutable retained harmonic-balance state.
-#[cfg(test)]
-pub fn run_hbnoise_analysis_from_hb_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &HbnoiseRunConfig,
-    operating_point: &HbOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<HbnoiseData> {
-    ensure_not_aborted(abort)?;
-    config.validate()?;
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_hbnoise_analysis_from_hb_on_materialized_with_abort(
-        &netlist,
-        config,
-        operating_point,
-        abort,
-    )
-}
-
-#[cfg(test)]
-fn run_hbnoise_analysis_from_hb_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &HbnoiseRunConfig,
-    operating_point: &HbOperatingPoint,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<HbnoiseData> {
-    run_hbnoise_analysis_from_hb_on_materialized_with_context(
-        netlist,
-        config,
-        operating_point,
-        ServiceContext::with_defaults(None, abort),
-    )
-}
-
 pub(crate) fn run_hbnoise_analysis_from_hb_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &HbnoiseRunConfig,
@@ -399,12 +361,11 @@ mod tests {
             noise_figure: false,
             contributor_ranking: true,
         };
-        let data = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
-            deck,
+        let data = run_hbnoise_analysis_from_hb_on_materialized_with_context(
+            &parse(deck),
             &config,
             &retained_hb(deck),
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .expect("HBNOISE runs");
         assert_eq!(data.frequencies.len(), 3);
@@ -420,12 +381,11 @@ mod tests {
             source_resistor: "r1".into(),
             temperature_kelvin: 300.15,
         });
-        let nf = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
-            deck,
+        let nf = run_hbnoise_analysis_from_hb_on_materialized_with_context(
+            &parse(deck),
             &with_reference,
             &retained_hb(deck),
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .unwrap();
         let evidence = nf.noise_figure.unwrap();
@@ -496,8 +456,11 @@ mod tests {
                 noise_figure: true,
                 contributor_ranking: false,
             };
-            let result = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
-                deck, &config, &state, None, &NoAbort,
+            let result = run_hbnoise_analysis_from_hb_on_materialized_with_context(
+                &parse(deck),
+                &config,
+                &state,
+                ctx(&NoAbort),
             )
             .unwrap();
             assert_eq!(result.frequencies, vec![1e3]);
@@ -545,8 +508,11 @@ mod tests {
             noise_figure: false,
             contributor_ranking: false,
         };
-        let base = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
-            deck, &config, &state, None, &NoAbort,
+        let base = run_hbnoise_analysis_from_hb_on_materialized_with_context(
+            &parse(deck),
+            &config,
+            &state,
+            ctx(&NoAbort),
         )
         .unwrap();
         for sideband in [-1, 1] {
@@ -554,8 +520,11 @@ mod tests {
             config.output_sideband = sideband;
             for figure in [false, true] {
                 config.noise_figure = figure;
-                let result = run_hbnoise_analysis_from_hb_with_source_path_and_abort(
-                    deck, &config, &state, None, &NoAbort,
+                let result = run_hbnoise_analysis_from_hb_on_materialized_with_context(
+                    &parse(deck),
+                    &config,
+                    &state,
+                    ctx(&NoAbort),
                 )
                 .unwrap();
                 for (index, &offset) in result.frequencies.iter().enumerate() {

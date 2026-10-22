@@ -6,9 +6,6 @@
 //! and the study executors call them, so the desktop application, the browser
 //! worker and the CLI reach the engine through the same code.
 
-#[cfg(test)]
-use rspice_core::engine::Engine;
-
 mod context;
 pub use context::ServiceContext;
 mod dcmatch;
@@ -131,29 +128,6 @@ pub use tf::{TfAccuracy, TfQuantity, TfRunConfig, infer_tf_run_config};
 pub use transient::TransientData;
 
 pub(crate) use crate::netlist_preparation::build_engine_config;
-
-/// Construct the authoritative engine used to produce or consume an
-/// authenticated periodic operating point.
-///
-/// `build_engine_config` has already resolved deck options.  Periodic run
-/// settings then own the Newton tolerance, so the resulting configuration
-/// must be marked resolved; passing it through `Engine::new` would apply the
-/// deck a second time and could overwrite that run-owned value.  Producer and
-/// dependent-analysis services share this helper so retained-state identity
-/// is based on exactly the same configuration contract.
-#[cfg(test)]
-fn build_resolved_periodic_engine(
-    netlist: &rspice_core::Netlist,
-    tolerance: rspice_core::Value,
-    context: &str,
-) -> ServiceRunResult<Engine> {
-    ServiceContext {
-        source_path: None,
-        limits: Default::default(),
-        abort: &rspice_core::NoAbort,
-    }
-    .periodic_engine(netlist, tolerance, context)
-}
 
 // =============================================================================
 // Tests

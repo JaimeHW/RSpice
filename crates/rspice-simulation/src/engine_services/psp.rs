@@ -8,16 +8,12 @@ mod noise;
 pub(crate) use noise::PspNoiseData;
 
 use std::collections::HashMap;
-#[cfg(test)]
-use std::path::Path;
 
 use num_complex::Complex64;
 use rspice_core::Value;
 use rspice_core::abort_signal::AbortSignal;
 use rspice_core::analysis::s_param;
 
-#[cfg(test)]
-use super::parse_runner_netlist_with_abort;
 use super::{SParameterPort, ServiceContext, ServiceRunError, ServiceRunResult};
 use crate::error::{ensure_not_aborted, poll_periodically};
 
@@ -133,41 +129,6 @@ pub(crate) struct PspData {
 /// Ports must already be physical RF `P` elements in the producer deck. It is
 /// not numerically valid to add terminations after PSS: doing so changes both
 /// the topology and the periodic operating point that PSP is linearizing.
-#[cfg(test)]
-pub fn run_psp_analysis_from_pss_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &PspRunConfig,
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PspData> {
-    run_periodic_sparameter_analysis(
-        netlist_text,
-        config,
-        PeriodicOperatingPoint::Pss(operating_point),
-        source_path,
-        abort,
-    )
-}
-
-/// Run HBSP from the exact retained harmonic-balance state.
-#[cfg(test)]
-pub fn run_hbsp_analysis_from_hb_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &HbspRunConfig,
-    operating_point: &rspice_core::engine::HbOperatingPoint,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PspData> {
-    run_periodic_sparameter_analysis(
-        netlist_text,
-        config,
-        PeriodicOperatingPoint::Hb(operating_point),
-        source_path,
-        abort,
-    )
-}
-
 pub(crate) fn run_psp_analysis_from_pss_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &PspRunConfig,
@@ -182,6 +143,7 @@ pub(crate) fn run_psp_analysis_from_pss_on_materialized_with_context(
     )
 }
 
+/// Run HBSP from the exact retained harmonic-balance state.
 pub(crate) fn run_hbsp_analysis_from_hb_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &HbspRunConfig,
@@ -223,28 +185,6 @@ impl PeriodicOperatingPoint<'_> {
             Self::Hb(point) => point.config().tolerance,
         }
     }
-}
-
-#[cfg(test)]
-fn run_periodic_sparameter_analysis(
-    netlist_text: &str,
-    config: &PspRunConfig,
-    operating_point: PeriodicOperatingPoint<'_>,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<PspData> {
-    ensure_not_aborted(abort)?;
-    let analysis = operating_point.analysis_name();
-    config
-        .validate_for(analysis)
-        .map_err(ServiceRunError::Failure)?;
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_periodic_sparameter_on_materialized(
-        &netlist,
-        config,
-        operating_point,
-        ServiceContext::with_defaults(source_path, abort),
-    )
 }
 
 fn run_periodic_sparameter_on_materialized(
@@ -608,7 +548,6 @@ mod tests {
         HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
     };
     use crate::engine_services::test_entry::{ctx, parse};
-    use crate::engine_services::{build_resolved_periodic_engine, parse_runner_netlist_with_abort};
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::analysis::PssConfig;
     use rspice_core::analysis::s_param::PortRealization;
@@ -752,33 +691,31 @@ mod tests {
                     C1 p1 0 1e-18\n\
                     P2 p2 0 PORT=2 Z0=50\n\
                     .end\n";
-        let netlist = parse_runner_netlist_with_abort(deck, None, &NoAbort)
-            .expect("service deck parsing succeeds");
-        let operating_point =
-            build_resolved_periodic_engine(&netlist, 1.0e-7, "test PSS producer configuration")
-                .expect("resolved producer engine")
-                .run_pss_operating_point_with_abort(
-                    &netlist,
-                    PssConfig::new(1.0e6)
-                        .with_tstab_periods(1)
-                        .with_points_per_period(32)
-                        .with_harmonics(4)
-                        .with_tolerance(1.0e-7),
-                    &NoAbort,
-                )
-                .expect("zero-state PSS converges");
+        let netlist = parse(deck);
+        let operating_point = ctx(&NoAbort)
+            .periodic_engine(&netlist, 1.0e-7, "test PSS producer configuration")
+            .expect("resolved producer engine")
+            .run_pss_operating_point_with_abort(
+                &netlist,
+                PssConfig::new(1.0e6)
+                    .with_tstab_periods(1)
+                    .with_points_per_period(32)
+                    .with_harmonics(4)
+                    .with_tolerance(1.0e-7),
+                &NoAbort,
+            )
+            .expect("zero-state PSS converges");
         let mut request = config();
         request.start_freq = 1.0e4;
         request.stop_freq = 1.0e4;
         request.points_per_unit = 1;
         request.sweep = PspSweep::Linear;
 
-        let result = run_psp_analysis_from_pss_with_source_path_and_abort(
-            deck,
+        let result = run_psp_analysis_from_pss_on_materialized_with_context(
+            &netlist,
             &request,
             &operating_point,
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .expect("PSP completes");
         let direct = |out, input| {
@@ -812,12 +749,11 @@ mod tests {
         }));
 
         request.mixed_mode = true;
-        let mixed = run_psp_analysis_from_pss_with_source_path_and_abort(
-            deck,
+        let mixed = run_psp_analysis_from_pss_on_materialized_with_context(
+            &netlist,
             &request,
             &operating_point,
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .expect("mixed-mode PSP completes");
         assert_mixed_matched_network(&mixed);
@@ -849,12 +785,11 @@ mod tests {
         request.points_per_unit = 1;
         request.sweep = PspSweep::Linear;
 
-        let result = run_hbsp_analysis_from_hb_with_source_path_and_abort(
-            deck,
+        let result = run_hbsp_analysis_from_hb_on_materialized_with_context(
+            &parse(deck),
             &request,
             operating_point.as_ref(),
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .expect("HBSP completes");
         let direct = |out, input| {
@@ -883,12 +818,11 @@ mod tests {
         }));
 
         request.mixed_mode = true;
-        let mixed = run_hbsp_analysis_from_hb_with_source_path_and_abort(
-            deck,
+        let mixed = run_hbsp_analysis_from_hb_on_materialized_with_context(
+            &parse(deck),
             &request,
             operating_point.as_ref(),
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
         .expect("mixed-mode HBSP completes");
         assert_mixed_matched_network(&mixed);
@@ -927,8 +861,9 @@ mod tests {
     }
 
     fn hbsp_fixture_request(deck: &str, request: &PspRunConfig) -> ServiceRunResult<PspData> {
+        let netlist = parse(deck);
         let point = run_hb_analysis_with_dc_seed_on_materialized_with_context(
-            &parse(deck),
+            &netlist,
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(1.0e6, 8)],
                 reltol: 2.5e-7,
@@ -938,12 +873,11 @@ mod tests {
             ctx(&NoAbort),
         )?
         .operating_point;
-        run_hbsp_analysis_from_hb_with_source_path_and_abort(
-            deck,
+        run_hbsp_analysis_from_hb_on_materialized_with_context(
+            &netlist,
             request,
             point.as_ref(),
-            None,
-            &NoAbort,
+            ctx(&NoAbort),
         )
     }
 
