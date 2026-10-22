@@ -1041,7 +1041,9 @@ pub enum SimulationError {
     /// the boundary shows about it: the digital edge the failed step
     /// followed and the converter that turned it into a step, or the nets
     /// that switched in the rejected solves. `context` begins with an
-    /// operating-point aid's own account when one stopped short. It is a
+    /// operating-point aid's own account when one stopped short. A transient
+    /// step that ran out of retries carries here, too, the non-finite device
+    /// trial an earlier attempt at the same timepoint rejected. It is a
     /// convergence failure to every frontend.
     #[error("Convergence failed after {iterations} iterations: {context}")]
     MixedConvergenceFailed { iterations: usize, context: String },

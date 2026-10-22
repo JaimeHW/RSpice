@@ -729,6 +729,8 @@ fn exhausted_nonfinite_trial_error(failure: (String, Value, Value)) -> Simulatio
 /// earlier, larger steps walked away from is appended as context instead,
 /// because an iteration count alone hides that the step spent its retries
 /// against a domain edge rather than against a stiff but evaluable system.
+/// The failure stays a convergence failure with its own iteration count: the
+/// context is added to it, not wrapped around it.
 fn exhausted_step_failure(
     nonconvergence: SimulationError,
     rejected_this_attempt: bool,
@@ -736,8 +738,8 @@ fn exhausted_step_failure(
 ) -> SimulationError {
     match carried {
         Some(failure) if rejected_this_attempt => exhausted_nonfinite_trial_error(failure),
-        Some((detail, time, dt)) => SimulationError::Circuit(format!(
-            "{nonconvergence}; an earlier attempt at this timepoint (t={time:.6e}, dt={dt:.3e}) rejected a non-finite device trial: {detail}"
+        Some((detail, time, dt)) => nonconvergence.with_convergence_context(&format!(
+            "an earlier attempt at this timepoint (t={time:.6e}, dt={dt:.3e}) rejected a non-finite device trial: {detail}"
         )),
         None => nonconvergence,
     }
@@ -13703,6 +13705,44 @@ mod tests {
     use crate::engine::waveform::TransientCompressionSignal;
     use crate::{Netlist, SimulationConfig};
     use std::cell::Cell;
+
+    /// A step that ran out of retries is a convergence failure even when an
+    /// earlier, larger attempt at the same timepoint rejected a non-finite
+    /// trial: the trial is context on that failure, so every frontend still
+    /// reads the convergence category (the CLI's exit 82) and the count.
+    #[test]
+    fn an_exhausted_step_keeps_its_convergence_category_with_a_carried_trial() {
+        let carried = Some(("B1: exp overflow".to_string(), 1.0e-9, 2.5e-12));
+        for nonconvergence in [
+            SimulationError::ConvergenceFailed(17),
+            SimulationError::MixedConvergenceFailed {
+                iterations: 17,
+                context: "after the edge on `d`".to_string(),
+            },
+        ] {
+            let error = exhausted_step_failure(nonconvergence, false, carried.clone());
+            let descriptor = error.descriptor();
+            assert_eq!(
+                descriptor.category,
+                crate::SimulationErrorCategory::Convergence,
+                "{error}"
+            );
+            assert_eq!(descriptor.iterations, Some(17), "{error}");
+            let text = error.to_string();
+            assert!(
+                text.contains("an earlier attempt at this timepoint (t=1.000000e-9, dt=2.500e-12)")
+                    && text.contains("rejected a non-finite device trial: B1: exp overflow"),
+                "{text}"
+            );
+        }
+        // The attempt that itself rejected the trial still reports the trial.
+        let own = exhausted_step_failure(SimulationError::ConvergenceFailed(17), true, carried);
+        assert!(
+            own.to_string()
+                .contains("Transient recovery exhausted at t=1.000000e-9"),
+            "{own}"
+        );
+    }
 
     /// Compress one hand-built accepted result with no authored interval
     /// schedule, no post-results, and no parent identity.

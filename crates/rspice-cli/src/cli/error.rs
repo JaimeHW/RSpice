@@ -863,6 +863,24 @@ mod tests {
         assert!(!details.retryable);
     }
 
+    /// The failure a transient step reports when its retries ran out after an
+    /// earlier attempt rejected a non-finite device trial: still a convergence
+    /// failure, exit 82, with its count and the trial as context.
+    #[test]
+    fn an_exhausted_step_with_a_carried_trial_exits_as_a_convergence_failure() {
+        let error = CliError::from(rspice_core::SimulationError::MixedConvergenceFailed {
+            iterations: 17,
+            context: "an earlier attempt at this timepoint (t=1.000000e-9, dt=2.500e-12) \
+                      rejected a non-finite device trial: B1: exp overflow"
+                .into(),
+        });
+        assert_eq!(error.exit_code(), ExitCode::ConvergenceFailed);
+        assert_eq!(error.exit_code() as i32, 82);
+        let details = error.details();
+        assert_eq!(details.category, "convergence");
+        assert_eq!(details.iterations, Some(17));
+    }
+
     #[test]
     fn engine_categories_never_collapse_onto_the_general_error_code() {
         let mut codes = std::collections::BTreeMap::new();
