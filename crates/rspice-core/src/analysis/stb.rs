@@ -615,35 +615,6 @@ impl StbResult {
         Ok(result)
     }
 
-    /// Get magnitude vs frequency data for a Bode plot.
-    pub fn magnitude_curve(&self) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
-        self.magnitude_curve_with_abort(&NoAbort)
-    }
-
-    /// Cancellable, fallible magnitude-curve projection.
-    pub(crate) fn magnitude_curve_with_abort(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
-        self.project_bode_curve_with_abort(|point| point.magnitude_db, abort)
-    }
-
-    fn project_bode_curve_with_abort(
-        &self,
-        ordinate: impl Fn(&BodePoint) -> Option<Value>,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<(Value, Option<Value>)>, StbAnalysisError> {
-        ensure_not_aborted(abort)?;
-        let mut curve = Vec::new();
-        try_reserve_exact(&mut curve, self.bode_points.len(), "STB Bode curve")?;
-        for (index, point) in self.bode_points.iter().enumerate() {
-            poll_abort(abort, index)?;
-            curve.push((point.frequency, ordinate(point)));
-        }
-        ensure_not_aborted(abort)?;
-        Ok(curve)
-    }
-
     /// Summarize the measured margins. This is not a stability verdict.
     pub fn margin_assessment(&self) -> &'static str {
         if self.success {
@@ -1314,27 +1285,9 @@ mod tests {
     }
 
     #[test]
-    fn bode_curve_projection_is_fallible_and_cancellable() {
-        let count = STB_ABORT_POLL_STRIDE * 4;
-        let mut result =
-            StbResult::try_with_capacity(count, false).expect("small test Bode result allocation");
-        for index in 0..count {
-            result.bode_points.push(BodePoint::from_loop_gain(
-                index as Value + 1.0,
-                Complex64::new(2.0, 0.0),
-            ));
-        }
-        let magnitude = result
-            .magnitude_curve()
-            .expect("small magnitude projection");
-        assert_eq!(magnitude.len(), count);
-        assert_eq!(magnitude[0], (1.0, Some(20.0 * 2.0_f64.log10())));
-
-        let abort = CountingAbort::new(2);
-        assert_eq!(
-            result.magnitude_curve_with_abort(&abort),
-            Err(StbAnalysisError::Aborted)
-        );
-        assert_eq!(abort.count(), 3);
+    fn a_bode_point_carries_the_loop_gain_magnitude_in_db() {
+        let point = BodePoint::from_loop_gain(1.0, Complex64::new(2.0, 0.0));
+        assert_eq!(point.frequency, 1.0);
+        assert_eq!(point.magnitude_db, Some(20.0 * 2.0_f64.log10()));
     }
 }
