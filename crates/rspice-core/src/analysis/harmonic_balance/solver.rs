@@ -921,12 +921,6 @@ impl VoltageSourceBranch {
         }
     }
 
-    /// Set AC parameters for a specific harmonic.
-    pub fn with_harmonic(mut self, harmonic: usize, magnitude: Value, phase: Value) -> Self {
-        self.set_harmonic_component(harmonic, Complex64::from_polar(magnitude, phase));
-        self
-    }
-
     fn set_harmonic_component(&mut self, harmonic: usize, value: Complex64) {
         if harmonic == 0 {
             return;
