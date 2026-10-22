@@ -34,10 +34,11 @@
 //!   that nothing looks at.
 //!
 //! `.four` is not a third shape. The Fourier analysis runs a transient and
-//! decomposes one output of it (`run_fourier_analysis_with_abort` in
-//! `services::simulation_runner::envelope_fourier`), so it reads every source
-//! and names none; the one fundamental-to-source binding in the product is
-//! harmonic balance, which is listed as a named consumer.
+//! decomposes one output of it (rspice-simulation's transient bridge hands
+//! that signal to `engine_services::run_fourier_from_signal_with_abort`), so
+//! it reads every source and names none; the one fundamental-to-source
+//! binding in the product is harmonic balance, which is listed as a named
+//! consumer.
 //!
 //! Matching is case-insensitive against [`Component::spice_instance_name`],
 //! which is the spelling the deck carries and therefore the spelling a plan's
