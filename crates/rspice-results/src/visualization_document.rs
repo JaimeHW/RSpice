@@ -70,6 +70,12 @@ pub const MAX_VISUALIZATION_LINK_GROUPS: usize = 1_024;
 pub const MAX_VISUALIZATION_TOMBSTONES: usize = 65_536;
 /// Maximum number of retained exact-comparison receipts.
 pub const MAX_VISUALIZATION_COMPARISONS: usize = 4_096;
+/// Maximum number of user-grouped buses in one visualization document.
+pub const MAX_VISUALIZATION_USER_BUSES: usize = 1_024;
+/// Maximum member lanes grouped into one user bus.
+pub const MAX_USER_BUS_MEMBERS: usize = 256;
+/// Maximum member references retained across all user buses in one document.
+pub const MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL: usize = 16_384;
 /// Maximum members carried by one measurement or link group.
 pub const MAX_ENTITY_REFERENCES: usize = 4_096;
 /// Maximum signal records carried by one comparison receipt.
@@ -1415,6 +1421,104 @@ pub struct Trace {
     #[serde(deserialize_with = "deserialize_label_string")]
     pub label: String,
     pub visible: bool,
+    /// How the waveform stack draws this trace. Absent before schema 9,
+    /// when every trace was an interpolated value trace.
+    #[serde(default, skip_serializing_if = "TraceLane::is_value")]
+    pub lane: TraceLane,
+}
+
+/// What a trace's lane draws: an interpolated value, or one of the exact
+/// event forms a digital or real event trace takes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TraceLaneKind {
+    /// An interpolated value trace in a unit pane: `V()`, `I()`, expressions.
+    #[default]
+    Value,
+    /// A scalar digital event trace, `D()`: levels and edges at exact instants.
+    Logic,
+    /// A declared bus, `D(bus)`: one hexagonal segment per stable word.
+    Bus,
+    /// A real event trace, `E()`: a step plot in a value pane.
+    Real,
+}
+
+/// How a bus word is spelled.
+///
+/// Binary is the VCD spelling — one character per member, declared MSB first,
+/// with `x` for unknown and `z` for high impedance — and is the only one that
+/// can spell every word a run can produce. The other three denote an integer,
+/// which a word with an unknown or high-impedance bit does not have.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BusRadix {
+    #[default]
+    Binary,
+    Hex,
+    Unsigned,
+    Signed,
+}
+
+impl BusRadix {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Binary => "binary",
+            Self::Hex => "hexadecimal",
+            Self::Unsigned => "unsigned decimal",
+            Self::Signed => "signed decimal",
+        }
+    }
+}
+
+/// One trace's lane presentation: its kind, the radix a bus spells its words
+/// in, and whether a bus shows its member lanes under it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TraceLane {
+    #[serde(default)]
+    pub kind: TraceLaneKind,
+    #[serde(default)]
+    pub radix: BusRadix,
+    #[serde(default)]
+    pub expanded: bool,
+}
+
+impl TraceLane {
+    /// The lane every trace had before lanes were recorded.
+    pub fn is_value(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Logic lanes the reader grouped into one word, drawn as a bus lane.
+///
+/// Members are logic traces of the bus's own pane, declared MSB first. A
+/// user bus is presentation only: the word at each instant is read from the
+/// members' exact event histories, as a declared bus is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserBus {
+    pub pane_id: PaneId,
+    /// The bus's name, unique within its pane.
+    #[serde(deserialize_with = "deserialize_label_string")]
+    pub name: String,
+    #[serde(deserialize_with = "deserialize_user_bus_members")]
+    pub members: Vec<TraceId>,
+    #[serde(default)]
+    pub radix: BusRadix,
+    #[serde(default)]
+    pub expanded: bool,
+}
+
+impl NestedResourceCount for UserBus {
+    fn nested_resource_count(&self) -> usize {
+        self.members.len()
+    }
+}
+
+fn deserialize_user_bus_members<'de, D>(deserializer: D) -> Result<Vec<TraceId>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserialize_bounded_vec::<_, _, MAX_USER_BUS_MEMBERS>(deserializer)
 }
 
 impl Trace {
@@ -1836,6 +1940,8 @@ pub struct VisualizationDocument {
     link_groups: Vec<LinkGroup>,
     tombstones: Vec<Tombstone>,
     comparisons: Vec<ComparisonReceipt>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    user_buses: Vec<UserBus>,
 }
 
 #[derive(Deserialize)]
@@ -1875,6 +1981,14 @@ struct VisualizationDocumentWire {
         MAX_VISUALIZATION_COMPARISONS,
         MAX_VISUALIZATION_COMPARISON_SIGNALS_TOTAL,
     >,
+    #[serde(default)]
+    user_buses: Option<
+        AggregateBoundedVec<
+            UserBus,
+            MAX_VISUALIZATION_USER_BUSES,
+            MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL,
+        >,
+    >,
 }
 
 const fn legacy_visualization_schema_version() -> u16 {
@@ -1907,7 +2021,18 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
             link_groups: wire.link_groups.into_inner(),
             tombstones: wire.tombstones.into_inner(),
             comparisons: wire.comparisons.into_inner(),
+            user_buses: wire
+                .user_buses
+                .map_or_else(Vec::new, AggregateBoundedVec::into_inner),
         };
+        if document.schema_version < 9
+            && (!document.user_buses.is_empty()
+                || document.traces.iter().any(|trace| !trace.lane.is_value()))
+        {
+            return Err(serde::de::Error::custom(
+                "event lanes and user buses require visualization schema 9",
+            ));
+        }
         if document.schema_version < 8
             && document.datasets.iter().any(|dataset| {
                 dataset
@@ -1952,7 +2077,7 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
                 document.migrate_v6_to_v7();
             }
             6 => document.migrate_v6_to_v7(),
-            7 => document.schema_version = Self::SCHEMA_VERSION,
+            7 | 8 => document.schema_version = Self::SCHEMA_VERSION,
             Self::SCHEMA_VERSION => {}
             version => {
                 return Err(serde::de::Error::custom(format!(
@@ -1966,6 +2091,11 @@ impl<'de> Deserialize<'de> for VisualizationDocument {
 }
 
 impl VisualizationDocument {
+    /// Schema 9 records each trace's lane (logic, bus or real event lanes,
+    /// a bus's radix and whether it is expanded) and the reader's user buses.
+    /// A schema-8 document reads as one whose traces are all value lanes and
+    /// that groups no bus, which is what it meant.
+    ///
     /// Schema 8 preserves explicitly unavailable signal samples in source tables.
     ///
     /// V1 through V6 documents within the published resource limits retain
@@ -1975,7 +2105,7 @@ impl VisualizationDocument {
     /// Unknown extension fields remain ignored for schema-v7 forward
     /// compatibility; introducing required semantics still requires a schema
     /// revision.
-    pub const SCHEMA_VERSION: u16 = 8;
+    pub const SCHEMA_VERSION: u16 = 9;
 
     pub fn new(
         title: impl Into<String>,
@@ -2028,6 +2158,7 @@ impl VisualizationDocument {
             link_groups: Vec::new(),
             tombstones: Vec::new(),
             comparisons: Vec::new(),
+            user_buses: Vec::new(),
         };
         document.validate()?;
         Ok(document)
@@ -2146,6 +2277,12 @@ impl VisualizationDocument {
     #[must_use]
     pub fn comparisons(&self) -> &[ComparisonReceipt] {
         &self.comparisons
+    }
+
+    /// The logic lanes the reader grouped into buses, in definition order.
+    #[must_use]
+    pub fn user_buses(&self) -> &[UserBus] {
+        &self.user_buses
     }
 
     #[must_use]
@@ -2379,5 +2516,7 @@ impl VisualizationDocument {
     }
 }
 
+#[cfg(test)]
+mod lane_tests;
 #[cfg(test)]
 mod tests;

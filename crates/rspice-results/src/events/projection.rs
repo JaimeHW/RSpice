@@ -99,31 +99,9 @@ impl EventOrder {
     }
 }
 
-/// How a bus word is spelled.
-///
-/// Binary is the VCD spelling — one character per member, declared MSB first,
-/// with `x` for unknown and `z` for high impedance — and is the only one that
-/// can spell every word a run can produce. The other three denote an integer,
-/// which a word with an unknown or high-impedance bit does not have.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum BusRadix {
-    #[default]
-    Binary,
-    Hex,
-    Unsigned,
-    Signed,
-}
-
-impl BusRadix {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Binary => "binary",
-            Self::Hex => "hexadecimal",
-            Self::Unsigned => "unsigned decimal",
-            Self::Signed => "signed decimal",
-        }
-    }
-}
+/// How a bus word is spelled. A presentation choice, so the visualization
+/// document owns it and persists it per lane.
+pub use crate::visualization_document::BusRadix;
 
 /// The widest bus whose unsigned and signed values a machine integer holds
 /// exactly. A wider word still has a hexadecimal and a binary spelling, both

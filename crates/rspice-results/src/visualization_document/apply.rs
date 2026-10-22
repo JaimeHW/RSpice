@@ -935,6 +935,34 @@ impl VisualizationDocument {
                 self.trace_mut(trace_id)?.visible = visible;
                 Ok(())
             }
+            DocumentEdit::SetTraceLane { trace_id, lane } => {
+                self.trace_mut(trace_id)?.lane = lane;
+                Ok(())
+            }
+            DocumentEdit::DefineUserBus(bus) => {
+                self.validate_user_bus(&bus)?;
+                match self
+                    .user_buses
+                    .iter_mut()
+                    .find(|held| held.pane_id == bus.pane_id && held.name == bus.name)
+                {
+                    Some(held) => *held = bus,
+                    None => self.user_buses.push(bus),
+                }
+                Ok(())
+            }
+            DocumentEdit::RemoveUserBus { pane_id, name } => {
+                let before = self.user_buses.len();
+                self.user_buses
+                    .retain(|bus| bus.pane_id != pane_id || bus.name != name);
+                if self.user_buses.len() == before {
+                    return Err(VisualizationError::InvalidValue {
+                        field: "user-bus.name",
+                        message: format!("pane {} groups no bus named {name:?}", pane_id.get()),
+                    });
+                }
+                Ok(())
+            }
             DocumentEdit::MoveCursor {
                 cursor_id,
                 position,
@@ -1376,6 +1404,7 @@ impl VisualizationDocument {
             y_axis_id: trace.y_axis_id,
             label: trace.label,
             visible: true,
+            lane: TraceLane::default(),
         });
         created.push(EntityRef::Trace(id));
         Ok(())
@@ -1483,6 +1512,13 @@ impl VisualizationDocument {
                     return Err(VisualizationError::EntityInUse { entity, dependent });
                 }
                 self.traces.retain(|trace| trace.id != id);
+                // A user bus is a grouping of lanes, not a dependent of
+                // them: removing a member narrows the word, and a bus left
+                // with no member is no bus.
+                for bus in &mut self.user_buses {
+                    bus.members.retain(|member| *member != id);
+                }
+                self.user_buses.retain(|bus| !bus.members.is_empty());
             }
             EntityRef::Cursor(id) => {
                 self.require_entity(entity)?;
@@ -1546,6 +1582,7 @@ impl VisualizationDocument {
             .retain(|measurement| measurement.pane_id != pane_id);
         self.annotations
             .retain(|annotation| annotation.pane_id != pane_id);
+        self.user_buses.retain(|bus| bus.pane_id != pane_id);
         let page_id = self
             .panes
             .iter()
@@ -1840,6 +1877,63 @@ impl VisualizationDocument {
         }
         for receipt in &self.comparisons {
             self.validate_comparison_receipt(receipt)?;
+        }
+        ensure_maximum_len(
+            "visualization-document.user-buses",
+            self.user_buses.len(),
+            MAX_VISUALIZATION_USER_BUSES,
+        )?;
+        validate_aggregate_nested_resources(
+            "visualization-document.user-bus-members",
+            &self.user_buses,
+            MAX_VISUALIZATION_USER_BUS_MEMBERS_TOTAL,
+        )?;
+        let mut bus_names = HashSet::new();
+        for bus in &self.user_buses {
+            self.validate_user_bus(bus)?;
+            if !bus_names.insert((bus.pane_id, bus.name.as_str())) {
+                return Err(VisualizationError::InvalidValue {
+                    field: "user-bus.name",
+                    message: format!(
+                        "pane {} groups two buses named {:?}",
+                        bus.pane_id.get(),
+                        bus.name
+                    ),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// One user bus on its own: a named, non-empty, duplicate-free word of
+    /// logic lanes that all sit in the bus's pane.
+    fn validate_user_bus(&self, bus: &UserBus) -> Result<(), VisualizationError> {
+        validate_label("user-bus.name", &bus.name)?;
+        self.require_pane(bus.pane_id)?;
+        if bus.members.is_empty() || bus.members.len() > MAX_USER_BUS_MEMBERS {
+            return Err(VisualizationError::InvalidValue {
+                field: "user-bus.members",
+                message: format!("a user bus groups 1 to {MAX_USER_BUS_MEMBERS} logic lanes"),
+            });
+        }
+        let mut seen = HashSet::new();
+        for member in &bus.members {
+            let trace = self.traces.iter().find(|trace| trace.id == *member).ok_or(
+                VisualizationError::EntityNotFound(EntityRef::Trace(*member)),
+            )?;
+            if !seen.insert(*member)
+                || trace.pane_id != bus.pane_id
+                || trace.lane.kind != TraceLaneKind::Logic
+            {
+                return Err(VisualizationError::InvalidValue {
+                    field: "user-bus.members",
+                    message: format!(
+                        "bus {:?} must group distinct logic lanes of its own pane; trace {} is not one",
+                        bus.name,
+                        member.get()
+                    ),
+                });
+            }
         }
         Ok(())
     }

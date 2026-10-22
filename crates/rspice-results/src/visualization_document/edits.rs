@@ -197,6 +197,21 @@ pub enum DocumentEdit {
         trace_id: TraceId,
         visible: bool,
     },
+    /// Set how the waveform stack draws one trace: its lane kind, a bus's
+    /// radix, and whether a bus shows its member lanes.
+    SetTraceLane {
+        trace_id: TraceId,
+        lane: TraceLane,
+    },
+    /// Group logic lanes of one pane into a bus, replacing the pane's bus of
+    /// the same name when there is one.
+    DefineUserBus(UserBus),
+    /// Ungroup one pane's user bus. Its member lanes stay.
+    RemoveUserBus {
+        pane_id: PaneId,
+        #[serde(deserialize_with = "deserialize_label_string")]
+        name: String,
+    },
     MoveCursor {
         cursor_id: CursorId,
         position: TypedValue,
