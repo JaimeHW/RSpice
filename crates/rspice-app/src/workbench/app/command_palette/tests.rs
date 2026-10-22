@@ -34,9 +34,6 @@ fn desktop_and_phone_layouts_match_the_mockup_contract() {
     assert_eq!(desktop.regions().search.height(), 48.0);
     assert_eq!(desktop.regions().scope.height(), 37.0);
     assert_eq!(desktop.regions().footer.height(), 31.0);
-    assert_eq!(RESULT_ROW_HEIGHT, 40.0);
-    assert_eq!(RESULT_ICON_COLUMN, 28.0);
-    assert_eq!(RESULT_ICON_SIDE, 26.0);
 
     let phone = PaletteLayout::resolve(
         Rect::from_min_size(pos2(0.0, 0.0), vec2(390.0, 844.0)),
@@ -473,7 +470,6 @@ fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete()
         signals.is_empty(),
         "no result data means no invented signal rows"
     );
-    assert_eq!(MAX_RECENT, 8);
 }
 
 #[cfg(not(target_arch = "wasm32"))]

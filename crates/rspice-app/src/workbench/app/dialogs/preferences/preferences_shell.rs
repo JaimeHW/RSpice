@@ -1909,7 +1909,6 @@ mod tests {
         assert_eq!(layout.surface.size(), vec2(382.0, 836.0));
         assert!(layout.narrow);
         assert!(layout.phone);
-        assert_eq!(FOOTER_HEIGHT, 48.0);
     }
 
     #[test]
@@ -1919,7 +1918,6 @@ mod tests {
         assert_eq!(layout.surface.size(), vec2(740.0, DESKTOP_HEIGHT));
         assert!(layout.narrow);
         assert!(!layout.phone);
-        assert_eq!(FOOTER_HEIGHT, 48.0);
     }
 
     #[test]

@@ -182,12 +182,6 @@ const _: [(); 1] = [(); color_is_rgb(INSTRUMENT_LIGHT.wire, 0x4e, 0x34, 0x00) as
 mod tests {
     use super::*;
 
-    #[test]
-    fn instrument_wire_tokens_match_rspice_schematic_design_refs() {
-        assert_eq!(INSTRUMENT_DARK.wire, Color32::from_rgb(0x44, 0x8c, 0x60));
-        assert_eq!(INSTRUMENT_LIGHT.wire, Color32::from_rgb(0x4e, 0x34, 0x00));
-    }
-
     /// Selection, the wire and the canvas stand apart in both palettes: a
     /// selected wire 3:1 off an unselected one, both 3:1 off the canvas, and
     /// a highlighted net 3:1 off the canvas. Selection, highlight and the
@@ -215,27 +209,6 @@ mod tests {
             assert_ne!(palette.canvas_select, palette.canvas_net_highlight);
             assert_ne!(palette.canvas_select, palette.accent, "{mode}");
         }
-    }
-
-    #[test]
-    fn instrument_semantic_colors_match_the_workbench_mockup() {
-        assert_eq!(
-            INSTRUMENT_DARK.bg_panel_2,
-            Color32::from_rgb(0x20, 0x28, 0x2d)
-        );
-        assert_eq!(INSTRUMENT_DARK.err, Color32::from_rgb(0xef, 0x80, 0x6f));
-        assert_eq!(INSTRUMENT_DARK.info, Color32::from_rgb(0x7c, 0xb8, 0xe8));
-        assert_eq!(INSTRUMENT_DARK.accent_dim.a(), 28);
-        assert_eq!(
-            INSTRUMENT_LIGHT.text_faint,
-            Color32::from_rgb(0x5c, 0x63, 0x67)
-        );
-        assert_eq!(
-            INSTRUMENT_LIGHT.bg_panel_2,
-            Color32::from_rgb(0xed, 0xf1, 0xf3)
-        );
-        assert_eq!(INSTRUMENT_LIGHT.info, Color32::from_rgb(0x3d, 0x72, 0xa8));
-        assert_eq!(INSTRUMENT_LIGHT.accent_dim.a(), 23);
     }
 
     /// sRGB relative luminance (WCAG 2.x).

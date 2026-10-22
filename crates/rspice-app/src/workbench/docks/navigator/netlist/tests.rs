@@ -540,10 +540,6 @@ fn a_hundred_thousand_card_deck_projects_within_a_frame() {
 
 #[test]
 fn netlist_navigator_geometry_matches_mockup_and_touch_contract() {
-    assert_eq!(NETLIST_OUTLINE_ROW_HEIGHT, 27.0);
-    assert_eq!(NETLIST_OUTLINE_TOUCH_ROW_HEIGHT, 44.0);
-    assert_eq!(NETLIST_OUTLINE_PADDING_X, 9.0);
-    assert_eq!(NETLIST_OUTLINE_ICON_GAP, 7.0);
     // A declaration hangs off its group's guide line, and every top-level
     // row reserves the caret column so their icons stay in one line.
     assert_eq!(

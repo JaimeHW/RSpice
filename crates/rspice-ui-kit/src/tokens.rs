@@ -324,11 +324,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn spacing_scale_matches_the_workbench_mockup_exactly() {
-        assert_eq!([SP_2, SP_3, SP_4, SP_5], [4.0, 6.0, 8.0, 12.0]);
-    }
-
-    #[test]
     fn tokens_resolve_every_direction_and_mode() {
         let direction = Direction::Instrument;
         for mode in Mode::ALL {

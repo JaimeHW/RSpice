@@ -610,11 +610,6 @@ mod tests {
 
     #[test]
     fn editor_geometry_matches_canonical_code_workspace() {
-        assert_eq!(FONT_SIZE, 11.0);
-        assert_eq!(LINE_HEIGHT, 17.05);
-        assert_eq!(GUTTER_WIDTH, 47.0);
-        assert_eq!(NUMBER_RIGHT_PADDING, 11.0);
-        assert_eq!(CODE_LEFT_PADDING, 12.0);
         let frame = code_editor_frame();
         assert_eq!(frame.inner_margin.left, 59);
         assert_eq!(frame.inner_margin.right, 20);

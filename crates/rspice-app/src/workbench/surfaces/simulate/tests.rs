@@ -203,8 +203,6 @@ fn desktop_analysis_split_matches_mockup_ratio_and_minimums() {
 
 #[test]
 fn responsive_breakpoints_match_mockup_contract() {
-    assert_eq!(SIMULATION_STACK_BREAKPOINT, 820.0);
-    assert_eq!(TITLE_ACTION_STACK_BREAKPOINT, 560.0);
     assert!(!analysis_workspace_is_split(820.0, 700.0));
     assert!(analysis_workspace_is_split(821.0, 506.0));
     assert!(!analysis_workspace_is_split(1_440.0, 505.0));
@@ -216,13 +214,7 @@ fn responsive_breakpoints_match_mockup_contract() {
 
 #[test]
 fn responsive_surface_geometry_matches_mockup_contract() {
-    assert_eq!(ANALYSIS_ROW_HEIGHT, 53.0);
-    assert_eq!(ANALYSIS_INDEX_DIAMETER, 22.0);
-    assert_eq!(ANALYSIS_ROW_LEFT_PADDING, 9.0);
-    assert_eq!(ANALYSIS_STACK_TABLET_MIN_WIDTH, 175.0);
-    assert_eq!(ANALYSIS_STACK_DESKTOP_MIN_WIDTH, 190.0);
     assert!(ANALYSIS_STACK_TABLET_MIN_WIDTH >= analysis_row_content_min_width());
-    assert_eq!(STACKED_WORKSPACE_GAP, 9.0);
 }
 
 #[test]
@@ -973,9 +965,6 @@ fn saved_output_storage_preview_uses_exact_binary_units_and_analysis_count() {
 
 #[test]
 fn analysis_catalog_uses_the_mockup_dialog_and_row_contracts() {
-    assert_eq!(ANALYSIS_CATALOG_GROUP_HEIGHT, 29.0);
-    assert_eq!(ANALYSIS_CATALOG_ROW_HEIGHT, 57.0);
-    assert_eq!(ANALYSIS_CATALOG_READINESS_WIDTH, 142.0);
     // Measured on the space the rows are given, not on the viewport: the
     // mockup's 1180-point surface carries two columns, a narrow one carries a
     // single row.

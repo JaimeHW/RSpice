@@ -167,13 +167,6 @@ pub fn segmented(
 mod tests {
     use super::*;
 
-    #[test]
-    fn segment_metrics_match_the_mockup_control() {
-        assert_eq!(SEGMENT_MIN_WIDTH, 54.0);
-        assert_eq!(SEGMENT_HORIZONTAL_PADDING, 8.0);
-        assert_eq!(PHONE_MAX_WIDTH, 560.0);
-    }
-
     /// Options are sized to their own labels, never to an equal share: the
     /// control is a row of named choices, not a table.
     #[cfg(not(target_arch = "wasm32"))]

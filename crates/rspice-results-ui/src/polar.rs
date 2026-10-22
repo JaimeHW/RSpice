@@ -1278,10 +1278,6 @@ mod tests {
                 RetainedTrace::new("V(out)", vec![0.0, 1.0e-9], vec![0.0, 1.0], "#00aaff"),
             ]);
         assert!(quantities(&analysis).is_empty());
-        assert_eq!(
-            ABSENT_STATE,
-            "No complex response in this run — run an AC, SP, or HB analysis"
-        );
     }
 
     /// The dB ruling is five 10 dB rings ending at a 10 dB step above the

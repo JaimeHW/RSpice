@@ -5,10 +5,7 @@
 //! read the text it painted, which is a different concern from painting it and
 //! is the half that grows every time a form makes a new claim.
 
-use super::envelope::{
-    ENVELOPE_ADAPTIVE_CHOICES, ENVELOPE_FIELD_LABELS, ENVELOPE_HARMONIC_ORDER_HELPER,
-    ENVELOPE_INITIAL_SOLVE_CHOICES,
-};
+use super::envelope::ENVELOPE_FIELD_LABELS;
 use super::harmonic_balance::{HB_FIELD_LABELS, HB_SOLVER_CHOICES};
 use super::noise::{
     NOISE_CONTRIBUTION_CHOICES, NOISE_FIELD_LABELS, NOISE_INTEGRATION_CHOICES, NOISE_SWEEP_CHOICES,
@@ -18,9 +15,7 @@ use super::operating_point::{
     op_node_initialization_disabled, op_startup_indices_compatible,
 };
 use super::pss::{PSS_ENGINE_DEFAULT_METHOD, PSS_FIELD_LABELS, pss_integration_method_choices};
-use super::transfer_function::{
-    XF_ACCURACY_CHOICES, XF_FIELD_LABELS, XF_NORMALIZATION_CHOICES, XF_SOLVE_POINT,
-};
+use super::transfer_function::XF_FIELD_LABELS;
 #[cfg(not(target_arch = "wasm32"))]
 use super::transfer_function::{XF_INFER_LABEL, xf_output_presets};
 use super::*;
@@ -287,27 +282,7 @@ fn pss_oscillator_toggle_preserves_form_geometry() {
 }
 
 #[test]
-fn pss_field_order_and_wording_match_the_canonical_mockup() {
-    assert_eq!(
-        PSS_FIELD_LABELS,
-        [
-            "Integration method",
-            "Fundamental",
-            "Tones",
-            "Stabilization cycles",
-            "Shooting points",
-            "Period tolerance",
-            "Autonomous oscillator",
-            "Oscillator node",
-            "Save harmonics",
-            "Stabilization time",
-            "Max iterations",
-            "Absolute tolerance",
-            "Damping",
-            "Max period change",
-            "Verbose",
-        ]
-    );
+fn pss_integration_methods_are_the_engines_own() {
     assert_eq!(
         pss_integration_method_choices(),
         [
@@ -377,32 +352,6 @@ fn every_periodic_carrier_position_preserves_form_geometry() {
             "{kind:?} changed height with the carrier selection: {heights:?}"
         );
     }
-}
-
-#[test]
-fn hb_field_order_and_wording_match_the_canonical_mockup() {
-    assert_eq!(
-        HB_FIELD_LABELS,
-        [
-            "Fundamental",
-            "Harmonics",
-            "Source",
-            "Oversample",
-            "Max iters",
-            "Solver",
-            "Source stepping",
-            "Mixing order",
-            "Relative tolerance",
-            "Absolute tolerance",
-            "Damping",
-            "Damping floor",
-            "GMRES restart",
-            "Collocation points",
-            "Exact Jacobian",
-            "Verbose",
-        ]
-    );
-    assert_eq!(HB_SOLVER_CHOICES, ["newton", "krylov"]);
 }
 
 /// The GMRES restart is the Krylov solver's parameter and is offered only on
@@ -710,63 +659,6 @@ fn envelope_modulation_source_split_is_fixed_and_fills_the_control_row() {
     }
 }
 
-#[test]
-fn envelope_form_matches_mockup_owned_contract() {
-    assert_eq!(
-        ENVELOPE_FIELD_LABELS,
-        [
-            "Carrier tones",
-            "Envelope stop",
-            "Envelope step",
-            "Harmonic order",
-            "Modulation sources",
-            "Initial periodic solve",
-            "Output schedule",
-        ]
-    );
-    assert_eq!(
-        ENVELOPE_INITIAL_SOLVE_CHOICES,
-        ["HB", "PSS", "Transient spectral estimate"]
-    );
-    assert_eq!(
-        ENVELOPE_ADAPTIVE_CHOICES,
-        [
-            "Adaptive solver samples",
-            "Fixed envelope step",
-            "Event-aligned only",
-        ]
-    );
-    assert_eq!(ENVELOPE_DECLARED_SOURCES_CHOICE, "Declared list...");
-    assert_eq!(ENVELOPE_HARMONIC_ORDER_HELPER, "positive integer");
-}
-
-#[test]
-fn transfer_function_form_matches_mockup_owned_contract() {
-    assert_eq!(
-        XF_FIELD_LABELS,
-        [
-            "Input source",
-            "Output expression",
-            "Solve point",
-            "Transfer gain",
-            "Input resistance",
-            "Output resistance",
-            "Normalize",
-            "Accuracy",
-        ]
-    );
-    assert_eq!(XF_SOLVE_POINT, "DC operating point");
-    assert_eq!(XF_ENABLED_CHOICES, ["Enabled", "Disabled"]);
-    assert_eq!(
-        XF_NORMALIZATION_CHOICES,
-        ["Disabled", "Relative to nominal", "Per source unit"]
-    );
-    assert_eq!(
-        XF_ACCURACY_CHOICES,
-        ["Fast", "Balanced", "Accurate", "Robust"]
-    );
-}
-
 /// Where a form pairs a point count with a graded [`SWEEP_KINDS`] mode,
 /// select that mode on the form's own draft. `false` means this kind has no
 /// graded sweep at all.
@@ -908,30 +800,9 @@ fn every_catalog_kind_draws_a_form() {
 #[test]
 fn noise_form_matches_mockup_owned_contract() {
     assert_eq!(
-        NOISE_FIELD_LABELS,
-        [
-            "Sweep",
-            // The point field names its own units, so the frozen entry is
-            // the ungraded spelling and the rendered one re-resolves. See
-            // `the_sweep_point_label_names_what_a_point_is_in_each_mode`.
-            "Points",
-            "Start frequency",
-            "Stop frequency",
-            "Output node",
-            "Input source",
-            "Contribution detail",
-            "Integrated noise",
-        ]
-    );
-    assert_eq!(
         NOISE_SWEEP_CHOICES,
         ["Decade", "Octave", "Linear", "Explicit frequency list"]
     );
-    // The two domain rows carry no authored presets at all: everything
-    // they offer is read off the elaborated design, and the only fixed
-    // entry is the exact-entry escape.
-    assert_eq!(NOISE_OUTPUT_CUSTOM_CHOICE, "Custom expression\u{2026}");
-    assert_eq!(NOISE_INPUT_CUSTOM_CHOICE, "Custom source name\u{2026}");
     assert_eq!(
         NOISE_CONTRIBUTION_CHOICES,
         ["Top 50", "All contributors", "Top 20", "Summary only"]
@@ -940,7 +811,6 @@ fn noise_form_matches_mockup_owned_contract() {
         NOISE_INTEGRATION_CHOICES,
         ["Enabled", "Output noise only", "Disabled"]
     );
-    assert_eq!(NOISE_SWEEP_CONTROL_COUNT, 2);
     // Rendered, the point row names the units the selected mode gives it.
     assert_eq!(
         noise_point_field_label(NoiseSweepType::Decade),

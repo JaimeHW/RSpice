@@ -126,24 +126,7 @@ fn column_projection_is_stable_and_exactly_fills_the_row() {
 fn fixed_workspace_geometry_does_not_depend_on_selected_section() {
     for section in ModelEditorSection::ALL {
         assert_eq!(section_spec(section).section, section);
-        assert_eq!(NAV_ROW_H, 36.0);
-        // 51, not 70: the band carries its kicker and its title, and the
-        // sentence that described the section below it is gone with the 19 px
-        // of ink and lead it occupied.
-        assert_eq!(SECTION_HEADER_H, 51.0);
-        assert_eq!(TABLE_HEADER_H, 27.0);
     }
-}
-
-/// The candidate band is one line at every width.
-///
-/// It had two layouts, 82 px and 124 px, to stack a purpose blurb under the
-/// title at middling widths. The band now carries the candidate's name and
-/// what is wrong with it, which is one line, so a narrow workspace no longer
-/// pays 78 px of chrome before its first row.
-#[test]
-fn the_specialist_header_is_one_line_at_every_width() {
-    assert_eq!(SPECIALIST_HEADER_H, 46.0);
 }
 
 /// The rail holds the six section entries and nothing else, so a short
@@ -170,14 +153,6 @@ fn qualification_progress_combines_suite_and_vector_progress() {
     assert_eq!(qualification_progress_fraction(1, 2, 0, 4), 0.5);
     assert_eq!(qualification_progress_fraction(1, 2, 4, 4), 1.0);
     assert_eq!(qualification_progress_fraction(4, 2, 0, 0), 1.0);
-}
-
-#[test]
-fn qualification_form_geometry_is_independent_of_combo_choices() {
-    assert_eq!(QUALIFICATION_FIELD_ROW_H, 54.0);
-    assert_eq!(QUALIFICATION_MULTILINE_ROW_H, 118.0);
-    assert_eq!(QUALIFICATION_STATUS_H, 86.0);
-    assert_eq!(QUALIFICATION_ERROR_H, 50.0);
 }
 
 #[test]

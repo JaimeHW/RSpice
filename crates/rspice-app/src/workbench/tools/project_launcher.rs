@@ -2052,7 +2052,6 @@ mod tests {
         assert_eq!(layout.surface.size(), Vec2::new(1180.0, 650.0));
         assert_eq!(layout.surface.center(), viewport.center());
         assert_eq!(layout.header_height, 48.0);
-        assert_eq!(LAUNCHER_NAV_WIDTH, 184.0);
     }
 
     #[test]

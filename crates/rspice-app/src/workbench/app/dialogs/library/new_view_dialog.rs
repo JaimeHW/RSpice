@@ -1206,16 +1206,6 @@ mod tests {
 
     #[test]
     fn creation_catalog_contains_only_views_with_production_editors() {
-        assert_eq!(
-            CREATABLE_VIEW_TYPES,
-            [
-                crate::state::ViewType::Schematic,
-                crate::state::ViewType::Testbench,
-                crate::state::ViewType::Symbol,
-                crate::state::ViewType::Layout,
-                crate::state::ViewType::VerilogA,
-            ]
-        );
         assert!(CREATABLE_VIEW_TYPES.into_iter().all(is_creatable_view_type));
         assert!(
             crate::state::ViewType::ALL

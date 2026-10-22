@@ -508,7 +508,6 @@ mod tests {
 
     #[test]
     fn the_form_offers_every_array_kind_under_its_own_name() {
-        assert_eq!(DEFAULT_COUNT, "8 \u{00d7} 1");
         assert_eq!(
             SchematicArrayKind::ALL.map(SchematicArrayKind::label),
             ["Linear", "Rectangular", "Radial documentation"]

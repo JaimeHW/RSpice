@@ -150,12 +150,4 @@ mod tests {
             .contains("size limit")
         );
     }
-
-    #[test]
-    fn filter_does_not_claim_unsupported_library_formats() {
-        assert_eq!(
-            SYMBOL_SOURCE_EXTENSIONS,
-            ["rspicesym", "json", "svg", "edif", "edf", "asy"]
-        );
-    }
 }

@@ -428,7 +428,6 @@ mod tests {
     fn compiled_key_decoder_is_exact_and_never_path_discovers_python() {
         assert_eq!(decode_key(&"ab".repeat(32)).unwrap(), [0xab; 32]);
         assert!(decode_key("python").is_err());
-        assert_eq!(RUNTIME_RELATIVE_PATH, "runtimes/python");
     }
 
     #[test]

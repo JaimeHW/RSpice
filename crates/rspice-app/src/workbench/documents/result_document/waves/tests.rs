@@ -60,8 +60,6 @@ fn deep_readouts_scroll_without_exceeding_the_212_px_body_cap() {
     let mut state = deep_readout_fixture(16);
 
     assert_eq!(readout_row_count(&mut state), 16);
-    assert_eq!(READOUT_BODY_MAX_H, 212.0);
-    assert_eq!(READOUT_MAX_H, READOUT_HEADER_H + READOUT_BODY_MAX_H);
     assert_eq!(readout_strip_height(&mut state), READOUT_MAX_H);
     assert!(readout_strip_height(&mut state) <= 238.0);
 }

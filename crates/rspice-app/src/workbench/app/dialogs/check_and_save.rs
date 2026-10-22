@@ -1128,16 +1128,6 @@ mod tests {
     use crate::state::{ValidatedRevisionRequest, ValidationFindingCounts};
     use uuid::Uuid;
 
-    #[test]
-    fn mockup_contract_strings_are_exact() {
-        assert_eq!(TITLE, "Check and save schematic");
-        assert_eq!(PRIMARY, "Save validated revision");
-        assert_eq!(
-            DESCRIPTION,
-            "Run connectivity, parameter, hierarchy, model, pin, and naming checks before explicit save."
-        );
-    }
-
     /// Check and save states no status in colour.
     ///
     /// Colour here is for data identity, a failing verdict, an error

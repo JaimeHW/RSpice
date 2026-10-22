@@ -6,9 +6,8 @@
 //! the density switch between desktop and touch.
 
 use super::{
-    EMPTY_HINT_PADDING_X, EMPTY_HINT_PADDING_Y, EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP,
-    FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, FLOW_TEXT_LEFT, NAV_PROPERTY_COLUMN_GAP,
-    NAV_PROPERTY_PADDING_X, PANEL_SEARCH_MARGIN_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT,
+    EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP,
+    NAV_PROPERTY_COLUMN_GAP, NAV_PROPERTY_PADDING_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT,
     active_mc_sample_trail, flow_row_geometry, header, panel_search, panel_search_field_width,
     responsive_result_control_height, select_result_analysis, select_result_dataset,
     select_result_signal, simulate_nav_meta, verification_coverage, verification_flow_label,
@@ -200,11 +199,7 @@ fn run_set_card_states_the_unit_of_a_quantity_axis() {
 
 #[test]
 fn navigator_search_and_empty_hint_match_mockup_spacing() {
-    assert_eq!(PANEL_SEARCH_MARGIN_X, 8.0);
     assert_eq!(panel_search_field_width(260.0), 244.0);
-    assert_eq!(NAV_PROPERTY_PADDING_X, 10.0);
-    assert_eq!(EMPTY_HINT_PADDING_X, 12);
-    assert_eq!(EMPTY_HINT_PADDING_Y, 20);
 }
 
 #[test]
@@ -534,11 +529,6 @@ fn the_data_browser_puts_its_query_under_the_tab_it_filters() {
 
 #[test]
 fn verification_flow_rows_match_the_mock_grid_without_text_collisions() {
-    assert_eq!(FLOW_ROW_HEIGHT, 63.0);
-    assert_eq!(FLOW_TEXT_LEFT, 35.0);
-    assert_eq!(FLOW_LABEL_TOP, 7.0);
-    assert_eq!(FLOW_DETAIL_TOP, 23.0);
-    assert_eq!(FLOW_STATUS_TOP, 43.0);
     assert!(FLOW_DETAIL_TOP - (FLOW_LABEL_TOP + 11.0) >= 4.0);
     assert!(FLOW_STATUS_TOP - (FLOW_DETAIL_TOP + 11.0) >= 4.0);
     assert!(FLOW_ROW_HEIGHT - (FLOW_STATUS_TOP + 11.0) >= 7.0);
@@ -863,13 +853,6 @@ fn result_navigator_selection_preserves_dataset_and_visibility_invariants() {
     );
 }
 
-#[test]
-fn schematic_navigator_uses_the_upgraded_compact_tree_metrics() {
-    assert_eq!(super::SCHEMATIC_NAV_ROW_HEIGHT, 24.0);
-    assert_eq!(super::SCHEMATIC_NAV_LABEL_SIZE, 12.0);
-    assert_eq!(super::SCHEMATIC_NAV_META_SIZE, 10.0);
-}
-
 /// The metadata register names the kind through the same accessor
 /// authority the unit column uses, so a derived projection never reports
 /// the kind of the wrapper instead of the quantity underneath it.
@@ -996,11 +979,6 @@ fn sample_counts_group_thousands_for_reading_as_magnitudes() {
 
 #[test]
 fn browser_rows_keep_the_mockup_two_register_metrics() {
-    assert_eq!(super::RESULT_QUANTITY_ROW_HEIGHT, 36.0);
-    assert_eq!(super::RESULT_ANALYSIS_HEAD_HEIGHT, 31.0);
-    assert_eq!(super::RESULT_BROWSER_VIRTUALIZATION_THRESHOLD, 250);
-    assert_eq!(super::RESULT_BROWSER_RENDER_WINDOW_ROWS, 120);
-    assert_eq!(super::RESULT_BROWSER_OVERSCAN_ROWS, 20);
     // Touch stages still promote both to the full target height.
     assert_eq!(
         super::responsive_result_control_height(

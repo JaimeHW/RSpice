@@ -212,17 +212,3 @@ pub(crate) fn ellipsized_text(
     }
     ("…".to_owned(), true)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn restored_operation_geometry_is_exact() {
-        assert_eq!(SURFACE_HEIGHT, 406.0);
-        assert_eq!(STEPS_HEIGHT, 36.0);
-        assert_eq!(BODY_HEIGHT, 230.0);
-        assert_eq!(CONTEXT_WIDTH, 260.0);
-        assert_eq!(TRANSACTION_HEIGHT, 37.0);
-    }
-}

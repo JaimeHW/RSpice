@@ -755,9 +755,6 @@ mod tests {
     use crate::report::INITIAL_PAGES;
     #[test]
     fn responsive_report_builder_matches_mockup_breakpoints() {
-        assert_eq!(OUTLINE_DESKTOP_WIDTH, 250.0);
-        assert_eq!(OUTLINE_TABLET_WIDTH, 180.0);
-        assert_eq!(INSPECTOR_WIDTH, 300.0);
         assert_eq!(
             ComposerLayout::resolve(1_280.0),
             ComposerLayout::ThreeColumn

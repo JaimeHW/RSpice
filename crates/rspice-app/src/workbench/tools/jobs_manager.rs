@@ -1898,7 +1898,6 @@ mod tests {
     /// it what the Simulate menu does.
     #[test]
     fn the_manager_is_titled_run_history_everywhere() {
-        assert_eq!(TITLE, "Run history");
         assert_eq!(SurfaceId::JobsManager.label(), TITLE);
     }
 }

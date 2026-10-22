@@ -34,8 +34,6 @@ use menus::{
     file_menu_shows_exit, menu_popup_max_height, shortcut_for_occurrence,
 };
 
-#[cfg(test)]
-const COMMAND_REFERENCE_MENU_LABEL: &str = "Command reference";
 /// The narrowest a menu popup is; it widens to fit its longest row up to
 /// [`MENU_MAX_OUTER_WIDTH`].
 const MENU_OUTER_WIDTH: f32 = 244.0;

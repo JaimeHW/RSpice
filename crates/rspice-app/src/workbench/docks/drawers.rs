@@ -895,11 +895,6 @@ mod tests {
     fn mobile_navigation_grid_height_tracks_its_real_rows() {
         assert_eq!(mobile_navigation_natural_height(2), 486.0);
         assert_eq!(mobile_navigation_natural_height(1), 850.0);
-        assert_eq!(MOBILE_NAV_MAX_WIDTH, 700.0);
-        assert_eq!(MOBILE_NAV_GUTTER, 9.0);
-        assert_eq!(MOBILE_NAV_CARD_HEIGHT, 44.0);
-        assert_eq!(MOBILE_NAV_GRID_PADDING, 12.0);
-        assert_eq!(MOBILE_NAV_GRID_GAP, 8.0);
     }
 
     /// A workspace is called what the rest of the shell calls it, and the

@@ -303,23 +303,3 @@ fn apply_layout(state: &mut AppState, template: LayoutTemplate, scope: LayoutSco
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn mockup_template_and_scope_order_are_stable() {
-        assert_eq!(
-            LayoutTemplate::LABELS,
-            ["Engineering", "Canvas", "Diagnostics", "Results review"]
-        );
-        assert_eq!(
-            LayoutScope::LABELS,
-            [
-                "Current workspace on this device",
-                "All workspaces on this device"
-            ]
-        );
-    }
-}

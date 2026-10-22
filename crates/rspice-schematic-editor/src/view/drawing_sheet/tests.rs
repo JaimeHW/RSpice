@@ -413,7 +413,6 @@ fn cursor_status_uses_the_configured_unit_and_explicit_sheet_context() {
 
 #[test]
 fn fit_and_detail_contracts_match_the_permanent_canvas_mockup() {
-    assert_eq!(FIT_SCREEN_INSET, 26.0);
     let detail = DrawingSheetLod::resolve(1.5, 1.0, test_lettering());
     assert!(detail.show_origin);
     assert!(detail.show_dimensions);

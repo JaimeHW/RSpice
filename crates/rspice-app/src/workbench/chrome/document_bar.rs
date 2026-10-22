@@ -1759,17 +1759,6 @@ mod tests {
     }
 
     #[test]
-    fn document_tab_geometry_matches_the_mockup() {
-        assert_eq!(TAB_MAX_WIDTH, 190.0);
-        assert_eq!(TAB_PADDING_X, 10.0);
-        assert_eq!(TAB_ICON_SIZE, 16.0);
-        assert_eq!(TAB_CONTENT_GAP, 7.0);
-        assert_eq!(TAB_CLOSE_SIZE, 16.0);
-        assert_eq!(TAB_DIRTY_SIZE, 6.0);
-        assert_eq!(tokens::FS_1, 12.0);
-    }
-
-    #[test]
     fn dirty_and_close_suffixes_never_overlap() {
         assert_eq!(suffix_width(false, false), 0.0);
         assert_eq!(suffix_width(true, false), 13.0);

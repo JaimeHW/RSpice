@@ -3,9 +3,7 @@ use super::*;
 use rspice_results_ui::session::ResultViewerState;
 use rspice_results_ui::waves::dock::{self, MarkerActions, ReadoutInput};
 #[cfg(test)]
-pub(super) use rspice_results_ui::waves::dock::{
-    MARKER_ROW_H, READOUT_BODY_MAX_H, READOUT_HEADER_H, READOUT_MAX_H,
-};
+pub(super) use rspice_results_ui::waves::dock::{MARKER_ROW_H, READOUT_HEADER_H, READOUT_MAX_H};
 #[cfg(test)]
 pub(super) use rspice_results_ui::waves::readout::{
     MAX_READOUT_BRANCHES, READOUT_ABSENT, READOUT_ROW_H, ReadoutRow, measurement_values,

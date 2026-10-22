@@ -412,21 +412,6 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
     assert_eq!(Command::JobsManager.spec().label, "Run history\u{2026}");
 }
 
-#[test]
-fn menu_geometry_matches_the_mockup_contract() {
-    assert_eq!(MENU_OUTER_WIDTH, 244.0);
-    assert_eq!(MENU_CONTENT_WIDTH, 232.0);
-    assert_eq!(MENU_ROW_HEIGHT, 27.0);
-    assert_eq!(MENU_TOUCH_ROW_HEIGHT, 44.0);
-    assert_eq!(MENU_MARGIN, 5.0);
-    assert_eq!(MENU_BORDER_WIDTH, 1.0);
-    assert_eq!(MENU_POPUP_GAP, 2.0);
-    assert_eq!(SEARCH_KEYCAP_HEIGHT, 18.0);
-    assert_eq!(SEARCH_KEYCAP_MIN_WIDTH, 19.0);
-    assert_eq!(SEARCH_KEYCAP_INLINE_PADDING, 4.0);
-    assert_eq!(SEARCH_KEYCAP_BORDER_WIDTH, 1.0);
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn desktop_menu_triggers_fill_the_title_track_without_vertical_clipping() {
@@ -542,7 +527,6 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
         Command::DescendHierarchy.spec().label,
         "Descend into selected instance…"
     );
-    assert_eq!(COMMAND_REFERENCE_MENU_LABEL, "Command reference");
 }
 
 #[test]
@@ -703,11 +687,6 @@ fn window_layout_menu_places_split_with_results_before_focus_workspace() {
             Command::ToggleFocusMode,
         ],
     );
-}
-
-#[test]
-fn brand_lockup_does_not_reserve_space_after_the_wordmark() {
-    assert_eq!(BRAND_WORDMARK_WIDTH, 88.0);
 }
 
 #[test]

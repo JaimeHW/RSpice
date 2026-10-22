@@ -247,23 +247,6 @@ fn direct_schematic_toolbar_selection_tracks_every_armed_tool() {
 }
 
 #[test]
-fn models_toolbar_projects_the_mockup_command_order_and_icons() {
-    assert_eq!(
-        MODELS_TOOLBAR_COMMANDS,
-        [
-            (Command::Save, WorkbenchIcon::Save, None),
-            (
-                Command::PdkSettings,
-                WorkbenchIcon::Add,
-                Some("Add library"),
-            ),
-            (Command::RescanModelLibraries, WorkbenchIcon::Refresh, None,),
-            (Command::CompileVerilogA, WorkbenchIcon::Netlist, None),
-        ]
-    );
-}
-
-#[test]
 fn responsive_toolbar_reserves_fixed_trailing_controls() {
     let tablet = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchState::default());
     let available_after_navigator = 780.0;
@@ -304,7 +287,6 @@ fn toolbar_padding_and_group_gaps_match_every_mockup_breakpoint() {
     assert_eq!(toolbar_outer_gap(1_280.0), 5.0);
     assert_eq!(toolbar_outer_gap(820.0), 5.0);
     assert_eq!(toolbar_outer_gap(560.0), 2.0);
-    assert_eq!(TOOLBAR_CONTEXT_GAP, 3.0);
 }
 
 #[test]

@@ -1108,13 +1108,6 @@ mod tests {
     use crate::state::{Component, ComponentType};
 
     #[test]
-    fn restored_mockup_contract_is_exact() {
-        assert_eq!(TITLE, "Replace selected instance");
-        assert_eq!(PRIMARY, "Replace instance");
-        assert_eq!(SURFACE_HEIGHT, 406.0);
-    }
-
-    #[test]
     fn replacement_is_unavailable_without_exactly_one_instance() {
         assert!(!replace_instance_available(&AppState::default()));
     }

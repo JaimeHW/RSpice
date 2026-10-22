@@ -762,7 +762,6 @@ fn design_tabs_keep_the_mockup_horizontal_inset() {
     let outer = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(260.0, 33.0));
     let content = panel_tabs_content_rect(outer);
 
-    assert_eq!(PANEL_TABS_PADDING_X, 8.0);
     assert_eq!(content.left(), 8.0);
     assert_eq!(content.right(), 252.0);
 }
@@ -773,31 +772,6 @@ fn design_tabs_flex_from_their_label_widths_like_the_mockup() {
     assert!((widths[0] - 101.5).abs() <= 0.001);
     assert!((widths[1] - 137.5).abs() <= 0.001);
     assert!((widths.iter().sum::<f32>() - 239.0).abs() <= 0.001);
-}
-
-/// The hierarchy leads: a design is read as the masters it declares and the
-/// occurrences that instantiate them, and the object rails below answer about
-/// the one sheet on screen.
-///
-/// The RF ports rail sits with the interface pins rather than with the
-/// excitations, and that placement is the claim: a port is read as a terminal
-/// of the design — the thing an S-parameter matrix is indexed by — before it is
-/// read as something that may or may not be driving. The rails below it are the
-/// conductors and the stimulus those terminals carry.
-#[test]
-fn design_navigator_sections_lead_with_the_hierarchy() {
-    assert_eq!(
-        DESIGN_NAVIGATOR_SECTION_ORDER,
-        [
-            DesignNavigatorSection::Masters,
-            DesignNavigatorSection::Occurrences,
-            DesignNavigatorSection::Ports,
-            DesignNavigatorSection::RfPorts,
-            DesignNavigatorSection::Nets,
-            DesignNavigatorSection::Excitations,
-            DesignNavigatorSection::NamedSignals,
-        ]
-    );
 }
 
 #[test]

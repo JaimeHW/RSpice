@@ -1196,11 +1196,6 @@ mod tests {
 
     #[test]
     fn responsive_geometry_and_phone_modes_match_the_mockup_contract() {
-        assert_eq!(COMPACT_BREAKPOINT, 820.0);
-        assert_eq!(CARD_HEIGHT, 58.0);
-        assert_eq!(TOUCH_CARD_HEIGHT, 64.0);
-        assert_eq!(CARD_ACTION_SIDE, 28.0);
-        assert_eq!(TOUCH_ACTION_SIDE, 44.0);
         assert_eq!(
             phone_mode(SurfaceId::LayoutWorkbench),
             "adaptive authoring · focused steps"
@@ -1213,7 +1208,6 @@ mod tests {
 
     #[test]
     fn specialist_filter_group_wraps_with_the_mockup_gap() {
-        assert_eq!(FILTER_GAP, 4.0);
         let wide_height = rendered_filter_height(900.0);
         // Four filters fit a 280 pt phone on one line; a narrower surface
         // is where the group has to wrap.

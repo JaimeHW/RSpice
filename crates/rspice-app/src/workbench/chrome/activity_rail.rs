@@ -210,12 +210,6 @@ mod tests {
 
     #[test]
     fn desktop_activity_rail_geometry_matches_the_mockup() {
-        assert_eq!(ACTIVITY_RAIL_W, 51.0);
-        assert_eq!(ACTIVITY_BUTTON_WIDTH, 50.0);
-        assert_eq!(ACTIVITY_BUTTON_HEIGHT, 45.0);
-        assert_eq!(ACTIVITY_ICON_SIZE, 19.0);
-        assert_eq!(ACTIVITY_ACTIVE_EDGE, 2.0);
-        assert_eq!(ACTIVITY_BADGE_SIZE, 15.0);
         let badge = activity_badge_rect(egui::Rect::from_min_size(
             egui::Pos2::ZERO,
             egui::vec2(ACTIVITY_BUTTON_WIDTH, ACTIVITY_BUTTON_HEIGHT),

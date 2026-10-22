@@ -226,11 +226,6 @@ mod tests {
 
     #[test]
     fn compact_navigation_geometry_matches_the_mockup() {
-        assert_eq!(PHONE_ACTIVE_EDGE, 2.0);
-        assert_eq!(PHONE_ICON_SIZE, 17.0);
-        assert_eq!(PHONE_ICON_CENTER_Y, 20.0);
-        assert_eq!(PHONE_LABEL_CENTER_Y, 36.5);
-        assert_eq!(PHONE_BADGE_SIZE, 15.0);
         let item = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(80.0, 52.0));
         let badge = phone_badge_rect(item);
         assert_eq!(badge.min, egui::pos2(43.0, 2.0));

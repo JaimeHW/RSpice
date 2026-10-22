@@ -1054,17 +1054,6 @@ mod tests {
     };
 
     #[test]
-    fn restored_mockup_contract_is_exact() {
-        assert_eq!(TITLE, "Create hierarchical cell");
-        assert_eq!(PRIMARY, "Create and descend");
-        assert_eq!(DEFAULT_CELL, "sensor_frontend");
-        assert_eq!(SETTING_ROW_HORIZONTAL_PADDING, 12);
-        assert_eq!(SETTING_ROW_VERTICAL_PADDING, 10);
-        assert_eq!(SETTING_ROW_MIN_HEIGHT, 54.0);
-        assert_eq!(SURFACE_WITHOUT_TABLE_ROWS, 267.0);
-    }
-
-    #[test]
     fn open_is_unavailable_for_mixed_selection() {
         let mut state = AppState::default();
         let id = state

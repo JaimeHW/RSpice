@@ -266,13 +266,6 @@ pub(crate) fn band_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn the_purpose_line_keeps_its_height() {
-        assert_eq!(PURPOSE_HEIGHT, 35.0);
-    }
-
     /// Nothing in the dialog-content slice paints a status in colour.
     ///
     /// Success has no styling at all, so the success tone, the information

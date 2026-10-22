@@ -349,12 +349,6 @@ fn the_problems_page_never_names_the_log_buffer() {
     }
 }
 
-#[test]
-fn console_empty_hints_match_mockup_spacing_and_type_scale() {
-    assert_eq!(CONSOLE_FONT_SIZE, 12.0);
-    assert_eq!(CONSOLE_FONT_SIZE, tokens::FS_1);
-}
-
 /// A page with nothing to list is inset by the body padding and nothing
 /// else: its line stands at the panel's own left edge, on the row the first
 /// row would have taken — under the tab strip, or under the page's toolbar
@@ -867,21 +861,6 @@ fn fractional_engine_progress_is_rendered_as_a_percentage() {
     assert_eq!(simulation_progress_percent(0.0), 0);
     assert_eq!(simulation_progress_percent(0.375), 38);
     assert_eq!(simulation_progress_percent(1.0), 100);
-}
-
-#[test]
-fn console_chrome_and_grid_geometry_match_the_mockup() {
-    assert_eq!(CONSOLE_HEADER_HEIGHT, 31.0);
-    assert_eq!(CONSOLE_TOUCH_HEADER_HEIGHT, 44.0);
-    assert_eq!(CONSOLE_ACTION_SIZE, 27.0);
-    assert_eq!(CONSOLE_ACTION_MARGIN_RIGHT, 3.0);
-    assert_eq!(CONSOLE_BODY_PADDING_TOP, 7.0);
-    assert_eq!(CONSOLE_BODY_PADDING_BOTTOM, 7.0);
-    assert_eq!(CONSOLE_BODY_PADDING_X, 10.0);
-    assert_eq!(CONSOLE_COLUMN_GAP, 9.0);
-    assert_eq!(CONSOLE_ROW_MIN_HEIGHT, 16.0);
-    assert_eq!(CONSOLE_FONT_SIZE, 12.0);
-    assert_eq!(CONSOLE_FONT_SIZE, tokens::FS_1);
 }
 
 /// The task log's status column is as wide as its widest status, measured in

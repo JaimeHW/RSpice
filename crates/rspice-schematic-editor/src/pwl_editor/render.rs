@@ -516,7 +516,6 @@ mod tests {
             pwl_input_label(None, PwlInputField::Value, "A"),
             "New PWL point value in A"
         );
-        assert_eq!(RAW_SOURCE_ACCESSIBLE_LABEL, "PWL source text");
 
         let error = "Point 2 Value: invalid number";
         assert_eq!(

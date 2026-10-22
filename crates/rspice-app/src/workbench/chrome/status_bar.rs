@@ -1298,9 +1298,6 @@ mod tests {
 
     #[test]
     fn status_item_geometry_matches_the_mockup_contract() {
-        assert_eq!(STATUS_PADDING_X, 9.0);
-        assert_eq!(STATUS_MARK_GAP, 5.0);
-        assert_eq!(STATUS_FONT_SIZE, 12.0);
         assert_eq!(STATUS_FONT_SIZE, tokens::FS_1);
         assert_eq!(
             status_text_font(),

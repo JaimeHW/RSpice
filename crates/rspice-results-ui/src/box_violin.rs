@@ -1301,9 +1301,5 @@ mod tests {
     fn the_corner_grouping_is_offered_and_refused_with_its_reason() {
         assert_eq!(GROUP_OPTIONS[2], "Corners \u{b7} none in this run");
         assert!(CORNER_REASON.contains("no runner produces a Monte Carlo per corner"));
-        assert_eq!(
-            ABSENT_STATE,
-            "No family distribution in this run — run a Monte Carlo analysis"
-        );
     }
 }

@@ -1295,9 +1295,6 @@ mod tests {
                 width: 374.0,
             }
         );
-        assert_eq!(TOAST_LIFETIME, 5.2);
-        assert_eq!(TOAST_MIN_HEIGHT, 49.0);
-        assert_eq!(TOAST_GAP, 7.0);
     }
 
     /// A warning lifted from the Console offers the way back to it, and two

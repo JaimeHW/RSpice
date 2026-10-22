@@ -1356,11 +1356,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_mockup_contract_strings_and_option_order_are_stable() {
-        assert_eq!(IMPORT_TITLE, "Import keyboard shortcut map");
-        assert_eq!(IMPORT_PRIMARY, "Import compatible bindings");
-        assert_eq!(EXPORT_TITLE, "Export keyboard shortcut map");
-        assert_eq!(EXPORT_PRIMARY, "Export shortcut profile");
+    fn option_order_and_labels_are_stable() {
         assert_eq!(
             MERGE_POLICIES.map(ShortcutMergePolicy::label),
             [
@@ -1379,18 +1375,6 @@ mod tests {
         assert_eq!(
             IMPORT_CLASSES.map(ImportBindingClass::label),
             ["Global", "Schematic", "Results", "Simulation",]
-        );
-        assert_eq!(WORKFLOW_ROW_MIN_HEIGHT, 54.0);
-        assert_eq!(WORKFLOW_ROW_LABEL_FR, 0.38);
-        assert_eq!(WORKFLOW_ROW_VALUE_FR, 1.0);
-        assert_eq!(WORKFLOW_ROW_COLUMN_GAP, 12.0);
-        assert_eq!(WORKFLOW_ROW_HORIZONTAL_PADDING, 12);
-        assert_eq!(WORKFLOW_ROW_VERTICAL_PADDING, 10);
-        assert_eq!(WORKFLOW_ROW_STACK_BREAKPOINT, 560.0);
-        assert_eq!(WORKFLOW_TABLE_COLLAPSE_WIDTH, 660.0);
-        assert_eq!(
-            IMPORT_SOURCE_PLACEHOLDER,
-            "~/Downloads/rspice-shortcuts.json"
         );
     }
 

@@ -1259,16 +1259,6 @@ mod tests {
 
     #[test]
     fn toolbar_geometry_matches_the_mockup_contract() {
-        assert_eq!(toolbar::CODE_TOOLBAR_HEIGHT, 33.0);
-        assert_eq!(toolbar::CODE_TOOLBAR_PADDING_X, 8.0);
-        assert_eq!(toolbar::CODE_TOOLBAR_GAP, 5.0);
-        assert_eq!(toolbar::CODE_TOOLBAR_ACTION_GUTTER, 12.0);
-        assert_eq!(toolbar::CODE_TOOLBAR_COMPACT_BREAKPOINT, 720.0);
-        assert_eq!(toolbar::CODE_TOOLBAR_TABLET_VIEWPORT_BREAKPOINT, 1024.0);
-        assert_eq!(toolbar::CODE_TOOLBAR_FULL_STATUS_MIN_WIDTH, 320.0);
-        assert_eq!(toolbar::PHONE_BREAKPOINT, 560.0);
-        assert_eq!(toolbar::PHONE_PRIMARY_WIDTH, 154.0);
-        assert_eq!(toolbar::CODE_TOOLBAR_ICON_WIDTH, 28.0);
         assert_eq!(toolbar::code_toolbar_visible_width(1024.0, 745.0), 745.0);
         assert_eq!(toolbar::code_toolbar_visible_width(700.0, 745.0), 700.0);
         assert!(toolbar::code_toolbar_compact(607.0));

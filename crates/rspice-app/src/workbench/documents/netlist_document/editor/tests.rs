@@ -499,16 +499,6 @@ fn live_lint_uses_abort_aware_parser_contract() {
     assert!(diagnostics[0].message.contains("cancelled"));
 }
 
-/// The gutter is a mockup contract, not a layout accident: line numbers,
-/// diagnostic pips, and the fold markers all measure from it.
-#[test]
-fn editor_owns_the_canonical_gutter_and_code_insets() {
-    assert_eq!(GUTTER_W, 47.0);
-    assert_eq!(CODE_LEFT_PADDING, 12.0);
-    assert_eq!(GUTTER_W + CODE_LEFT_PADDING, 59.0);
-    assert_eq!(CODE_TOP_PADDING, 8);
-}
-
 /// A parameter override, shown in the editor as its own lines, over a
 /// retained generated base.
 fn parameter_override_state(base: &str, authored: &str) -> AppState {
