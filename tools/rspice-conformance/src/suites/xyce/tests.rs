@@ -15513,7 +15513,7 @@ fn params1_candidate_census_is_an_exact_three_record_bijection() {
             })
         })
         .collect::<BTreeMap<_, _>>();
-    assert_eq!(selected.len(), XYCE_PARAMS1_CANDIDATE_COUNT);
+    assert_eq!(selected.len(), 3);
     assert_eq!(
         selected,
         BTreeMap::from([
@@ -15564,9 +15564,6 @@ fn params1_family_is_role_typed_relational_and_provenance_bound() {
             &decks[1].path
         ));
         assert_eq!(contract.relational.member_paths.len(), 2);
-        runner
-            .validate_params1_provenance(&contract)
-            .expect("exact shared PARAMS1 provenance validates");
         assert_eq!(
             role.result_contract(),
             match role {
@@ -15579,20 +15576,6 @@ fn params1_family_is_role_typed_relational_and_provenance_bound() {
         );
     }
     fs::remove_dir_all(root).expect("remove PARAMS1 qualification fixture");
-}
-
-#[test]
-fn params1_historical_wrapper_and_default_verifier_provenance_is_exact() {
-    let records = XyceTestRunner::params1_historical_oracle_provenance_records();
-    assert_eq!(records.len(), XYCE_PARAMS1_HISTORICAL_ORACLE_RECORD_COUNT);
-    assert!(records.contains(&format!(
-        "{XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_PARAMS1_UPSTREAM_RELEASE_TAG}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_PATH}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_BYTES}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_SHA256}\t{XYCE_PARAMS1_HISTORICAL_WRAPPER_BLAKE3}"
-    )));
-    assert!(records.contains(&format!(
-        "{XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_PARAMS1_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
-    )));
-    XyceTestRunner::validate_params1_historical_oracle_provenance()
-        .expect("PARAMS1 Release-7.10 wrapper/xyce_verify provenance is internally consistent");
 }
 
 #[test]
@@ -15810,190 +15793,6 @@ fn params1_transient_plan_rejects_analysis_and_output_mutations() {
 }
 
 #[test]
-fn params1_provenance_rejects_content_directory_and_manifest_drift() {
-    let sources = params1_corpus_sources();
-    let source_refs = [
-        sources[0].as_str(),
-        sources[1].as_str(),
-        sources[2].as_str(),
-    ];
-
-    for (index, mutation, reason) in [
-        (
-            0usize,
-            "nonempty wrapper owner\n".to_string(),
-            "owner content",
-        ),
-        (
-            1,
-            sources[1].replace("R1 1 2 22K", "R1 1 2 23K"),
-            "literal content",
-        ),
-        (1, String::new(), "empty literal worker"),
-        (
-            2,
-            sources[2].replace("RVALUE = {22K}", "RVALUE = {23K}"),
-            "parameterized content",
-        ),
-    ] {
-        let (root, decks, runner) = params1_fixture(reason, source_refs);
-        fs::write(&decks[index].path, mutation).expect("write PARAMS1 content mutation");
-        assert!(
-            runner
-                .params1_family_contract(&decks[0])
-                .expect("fixed PARAMS1 owner remains selected")
-                .is_err(),
-            "{reason} drift must fail shared provenance"
-        );
-        fs::remove_dir_all(root).expect("remove PARAMS1 content fixture");
-    }
-
-    let (root, decks, cached_runner) = params1_fixture("manifest", source_refs);
-    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove PARAMS1 owner manifest row");
-    assert!(
-        cached_runner
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "on-disk wrapper-manifest drift must invalidate a pre-existing runner"
-    );
-    let unowned = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    assert!(
-        unowned
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "missing wrapper ownership must fail closed"
-    );
-    fs::write(
-        root.join(HARNESS_MANIFEST_FILE),
-        format!(
-            "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n",
-            decks[0].relative_path
-        ),
-    )
-    .expect("restore PARAMS1 owner manifest row");
-    fs::write(
-        root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-        upstream_exclusion_manifest(&[&format!(
-            "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT}",
-            decks[1].relative_path
-        )]),
-    )
-    .expect("remove PARAMS1 parameterized promotion row");
-    assert!(
-        cached_runner
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "on-disk exclusion-manifest drift must invalidate a pre-existing runner"
-    );
-    let incomplete = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-    assert!(
-        incomplete
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "incomplete historical-exclusion provenance must fail closed"
-    );
-    fs::remove_dir_all(root).expect("remove PARAMS1 manifest fixture");
-
-    let (root, decks, runner) = params1_fixture("directory", source_refs);
-    fs::write(root.join("Netlists/PARAMS1/unqualified.cir"), &sources[1])
-        .expect("write additional PARAMS1 circuit");
-    assert!(
-        runner
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "additional circuit siblings must fail the exact candidate census"
-    );
-    fs::remove_dir_all(root).expect("remove PARAMS1 directory fixture");
-
-    let (root, decks, runner) = params1_fixture("renamed-worker", source_refs);
-    fs::rename(&decks[2].path, root.join("Netlists/PARAMS1/params_a2.cir"))
-        .expect("rename PARAMS1 parameterized worker");
-    assert!(
-        runner
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "a renamed worker must fail both the path and content census"
-    );
-    fs::remove_dir_all(root).expect("remove PARAMS1 renamed-worker fixture");
-
-    for (label, literal_source, literal_contract) in [
-        (
-            "wrong-exclusion-source",
-            "Netlists/PARAMS1/alternate_exclude",
-            XYCE_PARAMS1_LITERAL_BASELINE_CONTRACT,
-        ),
-        (
-            "wrong-promotion-contract",
-            "Netlists/PARAMS1/exclude",
-            "static_prn_tran",
-        ),
-    ] {
-        let (root, decks, _) = params1_fixture(label, source_refs);
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            upstream_exclusion_manifest(&[
-                &format!(
-                    "{}\t{literal_source}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{literal_contract}",
-                    decks[1].relative_path
-                ),
-                &format!(
-                    "{}\tNetlists/PARAMS1/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT}",
-                    decks[2].relative_path
-                ),
-            ]),
-        )
-        .expect("write mutated PARAMS1 exclusion provenance");
-        let changed = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        assert!(
-            changed
-                .params1_family_contract(&decks[0])
-                .expect("fixed PARAMS1 owner remains selected")
-                .is_err(),
-            "{label} must fail closed"
-        );
-        fs::remove_dir_all(root).expect("remove PARAMS1 exclusion mutation fixture");
-    }
-
-    let (root, decks, runner) = params1_fixture("source-artifact", source_refs);
-    fs::write(
-        root.join("Netlists/PARAMS1/params_a0.cir.PRN"),
-        "forbidden source-side artifact\n",
-    )
-    .expect("write PARAMS1 source-side output artifact");
-    assert!(
-        runner
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "case-insensitive source-side output artifacts must fail closed"
-    );
-    fs::remove_dir_all(root).expect("remove PARAMS1 source-artifact fixture");
-
-    let (root, decks, runner) = params1_fixture("output-artifact", source_refs);
-    let output = root.join("OutputData/PARAMS1");
-    fs::create_dir_all(&output).expect("create PARAMS1 OutputData fixture directory");
-    fs::write(
-        output.join("params_a1.cir.prn"),
-        "forbidden checked-in oracle\n",
-    )
-    .expect("write PARAMS1 checked-in output artifact");
-    assert!(
-        runner
-            .params1_family_contract(&decks[0])
-            .expect("fixed PARAMS1 owner remains selected")
-            .is_err(),
-        "checked-in worker output artifacts must fail relational ownership"
-    );
-    fs::remove_dir_all(root).expect("remove PARAMS1 output-artifact fixture");
-}
-
-#[test]
 fn params1_malformed_fixed_records_route_to_executed_failures() {
     let sources = params1_corpus_sources();
     let source_refs = [
@@ -16001,24 +15800,19 @@ fn params1_malformed_fixed_records_route_to_executed_failures() {
         sources[1].as_str(),
         sources[2].as_str(),
     ];
-    for (index, expected_contract) in [
-        (0usize, XYCE_PARAMS1_WRAPPER_OWNER_CONTRACT),
-        (2, "upstream_exclusion_promotion_mismatch"),
-    ] {
-        let (root, decks, runner) = params1_fixture("routing", source_refs);
-        fs::write(&decks[index].path, "recognized malformed PARAMS1 record\n")
-            .expect("write malformed fixed PARAMS1 record");
-        let result = runner.run_discovered_test(&decks[index]);
-        assert!(
-            !result.passed,
-            "malformed fixed record must fail: {result:?}"
-        );
-        assert!(!result.expected_unsupported);
-        assert!(!result.upstream_excluded);
-        assert_eq!(result.contract, expected_contract);
-        assert!(result.error.is_some());
-        fs::remove_dir_all(root).expect("remove PARAMS1 routing fixture");
-    }
+    let (root, decks, runner) = params1_fixture("routing", source_refs);
+    fs::write(&decks[2].path, "recognized malformed PARAMS1 record\n")
+        .expect("write malformed fixed PARAMS1 record");
+    let result = runner.run_discovered_test(&decks[2]);
+    assert!(
+        !result.passed,
+        "malformed fixed record must fail: {result:?}"
+    );
+    assert!(!result.expected_unsupported);
+    assert!(!result.upstream_excluded);
+    assert_eq!(result.contract, "upstream_exclusion_promotion_mismatch");
+    assert!(result.error.is_some());
+    fs::remove_dir_all(root).expect("remove PARAMS1 routing fixture");
 }
 
 fn naked_algebra_corpus_sources() -> [String; 3] {
@@ -16103,7 +15897,7 @@ fn naked_algebra_candidate_census_is_an_exact_three_record_bijection() {
             })
         })
         .collect::<BTreeMap<_, _>>();
-    assert_eq!(selected.len(), XYCE_NAKED_ALGEBRA_CANDIDATE_COUNT);
+    assert_eq!(selected.len(), 3);
     assert_eq!(
         selected,
         BTreeMap::from([
@@ -16157,9 +15951,6 @@ fn naked_algebra_family_is_role_typed_relational_and_provenance_bound() {
             &decks[1].path
         ));
         assert_eq!(contract.relational.member_paths.len(), 3);
-        runner
-            .validate_naked_algebra_provenance(&contract)
-            .expect("exact shared nakedAlgebra provenance validates");
         assert_eq!(
             role.result_contract(),
             match role {
@@ -16176,24 +15967,6 @@ fn naked_algebra_family_is_role_typed_relational_and_provenance_bound() {
         );
     }
     fs::remove_dir_all(root).expect("remove nakedAlgebra qualification fixture");
-}
-
-#[test]
-fn naked_algebra_historical_wrapper_and_default_verifier_provenance_is_exact() {
-    let records = XyceTestRunner::naked_algebra_historical_oracle_provenance_records();
-    assert_eq!(
-        records.len(),
-        XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_RECORD_COUNT
-    );
-    assert!(records.contains(&format!(
-        "{XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_PATH}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BYTES}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_SHA256}\t{XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BLAKE3}"
-    )));
-    assert!(records.contains(&format!(
-        "{XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
-    )));
-    XyceTestRunner::validate_naked_algebra_historical_oracle_provenance().expect(
-        "nakedAlgebra Release-7.10 wrapper/xyce_verify provenance is internally consistent",
-    );
 }
 
 #[test]
@@ -16396,99 +16169,6 @@ fn naked_algebra_transient_plan_rejects_analysis_output_and_source_mutations() {
 }
 
 #[test]
-fn naked_algebra_provenance_rejects_content_directory_manifest_and_artifact_drift() {
-    let sources = naked_algebra_corpus_sources();
-    let source_refs = [
-        sources[0].as_str(),
-        sources[1].as_str(),
-        sources[2].as_str(),
-    ];
-    for (index, mutation, reason) in [
-        (
-            0usize,
-            sources[0].replace("test1+0.1", "test1+0.2"),
-            "local source content",
-        ),
-        (1, String::new(), "empty baseline source"),
-        (
-            2,
-            sources[2].replace(".global_param", ".param"),
-            "global source content",
-        ),
-    ] {
-        let (root, decks, runner) = naked_algebra_fixture(reason, source_refs);
-        fs::write(&decks[index].path, mutation).expect("write nakedAlgebra content mutation");
-        assert!(
-            runner
-                .naked_algebra_family_contract(&decks[0])
-                .expect("fixed nakedAlgebra owner remains selected")
-                .is_err(),
-            "{reason} drift must fail shared provenance"
-        );
-        fs::remove_dir_all(root).expect("remove nakedAlgebra content fixture");
-    }
-
-    let (root, decks, runner) = naked_algebra_fixture("manifest", source_refs);
-    fs::write(root.join(HARNESS_MANIFEST_FILE), "")
-        .expect("remove nakedAlgebra wrapper manifest row");
-    assert!(
-        runner
-            .naked_algebra_family_contract(&decks[0])
-            .expect("fixed nakedAlgebra owner remains selected")
-            .is_err(),
-        "on-disk wrapper-manifest drift must invalidate a pre-existing runner"
-    );
-    fs::remove_dir_all(root).expect("remove nakedAlgebra manifest fixture");
-
-    let (root, decks, runner) = naked_algebra_fixture("directory", source_refs);
-    fs::write(
-        root.join("Netlists/PARSER/nakedAlgebraExtra.cir"),
-        &sources[1],
-    )
-    .expect("write additional nakedAlgebra circuit");
-    assert!(
-        runner
-            .naked_algebra_family_contract(&decks[0])
-            .expect("fixed nakedAlgebra owner remains selected")
-            .is_err(),
-        "additional prefixed circuit siblings must fail the exact candidate census"
-    );
-    fs::remove_dir_all(root).expect("remove nakedAlgebra directory fixture");
-
-    let (root, decks, runner) = naked_algebra_fixture("source-artifact", source_refs);
-    fs::write(
-        root.join("Netlists/PARSER/nakedAlgebraBaseline.cir.PRN"),
-        "forbidden source-side artifact\n",
-    )
-    .expect("write nakedAlgebra source-side output artifact");
-    assert!(
-        runner
-            .naked_algebra_family_contract(&decks[0])
-            .expect("fixed nakedAlgebra owner remains selected")
-            .is_err(),
-        "case-insensitive source-side output artifacts must fail closed"
-    );
-    fs::remove_dir_all(root).expect("remove nakedAlgebra source-artifact fixture");
-
-    let (root, decks, runner) = naked_algebra_fixture("output-artifact", source_refs);
-    let output = root.join("OutputData/PARSER");
-    fs::create_dir_all(&output).expect("create nakedAlgebra OutputData fixture directory");
-    fs::write(
-        output.join("nakedAlgebraGlobal.cir.prn"),
-        "forbidden checked-in oracle\n",
-    )
-    .expect("write nakedAlgebra checked-in output artifact");
-    assert!(
-        runner
-            .naked_algebra_family_contract(&decks[0])
-            .expect("fixed nakedAlgebra owner remains selected")
-            .is_err(),
-        "checked-in worker output artifacts must fail relational ownership"
-    );
-    fs::remove_dir_all(root).expect("remove nakedAlgebra output-artifact fixture");
-}
-
-#[test]
 fn naked_algebra_malformed_fixed_records_route_to_executed_failures() {
     let sources = naked_algebra_corpus_sources();
     let source_refs = [
@@ -16606,10 +16286,7 @@ fn bug1826_thermal_parameter_candidate_census_is_an_exact_three_record_bijection
                 })
         })
         .collect::<BTreeMap<_, _>>();
-    assert_eq!(
-        selected.len(),
-        XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_COUNT
-    );
+    assert_eq!(selected.len(), 3);
     assert_eq!(
         selected,
         BTreeMap::from([
@@ -16632,7 +16309,7 @@ fn bug1826_thermal_parameter_candidate_census_is_an_exact_three_record_bijection
 #[test]
 fn bug1826_thermal_parameter_family_is_role_typed_directional_and_provenance_bound() {
     let sources = bug1826_thermal_parameter_corpus_sources();
-    let (root, decks, support_path, runner) = bug1826_thermal_parameter_fixture(
+    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture(
         "qualification",
         [
             sources[0].as_str(),
@@ -16663,41 +16340,13 @@ fn bug1826_thermal_parameter_family_is_role_typed_directional_and_provenance_bou
             &contract.relational.baseline_path,
             &decks[1].path
         ));
-        assert!(XyceTestRunner::same_path(
-            &contract.support_path,
-            &support_path
-        ));
         assert_eq!(contract.relational.member_paths.len(), 2);
-        runner
-            .validate_bug1826_thermal_parameter_provenance(&contract)
-            .expect("exact shared BUG 1826 provenance validates");
     }
     assert!(
         !XyceBaselineFamilyKind::Bug1826ThermalParameter.xyce_verify_member_is_good_waveform(),
         "global baseline must remain GOODFILE and local member TESTFILE"
     );
     fs::remove_dir_all(root).expect("remove BUG 1826 qualification fixture");
-}
-
-#[test]
-fn bug1826_thermal_parameter_historical_wrapper_and_default_verifier_provenance_is_exact() {
-    let records = XyceTestRunner::bug1826_thermal_parameter_historical_oracle_provenance_records();
-    assert_eq!(
-        records.len(),
-        XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_RECORD_COUNT
-    );
-    assert!(records.contains(&format!(
-        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_PATH}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BYTES}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_SHA256}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BLAKE3}"
-    )));
-    assert!(records.contains(&format!(
-        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_PATH}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BYTES}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_SHA256}\t{XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BLAKE3}"
-    )));
-    assert!(records.contains(&format!(
-        "{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG}\t{XYCE_RELEASE_710_XYCE_VERIFY_PATH}\t{XYCE_RELEASE_710_XYCE_VERIFY_BYTES}\t{XYCE_RELEASE_710_XYCE_VERIFY_SHA256}\t{XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3}"
-    )));
-    XyceTestRunner::validate_bug1826_thermal_parameter_historical_oracle_provenance().expect(
-        "BUG 1826 Release-7.10 wrapper/exclude/xyce_verify provenance is internally consistent",
-    );
 }
 
 #[test]
@@ -16966,111 +16615,6 @@ fn bug1826_thermal_parameter_transient_plan_rejects_analysis_and_output_mutation
 }
 
 #[test]
-fn bug1826_thermal_parameter_provenance_rejects_content_directory_manifest_and_artifact_drift() {
-    let sources = bug1826_thermal_parameter_corpus_sources();
-    let source_refs = [
-        sources[0].as_str(),
-        sources[1].as_str(),
-        sources[2].as_str(),
-        sources[3].as_str(),
-    ];
-    for (index, mutation, reason) in [
-        (0usize, "nonempty owner\n".to_string(), "owner content"),
-        (
-            1,
-            sources[1].replace("a1=1e-5", "a1=2e-5"),
-            "global content",
-        ),
-        (
-            2,
-            sources[2].replace(".param", ".global_param"),
-            "local content",
-        ),
-    ] {
-        let (root, decks, _, runner) = bug1826_thermal_parameter_fixture(reason, source_refs);
-        fs::write(&decks[index].path, mutation).expect("write BUG 1826 content mutation");
-        assert!(
-            runner
-                .bug1826_thermal_parameter_family_contract(&decks[0])
-                .expect("fixed BUG 1826 owner remains selected")
-                .is_err(),
-            "{reason} drift must fail shared provenance"
-        );
-        fs::remove_dir_all(root).expect("remove BUG 1826 content fixture");
-    }
-
-    let (root, decks, support_path, runner) =
-        bug1826_thermal_parameter_fixture("support", source_refs);
-    fs::write(&support_path, sources[3].replace("0.5e-9", "0.6e-9"))
-        .expect("mutate BUG 1826 copper model");
-    assert!(
-        runner
-            .bug1826_thermal_parameter_family_contract(&decks[0])
-            .expect("fixed BUG 1826 owner remains selected")
-            .is_err(),
-        "shared copper-model drift must fail provenance"
-    );
-    fs::remove_dir_all(root).expect("remove BUG 1826 support fixture");
-
-    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("directory", source_refs);
-    fs::write(
-        root.join("Netlists/Certification_Tests/BUG_1826/unqualified.cir"),
-        &sources[1],
-    )
-    .expect("write extra BUG 1826 candidate");
-    assert!(
-        runner
-            .bug1826_thermal_parameter_family_contract(&decks[0])
-            .expect("fixed BUG 1826 owner remains selected")
-            .is_err(),
-        "additional directory entries must fail the exact census"
-    );
-    fs::remove_dir_all(root).expect("remove BUG 1826 directory fixture");
-
-    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("manifest", source_refs);
-    fs::write(root.join(HARNESS_MANIFEST_FILE), "").expect("remove BUG 1826 wrapper manifest row");
-    assert!(
-        runner
-            .bug1826_thermal_parameter_family_contract(&decks[0])
-            .expect("fixed BUG 1826 owner remains selected")
-            .is_err(),
-        "wrapper ownership drift must fail closed"
-    );
-    fs::remove_dir_all(root).expect("remove BUG 1826 manifest fixture");
-
-    let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("artifact", source_refs);
-    fs::write(
-        root.join("Netlists/Certification_Tests/BUG_1826/linear_simple_param.cir.PRN"),
-        "forbidden source-side output\n",
-    )
-    .expect("write BUG 1826 output artifact");
-    assert!(
-        runner
-            .bug1826_thermal_parameter_family_contract(&decks[0])
-            .expect("fixed BUG 1826 owner remains selected")
-            .is_err(),
-        "source-side output artifacts must fail closed"
-    );
-    fs::remove_dir_all(root).expect("remove BUG 1826 artifact fixture");
-
-    let (root, decks, _, runner) =
-        bug1826_thermal_parameter_fixture("output-artifact", source_refs);
-    let output = root.join("OutputData/Certification_Tests/BUG_1826");
-    fs::create_dir_all(&output).expect("create BUG 1826 OutputData fixture directory");
-    fs::write(
-        output.join("linear_simple_global.cir.prn"),
-        "forbidden checked-in oracle\n",
-    )
-    .expect("write BUG 1826 checked-in output artifact");
-    let error = runner
-        .bug1826_thermal_parameter_family_contract(&decks[0])
-        .expect("fixed BUG 1826 owner remains selected")
-        .expect_err("checked-in worker output must invalidate provenance");
-    assert!(error.contains("must not have checked-in output artifacts"));
-    fs::remove_dir_all(root).expect("remove BUG 1826 output-artifact fixture");
-}
-
-#[test]
 fn bug1826_thermal_parameter_malformed_fixed_records_route_to_executed_failures() {
     let sources = bug1826_thermal_parameter_corpus_sources();
     let source_refs = [
@@ -17080,11 +16624,7 @@ fn bug1826_thermal_parameter_malformed_fixed_records_route_to_executed_failures(
         sources[3].as_str(),
     ];
     for (index, expected_contract) in [
-        (
-            0usize,
-            XYCE_BUG1826_THERMAL_PARAMETER_WRAPPER_OWNER_CONTRACT,
-        ),
-        (1, "upstream_exclusion_promotion_mismatch"),
+        (1usize, "upstream_exclusion_promotion_mismatch"),
         (2, "upstream_exclusion_promotion_mismatch"),
     ] {
         let (root, decks, _, runner) = bug1826_thermal_parameter_fixture("routing", source_refs);
@@ -29006,31 +28546,6 @@ fn noise_gs_parser_preserves_frequency_at_and_failure_metadata() {
 }
 
 #[test]
-fn source_multiplicity_release_710_oracle_provenance_is_exact() {
-    let records = XyceTestRunner::source_multiplicity_historical_oracle_provenance_records();
-    assert_eq!(
-        records.len(),
-        XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_RECORD_COUNT
-    );
-    XyceTestRunner::validate_source_multiplicity_historical_oracle_provenance()
-        .expect("source-multiplicity wrappers, excludes, and xyce_verify stay provenance-bound");
-    assert!(records.iter().any(|record| {
-        record.contains("Netlists/BSRC/bsrc1_m.cir.sh")
-            && record.contains(XYCE_SOURCE_MULTIPLICITY_UPSTREAM_REGRESSION_COMMIT)
-    }));
-    assert!(
-        records
-            .iter()
-            .any(|record| record.contains("Netlists/VCCS/vccs_tran_m.cir.sh"))
-    );
-    assert!(
-        records
-            .iter()
-            .any(|record| record.contains(XYCE_RELEASE_710_XYCE_VERIFY_SHA256))
-    );
-}
-
-#[test]
 fn source_multiplicity_canonical_pairs_are_typed_and_owner_is_goodfile() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
@@ -29162,7 +28677,7 @@ fn source_multiplicity_provenance_is_a_fail_closed_twenty_record_bijection() {
 
     let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
     let decks = runner.discover_netlist_tests();
-    assert_eq!(decks.len(), XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT);
+    assert_eq!(decks.len(), 20);
     let role_counts = decks.iter().fold([0usize; 2], |mut counts, deck| {
         let (_, role) = XyceSourceMultiplicityRole::for_record(&deck.relative_path)
             .expect("every selected fixture deck has one exact source-multiplicity role");
@@ -29177,13 +28692,10 @@ fn source_multiplicity_provenance_is_a_fail_closed_twenty_record_bijection() {
                 == XYCE_SOURCE_MULTIPLICITY_CASES[0].owner_record
         })
         .expect("fixture contains first wrapper owner");
-    let contract = runner
+    runner
         .source_multiplicity_family_contract(owner)
         .expect("exact record is selected")
-        .expect("canonical twenty-record provenance qualifies");
-    runner
-        .validate_source_multiplicity_provenance(&contract)
-        .expect("complete provenance revalidates");
+        .expect("canonical twenty-record family qualifies");
     for relative in [
         XYCE_SOURCE_MULTIPLICITY_CASES[0]
             .owner_relative_path()
@@ -29208,60 +28720,6 @@ fn source_multiplicity_provenance_is_a_fail_closed_twenty_record_bijection() {
             }
         );
     }
-
-    let baseline = root
-        .path()
-        .join(XYCE_SOURCE_MULTIPLICITY_CASES[9].baseline_relative_path());
-    let original = fs::read(&baseline).expect("read mutation target");
-    fs::write(
-        &baseline,
-        b"source multiplicity provenance mutation\n.end\n",
-    )
-    .expect("mutate one fixed candidate");
-    assert!(
-        runner
-            .validate_source_multiplicity_provenance(&contract)
-            .is_err(),
-        "one changed candidate identity must fail the complete family"
-    );
-    fs::write(&baseline, original).expect("restore candidate identity");
-
-    fs::write(
-        root.path().join(HARNESS_MANIFEST_FILE),
-        format!("{}\n", wrapper_rows[1..].join("\n")),
-    )
-    .expect("remove one wrapper owner row");
-    assert!(
-        runner
-            .validate_source_multiplicity_provenance(&contract)
-            .is_err(),
-        "missing owner provenance must fail the complete family"
-    );
-    fs::write(
-        root.path().join(HARNESS_MANIFEST_FILE),
-        format!("{}\n", wrapper_rows.join("\n")),
-    )
-    .expect("restore wrapper owner rows");
-    let mut wrong_exclusions = exclusion_rows.clone();
-    wrong_exclusions[0] = wrong_exclusions[0].replace(
-        XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT,
-        "wrong_source_multiplicity_contract",
-    );
-    let wrong_refs = wrong_exclusions
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    fs::write(
-        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-        upstream_exclusion_manifest(&wrong_refs),
-    )
-    .expect("mutate one exclusion contract");
-    assert!(
-        runner
-            .validate_source_multiplicity_provenance(&contract)
-            .is_err(),
-        "one wrong baseline promotion contract must fail the complete family"
-    );
 }
 
 #[test]

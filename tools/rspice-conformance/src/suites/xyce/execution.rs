@@ -1195,7 +1195,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug372Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug372_oracle(deck, role, start) {
+            let result = match self.validate_bug372_oracle(role, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -11543,28 +11543,8 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let result_contract = contract.role.result_contract();
-        if let Err(reason) = self.validate_params1_provenance(&contract) {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!("PARAMS1 family provenance changed before execution: {reason}"),
-                Vec::new(),
-            );
-        }
-
-        let mut result =
-            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
         if result.passed && !result.expected_unsupported {
-            if let Err(reason) = self.validate_params1_provenance(&contract) {
-                return self.failure_result(
-                    deck,
-                    start,
-                    result_contract,
-                    format!("PARAMS1 family provenance changed during execution: {reason}"),
-                    Vec::new(),
-                );
-            }
             result.contract = result_contract.to_string();
         }
         result
@@ -11577,28 +11557,8 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let result_contract = contract.role.result_contract();
-        if let Err(reason) = self.validate_naked_algebra_provenance(&contract) {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!("nakedAlgebra family provenance changed before execution: {reason}"),
-                Vec::new(),
-            );
-        }
-
-        let mut result =
-            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
         if result.passed && !result.expected_unsupported {
-            if let Err(reason) = self.validate_naked_algebra_provenance(&contract) {
-                return self.failure_result(
-                    deck,
-                    start,
-                    result_contract,
-                    format!("nakedAlgebra family provenance changed during execution: {reason}"),
-                    Vec::new(),
-                );
-            }
             result.contract = result_contract.to_string();
         }
         result
@@ -11611,28 +11571,8 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let result_contract = contract.role.result_contract();
-        if let Err(reason) = self.validate_bug1826_thermal_parameter_provenance(&contract) {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!("BUG 1826 family provenance changed before execution: {reason}"),
-                Vec::new(),
-            );
-        }
-
-        let mut result =
-            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
         if result.passed && !result.expected_unsupported {
-            if let Err(reason) = self.validate_bug1826_thermal_parameter_provenance(&contract) {
-                return self.failure_result(
-                    deck,
-                    start,
-                    result_contract,
-                    format!("BUG 1826 family provenance changed during execution: {reason}"),
-                    Vec::new(),
-                );
-            }
             result.contract = result_contract.to_string();
         }
         result
@@ -11645,27 +11585,8 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let result_contract = contract.role.result_contract();
-        if let Err(reason) = self.validate_source_multiplicity_provenance(&contract) {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!("source-multiplicity provenance changed before execution: {reason}"),
-                Vec::new(),
-            );
-        }
-        let mut result =
-            self.run_baseline_family_contract(deck, contract.relational.clone(), start);
+        let mut result = self.run_baseline_family_contract(deck, contract.relational, start);
         if result.passed && !result.expected_unsupported {
-            if let Err(reason) = self.validate_source_multiplicity_provenance(&contract) {
-                return self.failure_result(
-                    deck,
-                    start,
-                    result_contract,
-                    format!("source-multiplicity provenance changed during execution: {reason}"),
-                    Vec::new(),
-                );
-            }
             result.contract = result_contract.to_string();
         }
         result

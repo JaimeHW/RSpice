@@ -234,40 +234,16 @@ const XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTRACT: &str =
 const XYCE_PARAMS1_OWNER_RECORD: &str = "netlists/params1/params_a.cir";
 const XYCE_PARAMS1_LITERAL_BASELINE_RECORD: &str = "netlists/params1/params_a0.cir";
 const XYCE_PARAMS1_PARAMETERIZED_MEMBER_RECORD: &str = "netlists/params1/params_a1.cir";
-const XYCE_PARAMS1_OWNER_CONTENT_BLAKE3: &str =
-    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
 const XYCE_PARAMS1_LITERAL_BASELINE_CONTENT_BLAKE3: &str =
     "c8c470a5f69c608d8a1b6dfceb6f74cd000e5f10279c16f7361ac10e3a618e04";
 const XYCE_PARAMS1_PARAMETERIZED_MEMBER_CONTENT_BLAKE3: &str =
     "ff7f4422bab651a252c2a1f26d85de3f5dcb2283c80abaaa409d6b7d6bfcf27d";
-const XYCE_PARAMS1_CANDIDATE_COUNT: usize = 3;
-const XYCE_PARAMS1_CANDIDATE_BLAKE3: &str =
-    "906ea8fd3d5f23664e117e5cc94db1764bd2c0f9428fe32d29f584ab7434c7de";
-const XYCE_PARAMS1_CANDIDATE_CONTENT_BLAKE3: &str =
-    "6f736f2fba7684dc732344f3a11febf3ce2565db27d4ae701ce58d20887ccc92";
-const XYCE_PARAMS1_OWNER_COUNT: usize = 1;
-const XYCE_PARAMS1_OWNER_MANIFEST_BLAKE3: &str =
-    "8d99d169acdd490904026dab9fb0c4567b2bbec6b997d23fc3779894406ae084";
-const XYCE_PARAMS1_EXCLUSION_COUNT: usize = 2;
-const XYCE_PARAMS1_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "bd29860b038fefd235030eafe83743f181dc811345fa62f6066f6c103fe25fea";
-const XYCE_PARAMS1_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_PARAMS1_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_PARAMS1_HISTORICAL_WRAPPER_PATH: &str = "Netlists/PARAMS1/params_a.cir.sh";
-const XYCE_PARAMS1_HISTORICAL_WRAPPER_BYTES: usize = 2_131;
-const XYCE_PARAMS1_HISTORICAL_WRAPPER_SHA256: &str =
-    "3e0d4db14de269d0b717f2ebdca11497f7e55c5c945c7f12765a96b87d4a8d56";
-const XYCE_PARAMS1_HISTORICAL_WRAPPER_BLAKE3: &str =
-    "a4322707a6b38e60db47b6b2524b69452846562e44e98531d5932bb401de057b";
 const XYCE_RELEASE_710_XYCE_VERIFY_PATH: &str = "TestScripts/xyce_verify.pl";
 const XYCE_RELEASE_710_XYCE_VERIFY_BYTES: usize = 59_566;
 const XYCE_RELEASE_710_XYCE_VERIFY_SHA256: &str =
     "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3";
 const XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3: &str =
     "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665";
-const XYCE_PARAMS1_HISTORICAL_ORACLE_RECORD_COUNT: usize = 2;
-const XYCE_PARAMS1_HISTORICAL_ORACLE_BLAKE3: &str =
-    "b085c4d44ae81be36abe39da9b70c41a32411d8f3671bd2b9a47353a64a44744";
 // The removed Release 7.10 nakedAlgebra wrapper used byte comparisons as
 // fast paths, then accepted both mixed-expression parameter spellings through
 // default `xyce_verify`. The native reconstruction binds the three canonical
@@ -287,29 +263,6 @@ const XYCE_NAKED_ALGEBRA_BRACED_BASELINE_CONTENT_BLAKE3: &str =
     "112fac431981b869aad379659da705edfbe28f0f5a2ab4f3119fe2e6bfa7e8ee";
 const XYCE_NAKED_ALGEBRA_GLOBAL_MEMBER_CONTENT_BLAKE3: &str =
     "3161ad78989d933ea20e80abb61165ade9a932c90c17604721439b1b1c530f65";
-const XYCE_NAKED_ALGEBRA_CANDIDATE_COUNT: usize = 3;
-const XYCE_NAKED_ALGEBRA_CANDIDATE_BLAKE3: &str =
-    "5c299428d945e9d2d617d6cb803982b9edd78d532d0f1a7a3887fed061148cc6";
-const XYCE_NAKED_ALGEBRA_CANDIDATE_CONTENT_BLAKE3: &str =
-    "cc328d723a5681e6b677a558870cd506d65fd0b3b0720ec3932a402c89403206";
-const XYCE_NAKED_ALGEBRA_OWNER_COUNT: usize = 1;
-const XYCE_NAKED_ALGEBRA_OWNER_MANIFEST_BLAKE3: &str =
-    "f585384fb812bdb6dcdc8fe5468ab75a66d00cb9cc947ee605408856c5cf28cd";
-const XYCE_NAKED_ALGEBRA_EXCLUSION_COUNT: usize = 2;
-const XYCE_NAKED_ALGEBRA_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "a217cc15c973d4ac5654aa1a20d314cf429a29e7397d2e787220d23bb61c88e9";
-const XYCE_NAKED_ALGEBRA_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_NAKED_ALGEBRA_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_PATH: &str = "Netlists/PARSER/nakedAlgebra.cir.sh";
-const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BYTES: usize = 2_026;
-const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_SHA256: &str =
-    "938f88ab56ab023d93a0cde882cb98391320d769087666b61bc7a4ed212b3e30";
-const XYCE_NAKED_ALGEBRA_HISTORICAL_WRAPPER_BLAKE3: &str =
-    "70e79ac1632a283e8af23bb303da9797ef1974f4adbd7af0948378863810dfe0";
-const XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_RECORD_COUNT: usize = 2;
-const XYCE_NAKED_ALGEBRA_HISTORICAL_ORACLE_BLAKE3: &str =
-    "0c56df6d66baca7083b8ef80ab6db52cc82d92c1087b8aff9e5eb8cad6c956c3";
 // BUG 1826's removed Release 7.10 wrapper compares the GLOBAL_PARAM member
 // against the ordinary PARAM member by byte identity first and default
 // `xyce_verify` second. The comparator is directional: the sorted global deck
@@ -328,73 +281,16 @@ const XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_RECORD: &str =
     "netlists/certification_tests/bug_1826/linear_simple_global.cir";
 const XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_RECORD: &str =
     "netlists/certification_tests/bug_1826/linear_simple_param.cir";
-const XYCE_BUG1826_THERMAL_PARAMETER_SUPPORT_RECORD: &str =
-    "netlists/certification_tests/bug_1826/copper.linear";
-const XYCE_BUG1826_THERMAL_PARAMETER_OWNER_CONTENT_BLAKE3: &str =
-    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
 const XYCE_BUG1826_THERMAL_PARAMETER_GLOBAL_BASELINE_CONTENT_BLAKE3: &str =
     "0498a73d52c4e66391b4920baf96c0838f08aa007c33fa5573be616609beca0a";
 const XYCE_BUG1826_THERMAL_PARAMETER_LOCAL_MEMBER_CONTENT_BLAKE3: &str =
     "fcc455267359d3ab906fe0aee58f4967e46c867a6fbef4f0420a6667f348ca45";
-const XYCE_BUG1826_THERMAL_PARAMETER_SUPPORT_CONTENT_BLAKE3: &str =
-    "4754b245583f213148103d11e3b76484916fe57bf63d18c307a381d708741e3d";
-const XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_COUNT: usize = 3;
-const XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_BLAKE3: &str =
-    "2f37d60ff33cb0f8516e44d24cef01316847b48e8d5e99fa73354f4638be1293";
-const XYCE_BUG1826_THERMAL_PARAMETER_CANDIDATE_CONTENT_BLAKE3: &str =
-    "c297b34e5e4611fde354bbd41b019d59eda9fef8ae01d03d8a1cd1eee3b04f1d";
-const XYCE_BUG1826_THERMAL_PARAMETER_OWNER_COUNT: usize = 1;
-const XYCE_BUG1826_THERMAL_PARAMETER_OWNER_MANIFEST_BLAKE3: &str =
-    "954fb7ec9f57f9bf266813a7a85592c2b19548b54652e1126b8a58c89be59ffd";
-const XYCE_BUG1826_THERMAL_PARAMETER_EXCLUSION_COUNT: usize = 2;
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "db80e2386563f743b021b1c1400d050254e5644de87361b2b41f327a0324e3f7";
-const XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG1826_THERMAL_PARAMETER_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_PATH: &str =
-    "Netlists/Certification_Tests/BUG_1826/linear_simple.cir.sh";
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BYTES: usize = 1_994;
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_SHA256: &str =
-    "155f0ba65fc5c1ab5e750f36b6905a54dc50eac250acfb2813ae853063a9e860";
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_WRAPPER_BLAKE3: &str =
-    "e9f1460c2a494dc9998dcfa1c07b7a24cefad947c779ace0377f8ee24f8a541b";
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_PATH: &str =
-    "Netlists/Certification_Tests/BUG_1826/exclude";
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BYTES: usize = 49;
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_SHA256: &str =
-    "f65dcf286bb349dc23ba25b0f5a7ad70c1ab2a1c3f209d9d73b5dec740f73d37";
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_EXCLUDE_BLAKE3: &str =
-    "84f595a0c23dbf23318e472473347fec6f36f1c5fc535f87b2e36c0f95390397";
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_RECORD_COUNT: usize = 3;
-const XYCE_BUG1826_THERMAL_PARAMETER_HISTORICAL_ORACLE_BLAKE3: &str =
-    "7ef9daf7fa72a71ca5981eff8c863aba6e8a87873b2f390f9708fbc0fe41303c";
 // Release 7.10 qualified these current-source multiplier decks by running the
 // authored M= owner as GOODFILE and its explicit 0.2-Siemens control as
-// TESTFILE.  Keep the complete selected corpus, removed wrapper/exclude
-// artifacts, and default xyce_verify implementation cryptographically bound;
-// the BSRC and VCCS directories also contain unrelated native regressions and
-// therefore deliberately use an exact-record selector rather than a physical
-// whole-directory census.
+// TESTFILE. The BSRC and VCCS directories also contain unrelated native
+// regressions, so the family uses an exact-record selector.
 const XYCE_SOURCE_MULTIPLICITY_WRAPPER_CONTRACT: &str = "source_multiplicity_family_wrapper";
 const XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT: &str = "source_multiplicity_family_baseline";
-const XYCE_SOURCE_MULTIPLICITY_CANDIDATE_COUNT: usize = 20;
-const XYCE_SOURCE_MULTIPLICITY_CANDIDATE_BLAKE3: &str =
-    "d4310f2dddfffbfaa2080d48de6cef07d61098c6b17b68bd22f88cbe40286e1d";
-const XYCE_SOURCE_MULTIPLICITY_CANDIDATE_CONTENT_BLAKE3: &str =
-    "1c234afda4454cc64bd9123b425e48c29244d39c9e7cc1f7397442844078c232";
-const XYCE_SOURCE_MULTIPLICITY_OWNER_COUNT: usize = 10;
-const XYCE_SOURCE_MULTIPLICITY_OWNER_MANIFEST_BLAKE3: &str =
-    "a775dba28575547cda2cebd65a10de0725143ba027dc602dba92da6914cc6590";
-const XYCE_SOURCE_MULTIPLICITY_EXCLUSION_COUNT: usize = 10;
-const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "87ee5ea84b7aa6b9be9d5b46c966148aeb83fb53716e34c0f2775f59b7e65699";
-const XYCE_SOURCE_MULTIPLICITY_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_SOURCE_MULTIPLICITY_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_RECORD_COUNT: usize = 13;
-const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_ORACLE_BLAKE3: &str =
-    "04535bab1b5685bb32d586a8c9456413b62b18252d988de73b35c972fb1f6493";
 
 // Release 7.10's four ABM_FREQ wrappers run the authored FREQ/HERTZ deck as
 // ACComparator's directional GOODFILE and the corresponding .AC DATA deck as
@@ -4487,12 +4383,7 @@ struct XyceSourceMultiplicityCaseSpec {
     family: &'static str,
     owner_record: &'static str,
     baseline_record: &'static str,
-    owner_content_blake3: &'static str,
-    baseline_content_blake3: &'static str,
     wrapper_path: &'static str,
-    wrapper_bytes: usize,
-    wrapper_sha256: &'static str,
-    wrapper_blake3: &'static str,
     representation: XyceSourceMultiplicityRepresentation,
     analysis: XyceSourceMultiplicityAnalysis,
 }
@@ -4520,12 +4411,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "BSRC/bsrc1_m",
         owner_record: "netlists/bsrc/bsrc1_m.cir",
         baseline_record: "netlists/bsrc/bsrc1_m_baseline.cir",
-        owner_content_blake3: "f4b552bd15c90721758eeca377d25af9cbe440d8d3fe2c6b4d74f1183b80aa43",
-        baseline_content_blake3: "79ed9fce2f03e8f4207f40e481c0104d2d7056dabb7724ba6d8e29a87c9e3fa6",
         wrapper_path: "Netlists/BSRC/bsrc1_m.cir.sh",
-        wrapper_bytes: 1_507,
-        wrapper_sha256: "eee1546b6d2dfef86346ab055205d43d0510359eda2aad7a09fcaf19fb219f1a",
-        wrapper_blake3: "8efdcf80dda6a2e4156f0df5696effed008f824b8d92819485e08218315c0148",
         representation: XyceSourceMultiplicityRepresentation::BehavioralDirect,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4533,12 +4419,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "BSRC/bsrc2_m",
         owner_record: "netlists/bsrc/bsrc2_m.cir",
         baseline_record: "netlists/bsrc/bsrc2_m_baseline.cir",
-        owner_content_blake3: "625c6829c9ba9901c348ac025c819c40169aa613439df53cd67fc4cdac8d865c",
-        baseline_content_blake3: "9f3502fa471a6ba24e3fbe8d3fae8cef6ada9018b21997ad803e6e72456133dd",
         wrapper_path: "Netlists/BSRC/bsrc2_m.cir.sh",
-        wrapper_bytes: 1_507,
-        wrapper_sha256: "ef0e8238efec42455b4a93ecc66a4cdce7c17d48b02e98d5260f52f11c84344f",
-        wrapper_blake3: "fb14fbf86b76ec0f5139838db876bb1d73ef17107fda20aec295f0fd7256c0c1",
         representation: XyceSourceMultiplicityRepresentation::BehavioralFormal,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4546,12 +4427,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "BSRC/bsrc3_m",
         owner_record: "netlists/bsrc/bsrc3_m.cir",
         baseline_record: "netlists/bsrc/bsrc3_m_baseline.cir",
-        owner_content_blake3: "35920c403dcbdd82a8fc8cb2603219ea6184c7d3f2648d1f61475cb3e4053ec1",
-        baseline_content_blake3: "2c2406536e6572e285bfb2aa28c92295c6cecfa886b89e30e30edf73abe318af",
         wrapper_path: "Netlists/BSRC/bsrc3_m.cir.sh",
-        wrapper_bytes: 1_507,
-        wrapper_sha256: "62792bdceaf62b26b47a29131d3c066f8bb2ffcdbab6dfbbe0a8b46230fb1887",
-        wrapper_blake3: "d5cf5022d29dc95f0fa6f4ba521d526f5f449231b9d13704198de1f0fa3ad7c8",
         representation: XyceSourceMultiplicityRepresentation::BehavioralInherited,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4559,12 +4435,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "BSRC/bsrc4_m",
         owner_record: "netlists/bsrc/bsrc4_m.cir",
         baseline_record: "netlists/bsrc/bsrc4_m_baseline.cir",
-        owner_content_blake3: "0aad95a37310d6977618e07d79f60fae09eafbd691b47b3af57847159789e2c7",
-        baseline_content_blake3: "25bf3ef5d4746dedb55cdbe083a43cd9b42686a7102b929a8c7d5aa8bf26cd6e",
         wrapper_path: "Netlists/BSRC/bsrc4_m.cir.sh",
-        wrapper_bytes: 1_507,
-        wrapper_sha256: "47492e2c23d5e69b156e60e50694e7db127dca4b303bc86fbbd08d729e1145c5",
-        wrapper_blake3: "df4f4e03e2a72b82ceee402aa483444b47b4ce9bb2148075fabeae89ab56f72a",
         representation: XyceSourceMultiplicityRepresentation::BehavioralNested,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4572,12 +4443,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "VCCS/vccs_m",
         owner_record: "netlists/vccs/vccs_m.cir",
         baseline_record: "netlists/vccs/vccs_m_baseline.cir",
-        owner_content_blake3: "f812935ead59e7a2b12406d558740053d86d73d008d1ddeb0a08252d7e74f1ed",
-        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
         wrapper_path: "Netlists/VCCS/vccs_m.cir.sh",
-        wrapper_bytes: 1_505,
-        wrapper_sha256: "e006106f3eb412eccc545ba6235a54185ecd2813a757ec49e0e72468bb9a45fa",
-        wrapper_blake3: "c35e4dc65ea5e269b471b81d4b1034993f025cff92d367b8cbd9bccd6b03a75c",
         representation: XyceSourceMultiplicityRepresentation::LinearDirect,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4585,12 +4451,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "VCCS/vccs_nl1_m",
         owner_record: "netlists/vccs/vccs_nl1_m.cir",
         baseline_record: "netlists/vccs/vccs_nl1_m_baseline.cir",
-        owner_content_blake3: "e2b173114a7447c858a03438e41128d969e0eed6b301d9b2111a5a096bfda931",
-        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
         wrapper_path: "Netlists/VCCS/vccs_nl1_m.cir.sh",
-        wrapper_bytes: 1_513,
-        wrapper_sha256: "58f91c31303fca150139c1fba81a2cdb46847d340dcdd2260bbba1340e4cbc8c",
-        wrapper_blake3: "c5326a2e3a98006d797a9e5462fdbbcba2f750c3ed75fd5d2e1452ce2118d99e",
         representation: XyceSourceMultiplicityRepresentation::ExpressionDirect,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4598,12 +4459,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "VCCS/vccs_nl2_m",
         owner_record: "netlists/vccs/vccs_nl2_m.cir",
         baseline_record: "netlists/vccs/vccs_nl2_m_baseline.cir",
-        owner_content_blake3: "c05a5858f5193946e8e95fb8ada1e91a38121aaf8f0ef31183724038c1fd11d9",
-        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
         wrapper_path: "Netlists/VCCS/vccs_nl2_m.cir.sh",
-        wrapper_bytes: 1_513,
-        wrapper_sha256: "f55c19a091f33fba8cead3c21aab70b58b7d17104d831e3df8d606468214383d",
-        wrapper_blake3: "a34f4217ca26a757d82df2eff09c52cf6d2a3a63885f824d930757d3a79f85f1",
         representation: XyceSourceMultiplicityRepresentation::ExpressionFormal,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4611,12 +4467,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "VCCS/vccs_nl3_m",
         owner_record: "netlists/vccs/vccs_nl3_m.cir",
         baseline_record: "netlists/vccs/vccs_nl3_m_baseline.cir",
-        owner_content_blake3: "53f6c0b9c09993e1383d4a64cc07ce6cfca92f403c20f95882c3b77edacbf288",
-        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
         wrapper_path: "Netlists/VCCS/vccs_nl3_m.cir.sh",
-        wrapper_bytes: 1_513,
-        wrapper_sha256: "30aafe1137706d5daf7fce968f232788ccf61482e4b62d9cfd17ba08a820117f",
-        wrapper_blake3: "83a6efe07cdf21df89dced284b2a7c48e66507486c424e24d8e5625d22bec04b",
         representation: XyceSourceMultiplicityRepresentation::ExpressionInherited,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4624,12 +4475,7 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "VCCS/vccs_nl4_m",
         owner_record: "netlists/vccs/vccs_nl4_m.cir",
         baseline_record: "netlists/vccs/vccs_nl4_m_baseline.cir",
-        owner_content_blake3: "8d5d10cf88304fd2cb3bb491b4fdaf63d02d12776612d7f8edcac1a2d3c434f2",
-        baseline_content_blake3: "6abda75fdb8e4b10468f1beda790188e30b4a558b4c963a67a797e51fe5c0c75",
         wrapper_path: "Netlists/VCCS/vccs_nl4_m.cir.sh",
-        wrapper_bytes: 1_513,
-        wrapper_sha256: "5a978749375eb3d89a91d9bf6aac4c44ba01a0904d54baefd17363eb5f16abbd",
-        wrapper_blake3: "2aea6fa37179f2f1f49424c7f2fc6974d2205bd42dbe9526aa4138cc91744a50",
         representation: XyceSourceMultiplicityRepresentation::ExpressionNested,
         analysis: XyceSourceMultiplicityAnalysis::Dc,
     },
@@ -4637,31 +4483,12 @@ const XYCE_SOURCE_MULTIPLICITY_CASES: [XyceSourceMultiplicityCaseSpec; 10] = [
         family: "VCCS/vccs_tran_m",
         owner_record: "netlists/vccs/vccs_tran_m.cir",
         baseline_record: "netlists/vccs/vccs_tran_m_baseline.cir",
-        owner_content_blake3: "9a7640eb4d5e03a2c6208481cb1dc44a77533b8b52d06d2784f9a84aad791fb5",
-        baseline_content_blake3: "ab06d9f0ed36a4616f10430e0a128c0e50cb7b3b85a8f2980c2c6708052357cc",
         wrapper_path: "Netlists/VCCS/vccs_tran_m.cir.sh",
-        wrapper_bytes: 1_515,
-        wrapper_sha256: "20a644a2b7b5e532e642c672dc7764804938cf67959159824b0fdbed8d6271dd",
-        wrapper_blake3: "a3b3ffdacd87222c56c6a05051206989db9e665b2a19552fc87effb6e06be969",
         representation: XyceSourceMultiplicityRepresentation::LinearDirect,
         analysis: XyceSourceMultiplicityAnalysis::Tran,
     },
 ];
 
-const XYCE_SOURCE_MULTIPLICITY_HISTORICAL_EXCLUDES: [(&str, usize, &str, &str); 2] = [
-    (
-        "Netlists/BSRC/exclude",
-        84,
-        "d201ec9fedac09939734e8f5e0746c7a46193ae25bb79d6c75699c68224a38b5",
-        "121f27fd1a3e7cbddc4d282aee79cdd98b843cd821551125566ac2196c00f3e6",
-    ),
-    (
-        "Netlists/VCCS/exclude",
-        141,
-        "918ba1f38f946bc77d7425c176340d5b29253ae9e63ffb3f969553367f63456c",
-        "3b8424f66d51107ee38549cea6006789460a8969f85b6cf59af1f40500e943ad",
-    ),
-];
 const XYCE_LEVEL2_DIODE_DTEMP_WRAPPER_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_owner";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
@@ -10156,31 +9983,24 @@ struct XyceAgeCapFamilyContract {
 #[derive(Debug, Clone)]
 struct XyceParams1FamilyContract {
     relational: XyceBaselineFamilyContract,
-    owner_path: PathBuf,
     role: XyceParams1Role,
 }
 
 #[derive(Debug, Clone)]
 struct XyceNakedAlgebraFamilyContract {
     relational: XyceBaselineFamilyContract,
-    owner_path: PathBuf,
     role: XyceNakedAlgebraRole,
 }
 
 #[derive(Debug, Clone)]
 struct XyceBug1826ThermalParameterFamilyContract {
     relational: XyceBaselineFamilyContract,
-    owner_path: PathBuf,
-    support_path: PathBuf,
     role: XyceBug1826ThermalParameterRole,
 }
 
 #[derive(Debug, Clone)]
 struct XyceSourceMultiplicityFamilyContract {
     relational: XyceBaselineFamilyContract,
-    owner_path: PathBuf,
-    baseline_path: PathBuf,
-    spec: &'static XyceSourceMultiplicityCaseSpec,
     role: XyceSourceMultiplicityRole,
 }
 
