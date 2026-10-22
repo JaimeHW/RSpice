@@ -7,10 +7,10 @@
 //!
 //! # Usage
 //! ```rust
-//! use rspice_core::library::{LibraryManager, ModelType};
+//! use rspice_core::library::{LibParser, foundation_library_source};
 //!
-//! let manager = LibraryManager::new();
-//! let diode_models = manager.models_of_type(ModelType::Diode);
+//! let parsed = LibParser::new(".").parse_string(foundation_library_source());
+//! let subcircuits = &parsed.top_level_subcircuits;
 //! ```
 
 mod foundation_defaults;
@@ -20,12 +20,14 @@ mod parser;
 mod spice_packs;
 mod veriloga_discovery;
 
-pub use foundation_defaults::{FoundationDeviceFamily, foundation_card_source};
+pub use foundation_defaults::{
+    FoundationDeviceFamily, foundation_card_source, foundation_library_source,
+};
 pub use lib_parser::{
     LibParseResult, LibParser, LibSection, LibSectionSummary, ParseError, ParsedModel,
     ParsedSubcircuit, ResolvedLibDependency, ResolvedLibSource, enumerate_lib_sections,
 };
-pub use manager::{LibraryManager, ModelDefinition, ModelType, SubcircuitDefinition};
+pub use manager::ModelType;
 // The Spectre model-library adapter is source text in, canonical SPICE source
 // text out — a dialect front-end, so it lives in the parsing layer beside the
 // include expander that also runs it. It keeps its published path here because

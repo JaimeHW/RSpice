@@ -23,7 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::manager::{ModelDefinition, ModelType};
+use super::manager::ModelType;
 use crate::abort_signal::{AbortReader, AbortSignal, NoAbort};
 use crate::netlist::lexer::parse_spice_value_complete;
 use crate::resource::{
@@ -207,20 +207,6 @@ impl ParsedModel {
             .find(|(k, _)| k.to_lowercase() == name_lower)
             .map(|(_, v)| *v)
     }
-
-    /// Convert to ModelDefinition for library manager
-    pub fn to_model_definition(&self, library: impl Into<Arc<str>>) -> ModelDefinition {
-        let mut def = ModelDefinition::new(self.name.clone(), self.model_type, library);
-        if let Some(ref desc) = self.description {
-            def = def.with_description(desc.clone());
-        }
-        // Transfer binning parameters
-        def = def.with_binning(self.lmin, self.lmax, self.wmin, self.wmax);
-        if let Some(ref prefix) = self.bin_prefix {
-            def = def.with_bin_prefix(prefix.clone());
-        }
-        def
-    }
 }
 
 //=============================================================================
@@ -366,6 +352,7 @@ impl LibParser {
     }
 
     /// Apply resource limits to subsequent file and authenticated-closure parses.
+    #[cfg(test)]
     #[must_use]
     pub(crate) fn with_resource_limits(mut self, limits: ResourceLimits) -> Self {
         self.resource_limits = limits;
@@ -2295,6 +2282,20 @@ mod tests {
             "OPTIONAL terminal defaults are not ordinary subcircuit parameters"
         );
         assert!(!subcircuit.parameters.contains_key("substrate"));
+    }
+
+    #[test]
+    fn a_continued_parenthesized_port_list_is_the_whole_interface() {
+        let mut parser = LibParser::new(".");
+        let result = parser.parse_string(".SuBcKt resistor\n+ (1 2)\nr1 1 2 1k\n.eNdS resistor\n");
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        let subcircuit = result
+            .top_level_subcircuits
+            .first()
+            .expect("one top-level subcircuit");
+        assert_eq!(subcircuit.name, "resistor");
+        assert_eq!(subcircuit.pins, ["1", "2"]);
     }
 
     #[test]

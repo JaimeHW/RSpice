@@ -157,11 +157,8 @@ impl ModelCatalog {
     }
 
     pub fn load_builtin_models(&mut self) {
-        let core_manager = rspice_core::library::LibraryManager::new();
-        let Some(content) = core_manager.get_library_content("foundation.lib") else {
-            return;
-        };
-        let parsed = rspice_core::library::LibParser::new(".").parse_string(content);
+        let parsed = rspice_core::library::LibParser::new(".")
+            .parse_string(rspice_core::library::foundation_library_source());
         let library = self
             .libraries
             .entry("RSpice Foundation".to_owned())
@@ -195,7 +192,7 @@ impl ModelCatalog {
             };
             library.add_model(device_model);
         }
-        for subcircuit in core_manager.subcircuits() {
+        for subcircuit in &parsed.top_level_subcircuits {
             library.subcircuits.insert(
                 subcircuit.name.clone(),
                 crate::ModelSubcircuitInterface {

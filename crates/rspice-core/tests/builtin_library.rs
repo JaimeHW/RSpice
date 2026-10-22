@@ -1,7 +1,9 @@
 //! Smoke coverage for the small RSpice-authored foundation library.
 
 use rspice_core::engine::{Engine, SimulationConfig};
-use rspice_core::library::{FoundationDeviceFamily, LibraryManager, foundation_card_source};
+use rspice_core::library::{
+    FoundationDeviceFamily, LibParser, foundation_card_source, foundation_library_source,
+};
 use rspice_core::netlist::{ModelDef, Netlist, unresolved_device_model_references};
 
 /// The `LEVEL=` a card declares, if any. Two foundation families share a SPICE
@@ -95,10 +97,7 @@ fn probed_current(deck: &str) -> Result<f64, String> {
 
 #[test]
 fn every_foundation_model_card_solves_and_conducts() {
-    let manager = LibraryManager::new();
-    let content = manager
-        .get_library_content("foundation.lib")
-        .expect("foundation library is embedded");
+    let content = foundation_library_source();
     let library = Netlist::parse(content).expect("foundation library parses");
     let mut probed = 0usize;
     let mut failures = Vec::new();
@@ -143,10 +142,7 @@ fn every_foundation_model_card_solves_and_conducts() {
 /// which is exactly how the p-channel JFET card shipped broken.
 #[test]
 fn every_family_default_is_a_conducting_library_card() {
-    let manager = LibraryManager::new();
-    let content = manager
-        .get_library_content("foundation.lib")
-        .expect("foundation library is embedded");
+    let content = foundation_library_source();
     let library = Netlist::parse(content).expect("foundation library parses");
 
     for family in FoundationDeviceFamily::ALL {
@@ -177,10 +173,7 @@ fn every_family_default_is_a_conducting_library_card() {
 /// that disagrees with the engine is the defect this pairing exists to catch.
 #[test]
 fn every_fallback_card_binds_and_conducts_without_a_model_line() {
-    let manager = LibraryManager::new();
-    let content = manager
-        .get_library_content("foundation.lib")
-        .expect("foundation library is embedded");
+    let content = foundation_library_source();
     let library = Netlist::parse(content).expect("foundation library parses");
     let mut probed = 0usize;
     let mut failures = Vec::new();
@@ -246,13 +239,12 @@ fn every_fallback_card_binds_and_conducts_without_a_model_line() {
 
 #[test]
 fn foundation_library_is_small_and_indexed() {
-    let manager = LibraryManager::new();
-    let content = manager
-        .get_library_content("foundation.lib")
-        .expect("foundation library is embedded");
+    let content = foundation_library_source();
     Netlist::parse(content).expect("foundation library parses");
-    assert_eq!(manager.model_count(), 16);
-    assert_eq!(manager.subcircuit_count(), 1);
+    let indexed = LibParser::new(".").parse_string(content);
+    assert!(indexed.is_ok(), "{:?}", indexed.errors);
+    assert_eq!(indexed.top_level_models.len(), 16);
+    assert_eq!(indexed.top_level_subcircuits.len(), 1);
     assert!(
         content.len() < 4096,
         "foundation library unexpectedly grew to {} bytes",

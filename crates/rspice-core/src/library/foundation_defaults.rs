@@ -95,6 +95,12 @@ impl FoundationDeviceFamily {
     }
 }
 
+/// The whole embedded `foundation.lib` source, for callers that index it.
+#[must_use]
+pub fn foundation_library_source() -> &'static str {
+    FOUNDATION_LIB
+}
+
 /// The verbatim `.MODEL` source of one foundation card, continuations included.
 ///
 /// Verbatim rather than re-rendered from the parsed card: a deck that must
