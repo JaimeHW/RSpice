@@ -1565,6 +1565,7 @@ mod tests {
                 monte_carlo_checkpoint: None,
                 transient_checkpoint: None,
                 measurements: Vec::new(),
+                checks: Default::default(),
                 saved_output_receipts: Vec::new(),
                 success: true,
                 error_message: None,

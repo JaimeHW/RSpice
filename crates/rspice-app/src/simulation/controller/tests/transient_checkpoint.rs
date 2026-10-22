@@ -515,7 +515,7 @@ fn transient_checkpoint_project_schema_and_import_library_are_content_checked() 
     let digest = legacy.runs[0].dataset_content_digest.clone();
     legacy.schema_version = 43;
     legacy.migrate_to_current(ProjectId::new()).unwrap();
-    assert_eq!(legacy.schema_version, 44);
+    assert_eq!(legacy.schema_version, 45);
     assert_eq!(legacy.runs[0].dataset_content_digest, digest);
 
     let mut library = TransientCheckpointLibrary::default();

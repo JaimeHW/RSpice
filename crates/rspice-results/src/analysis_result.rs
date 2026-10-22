@@ -28,6 +28,37 @@ pub const LIVE_TRANSIENT_PARTIAL_MESSAGE: &str =
 pub const LIVE_MONTE_CARLO_PARTIAL_MESSAGE: &str =
     "Monte Carlo analysis is running; committed trials are checkpointed";
 
+/// What a run's checks reported beside its results. Like measurements, they
+/// are observations of the run, kept and saved with the analysis they were
+/// reported after.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RunChecks {
+    /// The HDL's `$info`, `$warning`, `$error` and `$fatal` records, in
+    /// emission order.
+    pub hdl: Vec<HdlDiagnostic>,
+    /// The deck's `.ASSERT` reports, one per assertion and checked instance.
+    pub assertions: Vec<rspice_core::analysis::AssertionReport>,
+}
+
+impl RunChecks {
+    pub fn is_empty(&self) -> bool {
+        self.hdl.is_empty() && self.assertions.is_empty()
+    }
+}
+
+/// One HDL severity-task record. `$display` text is the run's log, not a
+/// check, and is not kept here.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HdlDiagnostic {
+    pub severity: rspice_core::config::HdlSeverity,
+    pub text: String,
+    /// When in the analysis it was reported.
+    pub point: rspice_core::config::HdlPoint,
+    /// The call that reported it.
+    pub origin: rspice_core::config::HdlOrigin,
+}
+
 /// Retained analysis evidence with exact waveform storage supplied by its owner.
 /// The default stores plain source data. Presentation owners may decorate a
 /// waveform while exposing the same canonical samples through `AsRef`.
@@ -68,6 +99,9 @@ pub struct AnalysisResult<W = RetainedWaveform> {
     pub transient_checkpoint: Option<crate::transient_checkpoint::TransientCheckpointEvidence>,
     /// Evaluated `.MEAS` results for this analysis (specs-matrix rows).
     pub measurements: Vec<rspice_core::MeasureResult>,
+    /// What the run's checks reported after this analysis: HDL severity-task
+    /// records and `.ASSERT` reports. Empty when it reported none.
+    pub checks: RunChecks,
     /// Authenticated application receipts for plan-owned saved-output
     /// contracts. The materialized waveform remains in `waveforms`; the
     /// receipt proves why it exists and records deferred/suppressed outcomes.
@@ -139,6 +173,7 @@ impl<W> AnalysisResult<W> {
             monte_carlo_checkpoint,
             transient_checkpoint,
             measurements,
+            checks,
             saved_output_receipts,
             success,
             error_message,
@@ -163,6 +198,7 @@ impl<W> AnalysisResult<W> {
             monte_carlo_checkpoint,
             transient_checkpoint,
             measurements,
+            checks,
             saved_output_receipts,
             success,
             error_message,
@@ -287,6 +323,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             monte_carlo_checkpoint: None,
             transient_checkpoint: None,
             measurements: Vec::new(),
+            checks: RunChecks::default(),
             saved_output_receipts: Vec::new(),
             success: true,
             error_message: None,
@@ -321,6 +358,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             monte_carlo_checkpoint: None,
             transient_checkpoint: None,
             measurements: Vec::new(),
+            checks: RunChecks::default(),
             saved_output_receipts: Vec::new(),
             success: false,
             error_message: Some(error.into()),
@@ -432,6 +470,7 @@ impl<W: AsRef<RetainedWaveform>> AnalysisResult<W> {
             family_metadata: self.family_metadata.as_ref(),
             result_payload: self.result_payload.as_ref(),
             measurements: &self.measurements,
+            checks: &self.checks,
             saved_output_receipts: &self.saved_output_receipts,
             monte_carlo_checkpoint: self.monte_carlo_checkpoint.as_ref(),
             transient_checkpoint: self.transient_checkpoint.as_ref(),

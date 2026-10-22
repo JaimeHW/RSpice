@@ -9,11 +9,12 @@
 //! One submodule per projected concern: [`channel`] the descriptor-keyed
 //! waveform channels and their per-sample validity, [`traces`] the XSPICE
 //! event traces, [`identity`] the parent-run identity, [`post`] the `.FOUR`
-//! and `.MEASURE` products computed before decimation, and [`report`] the
-//! compression error certificate.
+//! and `.MEASURE` products computed before decimation, [`assertions`] the
+//! `.ASSERT` reports, and [`report`] the compression error certificate.
 
 use super::*;
 
+mod assertions;
 mod channel;
 mod continuous;
 mod identity;
@@ -21,6 +22,7 @@ mod post;
 mod report;
 mod traces;
 
+use assertions::*;
 use channel::*;
 use continuous::*;
 use identity::*;
@@ -32,7 +34,11 @@ pub(crate) use report::{
     rebuild_compression_report,
 };
 
-pub(crate) const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 5;
+pub(crate) const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION: usize = 6;
+
+/// Version 5 carried continuous measurement streams but no `.ASSERT` reports.
+/// Read rather than refused: a version-5 build did not evaluate assertions.
+const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_ASSERTIONS: usize = 5;
 
 const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_CONTINUOUS: usize = 4;
 
@@ -46,6 +52,21 @@ const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_CONTINUOUS: usize = 4;
 pub(crate) const COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_BUSES: usize = 3;
 
 pub(crate) type CompressedTransientAnalogState = (
+    usize,
+    Vec<f64>,
+    Vec<CompressedChannelPersistenceState>,
+    Vec<CompressedDigitalTracePersistenceState>,
+    Vec<CompressedRealTracePersistenceState>,
+    CompressedIdentityPersistenceState,
+    Vec<CompressedFourierPersistenceState>,
+    Vec<CompressedMeasurementPersistenceState>,
+    Vec<CompressedDigitalBusPersistenceState>,
+    Vec<ContinuousMeasurementState>,
+    Vec<AssertionPersistenceState>,
+);
+
+/// Version 5 stored continuous measurement streams but no `.ASSERT` reports.
+pub(crate) type CompressedTransientAnalogStateWithoutAssertions = (
     usize,
     Vec<f64>,
     Vec<CompressedChannelPersistenceState>,
@@ -89,9 +110,12 @@ pub(crate) type CompressedTransientAnalogStateWithoutBuses = (
 /// is matched to a shape before its version tag is read rather than after.
 #[derive(Debug, Clone, pyo3::FromPyObject)]
 pub(crate) enum VersionedCompressedTransientAnalogState {
-    /// Ten fields: the current contract, carrying continuous measurements.
+    /// Eleven fields: the current contract, carrying `.ASSERT` reports.
     #[pyo3(transparent)]
     Current(CompressedTransientAnalogState),
+    /// Ten fields: continuous measurements and no assertion reports.
+    #[pyo3(transparent)]
+    WithoutAssertions(CompressedTransientAnalogStateWithoutAssertions),
     /// Nine fields: scalar measurements and a bus table.
     #[pyo3(transparent)]
     WithoutContinuous(CompressedTransientAnalogStateWithoutContinuous),
@@ -146,6 +170,12 @@ pub(crate) fn compressed_transient_analog_state(
             .iter()
             .map(continuous_measurement_state)
             .collect(),
+        result
+            .post_results
+            .assertions
+            .iter()
+            .map(assertion_persistence_state)
+            .collect(),
     )
 }
 
@@ -185,6 +215,7 @@ pub(crate) fn rebuild_compressed_transient(
         measurements,
         buses,
         continuous_measurements,
+        assertions,
     ) = match analog_state {
         VersionedCompressedTransientAnalogState::Current((
             version,
@@ -197,6 +228,7 @@ pub(crate) fn rebuild_compressed_transient(
             measurements,
             buses,
             continuous_measurements,
+            assertions,
         )) => (
             version,
             COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION,
@@ -209,6 +241,32 @@ pub(crate) fn rebuild_compressed_transient(
             measurements,
             buses,
             continuous_measurements,
+            assertions,
+        ),
+        VersionedCompressedTransientAnalogState::WithoutAssertions((
+            version,
+            step_sizes,
+            channels,
+            digital_traces,
+            real_traces,
+            identity,
+            fourier,
+            measurements,
+            buses,
+            continuous_measurements,
+        )) => (
+            version,
+            COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_ASSERTIONS,
+            step_sizes,
+            channels,
+            digital_traces,
+            real_traces,
+            identity,
+            fourier,
+            measurements,
+            buses,
+            continuous_measurements,
+            Vec::new(),
         ),
         VersionedCompressedTransientAnalogState::WithoutContinuous((
             version,
@@ -231,6 +289,7 @@ pub(crate) fn rebuild_compressed_transient(
             fourier,
             measurements,
             buses,
+            Vec::new(),
             Vec::new(),
         ),
         VersionedCompressedTransientAnalogState::WithoutBuses((
@@ -256,6 +315,7 @@ pub(crate) fn rebuild_compressed_transient(
             // table is what it says rather than what it lost.
             Vec::new(),
             Vec::new(),
+            Vec::new(),
         ),
     };
     if version < COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION_WITHOUT_BUSES {
@@ -264,10 +324,11 @@ pub(crate) fn rebuild_compressed_transient(
         )));
     }
     // Version and tuple shape must agree. Older versions did not compute
-    // continuous products, so they restore an empty collection explicitly.
+    // continuous products or assertion reports, so they restore empty
+    // collections explicitly.
     if version != expected_version {
         return Err(crate::errors::value_error(format!(
-            "unsupported compressed-transient analog pickle state version {version}; this build reads versions 3, 4 and {COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION}, each in its own shape"
+            "unsupported compressed-transient analog pickle state version {version}; this build reads versions 3, 4, 5 and {COMPRESSED_TRANSIENT_ANALOG_STATE_VERSION}, each in its own shape"
         )));
     }
     let Some(compression_report) = compression_state else {
@@ -319,9 +380,10 @@ pub(crate) fn rebuild_compressed_transient(
                 .into_iter()
                 .map(rebuild_continuous_measurement)
                 .collect::<PyResult<Vec<_>>>()?,
-            // The pickle carries no `.ASSERT` reports; the Python binding
-            // does not publish them.
-            assertions: Vec::new(),
+            assertions: assertions
+                .into_iter()
+                .map(rebuild_assertion)
+                .collect::<PyResult<Vec<_>>>()?,
         },
         identity: rebuild_identity(identity)?,
         compression_ratio,

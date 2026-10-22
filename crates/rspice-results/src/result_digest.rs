@@ -234,6 +234,7 @@ pub struct AnalysisResultDataRef<'a, W> {
     pub family_metadata: Option<&'a AnalysisResultFamilyMetadata>,
     pub result_payload: Option<&'a AnalysisResultPayload>,
     pub measurements: &'a [rspice_core::MeasureResult],
+    pub checks: &'a crate::analysis_result::RunChecks,
     pub saved_output_receipts: &'a [SavedOutputReceipt],
     pub monte_carlo_checkpoint: Option<&'a MonteCarloCheckpointEvidence>,
     pub transient_checkpoint: Option<&'a crate::transient_checkpoint::TransientCheckpointEvidence>,
@@ -485,9 +486,89 @@ where
             writer.string(&coordinate.name);
             writer.option(coordinate.unit.as_ref(), |writer, unit| writer.string(unit));
         }
+        // Optional, tagged extension: a result without checks keeps its
+        // sealed identity.
+        if version >= ResultDigestEncoding::V16 && !self.checks.is_empty() {
+            writer.string("run-checks/v1");
+            encode_run_checks(&mut writer, self.checks);
+        }
         writer
     }
 }
+
+fn encode_run_checks(writer: &mut ResultDigestWriter, checks: &crate::analysis_result::RunChecks) {
+    use rspice_core::config::{HdlPoint, HdlSeverity};
+    use rspice_core::netlist::{AssertAnalysis, AssertLevel};
+    writer.sequence(checks.hdl.len());
+    for record in &checks.hdl {
+        writer.u8(match record.severity {
+            HdlSeverity::Info => 0,
+            HdlSeverity::Warning => 1,
+            HdlSeverity::Error => 2,
+            HdlSeverity::Fatal => 3,
+        });
+        writer.string(&record.text);
+        match record.point {
+            HdlPoint::Initialization => writer.u8(0),
+            HdlPoint::OperatingPoint => writer.u8(1),
+            HdlPoint::DcSweep { value } => {
+                writer.u8(2);
+                writer.f64(value);
+            }
+            HdlPoint::Transient { time } => {
+                writer.u8(3);
+                writer.f64(time);
+            }
+        }
+        writer.string(&record.origin.scope);
+        writer.string(&record.origin.file);
+        writer.u64(u64::from(record.origin.line));
+    }
+    writer.sequence(checks.assertions.len());
+    for report in &checks.assertions {
+        writer.string(&report.name);
+        writer.u8(match report.analysis {
+            AssertAnalysis::Op => 0,
+            AssertAnalysis::Dc => 1,
+            AssertAnalysis::Tran => 2,
+        });
+        writer.string(&report.target);
+        writer.option(report.instance.as_deref(), |writer, instance| {
+            writer.string(instance);
+        });
+        writer.u8(match report.level {
+            AssertLevel::Notice => 0,
+            AssertLevel::Warning => 1,
+            AssertLevel::Error => 2,
+        });
+        writer.option(report.message.as_deref(), |writer, message| {
+            writer.string(message);
+        });
+        let file = report
+            .origin
+            .path
+            .as_ref()
+            .map(|path| path.to_string_lossy());
+        writer.option(file.as_deref(), |writer, file| writer.string(file));
+        writer.usize(report.origin.line);
+        writer.sequence(report.violations.len());
+        for violation in &report.violations {
+            for value in [
+                violation.start,
+                violation.end,
+                violation.extreme,
+                violation.at,
+            ] {
+                writer.option(value.as_ref(), |writer, value| writer.f64(*value));
+            }
+        }
+        writer.usize(report.unknown_stretches);
+        writer.option(report.error.as_deref(), |writer, error| {
+            writer.string(error)
+        });
+    }
+}
+
 fn encode_measurement_unit(
     writer: &mut ResultDigestWriter,
     unit: &rspice_core::analysis::MeasurementUnit,

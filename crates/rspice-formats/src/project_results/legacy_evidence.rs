@@ -157,6 +157,7 @@ pub fn validate_result_fields_for_source_schema(
     run: &ProjectSimulationRun,
     source_schema: u32,
 ) -> Result<(), String> {
+    reject_run_checks_before_schema_v45(run, source_schema)?;
     reject_transient_checkpoints_before_schema_v44(run, source_schema)?;
     reject_voltage_impulses_before_schema_v41(run, source_schema)?;
     reject_import_coordinates_before_schema_v42(run, source_schema)?;
@@ -412,6 +413,21 @@ pub(super) fn reject_transient_checkpoints_before_schema_v44(
             .any(|analysis| analysis.transient_checkpoint.is_present())
     {
         return Err("result schemas before v44 cannot contain transient checkpoints".into());
+    }
+    Ok(())
+}
+
+pub(super) fn reject_run_checks_before_schema_v45(
+    run: &ProjectSimulationRun,
+    source_schema: u32,
+) -> Result<(), String> {
+    if source_schema < RUN_CHECKS_RESULTS_SCHEMA_VERSION
+        && run
+            .analyses
+            .iter()
+            .any(|analysis| analysis.checks.is_present())
+    {
+        return Err("result schemas before v45 cannot contain run checks".into());
     }
     Ok(())
 }

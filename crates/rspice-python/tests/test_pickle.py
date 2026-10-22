@@ -925,12 +925,30 @@ class TestCompressedTransientResult:
         )
         assert original.num_points < original.input_points
         analog = original.__reduce__()[1][4]
-        assert analog[0] == 5
+        assert analog[0] == 6
         streams = analog[9]
         assert len(streams) == 2
         assert len(streams[0][1]) == 1
         assert len(streams[1][1]) > 1
         assert round_trip(original).__reduce__()[1][4][9] == streams
+
+    def test_assertion_reports_survive_pickle(self, engine):
+        deck = rspice.Netlist.parse(
+            "* Compressed assertion reports\n"
+            "V1 in 0 PULSE(0 1 0 1p 1p 1 2)\nR1 in out 1k\nC1 out 0 1n\n"
+            ".ASSERT half EXPR='V(out)' MAX=0.5 LEVEL=ERROR\n.END\n"
+        )
+        original = engine.run_tran_compressed(
+            deck, stop_time=3e-6, max_step=1e-8, abs_tol=0.1, rel_tol=0.1
+        )
+        reports = original.__reduce__()[1][4][10]
+        assert len(reports) == 1
+        name, analysis, _target, _instance, level = reports[0][:5]
+        assert (name, analysis, level) == ("half", "tran", "error")
+        # One violation, from tau ln 2 and still open at the stop time.
+        assert len(reports[0][8]) == 1
+        assert reports[0][8][0][1] is None
+        assert round_trip(original).__reduce__()[1][4][10] == reports
 
     def test_waveforms_and_interpolation_survive(self, engine, analysis_netlist):
         original = engine.run_tran_compressed(
@@ -1052,6 +1070,7 @@ class TestCompressedTransientResult:
             measurements,
             buses,
             continuous_measurements,
+            assertions,
         ) = state[-2]
         compression_report = state[-1]
         tail = (
@@ -1063,6 +1082,7 @@ class TestCompressedTransientResult:
             measurements,
             buses,
             continuous_measurements,
+            assertions,
         )
         legacy = (2, step_sizes, *tail)
         with pytest.raises(
@@ -1074,7 +1094,7 @@ class TestCompressedTransientResult:
         with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
             unpickler(*state[:-2], future, compression_report)
 
-        # Version 5 has ten fields; the older versions have distinct shapes.
+        # Version 6 has eleven fields; the older versions have distinct shapes.
         mismatched = (3, step_sizes, *tail)
         with pytest.raises(ValueError, match="unsupported compressed-transient analog"):
             unpickler(*state[:-2], mismatched, compression_report)
@@ -1082,15 +1102,21 @@ class TestCompressedTransientResult:
         # A state written before the bus contract is read, not refused: it is
         # this state with no bus table, and nothing that wrote one could
         # declare a bus.
-        without_buses = (3, step_sizes, *tail[:-2])
+        without_buses = (3, step_sizes, *tail[:-3])
         restored = unpickler(*state[:-2], without_buses, compression_report)
         assert restored.digital_buses() == []
         assert restored.__reduce__()[1][4][9] == []
 
-        without_continuous = (4, step_sizes, *tail[:-1])
+        without_continuous = (4, step_sizes, *tail[:-2])
         restored = unpickler(*state[:-2], without_continuous, compression_report)
         assert restored.digital_buses() == original.digital_buses()
         assert restored.__reduce__()[1][4][9] == []
+
+        # A version-5 build evaluated no assertions: it restores none.
+        without_assertions = (5, step_sizes, *tail[:-1])
+        restored = unpickler(*state[:-2], without_assertions, compression_report)
+        assert restored.__reduce__()[1][4][9] == continuous_measurements
+        assert restored.__reduce__()[1][4][10] == []
 
         # A sample is a number or a typed absence, never both and never
         # neither: the validity mask cannot be silently dropped or invented.

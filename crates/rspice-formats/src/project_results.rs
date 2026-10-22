@@ -49,6 +49,8 @@ thread_local! {
     pub static RESULT_VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+mod checks;
+pub use checks::{ProjectAssertViolation, ProjectAssertionReport, ProjectRunChecks};
 mod codec;
 pub use codec::*;
 
@@ -189,6 +191,7 @@ impl ProjectSimulationResultsData {
             );
         }
         for run in &self.runs {
+            legacy_evidence::reject_run_checks_before_schema_v45(run, source_schema)?;
             legacy_evidence::reject_transient_checkpoints_before_schema_v44(run, source_schema)?;
             legacy_evidence::reject_voltage_impulses_before_schema_v41(run, source_schema)?;
             legacy_evidence::reject_import_coordinates_before_schema_v42(run, source_schema)?;
@@ -200,6 +203,7 @@ impl ProjectSimulationResultsData {
                 | VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION
                 | IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION
                 | NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION
+                | TRANSIENT_CHECKPOINT_RESULTS_SCHEMA_VERSION
         ) {
             self.schema_version = PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION;
             return self.validate();
@@ -1772,6 +1776,10 @@ pub struct ProjectAnalysisResult {
         PersistedField<rspice_results::transient_checkpoint::TransientCheckpointEvidence>,
     #[serde(default)]
     pub measurements: Vec<ProjectMeasurement>,
+    /// The run's checks (HDL severity-task records and `.ASSERT` reports),
+    /// introduced in result schema v45. A result without checks omits it.
+    #[serde(default, skip_serializing_if = "PersistedField::is_missing")]
+    pub checks: PersistedField<ProjectRunChecks>,
     /// Authenticated outcomes for the immutable saved-output contracts that
     /// applied to this analysis. Older project files legitimately omit it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1965,6 +1973,12 @@ impl ProjectAnalysisResult {
                 self.id
             ));
         }
+        if self.checks.is_null() {
+            return Err(format!(
+                "analysis sequence {} has explicitly null checks",
+                self.id
+            ));
+        }
         if self.monte_carlo_checkpoint.is_null() {
             return Err(format!(
                 "analysis sequence {} has an explicitly null Monte Carlo checkpoint",
@@ -2004,6 +2018,12 @@ impl ProjectAnalysisResult {
             .provenance
             .map(ProjectAnalysisResultProvenance::into_provenance)
             .transpose()?;
+        let checks = self
+            .checks
+            .into_value()
+            .map(ProjectRunChecks::into_checks)
+            .transpose()?
+            .unwrap_or_default();
         let analysis = AnalysisResult {
             id: self.id,
             analysis_type,
@@ -2025,6 +2045,7 @@ impl ProjectAnalysisResult {
                 .into_iter()
                 .map(ProjectMeasurement::into_measurement)
                 .collect(),
+            checks,
             saved_output_receipts: self.saved_output_receipts,
             success: self.success,
             error_message: self.error_message,
@@ -2137,6 +2158,9 @@ impl ProjectAnalysisResult {
         for (measurement_idx, measurement) in self.measurements.iter().enumerate() {
             measurement.validate(&format!("{prefix}.measurements[{measurement_idx}]"))?;
         }
+        if let Some(checks) = self.checks.as_ref() {
+            checks.validate(&format!("{prefix}.checks"))?;
+        }
         if let Some(provenance) = &self.provenance {
             provenance
                 .validate()
@@ -2208,6 +2232,11 @@ impl ProjectAnalysisResult {
                 .iter()
                 .map(ProjectMeasurement::from)
                 .collect(),
+            checks: if analysis.checks.is_empty() {
+                PersistedField::Missing
+            } else {
+                PersistedField::Value(ProjectRunChecks::from(&analysis.checks))
+            },
             saved_output_receipts: analysis.saved_output_receipts.clone(),
             success: analysis.success,
             error_message: analysis.error_message.clone(),
@@ -2362,7 +2391,8 @@ const VOLTAGE_IMPULSE_RESULTS_SCHEMA_VERSION: u32 = 41;
 const IMPORT_COORDINATE_RESULTS_SCHEMA_VERSION: u32 = 42;
 const NULLABLE_WAVEFORM_RESULTS_SCHEMA_VERSION: u32 = 43;
 const TRANSIENT_CHECKPOINT_RESULTS_SCHEMA_VERSION: u32 = 44;
-const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = TRANSIENT_CHECKPOINT_RESULTS_SCHEMA_VERSION;
+const RUN_CHECKS_RESULTS_SCHEMA_VERSION: u32 = 45;
+const PROJECT_SIMULATION_RESULTS_SCHEMA_VERSION: u32 = RUN_CHECKS_RESULTS_SCHEMA_VERSION;
 
 const LEGACY_RESULT_RUN_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0xe515_12ea_10c0_58c8_8bd7_ea31_003f_f6cf);
