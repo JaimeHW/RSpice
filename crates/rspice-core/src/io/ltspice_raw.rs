@@ -20,10 +20,7 @@ mod metadata_options;
 mod table_metadata;
 pub use {
     metadata_options::write_raw_metadata_options,
-    table_metadata::{
-        raw_table_has_coordinate, raw_table_units, write_raw_table_layout_metadata,
-        write_raw_table_metadata_with_text, write_raw_table_metadata_with_units,
-    },
+    table_metadata::{raw_table_has_coordinate, raw_table_units, write_raw_table_layout_metadata},
 };
 
 use crate::resource::{

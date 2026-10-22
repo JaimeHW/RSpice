@@ -8,7 +8,12 @@ use super::*;
 mod admission;
 
 const PREFIX: &str = "RSpiceTableV1 ";
+/// V2 keeps V1's real-column list and adds case-sensitive unit symbols in RAW
+/// variable order.
 const UNITS_PREFIX: &str = "RSpiceTableV2 ";
+/// V3 adds the original plot name and `(name, type)` pairs in variable order,
+/// including the independent variable, so whitespace-free declarations keep
+/// labels that RAW's header syntax cannot express.
 const TEXT_PREFIX: &str = "RSpiceTableV3 ";
 const LAYOUT_PREFIX: &str = "RSpiceTableV4 ";
 
@@ -80,45 +85,6 @@ pub fn write_raw_table_layout_metadata<W: std::io::Write + ?Sized>(
 /// to the consumer. V4 explicitly takes precedence over that inference.
 pub fn raw_table_has_coordinate(header: &RawFileHeader) -> Result<bool, RawParseError> {
     Ok(read_metadata(header)?.is_some_and(|metadata| metadata.layout.is_some()))
-}
-
-/// Write exact table labels alongside real-column and unit provenance.
-/// V3 keeps the original plot name and `(name, type)` pairs in variable order,
-/// including the independent variable. Callers can then use whitespace-free
-/// declarations without losing labels that RAW's header syntax cannot express.
-pub fn write_raw_table_metadata_with_text<W: std::io::Write + ?Sized>(
-    writer: &mut W,
-    real_variables: &[usize],
-    units: &[Option<String>],
-    plot_name: &str,
-    variables: &[(&str, &str)],
-) -> std::io::Result<()> {
-    super::metadata_options::write_table(
-        writer,
-        3,
-        &serde_json::json!({
-            "real_variables": real_variables,
-            "units": units,
-            "text": {"plot_name": plot_name, "variables": variables},
-        }),
-    )
-}
-
-/// Write table provenance including explicit unit symbols in RAW variable order.
-/// V2 retains the V1 real-column contract and adds case-sensitive unit metadata.
-pub fn write_raw_table_metadata_with_units<W: std::io::Write + ?Sized>(
-    writer: &mut W,
-    real_variables: &[usize],
-    units: &[Option<String>],
-) -> std::io::Result<()> {
-    super::metadata_options::write_table(
-        writer,
-        2,
-        &serde_json::json!({
-            "real_variables": real_variables,
-            "units": units,
-        }),
-    )
 }
 
 fn read_metadata(header: &RawFileHeader) -> Result<Option<Metadata>, RawParseError> {
@@ -301,15 +267,22 @@ mod tests {
         for complex in [false, true] {
             let mut bytes = Vec::new();
             writeln!(bytes, "Title: escaped\nPlotname: escaped").unwrap();
-            write_raw_table_metadata_with_text(
+            // Files earlier releases wrote carry V3; they must keep restoring.
+            let real_variables: &[usize] = if complex { &[0] } else { &[] };
+            super::super::metadata_options::write_table(
                 &mut bytes,
-                if complex { &[0] } else { &[] },
-                &[Some("ms".into()), None],
-                " plot\r\nname ",
-                &[
-                    (" time ", "elapsed time"),
-                    ("V(α\n\"out\")", "custom\ttype"),
-                ],
+                3,
+                &serde_json::json!({
+                    "real_variables": real_variables,
+                    "units": ["ms", null],
+                    "text": {
+                        "plot_name": " plot\r\nname ",
+                        "variables": [
+                            [" time ", "elapsed time"],
+                            ["V(α\n\"out\")", "custom\ttype"],
+                        ],
+                    },
+                }),
             )
             .unwrap();
             let (flags, values) = if complex {
@@ -374,10 +347,15 @@ mod tests {
         for complex in [false, true] {
             let mut bytes = Vec::new();
             writeln!(bytes, "Title: units\nPlotname: units").unwrap();
-            write_raw_table_metadata_with_units(
+            // Files earlier releases wrote carry V2; they must keep restoring.
+            let real_variables: &[usize] = if complex { &[0] } else { &[] };
+            super::super::metadata_options::write_table(
                 &mut bytes,
-                if complex { &[0] } else { &[] },
-                &[Some("ms".into()), Some("mV".into())],
+                2,
+                &serde_json::json!({
+                    "real_variables": real_variables,
+                    "units": ["ms", "mV"],
+                }),
             )
             .unwrap();
             let (flags, values) = if complex {
