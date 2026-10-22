@@ -105,16 +105,6 @@ impl EyeData {
     }
 }
 
-/// Amplitude statistics
-#[derive(Debug, Clone, Default)]
-pub struct AmplitudeStats {
-    pub min: f64,
-    pub max: f64,
-    pub mean: f64,
-    pub std_dev: f64,
-    pub count: usize,
-}
-
 // =============================================================================
 // Eye Diagram Builder
 // =============================================================================
@@ -443,85 +433,6 @@ pub fn find_edges(time: &[f64], signal: &[f64], threshold: f64) -> Vec<Edge> {
     }
 
     edges
-}
-
-/// Calculate edge rate (rise or fall time) between two thresholds
-pub fn calculate_edge_rate(
-    time: &[f64],
-    signal: &[f64],
-    v_low_thresh: f64,
-    v_high_thresh: f64,
-    rising: bool,
-) -> Option<f64> {
-    let n = time.len().min(signal.len());
-    if n < 2 {
-        return None;
-    }
-
-    let mut edge_times = Vec::new();
-
-    for i in 0..n - 1 {
-        let v0 = signal[i];
-        let v1 = signal[i + 1];
-        let t0 = time[i];
-        let t1 = time[i + 1];
-
-        if !v0.is_finite() || !v1.is_finite() {
-            continue;
-        }
-
-        let dt = t1 - t0;
-        if dt <= 0.0 {
-            continue;
-        }
-
-        if rising {
-            // Find low threshold crossing
-            if v0 < v_low_thresh && v1 >= v_low_thresh {
-                let t_low = t0 + (v_low_thresh - v0) / (v1 - v0) * dt;
-
-                // Look ahead for high threshold crossing
-                for j in i..n - 1 {
-                    let va = signal[j];
-                    let vb = signal[j + 1];
-                    let ta = time[j];
-                    let tb = time[j + 1];
-
-                    if va < v_high_thresh && vb >= v_high_thresh {
-                        let t_high = ta + (v_high_thresh - va) / (vb - va) * (tb - ta);
-                        edge_times.push(t_high - t_low);
-                        break;
-                    }
-                }
-            }
-        } else {
-            // Find high threshold crossing (falling edge starts high)
-            if v0 >= v_high_thresh && v1 < v_high_thresh {
-                let t_high = t0 + (v0 - v_high_thresh) / (v0 - v1) * dt;
-
-                // Look ahead for low threshold crossing
-                for j in i..n - 1 {
-                    let va = signal[j];
-                    let vb = signal[j + 1];
-                    let ta = time[j];
-                    let tb = time[j + 1];
-
-                    if va >= v_low_thresh && vb < v_low_thresh {
-                        let t_low = ta + (va - v_low_thresh) / (va - vb) * (tb - ta);
-                        edge_times.push(t_low - t_high);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    if edge_times.is_empty() {
-        return None;
-    }
-
-    // Return mean edge time
-    Some(edge_times.iter().sum::<f64>() / edge_times.len() as f64)
 }
 
 // =============================================================================
