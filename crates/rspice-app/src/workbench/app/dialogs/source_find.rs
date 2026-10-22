@@ -9,6 +9,9 @@
 //! [`SOURCE_SEARCH_RESULT_LIMIT`]; a replace that would exceed the stream
 //! limit is refused instead of applying part of itself.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
 
 use crate::state::ProjectSourceLanguage;
@@ -490,19 +493,6 @@ mod tests {
                 if read_only { "" } else { "replacement" }
             );
             assert!(app.state.model.workspace.content.project_sources == sources);
-        }
-    }
-
-    /// A dialog that rewrites source across a whole bundle must never resolve
-    /// state by unwrapping.
-    #[test]
-    fn the_find_dialog_has_no_panic_based_state_transitions() {
-        let production = crate::source_guard::production_source(include_str!("source_find.rs"));
-        for forbidden in [".expect(", ".unwrap(", "panic!("] {
-            assert!(
-                !production.contains(forbidden),
-                "the source-find dialog contains panic shortcut {forbidden}"
-            );
         }
     }
 

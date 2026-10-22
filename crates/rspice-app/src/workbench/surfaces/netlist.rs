@@ -8,6 +8,9 @@
 //! banner, file drop, deterministic formatting, and the readiness predicates
 //! every other part reads. Each submodule owns one transaction of its own.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 mod generation;
 mod language;
 mod ownership;

@@ -5,6 +5,9 @@
 //! bytes before the exact source identity it was opened against is confirmed
 //! to still be current.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};

@@ -3,6 +3,9 @@
 //! The three-way merge uses the last saved digest as its base; a region it
 //! cannot reconcile becomes an explicit conflict block rather than a guess.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 // Staging an external change reads and digests a host file, which only the
 // native build can reopen; the browser gets the refusing stub at the bottom of
 // this file.

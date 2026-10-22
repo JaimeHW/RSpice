@@ -4,6 +4,9 @@
 //! This module owns only the currently visible page and asynchronous operation
 //! receipts that must never survive a process restart.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use crate::{
     product::{ContentDigest, ProjectId},
     state::{ProjectSourceId, ProjectSourceLanguage},

@@ -1,5 +1,8 @@
 //! Governed execution bridge for the strict project Automation workflow.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 mod debugger;
 mod evidence;
 mod host_calls;

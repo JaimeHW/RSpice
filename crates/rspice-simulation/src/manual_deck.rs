@@ -4,6 +4,9 @@
 //! analyses the deck itself declares, rather than the ones the Simulate
 //! workspace configured.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use crate::execution_options::SpecExecutionOptions;
 use crate::preparation::QueuedAnalysis;
 use rspice_core::netlist::{

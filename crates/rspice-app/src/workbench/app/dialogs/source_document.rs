@@ -11,6 +11,9 @@
 //! A draft is never applied by closing the dialog. Committing is an explicit
 //! act, because the operations here rewrite a source graph.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -2144,19 +2147,6 @@ mod tests {
         assert_eq!(with.source_path.as_deref(), Some(deck_path.as_path()));
 
         std::fs::remove_dir_all(&root).ok();
-    }
-
-    /// The panic-shortcut guard every lifecycle surface carries: a dialog that
-    /// rewrites a source graph must never resolve state by unwrapping.
-    #[test]
-    fn the_lifecycle_dialog_has_no_panic_based_state_transitions() {
-        let production = crate::source_guard::production_source(include_str!("source_document.rs"));
-        for forbidden in [".expect(", ".unwrap(", "panic!("] {
-            assert!(
-                !production.contains(forbidden),
-                "the source-document dialog contains panic shortcut {forbidden}"
-            );
-        }
     }
 
     /// Line endings are reported from the retained bytes. A whole-file rewrite

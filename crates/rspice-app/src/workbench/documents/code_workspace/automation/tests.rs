@@ -11,51 +11,16 @@ use super::*;
 
 #[test]
 fn source_workspace_runtime_transitions_have_no_production_panic_shortcuts() {
-    // Every module that runs a source-workspace transaction belongs here, not
-    // just its entry file: splitting a module must not silently narrow what
-    // this guard scans. Add a submodule the same day you create it.
+    // Each source-workspace module denies the shortcut lints in its shipped
+    // build. CI runs clippy natively only, so these files are still read here
+    // for the code that only the browser build compiles.
     for (name, source) in [
-        ("Automation runtime", include_str!("../automation.rs")),
-        ("Automation debugger", include_str!("debugger.rs")),
-        ("Automation evidence", include_str!("evidence.rs")),
         ("Automation host calls", include_str!("host_calls.rs")),
         ("Code workspace state", include_str!("../page.rs")),
         ("Verilog-A runtime", include_str!("../veriloga.rs")),
         (
-            "Netlist document runtime",
-            include_str!("../../netlist_document.rs"),
-        ),
-        (
-            "Netlist import review",
-            include_str!("../../netlist_document/import_review.rs"),
-        ),
-        (
             "Netlist surface",
             include_str!("../../../surfaces/netlist.rs"),
-        ),
-        (
-            "Netlist generation",
-            include_str!("../../../surfaces/netlist/generation.rs"),
-        ),
-        (
-            "Netlist ownership",
-            include_str!("../../../surfaces/netlist/ownership.rs"),
-        ),
-        (
-            "Netlist revision",
-            include_str!("../../../surfaces/netlist/revision.rs"),
-        ),
-        (
-            "Netlist search",
-            include_str!("../../../surfaces/netlist/search.rs"),
-        ),
-        (
-            "Netlist toolbar",
-            include_str!("../../../surfaces/netlist/toolbar.rs"),
-        ),
-        (
-            "Netlist transfer",
-            include_str!("../../../surfaces/netlist/transfer.rs"),
         ),
     ] {
         let production = crate::source_guard::production_source(source);

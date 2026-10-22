@@ -5,6 +5,9 @@
 //! script sent back. A call that names a handle this session did not issue is
 //! rejected rather than resolved.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use super::debugger::debug_fail;
 use super::*;
 

@@ -6,6 +6,9 @@
 //! of the same pass, which is what lets a generated line name the schematic
 //! object that produced it.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     GeneratedArtifact, GeneratedProvenance, GeneratedSourceMapEntry, GenerationInput,

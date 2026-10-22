@@ -4,6 +4,9 @@
 //! parameter tuning, and run-to-run diff state. It has no application-chrome
 //! chrome; the canonical Netlist workspace composes it as a document surface.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use std::collections::{HashMap, HashSet};
 
 use super::{CodeSourceFileAction, CodeWorkspacePage};

@@ -39,6 +39,9 @@
 //! owned their whole grammar. It no longer does. They spell their output probe
 //! `out=` like the rest of the family, because the engine does.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use std::collections::{HashMap, HashSet};
 
 use rspice_core::netlist::expr::eval_expression;

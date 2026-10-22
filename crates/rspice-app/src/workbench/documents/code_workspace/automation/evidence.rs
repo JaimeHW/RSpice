@@ -3,6 +3,9 @@
 //! The digest covers every field the comparison reads, so evidence can never
 //! be published against a run that differs from the one it was measured on.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use super::*;
 
 pub(super) fn build_spec_evidence(

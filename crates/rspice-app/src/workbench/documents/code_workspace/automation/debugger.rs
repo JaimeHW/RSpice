@@ -5,6 +5,9 @@
 //! Breakpoints, frames, and evaluations are all request-correlated, so a
 //! response that arrives after its session ended is discarded, not applied.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use super::host_calls::runtime_protocol_failure;
 use super::*;
 

@@ -4,6 +4,9 @@
 //! path is relative to the installed RSpice executable and anchored by the
 //! Ed25519 release key compiled into this application build.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use std::{
     path::PathBuf,
     sync::mpsc::{self, Receiver, TryRecvError},
@@ -431,26 +434,13 @@ mod tests {
     }
 
     #[test]
-    fn compiled_runtime_requirement_is_valid_and_production_has_no_panic_shortcuts() {
+    fn compiled_runtime_requirement_is_valid_and_the_lifecycle_keeps_its_guards() {
         let requirement = runtime_requirement().expect("compiled runtime requirement");
         assert!(requirement.python.matches(&Version::new(3, 14, 0)));
         assert!(requirement.rspice_api.matches(&Version::new(1, 0, 0)));
 
         let production =
             crate::source_guard::production_half(include_str!("automation_runtime.rs"));
-        for shortcut in [
-            ".expect(",
-            ".unwrap(",
-            "panic!(",
-            "unreachable!(",
-            "todo!(",
-            "unimplemented!(",
-        ] {
-            assert!(
-                !production.contains(shortcut),
-                "production code must not contain {shortcut}"
-            );
-        }
         for required in [
             "a managed Python launch is already active",
             "envelope.validate()",

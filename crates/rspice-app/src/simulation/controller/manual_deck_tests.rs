@@ -4,22 +4,6 @@ use super::{AnalysisSpec, AppState, NoiseSweepType, analysis_inputs};
 use rspice_simulation::manual_deck::build_manual_deck_queue;
 
 #[test]
-fn manual_deck_planning_has_no_panic_shortcuts() {
-    for source in [
-        include_str!("../../../../rspice-simulation/src/manual_deck.rs"),
-        include_str!("../../../../rspice-simulation/src/manual_deck/periodic.rs"),
-    ] {
-        let production = crate::source_guard::production_source(source);
-        for forbidden in [".expect(", ".unwrap(", "panic!(", "unreachable!("] {
-            assert!(
-                !production.contains(forbidden),
-                "manual-deck production code contains panic shortcut {forbidden}"
-            );
-        }
-    }
-}
-
-#[test]
 fn studio_hb_card_retains_solver_controls_and_automatic_grid() {
     use rspice_simulation_contract::hb_draft::{HbConfig, HbDialogState, HbSolverType};
     let config = HbConfig {

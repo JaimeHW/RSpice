@@ -5,6 +5,9 @@
 //! document's ownership, and the advisory chip yields its space before the
 //! language label or a blocking status can clip.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use egui::containers::menu::MenuButton;
 use egui::{Align, Layout, Ui, vec2};
 

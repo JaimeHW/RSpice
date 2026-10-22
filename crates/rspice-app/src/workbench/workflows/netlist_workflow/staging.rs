@@ -3,6 +3,9 @@
 //! Nothing observed in a candidate file — dialect, includes, encoding — is
 //! adopted until the review commits it, so a rejected import leaves no trace.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use super::bundle::{decode_import_bytes, parse_generated_netlist_bundle};
 use super::import::{
     NetlistImportMetadata, NetlistImportMode, apply_netlist_import_result,

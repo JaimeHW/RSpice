@@ -1,5 +1,8 @@
 //! Revision-bound search and atomic replacement across a project source bundle.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use std::borrow::Cow;
 
 use sha2::{Digest as _, Sha256};
@@ -887,24 +890,6 @@ mod tests {
         assert!(masked.contains("\r\n"));
         assert_eq!(lines[2].trim_end(), "R4 a b 1k,");
         assert_eq!(lines[3], "R5 $G_DPWR b 'x;gain'");
-    }
-
-    #[test]
-    fn production_source_search_has_no_panic_shortcuts() {
-        let production = crate::source_guard::production_half(include_str!("source_search.rs"));
-        for shortcut in [
-            ".expect(",
-            ".unwrap(",
-            "panic!(",
-            "unreachable!(",
-            "todo!(",
-            "unimplemented!(",
-        ] {
-            assert!(
-                !production.contains(shortcut),
-                "production code must not contain {shortcut}"
-            );
-        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]

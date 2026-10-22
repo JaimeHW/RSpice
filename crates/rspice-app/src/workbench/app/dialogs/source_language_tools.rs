@@ -11,6 +11,9 @@
 //! transaction refuses rather than applying to a newer revision, so this
 //! surface never repairs a stale index behind the user's back — it says so.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -832,20 +835,6 @@ mod tests {
     use super::*;
 
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-    /// A surface that rewrites every occurrence of a name across a project
-    /// must never resolve state by unwrapping.
-    #[test]
-    fn the_language_tools_dialog_has_no_panic_based_state_transitions() {
-        let production =
-            crate::source_guard::production_source(include_str!("source_language_tools.rs"));
-        for forbidden in [".expect(", ".unwrap(", "panic!("] {
-            assert!(
-                !production.contains(forbidden),
-                "the language tools dialog contains panic shortcut {forbidden}"
-            );
-        }
-    }
 
     /// Every view must be offered exactly once and name itself, or a chip
     /// would select a view the body cannot render.

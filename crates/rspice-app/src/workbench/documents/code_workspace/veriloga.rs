@@ -1,5 +1,8 @@
 //! Governed in-memory Verilog-A compilation for the Code workspace.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{

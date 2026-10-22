@@ -4,6 +4,9 @@
 //! carries the document it came from and whether that document is editable.
 //! Read-only generated source is searchable and never replaceable.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use egui::Ui;
 use std::ops::Range;
 

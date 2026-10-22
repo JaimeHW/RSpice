@@ -2,6 +2,9 @@
 //! the decoded candidate, the issues found in it, and whether the dialect the
 //! reader selected has a qualified execution profile.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NetlistImportOperation {
     OpenProject,

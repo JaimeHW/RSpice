@@ -5,6 +5,9 @@
 //! TOML capability manifest.  Execution consumes only this compiled closure;
 //! it never infers authority from labels painted by the UI.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use sha2::{Digest, Sha256};
@@ -1593,17 +1596,6 @@ mod tests {
         DEFAULT_AUTOMATION_PERMISSIONS, DEFAULT_AUTOMATION_PYTHON, DEFAULT_AUTOMATION_RUN_PLAN,
         DEFAULT_ENVIRONMENT_LOCK,
     };
-
-    #[test]
-    fn workspace_formation_has_no_production_panic_shortcuts() {
-        let production = crate::source_guard::production_half(include_str!("workspace.rs"));
-        for forbidden in [".expect(", ".unwrap(", "panic!(", "unreachable!("] {
-            assert!(
-                !production.contains(forbidden),
-                "Automation workspace formation contains {forbidden}"
-            );
-        }
-    }
 
     fn sources() -> AutomationWorkspaceSources<'static> {
         AutomationWorkspaceSources {

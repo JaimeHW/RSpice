@@ -12,6 +12,9 @@
 //! arbitrary boundary, and the small-document path was the one nothing
 //! exercised.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

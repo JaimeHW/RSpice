@@ -4,6 +4,9 @@
 //! typing into a generated view, and opening an existing owned document never
 //! rewrites its bytes from the current generated primary.
 
+#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
+#![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
+
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::NetlistDocumentId;
 use crate::ui::tokens::Tokens;
