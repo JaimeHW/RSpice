@@ -1630,11 +1630,6 @@ mod hb_state_contract_tests {
             measurements: Vec::new(),
             operating_point,
         };
-        assert_eq!(
-            result(point.clone()).estimated_numeric_payload_bytes()
-                - result(base).estimated_numeric_payload_bytes(),
-            5 * 2 * 8
-        );
         let response = WorkerResponse {
             id: 879,
             outcome: WorkerOutcome::Success(Box::new(result(point.clone()))),

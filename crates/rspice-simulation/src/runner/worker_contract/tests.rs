@@ -1494,9 +1494,6 @@ fn current_impulse_history_survives_worker_transfer_and_rejects_invalid_charge()
     };
     *time = vec![0.0, 1.0];
     events.current_impulses = Some(history.clone());
-    // Two extent values, two coverage flags, charge time/value, and
-    // derivative time/order/coefficient. This is independent of samples.
-    assert_eq!(conversions::event_history_payload_bytes(events), 54);
     let transport = WorkerResponseTransport::from_response(response.clone()).unwrap();
     let metadata = serde_json::to_string(&transport.response).unwrap();
     let transported = WorkerResponseTransport {
@@ -1765,88 +1762,6 @@ fn monte_carlo_worker_result_round_trips_seed_and_exact_samples_through_json() {
 }
 
 #[test]
-fn worker_result_payload_estimate_counts_high_volume_arrays() {
-    let transient = WorkerSimulationResult::Transient {
-        spectra: Vec::new(),
-        testbench_errors: Vec::new(),
-        convergence: None,
-        time: vec![0.0, 1.0],
-        waveforms: vec![WorkerWaveform {
-            name: "V(out)".to_string(),
-            x_values: vec![0.0, 1.0],
-            y_values: vec![0.2, 0.4],
-            y_unit: "V".to_string(),
-            is_complex: false,
-            y_imag: None,
-        }],
-        measurements: Vec::new(),
-        events: WorkerEventHistory::default(),
-    };
-    assert_eq!(transient.estimated_numeric_payload_bytes(), 48);
-
-    let ac = WorkerSimulationResult::Ac {
-        convergence: None,
-        noise_reference_temperature_kelvin: None,
-        reference_impedances_ohm: None,
-        frequencies: vec![1.0, 10.0, 100.0],
-        waveforms: vec![WorkerWaveform {
-            name: "V(out)".to_string(),
-            x_values: vec![1.0, 10.0, 100.0],
-            y_values: vec![1.0, 0.5, 0.25],
-            y_unit: String::new(),
-            is_complex: true,
-            y_imag: Some(vec![0.0, -0.1, -0.2]),
-        }],
-        measurements: Vec::new(),
-    };
-    assert_eq!(ac.estimated_numeric_payload_bytes(), 96);
-
-    let noise = WorkerSimulationResult::Noise {
-        output_unit: None,
-        frequencies: vec![1.0, 10.0],
-        output_noise: vec![1.0e-18, 2.0e-18],
-        input_noise: Some(vec![3.0e-18, 4.0e-18]),
-        contributors: HashMap::from([
-            ("R1".to_string(), vec![0.5e-18, 1.0e-18]),
-            ("M1".to_string(), vec![0.25e-18, 0.5e-18, 1.0e-18]),
-        ]),
-        summary: None,
-        measurements: Vec::new(),
-    };
-    assert_eq!(noise.estimated_numeric_payload_bytes(), 88);
-}
-
-#[test]
-fn worker_response_rejects_payloads_that_exceed_transport_limit() {
-    let result = SimulationResult::Transient {
-        spectra: Vec::new(),
-        hdl_output: Vec::new(),
-        time: vec![0.0, 1.0],
-        waveforms: HashMap::from([(
-            "V(out)".to_string(),
-            SampledWaveform::new_time_domain("V(out)", vec![0.0, 1.0], vec![0.2, 0.4]),
-        )]),
-        measurements: Vec::new(),
-        periodic_state: None,
-        convergence: Default::default(),
-        events: Default::default(),
-    };
-
-    let accepted = worker_outcome_from_result(Ok(result.clone()), 48);
-    assert!(matches!(accepted, WorkerOutcome::Success(_)));
-
-    let rejected = worker_outcome_from_result(Ok(result), 47);
-    match rejected {
-        WorkerOutcome::Failure(WorkerSimulationError::InvalidConfig(message)) => {
-            assert!(message.contains("browser worker result"));
-            assert!(message.contains("48 B"));
-            assert!(message.contains("47 B"));
-        }
-        other => panic!("expected InvalidConfig failure, got {other:?}"),
-    }
-}
-
-#[test]
 fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
     let result = SimulationResult::Transient {
         spectra: Vec::new(),
@@ -1861,12 +1776,6 @@ fn worker_transfer_response_does_not_apply_legacy_clone_budget() {
         convergence: Default::default(),
         events: Default::default(),
     };
-
-    let legacy = worker_outcome_from_result(Ok(result.clone()), 47);
-    assert!(matches!(
-        legacy,
-        WorkerOutcome::Failure(WorkerSimulationError::InvalidConfig(_))
-    ));
 
     let transfer_response = WorkerResponse::from_result_for_transfer(87, Ok(result));
     let WorkerOutcome::Success(_) = &transfer_response.outcome else {

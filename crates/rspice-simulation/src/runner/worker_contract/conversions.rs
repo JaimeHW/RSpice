@@ -8,29 +8,6 @@
 
 use super::*;
 
-#[cfg(test)]
-pub(super) fn noise_summary_payload_bytes(summary: &WorkerNoiseSummary) -> usize {
-    sum_payload_bytes([
-        summary
-            .rows
-            .iter()
-            .map(|_| f64_payload_bytes(2))
-            .fold(0usize, |total, bytes| total.saturating_add(bytes)),
-        f64_payload_bytes(3),
-        summary
-            .conversion
-            .as_ref()
-            .map_or(0, |_| f64_payload_bytes(1).saturating_add(12)),
-        summary.noise_figure.as_ref().map_or(0, |figure| {
-            f64_payload_bytes(
-                3usize
-                    .saturating_add(figure.frequencies.len())
-                    .saturating_add(figure.decibels.len()),
-            )
-        }),
-    ])
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerMonteCarloVariable {
     /// Confidence in the mean, with estimator and successful-trial population.
@@ -44,22 +21,6 @@ pub(crate) struct WorkerMonteCarloVariable {
     pub max: f64,
     pub histogram: Vec<usize>,
     pub bin_edges: Vec<f64>,
-}
-
-#[cfg(test)]
-impl WorkerMonteCarloVariable {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        sum_payload_bytes([
-            f64_payload_bytes(4usize.saturating_add(self.samples.len())),
-            if self.mean_confidence.is_some() {
-                48
-            } else {
-                0
-            },
-            usize_payload_bytes(self.histogram.len()),
-            f64_payload_bytes(self.bin_edges.len()),
-        ])
-    }
 }
 
 impl From<MonteCarloVariableResult> for WorkerMonteCarloVariable {
@@ -94,75 +55,9 @@ impl From<WorkerMonteCarloVariable> for MonteCarloVariableResult {
     }
 }
 
-#[cfg(test)]
-fn soa_evaluation_payload_bytes(value: &WorkerSoAEvaluation) -> usize {
-    f64_payload_bytes(if value.derating.is_some() { 6 } else { 3 })
-        .saturating_add(f64_payload_bytes(value.envelope.as_ref().map_or(0, |e| {
-            1 + usize::from(e.curve.pulse_width_s.is_some())
-                + e.curve.voltages_v.len()
-                + e.curve.dc_currents_a.as_ref().map_or(0, Vec::len)
-                + e.curve
-                    .pulses
-                    .iter()
-                    .map(|p| 1 + p.currents_a.len())
-                    .sum::<usize>()
-        })))
-        .saturating_add(f64_payload_bytes(if value.duration.is_some() {
-            6
-        } else {
-            0
-        }))
-        .saturating_add(f64_payload_bytes(if value.thresholds.is_default() {
-            0
-        } else {
-            usize::from(value.thresholds.warning_fraction.is_some())
-                + usize::from(value.thresholds.critical_fraction.is_some())
-        }))
-        .saturating_add(std::mem::size_of::<u64>())
-}
-
-#[cfg(test)]
-fn soa_violation_payload_bytes(_value: &WorkerSoAViolation) -> usize {
-    f64_payload_bytes(3)
-}
-
-#[cfg(test)]
-fn waveform_payload_bytes(waveform: &WorkerWaveform) -> usize {
-    sum_payload_bytes([
-        f64_payload_bytes(waveform.x_values.len()),
-        f64_payload_bytes(waveform.y_values.len()),
-        waveform
-            .y_imag
-            .as_ref()
-            .map_or(0, |values| f64_payload_bytes(values.len())),
-    ])
-}
-
-#[cfg(test)]
-fn measurement_payload_bytes(measurement: &WorkerMeasurement) -> usize {
-    f64_payload_bytes(
-        usize::from(measurement.value.is_some())
-            + usize::from(measurement.raw_value.is_some())
-            + usize::from(measurement.expected.is_some())
-            + usize::from(measurement.tolerance.is_some())
-            + usize::from(measurement.failure_limit.is_some())
-            + usize::from(measurement.event_axis.is_some()),
-    )
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct WorkerDeviceOpReport {
     pub entries: Vec<WorkerDeviceOpEntry>,
-}
-
-#[cfg(test)]
-impl WorkerDeviceOpReport {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        self.entries
-            .iter()
-            .map(WorkerDeviceOpEntry::estimated_numeric_payload_bytes)
-            .fold(0usize, |total, bytes| total.saturating_add(bytes))
-    }
 }
 
 impl From<rspice_core::circuit::DeviceOpReport> for WorkerDeviceOpReport {
@@ -195,16 +90,6 @@ pub(crate) struct WorkerDeviceOpEntry {
     pub device_kind: String,
     pub region: Option<String>,
     pub params: Vec<WorkerNamedValue>,
-}
-
-#[cfg(test)]
-impl WorkerDeviceOpEntry {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        self.params
-            .iter()
-            .map(WorkerNamedValue::estimated_numeric_payload_bytes)
-            .fold(0usize, |total, bytes| total.saturating_add(bytes))
-    }
 }
 
 impl From<rspice_core::circuit::DeviceOpEntry> for WorkerDeviceOpEntry {
@@ -244,13 +129,6 @@ impl From<WorkerDeviceOpEntry> for rspice_core::circuit::DeviceOpEntry {
 pub(crate) struct WorkerNamedValue {
     pub name: String,
     pub value: f64,
-}
-
-#[cfg(test)]
-impl WorkerNamedValue {
-    pub(super) fn estimated_numeric_payload_bytes(&self) -> usize {
-        f64_payload_bytes(1)
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -946,146 +824,6 @@ pub(super) fn worker_js_error(error: wasm_bindgen::JsValue) -> SimulationError {
         })
         .unwrap_or_else(|| "unknown JavaScript error".to_string());
     SimulationError::InvalidConfig(message)
-}
-
-#[cfg(test)]
-pub(super) fn sum_payload_bytes(bytes: impl IntoIterator<Item = usize>) -> usize {
-    bytes
-        .into_iter()
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
-}
-
-#[cfg(test)]
-pub(super) fn f64_payload_bytes(len: usize) -> usize {
-    len.saturating_mul(std::mem::size_of::<f64>())
-}
-
-#[cfg(test)]
-pub(super) fn pss_operating_point_payload_bytes(
-    operating_point: &rspice_core::engine::PssOperatingPoint,
-) -> usize {
-    let analysis = operating_point.analysis();
-    let values = analysis
-        .result
-        .time
-        .len()
-        .saturating_add(
-            analysis
-                .result
-                .waveforms
-                .iter()
-                .chain(&analysis.result.branch_waveforms)
-                .map(|waveform| waveform.values.len())
-                .sum::<usize>(),
-        )
-        .saturating_add(analysis.monodromy.iter().map(Vec::len).sum::<usize>())
-        .saturating_add(analysis.result.floquet_multipliers.len().saturating_mul(2))
-        .saturating_add(analysis.floquet_multipliers.len().saturating_mul(2))
-        .saturating_add(operating_point.shooting_state().len());
-    f64_payload_bytes(values)
-}
-
-#[cfg(test)]
-pub(super) fn usize_payload_bytes(len: usize) -> usize {
-    len.saturating_mul(std::mem::size_of::<usize>())
-}
-
-#[cfg(test)]
-pub(super) fn complex_pair_payload_bytes(len: usize) -> usize {
-    len.saturating_mul(2)
-        .saturating_mul(std::mem::size_of::<f64>())
-}
-
-#[cfg(test)]
-pub(super) fn event_history_payload_bytes(events: &WorkerEventHistory) -> usize {
-    let digital = events
-        .digital
-        .iter()
-        .map(|trace| f64_payload_bytes(trace.points.len()).saturating_add(trace.points.len()))
-        .fold(0usize, |total, bytes| total.saturating_add(bytes));
-    let real = events
-        .real
-        .iter()
-        .map(|trace| f64_payload_bytes(trace.points.len().saturating_mul(2)))
-        .fold(digital, |total, bytes| total.saturating_add(bytes));
-    // A bus contributes its two declared indices and nothing else: the
-    // members are names, which this budget does not count for a trace either,
-    // and there is no value in a declaration to count.
-    let impulses = events.current_impulses.as_ref().map_or(0, |history| {
-        history
-            .traces
-            .iter()
-            .fold(2 * size_of::<f64>() + 1, |total, trace| {
-                total
-                    .saturating_add(1)
-                    .saturating_add(f64_payload_bytes(trace.points.len().saturating_mul(2)))
-                    .saturating_add(
-                        trace
-                            .derivatives
-                            .len()
-                            .saturating_mul(2 * size_of::<f64>() + size_of::<u32>()),
-                    )
-            })
-    });
-    let voltage_impulses = events.voltage_impulses.as_ref().map_or(0, |history| {
-        history
-            .traces
-            .iter()
-            .fold(2 * size_of::<f64>() + 1, |total, trace| {
-                total
-                    .saturating_add(1)
-                    .saturating_add(f64_payload_bytes(trace.points.len().saturating_mul(2)))
-                    .saturating_add(
-                        trace
-                            .derivatives
-                            .len()
-                            .saturating_mul(2 * size_of::<f64>() + size_of::<u32>()),
-                    )
-            })
-    });
-    real.saturating_add(events.buses.len().saturating_mul(2 * size_of::<i64>()))
-        .saturating_add(impulses)
-        .saturating_add(voltage_impulses)
-}
-
-#[cfg(test)]
-pub(super) fn waveforms_payload_bytes(waveforms: &[WorkerWaveform]) -> usize {
-    waveforms
-        .iter()
-        .map(waveform_payload_bytes)
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
-}
-
-#[cfg(test)]
-pub(super) fn measurements_payload_bytes(measurements: &[WorkerMeasurement]) -> usize {
-    measurements
-        .iter()
-        .map(measurement_payload_bytes)
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
-}
-
-#[cfg(test)]
-pub(super) fn vec_map_payload_bytes(values_by_name: &HashMap<String, Vec<f64>>) -> usize {
-    values_by_name
-        .values()
-        .map(|values| f64_payload_bytes(values.len()))
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
-}
-
-#[cfg(test)]
-pub(super) fn soa_violations_payload_bytes(violations: &[WorkerSoAViolation]) -> usize {
-    violations
-        .iter()
-        .map(soa_violation_payload_bytes)
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
-}
-
-#[cfg(test)]
-pub(super) fn soa_evaluations_payload_bytes(evaluations: &[WorkerSoAEvaluation]) -> usize {
-    evaluations
-        .iter()
-        .map(soa_evaluation_payload_bytes)
-        .fold(0usize, |total, bytes| total.saturating_add(bytes))
 }
 
 pub(super) fn worker_waveforms(waveforms: HashMap<String, SampledWaveform>) -> Vec<WorkerWaveform> {
