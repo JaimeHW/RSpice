@@ -612,8 +612,9 @@ mod tests {
     #[test]
     fn pac_around_hb_and_pac_around_pss_agree_on_a_linear_circuit() {
         use crate::engine_services::hb::{
-            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
+        use crate::engine_services::test_entry::{ctx, parse};
 
         // R = 1 kOhm, C = 159.154943091895 pF: the corner sits at 1 MHz, so
         // the swept offsets below cover both sides of it.
@@ -654,14 +655,15 @@ mod tests {
                 &NoAbort,
             )
             .expect("the driven RC orbit converges");
-        let harmonic_balance = run_hb_analysis_with_abort(
-            DECK,
+        let harmonic_balance = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse(DECK),
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(FUNDAMENTAL, HARMONICS)],
                 reltol: 1.0e-10,
                 ..HbRunConfig::default()
             },
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("the harmonic-balance carrier converges")
         .operating_point;

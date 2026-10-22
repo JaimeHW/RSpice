@@ -357,18 +357,22 @@ pub(crate) fn integrate_psd(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine_services::hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort};
+    use crate::engine_services::hb::{
+        HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
+    };
+    use crate::engine_services::test_entry::{ctx, parse};
     use rspice_core::abort_signal::NoAbort;
 
     fn retained_hb(deck: &str) -> HbOperatingPoint {
-        run_hb_analysis_with_abort(
-            deck,
+        run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse(deck),
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(1.0e6, 8)],
                 reltol: 2.5e-7,
                 ..HbRunConfig::default()
             },
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("HB service runs")
         .operating_point

@@ -6,12 +6,10 @@
 
 #![allow(clippy::type_complexity)]
 
-use super::{ServiceRunError, ServiceRunResult, parse_runner_netlist_with_abort};
+use super::{ServiceRunError, ServiceRunResult};
 use crate::error::ensure_not_aborted;
 use rspice_core::Value;
-use rspice_core::abort_signal::AbortSignal;
 use std::collections::HashSet;
-use std::path::Path;
 /// One displayed spectrum in the core result's peak-amplitude convention.
 #[derive(Debug, Clone)]
 pub struct HbSpectrum {
@@ -35,68 +33,9 @@ pub struct HbData {
 use crate::periodic::build_core_hb_config;
 pub use crate::periodic::{HbRunConfig, HbToneRunConfig};
 
-/// Run Harmonic Balance analysis with cooperative cancellation.
-///
-/// Test-only. The shipping path is
-/// [`run_hb_analysis_with_source_path_and_abort`], reached from
-/// `simulation::runner::spec::periodic`.
-#[cfg(test)]
-pub fn run_hb_analysis_with_abort(
-    netlist_text: &str,
-    config: &HbRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<HbData> {
-    run_hb_analysis_with_source_path_and_abort(netlist_text, config, None, abort)
-}
-
-/// Run Harmonic Balance analysis with source-path resolution and cooperative
-/// cancellation through validation, layout construction, solving, and result
-/// conversion.
-#[allow(
-    dead_code,
-    reason = "retained source-path HB adapter for callers and tests"
-)]
-pub fn run_hb_analysis_with_source_path_and_abort(
-    netlist_text: &str,
-    config: &HbRunConfig,
-    source_path: Option<&Path>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<HbData> {
-    ensure_not_aborted(abort)?;
-    config.validate_with_abort(abort)?;
-    let netlist = parse_runner_netlist_with_abort(netlist_text, source_path, abort)?;
-    run_hb_analysis_on_materialized_with_abort(&netlist, config, abort)
-}
-
-/// Solve the already varied study circuit without replaying its nominal source.
-pub(crate) fn run_hb_analysis_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &HbRunConfig,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<HbData> {
-    ensure_not_aborted(abort)?;
-    run_hb_analysis_with_dc_seed_on_materialized_with_abort(netlist, config, None, abort)
-}
-
-/// Apply a bound OP seed while preserving an explicitly authored zero start.
-pub(crate) fn run_hb_analysis_with_dc_seed_on_materialized_with_abort(
-    netlist: &rspice_core::Netlist,
-    config: &HbRunConfig,
-    seed: Option<&rspice_core::engine::PeriodicDcOperatingPointSeed>,
-    abort: &dyn AbortSignal,
-) -> ServiceRunResult<HbData> {
-    run_hb_analysis_with_dc_seed_on_materialized_with_context(
-        netlist,
-        config,
-        seed,
-        super::ServiceContext {
-            source_path: None,
-            limits: Default::default(),
-            abort,
-        },
-    )
-}
-
+/// Solve the already varied circuit, applying a bound OP seed while
+/// preserving an explicitly authored zero start. The configuration is
+/// validated before the layout is built.
 pub(crate) fn run_hb_analysis_with_dc_seed_on_materialized_with_context(
     netlist: &rspice_core::Netlist,
     config: &HbRunConfig,
@@ -275,7 +214,9 @@ fn validate_hb_solution(analysis: &rspice_core::engine::HbAnalysisResult) -> Ser
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use super::super::test_entry::{ctx, parse};
     use super::*;
+    use rspice_core::abort_signal::AbortSignal;
 
     struct AbortOnPoll {
         abort_on: usize,
@@ -299,7 +240,12 @@ mod tests {
             polls: AtomicUsize::new(0),
         };
 
-        let result = run_hb_analysis_with_abort("invalid", &config, &abort);
+        let result = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse("invalid\n.end\n"),
+            &config,
+            None,
+            ctx(&abort),
+        );
 
         assert!(matches!(result, Err(ServiceRunError::Aborted)));
     }

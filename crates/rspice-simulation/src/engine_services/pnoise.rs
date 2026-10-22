@@ -550,8 +550,9 @@ mod tests {
     #[test]
     fn pnoise_around_hb_and_pnoise_around_pss_agree_on_a_linear_circuit() {
         use crate::engine_services::hb::{
-            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
+        use crate::engine_services::test_entry::{ctx, parse};
 
         // R = 1 kOhm, C = 159.154943091895 pF, corner at 1 MHz.
         const DECK: &str = "pnoise carrier agreement fixture\n\
@@ -597,14 +598,15 @@ mod tests {
                 &NoAbort,
             )
             .expect("the driven RC orbit converges");
-        let harmonic_balance = run_hb_analysis_with_abort(
-            DECK,
+        let harmonic_balance = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse(DECK),
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(FUNDAMENTAL, HARMONICS)],
                 reltol: 1.0e-10,
                 ..HbRunConfig::default()
             },
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("the harmonic-balance carrier converges")
         .operating_point;
@@ -686,21 +688,23 @@ mod tests {
     #[test]
     fn a_phase_referred_pnoise_run_refuses_a_harmonic_balance_carrier() {
         use crate::engine_services::hb::{
-            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
+        use crate::engine_services::test_entry::{ctx, parse};
 
         const DECK: &str = "pnoise phase refusal fixture\n\
                             V1 in 0 SIN(0 0.001 1Meg)\n\
                             R1 in out 1k\n\
                             C1 out 0 1n\n\
                             .end\n";
-        let harmonic_balance = run_hb_analysis_with_abort(
-            DECK,
+        let harmonic_balance = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse(DECK),
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(1.0e6, 8)],
                 ..HbRunConfig::default()
             },
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("the harmonic-balance carrier converges")
         .operating_point;

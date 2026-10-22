@@ -76,8 +76,6 @@ pub(crate) use envelope_fourier::{
 pub(crate) use hb::HbData;
 pub(crate) use hb::HbSpectrum;
 pub(crate) use hb::run_hb_analysis_with_dc_seed_on_materialized_with_context;
-#[cfg(test)]
-pub use hb::run_hb_analysis_with_source_path_and_abort;
 pub use hb::{HbRunConfig, HbToneRunConfig};
 pub use hbnoise::{HbNoiseReference, HbnoiseFrequencySweep, HbnoiseRunConfig};
 pub(crate) use hbnoise::{

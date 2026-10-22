@@ -1186,8 +1186,10 @@ fn periodic_op_handoff_manual_deck_inserts_one_unambiguous_seed() {
 /// converged `.HB` operating point.
 #[test]
 fn an_hb_carrier_accepts_the_periodic_dependents_that_can_read_it() {
+    use crate::engine_services::test_entry::{ctx, parse};
     use crate::engine_services::{
-        self as svc, HbRunConfig, HbToneRunConfig, run_hb_analysis_with_source_path_and_abort,
+        self as svc, HbRunConfig, HbToneRunConfig,
+        run_hb_analysis_with_dc_seed_on_materialized_with_context,
     };
     use rspice_core::abort_signal::NoAbort;
     use rspice_simulation_contract::periodic_carrier::PeriodicCarrier as CarrierSelector;
@@ -1200,15 +1202,15 @@ fn an_hb_carrier_accepts_the_periodic_dependents_that_can_read_it() {
     // One converged carrier for all three runs, as the plan hands the one
     // artifact to every dependent bound to that instance.
     let carrier_deck = format!("{CIRCUIT}.end\n");
-    let operating_point = run_hb_analysis_with_source_path_and_abort(
-        &carrier_deck,
+    let operating_point = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+        &parse(&carrier_deck),
         &HbRunConfig {
             tones: vec![HbToneRunConfig::new(FUNDAMENTAL, 12)],
             reltol: 1.0e-10,
             ..HbRunConfig::default()
         },
         None,
-        &NoAbort,
+        ctx(&NoAbort),
     )
     .expect("the harmonic-balance carrier converges")
     .operating_point;

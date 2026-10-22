@@ -604,7 +604,10 @@ fn validate_declared_ports(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine_services::hb::{HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort};
+    use crate::engine_services::hb::{
+        HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
+    };
+    use crate::engine_services::test_entry::{ctx, parse};
     use crate::engine_services::{build_resolved_periodic_engine, parse_runner_netlist_with_abort};
     use rspice_core::abort_signal::NoAbort;
     use rspice_core::analysis::PssConfig;
@@ -828,14 +831,15 @@ mod tests {
                     C1 p1 0 1e-18\n\
                     P2 p2 0 PORT=2 Z0=50\n\
                     .end\n";
-        let operating_point = run_hb_analysis_with_abort(
-            deck,
+        let operating_point = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse(deck),
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(1.0e6, 8)],
                 reltol: 2.5e-7,
                 ..HbRunConfig::default()
             },
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("HB service converges")
         .operating_point;
@@ -923,14 +927,15 @@ mod tests {
     }
 
     fn hbsp_fixture_request(deck: &str, request: &PspRunConfig) -> ServiceRunResult<PspData> {
-        let point = run_hb_analysis_with_abort(
-            deck,
+        let point = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse(deck),
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(1.0e6, 8)],
                 reltol: 2.5e-7,
                 ..HbRunConfig::default()
             },
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )?
         .operating_point;
         run_hbsp_analysis_from_hb_with_source_path_and_abort(

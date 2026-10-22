@@ -327,21 +327,23 @@ mod tests {
     #[test]
     fn pxf_around_hb_and_pxf_around_pss_agree_on_a_linear_circuit() {
         use crate::engine_services::hb::{
-            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_abort,
+            HbRunConfig, HbToneRunConfig, run_hb_analysis_with_dc_seed_on_materialized_with_context,
         };
+        use crate::engine_services::test_entry::{ctx, parse};
 
         const RESISTANCE: Value = 1.0e3;
         const CAPACITANCE: Value = 159.154_943_091_895e-12;
         const BOUND: Value = 1.0e-9;
 
-        let harmonic_balance = run_hb_analysis_with_abort(
-            FIXTURE_DECK,
+        let harmonic_balance = run_hb_analysis_with_dc_seed_on_materialized_with_context(
+            &parse(FIXTURE_DECK),
             &HbRunConfig {
                 tones: vec![HbToneRunConfig::new(FIXTURE_FUNDAMENTAL, 8)],
                 reltol: 1.0e-10,
                 ..HbRunConfig::default()
             },
-            &NoAbort,
+            None,
+            ctx(&NoAbort),
         )
         .expect("the harmonic-balance carrier converges")
         .operating_point;

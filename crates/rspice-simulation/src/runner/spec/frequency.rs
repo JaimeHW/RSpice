@@ -733,16 +733,17 @@ fn pnoise_result(
 fn sampled_pnoise_studio_runs_retained_hb_and_reports_timing_and_input_units() {
     use crate::periodic::{PnoiseFrequencySweep, PnoiseReference, PnoiseRunConfig};
     use rspice_core::analysis::pnoise::{PeriodicNoiseEdge, PeriodicNoiseSampling};
+    use svc_runner::test_entry::{ctx, parse};
     use svc_runner::{HbRunConfig, HbToneRunConfig};
     let deck = "sampled studio\nI1 0 out SIN(0 1m 1k) AC 1\nR1 out 0 1k\n.end\n";
-    let hb = svc_runner::run_hb_analysis_with_source_path_and_abort(
-        deck,
+    let hb = svc_runner::run_hb_analysis_with_dc_seed_on_materialized_with_context(
+        &parse(deck),
         &HbRunConfig {
             tones: vec![HbToneRunConfig::new(1000.0, 4)],
             ..Default::default()
         },
         None,
-        &rspice_core::NoAbort,
+        ctx(&rspice_core::NoAbort),
     )
     .unwrap();
     for sampling in [
