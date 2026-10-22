@@ -253,31 +253,6 @@ impl SimulationResult {
         self.branch_current(branch_idx)
     }
 
-    /// Get branch current by element name using a lookup map
-    ///
-    /// # Arguments
-    /// * `name` - Element name (e.g., "V1", "L1", "VSRC")
-    /// * `branch_map` - Map from element name to branch index
-    ///
-    /// # Returns
-    /// Current value if found, None otherwise
-    ///
-    /// # Example
-    /// ```ignore
-    /// let current = result.branch_current_by_name("V1", &circuit.branch_names);
-    /// ```
-    pub fn branch_current_by_name(
-        &self,
-        name: &str,
-        branch_map: &std::collections::HashMap<String, usize>,
-    ) -> Option<Value> {
-        self.branch_current_named(name).or_else(|| {
-            branch_map
-                .get(name)
-                .and_then(|&idx| self.branch_currents.get(idx).copied())
-        })
-    }
-
     fn is_ground_name(name: &str) -> bool {
         crate::naming::is_spice_ground_name(name)
     }

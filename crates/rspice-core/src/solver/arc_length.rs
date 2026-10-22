@@ -394,12 +394,6 @@ impl ArcLengthContinuation {
         let sum_sq: Value = self.tangent_x.iter().map(|&t| t * t).sum();
         (sum_sq + self.tangent_lambda * self.tangent_lambda).sqrt()
     }
-
-    /// Scale a source value by current continuation parameter
-    #[inline]
-    pub fn scale_source(&self, value: Value) -> Value {
-        value * self.lambda
-    }
 }
 
 //=============================================================================

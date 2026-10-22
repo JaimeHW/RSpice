@@ -149,12 +149,6 @@ impl SourceStepper {
         self.steps = 0;
         self.complete = false;
     }
-
-    /// Scale a source value by current factor
-    #[inline]
-    pub fn scale_source(&self, value: Value) -> Value {
-        value * self.current_factor
-    }
 }
 
 impl Default for SourceStepper {
