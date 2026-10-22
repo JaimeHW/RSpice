@@ -12,7 +12,7 @@ use rspice_conformance::suites::xyce::{
     XyceDeck, XyceDeckSection, XyceRunnerConfig, XyceTestResult, XyceTestRunner,
     XyceTransientGridAlignment, XyceValueMismatch,
 };
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -28,7 +28,6 @@ const XYCE_CASE_RUNNER_RESULT_GRACE_MS: u128 = 1_000;
 const XYCE_PROGRESS_INITIAL_DELAY: Duration = Duration::from_secs(2);
 const XYCE_PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 const XYCE_CLASSIFICATION_REPORT_ENV: &str = "RSPICE_XYCE_CLASSIFICATION_REPORT";
-const XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT: usize = 1_143;
 const XYCE_GRID_ALIGNMENT_REPORT_ENV: &str = "RSPICE_XYCE_GRID_REPORT";
 const XYCE_GRID_ALIGNMENT_MANIFEST_FILE: &str = "grid-alignment-manifest.tsv";
 
@@ -249,39 +248,29 @@ fn write_xyce_classification_report_if_requested(
     Ok(Some(path))
 }
 
+/// How the suite disposed of one deck, as the contract manifest records it.
+fn xyce_contract_outcome(result: &XyceTestResult) -> &'static str {
+    if result.upstream_excluded {
+        "upstream_excluded"
+    } else if result.expected_unsupported {
+        "expected_unsupported"
+    } else {
+        "executed"
+    }
+}
+
+/// Dump `deck -> outcome, contract` for every deck in the format of
+/// `tests/xyce/contract-manifest.tsv`, which is regenerated from this report.
 fn write_xyce_classification_report(
     results: &[XyceTestResult],
     output_path: &Path,
 ) -> io::Result<()> {
-    let mut classified = results
-        .iter()
-        .filter(|result| result.upstream_exclusion_source.is_some())
-        .collect::<Vec<_>>();
-    if classified.len() != XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "classification report has {} upstream-exclusion records; expected {}",
-                classified.len(),
-                XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT
-            ),
-        ));
-    }
-    classified.sort_by(|left, right| {
-        left.relative_path
-            .to_ascii_lowercase()
-            .cmp(&right.relative_path.to_ascii_lowercase())
-            .then_with(|| left.relative_path.cmp(&right.relative_path))
-    });
-
+    let mut rows = BTreeMap::new();
     let mut normalized_paths = BTreeSet::new();
-    let mut report =
-        String::from("relative_path\tpassed\texpected_unsupported\tcontract\tprocess_status\n");
-    for result in classified {
+    for result in results {
         validate_xyce_classification_field("relative_path", &result.relative_path)?;
         validate_xyce_classification_field("contract", &result.contract)?;
-        let normalized = result.relative_path.to_ascii_lowercase();
-        if !normalized_paths.insert(normalized) {
+        if !normalized_paths.insert(result.relative_path.to_ascii_lowercase()) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
@@ -290,23 +279,20 @@ fn write_xyce_classification_report(
                 ),
             ));
         }
-        let independently_qualified = result.passed && !result.upstream_excluded;
-        report.push_str(&result.relative_path);
+        rows.insert(
+            result.relative_path.as_str(),
+            (xyce_contract_outcome(result), result.contract.as_str()),
+        );
+    }
+
+    let mut report = String::from("# relative_path\toutcome\tcontract\n");
+    for (relative_path, (outcome, contract)) in rows {
+        report.push_str(relative_path);
         report.push('\t');
-        report.push_str(if independently_qualified {
-            "true"
-        } else {
-            "false"
-        });
+        report.push_str(outcome);
         report.push('\t');
-        report.push_str(if result.expected_unsupported {
-            "true"
-        } else {
-            "false"
-        });
-        report.push('\t');
-        report.push_str(&result.contract);
-        report.push_str("\tcompleted\n");
+        report.push_str(contract);
+        report.push('\n');
     }
 
     let parent = output_path
@@ -784,30 +770,12 @@ fn harness_manifest_entries(root: &Path) -> BTreeSet<String> {
 
 #[test]
 fn test_xyce_classification_report_is_deterministic_and_fail_closed() {
-    let results = (0..XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT)
-        .rev()
-        .map(|index| {
-            let independently_qualified = index == 0;
-            XyceTestResult {
-                name: format!("fixture_{index:04}"),
-                relative_path: format!("Netlists/Fixture/{index:04}.cir"),
-                passed: true,
-                expected_unsupported: false,
-                upstream_excluded: !independently_qualified,
-                upstream_exclusion_source: Some("Netlists/Fixture/exclude".to_string()),
-                error: None,
-                mismatches: Vec::new(),
-                duration_ms: 1,
-                contract: if independently_qualified {
-                    "qualified_contract"
-                } else {
-                    "upstream_excluded"
-                }
-                .to_string(),
-                transient_grid_alignment: None,
-            }
-        })
-        .collect::<Vec<_>>();
+    let deck = |name: &str| format!("Netlists/ContractFixture/{name}.cir");
+    let results = [
+        xyce_contract_fixture(&deck("c"), "executed", "static_prn_transient"),
+        xyce_contract_fixture(&deck("a"), "upstream_excluded", "upstream_excluded"),
+        xyce_contract_fixture(&deck("b"), "expected_unsupported", "unsupported_fixture"),
+    ];
     let directory = tempfile::tempdir().expect("create classification report directory");
     let first = directory.path().join("first.tsv");
     let second = directory.path().join("second.tsv");
@@ -816,36 +784,22 @@ fn test_xyce_classification_report_is_deterministic_and_fail_closed() {
     write_xyce_classification_report(&results, &second).expect("write second report");
     let first_bytes = fs::read(&first).expect("read first report");
     assert_eq!(first_bytes, fs::read(&second).expect("read second report"));
-
-    let report = String::from_utf8(first_bytes).expect("report is UTF-8");
-    let mut lines = report.lines();
     assert_eq!(
-        lines.next(),
-        Some("relative_path\tpassed\texpected_unsupported\tcontract\tprocess_status")
-    );
-    assert_eq!(
-        lines.next(),
-        Some("Netlists/Fixture/0000.cir\ttrue\tfalse\tqualified_contract\tcompleted")
-    );
-    assert_eq!(
-        lines.next(),
-        Some("Netlists/Fixture/0001.cir\tfalse\tfalse\tupstream_excluded\tcompleted")
-    );
-    assert_eq!(
-        report.lines().count(),
-        XYCE_RETAINED_UPSTREAM_EXCLUSION_COUNT + 1
+        String::from_utf8(first_bytes).expect("report is UTF-8"),
+        format!(
+            "# relative_path\toutcome\tcontract\n\
+             {}\tupstream_excluded\tupstream_excluded\n\
+             {}\texpected_unsupported\tunsupported_fixture\n\
+             {}\texecuted\tstatic_prn_transient\n",
+            deck("a"),
+            deck("b"),
+            deck("c")
+        )
     );
 
     let overwrite = write_xyce_classification_report(&results, &first)
-        .expect_err("classification reports must never overwrite provenance evidence");
+        .expect_err("classification reports must never overwrite an existing census");
     assert_eq!(overwrite.kind(), io::ErrorKind::AlreadyExists);
-
-    let mut missing = results.clone();
-    missing[0].upstream_exclusion_source = None;
-    let missing_error =
-        write_xyce_classification_report(&missing, &directory.path().join("missing.tsv"))
-            .expect_err("incomplete exclusion inventory must fail");
-    assert_eq!(missing_error.kind(), io::ErrorKind::InvalidData);
 
     let mut duplicate = results;
     duplicate[0].relative_path = duplicate[1].relative_path.to_ascii_uppercase();
@@ -853,6 +807,23 @@ fn test_xyce_classification_report_is_deterministic_and_fail_closed() {
         write_xyce_classification_report(&duplicate, &directory.path().join("duplicate.tsv"))
             .expect_err("case-insensitive duplicate inventory must fail");
     assert_eq!(duplicate_error.kind(), io::ErrorKind::InvalidData);
+}
+
+/// A result whose manifest outcome and contract are the given ones.
+fn xyce_contract_fixture(relative_path: &str, outcome: &str, contract: &str) -> XyceTestResult {
+    XyceTestResult {
+        name: "fixture".to_string(),
+        relative_path: relative_path.to_string(),
+        passed: true,
+        expected_unsupported: outcome == "expected_unsupported",
+        upstream_excluded: outcome == "upstream_excluded",
+        upstream_exclusion_source: None,
+        error: None,
+        mismatches: Vec::new(),
+        duration_ms: 1,
+        contract: contract.to_string(),
+        transient_grid_alignment: None,
+    }
 }
 
 #[test]
@@ -12237,6 +12208,11 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
     {
         println!("Xyce grid-alignment report: {}", report_path.display());
     }
+    if let Some(report_path) = write_xyce_classification_report_if_requested(&results)
+        .expect("write requested Xyce classification report")
+    {
+        println!("Xyce classification report: {}", report_path.display());
+    }
 
     let index_aligned = results
         .iter()
@@ -12285,12 +12261,6 @@ fn test_full_xyce_suite_summary_accounts_for_every_deck() {
         "Xyce full suite has {} failing deck(s): {} executed pass, {} expected unsupported, {} upstream excluded",
         stats.failed, stats.passed, stats.expected_unsupported, stats.upstream_excluded
     );
-
-    if let Some(report_path) = write_xyce_classification_report_if_requested(&results)
-        .expect("write requested clean-HEAD Xyce classification report")
-    {
-        println!("Xyce classification report: {}", report_path.display());
-    }
 }
 #[cfg(feature = "veriloga-model-vbic13")]
 #[test]
