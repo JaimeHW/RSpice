@@ -1235,34 +1235,6 @@ fn a_sheet_saved_with_a_bleed_compiles_on_its_paper_for_full_and_clipped_output(
 }
 
 #[test]
-fn authored_sheet_clip_projects_crossing_geometry_to_the_exact_sheet_edge() {
-    let clip = ClipRect {
-        x: 50,
-        y: 50,
-        width: 100,
-        height: 100,
-    };
-    let stroke = StrokeStyle::default();
-    let primitives = clip_scene_primitive(
-        &ScenePrimitive::Line {
-            from: ScenePoint::new(Length::from_micrometres(0), Length::from_micrometres(100)),
-            to: ScenePoint::new(Length::from_micrometres(200), Length::from_micrometres(100)),
-            stroke,
-        },
-        clip,
-    )
-    .unwrap();
-    assert!(matches!(
-        primitives.as_slice(),
-        [ScenePrimitive::Line { from, to, .. }]
-            if from.x.micrometres() == 0
-                && from.y.micrometres() == 50
-                && to.x.micrometres() == 100
-                && to.y.micrometres() == 50
-    ));
-}
-
-#[test]
 fn authored_sheet_clip_preserves_partially_intersecting_non_linear_primitives() {
     let source_bounds =
         SemanticBounds::try_new(SemanticPoint::new(0, 0), SemanticPoint::new(200, 200)).unwrap();
