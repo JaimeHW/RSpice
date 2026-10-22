@@ -652,7 +652,25 @@ impl<'a> Parser<'a> {
 
         if !self.check(TokenKind::RParen) {
             loop {
+                // IEEE 1364-2005 A.1.4: an ANSI port declaration may open with
+                // attribute instances. A plain port name takes none.
+                let attributes_span = self.current_span();
+                let mut attributes = self.parse_attributes()?;
                 let span = self.current_span();
+                if !attributes.is_empty()
+                    && !matches!(
+                        self.current().kind,
+                        TokenKind::Input | TokenKind::Output | TokenKind::Inout
+                    )
+                {
+                    return Err(ParseError::expected(
+                        "a port direction after the attribute instance; attributes belong to a \
+                         port declaration (IEEE 1364-2005 A.1.4)"
+                            .to_string(),
+                        self.current().describe(),
+                        attributes_span,
+                    ));
+                }
 
                 let direction = match self.current().kind {
                     TokenKind::Input => {
@@ -673,6 +691,7 @@ impl<'a> Parser<'a> {
                 if let Some(direction) = direction {
                     let (net_type, discipline) = self.parse_port_type_and_discipline(direction)?;
                     let (signedness, range) = self.parse_port_shape(net_type, span)?;
+                    attributes.extend(self.parse_attributes()?);
 
                     let name: SmolStr = self.expect_identifier("port name")?.into();
                     self.reject_unpacked_port(&name)?;
@@ -689,6 +708,7 @@ impl<'a> Parser<'a> {
                         net_type,
                         names: vec![name],
                         initializers,
+                        attributes,
                         span: span.extend(self.previous_span()),
                     };
                     Self::expand_port_net_type(module, &declaration);
@@ -724,6 +744,7 @@ impl<'a> Parser<'a> {
                             net_type: context.net_type,
                             names: vec![name],
                             initializers,
+                            attributes: Vec::new(),
                             span: span.extend(self.previous_span()),
                         };
                         Self::expand_port_net_type(module, &declaration);
@@ -746,6 +767,11 @@ impl<'a> Parser<'a> {
     /// Attribute values are restricted to simple constants (string, number,
     /// identifier, optionally negated or parenthesized). A full expression
     /// parser would consume the closing `*)` as a multiplication.
+    ///
+    /// Cadence's typed form is read too: each entry may open with a type
+    /// keyword and end with a semicolon, `(* integer inh_conn_prop_name =
+    /// "vdd"; integer inh_conn_def_value = "vdd"; *)`. The type names how
+    /// Cadence stores the value and changes nothing here.
     fn parse_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
         let mut attrs = Vec::new();
 
@@ -759,6 +785,13 @@ impl<'a> Parser<'a> {
                     break;
                 }
 
+                if matches!(
+                    self.current().kind,
+                    TokenKind::Integer | TokenKind::Real | TokenKind::String
+                ) && self.peek_is(TokenKind::Identifier)
+                {
+                    self.advance(); // consume the Cadence entry's type
+                }
                 let span = self.current_span();
                 let name = self.expect_identifier("attribute name")?;
                 let value = if self.match_token(TokenKind::Assign_) {
@@ -773,7 +806,7 @@ impl<'a> Parser<'a> {
                     span,
                 });
 
-                if self.match_token(TokenKind::Comma) {
+                if self.match_token(TokenKind::Comma) || self.match_token(TokenKind::Semicolon) {
                     continue;
                 }
                 // Xyce's canonical compact-model sources also use the
@@ -840,10 +873,15 @@ impl<'a> Parser<'a> {
         }
         // Attribute instances may precede any declaration
         let attributes = self.parse_attributes()?;
+        // Port and net declarations keep theirs: a connect module reads its
+        // supply port's from them, and a mixed module's port carries
+        // `supplySensitivity` to the converter on it.
+        let nets_before = module.nets.len();
 
         match self.current().kind {
             TokenKind::Input | TokenKind::Output | TokenKind::Inout => {
-                let decl = self.parse_port_declaration()?;
+                let mut decl = self.parse_port_declaration()?;
+                decl.attributes.splice(0..0, attributes.iter().cloned());
                 Self::expand_port_net_type(module, &decl);
                 module.port_declarations.push(decl);
             }
@@ -996,6 +1034,11 @@ impl<'a> Parser<'a> {
                 return Err(self.unsupported_current("module item"));
             }
         }
+        if !attributes.is_empty() {
+            for net in &mut module.nets[nets_before..] {
+                net.attributes.splice(0..0, attributes.iter().cloned());
+            }
+        }
         Ok(())
     }
 
@@ -1038,6 +1081,16 @@ impl<'a> Parser<'a> {
         }
 
         if self.peek_is(TokenKind::LBracket) {
+            module.nets.push(self.parse_net_decl()?);
+            return Ok(());
+        }
+
+        // A discipline followed by attributes, Cadence's spelling of a net
+        // with inherited-connection properties: `logic (* … *) d;`. An
+        // instance's parentheses never open with `*`.
+        if self.peek_is(TokenKind::LParen)
+            && self.tokens.get(self.pos + 2).map(|token| token.kind) == Some(TokenKind::Star)
+        {
             module.nets.push(self.parse_net_decl()?);
             return Ok(());
         }
@@ -1405,6 +1458,8 @@ impl<'a> Parser<'a> {
 
         // IEEE 1364-2005 section 12.3.3: `input [signed] [range] names;`
         let (signedness, range) = self.parse_port_shape(net_type, start)?;
+        // Cadence's placement of a port's attributes, after its type.
+        let attributes = self.parse_attributes()?;
 
         // Port names
         let mut names = Vec::new();
@@ -1428,6 +1483,7 @@ impl<'a> Parser<'a> {
             net_type,
             names,
             initializers,
+            attributes,
             span: start.extend(self.previous_span()),
         })
     }
@@ -1444,7 +1500,7 @@ impl<'a> Parser<'a> {
                 self.current().kind,
                 TokenKind::Identifier | TokenKind::EscapedIdentifier
             ) && self.current().text.as_deref() != Some("signed")
-                && matches!(
+                && (matches!(
                     self.tokens.get(self.pos + 1).map(|token| token.kind),
                     Some(
                         TokenKind::Identifier
@@ -1458,7 +1514,10 @@ impl<'a> Parser<'a> {
                             | TokenKind::Signed
                             | TokenKind::Unsigned
                     )
-                )
+                ) || (self.tokens.get(self.pos + 1).map(|token| token.kind)
+                    == Some(TokenKind::LParen)
+                    && self.tokens.get(self.pos + 2).map(|token| token.kind)
+                        == Some(TokenKind::Star)))
                 && !self.names_unpacked_port())
         {
             Some(self.expect_identifier("discipline")?.into())
@@ -2062,6 +2121,9 @@ impl<'a> Parser<'a> {
         let start = self.current_span();
         let discipline = self.expect_identifier("discipline")?;
         let range = self.parse_optional_vector_range()?;
+        // Cadence writes a net's inherited-connection properties between its
+        // discipline and its names.
+        let attributes = self.parse_attributes()?;
         let (names, dimensions) = self.parse_net_names("node name")?;
         self.expect(TokenKind::Semicolon)?;
         Ok(NetDecl {
@@ -2071,6 +2133,7 @@ impl<'a> Parser<'a> {
             names,
             is_ground: false,
             is_internal: false,
+            attributes,
             span: start.extend(self.previous_span()),
         })
     }
@@ -2089,6 +2152,7 @@ impl<'a> Parser<'a> {
             names,
             is_ground: true,
             is_internal: false,
+            attributes: Vec::new(),
             span: start.extend(self.previous_span()),
         })
     }

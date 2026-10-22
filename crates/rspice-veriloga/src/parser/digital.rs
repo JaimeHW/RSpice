@@ -633,6 +633,7 @@ impl Parser<'_> {
                 names: items.iter().map(|item| item.name.clone()).collect(),
                 is_ground: false,
                 is_internal: true,
+                attributes: Vec::new(),
                 span,
             });
         }

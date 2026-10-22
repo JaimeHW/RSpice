@@ -155,6 +155,7 @@ pub(super) fn expand(
                     range: None,
                     is_ground: false,
                     is_internal: true,
+                    attributes: Vec::new(),
                     span: item.span,
                 });
             }

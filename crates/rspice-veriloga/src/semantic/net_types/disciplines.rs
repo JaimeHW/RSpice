@@ -319,6 +319,7 @@ pub(super) fn apply(
             },
             is_ground: false,
             is_internal: false,
+            attributes: Vec::new(),
             span: *span,
         });
     }

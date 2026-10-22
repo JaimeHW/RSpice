@@ -224,6 +224,16 @@ fn supply_net_of(parameter: &ParameterOverride) -> Option<&SmolStr> {
     }
 }
 
+/// The deck net an attribute names: `vdd`, or Cadence's global spelling of it,
+/// `cds_globals.\vdd `, with the hierarchical prefix and the Verilog escape
+/// (a backslash, and the space that ends it) taken off.
+pub(crate) fn inherited_net_name(value: &str) -> SmolStr {
+    let value = value.trim();
+    let value = value.strip_prefix("cds_globals.").unwrap_or(value);
+    let value = value.strip_prefix('\\').unwrap_or(value);
+    value.trim_end().into()
+}
+
 /// A signed numeric literal or `inf`, and nothing else. `inf` is the value
 /// of a timeout that never expires and of a resistance that conducts nothing.
 fn fold_literal(expression: &crate::ast::Expression) -> Option<f64> {

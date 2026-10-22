@@ -471,7 +471,12 @@ use super::*;
 //
 // Version 164 follows the canonical IR's schema to 175, whose digital plan
 // carries `trireg` nets. A version-161 record refused them.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 164;
+//
+// Version 165 follows the canonical IR's schema to 176, whose ports carry
+// their `supplySensitivity` and `groundSensitivity` attributes. A version-164
+// record would replay ports without them, and the converters on those ports
+// would convert against the deck's supply rather than the named net.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 165;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

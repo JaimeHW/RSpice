@@ -10218,6 +10218,8 @@ mod tests {
                     discipline: "electrical".into(),
                     nature_potential: Some("voltage".into()),
                     nature_flow: Some("current".into()),
+                    supply_sensitivity: None,
+                    ground_sensitivity: None,
                 },
                 AnalyzedPort {
                     name: "n".into(),
@@ -10225,6 +10227,8 @@ mod tests {
                     discipline: "electrical".into(),
                     nature_potential: Some("voltage".into()),
                     nature_flow: Some("current".into()),
+                    supply_sensitivity: None,
+                    ground_sensitivity: None,
                 },
             ],
             formal_ports: ["p", "n"]

@@ -14,6 +14,11 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 176 carries a port's `supplySensitivity` and `groundSensitivity`
+/// attributes (`HirPort::supply_sensitivity`, `HirPort::ground_sensitivity`),
+/// which bind the converter on that port to a net. Earlier artifacts dropped
+/// them, so a converter would convert against the deck's supply instead.
+///
 /// Version 175 lowers `trireg` nets: a typed net may be a charge storage net
 /// with a charge strength and a decay time (`DigitalNetType::Trireg`).
 /// Earlier artifacts refused those sources.
@@ -199,7 +204,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 175;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 176;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

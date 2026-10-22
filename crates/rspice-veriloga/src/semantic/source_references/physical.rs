@@ -183,6 +183,7 @@ impl Resolver {
                 names: vec![symbol.clone()],
                 is_ground: ground,
                 is_internal: true,
+                attributes: Vec::new(),
                 span,
             };
             self.retain_dependencies(owner, target, dependencies);

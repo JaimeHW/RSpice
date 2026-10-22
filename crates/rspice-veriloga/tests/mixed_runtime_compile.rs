@@ -817,3 +817,67 @@ endmodule
     }
     assert!(malformed.validate().is_err());
 }
+
+/// A port's `supplySensitivity` and `groundSensitivity` reach the canonical
+/// port the engine reads, in the standard and in Cadence's typed spelling, and
+/// a port without them is encoded exactly as before.
+#[test]
+fn port_sensitivity_attributes_reach_the_canonical_ports() {
+    use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
+
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let source = r#"
+module sensed(p, n, a, q, b);
+  inout p, n; electrical p, n;
+  (* supplySensitivity = "vddl", groundSensitivity = "vssl" *) input a;
+  output (* integer supplySensitivity = "cds_globals.\\vddh! "; *) q;
+  input b;
+  wire a, b; reg q;
+  initial q = 1'b0;
+  always @(posedge a) q <= b;
+  analog I(p, n) <+ V(p, n) / 1000.0;
+endmodule
+"#;
+    let runtime = compiler.compile_runtime(source, None).unwrap();
+    let ports = &runtime.canonical_ir.hir.ports;
+    let port = |name: &str| {
+        ports
+            .iter()
+            .find(|port| port.name == name)
+            .unwrap_or_else(|| panic!("port {name}"))
+    };
+    assert_eq!(port("a").supply_sensitivity.as_deref(), Some("vddl"));
+    assert_eq!(port("a").ground_sensitivity.as_deref(), Some("vssl"));
+    assert_eq!(port("q").supply_sensitivity.as_deref(), Some("vddh!"));
+    assert_eq!(port("q").ground_sensitivity, None);
+    assert_eq!(port("b").supply_sensitivity, None);
+
+    let plain = serde_json::to_value(port("b")).unwrap();
+    assert!(
+        plain.get("supply_sensitivity").is_none() && plain.get("ground_sensitivity").is_none(),
+        "a port without the attributes encodes as before: {plain}"
+    );
+    let encoded = serde_json::to_string(&runtime.canonical_ir).unwrap();
+    let decoded: CanonicalIrArtifact = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(&decoded.hir.ports, ports);
+
+    let conflicting = source.replace(
+        "output (* integer",
+        "(* supplySensitivity = \"vddx\" *) output (* integer",
+    );
+    let error = compiler
+        .compile_runtime(&conflicting, None)
+        .expect_err("two supply nets for one port");
+    assert!(
+        error.to_string().contains("'vddx'") && error.to_string().contains("'vddh!'"),
+        "got {error}"
+    );
+    let numeric = source.replace("\"vddl\"", "3");
+    let error = compiler
+        .compile_runtime(&numeric, None)
+        .expect_err("a supply attribute names a net");
+    assert!(error.to_string().contains("must name a net"), "got {error}");
+}

@@ -282,6 +282,14 @@ pub struct HirPort {
     pub discipline: SmolStr,
     pub nature_potential: Option<SmolStr>,
     pub nature_flow: Option<SmolStr>,
+    /// The net the converter on this discrete port takes its supply from,
+    /// as the port's `supplySensitivity` attribute names it. The engine
+    /// resolves it in the instance's scope and binds the converter to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supply_sensitivity: Option<SmolStr>,
+    /// The net the port's `groundSensitivity` attribute names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground_sensitivity: Option<SmolStr>,
 }
 
 /// One port of the module header as declared, before vector expansion.
@@ -1169,6 +1177,8 @@ impl HirModel {
                     discipline: port.discipline.clone(),
                     nature_potential: port.nature_potential.clone(),
                     nature_flow: port.nature_flow.clone(),
+                    supply_sensitivity: port.supply_sensitivity.clone(),
+                    ground_sensitivity: port.ground_sensitivity.clone(),
                 })
                 .collect(),
             formal_ports: module

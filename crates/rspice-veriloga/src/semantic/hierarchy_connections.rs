@@ -523,6 +523,7 @@ fn prepare_boundaries(
                 names: vec![private.clone()],
                 is_ground: false,
                 is_internal: true,
+                attributes: Vec::new(),
                 span,
             });
             if let Some(kind) = lower_kind {
@@ -589,6 +590,7 @@ fn prepare_boundaries(
                     names: vec![tap.clone()],
                     is_ground: false,
                     is_internal: true,
+                    attributes: Vec::new(),
                     span,
                 });
                 prepared.digital_nets.push(DigitalNetDecl {

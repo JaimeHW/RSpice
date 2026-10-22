@@ -895,3 +895,108 @@ endmodule
     let message = error.to_string();
     assert!(message.contains("nowhere"), "got {message}");
 }
+
+// ---------------------------------------------------------------------------
+// Attributes on port and net declarations
+// ---------------------------------------------------------------------------
+
+fn modules(file: &SourceFile) -> Vec<&Module> {
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Module(module) | Item::ConnectModule(module) => Some(module),
+            _ => None,
+        })
+        .collect()
+}
+
+fn attribute_text(attributes: &[crate::ast::Attribute]) -> Vec<(String, Option<String>)> {
+    attributes
+        .iter()
+        .map(|attribute| {
+            (
+                attribute.name.to_string(),
+                attribute.text_value().map(str::to_owned),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn port_and_net_declarations_keep_their_attributes_in_both_spellings() {
+    let file = parse(
+        r#"
+module ansi((* supplySensitivity = "vdd" *) input electrical (* groundSensitivity = vss *) a, b);
+endmodule
+module plain(y, vsup, d);
+  (* supplySensitivity = "vdd" *) output y; electrical y;
+  inout vsup;
+  electrical (* integer inh_conn_prop_name = "vdd"; integer inh_conn_def_value = "cds_globals.\\vdd! "; *) vsup;
+  input (* integer inh_conn_prop_name = "vlogic"; *) d;
+  logic (* string inh_conn_def_value = "vlogic"; *) d;
+endmodule
+"#,
+    );
+    let modules = modules(&file);
+    let ansi = &modules[0].port_declarations;
+    assert_eq!(
+        attribute_text(&ansi[0].attributes),
+        [
+            ("supplySensitivity".into(), Some("vdd".into())),
+            ("groundSensitivity".into(), Some("vss".into())),
+        ]
+    );
+    assert!(
+        ansi[1].attributes.is_empty(),
+        "a bare name after an ANSI port declares another port, with no attributes of its own"
+    );
+
+    let plain = modules[1];
+    assert_eq!(
+        attribute_text(&plain.port_declarations[0].attributes),
+        [("supplySensitivity".into(), Some("vdd".into()))]
+    );
+    assert!(plain.port_declarations[1].attributes.is_empty());
+    assert_eq!(
+        attribute_text(&plain.port_declarations[2].attributes),
+        [("inh_conn_prop_name".into(), Some("vlogic".into()))]
+    );
+    let net = |name: &str| {
+        plain
+            .nets
+            .iter()
+            .find(|net| net.names.iter().any(|declared| declared == name))
+            .unwrap_or_else(|| panic!("net {name}"))
+    };
+    assert!(net("y").attributes.is_empty());
+    let vsup = attribute_text(&net("vsup").attributes);
+    assert_eq!(
+        vsup,
+        [
+            ("inh_conn_prop_name".into(), Some("vdd".into())),
+            (
+                "inh_conn_def_value".into(),
+                Some(r"cds_globals.\vdd! ".into())
+            ),
+        ]
+    );
+    assert_eq!(inherited_net_name(vsup[1].1.as_deref().unwrap()), "vdd!");
+    assert_eq!(
+        attribute_text(&net("d").attributes),
+        [("inh_conn_def_value".into(), Some("vlogic".into()))]
+    );
+}
+
+#[test]
+fn an_attribute_before_a_plain_port_name_is_refused() {
+    let tokens = Lexer::new(
+        "module m((* supplySensitivity = \"vdd\" *) a); endmodule",
+        SourceId::new(0),
+    )
+    .collect_tokens()
+    .unwrap();
+    let error = Parser::new(&tokens)
+        .parse()
+        .expect_err("attributes belong to a port declaration");
+    assert!(error.to_string().contains("port direction"), "got {error}");
+}

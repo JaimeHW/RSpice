@@ -117,6 +117,7 @@ pub(super) fn temporary_net(
         names: vec![name.clone()],
         is_ground: false,
         is_internal: true,
+        attributes: Vec::new(),
         span,
     });
     prepared.digital_nets.push(DigitalNetDecl {

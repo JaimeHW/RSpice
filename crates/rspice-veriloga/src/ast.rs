@@ -724,6 +724,10 @@ pub struct PortDeclaration {
     pub names: Vec<SmolStr>,
     /// Constant initializers on output variable ports, keyed by port name.
     pub initializers: Vec<(SmolStr, Expression)>,
+    /// Attribute instances written on the declaration, before it or after
+    /// its type (`inout (* integer inh_conn_prop_name = "vdd"; *) vsup;`).
+    /// IEEE 1364-2005 section 3.8: they apply to every name declared.
+    pub attributes: Vec<Attribute>,
     /// Source span
     pub span: Span,
 }
@@ -922,6 +926,10 @@ pub struct NetDecl {
     pub is_ground: bool,
     /// Whether this is an internal node (not in port list)
     pub is_internal: bool,
+    /// Attribute instances written on the declaration, before it or after
+    /// its discipline (`electrical (* integer inh_conn_def_value = "vdd"; *)
+    /// vsup;`). They apply to every name declared.
+    pub attributes: Vec<Attribute>,
     /// Source span
     pub span: Span,
 }
@@ -2128,6 +2136,19 @@ pub struct Attribute {
     pub name: SmolStr,
     pub value: Option<Expression>,
     pub span: Span,
+}
+
+impl Attribute {
+    /// The value as text, when it is a string or a bare identifier:
+    /// `(* supplySensitivity = "vdd" *)` and `(* supplySensitivity = vdd *)`
+    /// both read `vdd`.
+    pub fn text_value(&self) -> Option<&str> {
+        match self.value.as_ref()? {
+            Expression::StringLit(literal) => Some(literal.value.as_str()),
+            Expression::Identifier(identifier) => Some(identifier.name.as_str()),
+            _ => None,
+        }
+    }
 }
 
 // ============================================================================

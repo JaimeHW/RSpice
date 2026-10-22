@@ -353,6 +353,11 @@ pub struct AnalyzedPort {
     pub discipline: SmolStr,
     pub nature_potential: Option<SmolStr>,
     pub nature_flow: Option<SmolStr>,
+    /// The net the converter on this port takes its supply from, as its
+    /// `supplySensitivity` attribute names it.
+    pub supply_sensitivity: Option<SmolStr>,
+    /// The net its `groundSensitivity` attribute names.
+    pub ground_sensitivity: Option<SmolStr>,
 }
 
 /// One port of the module header, before vector expansion.

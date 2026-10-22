@@ -1042,6 +1042,21 @@ fn write_hir_port(out: &mut String, port: &HirPort) {
         option_smol(port.nature_flow.as_ref())
     )
     .expect("write to string");
+    // Written only where present, so a port without them reads as before.
+    for (field, value) in [
+        ("supply_sensitivity", &port.supply_sensitivity),
+        ("ground_sensitivity", &port.ground_sensitivity),
+    ] {
+        if let Some(value) = value {
+            writeln!(
+                out,
+                "port_attribute id={} {field}={}",
+                port.id.index(),
+                enc_str(value)
+            )
+            .expect("write to string");
+        }
+    }
 }
 
 fn write_hir_formal_port(out: &mut String, port: &HirFormalPort) {

@@ -405,6 +405,7 @@ pub(crate) mod library_binding;
 mod net_types;
 mod node_vectors;
 mod parameter_arrays;
+mod port_attributes;
 pub(crate) fn visit_expression(expression: &Expression, visit: &mut impl FnMut(&Expression)) {
     flow_probes::visit_expression(expression, visit);
 }
@@ -1358,6 +1359,7 @@ impl SemanticAnalyzer {
             })?;
             let potential = disc.potential.as_ref().map(|s| SmolStr::from(s.as_str()));
             let flow = disc.flow.as_ref().map(|s| SmolStr::from(s.as_str()));
+            let sensitivity = port_attributes::port_sensitivity(module, port_name)?;
 
             analyzed.ports.push(AnalyzedPort {
                 name: port_name.clone(),
@@ -1365,6 +1367,8 @@ impl SemanticAnalyzer {
                 discipline: disc_name.clone(),
                 nature_potential: potential,
                 nature_flow: flow,
+                supply_sensitivity: sensitivity.supply,
+                ground_sensitivity: sensitivity.ground,
             });
 
             self.define_symbol(Symbol {
