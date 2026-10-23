@@ -206,36 +206,4 @@ mod tests {
         assert_eq!(done_top, resting_top);
         assert_eq!(done, resting, "ending the command moved the drawing");
     }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_tool_options_strip() {
-        use crate::ui::tokens::Mode;
-        use std::io::Write as _;
-
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        let stderr = std::io::stderr();
-        let mut report = stderr.lock();
-
-        for (stem, mut state) in [("move", armed_move()), ("stretch", armed_stretch())] {
-            for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
-                let canvas = crate::ui::raster::render_themed(
-                    crate::ui::Theme {
-                        mode,
-                        ..crate::ui::Theme::default()
-                    },
-                    egui::vec2(900.0, 64.0),
-                    |ui, _background| show(ui, &mut state),
-                );
-                let height = canvas.content_height().max(1);
-                let path = directory.join(format!("tool-options-{stem}-{mode_stem}.png"));
-                std::fs::write(&path, canvas.png(height)).expect("write strip render");
-                writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
-                    .expect("write raster qualification report");
-            }
-        }
-    }
 }

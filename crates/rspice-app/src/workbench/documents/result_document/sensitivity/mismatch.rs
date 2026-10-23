@@ -162,30 +162,4 @@ mod tests {
         assert!(super::super::active_payload_is_valid(&state));
         assert!(matches!(active_mismatch(&state), ActiveMismatch::Missing));
     }
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_the_dc_mismatch_sheet() {
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        for width in [1000.0_f32, 1600.0] {
-            for normalized in [true, false] {
-                let mut evidence = evidence();
-                evidence.normalized_contributions = normalized;
-                let mut state = state_with(evidence);
-                let canvas =
-                    crate::ui::raster::render(egui::vec2(width, 420.0), |ui, background| {
-                        egui::CentralPanel::default()
-                            .frame(egui::Frame::NONE.fill(background))
-                            .show(ui, |ui| show(ui, &mut state));
-                    });
-                let basis = if normalized { "share" } else { "absolute" };
-                std::fs::write(
-                    directory.join(format!("dc-mismatch-sheet-{width}-{basis}.png")),
-                    canvas.png(420),
-                )
-                .expect("write sheet render");
-            }
-        }
-    }
 }

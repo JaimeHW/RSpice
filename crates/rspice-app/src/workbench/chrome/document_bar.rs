@@ -2103,33 +2103,6 @@ mod tests {
         assert!(hidden_button(&nodes).is_none(), "nothing is hidden");
     }
 
-    /// Renders for review, cropped to the top of a 1440 x 900 window: a strip
-    /// whose tabs fit, one whose tabs shrank to fit, and one that overflows,
-    /// each over the page's tone so the active tab's join to the page shows.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_the_document_strip_for_review() {
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        for (stem, extra) in [
-            ("document-strip-fits", 0),
-            ("document-strip-shrunk", 3),
-            ("document-strip-overflowing", 14),
-        ] {
-            let mut app = design_session(extra);
-            let canvas = crate::ui::raster::render(egui::vec2(1440.0, 900.0), |ui, _| {
-                let page = Tokens::get(ui.ctx()).color.bg_app;
-                ui.painter().rect_filled(ui.max_rect(), 0.0, page);
-                let layout = LayoutSpec::resolve(1440.0, 900.0, &app.state.workbench);
-                show(ui, &mut app, layout);
-            });
-            std::fs::write(directory.join(format!("{stem}.png")), canvas.png(140))
-                .expect("write the render");
-        }
-    }
-
     /// Past the floor, the strip scrolls and "+N" counts exactly the tabs out
     /// of view; choosing one from its menu opens that document.
     #[cfg(not(target_arch = "wasm32"))]

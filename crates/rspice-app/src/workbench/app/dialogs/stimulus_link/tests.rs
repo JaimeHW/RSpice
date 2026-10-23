@@ -859,8 +859,6 @@ fn is_exponent_notation(run: &str) -> bool {
 enum Scene {
     /// Adopt over the five-definition library, with an optional pick.
     Adopt(Option<&'static str>),
-    /// Adopt over a library of nothing this instance can take.
-    AdoptKindOnly,
     /// Save, optionally with a name the library already holds.
     Save(Option<&'static str>),
 }
@@ -869,10 +867,7 @@ enum Scene {
 impl Scene {
     /// One app with this scene's dialog already open on it.
     fn open(self) -> RSpiceApp {
-        let (mut app, id) = match self {
-            Self::AdoptKindOnly => kind_only_fixture(),
-            _ => wide_fixture(),
-        };
+        let (mut app, id) = wide_fixture();
         let mode = match self {
             Self::Save(_) => StimulusLinkMode::Extract,
             _ => StimulusLinkMode::Adopt,
@@ -886,17 +881,6 @@ impl Scene {
             _ => {}
         }
         app
-    }
-
-    /// The file stem the review render is written under.
-    fn stem(self) -> String {
-        match self {
-            Self::Adopt(None) => "adopt-nothing-picked".to_owned(),
-            Self::Adopt(Some(pick)) => format!("adopt-{}", pick.replace('_', "-")),
-            Self::AdoptKindOnly => "adopt-kind-only".to_owned(),
-            Self::Save(None) => "save-valid-name".to_owned(),
-            Self::Save(Some(_)) => "save-refused-name".to_owned(),
-        }
     }
 }
 
@@ -1020,43 +1004,4 @@ fn painted(scene: Scene, screen: egui::Vec2, mode: Mode) -> Painted {
         painted.surface
     );
     painted
-}
-
-/// Write every reviewable state of both modes, in both themes, to PNGs.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_stimulus_link_modes() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    for scene in [
-        Scene::Adopt(None),
-        Scene::Adopt(Some("clock")),
-        Scene::Adopt(Some("sensor_drive")),
-        Scene::AdoptKindOnly,
-        Scene::Save(None),
-        Scene::Save(Some("sensor_drive")),
-    ] {
-        for (suffix, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
-            let mut app = scene.open();
-            let canvas = crate::ui::raster::render_themed(
-                themed(mode),
-                egui::vec2(1024.0, 640.0),
-                |ui, background| {
-                    let _ = background;
-                    render_stimulus_link_dialog(ui.ctx(), &mut app.state);
-                },
-            );
-            let height = canvas.content_height().max(1);
-            let path = directory.join(format!("stimulus-link-{}-{suffix}.png", scene.stem()));
-            std::fs::write(&path, canvas.png(height)).expect("write dialog render");
-            writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
-                .expect("write raster qualification report");
-        }
-    }
 }

@@ -19,9 +19,7 @@
 //! glyph read off one of these images is not a defect report; check the string
 //! in `tests.rs`, which reads the galley rather than the pixels.
 //!
-//! The default tests compare reviewed fingerprints and never write files. The
-//! ignored review tools print replacement fingerprints or write PNGs to
-//! `RSPICE_RASTER_DIR` (default: the system temp directory).
+//! The tests compare reviewed fingerprints and never write files.
 
 // Native-only, like the render harnesses in `tests.rs` it shares fixtures with:
 // it rasterizes to a file for a person to open.
@@ -148,72 +146,5 @@ fn every_plan_manager_route_matches_its_reviewed_gated_viewport_baselines() {
             regression_height(&canvas),
             PLAN_MANAGER_FINGERPRINTS[index],
         );
-    }
-}
-
-#[test]
-#[ignore = "prints source-ready visual fingerprints after explicit review"]
-fn print_plan_manager_visual_fingerprints_for_review() {
-    use std::io::Write as _;
-
-    let mut stdout = std::io::stdout().lock();
-    for (_, mode, viewport, screen) in baseline_cases() {
-        let canvas = raster(mode, screen);
-        let height = regression_height(&canvas);
-        writeln!(
-            stdout,
-            "{} {}x{} {}",
-            file_stem(mode, viewport),
-            canvas.width(),
-            height,
-            canvas.regression_fingerprint(height)
-        )
-        .expect("write visual fingerprint");
-    }
-}
-
-/// Write every route at every gated viewport to PNGs so the design can be
-/// reviewed.
-///
-/// Twenty-four images: eight modes at three shapes. The list of modes is
-/// [`tests::EVERY_ROUTE`](super::tests::EVERY_ROUTE), which the coverage claim
-/// beside it holds to the mode enum, so a ninth route arrives here through the
-/// same edit that dispatches it rather than whenever someone remembers this
-/// file.
-///
-/// Read them for layout, not for wording — the module header says why.
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_every_route_at_every_gated_viewport() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report_output = stderr.lock();
-
-    for mode in super::tests::EVERY_ROUTE {
-        for (viewport, screen) in super::tests::GATED_VIEWPORTS {
-            let canvas = raster(mode, screen);
-            // Cropped to the last row anything painted on, so a surface shorter
-            // than its viewport is not reported as acres of empty space. A
-            // surface *taller* than its viewport cannot hide here: the canvas
-            // is the viewport, so the overflow is simply cut off, and the fit
-            // gates are what prove there is none.
-            let height = regression_height(&canvas);
-            let bytes = canvas.png(height);
-            let path = directory.join(format!("{}.png", file_stem(mode, viewport)));
-            std::fs::write(&path, &bytes).expect("write plan-manager render");
-            writeln!(
-                report_output,
-                "{} {}x{} {} bytes",
-                path.display(),
-                canvas.width(),
-                height,
-                bytes.len()
-            )
-            .expect("write raster qualification report");
-        }
     }
 }

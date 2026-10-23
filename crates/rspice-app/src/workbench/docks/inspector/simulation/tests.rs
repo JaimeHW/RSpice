@@ -1,9 +1,7 @@
-//! The Simulate and Verify docks, rendered from seeded state for review.
+//! The Simulate and Verify docks, painted from seeded state.
 //!
-//! The Simulate inspector is rendered in the three states its last run can be
-//! in: complete, failed, and never run. The Verify inspector and both
-//! navigators are rendered beside them. PNGs and their measured geometry go to
-//! `RSPICE_RASTER_DIR` (default: the system temp directory).
+//! The Simulate inspector is painted in the three states its last run can be
+//! in: complete, failed, and never run, and the Verify inspector beside them.
 
 use egui::Vec2;
 
@@ -12,7 +10,6 @@ use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SimulationRunLifecycle,
     SpecEntry, SpecPointScope,
 };
-use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::{VerificationPage, Workspace};
 use rspice_results::yield_analysis::{
@@ -20,8 +17,6 @@ use rspice_results::yield_analysis::{
 };
 
 const INSPECTOR_DEFAULT_WIDTH: f32 = 312.0;
-const INSPECTOR_MIN_WIDTH: f32 = 278.0;
-const NAVIGATOR_WIDTH: f32 = 260.0;
 
 /// The first analysis of the default plan: the one the inspector selects.
 fn first_instance(app: &RSpiceApp) -> AnalysisInstanceId {
@@ -166,10 +161,6 @@ fn verify_yield_empty() -> RSpiceApp {
 
 fn verify_tuning() -> RSpiceApp {
     verify_app(VerificationPage::Tuning)
-}
-
-fn verify_corners() -> RSpiceApp {
-    verify_app(VerificationPage::Corners)
 }
 
 fn inspector_context() -> egui::Context {
@@ -464,78 +455,4 @@ fn the_tuning_inspector_states_only_uncommitted_and_invalid_values() {
             "Commit contract",
         ],
     );
-}
-
-/// One review panel: its file name and the app state it renders.
-type ReviewPanel = (&'static str, fn() -> RSpiceApp);
-
-fn review_directory() -> std::path::PathBuf {
-    std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from)
-}
-
-/// The Simulate and Verify inspectors as PNGs, with their measured geometry
-/// beside each, at the dock's default and minimum widths.
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_simulate_and_verify_inspectors_for_review() {
-    let directory = review_directory();
-    let panels: [ReviewPanel; 7] = [
-        ("simulate-inspector-last-run-ok", simulate_last_run_ok),
-        (
-            "simulate-inspector-last-run-failed",
-            simulate_last_run_failed,
-        ),
-        ("simulate-inspector-never-run", simulate_app),
-        ("verify-inspector-yield-mc", verify_monte_carlo),
-        ("verify-inspector-yield-empty", verify_yield_empty),
-        ("verify-inspector-corners", verify_corners),
-        ("verify-inspector-tuning", verify_tuning),
-    ];
-    for (name, fixture) in panels {
-        for width in [INSPECTOR_DEFAULT_WIDTH, INSPECTOR_MIN_WIDTH] {
-            let mut app = fixture();
-            crate::ui::raster::write_panel_review(
-                &directory,
-                &format!("{name}-{width}"),
-                crate::ui::Theme::default(),
-                Vec2::new(width, 1200.0),
-                10.0,
-                |ui, _| {
-                    let panel = Tokens::get(ui.ctx()).color.bg_panel;
-                    egui::CentralPanel::default()
-                        .frame(egui::Frame::NONE.fill(panel))
-                        .show(ui, |ui| super::super::show(ui, &mut app));
-                },
-            );
-        }
-    }
-}
-
-/// The Simulate and Verify navigators as PNGs, with their measured geometry.
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_simulate_and_verify_navigators_for_review() {
-    let directory = review_directory();
-    let panels: [ReviewPanel; 3] = [
-        ("simulate-navigator", simulate_app),
-        ("verify-navigator-empty", verify_yield_empty),
-        ("verify-navigator-mc", verify_monte_carlo),
-    ];
-    for (name, fixture) in panels {
-        let mut app = fixture();
-        crate::ui::raster::write_panel_review(
-            &directory,
-            name,
-            crate::ui::Theme::default(),
-            Vec2::new(NAVIGATOR_WIDTH, 1200.0),
-            10.0,
-            |ui, _| {
-                let panel = Tokens::get(ui.ctx()).color.bg_panel;
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(panel))
-                    .show(ui, |ui| super::super::super::navigator::show(ui, &mut app));
-            },
-        );
-    }
 }

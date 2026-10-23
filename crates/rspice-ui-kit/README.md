@@ -65,10 +65,6 @@ every simulator package and every application crate in its closure except
 
 ```bash
 cargo test -p rspice-ui-kit --features plot
-
-# Writes the status-grammar review PNGs to RSPICE_RASTER_DIR (default: the
-# system temp directory); nothing in it asserts.
-cargo test -p rspice-ui-kit --lib render_the_status_grammar_for_review -- --ignored
 ```
 
 `plot` is off by default, so its tests compile only with the feature.

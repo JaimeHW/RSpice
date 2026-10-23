@@ -6,7 +6,7 @@
 
 use std::sync::{Arc, Mutex, mpsc};
 
-use super::veriloga_design_tests::{DESKTOP, open_in_design, open_project_app};
+use super::veriloga_design_tests::{open_in_design, open_project_app};
 use super::*;
 use crate::state::{
     Cell, CellViewRef, Library, LibraryCellInstance, Point, PortDirection, ProjectSourceBundle,
@@ -882,92 +882,4 @@ fn an_instance_placed_before_a_port_change_is_repaired_and_the_run_proceeds() {
 
     let deck = configured_deck(&app);
     assert!(deck.is_ok(), "{deck:?}");
-}
-
-/// Renders for review: the editor's interface strip and the inspector's
-/// Symbol row with Update symbol, for a hand-edited symbol that drifted, and
-/// the strip for a module that differs from its cell's schematic.
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_veriloga_interface_findings_for_review() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    let mut write = |name: &str, canvas: &crate::ui::raster::Canvas, height: usize| {
-        let path = directory.join(format!("{name}.png"));
-        std::fs::write(&path, canvas.png(height)).expect("write the render");
-        writeln!(report, "{}", path.display()).ok();
-    };
-
-    // A hand-edited symbol the module has moved on from.
-    let mut drifted = open_project_app();
-    let reference = add_module_cell(
-        &mut drifted.state,
-        "gain_cell",
-        "gain_cell",
-        &conductance("gain_cell", "p, n", "  inout p, n;\n  electrical p, n;\n"),
-    );
-    open_in_design(&mut drifted.state, &reference);
-    compile_and_publish(&mut drifted);
-    let drawn = symbol(&drifted, &reference);
-    drifted
-        .state
-        .model
-        .library_manager
-        .edit_library(LIBRARY)
-        .and_then(|mut library| {
-            library.store_symbol_document("gain_cell", GENERATED_SYMBOL_VIEW, &drawn)
-        })
-        .expect("the symbol view")
-        .expect("the symbol stores");
-    edit_source(
-        &mut drifted,
-        &conductance(
-            "gain_cell",
-            "p, ctl, en",
-            "  inout p;\n  input ctl, en;\n  electrical p, ctl, en;\n  electrical n;\n",
-        ),
-    );
-    compile_and_publish(&mut drifted);
-    for (name, size) in [
-        ("veriloga-symbol-drift-1440x900", DESKTOP),
-        ("veriloga-symbol-drift-390x844", egui::vec2(390.0, 844.0)),
-    ] {
-        drifted.state.workbench.coarse_pointer = size.x < 500.0;
-        let canvas = crate::ui::raster::render(size, |ui, _| drifted.render_frame_chrome(ui));
-        write(name, &canvas, size.y as usize);
-    }
-
-    // A module that differs from its cell's schematic.
-    let mut mismatched = open_project_app();
-    let reference = add_module_cell(
-        &mut mismatched.state,
-        "amp",
-        "amp",
-        &conductance(
-            "amp",
-            "p, n, ctl",
-            "  inout p, n;\n  input ctl;\n  electrical p, n, ctl;\n",
-        ),
-    );
-    mismatched
-        .state
-        .model
-        .library_manager
-        .get_library_mut(LIBRARY)
-        .and_then(|library| library.get_cell_mut("amp"))
-        .expect("the cell")
-        .add_view(View::new("schematic", ViewType::Schematic));
-    open_in_design(&mut mismatched.state, &reference);
-    compile_and_publish(&mut mismatched);
-    let canvas = crate::ui::raster::render(DESKTOP, |ui, _| mismatched.render_frame_chrome(ui));
-    write(
-        "veriloga-schematic-mismatch-1440x900",
-        &canvas,
-        DESKTOP.y as usize,
-    );
 }

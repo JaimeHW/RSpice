@@ -2,8 +2,6 @@
 
 mod preference_pages;
 mod preferences_shell;
-#[cfg(test)]
-mod raster;
 pub(crate) mod shortcut_portability_dialogs;
 pub(in crate::workbench) mod shortcut_preferences;
 pub(crate) mod workspace_layout_manager;

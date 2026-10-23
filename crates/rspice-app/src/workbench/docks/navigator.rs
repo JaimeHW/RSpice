@@ -6167,34 +6167,6 @@ mod tests {
         .collect();
     }
 
-    /// The four Project rails as PNGs, with their measured geometry beside
-    /// each. Run with `--ignored`; the renders go to `RSPICE_RASTER_DIR`.
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_the_project_navigators_for_review() {
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        for page in ProjectPage::ALL {
-            let mut app = project_app(page);
-            crate::ui::raster::write_panel_review(
-                &directory,
-                &format!(
-                    "project-navigator-{}",
-                    page.label().to_lowercase().replace(' ', "-")
-                ),
-                crate::ui::Theme::default(),
-                Vec2::new(260.0, 900.0),
-                10.0,
-                |ui, _| {
-                    let panel = Tokens::get(ui.ctx()).color.bg_panel;
-                    egui::CentralPanel::default()
-                        .frame(egui::Frame::NONE.fill(panel))
-                        .show(ui, |ui| show(ui, &mut app));
-                },
-            );
-        }
-    }
-
     /// Painted text of one Project rail.
     fn painted(page: ProjectPage) -> String {
         let mut app = project_app(page);

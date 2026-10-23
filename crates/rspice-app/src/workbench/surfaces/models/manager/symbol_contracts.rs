@@ -24,19 +24,6 @@
 //! them would be the one place a reader could not check them against the rule
 //! that actually runs on save.
 
-/// Re-exported so the Symbols page's own tests can seed a registry from the
-/// same fixture this file's tests check the derivations against; two fixtures
-/// for one registry is two registries.
-///
-/// The module itself stays private and stays at the bottom of the file:
-/// `source_guard::production_half` locates the shipped half of a self-scanning
-/// source by that exact declaration, and the control ratchet reads this file
-/// through it. A `pub(super) mod tests` panics the guard, and one declared at
-/// the top leaves the ratchet scanning the module doc comment and nothing
-/// else — a guard that scans nothing passes forever.
-#[cfg(test)]
-pub(super) use tests::seed_symbol_registry;
-
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash as _, Hasher as _};
 

@@ -521,46 +521,4 @@ pub(crate) mod tests {
             );
         }
     }
-
-    #[test]
-    #[ignore = "writes images for manual layout inspection"]
-    fn render_network_matrix_previews() {
-        let destination = std::path::PathBuf::from(
-            std::env::var("RSPICE_NETWORK_MATRIX_QA_DIR")
-                .expect("set the preview output directory"),
-        );
-        std::fs::create_dir_all(&destination).unwrap();
-        for (width, open_plot) in [(1280, false), (768, false), (768, true)] {
-            let mut app = crate::workbench::AppState::default();
-            let mut run = SimulationRun::new(1);
-            run.add_analysis(fixture(true));
-            app.model.simulation.retained.runs.push(run);
-            assert!(app.model.simulation.select_run(0));
-            if open_plot {
-                let run = app.model.simulation.active_run().unwrap();
-                let analysis = app.model.simulation.active_analysis().unwrap();
-                let key = AnalysisPresentationKey::new(run.dataset_id, analysis);
-                app.results
-                    .results
-                    .network_matrix
-                    .bind(key, &app.model.simulation);
-                app.results.results.network_matrix.open_trace = true;
-                app.results.results.session.polar.quantity = Some("|Sdd11|".to_owned());
-            }
-            let canvas =
-                crate::ui::raster::render(egui::vec2(width as f32, 640.0), |ui, background| {
-                    egui::CentralPanel::default()
-                        .frame(egui::Frame::NONE.fill(background).inner_margin(12.0))
-                        .show(ui, |ui| show(ui, &mut SheetContext::of(&mut app)));
-                });
-            std::fs::write(
-                destination.join(format!(
-                    "network-matrix-{width}{}.png",
-                    if open_plot { "-plot" } else { "" }
-                )),
-                canvas.png(640),
-            )
-            .unwrap();
-        }
-    }
 }

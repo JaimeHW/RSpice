@@ -385,9 +385,6 @@ def command_gates(
                 "drawing_sheet",
                 # The sheet's properties are edited in the inspector.
                 "inspector::design::sheet",
-                # Writes PNGs for a human to look at; it checks nothing.
-                "--skip",
-                "render_custom_sheet_size_dialogs_for_review",
             ),
             97,
         ),

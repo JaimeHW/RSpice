@@ -335,44 +335,6 @@ mod tests {
         component
     }
 
-    /// The form in each state worth reading, beside the Navigator rows it
-    /// lists, at desktop and phone widths, in both themes.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_find_replace() {
-        use crate::ui::tokens::Mode;
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        for (stem, find, regex) in [
-            ("empty", "", false),
-            ("matches", "10k", false),
-            ("refusal", "R(", true),
-        ] {
-            for (size_stem, size) in [
-                ("1024x640", egui::vec2(1024.0, 640.0)),
-                ("390x844", egui::vec2(390.0, 844.0)),
-            ] {
-                for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
-                    let mut app = RSpiceApp::test_instance();
-                    let document = app.state.model.schematic.document_mut_for_test();
-                    document.components = vec![part(1, "R1", "10k"), part(2, "R2", "10k")];
-                    open_find_replace(&mut app.state);
-                    app.state.design.find_replace.options.regex = regex;
-                    ask(&mut app.state, find, "22k", FindScope::CellView);
-                    let canvas = super::super::render_settled_form(mode, size, |ctx| {
-                        app.render_find_replace_dialog(ctx);
-                    });
-                    let height = canvas.content_height().max(1);
-                    let path =
-                        directory.join(format!("find-replace-{stem}-{size_stem}-{mode_stem}.png"));
-                    std::fs::write(&path, canvas.png(height)).expect("write dialog render");
-                }
-            }
-        }
-    }
-
     fn ask(state: &mut AppState, find: &str, replace: &str, scope: FindScope) {
         let form = &mut state.design.find_replace;
         form.find = find.to_owned();

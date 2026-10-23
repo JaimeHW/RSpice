@@ -1622,35 +1622,3 @@ impl Sweep {
         )
     }
 }
-
-/// The per-surface tallies as the sweep measures them now, in the shape
-/// [`PRESSED_PER_SURFACE`] is written in.
-///
-/// [`the_press_sweep_covers_every_control_it_covered_before`] reports a tally
-/// that *fell* and says nothing about one that rose, which is the honest shape
-/// for a floor and a useless one for re-freezing the table after a deliberate
-/// change. That left the numbers to be reconstructed by hand from a red gate,
-/// which is how a frozen tally rots into a number nobody believes. This prints
-/// them, and it is the counterpart of `print_studio_visual_fingerprints_for_review`
-/// next door: both are review tools, both are `#[ignore]`d, and both exist so
-/// re-approving a measurement is reading output rather than guessing.
-#[test]
-#[ignore = "prints source-ready press tallies after explicit review"]
-fn print_press_sweep_surface_tallies_for_review() {
-    use std::io::Write as _;
-
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    let mut total = 0usize;
-    for surface in studio_enumeration() {
-        total += surface.targets.len();
-        writeln!(
-            report,
-            "    (\"{}\", {}),",
-            surface.surface,
-            surface.targets.len()
-        )
-        .expect("write the press tally");
-    }
-    writeln!(report, "PRESSED_FLOOR = {total}").expect("write the press tally");
-}

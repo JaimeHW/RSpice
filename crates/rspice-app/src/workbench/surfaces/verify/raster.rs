@@ -1,12 +1,9 @@
-//! Review renders of the Verify pages, the fixtures they read, and the page
-//! geometry both the renders and the layout tests measure.
+//! The Verify pages' fixtures and the page geometry the layout tests measure.
 //!
-//! Each page is rendered on a project that has run nothing and on one holding
+//! Each page is measured on a project that has run nothing and on one holding
 //! real retained evidence for that page: a corner run with a failing and a
 //! near-limit cell, forty Monte Carlo samples of which three fail, an SOA run
-//! with two violations, an optimizer's iterations. The PNGs, and a text report
-//! of where the toolbar, the table head, the rows and the right-aligned numbers
-//! landed, go to `RSPICE_RASTER_DIR` (default: the system temp directory).
+//! with two violations, an optimizer's iterations.
 //!
 //! The geometry is published by the widgets themselves through [`probe`], which
 //! exists only in test builds: a measurement read back from the pixels would be
@@ -103,101 +100,6 @@ impl PageGeometry {
             .filter(|(_, rect)| rect.left() < 9.5 || rect.right() > width - 9.5)
             .map(|(name, rect)| format!("{name} {:.1}..{:.1}", rect.left(), rect.right()))
             .collect()
-    }
-
-    pub(super) fn report(&self, name: &str, width: f32) -> String {
-        let mut lines = vec![format!("{name} ({width} px)")];
-        let span = |rect: Rect| {
-            format!(
-                "{:.1}..{:.1} (h {:.1}) x {:.1}..{:.1}",
-                rect.top(),
-                rect.bottom(),
-                rect.height(),
-                rect.left(),
-                rect.right()
-            )
-        };
-        if let Some(toolbar) = self.one("toolbar") {
-            lines.push(format!("  toolbar        {}", span(toolbar)));
-        }
-        if let Some(title) = self.one("toolbar.title") {
-            lines.push(format!("  title left x   {:.1}", title.left()));
-        }
-        if let Some(summary) = self.one("toolbar.summary") {
-            lines.push(format!("  summary        {}", span(summary)));
-        }
-        let actions = self.all("toolbar.action");
-        if !actions.is_empty() {
-            let right = actions.iter().map(|rect| rect.right()).fold(0.0, f32::max);
-            lines.push(format!(
-                "  actions        {} · right gap {:.1}",
-                actions
-                    .iter()
-                    .map(|rect| format!("{:.1}..{:.1}", rect.left(), rect.right()))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                width - right
-            ));
-        }
-        if let Some(empty) = self.one("empty") {
-            lines.push(format!("  empty line     {}", span(empty)));
-        }
-        if let Some(text) = self.one("empty.text") {
-            lines.push(format!("  empty text x   {:.1}", text.left()));
-        }
-        if let Some(head) = self.one("table.head") {
-            lines.push(format!("  table head     {}", span(head)));
-            if let Some(toolbar) = self.one("toolbar") {
-                lines.push(format!(
-                    "  toolbar→head   {:.1}",
-                    head.top() - toolbar.bottom()
-                ));
-            }
-        }
-        let rows = self.all("table.row");
-        if !rows.is_empty() {
-            let mut heights = rows
-                .iter()
-                .map(|rect| format!("{:.1}", rect.height()))
-                .collect::<Vec<_>>();
-            heights.dedup();
-            lines.push(format!(
-                "  rows           {} · h {}",
-                rows.len(),
-                heights.join(", ")
-            ));
-            if let Some(head) = self.one("table.head") {
-                lines.push(format!(
-                    "  head→row 1     {:.1}",
-                    rows[0].top() - head.bottom()
-                ));
-            }
-        }
-        for (column, edges) in self.right_edges() {
-            lines.push(format!(
-                "  {column} right edges {}",
-                edges
-                    .iter()
-                    .map(|edge| format!("{edge:.1}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        for (key, prefix) in [("histogram", "histogram     "), ("split", "split         ")] {
-            if let Some(rect) = self.one(key) {
-                lines.push(format!("  {prefix} {}", span(rect)));
-            }
-        }
-        let outside = self.outside_insets(width);
-        lines.push(format!(
-            "  outside insets {}",
-            if outside.is_empty() {
-                "none".to_owned()
-            } else {
-                outside.join("; ")
-            }
-        ));
-        lines.join("\n") + "\n"
     }
 }
 
@@ -816,60 +718,4 @@ pub(super) fn optimization_app() -> RSpiceApp {
                 converged: true,
             }),
     )
-}
-
-/// The fixture that seeds one page with real evidence.
-fn seeded(page: VerificationPage) -> RSpiceApp {
-    match page {
-        VerificationPage::Corners => corner_app(),
-        VerificationPage::DeviceSafety => soa_app(),
-        VerificationPage::Optimization => optimization_app(),
-        VerificationPage::Yield => monte_carlo_app(),
-        VerificationPage::Tuning => tuning_app(),
-        VerificationPage::Regression => regression_app(),
-    }
-}
-
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_every_verify_page() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    for page in VerificationPage::NAVIGATION {
-        for state in ["empty", "seeded"] {
-            let fixture = || {
-                if state == "seeded" {
-                    seeded(page)
-                } else {
-                    RSpiceApp::test_instance()
-                }
-            };
-            let name = format!("verify-{page:?}-{state}").to_lowercase();
-            let geometry = page_geometry(fixture(), page);
-            let mut app = fixture();
-            app.state.workbench.activate(Workspace::Verify);
-            app.state.workbench.verification_page = page;
-            let canvas =
-                crate::ui::raster::render(vec2(PAGE_WIDTH, PAGE_HEIGHT), |ui, background| {
-                    egui::CentralPanel::default()
-                        .frame(egui::Frame::NONE.fill(background))
-                        .show(ui, |ui| super::show(ui, &mut app));
-                });
-            let height = canvas.content_height().max(1);
-            let path = directory.join(format!("{name}.png"));
-            std::fs::write(&path, canvas.png(height)).expect("write page render");
-            std::fs::write(
-                directory.join(format!("{name}.txt")),
-                geometry.report(&name, PAGE_WIDTH),
-            )
-            .expect("write page geometry");
-            writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
-                .expect("write raster report");
-        }
-    }
 }

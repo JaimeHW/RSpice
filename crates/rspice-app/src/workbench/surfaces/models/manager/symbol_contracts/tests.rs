@@ -410,7 +410,7 @@ fn a_template_the_netlist_writer_refuses_produces_no_token_table() {
 /// A design catalog with the three registry states a reader has to tell apart:
 /// a symbol whose artwork agrees with its provider, one whose artwork does
 /// not, and a legacy symbol with no typed contract at all.
-pub(in crate::workbench::surfaces::models::manager) fn seed_symbol_registry(state: &mut AppState) {
+fn seed_symbol_registry(state: &mut AppState) {
     use crate::state::{PortSpec, SymbolDocument};
 
     state.model.library_manager = LibraryManager::new();

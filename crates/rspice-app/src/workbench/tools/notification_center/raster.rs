@@ -9,9 +9,7 @@
 //! Read the renders for layout, not for wording: the rasterizer samples the
 //! font atlas unfiltered, and its own header says what that costs.
 //!
-//! The default test compares reviewed fingerprints and never writes files.
-//! The ignored review tools print replacement fingerprints or write PNGs to
-//! `RSPICE_RASTER_DIR` (default: the system temp directory).
+//! The test compares reviewed fingerprints and never writes files.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -176,47 +174,5 @@ fn the_notification_surfaces_match_their_reviewed_baselines() {
     for (case, fingerprint) in CASES.iter().zip(FINGERPRINTS) {
         let canvas = raster(case);
         canvas.assert_regression(case.stem, regression_height(&canvas), fingerprint);
-    }
-}
-
-#[test]
-#[ignore = "prints source-ready visual fingerprints after explicit review"]
-fn print_notification_visual_fingerprints_for_review() {
-    use std::io::Write as _;
-
-    let mut stdout = std::io::stdout().lock();
-    for case in &CASES {
-        let canvas = raster(case);
-        let height = regression_height(&canvas);
-        writeln!(
-            stdout,
-            "{} {}x{} {}",
-            case.stem,
-            canvas.width(),
-            height,
-            canvas.regression_fingerprint(height)
-        )
-        .expect("write visual fingerprint");
-    }
-}
-
-/// Write every scene to a PNG so the design can be looked at.
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_every_notification_scene() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    for case in &CASES {
-        let canvas = raster(case);
-        let height = regression_height(&canvas);
-        let path = directory.join(format!("{}.png", case.stem));
-        std::fs::write(&path, canvas.png(height)).expect("write notification render");
-        writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
-            .expect("write raster report");
     }
 }

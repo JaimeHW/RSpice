@@ -2313,45 +2313,7 @@ mod tests {
     }
 }
 
-/// The source-document inspector — the lifecycle body of the Automation
-/// workspace's root document — as PNGs with its measured geometry beside each,
-/// at the inspector dock's default and minimum widths. `RSPICE_RASTER_DIR`
-/// names the directory; the system temp directory otherwise.
-#[cfg(test)]
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_source_document_inspector_for_review() {
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    let messages =
-        crate::workbench::MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates);
-    for width in [312.0_f32, 278.0] {
-        let mut app = RSpiceApp::test_instance();
-        app.state.code.code_workspace.page = code_workspace::CodeWorkspacePage::Automation;
-        let facts = document_facts(&app, messages).expect("the page states a document");
-        crate::ui::raster::write_panel_review(
-            &directory,
-            &format!("source-document-inspector-{width}"),
-            crate::ui::Theme::default(),
-            egui::vec2(width, 1800.0),
-            10.0,
-            |ui, _| {
-                let panel = Tokens::get(ui.ctx()).color.bg_panel;
-                egui::CentralPanel::default()
-                    .frame(egui::Frame::NONE.fill(panel))
-                    .show(ui, |ui| {
-                        let _ = lifecycle_body(ui, &mut app.state, &facts, messages);
-                    });
-            },
-        );
-    }
-}
-
-/// Offscreen renders of the include search chain, so the list's density can be
-/// looked at rather than only asserted about.
-///
-/// Run with `--ignored`; the renders go to `RSPICE_RASTER_DIR` (default: the
-/// system temp directory).
+/// Offscreen renders of the include search chain.
 #[cfg(test)]
 mod include_search_raster {
     use super::*;
@@ -2397,55 +2359,5 @@ mod include_search_raster {
             populated.content_height() > empty.content_height(),
             "three ordered rows must occupy more of the section than the empty state"
         );
-    }
-
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_include_search_chain() {
-        use std::io::Write as _;
-
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        let stderr = std::io::stderr();
-        let mut report = stderr.lock();
-
-        let root = crate::fixture_root::canonical_temp_dir().join(format!(
-            "rspice-include-chain-raster-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(root.join("models")).expect("create present directory");
-        std::fs::create_dir_all(root.join("corners")).expect("create present directory");
-        let root_text = root.display().to_string();
-
-        for (label, entries) in [
-            ("empty", Vec::new()),
-            (
-                "three-with-one-missing",
-                vec!["models", "corners", "vendor/absent"],
-            ),
-        ] {
-            for (width, height) in [(1024.0_f32, 640.0_f32), (1600.0, 900.0)] {
-                let mut state = chain_state(&entries, Some(&root_text));
-                let canvas = render(width, height, &mut state);
-                let content = canvas.content_height().max(1);
-                let bytes = canvas.png(content);
-                let path = directory.join(format!(
-                    "netlist-include-search-{label}-{}x{}.png",
-                    width as usize, height as usize
-                ));
-                std::fs::write(&path, &bytes).expect("write chain render");
-                writeln!(
-                    report,
-                    "{} {}x{} {} bytes",
-                    path.display(),
-                    canvas.width(),
-                    content,
-                    bytes.len()
-                )
-                .expect("write raster report");
-            }
-        }
-        std::fs::remove_dir_all(&root).ok();
     }
 }

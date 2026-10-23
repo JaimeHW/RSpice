@@ -391,17 +391,3 @@ fn the_page_exports_the_active_sheet_only() {
         "another sheet's objects are not on this page: {active}"
     );
 }
-
-/// The fixture sheet as an SVG file, for a person to open and measure.
-#[test]
-#[ignore = "writes a review SVG to RSPICE_RASTER_DIR"]
-fn render_svg_export_review() {
-    let svg = export(&fixture_document(), SvgDesignContext::default());
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("review output directory");
-    let stage = std::env::var("RSPICE_REVIEW_STAGE").unwrap_or_else(|_| "now".to_owned());
-    let path = directory.join(format!("svg-export-{stage}.svg"));
-    std::fs::write(&path, svg).expect("write review svg");
-    eprintln!("wrote {}", path.display());
-}

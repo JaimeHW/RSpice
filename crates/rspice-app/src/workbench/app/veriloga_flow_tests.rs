@@ -202,18 +202,16 @@ impl User {
     }
 }
 
-/// What one Run plan consumed and produced: the deck, the node `out` drives,
-/// and its voltage at the operating point and every point computed after it.
+/// What one Run plan consumed and produced: the deck, and the voltage of the
+/// node `out` drives at the operating point and every point computed after it.
 struct RunOutcome {
     deck: String,
-    out_node: String,
     out_volts: Vec<f64>,
 }
 
-/// The device as the flow leaves it: its view, and the placed instance.
+/// The device as the flow leaves it: its view.
 struct Device {
     view: CellViewRef,
-    instance: u64,
 }
 
 /// Steps 1 to 7: a new project, the device created from the canvas, written,
@@ -449,7 +447,7 @@ fn wired_device() -> (User, Device) {
         Some(&"5".to_owned())
     );
 
-    (user, Device { view, instance })
+    (user, Device { view })
 }
 
 /// Step 8: Run plan, exactly as the toolbar's run control does, and the
@@ -608,11 +606,7 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
             .to_vec(),
     };
     assert!(!out_volts.is_empty(), "{name} has samples");
-    RunOutcome {
-        deck,
-        out_node,
-        out_volts,
-    }
+    RunOutcome { deck, out_volts }
 }
 
 fn assert_five_volts(outcome: &RunOutcome) {
@@ -679,67 +673,4 @@ fn a_new_veriloga_device_runs_from_the_canvas_to_its_operating_point_and_back_fr
     let mut lock = path.as_os_str().to_os_string();
     lock.push(".rspice.lock");
     let _ = std::fs::remove_file(std::path::PathBuf::from(lock));
-}
-
-/// Renders for review: the schematic with the wired device, its instance
-/// inspector, and the operating point after Run plan.
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_wired_veriloga_device_for_review() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    let mut write = |name: &str, canvas: &crate::ui::raster::Canvas| {
-        let path = directory.join(format!("{name}.png"));
-        std::fs::write(&path, canvas.png(SIZE.y as usize)).expect("write the render");
-        writeln!(report, "{}", path.display()).ok();
-    };
-
-    let (mut user, device) = wired_device();
-    user.app
-        .state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .clear();
-    user.app.state.model.schematic.session.editor.needs_fit = true;
-    user.settle();
-    let canvas = crate::ui::raster::render(SIZE, |ui, _| user.app.render_frame_chrome(ui));
-    write("veriloga-e2e-schematic-1440x900", &canvas);
-
-    user.app
-        .state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .select_only_component(device.instance);
-    user.settle();
-    let canvas = crate::ui::raster::render(SIZE, |ui, _| user.app.render_frame_chrome(ui));
-    write("veriloga-e2e-inspector-1440x900", &canvas);
-
-    let outcome = run_plan(&mut user, &device);
-    assert_five_volts(&outcome);
-    // The run's result, with `out` plotted the way a reader picks it.
-    Command::OpenWorkspace(Workspace::Results).execute(&mut user.app);
-    user.settle();
-    let trace = format!("V({})", outcome.out_node);
-    let row = user
-        .named
-        .iter()
-        .find(|(name, _)| name.starts_with(&format!("{trace}, ")))
-        .map(|(_, rect)| *rect)
-        .unwrap_or_else(|| panic!("the data browser lists {trace}"));
-    user.frame(vec![egui::Event::PointerMoved(row.center())]);
-    user.frame(vec![egui::Event::PointerMoved(row.center())]);
-    user.click(&format!("{trace} plotted"));
-    let canvas = crate::ui::raster::render(SIZE, |ui, _| user.app.render_frame_chrome(ui));
-    write("veriloga-e2e-result-1440x900", &canvas);
 }

@@ -4,7 +4,7 @@
 //! own poll, then read what the library, the property sheet, the design check
 //! and the deck say about an instance of the module.
 
-use super::veriloga_design_tests::{DESKTOP, open_in_design, open_project_app};
+use super::veriloga_design_tests::{open_in_design, open_project_app};
 use super::veriloga_interface_tests::{
     add_module_cell, compile_and_publish, configured_deck, edit_source,
     ensure_veriloga_configuration, view,
@@ -491,81 +491,5 @@ fn a_parameter_the_module_dropped_is_found_refused_and_removable() {
     assert!(
         refusal.contains("parameter `gain` is not declared"),
         "{refusal}"
-    );
-}
-
-/// Renders for review: the instance inspector for a device with several kinds
-/// of parameter, the same instance carrying a value its module dropped, and
-/// the Verilog-A tab inspector's Parameters section.
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_veriloga_parameters_for_review() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    let mut write = |name: &str, canvas: &crate::ui::raster::Canvas, height: usize| {
-        let path = directory.join(format!("{name}.png"));
-        std::fs::write(&path, canvas.png(height)).expect("write the render");
-        writeln!(report, "{}", path.display()).ok();
-    };
-
-    let mut app = open_project_app();
-    let reference = add_module_cell(
-        &mut app.state,
-        "gain_cell",
-        "gain_cell",
-        &module(
-            "gain_cell",
-            &format!("{KINDS}  (* units=\"Ohm\" *) parameter real rload = 1e3 from [0:inf);\n"),
-        ),
-    );
-    open_in_design(&mut app.state, &reference);
-    compile_and_publish(&mut app);
-    let canvas = crate::ui::raster::render(DESKTOP, |ui, _| app.render_frame_chrome(ui));
-    write(
-        "veriloga-tab-parameters-1440x900",
-        &canvas,
-        DESKTOP.y as usize,
-    );
-
-    let id = place_from_shelf(&mut app.state, &reference);
-    set_params(&mut app.state, id, "gain=3 stages=4");
-    app.state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Design);
-    app.state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .select_only_component(id);
-    app.state.workbench.inspector_visible = true;
-    let canvas = crate::ui::raster::render(DESKTOP, |ui, _| app.render_frame_chrome(ui));
-    write(
-        "veriloga-instance-parameters-1440x900",
-        &canvas,
-        DESKTOP.y as usize,
-    );
-
-    set_params(&mut app.state, id, "gain=3 stages=4 offset=1m");
-    let canvas = crate::ui::raster::render(DESKTOP, |ui, _| app.render_frame_chrome(ui));
-    write(
-        "veriloga-instance-undeclared-1440x900",
-        &canvas,
-        DESKTOP.y as usize,
-    );
-
-    // The same rows where the schematic cannot be edited.
-    app.state.model.schematic.session.read_only = true;
-    let canvas = crate::ui::raster::render(DESKTOP, |ui, _| app.render_frame_chrome(ui));
-    write(
-        "veriloga-instance-read-only-1440x900",
-        &canvas,
-        DESKTOP.y as usize,
     );
 }

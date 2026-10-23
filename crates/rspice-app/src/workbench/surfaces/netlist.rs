@@ -1615,53 +1615,6 @@ mod tests {
         (canvas, pixels)
     }
 
-    /// Render the deck stage showing one point's executed deck.
-    ///
-    /// The strip above it has to say which point, because a run's deck digest
-    /// describes the source it was authorized over and a corner point solves
-    /// something else — the same digest over four different decks would be a
-    /// header that is true of the run and false of what is under it.
-    fn executed_deck_stage(width: f32) -> crate::ui::raster::Canvas {
-        const EXECUTED: &str = "run strip fixture\n* RSpice sealed model source: pack rspice-opamps 2.1.0\n.model OPA2340 D\n.OPTIONS TEMP=125\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n";
-
-        let mut app = RSpiceApp::test_instance();
-        app.state.workbench.workspace = crate::workbench::state::Workspace::Netlist;
-        app.state.code.netlist.active_document = ActiveNetlistDocument::OwnedSource;
-        app.state.code.netlist.active_document_initialized = true;
-        seal_manual_run(&mut app.state, 7, 0xAB, 4);
-        let deck: std::sync::Arc<str> = std::sync::Arc::from(EXECUTED);
-        app.state
-            .model
-            .simulation
-            .retained
-            .executed_decks
-            .retain(crate::state::ExecutedDeck {
-                run_id: 7,
-                points: vec![crate::state::ExecutedDeckPoint {
-                    label: "SS 1.62V 125C".to_owned(),
-                    model_sources: crate::state::sealed_model_sources(&deck),
-                    deck,
-                }],
-            });
-        assert!(
-            crate::workbench::documents::netlist_document::reveal_executed_deck(
-                &mut app.state,
-                7,
-                0
-            )
-        );
-        assert_eq!(
-            run_strip_projection(&app.state).and_then(|projection| projection.point),
-            Some("SS 1.62V 125C".to_owned()),
-            "the fixture must be showing the point it renders"
-        );
-        crate::ui::raster::render(vec2(width, 520.0), |ui, background| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(background))
-                .show(ui, |ui| show_prepared(ui, &mut app));
-        })
-    }
-
     #[test]
     fn run_strip_paints_a_distinct_row_for_every_phase_at_both_stage_widths() {
         for width in [1600.0, 1000.0] {
@@ -1671,43 +1624,6 @@ mod tests {
             assert_ne!(current, edited, "ok and warn must not render alike");
             assert_ne!(current, running, "ok and running must not render alike");
             assert_ne!(edited, running, "warn and running must not render alike");
-        }
-    }
-
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_run_strip_phases() {
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        for width in [2560.0_f32, 1600.0, 1000.0] {
-            for phase in [
-                RunStripPhase::Current,
-                RunStripPhase::Edited,
-                RunStripPhase::Running,
-                RunStripPhase::Snapshot,
-            ] {
-                // The widest stage only has to show the steady state.
-                if width > 1600.0 && phase != RunStripPhase::Current {
-                    continue;
-                }
-                let (canvas, _) = run_strip_band(width, phase);
-                let height = canvas.content_height().clamp(1, 200);
-                let path = directory.join(format!(
-                    "netlist-run-strip-{phase:?}-{}.png",
-                    width.round() as u32
-                ));
-                std::fs::write(&path, canvas.png(height)).expect("write strip render");
-            }
-        }
-        for width in [1600.0_f32, 1000.0] {
-            let canvas = executed_deck_stage(width);
-            let height = canvas.content_height().clamp(1, 420);
-            let path = directory.join(format!(
-                "netlist-executed-deck-{}.png",
-                width.round() as u32
-            ));
-            std::fs::write(&path, canvas.png(height)).expect("write executed deck render");
         }
     }
 

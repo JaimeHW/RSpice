@@ -1,21 +1,14 @@
-//! The canvas raster review set: three fixture sheets rendered through the
-//! real paint path ([`super::render_schematic_view`]) at the zooms, themes
-//! and pixel densities a customer meets, and the measurements a review reads
-//! off them.
+//! Canvas geometry measured on fixture sheets rendered through the real paint
+//! path ([`super::render_schematic_view`]) at the zooms, themes and pixel
+//! densities a customer meets.
 //!
-//! The sheets are a dense analog stage, a hierarchy sheet with its
-//! operating-point overlay on, and the frame-cost probe's production-scale
-//! sheet. [`render`] drives a headless context through three whole frames and
-//! hands back both the rasterized canvas (device pixels) and the shapes the
-//! last frame painted (points), so an assertion can measure either.
+//! The sheets are a dense analog stage and a hierarchy sheet with its
+//! operating-point overlay on. [`render`] drives a headless context through
+//! three whole frames and hands back the shapes the last frame painted
+//! (points), so an assertion can measure them.
 //!
-//! The PNGs are for a person: `render_the_canvas_raster_review_set` is
-//! `#[ignore]`d and writes them, with a measurement table beside each, to
-//! `RSPICE_RASTER_DIR`. No image or fingerprint is pinned: every claim a
-//! review makes is pinned as a measured-geometry assertion instead.
-
-use std::collections::BTreeMap;
-use std::fmt::Write as _;
+//! No image or fingerprint is pinned: every claim is pinned as a
+//! measured-geometry assertion instead.
 
 use egui::{Color32, Rect, Shape, epaint::ClippedShape};
 use rspice_design::schematic::{
@@ -82,11 +75,9 @@ fn settle(state: &mut AppState) {
     state.sync_active_schematic_to_workspace();
 }
 
-/// Where the analog sheet is reviewed from: its middle, and the diode tie of
-/// its mirror.
+/// Where the analog sheet is measured from: its middle.
 pub(super) const ANALOG_CENTRE: Point = Point::new(510, 300);
-const ANALOG_DETAIL: Point = Point::new(330, 220);
-/// Where the hierarchy sheet is reviewed from: its middle, and the two
+/// Where the hierarchy sheet is measured from: its middle, and the two
 /// connectors between its instances with their badges.
 pub(super) const HIERARCHY_CENTRE: Point = Point::new(470, 330);
 const HIERARCHY_DETAIL: Point = Point::new(450, 250);
@@ -418,7 +409,6 @@ pub(super) enum Zoom {
 
 #[derive(Clone, Copy)]
 pub(super) struct Framing {
-    pub(super) name: &'static str,
     pub(super) zoom: Zoom,
     /// The world point at the middle of the canvas.
     pub(super) centre: Point,
@@ -441,10 +431,8 @@ pub(super) fn a1_fit_zoom() -> f64 {
 
 /// One rendered frame.
 pub(super) struct Render {
-    pub(super) canvas: crate::ui::raster::Canvas,
     /// What the last frame painted, in points.
     pub(super) shapes: Vec<ClippedShape>,
-    pub(super) pixels_per_point: f32,
     pub(super) zoom: f64,
     pub(super) tokens: std::sync::Arc<crate::ui::tokens::Tokens>,
 }
@@ -519,9 +507,7 @@ pub(super) fn render_pointing(
         ctx.pixels_per_point()
     );
     Render {
-        canvas: crate::ui::raster::rasterize(&ctx, SCREEN, &output),
         shapes: output.shapes,
-        pixels_per_point,
         zoom,
         tokens: crate::ui::tokens::Tokens::get(&ctx),
     }
@@ -587,256 +573,6 @@ pub(super) fn painted_text(shapes: &[ClippedShape]) -> Vec<PaintedText> {
         .collect()
 }
 
-fn hex(colour: Color32) -> String {
-    let [r, g, b, a] = colour.to_srgba_unmultiplied();
-    if a == 255 {
-        format!("#{r:02X}{g:02X}{b:02X}")
-    } else {
-        format!("#{r:02X}{g:02X}{b:02X}@{a}")
-    }
-}
-
-fn relative_luminance(colour: Color32) -> f64 {
-    let linear = |channel: u8| {
-        let channel = f64::from(channel) / 255.0;
-        if channel <= 0.040_45 {
-            channel / 12.92
-        } else {
-            ((channel + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    0.2126 * linear(colour.r()) + 0.7152 * linear(colour.g()) + 0.0722 * linear(colour.b())
-}
-
-/// WCAG 2.x contrast of `ink` composited over an opaque `ground`.
-pub(super) fn contrast(ink: Color32, ground: Color32) -> f64 {
-    let alpha = f32::from(ink.a()) / 255.0;
-    // `Color32` is premultiplied: over an opaque ground, src + dst * (1 - a).
-    let over = |src: u8, dst: u8| {
-        (f32::from(src) + f32::from(dst) * (1.0 - alpha))
-            .round()
-            .clamp(0.0, 255.0) as u8
-    };
-    let composed = Color32::from_rgb(
-        over(ink.r(), ground.r()),
-        over(ink.g(), ground.g()),
-        over(ink.b(), ground.b()),
-    );
-    let (a, b) = (relative_luminance(composed), relative_luminance(ground));
-    let (bright, dark) = if a > b { (a, b) } else { (b, a) };
-    (bright + 0.05) / (dark + 0.05)
-}
-
-/// The measurement table a review reads: stroke widths and circle radii by
-/// colour, and text sizes by colour with their contrast on the canvas.
-pub(super) fn measurement_table(render: &Render) -> String {
-    let canvas_bg = render.tokens.color.canvas_bg;
-    let mut strokes: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
-    let mut circles: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
-    let add = |table: &mut BTreeMap<String, BTreeMap<String, usize>>, key, value| {
-        *table.entry(key).or_default().entry(value).or_default() += 1;
-    };
-    let rgb = |colour: Color32| {
-        let [r, g, b, _] = colour.to_srgba_unmultiplied();
-        [r, g, b]
-    };
-    let named = |colour: Color32| {
-        let c = &render.tokens.color;
-        let tokens = [
-            ("wire", c.wire),
-            ("symbol", c.symbol),
-            ("net_label", c.net_label),
-            ("text", c.text),
-            ("text_dim", c.text_dim),
-            ("text_faint", c.text_faint),
-            ("canvas_select", c.canvas_select),
-            ("canvas_grid", c.canvas_grid),
-            ("canvas_bg", c.canvas_bg),
-            ("info", c.info),
-            ("accent", c.accent),
-            ("border", c.border),
-        ];
-        tokens
-            .iter()
-            .find(|(_, token)| colour.a() > 0 && rgb(*token) == rgb(colour))
-            .map_or_else(
-                || hex(colour),
-                |(name, _)| {
-                    if colour.a() == 255 {
-                        (*name).to_owned()
-                    } else {
-                        format!("{name}@{}", colour.a())
-                    }
-                },
-            )
-    };
-    for (_, shape) in leaf_shapes(&render.shapes) {
-        match shape {
-            Shape::LineSegment { stroke, .. } => add(
-                &mut strokes,
-                format!("line {}", named(stroke.color)),
-                format!("{:.2}", stroke.width),
-            ),
-            Shape::Path(path) => {
-                if path.stroke.width > 0.0
-                    && let egui::epaint::ColorMode::Solid(colour) = path.stroke.color
-                {
-                    add(
-                        &mut strokes,
-                        format!(
-                            "path{} {}",
-                            if path.closed { " closed" } else { "" },
-                            named(colour)
-                        ),
-                        format!("{:.2}", path.stroke.width),
-                    );
-                }
-            }
-            Shape::Circle(circle) => add(
-                &mut circles,
-                format!(
-                    "circle fill {} stroke {}",
-                    named(circle.fill),
-                    named(circle.stroke.color)
-                ),
-                format!("r {:.2} w {:.2}", circle.radius, circle.stroke.width),
-            ),
-            Shape::Rect(rect) => add(
-                &mut strokes,
-                format!(
-                    "rect fill {} stroke {}",
-                    named(rect.fill),
-                    named(rect.stroke.color)
-                ),
-                format!(
-                    "{:.1}x{:.1} w {:.2}",
-                    rect.rect.width(),
-                    rect.rect.height(),
-                    rect.stroke.width
-                ),
-            ),
-            _ => {}
-        }
-    }
-    let mut texts: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
-    for text in painted_text(&render.shapes) {
-        add(
-            &mut texts,
-            format!(
-                "text {} ({:.2}:1) {:?}",
-                named(text.colour),
-                contrast(text.colour, canvas_bg),
-                text.family
-            ),
-            format!("{:.2} pt", text.size),
-        );
-    }
-    let mut out = format!(
-        "zoom {:.4} pt/wu, {} px/pt, canvas {}\n",
-        render.zoom,
-        render.pixels_per_point,
-        hex(canvas_bg)
-    );
-    for (title, table) in [("strokes", strokes), ("marks", circles), ("text", texts)] {
-        let _ = writeln!(out, "-- {title}");
-        for (key, values) in table {
-            let values = values
-                .iter()
-                .map(|(value, count)| format!("{value} x{count}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let _ = writeln!(out, "{key}: {values}");
-        }
-    }
-    out
-}
-
-/// The review set: each sheet at zoom 0.25, at the zoom that fits A1, at 1
-/// and at 4; dark and light; at 1x and 2x. Writes `<sheet>-<zoom>-<theme>-
-/// <density>.png` and a `.txt` measurement table beside each into
-/// `RSPICE_RASTER_DIR`.
-#[test]
-#[ignore = "writes PNGs and measurement tables for a person to review; run with --ignored"]
-fn render_the_canvas_raster_review_set() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let only = std::env::var("RSPICE_REVIEW_ONLY").ok();
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-
-    let framings = |whole: Point, detail: Point| {
-        [
-            Framing {
-                name: "z0.25",
-                zoom: Zoom::Fixed(0.25),
-                centre: whole,
-            },
-            Framing {
-                name: "fitA1",
-                zoom: Zoom::FitA1,
-                centre: whole,
-            },
-            Framing {
-                name: "z1",
-                zoom: Zoom::Fixed(1.0),
-                centre: whole,
-            },
-            Framing {
-                name: "z4",
-                zoom: Zoom::Fixed(4.0),
-                centre: detail,
-            },
-        ]
-    };
-    type Sheet = (&'static str, fn() -> AppState, [Framing; 4]);
-    let sheets: [Sheet; 3] = [
-        (
-            "analog",
-            analog_sheet,
-            framings(ANALOG_CENTRE, ANALOG_DETAIL),
-        ),
-        (
-            "hierarchy",
-            hierarchy_sheet,
-            framings(HIERARCHY_CENTRE, HIERARCHY_DETAIL),
-        ),
-        (
-            "scale",
-            || super::frame_cost::scale_fixture().state,
-            framings(Point::new(1400, 1100), Point::new(1210, 1060)),
-        ),
-    ];
-    for (sheet, build, framings) in sheets {
-        if only.as_deref().is_some_and(|only| !only.contains(sheet)) {
-            continue;
-        }
-        for (theme_name, theme) in themes() {
-            for pixels_per_point in [1.0_f32, 2.0] {
-                let mut state = build();
-                for framing in framings {
-                    let render = render(&mut state, theme, framing, pixels_per_point);
-                    let name = format!(
-                        "{sheet}-{}-{theme_name}-{}x",
-                        framing.name, pixels_per_point as u32
-                    );
-                    let png = directory.join(format!("{name}.png"));
-                    std::fs::write(&png, render.canvas.png(render.canvas.height()))
-                        .expect("write the render");
-                    std::fs::write(
-                        directory.join(format!("{name}.txt")),
-                        measurement_table(&render),
-                    )
-                    .expect("write the measurements");
-                    writeln!(report, "{}", png.display()).ok();
-                }
-            }
-        }
-    }
-}
-
 /// Where `world` lands on a render framed at `centre` and `zoom`.
 fn on_screen(centre: Point, zoom: f64, world: Point) -> egui::Pos2 {
     egui::pos2(
@@ -847,7 +583,6 @@ fn on_screen(centre: Point, zoom: f64, world: Point) -> egui::Pos2 {
 
 fn at_zoom(zoom: f64, centre: Point) -> Framing {
     Framing {
-        name: "test",
         zoom: Zoom::Fixed(zoom),
         centre,
     }
@@ -1071,7 +806,6 @@ fn a_port_name_letters_and_greeks_as_a_net_name() {
     }
 
     let framing = Framing {
-        name: "test",
         zoom: Zoom::FitA1,
         centre: HIERARCHY_CENTRE,
     };
@@ -1115,7 +849,6 @@ fn no_canvas_text_is_painted_below_the_legibility_floor() {
     ] {
         let mut state = analog_sheet();
         let framing = Framing {
-            name: "test",
             zoom,
             centre: ANALOG_CENTRE,
         };

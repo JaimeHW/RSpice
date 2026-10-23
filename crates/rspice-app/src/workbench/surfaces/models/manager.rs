@@ -22,8 +22,6 @@ pub(super) mod include;
 mod paint;
 mod place;
 mod qualification_page;
-#[cfg(test)]
-mod raster;
 mod shelf;
 mod symbol_contracts;
 mod symbols;

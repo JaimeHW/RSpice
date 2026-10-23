@@ -780,27 +780,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "prints source-ready visual fingerprints after explicit review"]
-    fn print_netlist_first_visual_fingerprints_for_review() {
-        use std::io::Write as _;
-
-        let mut stdout = std::io::stdout().lock();
-        for baseline in NETLIST_FIRST_BASELINES {
-            let canvas = netlist_first_canvas(baseline.size, baseline.truncated);
-            let height = regression_height(&canvas);
-            writeln!(
-                stdout,
-                "{} {}x{} {}",
-                baseline.name,
-                canvas.width(),
-                height,
-                canvas.regression_fingerprint(height)
-            )
-            .expect("write visual fingerprint");
-        }
-    }
-
-    #[test]
     fn imported_deck_with_only_the_pristine_bootstrap_buffer_is_netlist_first() {
         let mut app = RSpiceApp::test_instance();
         assert!(
@@ -994,36 +973,6 @@ mod tests {
                     .any(|pixel| pixel != canvas.background()),
                 "{label} painted nothing"
             );
-        }
-    }
-
-    /// Write the landing at the supported viewports to PNGs so the design can
-    /// be reviewed. Read them for layout, not wording — `crate::ui::raster`'s
-    /// header says why.
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_the_landing_at_every_supported_viewport() {
-        use std::io::Write as _;
-
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        let stderr = std::io::stderr();
-        let mut report_output = stderr.lock();
-
-        for baseline in NETLIST_FIRST_BASELINES {
-            let canvas = netlist_first_canvas(baseline.size, baseline.truncated);
-            let height = regression_height(&canvas);
-            let path = directory.join(format!("{}.png", baseline.name));
-            std::fs::write(&path, canvas.png(height)).expect("write the render");
-            writeln!(
-                report_output,
-                "{} {}x{}",
-                path.display(),
-                canvas.width(),
-                height
-            )
-            .ok();
         }
     }
 }

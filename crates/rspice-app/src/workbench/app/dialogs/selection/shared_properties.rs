@@ -421,43 +421,4 @@ mod tests {
             .select_component(1);
         assert!(!shared_properties_available(&state));
     }
-
-    /// The form at desktop and phone widths, in both themes.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_shared_properties() {
-        use crate::ui::tokens::Mode;
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        for (size_stem, size) in [
-            ("1024x640", egui::vec2(1024.0, 640.0)),
-            ("390x844", egui::vec2(390.0, 844.0)),
-        ] {
-            for (mode_stem, mode) in [("dark", Mode::Dark), ("light", Mode::Light)] {
-                let mut app = RSpiceApp::test_instance();
-                let document = app.state.model.schematic.document_mut_for_test();
-                document.components = vec![
-                    resistor(1, "R1", "1k"),
-                    resistor(2, "R2", "2k"),
-                    resistor(3, "R3", "1k"),
-                ];
-                for component in &mut document.components {
-                    component.params = "m=2".to_owned();
-                }
-                let selection = &mut app.state.model.schematic.session.editor.selection;
-                for id in 1..=3 {
-                    selection.select_component(id);
-                }
-                assert!(open_shared_properties(&mut app.state));
-                let canvas = super::super::super::render_settled_form(mode, size, |ctx| {
-                    app.render_shared_properties_dialog(ctx);
-                });
-                let height = canvas.content_height().max(1);
-                let path = directory.join(format!("shared-properties-{size_stem}-{mode_stem}.png"));
-                std::fs::write(&path, canvas.png(height)).expect("write dialog render");
-            }
-        }
-    }
 }

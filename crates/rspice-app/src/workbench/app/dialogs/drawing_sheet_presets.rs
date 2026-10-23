@@ -1365,8 +1365,6 @@ mod tests {
 
     use super::*;
 
-    const DESKTOP: egui::Vec2 = egui::vec2(1440.0, 900.0);
-
     /// Using a custom size from the library puts the open sheet on it, as one
     /// sheet edit, closes the library and shows the sheet's properties.
     #[test]
@@ -1398,91 +1396,6 @@ mod tests {
         assert!(!app.state.sheets.drawing_sheet_presets.any_open());
         assert!(app.state.workbench.reveal_sheet_section);
         assert!(app.state.can_undo_project_design());
-    }
-
-    /// The library and the custom-size editor, each over a project that owns
-    /// one preset, at desktop and phone widths in both modes. Run with
-    /// `--ignored`; `RSPICE_RASTER_DIR` names the output directory.
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_custom_sheet_size_dialogs_for_review() {
-        use std::io::Write as _;
-
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        let stderr = std::io::stderr();
-        let mut report = stderr.lock();
-        for (name, size, coarse) in [
-            ("1440x900", DESKTOP, false),
-            ("390x844", egui::vec2(390.0, 844.0), true),
-        ] {
-            for (mode, mode_name) in [
-                (crate::ui::Mode::Dark, "dark"),
-                (crate::ui::Mode::Light, "light"),
-            ] {
-                for (page, open_editor) in [("library", false), ("editor", true)] {
-                    let mut app = RSpiceApp::test_instance();
-                    // A headless pass has no clock for an opening fade, so a
-                    // dialog would otherwise rasterize part-transparent.
-                    app.state.model.preferences.set_toggle(
-                        crate::workbench::preferences::TogglePreference::ReducedMotion,
-                        true,
-                    );
-                    app.state.open_project_session();
-                    app.state.workbench.coarse_pointer = coarse;
-                    let preset = DrawingSheetPreset {
-                        id: "lab-documentation-panel".to_owned(),
-                        name: "Lab documentation panel".to_owned(),
-                        scope: DrawingSheetPresetScope::Project,
-                        format: model::custom_format(
-                            "Lab documentation panel",
-                            250_000,
-                            400_000,
-                            StartingFrame::IsoA,
-                        )
-                        .unwrap(),
-                    };
-                    let mut seeded = (*app.state.model.workspace.content.design_management).clone();
-                    seeded
-                        .publish_drawing_sheet_preset(seeded.revision(), preset)
-                        .unwrap();
-                    app.state
-                        .model
-                        .workspace
-                        .content
-                        .replace_design_management(seeded)
-                        .unwrap();
-                    assert!(open_custom_sheet_size_library(&mut app.state));
-                    if open_editor {
-                        app.handle_preset_library_action(LibraryBodyAction::New);
-                        let draft = app
-                            .state
-                            .sheets
-                            .drawing_sheet_presets
-                            .editor
-                            .as_mut()
-                            .expect("the editor opened");
-                        draft.name = "Test strip panel".to_owned();
-                        draft.width = "250".to_owned();
-                        draft.height = "400".to_owned();
-                    }
-                    let theme = crate::ui::Theme {
-                        mode,
-                        ..crate::ui::Theme::default()
-                    };
-                    app.state.workbench.theme = theme;
-                    let canvas = crate::ui::raster::render_themed(theme, size, |ui, _| {
-                        app.render_frame_chrome(ui);
-                        app.render_frame_dialogs(ui.ctx());
-                    });
-                    let path =
-                        directory.join(format!("custom-sheet-{page}-{name}-{mode_name}.png"));
-                    std::fs::write(&path, canvas.png(size.y as usize)).expect("write the render");
-                    writeln!(report, "{}", path.display()).ok();
-                }
-            }
-        }
     }
 
     fn build_package(

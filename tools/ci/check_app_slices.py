@@ -131,8 +131,6 @@ SLICE_RULES = [
     (W + r"app/schematic", "design"),
     (W + r"app/(wiring_acceptance|gesture_tests|touch_flow_tests)", "design"),
     (W + r"app/(source_editor_command_tests|veriloga_\w+_tests)", "code"),
-    (W + r"app/chrome_review_tests", "framework"),
-    (W + r"app/dialog_review_tests", "shell"),
     # Chrome, docks, commands and menus.
     (W + r"chrome/presence", "cloud"),
     (W + r"chrome/sheet_strip", "sheets"),

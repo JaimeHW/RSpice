@@ -20,11 +20,6 @@ use super::super::super::inspector::stimulus as inspector_dock;
 const NAVIGATOR: egui::Vec2 = egui::vec2(228.0, 640.0);
 /// The inspector's own width at the same fit.
 const INSPECTOR: egui::Vec2 = egui::vec2(300.0, 640.0);
-/// The column the inspector's five sections claim when nothing is scrolled
-/// away, which is what a review of them has to look at: the dock itself puts
-/// them in a scroll area, so a render held to the dock's height would only ever
-/// show the first two.
-const INSPECTOR_COLUMN: egui::Vec2 = egui::vec2(300.0, 1180.0);
 
 /// Lay one dock out and read back everything it announced.
 fn announced(size: egui::Vec2, mut pass: impl FnMut(&mut egui::Ui)) -> Vec<String> {
@@ -674,60 +669,4 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
         Some(1),
         "the draft was armed instead of the published revision"
     );
-}
-
-/// Write both docks to PNGs for a human to look at.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn print_stimulus_docks_for_review() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    for (stem, mode) in [
-        ("dark", crate::ui::Mode::Dark),
-        ("light", crate::ui::Mode::Light),
-    ] {
-        for (dock, size) in [("navigator", NAVIGATOR), ("inspector", INSPECTOR_COLUMN)] {
-            let theme = crate::ui::Theme {
-                mode,
-                ..crate::ui::Theme::default()
-            };
-            let mut app = RSpiceApp::test_instance();
-            library(&mut app.state);
-            app.state.workbench.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
-            adopt(&mut app.state, 1, "V1", "bridge_cal_step");
-            adopt(&mut app.state, 2, "V2", "bridge_cal_step");
-            let held = app
-                .state
-                .model
-                .workspace
-                .content
-                .stimulus_library
-                .get("vdd_ramp_1ms")
-                .cloned()
-                .expect("held");
-            app.state
-                .workbench
-                .stimulus_editor
-                .draft_for(&held)
-                .edit(|working| working.value = "0 0 2m 5 6m 5".to_owned());
-            let canvas = crate::ui::raster::render_themed(theme, size, |ui, _background| {
-                if dock == "navigator" {
-                    show(ui, &mut app.state);
-                } else {
-                    inspector_dock::show(ui, &mut app.state);
-                }
-            });
-            let height = canvas.content_height().max(1);
-            let path = directory.join(format!("stimulus-{dock}-{stem}.png"));
-            std::fs::write(&path, canvas.png(height)).expect("write dock render");
-            writeln!(report, "{} {}x{}", path.display(), canvas.width(), height)
-                .expect("write raster qualification report");
-        }
-    }
 }

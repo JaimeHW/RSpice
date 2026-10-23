@@ -159,27 +159,6 @@ fn every_models_workspace_page_matches_its_reviewed_visual_baseline() {
     }
 }
 
-#[test]
-#[ignore = "prints source-ready visual fingerprints after explicit review"]
-fn print_models_visual_fingerprints_for_review() {
-    use std::io::Write as _;
-
-    let mut stdout = std::io::stdout().lock();
-    for baseline in MODELS_BASELINES {
-        let canvas = models_canvas(baseline.page, baseline.scope);
-        let height = models_regression_height(&canvas);
-        writeln!(
-            stdout,
-            "{} {}x{} {}",
-            baseline.name,
-            canvas.width(),
-            height,
-            canvas.regression_fingerprint(height)
-        )
-        .expect("write visual fingerprint");
-    }
-}
-
 /// Every page's actions stay inside its own title band.
 ///
 /// The band is one row now rather than two — the mockup's `.model-section-bar`
@@ -715,36 +694,6 @@ fn no_models_page_ends_in_unpainted_canvas() {
                 break;
             }
         }
-    }
-}
-
-/// Write every page of the workspace to a PNG so its design can be reviewed.
-///
-/// The default state renders the compiled-in catalog; per-page populated and
-/// exception states live beside the pages that own them (`corners::tests`,
-/// `symbols::tests`, `bins::tests`, `qualification_page::tests`) and the hub's
-/// trust rungs in `manager/raster.rs`. This test is the whole-workspace sweep
-/// a reviewer starts from. Renders go to `RSPICE_RASTER_DIR` (default: the
-/// system temp directory); read them for layout, not wording — the
-/// rasterizer's own header says why.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_every_page_for_review() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-
-    for baseline in MODELS_BASELINES {
-        let canvas = models_canvas(baseline.page, baseline.scope);
-        let path = directory.join(format!("{}.png", baseline.name));
-        let height = models_regression_height(&canvas);
-        std::fs::write(&path, canvas.png(height)).expect("write png");
-        writeln!(report, "wrote {}", path.display()).ok();
     }
 }
 

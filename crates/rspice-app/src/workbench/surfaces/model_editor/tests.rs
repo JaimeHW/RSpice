@@ -614,39 +614,3 @@ fn no_model_editor_file_paints_a_status_in_colour() {
         }
     }
 }
-
-/// Renders every model editor section to `RSPICE_RASTER_DIR` (or the system
-/// temp directory); read them for layout, not wording — the rasterizer's own
-/// header says why.
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_every_section_for_review() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-
-    for (index, section) in ModelEditorSection::ALL.into_iter().enumerate() {
-        let mut app = app_with_open_candidate();
-        app.state.workbench.model_editor.active_section = section;
-        let canvas = crate::ui::raster::render(Vec2::new(1_180.0, 900.0), |ui, background| {
-            egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(background))
-                .show(ui, |ui| show(ui, &mut app));
-        });
-        let slug = section
-            .label()
-            .to_ascii_lowercase()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect::<String>();
-        let path = directory.join(format!("model-editor-{index:02}-{slug}.png"));
-        let height = canvas.content_height().max(200);
-        std::fs::write(&path, canvas.png(height)).expect("write png");
-        writeln!(report, "wrote {}", path.display()).ok();
-    }
-}

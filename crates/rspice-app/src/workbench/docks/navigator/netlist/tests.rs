@@ -860,10 +860,7 @@ fn an_include_of_a_file_without_sections_gains_nothing() {
     );
 }
 
-/// Offscreen renders of the include rows at the dock's own width, so the trace
-/// and the shadow marker can be looked at rather than only asserted about.
-///
-/// Run the PNG writer with `--ignored`; renders go to `RSPICE_RASTER_DIR`.
+/// Offscreen renders of the include rows at the dock's own width.
 mod include_row_raster {
     use super::*;
 
@@ -998,47 +995,5 @@ mod include_row_raster {
             read_only.pixels_in(region).collect::<Vec<_>>(),
             "a chooser that cannot be used must say so in what it paints"
         );
-    }
-
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_include_rows() {
-        use std::io::Write as _;
-
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        let stderr = std::io::stderr();
-        let mut report = stderr.lock();
-        let mut write = |name: String, canvas: &crate::ui::raster::Canvas| {
-            let content = canvas.content_height().max(1);
-            let bytes = canvas.png(content);
-            let path = directory.join(name);
-            std::fs::write(&path, &bytes).expect("write include row render");
-            writeln!(
-                report,
-                "{} {}x{} {} bytes",
-                path.display(),
-                canvas.width(),
-                content,
-                bytes.len()
-            )
-            .expect("write raster report");
-        };
-        for width in [DOCK_WIDTH, 1600.0] {
-            let stage = width as u32;
-            for (label, shadowed) in [("resolved", false), ("shadowed", true)] {
-                write(
-                    format!("netlist-navigator-include-{label}-{stage}.png"),
-                    &render_at(shadowed, width),
-                );
-            }
-            for (label, editable) in [("editable", true), ("read-only", false)] {
-                write(
-                    format!("netlist-navigator-section-chooser-{label}-{stage}.png"),
-                    &render_chooser(editable, width),
-                );
-            }
-        }
     }
 }

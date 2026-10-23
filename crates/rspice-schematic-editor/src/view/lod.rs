@@ -265,9 +265,6 @@ pub fn greek_tab_width_pt(tab_wu: f32, zoom: f32, ppp: f32) -> f32 {
 }
 
 #[cfg(test)]
-pub(crate) mod review;
-
-#[cfg(test)]
 mod tests {
     use super::*;
 

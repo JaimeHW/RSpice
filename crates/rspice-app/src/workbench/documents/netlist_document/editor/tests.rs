@@ -122,31 +122,6 @@ fn hovering_a_parameter_opens_a_popover_the_plain_editor_does_not() {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_value_hover_over_a_definition_and_an_expression() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    for width in HOVER_STAGE_WIDTHS {
-        // The `l` a `.param` binds, then the `{l*2}` an element card reads
-        // — aimed at its `*`, which only the expression span covers.
-        for (label, row, column) in [("definition", 2, 7), ("expression", 3, 25)] {
-            let (hovered, _, _, resolved) = hover_rasters(width, row, column);
-            assert!(
-                resolved.is_some_and(|hover| hover.value.is_some()),
-                "the {label} render did not hover a value at {width} px"
-            );
-            let path = directory.join(format!("netlist-value-hover-{label}-{width:.0}.png"));
-            std::fs::write(&path, hovered.png(hovered.content_height())).expect("write the render");
-            writeln!(std::io::stderr().lock(), "wrote {}", path.display()).ok();
-        }
-    }
-}
-
 #[test]
 fn editor_diagnostic_pipeline_has_no_panic_shortcuts() {
     let production = crate::source_guard::production_source(include_str!("../editor.rs"));

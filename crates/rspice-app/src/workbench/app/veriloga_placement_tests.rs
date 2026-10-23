@@ -4,7 +4,7 @@
 //! These pins create a device through the form, compile it the way a
 //! worker's answer is published, and press what the compile result offers.
 
-use super::veriloga_design_tests::{DESKTOP, open_project_app};
+use super::veriloga_design_tests::open_project_app;
 use super::veriloga_interface_tests::{compile_and_publish, edit_source};
 use super::*;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
@@ -176,70 +176,4 @@ fn a_closed_origin_offers_the_designs_top_schematic_and_otherwise_nothing() {
     app.state.model.workspace.content.close_view(&bench);
     app.state.model.workspace.content.project.top_cell = "gain".to_owned();
     assert_eq!(app.state.veriloga_placement_target(&handoff), None);
-}
-
-/// New Verilog-A device… empty, filled and refusing a port, at desktop and
-/// phone widths, and the compile result offering "Place in <schematic>".
-#[test]
-#[ignore = "writes PNGs for a human to look at; run with --ignored"]
-fn render_the_new_device_form_and_the_placement_offer_for_review() {
-    use std::io::Write as _;
-
-    let directory = std::env::var("RSPICE_RASTER_DIR")
-        .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-    std::fs::create_dir_all(&directory).expect("raster output directory");
-    let stderr = std::io::stderr();
-    let mut report = stderr.lock();
-    let mut write = |name: &str, canvas: &crate::ui::raster::Canvas, height: usize| {
-        let path = directory.join(format!("{name}.png"));
-        std::fs::write(&path, canvas.png(height)).expect("write the render");
-        writeln!(report, "{}", path.display()).ok();
-    };
-
-    for (name, cell, ports) in [
-        ("new-veriloga-device-empty", "", ""),
-        (
-            "new-veriloga-device-filled",
-            "opamp_ideal",
-            "inp:in inn:in out:out vdd vss",
-        ),
-        (
-            "new-veriloga-device-refused",
-            "opamp_ideal",
-            "inp:in out:sideways",
-        ),
-    ] {
-        for (suffix, size) in [("1440x900", DESKTOP), ("390x844", egui::vec2(390.0, 844.0))] {
-            let mut app = open_project_app();
-            app.state
-                .model
-                .library_manager
-                .add_library(Library::new(LIBRARY));
-            app.state.workbench.activate(Workspace::Design);
-            app.state.workbench.coarse_pointer = size.x < 500.0;
-            crate::workbench::app::open_new_veriloga_device_form(&mut app.state);
-            let form = &mut app.state.code.new_veriloga_device;
-            form.library = LIBRARY.to_owned();
-            form.name = cell.to_owned();
-            form.ports = ports.to_owned();
-            let canvas = crate::ui::raster::render(size, |ui, _| {
-                app.render_frame_chrome(ui);
-                app.render_frame_dialogs(ui.ctx());
-            });
-            write(&format!("{name}-{suffix}"), &canvas, size.y as usize);
-        }
-    }
-
-    let (mut app, _, _) = device_created_from_a_schematic();
-    edit_source(&mut app, TWO_PORTS);
-    compile_and_publish(&mut app);
-    for (suffix, size) in [("1440x900", DESKTOP), ("390x844", egui::vec2(390.0, 844.0))] {
-        app.state.workbench.coarse_pointer = size.x < 500.0;
-        let canvas = crate::ui::raster::render(size, |ui, _| app.render_frame_chrome(ui));
-        write(
-            &format!("veriloga-place-offer-{suffix}"),
-            &canvas,
-            size.y as usize,
-        );
-    }
 }

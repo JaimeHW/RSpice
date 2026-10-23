@@ -84,45 +84,6 @@ fn icon(field: &FindField) -> WorkbenchIcon {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-    use crate::state::{Component, ComponentType, NetLabel, Point};
-
-    /// The rows the Navigator lists while the form is open.
-    #[test]
-    #[ignore = "writes PNGs for a human to look at; run with --ignored"]
-    fn render_find_matches() {
-        let directory = std::env::var("RSPICE_RASTER_DIR")
-            .map_or_else(|_| std::env::temp_dir(), std::path::PathBuf::from);
-        std::fs::create_dir_all(&directory).expect("raster output directory");
-        let mut app = crate::workbench::RSpiceApp::test_instance();
-        let document = app.state.model.schematic.document_mut_for_test();
-        document.components = (1..=3)
-            .map(|id| {
-                let mut part = Component::new(id, ComponentType::Resistor, Point::origin());
-                part.name = format!("R{id}");
-                part.value = "10k".to_owned();
-                part
-            })
-            .collect();
-        document.net_labels = vec![NetLabel::new(9, Point::origin(), "out_r1")];
-        crate::workbench::app::open_find_replace(&mut app.state);
-        let form = &mut app.state.design.find_replace;
-        form.find = "r1".to_owned();
-        form.replace = "RA".to_owned();
-        let canvas = crate::ui::raster::render(egui::vec2(300.0, 160.0), |ui, _background| {
-            find_matches_section(ui, &mut app.state);
-        });
-        let height = canvas.content_height().max(1);
-        std::fs::write(
-            directory.join("find-replace-navigator.png"),
-            canvas.png(height),
-        )
-        .expect("write navigator render");
-    }
-}
-
 /// What the row's text is: an instance's own name, or which of its fields.
 fn meta(found: &FindMatch) -> String {
     match found.field {
