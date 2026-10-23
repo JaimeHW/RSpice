@@ -7,7 +7,6 @@ use crate::Value;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::{FloquetSpectrumCertificate, FloquetSpectrumEvidence};
 use crate::numerics::eigenspectrum::{OrdinarySpectrumError, qualified_real_eigenspectrum};
-use crate::solver::{SolverError, StaticMatrix};
 
 /// Failure to extract and strictly qualify a complete Floquet spectrum.
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
@@ -81,8 +80,8 @@ impl ShootingState {
 
     /// Update initial state estimate
     ///
-    /// Applies Newton step: x0_new = x0 + damping * delta
-    /// Note: delta is pre-computed as -J^(-1)*F by compute_newton_step
+    /// Applies Newton step: x0_new = x0 + damping * delta, where delta solves
+    /// J * delta = -F
     pub fn update_x0(&mut self, delta: &[Value], damping: Value) {
         for (i, &entry) in delta.iter().enumerate().take(self.n_states) {
             self.x0[i] += damping * entry;
@@ -109,9 +108,6 @@ pub struct ShootingNewtonSolver {
     /// Damping factor for Newton updates
     pub damping: Value,
 
-    /// Finite difference step for Jacobian computation
-    fd_step: Value,
-
     /// Current iteration count
     iteration: usize,
 
@@ -127,7 +123,6 @@ impl ShootingNewtonSolver {
             abstol: 1e-12,
             max_iterations,
             damping: 1.0,
-            fd_step: 1e-8,
             iteration: 0,
             converged: false,
         }
@@ -142,12 +137,6 @@ impl ShootingNewtonSolver {
     /// Set absolute tolerance
     pub fn with_abstol(mut self, abstol: Value) -> Self {
         self.abstol = abstol;
-        self
-    }
-
-    /// Set finite difference step size
-    pub fn with_fd_step(mut self, step: Value) -> Self {
-        self.fd_step = step;
         self
     }
 
@@ -191,115 +180,6 @@ impl ShootingNewtonSolver {
     /// Check if maximum iterations exceeded
     pub fn is_maxed_out(&self) -> bool {
         self.iteration >= self.max_iterations
-    }
-
-    /// Compute Newton update using finite-difference Jacobian
-    ///
-    /// # Arguments
-    /// * `state` - Current shooting state
-    /// * `integrate_period` - Closure that integrates from x0 to x(T)
-    ///
-    /// # Returns
-    /// Newton step delta_x0
-    pub fn compute_newton_step<F>(
-        &self,
-        state: &ShootingState,
-        integrate_period: F,
-    ) -> Result<Vec<Value>, SolverError>
-    where
-        F: Fn(&[Value]) -> Vec<Value>,
-    {
-        let n = state.dimension();
-
-        // Build Jacobian J = dF/dx0 = d(x(T) - x0)/dx0 = dX(T)/dx0 - I
-        // where X(T) is the map from x0 to x(T)
-
-        let mut jacobian = vec![vec![0.0; n]; n];
-
-        // Compute Jacobian columns via finite differences
-        for j in 0..n {
-            let mut x0_plus = state.x0.clone();
-            let mut x0_minus = state.x0.clone();
-
-            // Perturbation size scaled by variable magnitude
-            let h = self.fd_step * (state.x0[j].abs().max(1.0));
-
-            x0_plus[j] += h;
-            x0_minus[j] -= h;
-
-            // Integrate perturbed initial conditions
-            let x_t_plus = integrate_period(&x0_plus);
-            let x_t_minus = integrate_period(&x0_minus);
-
-            // Central difference for dX(T)/dx0
-            for i in 0..n {
-                let dx_t_dx0 = (x_t_plus[i] - x_t_minus[i]) / (2.0 * h);
-                // Jacobian of F = X(T) - x0 is dX/dx0 - I
-                jacobian[i][j] = dx_t_dx0 - if i == j { 1.0 } else { 0.0 };
-            }
-        }
-
-        // Solve J * delta = -F for Newton step
-        self.solve_linear_system(&jacobian, &state.residual)
-    }
-
-    /// Solve and certify `J * delta = -F` without changing the Jacobian.
-    fn solve_linear_system(
-        &self,
-        jacobian: &[Vec<Value>],
-        rhs: &[Value],
-    ) -> Result<Vec<Value>, SolverError> {
-        let n = rhs.len();
-
-        if n == 0 {
-            return if jacobian.is_empty() {
-                Ok(Vec::new())
-            } else {
-                Err(SolverError::InvalidCircuit(format!(
-                    "Shooting Newton system has {} matrix rows but an empty RHS",
-                    jacobian.len()
-                )))
-            };
-        }
-        if jacobian.len() != n {
-            return Err(SolverError::InvalidCircuit(format!(
-                "Shooting Newton dimension mismatch: matrix has {} rows, RHS has {n}",
-                jacobian.len()
-            )));
-        }
-        if rhs.iter().any(|value| !value.is_finite()) {
-            return Err(SolverError::Overflow);
-        }
-
-        // Retain exact-zero diagonal entries structurally so factorization,
-        // rather than sparse assembly, owns the singularity diagnosis.
-        let mut triplets = Vec::with_capacity(n.saturating_mul(n));
-        for (row_index, row) in jacobian.iter().enumerate() {
-            if row.len() != n {
-                return Err(SolverError::InvalidCircuit(format!(
-                    "Shooting Newton row {row_index} has {} columns; expected {n}",
-                    row.len()
-                )));
-            }
-            for (col_index, &value) in row.iter().enumerate() {
-                if !value.is_finite() {
-                    return Err(SolverError::Overflow);
-                }
-                if row_index == col_index || value != 0.0 {
-                    triplets.push((row_index, col_index, value));
-                }
-            }
-        }
-
-        let mut matrix = StaticMatrix::from_triplets(n, n, &triplets)?;
-        let neg_rhs: Vec<Value> = rhs.iter().map(|r| -r).collect();
-        match matrix.solve(&neg_rhs) {
-            Ok(solution) => Ok(solution),
-            Err(SolverError::InaccurateSolution(_)) if n <= 64 => {
-                matrix.solve_dense_extended(&neg_rhs)
-            }
-            Err(error) => Err(error),
-        }
     }
 
     /// Extract and strictly residual-qualify the complete Floquet spectrum,
@@ -447,41 +327,6 @@ mod tests {
         assert!(!solver.check_convergence(&state));
         let state = ShootingState::new(vec![0.0], 1.0);
         assert!(!ShootingNewtonSolver::new(Value::INFINITY, 10).check_convergence(&state));
-    }
-
-    #[test]
-    fn shooting_newton_linear_solve_fails_closed_on_singular_system() {
-        let solver = ShootingNewtonSolver::default();
-        assert!(matches!(
-            solver.solve_linear_system(&[vec![0.0]], &[1.0]),
-            Err(SolverError::SingularMatrix)
-        ));
-    }
-
-    #[test]
-    fn shooting_newton_linear_solve_preserves_tiny_physical_scale() {
-        let solver = ShootingNewtonSolver::default();
-        let solution = solver
-            .solve_linear_system(&[vec![1.0e-18]], &[-1.0])
-            .expect("a finite tiny coefficient is nonsingular");
-        assert!((solution[0] / 1.0e18 - 1.0).abs() <= 4.0 * Value::EPSILON);
-    }
-
-    #[test]
-    fn shooting_newton_linear_solve_rejects_malformed_and_nonfinite_inputs() {
-        let solver = ShootingNewtonSolver::default();
-        assert!(matches!(
-            solver.solve_linear_system(&[vec![1.0], vec![2.0]], &[1.0]),
-            Err(SolverError::InvalidCircuit(_))
-        ));
-        assert!(matches!(
-            solver.solve_linear_system(&[vec![Value::NAN]], &[1.0]),
-            Err(SolverError::Overflow)
-        ));
-        assert!(matches!(
-            solver.solve_linear_system(&[vec![1.0]], &[Value::INFINITY]),
-            Err(SolverError::Overflow)
-        ));
     }
 
     #[test]

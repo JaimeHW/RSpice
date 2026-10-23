@@ -2573,8 +2573,7 @@ impl Engine {
         let detected_period = shooting_state.period;
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
             .with_abstol(config.abstol)
-            .with_damping(config.damping_factor)
-            .with_fd_step(PSS_FD_STEP);
+            .with_damping(config.damping_factor);
 
         // ==================================================================
         // Phase 4: Build Result
@@ -2705,8 +2704,7 @@ impl Engine {
     ) -> Result<PssGridSolution, SimulationError> {
         let mut solver = ShootingNewtonSolver::new(config.tolerance, config.max_iterations)
             .with_abstol(config.abstol)
-            .with_damping(config.damping_factor)
-            .with_fd_step(PSS_FD_STEP);
+            .with_damping(config.damping_factor);
 
         let mut detected_period = shooting_state.period;
         let mut iteration = 0;
