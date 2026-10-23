@@ -8,7 +8,14 @@ use rspice_core::engine::{Engine, HbAnalysisResult};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::TAU;
 
-const MODELS: &str = include_str!("../src/device/mosfet/bsim3v3/testdata/models018.lib");
+#[path = "common/family_src.rs"]
+mod family_src;
+
+/// The BSIM3v3 oracle cards (n018/p018, LEVEL=49, CAPMOD=3), read from the
+/// device model that owns them in whichever crate of the family holds it.
+fn models018() -> String {
+    family_src::read_family_src("device/mosfet/bsim3v3/testdata/models018.lib")
+}
 
 fn pac_config(f: f64) -> PacConfig {
     PacConfig::new()
@@ -49,7 +56,7 @@ fn close(actual: Complex64, expected: Complex64, tolerance: f64) {
 fn bsim3_periodic_qs_hb_and_pac_match_native_ac_with_series_resistors() {
     let f = 1e8;
     let amplitude = 1e-4;
-    let models = MODELS.replace("rsh=0", "rsh=20");
+    let models = models018().replace("rsh=0", "rsh=20");
     let deck = format!(
         "Native BSIM3 periodic AC limit\n\
         vdd supply 0 dc 1.8\nrd supply out 3k\n\
@@ -109,7 +116,7 @@ fn bsim3_periodic_qs_hb_and_pac_match_native_ac_with_series_resistors() {
 fn bsim3_periodic_nqs_solves_hidden_charge_and_terminal_displacement_currents() {
     let f = 1e9;
     let amplitude = 1e-4;
-    let models = MODELS.replace("capmod=3", "capmod=2 nqsmod=1 acnqsmod=0");
+    let models = models018().replace("capmod=3", "capmod=2 nqsmod=1 acnqsmod=0");
     let deck = format!(
         "Native BSIM3 NQS periodic state\n\
         vd d 0 dc 0.8\nvin g 0 dc 0.9 sin(0.9 {amplitude} {f})\n\
@@ -223,7 +230,7 @@ fn bsim3_periodic_ac_only_nqs_response_matches_native_ac() {
         vdd supply 0 dc 1.8\nrd supply out 3k\nvin in 0 dc 0.95 ac 1\n\
         m1 out in 0 0 n018 w=1u l=0.18u\n\
         {}\n.end\n",
-            MODELS.replace("capmod=3", &format!("capmod=3 acnqsmod=1 nqsmod={nqs}"))
+            models018().replace("capmod=3", &format!("capmod=3 acnqsmod=1 nqsmod={nqs}"))
         );
         let netlist = Netlist::parse(&deck.replace(" ac 1", "")).unwrap();
         let ac_netlist = Netlist::parse(&deck).unwrap();
@@ -368,7 +375,7 @@ fn bsim3_ac_only_nqs_driven_sidebands_match_quasiperiodic_response() {
     let offset = 1.03e10;
     let netlist = Netlist::parse(&format!(
         "Driven AC-only NQS\nVDD supply 0 1.8\nRD supply out 3k\nVIN in 0 SIN(.95 .08 {fundamental})\nM1 out in 0 0 n018 W=1u L=.18u\n{}\n.options hbint tahb=0\n.end\n",
-        MODELS.replace("capmod=3", "capmod=3 acnqsmod=1")
+        models018().replace("capmod=3", "capmod=3 acnqsmod=1")
     )).unwrap();
     let engine = Engine::default();
     let hb = engine
@@ -436,8 +443,10 @@ fn bsim3_periodic_two_tone_qpss_preserves_independent_frequency_response() {
         vin in mid dc 0.95 ac 1 sin(0.95 {amplitude} {})\n\
         vsecond mid 0 dc 0 sin(0 {amplitude} {})\n\
         m1 out in 0 0 n018 w=1u l=0.18u m=2\n\
-        {MODELS}\n.end\n",
-        frequencies[0], frequencies[1]
+        {models}\n.end\n",
+        frequencies[0],
+        frequencies[1],
+        models = models018(),
     ))
     .unwrap();
     let engine = Engine::default();
@@ -475,7 +484,7 @@ fn bsim3_periodic_noise_matches_stationary_noise_for_every_model_selector() {
         ..Default::default()
     });
     for selector in 1..=6 {
-        let models = MODELS
+        let models = models018()
             .replace(
                 "level=49",
                 &format!("level=49 noimod={selector} kf=2e-24 af=1.2 ef=0.9"),

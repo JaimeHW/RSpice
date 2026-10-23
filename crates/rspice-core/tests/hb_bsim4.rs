@@ -7,7 +7,14 @@ use rspice_core::engine::{Engine, HbAnalysisResult};
 use rspice_core::netlist::Netlist;
 use std::f64::consts::TAU;
 
-const MODELS: &str = include_str!("../src/device/mosfet/bsim4v8/testdata/models45.lib");
+#[path = "common/family_src.rs"]
+mod family_src;
+
+/// The BSIM4 oracle cards (n45/p90, LEVEL=54, CAPMOD=2), read from the
+/// device model that owns them in whichever crate of the family holds it.
+fn models45() -> String {
+    family_src::read_family_src("device/mosfet/bsim4v8/testdata/models45.lib")
+}
 
 fn pac_config(f: f64) -> PacConfig {
     PacConfig::new()
@@ -57,7 +64,7 @@ fn amplifier(options: &str, pmos: bool, waveform: &str) -> String {
         vin in 0 dc {bias} {waveform}\n\
         m1 out in 0 0 {model} w=1u l=90n nf=2 m=2 ad=0.2p as=0.3p pd=4.4u ps=5u nrd=1 nrs=1\n\
         {}\n.end\n",
-        MODELS.replace(
+        models45().replace(
             "level=54 version=4.8",
             &format!("level=54 version=4.8 {options}")
         )
@@ -155,7 +162,7 @@ fn bsim4_periodic_nqs_solves_physical_deficit_and_gate_current() {
     let deck = format!(
         "BSIM4 NQS\nvd d 0 dc 0.8\nvin g 0 dc 0.7 sin(0.7 {amplitude} {f})\n\
         m1 d g 0 0 n45 w=1u l=90n nf=2 m=2 nrd=0 nrs=0\n{}\n.end\n",
-        MODELS.replace("level=54 version=4.8", "level=54 version=4.8 trnqsmod=1")
+        models45().replace("level=54 version=4.8", "level=54 version=4.8 trnqsmod=1")
     );
     let netlist = Netlist::parse(&deck).unwrap();
     use rspice_core::device::mosfet::bsim4v8::{Bsim4v8, Bsim4v8Geometry, Bsim4v8Model};

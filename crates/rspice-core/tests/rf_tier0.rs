@@ -7,16 +7,15 @@ use rspice_core::analysis::pss::PssConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
+#[path = "common/family_src.rs"]
+mod family_src;
+
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
 }
 
 fn bsim4_models45() -> String {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/device/mosfet/bsim4v8/testdata/models45.lib"
-    );
-    std::fs::read_to_string(path).expect("read BSIM4 model card")
+    family_src::read_family_src("device/mosfet/bsim4v8/testdata/models45.lib")
 }
 
 fn bsim4_rf_deck() -> String {

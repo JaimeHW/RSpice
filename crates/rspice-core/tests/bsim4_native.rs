@@ -20,13 +20,13 @@ use rspice_core::Complex64;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
-/// The module's own oracle model cards (n45/p90, LEVEL=54, CAPMOD=2).
+#[path = "common/family_src.rs"]
+mod family_src;
+
+/// The module's own oracle model cards (n45/p90, LEVEL=54, CAPMOD=2), read in
+/// whichever crate of the family holds the model.
 fn models45() -> String {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/device/mosfet/bsim4v8/testdata/models45.lib"
-    );
-    std::fs::read_to_string(path).expect("read models45.lib")
+    family_src::read_family_src("device/mosfet/bsim4v8/testdata/models45.lib")
 }
 
 fn models45_mobmod(mob_mod: i32) -> String {
