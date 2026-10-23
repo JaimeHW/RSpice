@@ -4403,6 +4403,7 @@ fn sealed_runtimes_serve_a_wreal_resolution_that_changes_none_of_their_nets() {
             model: runtime.model,
             canonical_ir: runtime.canonical_ir,
             external_cells: None,
+            delay_select: Default::default(),
         })
     };
     let _installed = hold_project_veriloga_sources_for_session(
@@ -4439,53 +4440,81 @@ fn sealed_runtimes_serve_a_wreal_resolution_that_changes_none_of_their_nets() {
     assert!(!error.contains("not installed"), "{error}");
 }
 
-/// A sealed runtime was compiled keeping each min:typ:max expression's
-/// typical value (IEEE 1364-2005 section 5.3), and which expressions it
-/// chose between is not recorded, so a deck selecting another value refuses
-/// it by naming both selections rather than running the typical values.
+/// A sealed runtime names the min:typ:max selection it was compiled under
+/// (IEEE 1364-2005 section 5.3), which keys it beside its source: a deck
+/// keeping the same values runs it, and one keeping others refuses it by
+/// naming both selections, since which expressions the parser chose between
+/// is not recorded. The same source compiled under another selection is
+/// another key, and both may be installed at once.
 #[test]
-fn sealed_runtimes_refuse_a_min_typ_max_selection_they_were_not_compiled_under() {
+fn sealed_runtimes_run_only_under_the_min_typ_max_selection_they_were_compiled_under() {
     use rspice_core::{
         ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, ResourceLimits,
         hold_project_veriloga_sources_for_session,
     };
-    let runtime = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-        enable_ams: true,
-        ..Default::default()
-    })
-    .compile_runtime(
-        "module held(y); output y; wreal y; real r; assign y = r;\n\
-         initial begin r = 1.0; #(1:2:3) r = 2.0; end endmodule",
-        None,
-    )
-    .unwrap();
+    use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
     let key = format!(
         "__rspice_project__/sealed-delay-select-{}/held.vams",
         std::process::id()
     );
-    let _installed = hold_project_veriloga_sources_for_session(
-        vec![ProjectVerilogASourceRegistration::Runtime(
-            ProjectVerilogARuntimeRegistration {
-                source_key: PathBuf::from(&key),
-                aliases: vec!["HELD".into()],
-                model: runtime.model,
-                canonical_ir: runtime.canonical_ir,
-                external_cells: None,
-            },
-        )],
-        ResourceLimits::default(),
-    )
-    .unwrap();
+    let install = |delay_select| {
+        let runtime = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+            enable_ams: true,
+            delay_select,
+            ..Default::default()
+        })
+        .compile_runtime(
+            "module held(y); output y; wreal y; parameter real v = 1.0:2.0:3.0;\n\
+             assign y = v; endmodule",
+            None,
+        )
+        .unwrap();
+        hold_project_veriloga_sources_for_session(
+            vec![ProjectVerilogASourceRegistration::Runtime(
+                ProjectVerilogARuntimeRegistration {
+                    source_key: PathBuf::from(&key),
+                    aliases: vec!["HELD".into()],
+                    model: runtime.model,
+                    canonical_ir: runtime.canonical_ir,
+                    external_cells: None,
+                    delay_select,
+                },
+            )],
+            ResourceLimits::default(),
+        )
+        .unwrap()
+    };
     let deck = |options: &str| {
         format!("* sealed delay\nxa out HELD\nrload out 0 1k\n{options}.va \"{key}\" HELD\n.end\n")
     };
-    operating_point_at(&deck(""), "out").expect("the typical values run");
-    let error = operating_point_at(&deck(".options hdl_delay_select=max\n"), "out")
-        .expect_err("a sealed runtime cannot be compiled again under `max`");
-    for expected in ["sealed", "`hdl_delay_select=typ`", "`hdl_delay_select=max`"] {
-        assert!(error.contains(expected), "{expected}: {error}");
+    let held = |deck: &str, expected: f64| {
+        let volts = operating_point_at(deck, "out")
+            .unwrap_or_else(|error| panic!("{expected} V runs: {error}"));
+        assert!(
+            (volts - expected).abs() < 1e-9,
+            "V(out) = {volts}, expected {expected}"
+        );
+    };
+    let min_deck = deck(".options hdl_delay_select=min\n");
+    let _min = install(DigitalDelaySelect::Min);
+    held(&min_deck, 1.0);
+    for (options, selection) in [("", "typ"), (".options hdl_delay_select=max\n", "max")] {
+        let error = operating_point_at(&deck(options), "out")
+            .expect_err("a sealed runtime is never run under another selection");
+        for expected in [
+            "sealed".to_owned(),
+            "`hdl_delay_select=min`".to_owned(),
+            format!("`hdl_delay_select={selection}`"),
+        ] {
+            assert!(error.contains(&expected), "{expected}: {error}");
+        }
+        assert!(!error.contains("not installed"), "{error}");
     }
-    assert!(!error.contains("not installed"), "{error}");
+
+    // The typical artifact joins the minimum one under the same source.
+    let _typ = install(DigitalDelaySelect::Typ);
+    held(&deck(""), 2.0);
+    held(&min_deck, 1.0);
 }
 
 #[test]

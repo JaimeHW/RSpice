@@ -11,6 +11,7 @@ use super::*;
 mod dc_sweep;
 mod hb_current;
 mod result_round_trip;
+mod veriloga_delay_select;
 
 #[test]
 fn studio_measurement_reference_worker_validates_and_executes_captured_data() {

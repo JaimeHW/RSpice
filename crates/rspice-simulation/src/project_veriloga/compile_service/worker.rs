@@ -13,9 +13,12 @@ use super::{VerilogACompileOutcome, project_compile_outcome, transport_failure_o
 use crate::project_veriloga::worker::WasmJitWorkerArtifact;
 use rspice_design::project_sources::ProjectSourceBundle;
 use rspice_veriloga::ExternalCell;
+use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 
 /// 3: a request carries the cells the design is compiled against.
-const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 3;
+/// 4: a request carries the min:typ:max selection the design is compiled
+///    under when that is not `typ`.
+const VERILOGA_WORKER_PROTOCOL_VERSION: u32 = 4;
 const MAX_VERILOGA_WORKER_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +33,14 @@ pub(crate) struct VerilogAWorkerRequest {
     /// which the protocol check refuses.
     #[serde(default)]
     cells: Option<Vec<ExternalCell>>,
+    /// The value of each min:typ:max expression the netlist the project's
+    /// run builds keeps. Absent for the typical values.
+    #[serde(default, skip_serializing_if = "is_typical")]
+    delay_select: DigitalDelaySelect,
+}
+
+fn is_typical(delay_select: &DigitalDelaySelect) -> bool {
+    *delay_select == DigitalDelaySelect::Typ
 }
 
 impl VerilogAWorkerRequest {
@@ -38,6 +49,7 @@ impl VerilogAWorkerRequest {
         bundle: &ProjectSourceBundle,
         selected_module: Option<&str>,
         cells: Option<&[ExternalCell]>,
+        delay_select: DigitalDelaySelect,
     ) -> Result<Self, String> {
         let request = Self {
             protocol: VERILOGA_WORKER_PROTOCOL_VERSION,
@@ -45,6 +57,7 @@ impl VerilogAWorkerRequest {
             bundle: bundle.clone(),
             selected_module: selected_module.map(str::to_owned),
             cells: cells.map(<[_]>::to_vec),
+            delay_select,
         };
         request.validated_source()?;
         Ok(request)
@@ -61,7 +74,7 @@ impl VerilogAWorkerRequest {
             return Err("Verilog-A worker request id must be non-zero.".to_owned());
         }
         WorkerCompileRequest::try_new(&self.bundle, self.selected_module.as_deref())
-            .map(|request| request.against(self.cells.as_deref()))
+            .map(|request| request.against(self.cells.as_deref(), self.delay_select))
             .map_err(|error| error.to_string())
     }
 }
@@ -168,7 +181,10 @@ mod browser {
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::prelude::*;
 
-    use super::{ExternalCell, ProjectSourceBundle, VerilogACompileOutcome, VerilogAWorkerRequest};
+    use super::{
+        DigitalDelaySelect, ExternalCell, ProjectSourceBundle, VerilogACompileOutcome,
+        VerilogAWorkerRequest,
+    };
 
     struct ActiveCompileWorker {
         id: u32,
@@ -196,6 +212,7 @@ mod browser {
         bundle: &ProjectSourceBundle,
         selected_module: Option<&str>,
         cells: Option<&[ExternalCell]>,
+        delay_select: DigitalDelaySelect,
         sender: mpsc::Sender<VerilogACompileOutcome>,
         wake: Rc<dyn Fn()>,
     ) -> Result<(), String> {
@@ -204,7 +221,8 @@ mod browser {
         }
 
         let id = allocate_request_id();
-        let request = VerilogAWorkerRequest::try_new(id, bundle, selected_module, cells)?;
+        let request =
+            VerilogAWorkerRequest::try_new(id, bundle, selected_module, cells, delay_select)?;
         let request = serde_wasm_bindgen::to_value(&request)
             .map_err(|error| format!("Could not encode Verilog-A worker request: {error}"))?;
         let worker_url = worker_url()?;
@@ -427,6 +445,8 @@ mod tests {
     use super::*;
     use rspice_design::project_sources::{ProjectSourceLanguage, ProjectSourceOwner};
 
+    const TYP: DigitalDelaySelect = DigitalDelaySelect::Typ;
+
     fn selected_source() -> ProjectSourceBundle {
         ProjectSourceBundle::try_new(
             ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
@@ -474,7 +494,8 @@ mod tests {
     #[test]
     fn request_and_response_round_trip_exact_compiled_artifacts() {
         let request =
-            VerilogAWorkerRequest::try_new(7, &selected_source(), Some("worker"), None).unwrap();
+            VerilogAWorkerRequest::try_new(7, &selected_source(), Some("worker"), None, TYP)
+                .unwrap();
         let request: VerilogAWorkerRequest =
             serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
         let response =
@@ -492,7 +513,8 @@ mod tests {
     #[test]
     fn stale_worker_response_ids_are_rejected() {
         let request =
-            VerilogAWorkerRequest::try_new(9, &selected_source(), Some("worker"), None).unwrap();
+            VerilogAWorkerRequest::try_new(9, &selected_source(), Some("worker"), None, TYP)
+                .unwrap();
         let response =
             VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         assert!(response.into_outcome(10).is_err());
@@ -501,7 +523,8 @@ mod tests {
     #[test]
     fn malformed_transferred_target_matrix_is_rejected_without_panicking() {
         let request =
-            VerilogAWorkerRequest::try_new(11, &selected_source(), Some("worker"), None).unwrap();
+            VerilogAWorkerRequest::try_new(11, &selected_source(), Some("worker"), None, TYP)
+                .unwrap();
         let response =
             VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         let mut encoded = serde_json::to_value(response).unwrap();
@@ -519,6 +542,7 @@ mod tests {
             &selected_source_with_profile(),
             Some("worker"),
             None,
+            TYP,
         )
         .unwrap();
         let mut encoded = serde_json::to_value(request).unwrap();
@@ -534,7 +558,8 @@ mod tests {
     #[test]
     fn malformed_transferred_specialist_evidence_is_rejected() {
         let request =
-            VerilogAWorkerRequest::try_new(13, &selected_source(), Some("worker"), None).unwrap();
+            VerilogAWorkerRequest::try_new(13, &selected_source(), Some("worker"), None, TYP)
+                .unwrap();
         let response =
             VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
         let mut encoded = serde_json::to_value(response).unwrap();
@@ -589,23 +614,23 @@ mod tests {
         let over_half = design_over("half");
 
         let VerilogACompileOutcome::Success(report) =
-            super::super::compile_source(&over_half, Some("top"), Some(&cells))
+            super::super::compile_source(&over_half, Some("top"), Some(&cells), TYP)
         else {
             panic!("the desktop compile builds `half` from the project's cells");
         };
         assert_eq!(report.canonical_ir.hir.external_leaves.len(), 1);
         assert_undefined(
-            super::super::compile_source(&over_half, Some("top"), None),
+            super::super::compile_source(&over_half, Some("top"), None, TYP),
             "half",
         );
         assert_undefined(
-            super::super::compile_source(&design_over("missing"), Some("top"), Some(&cells)),
+            super::super::compile_source(&design_over("missing"), Some("top"), Some(&cells), TYP),
             "missing",
         );
 
         let through_worker = |id, bundle: &ProjectSourceBundle| {
             let request =
-                VerilogAWorkerRequest::try_new(id, bundle, Some("top"), Some(&cells)).unwrap();
+                VerilogAWorkerRequest::try_new(id, bundle, Some("top"), Some(&cells), TYP).unwrap();
             let request: VerilogAWorkerRequest =
                 serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
             let response =
@@ -622,27 +647,85 @@ mod tests {
         assert_undefined(through_worker(22, &design_over("missing")), "missing");
     }
 
-    /// A request of the protocol before the cell table is refused by its
-    /// protocol, as every earlier protocol's request is.
+    /// A request of the protocol before the cell table, or of the one before
+    /// the min:typ:max selection, is refused by its protocol, as every
+    /// earlier protocol's request is.
     #[test]
-    fn a_request_without_the_cell_table_protocol_is_refused() {
-        let request = VerilogAWorkerRequest::try_new(
-            23,
-            &design_over("half"),
-            Some("top"),
-            Some(&deck_cells()),
+    fn a_request_of_an_earlier_protocol_is_refused() {
+        for (protocol, dropped) in [(2, "cells"), (3, "delay_select")] {
+            let request = VerilogAWorkerRequest::try_new(
+                23,
+                &design_over("half"),
+                Some("top"),
+                Some(&deck_cells()),
+                DigitalDelaySelect::Max,
+            )
+            .unwrap();
+            let mut encoded = serde_json::to_value(request).unwrap();
+            encoded["protocol"] = serde_json::json!(protocol);
+            encoded.as_object_mut().unwrap().remove(dropped);
+            let request: VerilogAWorkerRequest = serde_json::from_value(encoded).unwrap();
+
+            let error =
+                VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode)
+                    .unwrap_err();
+            assert_eq!(
+                error,
+                format!("Unsupported Verilog-A worker protocol {protocol}; expected 4.")
+            );
+        }
+    }
+
+    /// The browser's worker compiles a design under the min:typ:max
+    /// selection of the netlist its project's run builds, which the request
+    /// carries: the report it returns is the one the desktop compile builds
+    /// under that selection, and a typical request carries no selection.
+    #[test]
+    fn the_worker_compiles_under_the_transferred_min_typ_max_selection() {
+        let held = ProjectSourceBundle::try_new(
+            ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
+            ProjectSourceLanguage::VerilogA,
+            "held.va",
+            "module held(p, n); inout p, n; electrical p, n;\n\
+             parameter real g = 1.0e-3:2.0e-3:3.0e-3;\n\
+             analog I(p, n) <+ g * V(p, n);\nendmodule\n",
+            [],
+            [],
         )
         .unwrap();
-        let mut encoded = serde_json::to_value(request).unwrap();
-        encoded["protocol"] = serde_json::json!(2);
-        encoded.as_object_mut().unwrap().remove("cells");
-        let request: VerilogAWorkerRequest = serde_json::from_value(encoded).unwrap();
+        let typical = serde_json::to_value(
+            VerilogAWorkerRequest::try_new(31, &held, Some("held"), None, TYP).unwrap(),
+        )
+        .unwrap();
+        assert!(typical.get("delay_select").is_none(), "{typical}");
 
-        let error = VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode)
-            .unwrap_err();
-        assert_eq!(
-            error,
-            "Unsupported Verilog-A worker protocol 2; expected 3."
+        let request =
+            VerilogAWorkerRequest::try_new(32, &held, Some("held"), None, DigitalDelaySelect::Min)
+                .unwrap();
+        let request: VerilogAWorkerRequest =
+            serde_json::from_slice(&serde_json::to_vec(&request).unwrap()).unwrap();
+        let response =
+            VerilogAWorkerResponse::from_request(request, WorkerCompileTarget::Bytecode).unwrap();
+        let response: VerilogAWorkerResponse =
+            serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
+        let VerilogACompileOutcome::Success(from_worker) = response.into_outcome(32).unwrap()
+        else {
+            panic!("the worker compiles `held` under `min`");
+        };
+        let compiled = |delay_select| {
+            let VerilogACompileOutcome::Success(report) =
+                super::super::compile_source(&held, Some("held"), None, delay_select)
+            else {
+                panic!("the desktop compiles `held`");
+            };
+            serde_json::to_string(&report.model).unwrap()
+        };
+        let from_worker = serde_json::to_string(&from_worker.model).unwrap();
+        assert_eq!(from_worker, compiled(DigitalDelaySelect::Min));
+        assert_ne!(
+            from_worker,
+            compiled(TYP),
+            "the minimum, not the typical value"
         );
     }
 

@@ -4,6 +4,7 @@
 //! owns compilation, bounded worker transport, and structured diagnostic outcomes.
 
 use rspice_design::project_sources::ProjectSourceBundle;
+use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_veriloga::{ExternalCell, RuntimeCompileReport};
 use rspice_vocabulary::diagnostics::{DiagnosticSeverity, SourceDiagnostic};
 use std::sync::{Arc, mpsc};
@@ -20,16 +21,18 @@ pub enum VerilogACompileOutcome {
 }
 
 /// Compile `selected_module` of `bundle` in-process, offering the design
-/// `cells` as leaves: those of the netlist the project's run builds. A name
-/// neither the bundle nor `cells` defines is still an undefined module.
+/// `cells` as leaves and keeping the `delay_select` value of each
+/// min:typ:max expression: those of the netlist the project's run builds. A
+/// name neither the bundle nor `cells` defines is still an undefined module.
 pub fn compile_source(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
     cells: Option<&[ExternalCell]>,
+    delay_select: DigitalDelaySelect,
 ) -> VerilogACompileOutcome {
     project_compile_outcome(
         bundle,
-        super::compile_project_bundle_source_against(bundle, selected_module, cells),
+        super::compile_project_bundle_source_against(bundle, selected_module, cells, delay_select),
     )
 }
 
@@ -64,18 +67,25 @@ pub fn transport_failure_outcome(message: String) -> VerilogACompileOutcome {
 }
 
 /// Compile as [`compile_source`] off the editor's thread: on a native thread,
-/// or in the browser's compile worker, which receives `cells` with the bundle.
+/// or in the browser's compile worker, which receives `cells` and
+/// `delay_select` with the bundle.
 pub fn start_compile(
     bundle: ProjectSourceBundle,
     selected_module: Option<String>,
     cells: Option<Arc<[ExternalCell]>>,
+    delay_select: DigitalDelaySelect,
     sender: mpsc::Sender<VerilogACompileOutcome>,
     wake: impl Fn() + Send + Sync + 'static,
 ) -> Result<(), String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         std::thread::spawn(move || {
-            let outcome = compile_source(&bundle, selected_module.as_deref(), cells.as_deref());
+            let outcome = compile_source(
+                &bundle,
+                selected_module.as_deref(),
+                cells.as_deref(),
+                delay_select,
+            );
             let _ = sender.send(outcome);
             wake();
         });
@@ -86,6 +96,7 @@ pub fn start_compile(
         &bundle,
         selected_module.as_deref(),
         cells.as_deref(),
+        delay_select,
         sender,
         std::rc::Rc::new(wake),
     )

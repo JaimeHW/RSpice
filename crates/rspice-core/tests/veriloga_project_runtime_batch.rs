@@ -44,6 +44,7 @@ fn registration(
         model: compiled.model,
         canonical_ir: compiled.canonical_ir,
         external_cells: None,
+        delay_select: Default::default(),
     }
 }
 

@@ -982,6 +982,7 @@ fn sealed_hierarchy_rebinds_selected_libraries_without_filesystem_sources() {
                 model: runtime.model,
                 canonical_ir: runtime.canonical_ir,
                 external_cells: None,
+                delay_select: Default::default(),
             }),
             ProjectVerilogASourceRegistration::Connections(
                 ProjectVerilogAConnectionLibraryRegistration {

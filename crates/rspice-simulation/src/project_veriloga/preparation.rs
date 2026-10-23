@@ -8,6 +8,7 @@ use rspice_design::project_sources::{
 };
 use rspice_design::projection::ConfigurationExecutionProjection;
 use rspice_veriloga::ExternalCell;
+use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_vocabulary::product::ProjectId;
 use std::collections::HashMap;
 
@@ -22,13 +23,32 @@ pub fn deck_external_cells(source: &str) -> Vec<ExternalCell> {
     )
 }
 
+/// The value of each min:typ:max expression the deck `source` keeps in its
+/// HDL designs: its `.options hdl_delay_select`, resolved into the run's
+/// configuration as the engine resolves it for the deck it builds
+/// ([`rspice_core::engine::hdl_delay_select`]). A deck that does not parse
+/// keeps the typical values; its run is refused where it is built.
+pub fn deck_delay_select(source: &str) -> DigitalDelaySelect {
+    rspice_core::Netlist::parse(source).map_or_else(
+        |_| DigitalDelaySelect::Typ,
+        |netlist| {
+            rspice_core::engine::hdl_delay_select(&rspice_core::resolve_simulation_config(
+                &rspice_core::SimulationConfig::default(),
+                Some(&netlist.options),
+                &rspice_core::SimulationConfigOverrides::default(),
+            ))
+        },
+    )
+}
+
 /// The runtimes of the configured Verilog-A cell views, each compiled
-/// against `cells`, those of the deck it runs in.
+/// against `cells` and under `delay_select`, those of the deck it runs in.
 pub fn prepared_configuration_veriloga_runtimes(
     project_id: ProjectId,
     sources: &ProjectSourceRegistry,
     projection: &ConfigurationExecutionProjection,
     cells: &[ExternalCell],
+    delay_select: DigitalDelaySelect,
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let mut prepared = HashMap::<String, crate::veriloga::PreparedVerilogARuntime>::new();
     for execution in projection.plan().bindings() {
@@ -61,6 +81,7 @@ pub fn prepared_configuration_veriloga_runtimes(
             bundle,
             binding.selected_module(),
             Some(cells),
+            delay_select,
         )
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         if runtime.source_key() != binding.source_key()
@@ -134,14 +155,16 @@ pub fn prepared_configuration_veriloga_runtimes(
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
-/// The runtime of one project Verilog-A bundle a deck offering `cells` names,
-/// from the retained compile receipt when it is this bundle's current one and
-/// builds for those cells, else rebuilt from the validated bytes against them.
+/// The runtime of one project Verilog-A bundle a deck offering `cells` and
+/// selecting `delay_select` names, from the retained compile receipt when it
+/// is this bundle's current one and builds for those cells under that
+/// selection, else rebuilt from the validated bytes against them.
 fn prepared_project_veriloga_runtime(
     project_id: ProjectId,
     bundle: &ProjectSourceBundle,
     retained: Option<&ProjectCompileReceipt>,
     cells: &[ExternalCell],
+    delay_select: DigitalDelaySelect,
 ) -> Result<crate::veriloga::PreparedVerilogARuntime, PreparationError> {
     let document = bundle.root();
     if let Some(receipt) = retained
@@ -149,7 +172,7 @@ fn prepared_project_veriloga_runtime(
         && receipt.token().bundle_id == bundle.id()
         && receipt.token().revision == bundle.revision().get()
         && receipt.token().closure_digest == bundle.closure_digest()
-        && receipt.builds_for(cells)
+        && receipt.builds_for(cells, delay_select)
     {
         return receipt
             .prepare_runtime(project_id, bundle)
@@ -172,6 +195,7 @@ fn prepared_project_veriloga_runtime(
         bundle,
         None,
         Some(cells),
+        delay_select,
     )
     .map_err(|diagnostics| {
         let detail = diagnostics
@@ -300,8 +324,8 @@ pub fn project_veriloga_runtimes_referenced_by(
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let lines = executable_logical_lines(source);
     let mut runtimes = Vec::new();
-    // The deck's cells, read once a bundle it names needs them.
-    let mut cells = None;
+    // The deck's cells and selection, read once a bundle it names needs them.
+    let mut deck = None;
     for bundle in sources
         .iter_bundles()
         .filter(|bundle| bundle.language() == ProjectSourceLanguage::VerilogA)
@@ -320,8 +344,10 @@ pub fn project_veriloga_runtimes_referenced_by(
         if !references_bundle {
             continue;
         }
-        let cells = cells.get_or_insert_with(|| deck_external_cells(source));
-        let runtime = prepared_project_veriloga_runtime(project_id, bundle, retained, cells)?;
+        let (cells, delay_select) =
+            deck.get_or_insert_with(|| (deck_external_cells(source), deck_delay_select(source)));
+        let runtime =
+            prepared_project_veriloga_runtime(project_id, bundle, retained, cells, *delay_select)?;
         let exact_reference = lines.iter().any(|(_, line)| {
             project_veriloga_directive_matches_exact_identity(
                 line,

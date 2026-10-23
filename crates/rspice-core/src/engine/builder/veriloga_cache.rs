@@ -2155,9 +2155,11 @@ fn lookup_veriloga_key_with_limits_and_abort(
 /// plain `wreal` net would run with a resolution the deck did not ask for,
 /// so it is refused, naming the net and both resolutions.
 ///
-/// A deck's min:typ:max selection other than `typ` is refused the same way
-/// for any such runtime: the parser applied the typical values, and which
-/// expressions it chose between is not recorded.
+/// A registration names the min:typ:max selection it was compiled under,
+/// which keys it as the deck's selection keys the deck's own compile. One
+/// compiled under another selection than the deck's kept other values of the
+/// expressions the parser chose between, and which expressions those were is
+/// not recorded, so it is refused, naming both selections, rather than run.
 #[cfg(feature = "veriloga")]
 fn registered_at_default_resolution(
     canonical: &VerilogASourceKey,
@@ -2169,42 +2171,54 @@ fn registered_at_default_resolution(
     };
     let path = canonical.source_path.as_path();
     let sealed = is_sealed_veriloga_virtual_path(path);
-    // A runtime registered without the deck's cell table compiled no leaf: it
-    // is the one the table would compile, or it never compiled at all.
-    if (canonical.wreal_resolution == DigitalRealResolution::Single
-        && canonical.external_cells.is_none()
-        && canonical.delay_select == DigitalDelaySelect::Typ)
-        || !(sealed || cfg!(target_arch = "wasm32"))
-    {
+    if !(sealed || cfg!(target_arch = "wasm32")) {
         return Ok(None);
     }
     // One compiled against the deck's own cells, then one with no leaf,
-    // which the deck's cells build as any other deck's do.
-    let registered = canonical.clone().under(&DeckHdl::default());
-    let mut against_deck_cells = registered.clone();
-    against_deck_cells.external_cells = canonical.external_cells;
+    // which the deck's cells build as any other deck's do: under the deck's
+    // selection first, then under each other one, to be refused. A runtime
+    // registered without the deck's cell table compiled no leaf: it is the
+    // one the table would compile, or it never compiled at all.
+    let selections = std::iter::once(canonical.delay_select).chain(
+        [
+            DigitalDelaySelect::Min,
+            DigitalDelaySelect::Typ,
+            DigitalDelaySelect::Max,
+        ]
+        .into_iter()
+        .filter(|selection| *selection != canonical.delay_select),
+    );
     let entry = veriloga_source_cache().read().ok().and_then(|cache| {
-        [&against_deck_cells, &registered]
-            .into_iter()
-            .filter(|key| *key != canonical)
-            .find_map(|key| cache.get_cloned(key))
+        selections
+            .flat_map(|delay_select| {
+                let registered = canonical.clone().under(&DeckHdl {
+                    delay_select,
+                    ..DeckHdl::default()
+                });
+                let mut against_deck_cells = registered.clone();
+                against_deck_cells.external_cells = canonical.external_cells;
+                [against_deck_cells, registered]
+            })
+            .filter(|key| key != canonical)
+            .find_map(|key| Some((key.delay_select, cache.get_cloned(&key)?)))
     });
-    let Some(CachedVerilogASource::Runtime(entry)) = entry else {
+    let Some((compiled_under, CachedVerilogASource::Runtime(entry))) = entry else {
         return Ok(None);
     };
     if !dependencies_are_fresh_with_limits_and_abort(&entry.dependencies, limits, abort)? {
         return Ok(None);
     }
-    if canonical.delay_select != DigitalDelaySelect::Typ {
+    if compiled_under != canonical.delay_select {
         let option = canonical.delay_select.keyword();
         return Err(cache_refusal(
             path,
             crate::ElaborationErrorKind::MissingSource,
             format!(
-                "this {} Verilog-A runtime was compiled under `hdl_delay_select=typ`, and the \
+                "this {} Verilog-A runtime was compiled under `hdl_delay_select={}`, and the \
                  deck's `hdl_delay_select={option}` keeps other min:typ:max values; register \
                  it compiled under `{option}`",
                 if sealed { "sealed" } else { "registered" },
+                compiled_under.keyword(),
             ),
         ));
     }
@@ -2849,6 +2863,12 @@ pub struct ProjectVerilogARuntimeRegistration {
     /// ([`crate::engine::hdl_external_cells`]) builds it. `None` for an
     /// artifact with no leaf, which every deck builds alike.
     pub external_cells: Option<Vec<rspice_veriloga::ExternalCell>>,
+    /// The value of each min:typ:max expression the artifact was compiled
+    /// keeping (`rspice_veriloga::CompilerOptions::delay_select`). It is part
+    /// of the artifact's key: only a deck whose `.options hdl_delay_select`
+    /// keeps the same values builds it, and a deck keeping others refuses it
+    /// by naming both.
+    pub delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
 }
 
 /// Standalone connection declarations under an exact sealed source key.
@@ -2885,16 +2905,19 @@ struct PreparedProjectVerilogARegistration {
     artifact_fingerprint: [u8; 32],
     /// The identity of the cell table the artifact was compiled against.
     cells: Option<[u8; 32]>,
+    /// The min:typ:max selection the artifact was compiled under.
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
     entry: CachedVerilogASource,
 }
 
 #[cfg(feature = "veriloga")]
 impl PreparedProjectVerilogARegistration {
     /// The cache key the source is installed under: its sealed path, with
-    /// the cells it was compiled against.
+    /// the cells and the min:typ:max selection it was compiled under.
     fn cache_key(&self) -> VerilogASourceKey {
         let mut key = VerilogASourceKey::new(&self.key, None);
         key.external_cells = self.cells;
+        key.delay_select = self.delay_select;
         key
     }
 }
@@ -3017,6 +3040,7 @@ fn prepare_project_veriloga_registration(
         aliases,
         artifact_fingerprint,
         cells,
+        delay_select: registration.delay_select,
         entry: CachedVerilogASource::Runtime(CachedVerilogAModel {
             dependencies: Vec::new(),
             model: std::sync::Arc::new(registration.model),
@@ -3114,6 +3138,7 @@ fn install_project_veriloga_sources(
                     aliases,
                     artifact_fingerprint: *library.artifact.identity(),
                     cells: None,
+                    delay_select: Default::default(),
                     entry: CachedVerilogASource::Connections(std::sync::Arc::new(library.artifact)),
                 }
             }
@@ -3121,6 +3146,7 @@ fn install_project_veriloga_sources(
         if let Some(existing) = prepared_by_key.get_mut(&prepared.key) {
             if existing.artifact_fingerprint != prepared.artifact_fingerprint
                 || existing.cells != prepared.cells
+                || existing.delay_select != prepared.delay_select
             {
                 return Err(format!(
                     "sealed Verilog-A runtime key '{}' is claimed by differing artifacts",
@@ -3184,7 +3210,8 @@ fn install_project_veriloga_sources(
 
     // Compare the whole candidate set against the live registry while holding
     // the one cache lock. Nothing can change between validation and commit.
-    // The same source compiled against another cell table is another key.
+    // The same source compiled against another cell table, or under another
+    // min:typ:max selection, is another key.
     for (cached_key, cached_entry) in cache.iter() {
         if !is_sealed_veriloga_virtual_path(&cached_key.source_path) {
             continue;
@@ -3195,6 +3222,7 @@ fn install_project_veriloga_sources(
         for runtime in &prepared {
             if cached_folded_key == runtime.folded_key
                 && cached_key.external_cells == runtime.cells
+                && cached_key.delay_select == runtime.delay_select
                 && cached_fingerprint != runtime.artifact_fingerprint
             {
                 return Err(format!(
@@ -3473,6 +3501,7 @@ endmodule
             model: report.model,
             canonical_ir: report.canonical_ir,
             external_cells: None,
+            delay_select: Default::default(),
         }
     }
 
@@ -3511,6 +3540,7 @@ endmodule
             model,
             canonical_ir,
             external_cells: None,
+            delay_select: Default::default(),
         }])
     }
 

@@ -63,6 +63,7 @@ endmodule
                 model: runtime.model,
                 canonical_ir: runtime.canonical_ir,
                 external_cells: None,
+                delay_select: Default::default(),
             },
         )],
         ResourceLimits::default(),
@@ -123,6 +124,7 @@ fn module_timescales_drive_exact_mixed_breakpoints_from_file_and_sealed_sources(
                 )
                 .unwrap(),
                 external_cells: None,
+                delay_select: Default::default(),
             },
         )],
         ResourceLimits::default(),
@@ -202,6 +204,7 @@ endmodule
                 model: runtime.model,
                 canonical_ir: runtime.canonical_ir,
                 external_cells: None,
+                delay_select: Default::default(),
             },
         )],
         ResourceLimits::default(),

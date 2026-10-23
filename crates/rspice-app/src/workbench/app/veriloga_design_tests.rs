@@ -389,6 +389,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
         token: receipt.compilation.token(),
         receiver: Arc::new(Mutex::new(receiver)),
         cells: None,
+        delay_select: Default::default(),
     });
     frame(&ctx, &mut app, DESKTOP);
 

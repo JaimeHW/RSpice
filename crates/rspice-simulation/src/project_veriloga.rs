@@ -1,6 +1,7 @@
 //! Project source compilation with typed failures for host diagnostic adapters.
 
 use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceRole};
+use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_veriloga::{ExternalCell, RuntimeCompileReport, VerilogACompiler};
 use sha2::{Digest as _, Sha256};
 
@@ -28,21 +29,25 @@ pub fn compile_project_bundle_source(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
 ) -> Result<Box<RuntimeCompileReport>, ProjectVerilogACompileError> {
-    compile_project_bundle_source_against(bundle, selected_module, None)
+    compile_project_bundle_source_against(bundle, selected_module, None, DigitalDelaySelect::Typ)
 }
 
 /// [`compile_project_bundle_source`] offering the design `cells` as leaves
-/// (`rspice_veriloga::CompilerOptions::external_cells`): the cells of the
-/// deck that runs it.
+/// (`rspice_veriloga::CompilerOptions::external_cells`) and keeping the
+/// `delay_select` value of each min:typ:max expression
+/// (`rspice_veriloga::CompilerOptions::delay_select`): the cells and the
+/// selection of the deck that runs it.
 pub fn compile_project_bundle_source_against(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
     cells: Option<&[ExternalCell]>,
+    delay_select: DigitalDelaySelect,
 ) -> Result<Box<RuntimeCompileReport>, ProjectVerilogACompileError> {
     let resolved = build_profile::resolve_veriloga_build_profile(bundle)
         .map_err(ProjectVerilogACompileError::BuildProfile)?;
     let compiler = VerilogACompiler::new(rspice_veriloga::CompilerOptions {
         external_cells: cells.map(<[_]>::to_vec),
+        delay_select,
         ..resolved.profile.compiler_options()
     });
     let qualifications = resolved.profile.qualification_options();
@@ -90,11 +95,13 @@ fn successful_compile_outcome(
     Ok(Box::new(report))
 }
 
-/// Compile `module_name` of `bundle`, offering the design `cells` as leaves.
+/// Compile `module_name` of `bundle`, offering the design `cells` as leaves
+/// and keeping the `delay_select` value of each min:typ:max expression.
 pub fn compile_project_virtual_runtime(
     bundle: &rspice_design::project_sources::ProjectSourceBundle,
     module_name: &str,
     cells: Option<&[ExternalCell]>,
+    delay_select: DigitalDelaySelect,
 ) -> Result<rspice_veriloga::VirtualRuntimeCompilation, PreparedRuntimeError> {
     let resolved = build_profile::resolve_veriloga_build_profile(bundle)
         .map_err(PreparedRuntimeError::SourceIdentity)?;
@@ -107,6 +114,7 @@ pub fn compile_project_virtual_runtime(
             .map_err(PreparedRuntimeError::SourceBundle)?;
     let compilation = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
         external_cells: cells.map(<[_]>::to_vec),
+        delay_select,
         ..resolved.profile.compiler_options()
     })
     .compile_virtual_runtime_diagnosed_with_qualifications(
@@ -126,12 +134,14 @@ pub fn compile_project_virtual_runtime(
     Ok(compilation)
 }
 
-/// Compile and seal `module_name` of `bundle` for a deck offering `cells`.
+/// Compile and seal `module_name` of `bundle` for a deck offering `cells`
+/// and selecting `delay_select`.
 pub fn compile_project_source_bundle_runtime(
     project_id: rspice_vocabulary::product::ProjectId,
     bundle: &rspice_design::project_sources::ProjectSourceBundle,
     module_name: &str,
     cells: Option<&[ExternalCell]>,
+    delay_select: DigitalDelaySelect,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
     if bundle.language() != rspice_design::project_sources::ProjectSourceLanguage::VerilogA {
         return Err(PreparedRuntimeError::SourceIdentity(format!(
@@ -149,13 +159,14 @@ pub fn compile_project_source_bundle_runtime(
     let netlist_alias =
         rspice_design::project_sources::project_veriloga_bundle_alias(bundle, module_name)
             .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
-    let compilation = compile_project_virtual_runtime(bundle, module_name, cells)?;
+    let compilation = compile_project_virtual_runtime(bundle, module_name, cells, delay_select)?;
     PreparedVerilogARuntime::try_from_virtual_compilation_against(
         source_key,
         bundle.closure_digest(),
         netlist_alias,
         &compilation,
         cells,
+        delay_select,
     )
 }
 
@@ -209,6 +220,11 @@ impl VerilogASourceOperationToken {
 }
 
 /// Bind a compile report only after checking its current project source token.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the source, its token and the report are checked against each other, and the \
+              cells and selection the report was compiled under are sealed with it"
+)]
 pub fn prepare_project_runtime(
     project_id: rspice_vocabulary::product::ProjectId,
     bundle: &rspice_design::project_sources::ProjectSourceBundle,
@@ -216,8 +232,9 @@ pub fn prepare_project_runtime(
     module_name: &str,
     report: &rspice_veriloga::RuntimeCompileReport,
     netlist_alias: impl Into<String>,
-    // The cells `report` was compiled against.
+    // The cells `report` was compiled against, and the selection under.
     cells: Option<&[ExternalCell]>,
+    delay_select: DigitalDelaySelect,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
     if token.project_id != project_id
         || token.bundle_id != bundle.id()
@@ -245,6 +262,7 @@ pub fn prepare_project_runtime(
         netlist_alias.into(),
         report,
         cells,
+        delay_select,
     )
 }
 

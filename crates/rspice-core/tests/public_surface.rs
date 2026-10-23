@@ -331,7 +331,13 @@ use rspice_core::analysis::harmonic_balance::{
 // after each analysis (the transient one also from the post-results pass).
 // They join the existing `analysis` re-export. The census was 5,696.
 // Deleting public items nothing used brings it to 5,446, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5446;
+// `engine::hdl_delay_select` adds one: the min:typ:max selection a run's
+// resolved configuration gives its HDL, in the compiler's spelling, which
+// rspice-simulation compiles a project's sealed Verilog-A runtime under, and
+// registers it under, so a project design runs at the deck's selection as
+// the builder compiles a deck's own sources. The census is 5,447, with no
+// slack.
+const MAX_PUBLIC_ITEMS: usize = 5447;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

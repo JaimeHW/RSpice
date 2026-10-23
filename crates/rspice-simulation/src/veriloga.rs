@@ -1,6 +1,7 @@
 //! Sealed Verilog-A/AMS artifacts, compilation and engine registration.
 
 use crate::compilation::unified_runtime_compiler_options;
+use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use sha2::{Digest as _, Sha256};
 
 mod connections;
@@ -85,6 +86,17 @@ pub struct PreparedVerilogARuntime {
     /// offers the same cells.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     external_cells: Option<Vec<rspice_veriloga::ExternalCell>>,
+    /// The value of each min:typ:max expression the artifact was compiled
+    /// keeping, the deck's `.options hdl_delay_select`: part of its identity
+    /// beside its source, and of the key the engine installs it under, so it
+    /// builds only for a deck keeping the same values. A typical artifact
+    /// carries none and keeps the bytes and the digest it always had.
+    #[serde(default, skip_serializing_if = "is_typical")]
+    delay_select: DigitalDelaySelect,
+}
+
+fn is_typical(delay_select: &DigitalDelaySelect) -> bool {
+    *delay_select == DigitalDelaySelect::Typ
 }
 
 impl PreparedVerilogARuntime {
@@ -119,6 +131,7 @@ impl PreparedVerilogARuntime {
             netlist_alias.into(),
             report,
             None,
+            DigitalDelaySelect::Typ,
         )
     }
 
@@ -134,17 +147,21 @@ impl PreparedVerilogARuntime {
             netlist_alias,
             compilation,
             None,
+            DigitalDelaySelect::Typ,
         )
     }
 
     /// [`Self::try_from_virtual_compilation`] for a compile given `cells`
-    /// (`rspice_veriloga::CompilerOptions::external_cells`).
+    /// (`rspice_veriloga::CompilerOptions::external_cells`) and keeping the
+    /// `delay_select` value of each min:typ:max expression
+    /// (`rspice_veriloga::CompilerOptions::delay_select`).
     pub fn try_from_virtual_compilation_against(
         source_key: String,
         source_digest: rspice_vocabulary::product::ContentDigest,
         netlist_alias: String,
         compilation: &rspice_veriloga::VirtualRuntimeCompilation,
         cells: Option<&[rspice_veriloga::ExternalCell]>,
+        delay_select: DigitalDelaySelect,
     ) -> Result<Self, PreparedRuntimeError> {
         compilation.validate_integrity().map_err(|error| {
             PreparedRuntimeError::Integrity(format!(
@@ -158,13 +175,16 @@ impl PreparedVerilogARuntime {
             netlist_alias,
             &compilation.runtime,
             cells,
+            delay_select,
         )
     }
 
-    /// Seal a report compiled given `cells`. The table is the artifact's
-    /// only when a leaf of its design was built from it: a design with no
-    /// leaf compiles the same against any table, and is sealed as one
-    /// compiled against none.
+    /// Seal a report compiled given `cells` and under `delay_select`. The
+    /// table is the artifact's only when a leaf of its design was built from
+    /// it: a design with no leaf compiles the same against any table, and is
+    /// sealed as one compiled against none. The selection is always the
+    /// artifact's, since whether the design had a min:typ:max expression to
+    /// choose from is not recorded.
     pub(crate) fn seal(
         source_key: String,
         source_digest: rspice_vocabulary::product::ContentDigest,
@@ -172,6 +192,7 @@ impl PreparedVerilogARuntime {
         netlist_alias: String,
         report: &rspice_veriloga::RuntimeCompileReport,
         cells: Option<&[rspice_veriloga::ExternalCell]>,
+        delay_select: DigitalDelaySelect,
     ) -> Result<Self, PreparedRuntimeError> {
         let model_json = seal_compiled_model(&report.model)?;
         let canonical_ir_json = seal_canonical_ir(&report.canonical_ir)?;
@@ -186,6 +207,7 @@ impl PreparedVerilogARuntime {
             &model_json,
             &canonical_ir_json,
             external_cells.as_deref(),
+            delay_select,
         );
         let runtime = Self {
             source_key,
@@ -196,6 +218,7 @@ impl PreparedVerilogARuntime {
             model_json,
             canonical_ir_json,
             external_cells,
+            delay_select,
         };
         runtime
             .validate()
@@ -237,6 +260,7 @@ impl PreparedVerilogARuntime {
             model,
             canonical_ir,
             external_cells: self.external_cells.clone(),
+            delay_select: self.delay_select,
         })
     }
 
@@ -258,6 +282,7 @@ impl PreparedVerilogARuntime {
             &self.model_json,
             &self.canonical_ir_json,
             self.external_cells.as_deref(),
+            self.delay_select,
         );
         if expected != self.artifact_digest {
             return Err("Verilog-A runtime artifact digest does not match its payload".to_owned());
@@ -300,6 +325,11 @@ impl PreparedVerilogARuntime {
 
     pub fn netlist_alias(&self) -> &str {
         &self.netlist_alias
+    }
+
+    /// The min:typ:max selection the artifact was compiled under.
+    pub const fn delay_select(&self) -> DigitalDelaySelect {
+        self.delay_select
     }
 
     pub fn provenance_label(&self) -> String {
@@ -854,6 +884,10 @@ where
     })
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is one field of the artifact's identity, hashed in this order"
+)]
 fn runtime_artifact_digest(
     source_key: &str,
     source_digest: rspice_vocabulary::product::ContentDigest,
@@ -862,6 +896,7 @@ fn runtime_artifact_digest(
     model_json: &str,
     canonical_ir_json: &str,
     external_cells: Option<&[rspice_veriloga::ExternalCell]>,
+    delay_select: DigitalDelaySelect,
 ) -> rspice_vocabulary::product::ContentDigest {
     let mut hasher = Sha256::new();
     hasher.update(b"rspice.project-veriloga-runtime/v2\0");
@@ -890,6 +925,11 @@ fn runtime_artifact_digest(
                 names.iter().for_each(|name| field(name.as_bytes()));
             }
         }
+    }
+    // A typical artifact keeps the identity it always had.
+    if delay_select != DigitalDelaySelect::Typ {
+        field(b"delay-select");
+        field(delay_select.keyword().as_bytes());
     }
     rspice_vocabulary::product::ContentDigest::from_bytes(hasher.finalize().into())
 }

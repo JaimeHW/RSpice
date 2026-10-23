@@ -305,16 +305,29 @@ fn seal_hdl(
     }
     let directory = origin.parent().unwrap_or(Path::new("."));
     // A design may instantiate the deck's own cells as SPICE leaves, so the
-    // compile sees the deck's table, as the engine's own compile does. A deck
-    // that does not parse here is refused, by the same parser, when it is
-    // prepared.
-    let external_cells = rspice_core::netlist::IncludeProcessor::new(directory)
+    // compile sees the deck's table, and keeps the min:typ:max values the
+    // deck selects, as the engine's own compile does. A deck that does not
+    // parse here is refused, by the same parser, when it is prepared.
+    let netlist = rspice_core::netlist::IncludeProcessor::new(directory)
         .expand_content(circuit, origin)
         .ok()
-        .and_then(|expanded| rspice_core::Netlist::parse(&expanded).ok())
-        .map(|netlist| rspice_core::engine::hdl_external_cells(&netlist));
+        .and_then(|expanded| rspice_core::Netlist::parse(&expanded).ok());
+    let external_cells = netlist
+        .as_ref()
+        .map(rspice_core::engine::hdl_external_cells);
+    let delay_select = netlist
+        .as_ref()
+        .map(|netlist| {
+            rspice_core::engine::hdl_delay_select(&rspice_core::resolve_simulation_config(
+                &rspice_core::SimulationConfig::default(),
+                Some(&netlist.options),
+                &rspice_core::SimulationConfigOverrides::default(),
+            ))
+        })
+        .unwrap_or_default();
     let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
         external_cells: external_cells.clone(),
+        delay_select,
         ..rspice_simulation::compilation::unified_runtime_compiler_options()
     });
     let mut lines: Vec<String> = circuit.lines().map(str::to_owned).collect();
@@ -416,13 +429,15 @@ fn seal_hdl(
         let alias = directive.alias.clone().unwrap_or_else(|| module.clone());
         let source_key = sealed_source_key(design_slug, &module, &file_name);
         // Sealed with the deck's table it was compiled against, which a
-        // design with a leaf carries in its identity and install key.
+        // design with a leaf carries in its identity and install key, and
+        // with the selection it was compiled under, which every design does.
         let runtime = PreparedVerilogARuntime::try_from_virtual_compilation_against(
             source_key.clone(),
             digest,
             alias.clone(),
             &compilation,
             external_cells.as_deref(),
+            delay_select,
         )
         .map_err(|error| compile_refusal(&module, &path, error.to_string()))?;
         runtimes.push(runtime);

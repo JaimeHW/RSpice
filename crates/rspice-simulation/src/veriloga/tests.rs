@@ -616,3 +616,150 @@ fn installing_an_edited_module_leaves_each_deck_the_runtime_it_names() {
         );
     }
 }
+
+/// The digest an artifact had before its min:typ:max selection joined its
+/// identity: `rspice.project-veriloga-runtime/v2` over its six fields, each
+/// length-prefixed, and the cell table it names, if any.
+fn digest_before_the_selection(
+    runtime: &PreparedVerilogARuntime,
+) -> rspice_vocabulary::product::ContentDigest {
+    use sha2::{Digest as _, Sha256};
+    assert!(runtime.external_cells.is_none(), "a fixture without leaves");
+    let mut hasher = Sha256::new();
+    hasher.update(b"rspice.project-veriloga-runtime/v2\0");
+    for bytes in [
+        runtime.source_key.as_bytes(),
+        runtime.source_digest.as_bytes(),
+        runtime.module_name.as_bytes(),
+        runtime.netlist_alias.as_bytes(),
+        runtime.model_json.as_bytes(),
+        runtime.canonical_ir_json.as_bytes(),
+    ] {
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    }
+    rspice_vocabulary::product::ContentDigest::from_bytes(hasher.finalize().into())
+}
+
+const HELD: &str = "module held(p, n); inout p, n; electrical p, n;\n\
+                    parameter real g = 1.0e-3:2.0e-3:3.0e-3;\n\
+                    analog I(p, n) <+ g * V(p, n);\nendmodule\n";
+
+/// `held` compiled keeping the `delay_select` value of its min:typ:max
+/// conductance, and sealed under that selection.
+fn seal_held(
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+) -> PreparedVerilogARuntime {
+    let bundle = rspice_veriloga::VirtualSourceBundle::new(
+        "held.va",
+        [rspice_veriloga::VirtualSourceFile::new("held.va", HELD)],
+    )
+    .expect("fixture bundle is well formed");
+    let compilation = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        delay_select,
+        ..Default::default()
+    })
+    .compile_virtual_runtime(
+        &bundle,
+        "held",
+        rspice_veriloga::VirtualCompileLimits::default(),
+    )
+    .expect("fixture module compiles");
+    PreparedVerilogARuntime::try_from_virtual_compilation_against(
+        "__rspice_project__/fixture/held.va".to_owned(),
+        rspice_vocabulary::product::ContentDigest::from_bytes([0x5a; 32]),
+        "HELD".to_owned(),
+        &compilation,
+        None,
+        delay_select,
+    )
+    .expect("fixture compilation seals into a prepared runtime")
+}
+
+/// A typical artifact keeps the digest and the bytes it had before the
+/// selection joined its identity, so artifacts sealed before stay valid; the
+/// digest of a fixed payload is pinned to the value it had then.
+#[test]
+fn a_typical_artifact_keeps_the_digest_and_bytes_it_had() {
+    use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
+    let pinned = super::runtime_artifact_digest(
+        "__rspice_project__/fixture/held.va",
+        rspice_vocabulary::product::ContentDigest::from_bytes([0x5a; 32]),
+        "held",
+        "HELD",
+        "{\"model\":1}",
+        "{\"ir\":1}",
+        None,
+        DigitalDelaySelect::Typ,
+    );
+    assert_eq!(
+        pinned.to_string(),
+        "6515661f6015bacf1b8fd9b06f1da25f9aeff3716769438ecd0e8bd8d59c4fa6"
+    );
+
+    let typical = seal_held(DigitalDelaySelect::Typ);
+    assert_eq!(
+        typical.artifact_digest(),
+        digest_before_the_selection(&typical)
+    );
+    let json = serde_json::to_string(&typical).expect("encode the artifact");
+    assert!(!json.contains("delay_select"), "{json}");
+    let decoded: PreparedVerilogARuntime = serde_json::from_str(&json).expect("decode");
+    assert_eq!(decoded, typical);
+}
+
+/// The selection is part of every artifact's identity, of a design with a
+/// min:typ:max expression or without one alike: min, typ and max seal three
+/// artifacts, and a minimum artifact stripped of its selection no longer
+/// matches its digest.
+#[test]
+fn each_selection_seals_an_artifact_of_its_own() {
+    use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
+    let selections = [
+        DigitalDelaySelect::Min,
+        DigitalDelaySelect::Typ,
+        DigitalDelaySelect::Max,
+    ];
+    let sealed = selections.map(seal_held);
+    let fixed = selections.map(|delay_select| {
+        super::runtime_artifact_digest(
+            "__rspice_project__/fixture/held.va",
+            rspice_vocabulary::product::ContentDigest::from_bytes([0x5a; 32]),
+            "held",
+            "HELD",
+            "{\"model\":1}",
+            "{\"ir\":1}",
+            None,
+            delay_select,
+        )
+    });
+    for digests in [
+        sealed.each_ref().map(|runtime| runtime.artifact_digest()),
+        fixed,
+    ] {
+        assert_ne!(digests[0], digests[1]);
+        assert_ne!(digests[1], digests[2]);
+        assert_ne!(digests[0], digests[2]);
+    }
+    for (runtime, delay_select) in sealed.iter().zip(selections) {
+        assert_eq!(runtime.delay_select(), delay_select);
+        runtime.validate().expect("each artifact validates");
+        let registration = runtime.registration().expect("each artifact registers");
+        assert_eq!(registration.delay_select, delay_select);
+    }
+
+    let mut json: serde_json::Value = serde_json::to_value(&sealed[0]).expect("encode");
+    assert_eq!(json["delay_select"], "Min");
+    let decoded: PreparedVerilogARuntime =
+        serde_json::from_value(json.clone()).expect("decode the minimum artifact");
+    assert_eq!(decoded, sealed[0]);
+    json.as_object_mut()
+        .expect("an object")
+        .remove("delay_select");
+    let stripped: PreparedVerilogARuntime =
+        serde_json::from_value(json).expect("decode the stripped artifact");
+    assert!(
+        stripped.validate().is_err(),
+        "a stripped selection is refused"
+    );
+}

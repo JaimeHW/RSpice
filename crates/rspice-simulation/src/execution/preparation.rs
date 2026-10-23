@@ -27,7 +27,7 @@ use crate::output_contract::selection::{effective_plan_capture, projection_occur
 use crate::preparation::{QueuedAnalysis, validate_prepared_periodic_sources};
 use crate::project_technology::ProjectTechnologyInputs;
 use crate::project_veriloga::preparation::{
-    deck_external_cells, prepared_configuration_veriloga_runtimes,
+    deck_delay_select, deck_external_cells, prepared_configuration_veriloga_runtimes,
     prepared_corner_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
     prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
     rebind_project_veriloga_source_keys,
@@ -442,12 +442,14 @@ where
             .collect(),
     )?;
     // A configured design is compiled against the cells of the deck it runs
-    // in, which a design may instantiate as leaves.
+    // in, which a design may instantiate as leaves, and under its min:typ:max
+    // selection.
     let project_veriloga_runtimes = prepared_configuration_veriloga_runtimes(
         inputs.technology.project.id(),
         inputs.project_sources,
         &execution_projection,
         &deck_external_cells(&netlist),
+        deck_delay_select(&netlist),
     )?
     .try_merge(external_veriloga_runtimes.clone())
     .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
@@ -621,13 +623,25 @@ struct ExpandedManualDeck {
 }
 
 /// The cells the manual deck `manual` offers its project's HDL designs as
-/// leaves: those of the deck as its run expands it, which the run compiles
-/// each design it names against. The editor compiles a design against them.
-pub fn manual_deck_external_cells<R, A>(
+/// leaves, and the min:typ:max selection it keeps in them: those of the deck
+/// as its run expands it, which the run compiles each design it names
+/// against and under. The editor compiles a design against and under them.
+pub fn manual_deck_hdl<R, A>(
     inputs: &RunPreparationInputs<'_, R, A>,
     manual: ManualSourceInputs<'_>,
-) -> Result<Vec<rspice_veriloga::ExternalCell>, PreparationError> {
-    expand_manual_deck(inputs, &manual).map(|deck| deck_external_cells(&deck.expanded))
+) -> Result<
+    (
+        Vec<rspice_veriloga::ExternalCell>,
+        rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
+    ),
+    PreparationError,
+> {
+    expand_manual_deck(inputs, &manual).map(|deck| {
+        (
+            deck_external_cells(&deck.expanded),
+            deck_delay_select(&deck.expanded),
+        )
+    })
 }
 
 fn expand_manual_deck<R, A>(

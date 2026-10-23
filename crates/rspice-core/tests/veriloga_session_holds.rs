@@ -50,6 +50,7 @@ fn conductance(name: &str, siemens: f64) -> (PathBuf, ProjectVerilogASourceRegis
             model: report.model,
             canonical_ir: report.canonical_ir,
             external_cells: None,
+            delay_select: Default::default(),
         }),
     )
 }

@@ -41,6 +41,11 @@ fn deck(cells: &str, header: &str, instance: &str) -> String {
 const HALF: &str = ".subckt half a b\nr1 a b 1k\n.ends\n";
 
 fn project() -> (ProjectId, ProjectSourceRegistry) {
+    project_of(TOP)
+}
+
+/// A project whose one Verilog-A bundle is the design `top` of `source`.
+fn project_of(source: &str) -> (ProjectId, ProjectSourceRegistry) {
     let mut sources = ProjectSourceRegistry::default();
     sources
         .insert_bundle(
@@ -48,7 +53,7 @@ fn project() -> (ProjectId, ProjectSourceRegistry) {
                 ProjectSourceOwner::code_workspace(ProjectSourceLanguage::VerilogA),
                 ProjectSourceLanguage::VerilogA,
                 "top.va",
-                TOP,
+                source,
                 [],
                 [],
             )
@@ -99,19 +104,57 @@ static SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// The manual deck route: the same design, read from a file.
 fn manual_run() -> rspice_core::engine::TransientResult {
+    manual_run_of(TOP, "")
+}
+
+/// [`manual_run`] of the design `top` of `source`, in a deck whose header
+/// also carries `options`.
+fn manual_run_of(source: &str, options: &str) -> rspice_core::engine::TransientResult {
     let path = std::env::temp_dir().join(format!(
         "rspice_project_top_{}_{}.vams",
         std::process::id(),
         SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
-    std::fs::write(&path, TOP).expect("write the design");
+    std::fs::write(&path, source).expect("write the design");
     let header = format!(
-        ".hdl \"{}\" module=top",
+        "{options}.hdl \"{}\" module=top",
         path.display().to_string().replace('\\', "/")
     );
     let result = run(&deck(HALF, &header, "top"));
     let _ = std::fs::remove_file(&path);
     result.expect("the manual deck runs")
+}
+
+/// Whether two runs accepted the same time points and solved the same
+/// voltages, bit for bit.
+fn assert_bit_identical(
+    project: &rspice_core::engine::TransientResult,
+    manual: &rspice_core::engine::TransientResult,
+    route: &str,
+) {
+    let bits = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(project.node_names, manual.node_names, "{route}");
+    assert_eq!(
+        bits(&project.time),
+        bits(&manual.time),
+        "{route}: the same accepted time points"
+    );
+    for (name, (project, manual)) in project
+        .node_names
+        .iter()
+        .zip(project.voltages.iter().zip(&manual.voltages))
+    {
+        assert_eq!(
+            bits(project),
+            bits(manual),
+            "{route}: v({name}) differs between the routes"
+        );
+    }
 }
 
 #[test]
@@ -123,6 +166,7 @@ fn a_project_runs_its_design_over_the_deck_cells_as_the_manual_deck_does() {
         sources.iter_bundles().next().expect("the design's bundle"),
         "top",
         None,
+        DigitalDelaySelect::Typ,
     )
     .expect_err("without the deck's cells `half` is undefined");
     assert!(refused.to_string().contains("half"), "{refused}");
@@ -234,7 +278,11 @@ fn a_design_without_leaves_keeps_its_identity_under_any_table() {
     let project_id = ProjectId::new();
     let bundle = sources.iter_bundles().next().expect("the bundle");
     let bare = crate::project_veriloga::compile_project_source_bundle_runtime(
-        project_id, bundle, "load", None,
+        project_id,
+        bundle,
+        "load",
+        None,
+        DigitalDelaySelect::Typ,
     )
     .expect("compile without cells");
     let offered = crate::project_veriloga::compile_project_source_bundle_runtime(
@@ -242,7 +290,154 @@ fn a_design_without_leaves_keeps_its_identity_under_any_table() {
         bundle,
         "load",
         Some(&deck_external_cells(HALF)),
+        DigitalDelaySelect::Typ,
     )
     .expect("compile against the deck's cells");
     assert_eq!(bare, offered);
+}
+
+/// [`TOP`] with its switch delayed by a min:typ:max delay (IEEE 1364-2005
+/// section 5.3): the conductance changes at 10, 20 or 30 ns.
+const DELAYED_TOP: &str = "`include \"disciplines.vams\"\n\
+                           `timescale 1ns/1ps\n\
+                           module top(vin, vout);\n\
+                           \x20 inout vin, vout;\n\
+                           \x20 electrical vin, vout, m;\n\
+                           \x20 electrical gnd;\n\
+                           \x20 ground gnd;\n\
+                           \x20 reg sel;\n\
+                           \x20 initial begin sel = 1'b0; #(10:20:30) sel = 1'b1; end\n\
+                           \x20 half xu(vin, m);\n\
+                           \x20 dclamp dl(m, gnd);\n\
+                           \x20 analog I(m, vout) <+ V(m, vout) / (sel ? 1.0e3 : 2.0e3);\n\
+                           endmodule\n";
+
+/// The project deck of `top` selecting `options`.
+fn delayed_project_deck(
+    project_id: ProjectId,
+    sources: &ProjectSourceRegistry,
+    options: &str,
+) -> String {
+    let (header, alias) = directive(project_id, sources);
+    deck(HALF, &format!("{options}{header}"), &alias)
+}
+
+/// A deck's `.options hdl_delay_select` reaches a project's design: under
+/// min and under max the project route compiles, seals and runs it exactly
+/// as the manual deck runs the same design read from a file, bit for bit,
+/// and the two selections run differently.
+#[test]
+fn a_project_runs_its_design_under_the_deck_selection_as_the_manual_deck_does() {
+    let (project_id, sources) = project_of(DELAYED_TOP);
+    let mut outputs = Vec::new();
+    for (options, selection) in [
+        (".options hdl_delay_select=min\n", DigitalDelaySelect::Min),
+        (".options hdl_delay_select=max\n", DigitalDelaySelect::Max),
+        ("", DigitalDelaySelect::Typ),
+    ] {
+        let project_deck = delayed_project_deck(project_id, &sources, options);
+        let runtimes = prepared(project_id, &sources, &project_deck);
+        let runtime = runtimes.device_runtimes().next().expect("the design");
+        assert_eq!(runtime.delay_select(), selection);
+        let _installed = runtimes.install().expect("install the sealed design");
+        let project = run(&project_deck)
+            .unwrap_or_else(|error| panic!("{selection:?}: the project deck runs: {error}"));
+        let manual = manual_run_of(DELAYED_TOP, options);
+        assert_bit_identical(&project, &manual, &format!("{selection:?}"));
+        outputs.push(project.voltages);
+    }
+    assert_ne!(outputs[0], outputs[1], "min and max switch at other times");
+    assert_ne!(outputs[0], outputs[2], "min and typ switch at other times");
+}
+
+/// An artifact sealed under one selection is never run under another: a
+/// deck selecting another refuses it by naming both selections, and its own
+/// preparation compiles another artifact, which runs beside the first.
+#[test]
+fn an_artifact_sealed_at_min_is_never_reused_under_another_selection() {
+    let (project_id, sources) = project_of(DELAYED_TOP);
+    let min_deck = delayed_project_deck(project_id, &sources, ".options hdl_delay_select=min\n");
+    let minimum = prepared(project_id, &sources, &min_deck);
+    let _minimum = minimum.install().expect("install the minimum design");
+    let identity = |set: &crate::veriloga::PreparedVerilogARuntimeSet| {
+        set.device_runtimes()
+            .map(|runtime| runtime.artifact_digest())
+            .collect::<Vec<_>>()
+    };
+    for (options, keyword) in [("", "typ"), (".options hdl_delay_select=max\n", "max")] {
+        let other_deck = delayed_project_deck(project_id, &sources, options);
+        let refused = run(&other_deck)
+            .expect_err("the minimum artifact is not the other deck's")
+            .to_string();
+        for expected in [
+            "`hdl_delay_select=min`".to_owned(),
+            format!("`hdl_delay_select={keyword}`"),
+        ] {
+            assert!(refused.contains(&expected), "{expected}: {refused}");
+        }
+        assert!(!refused.contains("not installed"), "{refused}");
+
+        let other = prepared(project_id, &sources, &other_deck);
+        assert_ne!(
+            identity(&other),
+            identity(&minimum),
+            "{keyword}: recompiled"
+        );
+        let _other = other
+            .install()
+            .expect("install the other selection's design");
+        assert_bit_identical(
+            &run(&other_deck).expect("the other deck runs its own artifact"),
+            &manual_run_of(DELAYED_TOP, options),
+            keyword,
+        );
+        run(&min_deck).expect("the minimum deck still runs its own artifact");
+    }
+}
+
+/// The editor's compile receipt names the selection it compiled under: a
+/// typical receipt serves a typical deck, and goes stale once the deck
+/// selects min, whose run compiles the design again under min.
+#[test]
+fn a_typical_receipt_goes_stale_when_the_deck_selects_min() {
+    let (project_id, sources) = project_of(DELAYED_TOP);
+    let bundle = sources.iter_bundles().next().expect("the design's bundle");
+    let typ_deck = delayed_project_deck(project_id, &sources, "");
+    let min_deck = delayed_project_deck(project_id, &sources, ".options hdl_delay_select=min\n");
+    let cells = deck_external_cells(&typ_deck);
+    assert_eq!(
+        cells,
+        deck_external_cells(&min_deck),
+        "only the selection changed"
+    );
+    assert_eq!(deck_delay_select(&typ_deck), DigitalDelaySelect::Typ);
+    assert_eq!(deck_delay_select(&min_deck), DigitalDelaySelect::Min);
+
+    let (receipt, _) = crate::project_veriloga::receipt::compile_project_bundle_receipt_against(
+        project_id,
+        bundle,
+        None,
+        Some(&cells),
+        DigitalDelaySelect::Typ,
+    )
+    .unwrap_or_else(|diagnostics| panic!("the editor compiles the design: {diagnostics:?}"));
+    assert_eq!(receipt.delay_select(), DigitalDelaySelect::Typ);
+    assert!(receipt.builds_for(&cells, DigitalDelaySelect::Typ));
+    assert!(!receipt.builds_for(&cells, DigitalDelaySelect::Min));
+    let typical = receipt
+        .prepare_runtime(project_id, bundle)
+        .expect("the receipt seals");
+
+    let from = |deck: &str| {
+        project_veriloga_runtimes_referenced_by(project_id, &sources, Some(&receipt), deck)
+            .unwrap_or_else(|error| panic!("the project route prepares the design: {error:?}"))
+            .device_runtimes()
+            .next()
+            .cloned()
+            .expect("the design")
+    };
+    assert_eq!(from(&typ_deck), typical, "the current receipt serves");
+    let minimum = from(&min_deck);
+    assert_eq!(minimum.delay_select(), DigitalDelaySelect::Min);
+    assert_ne!(minimum.artifact_digest(), typical.artifact_digest());
 }

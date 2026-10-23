@@ -1181,6 +1181,7 @@ fn configured_cell_view_compiles_the_exact_sealed_veriloga_bundle() {
         &state.model.workspace.content.project_sources,
         &projection,
         &[],
+        Default::default(),
     )
     .expect("compile exact configured source closure");
 

@@ -127,6 +127,9 @@ pub struct PendingVerilogACompile {
     pub receiver: Arc<Mutex<mpsc::Receiver<VerilogACompileOutcome>>>,
     /// The cells the design is compiled against, which its receipt names.
     pub cells: Option<Arc<[rspice_veriloga::ExternalCell]>>,
+    /// The min:typ:max selection the design is compiled under, which its
+    /// receipt names.
+    pub delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
 }
 
 impl Clone for PendingVerilogACompile {
@@ -135,6 +138,7 @@ impl Clone for PendingVerilogACompile {
             token: self.token,
             receiver: Arc::clone(&self.receiver),
             cells: self.cells.clone(),
+            delay_select: self.delay_select,
         }
     }
 }

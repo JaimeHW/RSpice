@@ -914,18 +914,19 @@ fn start_veriloga_compile(
     }
     let token = selected.token(app.state.model.workspace.content.project.id());
     // A design may instantiate the SPICE cells of the netlist its project's
-    // run would build: a manual deck's as its run expands it, else the
-    // configured design's. While that netlist cannot be built the design is
-    // compiled against no cells, and a run compiles it again against its own.
-    // A name nothing in the project defines stays undefined.
-    let cells = {
+    // run would build, and keeps the min:typ:max values it selects: a manual
+    // deck's as its run expands it, else the configured design's. While that
+    // netlist cannot be built the design is compiled against no cells and
+    // under the typical values, and a run compiles it again against and under
+    // its own. A name nothing in the project defines stays undefined.
+    let deck = {
         use crate::simulation::controller::{SimulationController, prepared_run};
         let state = &app.state;
         match state.model.simulation.execution.run_intent {
             crate::state::SimulationRunIntent::ManualDeck => {
                 prepared_run::manual_source_inputs(state)
                     .and_then(|manual| {
-                        rspice_simulation::execution::preparation::manual_deck_external_cells(
+                        rspice_simulation::execution::preparation::manual_deck_hdl(
                             &prepared_run::run_preparation_inputs(state),
                             manual,
                         )
@@ -936,14 +937,18 @@ fn start_veriloga_compile(
                 SimulationController::prepare_design_netlist_for_inspection(state)
                     .ok()
                     .map(|netlist| {
-                        rspice_simulation::project_veriloga::preparation::deck_external_cells(
-                            &netlist,
-                        )
+                        use rspice_simulation::project_veriloga::preparation::{
+                            deck_delay_select, deck_external_cells,
+                        };
+                        (deck_external_cells(&netlist), deck_delay_select(&netlist))
                     })
             }
         }
-    }
-    .map(Arc::<[_]>::from);
+    };
+    let delay_select = deck
+        .as_ref()
+        .map_or_else(Default::default, |(_, delay_select)| *delay_select);
+    let cells = deck.map(|(cells, _)| Arc::<[_]>::from(cells));
     let (sender, receiver) = mpsc::channel();
     Arc::make_mut(&mut app.state.code.code_workspace.veriloga.last_failure).clear();
     app.state.code.code_workspace.veriloga.last_failure_token = None;
@@ -951,6 +956,7 @@ fn start_veriloga_compile(
         token,
         receiver: Arc::new(Mutex::new(receiver)),
         cells: cells.clone(),
+        delay_select,
     });
 
     let wake = repaint.clone();
@@ -958,6 +964,7 @@ fn start_veriloga_compile(
         selected.bundle,
         selected.selected_module,
         cells,
+        delay_select,
         sender.clone(),
         move || wake.request_repaint(),
     ) {
@@ -1047,6 +1054,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 &report,
                 receipt_bundle.as_ref(),
                 pending.cells.as_deref(),
+                pending.delay_select,
             ) {
                 Ok(receipt) => receipt,
                 Err(error) => {
@@ -1409,6 +1417,7 @@ fn compile_selected_source(selected: &SelectedVerilogASource) -> VerilogACompile
         selected.bundle(),
         selected.selected_module(),
         None,
+        Default::default(),
     )
 }
 
@@ -1420,6 +1429,7 @@ pub(crate) fn compile_project_bundle_virtual_for_provenance(
         bundle,
         selected_module,
         None,
+        Default::default(),
     )
     .map_err(|error| error.to_string())
 }
@@ -1460,10 +1470,15 @@ fn receipt_from_report(
     report: &RuntimeCompileReport,
     bundle: Option<&ProjectSourceBundle>,
     cells: Option<&[rspice_veriloga::ExternalCell]>,
+    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
 ) -> Result<VerilogACompileReceipt, String> {
     let (compilation, diagnostics) =
         rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt::from_report_against(
-            token, report, bundle, cells,
+            token,
+            report,
+            bundle,
+            cells,
+            delay_select,
         )?;
     receipt_projection(compilation, diagnostics)
 }
@@ -1687,7 +1702,14 @@ mod tests {
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("legacy source must compile")
         };
-        let receipt = receipt_from_report(token, &report, Some(selected.bundle()), None).unwrap();
+        let receipt = receipt_from_report(
+            token,
+            &report,
+            Some(selected.bundle()),
+            None,
+            Default::default(),
+        )
+        .unwrap();
 
         let first = record_veriloga_qualification(
             &mut app,
@@ -2049,7 +2071,14 @@ mod tests {
         };
         assert_eq!(report.diagnostics.len(), 1);
 
-        let receipt = receipt_from_report(token, &report, Some(selected.bundle()), None).unwrap();
+        let receipt = receipt_from_report(
+            token,
+            &report,
+            Some(selected.bundle()),
+            None,
+            Default::default(),
+        )
+        .unwrap();
         let warning = receipt
             .diagnostics
             .iter()
@@ -2071,6 +2100,7 @@ mod tests {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
             cells: None,
+            delay_select: Default::default(),
         });
 
         poll_veriloga_compile(&mut app);
@@ -2148,7 +2178,14 @@ mod tests {
         let VerilogACompileOutcome::Success(report) = compile_selected_source(&selected) else {
             panic!("a retained variable is legal Verilog-A and must not fail the compile")
         };
-        let receipt = receipt_from_report(token, &report, Some(selected.bundle()), None).unwrap();
+        let receipt = receipt_from_report(
+            token,
+            &report,
+            Some(selected.bundle()),
+            None,
+            Default::default(),
+        )
+        .unwrap();
         let retained: Vec<_> = receipt
             .diagnostics
             .iter()
@@ -2172,6 +2209,7 @@ mod tests {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
             cells: None,
+            delay_select: Default::default(),
         });
         poll_veriloga_compile(&mut app);
 
@@ -2223,6 +2261,7 @@ mod tests {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
             cells: None,
+            delay_select: Default::default(),
         });
         app.state
             .model
@@ -2265,6 +2304,7 @@ mod tests {
             token: receipt.compilation.token(),
             receiver: Arc::new(Mutex::new(receiver)),
             cells: None,
+            delay_select: Default::default(),
         });
         app.state
             .model
@@ -2286,5 +2326,48 @@ mod tests {
             receipt.compilation.token()
         ));
         assert!(!changed.bundle().validation_is_current());
+    }
+
+    /// The published receipt names the min:typ:max selection its compile
+    /// kept, as it names the cells: a receipt compiled under min serves a
+    /// deck selecting min, and is stale for one keeping the typical values.
+    #[test]
+    fn the_published_receipt_names_the_selection_it_was_compiled_under() {
+        use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
+        let mut app = module_source_with(
+            "held",
+            "module held(p, n);\n  inout p, n; electrical p, n;\n  parameter real g = 1.0e-3:2.0e-3:3.0e-3;\n  analog I(p, n) <+ g * V(p, n);\nendmodule\n",
+        );
+        let selected = selected_veriloga_source(&app).unwrap();
+        let outcome = rspice_simulation::project_veriloga::compile_service::compile_source(
+            selected.bundle(),
+            selected.selected_module(),
+            None,
+            DigitalDelaySelect::Min,
+        );
+        assert!(matches!(outcome, VerilogACompileOutcome::Success(_)));
+        let (sender, receiver) = mpsc::channel();
+        sender.send(outcome).unwrap();
+        app.state.code.code_workspace.veriloga.pending = Some(PendingVerilogACompile {
+            token: selected.token(app.state.model.workspace.content.project.id()),
+            receiver: Arc::new(Mutex::new(receiver)),
+            cells: None,
+            delay_select: DigitalDelaySelect::Min,
+        });
+
+        poll_veriloga_compile(&mut app);
+
+        let published = &app
+            .state
+            .code
+            .code_workspace
+            .veriloga
+            .receipt
+            .as_ref()
+            .expect("the compile is published")
+            .compilation;
+        assert_eq!(published.delay_select(), DigitalDelaySelect::Min);
+        assert!(published.builds_for(&[], DigitalDelaySelect::Min));
+        assert!(!published.builds_for(&[], DigitalDelaySelect::Typ));
     }
 }

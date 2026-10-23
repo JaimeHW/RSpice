@@ -108,6 +108,7 @@ pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
         token: receipt.compilation.token(),
         receiver: Arc::new(Mutex::new(receiver)),
         cells: None,
+        delay_select: Default::default(),
     });
     code_workspace::poll_veriloga_compile(app);
     assert!(
@@ -348,6 +349,7 @@ pub(super) fn configured_deck(app: &RSpiceApp) -> Result<String, String> {
         &state.model.workspace.content.project_sources,
         &projection,
         &[],
+        Default::default(),
     )
     .map_err(|error| error.message().to_owned())?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(

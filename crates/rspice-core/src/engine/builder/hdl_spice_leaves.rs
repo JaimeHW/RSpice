@@ -99,6 +99,22 @@ pub fn hdl_external_cells(netlist: &Netlist) -> Vec<ExternalCell> {
     cells
 }
 
+/// The value of each min:typ:max expression a run configured by `config`
+/// keeps in its HDL (`--hdl-delay-select`, else the deck's `.options
+/// hdl_delay_select`, as [`crate::resolve_simulation_config`] resolves
+/// them), as the compiler spells it.
+///
+/// The builder compiles every HDL source of the deck under this selection. A
+/// caller that compiles a deck's HDL ahead of the build, as a sealed project
+/// runtime is, compiles it under the same selection
+/// (`rspice_veriloga::CompilerOptions::delay_select`) and registers the
+/// runtime under it.
+pub fn hdl_delay_select(
+    config: &crate::config::SimulationConfig,
+) -> rspice_veriloga::canonical_ir::digital::DigitalDelaySelect {
+    crate::xspice::verilog::compiler_delay_select(config.hdl.delay_select)
+}
+
 /// The node name a leaf port or a hoisted port of `element`'s design lands on.
 pub(super) fn node_name(
     element: &Element,

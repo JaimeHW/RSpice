@@ -4,6 +4,7 @@ use rspice_design::project_sources::{
     MAX_PROJECT_SOURCE_LOGICAL_PATH_BYTES, ProjectSourceBundle, ProjectSourceError,
     ProjectSourceLanguage,
 };
+use rspice_veriloga::canonical_ir::digital::DigitalDelaySelect;
 use rspice_veriloga::{ExternalCell, RuntimeCompileReport};
 
 use super::{ProjectVerilogACompileError, build_profile, compile_project_bundle_source_against};
@@ -122,6 +123,7 @@ pub struct WorkerCompileRequest<'a> {
     bundle: &'a ProjectSourceBundle,
     selected_module: Option<&'a str>,
     cells: Option<&'a [ExternalCell]>,
+    delay_select: DigitalDelaySelect,
 }
 
 impl<'a> WorkerCompileRequest<'a> {
@@ -148,22 +150,37 @@ impl<'a> WorkerCompileRequest<'a> {
             bundle,
             selected_module,
             cells: None,
+            delay_select: DigitalDelaySelect::Typ,
         })
     }
 
-    /// Offer the design `cells` as leaves: those of the netlist the
-    /// project's run builds (`rspice_veriloga::CompilerOptions::external_cells`).
+    /// Offer the design `cells` as leaves and keep the `delay_select` value
+    /// of each min:typ:max expression: those of the netlist the project's
+    /// run builds (`rspice_veriloga::CompilerOptions::external_cells` and
+    /// `rspice_veriloga::CompilerOptions::delay_select`).
     #[must_use]
-    pub const fn against(self, cells: Option<&'a [ExternalCell]>) -> Self {
-        Self { cells, ..self }
+    pub const fn against(
+        self,
+        cells: Option<&'a [ExternalCell]>,
+        delay_select: DigitalDelaySelect,
+    ) -> Self {
+        Self {
+            cells,
+            delay_select,
+            ..self
+        }
     }
 
     pub fn compile(
         self,
         target: WorkerCompileTarget,
     ) -> Result<CompiledWorkerSource, ProjectVerilogACompileError> {
-        let report =
-            compile_project_bundle_source_against(self.bundle, self.selected_module, self.cells)?;
+        let report = compile_project_bundle_source_against(
+            self.bundle,
+            self.selected_module,
+            self.cells,
+            self.delay_select,
+        )?;
         Ok(match target {
             WorkerCompileTarget::Bytecode => CompiledWorkerSource {
                 report,
