@@ -728,10 +728,17 @@ impl<'a> HierarchyElaborator<'a> {
         if let Some(alias) = child.node_aliases.first() {
             return Err(semantic_error(
                 SemanticErrorKind::UnsupportedFeature(format!(
-                    "module '{}' binds `{}` to the deck node \"{}\" in `analog initial`, and \
-                     instance '{path}' places it inside another module; only a module the deck \
-                     instantiates directly may alias a deck node",
-                    instance.module, alias.net, alias.path
+                    "module '{}' binds `{}` to the deck node \"{}\" with `{}` in `analog \
+                     initial`, and instance '{path}' places it inside another module; only a \
+                     module the deck instantiates directly may alias a deck node",
+                    instance.module,
+                    alias.net,
+                    alias.path,
+                    if alias.port {
+                        "$analog_port_alias"
+                    } else {
+                        "$analog_node_alias"
+                    }
                 )),
                 instance.span,
             ));

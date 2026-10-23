@@ -371,3 +371,69 @@ fn an_alias_outside_analog_initial_is_refused() {
     assert!(message.contains("$analog_node_alias"), "{message}");
     assert!(message.contains("only in `analog initial`"), "{message}");
 }
+
+#[test]
+fn an_alias_in_a_module_another_module_instantiates_is_refused() {
+    let source = SourceFile::new(
+        "`include \"disciplines.vams\"\n\
+         module inner(p);\n\
+         \x20 inout p; electrical p;\n\
+         \x20 electrical m_alias;\n\
+         \x20 integer ok;\n\
+         \x20 analog initial ok = $analog_node_alias(m_alias, \"xdiv.m\");\n\
+         \x20 analog V(p) <+ V(m_alias);\n\
+         endmodule\n\
+         module alias(p);\n\
+         \x20 inout p; electrical p;\n\
+         \x20 inner u1(p);\n\
+         endmodule\n",
+    );
+    let text = format!(
+        "child alias\n\
+         .hdl \"{}\" module=alias\n\
+         vin in 0 dc 1\n\
+         {}\
+         xdiv in 0 div\n\
+         xa p alias\n\
+         rp p 0 1k\n\
+         .op\n\
+         .end\n",
+        source.path(),
+        divider(false)
+    );
+    let deck = Netlist::parse(&text).unwrap_or_else(|error| panic!("deck parses: {error}\n{text}"));
+    let message = match Engine::default().build_circuit(&deck) {
+        Ok(_) => panic!("the alias inside a child module builds"),
+        Err(error) => error.to_string(),
+    };
+    assert!(message.contains("$analog_node_alias"), "{message}");
+    assert!(message.contains("module 'inner'"), "{message}");
+    assert!(
+        message.contains("only a module the deck instantiates directly"),
+        "{message}"
+    );
+}
+
+#[test]
+fn an_alias_in_a_module_with_discrete_processes_is_refused() {
+    let source = SourceFile::new(
+        "`include \"disciplines.vams\"\n\
+         module alias(p);\n\
+         \x20 inout p; electrical p;\n\
+         \x20 electrical m_alias;\n\
+         \x20 integer ok;\n\
+         \x20 reg r;\n\
+         \x20 initial r = 1'b0;\n\
+         \x20 analog initial ok = $analog_node_alias(m_alias, \"xdiv.m\");\n\
+         \x20 analog V(p) <+ V(m_alias);\n\
+         endmodule\n",
+    );
+    let message = match Engine::default().build_circuit(&alias_deck(&source, ".op")) {
+        Ok(_) => panic!("the alias in a mixed module builds"),
+        Err(error) => error.to_string(),
+    };
+    assert!(message.contains("$analog_node_alias"), "{message}");
+    assert!(message.contains("`m_alias`"), "{message}");
+    assert!(message.contains("runs discrete processes"), "{message}");
+    assert!(message.contains("$cds_get_analog_value"), "{message}");
+}
