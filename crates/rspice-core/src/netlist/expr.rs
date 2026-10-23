@@ -46,7 +46,6 @@ mod tests;
 
 use parser::ExprParser;
 
-pub use crate::ComplexValue;
 #[doc(hidden)]
 pub use api::{
     ParseExpressionWithAbortError, eval_expression_complex_with_abort,
@@ -95,6 +94,7 @@ pub use model::{
     ModelEvaluationContext, ModelNominalTemperature, resolve_real_instance_expressions,
     set_model_temperature_scalars,
 };
+pub use num_complex::Complex64 as ComplexValue;
 #[doc(hidden)]
 pub use parameter_direction::ComplexDirection;
 #[doc(hidden)]
