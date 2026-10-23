@@ -137,9 +137,6 @@ pub struct ParamResolver {
     /// Global parameters (top-level .PARAM)
     global_params: HashMap<String, Value>,
 
-    /// Subcircuit default parameters (name -> params)
-    subcircuit_defaults: HashMap<String, HashMap<String, Value>>,
-
     /// Complete real-valued snapshots captured by hierarchy expansion. An absent
     /// name in a snapshot must not fall back to an outer, shadowed binding.
     resolved_scopes: HashMap<Vec<String>, HashMap<String, Value>>,
@@ -160,17 +157,6 @@ impl ParamResolver {
         self.global_params.insert(name.to_uppercase(), value);
     }
 
-    /// Set subcircuit defaults from a parsed SubcircuitDef
-    pub fn add_subcircuit_defaults(&mut self, subckt_name: &str, params: &[(String, Value)]) {
-        let entry = self
-            .subcircuit_defaults
-            .entry(subckt_name.to_uppercase())
-            .or_default();
-        for (name, value) in params {
-            entry.insert(name.to_uppercase(), *value);
-        }
-    }
-
     /// Replace the values recorded for one completed parameter scope without
     /// evaluating its expressions again. Segment keys preserve hierarchy even
     /// when a literal instance name contains the display separator.
@@ -188,7 +174,7 @@ impl ParamResolver {
         );
     }
 
-    /// Clear data belonging to the previous expansion, retaining definitions.
+    /// Clear data belonging to the previous expansion.
     pub(crate) fn clear_expansion(&mut self) {
         self.global_params.clear();
         self.resolved_scopes.clear();
@@ -236,15 +222,6 @@ impl ParamResolver {
     /// Clear all parameters
     pub fn clear(&mut self) {
         self.clear_expansion();
-        self.subcircuit_defaults.clear();
-    }
-
-    /// Get count of defined parameters at all scopes
-    pub fn param_count(&self) -> usize {
-        let global = self.global_params.len();
-        let subckt: usize = self.subcircuit_defaults.values().map(|m| m.len()).sum();
-        let resolved: usize = self.resolved_scopes.values().map(|m| m.len()).sum();
-        global + subckt + resolved
     }
 }
 
