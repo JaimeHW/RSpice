@@ -983,13 +983,10 @@ impl Command {
         {
             return CommandAvailability::Hidden;
         }
-        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(
-            &app.state.platform,
-        ) && self.blocked_by_project_operation()
-        {
+        if self.held_by_project_operation(&app.state.platform) {
             return CommandAvailability::Disabled("project operation is still in progress");
         }
-        if self.requires_open_project() && !app.state.platform.project_lifecycle.is_open() {
+        if self.lacks_open_project(&app.state.platform) {
             return CommandAvailability::Disabled("no project is open");
         }
         if self.mutates_window_session() && app.state.application_modal_open() {

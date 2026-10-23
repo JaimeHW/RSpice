@@ -7,18 +7,15 @@ use super::*;
 impl Command {
     pub fn is_enabled(self, app: &RSpiceApp) -> bool {
         let state = &app.state;
-        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform)
-            && self.blocked_by_project_operation()
-        {
+        // The dispatcher's own guards, so what is drawn enabled is what runs.
+        if self.held_by_project_operation(&state.platform) {
             return false;
         }
-        if self.requires_open_project() && !state.platform.project_lifecycle.is_open() {
+        if self.lacks_open_project(&state.platform) {
             return false;
         }
-        if let Some(request) = self.source_editor_request()
-            && let Some(editor) = state.workbench.active_source_editor
-        {
-            return editor.editable || !request.mutates_source();
+        if let Some((_, accepted)) = self.source_editor_redirect(&state.workbench) {
+            return accepted;
         }
         match self {
             Self::OpenWorkspace(workspace) => {
