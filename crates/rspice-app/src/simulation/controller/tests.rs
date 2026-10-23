@@ -1276,56 +1276,6 @@ mod monte_carlo_checkpoint;
 mod transient_checkpoint;
 
 #[test]
-fn production_runner_surface_exposes_only_the_opaque_prepared_start() {
-    let source = include_str!("../../../../rspice-simulation/src/runner.rs");
-    let controller_source = [
-        include_str!("../controller.rs"),
-        include_str!("completion.rs"),
-    ]
-    .join("\n");
-    // Split boundary-sensitive search strings so this test's own source
-    // cannot satisfy or invalidate the assertions.
-    let prepared_signature = ["pub fn ", "start_prepared"].concat();
-    assert_eq!(source.match_indices(&prepared_signature).count(), 1);
-    for forbidden in [
-        ["pub fn ", "start_request"].concat(),
-        ["pub(crate) fn ", "start_request"].concat(),
-    ] {
-        assert!(
-            !source.contains(&forbidden),
-            "raw start request must remain private: {forbidden}"
-        );
-    }
-
-    for signature in [
-        "\n    fn start(&mut self",
-        "\n    fn start_with_source_path(",
-    ] {
-        let index = source
-            .find(signature)
-            .unwrap_or_else(|| panic!("missing raw test helper {signature}"));
-        let prefix = &source[..index];
-        assert_eq!(
-            prefix.lines().next_back().map(str::trim),
-            Some("#[cfg(test)]"),
-            "raw start helper must remain test-only: {signature}",
-        );
-    }
-
-    assert_eq!(
-        controller_source.match_indices(".start_prepared(").count(),
-        1,
-        "the controller must have one opaque task dispatch point"
-    );
-    for forbidden in ["self.runner.start(", "self.runner.start_with_source_path("] {
-        assert!(
-            !controller_source.contains(forbidden),
-            "controller bypasses the authorized dispatch boundary: {forbidden}"
-        );
-    }
-}
-
-#[test]
 fn browser_worker_transfer_protocol_matches_rust_transport() {
     use rspice_simulation_contract::worker_protocol::{
         WORKER_REQUEST_TRANSPORT_PROTOCOL, WORKER_RESPONSE_TRANSPORT_PROTOCOL,

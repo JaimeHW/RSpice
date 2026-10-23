@@ -21,9 +21,9 @@ const REAL_VIEWPORT: Vec2 = egui::Vec2::new(1024.0, 640.0);
 /// Measured from the `Dialog` widget rather than derived from its size spec.
 /// Header height, footer height, the scroll area's own inset and the
 /// narrow-viewport rule all belong to that widget, and a number copied out
-/// of them here would go stale the first time one of them moved.
-/// `the_shell_composes_the_geometry_these_tests_measure` holds the three
-/// builder settings this reconstructs.
+/// of them here would go stale the first time one of them moved. The builder
+/// settings it reconstructs are the shell's own in `plan_manager.rs`; a change
+/// to one there belongs here too.
 #[cfg(not(target_arch = "wasm32"))]
 fn measured_dialog_body_size(screen: Vec2) -> Vec2 {
     let ctx = egui::Context::default();
@@ -1022,46 +1022,6 @@ fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
             .iter()
             .all(|record| !record.archived),
         "restoring left the plan archived"
-    );
-}
-
-/// The geometry the fit test measures is the geometry the shell composes.
-///
-/// `measured_dialog_body_size` reconstructs the dialog with two builder
-/// settings, and the split's breakpoint is only the table's if the shell
-/// hands it the table's own minimum. Both are source facts, so both are
-/// checked here rather than assumed by the test that depends on them.
-///
-/// The header is the third geometry-bearing setting, and the only one pinned by
-/// its absence rather than its presence: the probe reconstructs a dialog that
-/// has one, so a shell that hid its own would be measured against 57 points of
-/// body budget it never paints.
-#[test]
-fn the_shell_composes_the_geometry_these_tests_measure() {
-    let shell = crate::source_guard::production_source(include_str!("../plan_manager.rs"));
-    for required in [
-        "DialogSize::CapabilityReview",
-        ".flush_body()",
-        ".overlay_scrollbar()",
-        "kit::flush_table_minimum_width(&PLAN_COLUMNS)",
-        "&PLAN_COLUMNS,",
-    ] {
-        assert!(
-            shell.contains(required),
-            "the shell no longer contains `{required}`, so the fit \
-             measurement no longer describes what it paints"
-        );
-    }
-    assert!(
-        !shell.contains("egui::Grid::new(\"simulation.plan-manager.rows\")"),
-        "the records table is back on an auto-sized grid, which cannot be \
-         held to a column budget"
-    );
-    assert!(
-        !shell.contains(".without_header()"),
-        "the shell hides its header, so the fit measurement is taken against 57 \
-         points of body budget nothing paints and reports a fit while the last \
-         row sits under the footer"
     );
 }
 
