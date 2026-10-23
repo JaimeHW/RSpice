@@ -12,7 +12,9 @@ use std::time::Duration;
 
 use super::result_navigation::{RunOrigin, app_with_prepared_run};
 use super::*;
-use crate::state::command_catalog::{CommandPlatform, ShortcutBinding, ShortcutKind};
+use crate::state::command_catalog::{
+    CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutKind,
+};
 use crate::state::shortcuts::{
     ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence, ShortcutStroke,
     shortcut_context_precedence_rank,
@@ -20,7 +22,8 @@ use crate::state::shortcuts::{
 use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
-use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, CommandRegistry, command_registry};
+use crate::workbench::framework::command_registry::CommandFlags;
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
@@ -145,6 +148,73 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
         .collect()
 }
 
+/// One row per command the registry orders, read through the registry: the
+/// order, the id, the palette listing, the shortcut context, the bindings and
+/// the reserved chords come from its specs and its catalog, and the rest from
+/// the command its key resolves to.
+// Refactor scaffolding: deleted when the split completes.
+fn registry_command_rows() -> Vec<CommandRow> {
+    let no_project = no_project_app();
+    let project_open = project_open_app();
+    let results_retained = results_retained_app();
+    let registry = command_registry();
+    let catalog = CommandRegistry;
+    catalog
+        .commands()
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(index, key)| {
+            let id = key.as_str();
+            let spec = registry
+                .spec(key)
+                .unwrap_or_else(|| panic!("{id} is ordered but has no spec"));
+            let command = Command::from_stable_id(id)
+                .unwrap_or_else(|| panic!("{id} resolves to no command"));
+            let context = catalog
+                .context(key)
+                .unwrap_or_else(|| panic!("{id} has no shortcut context"));
+            let state = |app: &RSpiceApp| StateRow {
+                context_live: context.matches(app),
+                ..state_row(command, app)
+            };
+            CommandRow {
+                index,
+                id: spec.key.as_str(),
+                label: command.spec().label,
+                group: command.spec().group,
+                requires_open_project: command.requires_open_project(),
+                blocked_by_project_operation: command.blocked_by_project_operation(),
+                mutates_window_session: command.mutates_window_session(),
+                palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
+                source_editor_only: command.source_editor_only(),
+                navigates_source_language: command.navigates_source_language(),
+                repeatable: command.repeatable(),
+                commits_inspector_edit: command.commits_inspector_edit(),
+                edits_active_document: command_edits_schematic(command),
+                source_editor_request: command
+                    .source_editor_request()
+                    .map(|request| format!("{request:?}")),
+                context: context.label(),
+                context_suppressed_by_text_focus: context.suppressed_by_text_focus(),
+                bindings: catalog
+                    .default_bindings(key)
+                    .iter()
+                    .map(binding_row)
+                    .collect(),
+                primary_reserved_on: CommandPlatform::ALL
+                    .into_iter()
+                    .filter(|platform| catalog.primary_is_reserved_on(key, *platform))
+                    .map(CommandPlatform::label)
+                    .collect(),
+                no_project: state(&no_project),
+                project_open: state(&project_open),
+                results_retained: state(&results_retained),
+            }
+        })
+        .collect()
+}
+
 fn state_row(command: Command, app: &RSpiceApp) -> StateRow {
     StateRow {
         availability: command.availability(app).into(),
@@ -211,22 +281,16 @@ fn results_retained_app() -> RSpiceApp {
     app
 }
 
-/// The alias literals `from_stable_id` tests before its registry lookup.
+/// The alias literals the command registry tests before its key lookup:
+/// every string literal in the alias table, whose targets are commands.
 fn aliases_answered_by_from_stable_id() -> BTreeSet<&'static str> {
     const VOCABULARY: &str = include_str!("../vocabulary.rs");
     let body = VOCABULARY
-        .split_once("pub fn from_stable_id(")
-        .and_then(|(_, rest)| rest.split_once("COMMAND_REGISTRY"))
+        .split_once("const LEGACY_ALIASES: &[(&str, CommandKey)] = &[")
+        .and_then(|(_, rest)| rest.split_once("\n];"))
         .map(|(body, _)| body)
-        .expect("from_stable_id checks its aliases before it searches the registry");
-    body.split("id == \"")
-        .skip(1)
-        .map(|rest| {
-            rest.split_once('"')
-                .expect("an alias is a closed string literal")
-                .0
-        })
-        .collect()
+        .expect("the registry's aliases are one table in vocabulary.rs");
+    body.split('"').skip(1).step_by(2).collect()
 }
 
 #[test]
@@ -289,6 +353,65 @@ fn every_legacy_alias_resolves_to_a_registered_command_and_shadows_no_live_id() 
 #[test]
 fn legacy_rows_are_deterministic() {
     assert_eq!(legacy_command_rows(), legacy_command_rows());
+}
+
+// Refactor scaffolding: deleted when the split completes.
+#[test]
+fn registry_rows_equal_legacy_rows() {
+    let registry = registry_command_rows();
+    let legacy = legacy_command_rows();
+    assert_eq!(registry.len(), legacy.len());
+    for (registry, legacy) in registry.iter().zip(&legacy) {
+        assert_eq!(registry, legacy, "row {} ({})", legacy.index, legacy.id);
+    }
+}
+
+#[test]
+fn the_command_registry_validates() {
+    assert_eq!(command_registry().validate(), Ok(()));
+}
+
+/// A retired id is answered with the key of the command it names now, and
+/// is never itself a key the registry declares.
+#[test]
+fn the_registry_answers_every_legacy_alias_with_a_live_key() {
+    let registry = command_registry();
+    for &(alias, target) in LEGACY_ALIASES {
+        assert!(
+            registry.spec(CommandKey::new(alias)).is_none(),
+            "alias {alias} is also a key"
+        );
+        let resolved = registry
+            .resolve(alias)
+            .unwrap_or_else(|| panic!("alias {alias} resolves to nothing"));
+        assert_eq!(resolved.as_str(), target, "alias {alias}");
+        assert!(registry.spec(resolved).is_some(), "alias {alias}");
+    }
+}
+
+/// The shortcut resolver breaks equal-precedence ties by position in
+/// [`COMMAND_REGISTRY`]; the registry's order puts every command in the same
+/// position, so ties break the same way when the resolver reads it instead.
+// Refactor scaffolding: deleted when the split completes.
+#[test]
+fn the_registry_order_breaks_ties_as_the_command_registry_does() {
+    let order = command_registry().order();
+    assert_eq!(order.len(), COMMAND_REGISTRY.len());
+    for (index, (key, command)) in order.iter().zip(COMMAND_REGISTRY).enumerate() {
+        assert_eq!(*key, command.key(), "position {index} is {command:?}");
+    }
+    let position = |command: Command| {
+        order
+            .iter()
+            .position(|key| *key == command.key())
+            .unwrap_or_else(|| panic!("{command:?} is ordered"))
+    };
+    for (earlier, later) in [
+        (Command::Duplicate, Command::DuplicateLine),
+        (Command::PlaceWire, Command::ToggleLineComment),
+    ] {
+        assert!(position(earlier) < position(later), "{earlier:?}");
+    }
 }
 
 /// Two candidates of equal context precedence answering one chord are

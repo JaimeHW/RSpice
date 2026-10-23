@@ -17,6 +17,7 @@ use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
 use crate::state::{ComponentType, ModelsPage};
+use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage, Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -346,36 +347,7 @@ impl Command {
     /// Unknown IDs are intentionally retained by profile persistence but are
     /// never guessed into a command owned by this build.
     pub fn from_stable_id(id: &str) -> Option<Self> {
-        // `model-metadata-audit` shipped as the portable identity for this
-        // tab before the mockup-defined Qualification workspace replaced the
-        // temporary audit. Preserve imported shortcut profiles explicitly;
-        // do not make general command resolution fuzzy.
-        if id == "model-metadata-audit" {
-            return Some(Self::ModelsPage(ModelsPage::Qualification));
-        }
-        if id == "fit-canvas" {
-            return Some(Self::ZoomFit);
-        }
-        if id == "export-waveforms" {
-            return Some(Self::ExportWaveformsCsv);
-        }
-        // The cursor manager's slots became the linked-cursors toggle, so a
-        // shortcut bound to it keeps doing what the slots now do.
-        if id == "cursor-manager" || id == "visualization-cursor-manager" {
-            return Some(Self::ToggleLinkedCursors);
-        }
-        if id == "visualization-document-properties" {
-            return Some(Self::VisualizationDocumentProperties);
-        }
-        // The one check command became two; a shortcut bound to it keeps
-        // checking the cellview in front of the reader.
-        if id == "run-checks" {
-            return Some(Self::CheckCellview);
-        }
-        COMMAND_REGISTRY
-            .iter()
-            .copied()
-            .find(|command| command.stable_id() == id)
+        command_registry().resolve(id).and_then(legacy_command)
     }
 
     pub const fn spec(self) -> CommandSpec {
@@ -1125,6 +1097,22 @@ impl Command {
             Self::About => spec("about", "About RSpice", "Help"),
         }
     }
+
+    /// The command as the registry holds it.
+    fn registry_spec(self) -> command_registry::CommandSpec {
+        command_registry::CommandSpec {
+            key: self.key(),
+            flags: CommandFlags::NONE
+                .with(CommandFlags::PALETTE_VISIBLE, self.palette_visible())
+                .with(
+                    CommandFlags::PRIMARY_RESERVED_BY_BROWSER,
+                    self.primary_is_reserved_on(CommandPlatform::Browser),
+                ),
+            context: self.shortcut_context(),
+            bindings: self.shortcut_bindings(),
+            owner: self.owner(),
+        }
+    }
 }
 
 pub(in crate::workbench) const fn spec(
@@ -1448,12 +1436,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::Cancel,
 ];
 
-/// [`COMMAND_REGISTRY`] as the catalog a shortcut profile reads command
-/// facts through. A key names the registered command with that stable id.
-#[derive(Debug, Clone, Copy)]
-pub struct CommandRegistry;
-
-static COMMAND_KEYS: [CommandKey; COMMAND_REGISTRY.len()] = {
+/// [`COMMAND_REGISTRY`] as keys: the order the command registry lists every
+/// command in.
+static COMMAND_ORDER: [CommandKey; COMMAND_REGISTRY.len()] = {
     let mut keys = [CommandKey::new(""); COMMAND_REGISTRY.len()];
     let mut index = 0;
     while index < COMMAND_REGISTRY.len() {
@@ -1463,46 +1448,110 @@ static COMMAND_KEYS: [CommandKey; COMMAND_REGISTRY.len()] = {
     keys
 };
 
-fn registered(command: CommandKey) -> Option<Command> {
-    static BY_KEY: LazyLock<HashMap<CommandKey, Command>> = LazyLock::new(|| {
-        COMMAND_REGISTRY
-            .iter()
-            .map(|command| (command.key(), *command))
-            .collect()
+/// Ids older builds stored for commands that now answer to another, each with
+/// the key of the command it names now. Shortcut profiles those builds wrote
+/// keep their bindings; nothing else about resolution is fuzzy.
+const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
+    // `model-metadata-audit` shipped as the portable identity for this tab
+    // before the mockup-defined Qualification workspace replaced the
+    // temporary audit.
+    (
+        "model-metadata-audit",
+        Command::ModelsPage(ModelsPage::Qualification).key(),
+    ),
+    ("fit-canvas", Command::ZoomFit.key()),
+    ("export-waveforms", Command::ExportWaveformsCsv.key()),
+    // The cursor manager's slots became the linked-cursors toggle, so a
+    // shortcut bound to it keeps doing what the slots now do.
+    ("cursor-manager", Command::ToggleLinkedCursors.key()),
+    (
+        "visualization-cursor-manager",
+        Command::ToggleLinkedCursors.key(),
+    ),
+    (
+        "visualization-document-properties",
+        Command::VisualizationDocumentProperties.key(),
+    ),
+    // The one check command became two; a shortcut bound to it keeps
+    // checking the cellview in front of the reader.
+    ("run-checks", Command::CheckCellview.key()),
+];
+
+/// The registry of every command in [`COMMAND_REGISTRY`], built on first use
+/// and checked as it is built.
+pub(super) fn command_registry() -> &'static Registry {
+    static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
+        let registry = Registry::new(
+            &COMMAND_ORDER,
+            COMMAND_REGISTRY
+                .iter()
+                .map(|command| command.registry_spec())
+                .collect(),
+            LEGACY_ALIASES,
+        );
+        debug_assert_eq!(registry.validate(), Ok(()));
+        registry
     });
-    BY_KEY.get(&command).copied()
+    &REGISTRY
 }
+
+/// The command a registered key names. Every registered command is still
+/// declared by this enum, and this table is how a key reaches it.
+fn legacy_command(key: CommandKey) -> Option<Command> {
+    static BY_KEY: LazyLock<HashMap<CommandKey, Command>> = LazyLock::new(|| {
+        let mut commands = HashMap::with_capacity(COMMAND_REGISTRY.len());
+        for command in COMMAND_REGISTRY {
+            commands.entry(command.key()).or_insert(*command);
+        }
+        commands
+    });
+    BY_KEY.get(&key).copied()
+}
+
+/// The command registry as the catalog a shortcut profile reads command facts
+/// through.
+#[derive(Debug, Clone, Copy)]
+pub struct CommandRegistry;
 
 impl CommandCatalog for CommandRegistry {
     fn commands(&self) -> &[CommandKey] {
-        &COMMAND_KEYS
+        command_registry().order()
     }
 
     fn resolve(&self, id: &str) -> Option<CommandKey> {
-        Command::from_stable_id(id).map(Command::key)
+        command_registry().resolve(id)
     }
 
     fn context(&self, command: CommandKey) -> Option<ShortcutContext> {
-        registered(command).map(Command::shortcut_context)
+        command_registry().spec(command).map(|spec| spec.context)
     }
 
     fn default_bindings(&self, command: CommandKey) -> &'static [ShortcutBinding] {
-        match registered(command) {
-            Some(command) => command.shortcut_bindings(),
-            None => &[],
-        }
+        command_registry()
+            .spec(command)
+            .map_or(&[], |spec| spec.bindings)
     }
 
     fn primary_is_reserved_on(&self, command: CommandKey, platform: CommandPlatform) -> bool {
-        registered(command).is_some_and(|command| command.primary_is_reserved_on(platform))
+        platform.has_browser_reserved_primary()
+            && command_registry().spec(command).is_some_and(|spec| {
+                spec.flags
+                    .contains(CommandFlags::PRIMARY_RESERVED_BY_BROWSER)
+            })
     }
 }
 
-/// Searchable projection of [`COMMAND_REGISTRY`]. The command palette itself
+/// Searchable projection of the command registry. The command palette itself
 /// and context-only cancellation are intentionally not self-referential rows.
 pub fn command_catalog() -> impl Iterator<Item = Command> {
-    COMMAND_REGISTRY
+    let registry = command_registry();
+    registry
+        .order()
         .iter()
-        .copied()
-        .filter(|command| command.palette_visible())
+        .filter(move |key| {
+            registry
+                .spec(**key)
+                .is_some_and(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE))
+        })
+        .filter_map(|key| legacy_command(*key))
 }

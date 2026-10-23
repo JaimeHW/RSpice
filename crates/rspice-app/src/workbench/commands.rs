@@ -11,6 +11,7 @@ use crate::schematic::view::selection_transform::{
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::CommandOwner;
 use crate::workbench::framework::requests::{
     ClipboardText, FocusNavigatorSearch, FocusPlacementSearch,
 };
@@ -491,6 +492,255 @@ impl Command {
                     | Self::ToggleFocusMode
                     | Self::ResetLayout
             )
+    }
+
+    /// The part of the product that carries the command out: the slice whose
+    /// code its dispatch reaches. Commands that act on whichever document is
+    /// in front (edit, find and zoom) belong to the workbench.
+    const fn owner(self) -> CommandOwner {
+        match self {
+            Self::OpenWorkspace(_)
+            | Self::Exit
+            | Self::RepeatLastCommand
+            | Self::PreviousWorkspace
+            | Self::NextWorkspace
+            | Self::KeyboardShortcuts
+            | Self::HelpCenter
+            | Self::ReleaseNotes
+            | Self::MigrationGuide
+            | Self::SystemDiagnostics
+            | Self::SupportBundle
+            | Self::LegalPrivacy
+            | Self::About => CommandOwner::Shell,
+            Self::Undo
+            | Self::Redo
+            | Self::Cut
+            | Self::Copy
+            | Self::Paste
+            | Self::Duplicate
+            | Self::Delete
+            | Self::SelectAll
+            | Self::FindInDesign
+            | Self::ZoomIn
+            | Self::ZoomOut
+            | Self::ZoomFit
+            | Self::ZoomOneToOne
+            | Self::ZoomToSelection
+            | Self::ZoomBox
+            | Self::ResetActiveView
+            | Self::ToggleFullScreen
+            | Self::RevertActiveDocument
+            | Self::CloseActiveDocument
+            | Self::ToggleNavigator
+            | Self::ToggleInspector
+            | Self::ToggleConsole
+            | Self::OpenConsole
+            | Self::OpenProblems
+            | Self::OpenNotifications
+            | Self::ToggleConsoleMaximized
+            | Self::ClearConsole
+            | Self::ToggleFocusMode
+            | Self::ResetLayout
+            | Self::NewApplicationWindow
+            | Self::DetachDocument
+            | Self::MoveDocumentToWindow
+            | Self::ReattachDocument
+            | Self::ConsolidateWindows
+            | Self::MonitorRecovery
+            | Self::PreviousDocument
+            | Self::NextDocument
+            | Self::CloseOtherDocuments
+            | Self::CloseAllDocuments
+            | Self::WindowManager
+            | Self::CommandPalette
+            | Self::SpecialistToolBrowser
+            | Self::DesignSpecialistWorkspaces => CommandOwner::Framework,
+            Self::ProjectLauncher
+            | Self::RecentProjects
+            | Self::NewProject
+            | Self::OpenProject
+            | Self::Save
+            | Self::SaveAs
+            | Self::SaveAll
+            | Self::CloseProject
+            | Self::NewCell
+            | Self::NewView
+            | Self::OpenDocument
+            | Self::DesignManagement
+            | Self::RevisionHistory
+            | Self::CheckAndSave
+            | Self::ProjectPage(_) => CommandOwner::Project,
+            Self::SelectTool
+            | Self::PlaceInstance
+            | Self::PlaceWire
+            | Self::PlaceBus
+            | Self::PlaceBusTap
+            | Self::PlaceJunction
+            | Self::PlaceLabel
+            | Self::PlaceOffSheetConnector
+            | Self::PlaceProbe
+            | Self::PlacePin
+            | Self::PlaceText
+            | Self::PlaceShape
+            | Self::Place(_)
+            | Self::MoveSelection
+            | Self::StretchSelection
+            | Self::ArraySelection
+            | Self::ReplaceInstance
+            | Self::UpdateInstanceInterface
+            | Self::CreateHierarchy
+            | Self::ConnectivityManager
+            | Self::SelectionBulkEdit
+            | Self::RuleSetup
+            | Self::ReviewComments
+            | Self::SymbolPinTool
+            | Self::SymbolPolylineTool
+            | Self::SymbolRectangleTool
+            | Self::SymbolCircleTool
+            | Self::SymbolArcTool
+            | Self::SymbolPolygonTool
+            | Self::SymbolTextTool
+            | Self::SymbolRotatePin
+            | Self::SymbolMirrorPin
+            | Self::SymbolUpdatePinsFromContract
+            | Self::SymbolSave
+            | Self::EditSymbolInPlace
+            | Self::ExitSymbolInPlace
+            | Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
+            | Self::MirrorSelectionHorizontal
+            | Self::MirrorSelectionVertical
+            | Self::AlignSelectionLeft
+            | Self::AlignSelectionCenter
+            | Self::AlignSelectionRight
+            | Self::AlignSelectionTop
+            | Self::AlignSelectionMiddle
+            | Self::AlignSelectionBottom
+            | Self::DistributeSelectionHorizontal
+            | Self::DistributeSelectionVertical
+            | Self::SnapSelectionToGrid
+            | Self::JoinCollinearWires
+            | Self::Cancel
+            | Self::AscendHierarchy
+            | Self::DescendHierarchy
+            | Self::DescendHierarchyDirect
+            | Self::ShowInNetlist
+            | Self::CheckCellview
+            | Self::CheckDesign
+            | Self::ClearChecks
+            | Self::NextViolation
+            | Self::PreviousViolation
+            | Self::RenameSelection
+            | Self::ObjectProperties
+            | Self::FindReplace
+            | Self::FitSchematicContent
+            | Self::CycleGrid
+            | Self::GridSnapRouting
+            | Self::VisibilityOptions
+            | Self::EngineeringTableView
+            | Self::StimulusNewDefinition
+            | Self::StimulusDuplicateDefinition
+            | Self::StimulusDeleteDefinition
+            | Self::StimulusApplyDraft
+            | Self::StimulusRevertDraft
+            | Self::StimulusValidateLibrary
+            | Self::StimulusPlaceDefinition
+            | Self::StimulusShowAdopter => CommandOwner::Design,
+            Self::SheetProperties
+            | Self::SheetFormatManager
+            | Self::CustomSheetSizes
+            | Self::SheetDefaults
+            | Self::DrawingSheetLayers
+            | Self::NextSheet
+            | Self::PreviousSheet
+            | Self::NewSheet
+            | Self::DeleteSheet => CommandOwner::Sheets,
+            Self::RunSimulation
+            | Self::StopSimulation
+            | Self::JobsManager
+            | Self::PreflightChecks
+            | Self::ManageSimulationPlans
+            | Self::AddAnalysis
+            | Self::SimulationOptions
+            | Self::SimulationPage(_)
+            | Self::VerificationPage(_)
+            | Self::ConfigurationSets => CommandOwner::Simulate,
+            Self::ImportResultDataset
+            | Self::ExportWaveformsCsv
+            | Self::ClearResults
+            | Self::ToggleLinkedCursors
+            | Self::ToggleResultsSplit
+            | Self::DatasetManifestBrowser
+            | Self::OpenRunInResults
+            | Self::OpenProducingPlan
+            | Self::OpenTaskDeck
+            | Self::RevealProducerLog
+            | Self::CreateResultDocument
+            | Self::WaveformCalculator
+            | Self::ExpressionDiagnostics
+            | Self::CompareResultDatasets
+            | Self::MeasurementLibrary
+            | Self::FamilySlicing
+            | Self::ResultViewer(_)
+            | Self::EditSpecifications
+            | Self::AddVisualizationPane
+            | Self::VisualizationDocumentProperties => CommandOwner::Results,
+            Self::ModelsPage(_)
+            | Self::ModelBrowser
+            | Self::ModelCreateProjectCopy
+            | Self::ModelEditor
+            | Self::ModelCorrelation
+            | Self::ModelSaveRevision
+            | Self::ModelValidate
+            | Self::ModelRunQualificationTests
+            | Self::ModelCompareRelease
+            | Self::PdkSettings
+            | Self::RescanModelLibraries => CommandOwner::Models,
+            Self::NewVerilogADevice
+            | Self::OpenNetlist
+            | Self::ImportNetlist
+            | Self::ImportVerilogA
+            | Self::ExportNetlist(_)
+            | Self::GenerateNetlist
+            | Self::FindCodeDocument
+            | Self::ValidateCodeDocument
+            | Self::ManageSourceDocument
+            | Self::SourceLanguageTools
+            | Self::ToggleLineComment
+            | Self::IndentLines
+            | Self::OutdentLines
+            | Self::DuplicateLine
+            | Self::DeleteLine
+            | Self::MoveLineUp
+            | Self::MoveLineDown
+            | Self::GoToMatchingBracket
+            | Self::GoToLine
+            | Self::FormatDocument
+            | Self::FoldSelection
+            | Self::UnfoldAtCaret
+            | Self::FoldAll
+            | Self::UnfoldAll
+            | Self::GoToDefinition
+            | Self::FindReferences
+            | Self::RenameSymbol
+            | Self::CompareGeneratedRevisions
+            | Self::CompileVerilogA
+            | Self::VerilogABuildSettings
+            | Self::AutomationConsole => CommandOwner::Code,
+            Self::ExportSchematicSvg
+            | Self::PrintHardcopy
+            | Self::ExportActiveView
+            | Self::ReportAuthoring
+            | Self::SaveReportDocument
+            | Self::AddReportPage
+            | Self::ReportPageProperties => CommandOwner::Hardcopy,
+            Self::ExportPublicationSnapshot
+            | Self::LiveSession
+            | Self::PublishToWeb
+            | Self::AccountOrganization
+            | Self::License => CommandOwner::Cloud,
+            Self::Preferences | Self::WorkspaceLayouts => CommandOwner::Settings,
+        }
     }
 
     pub fn execute(self, app: &mut RSpiceApp) {
