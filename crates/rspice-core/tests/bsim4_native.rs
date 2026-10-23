@@ -1824,6 +1824,113 @@ fn rgatemod3_common_source_ac_matches_xyce710_and_ngspice46() {
     }
 }
 
+/// The bound on the real or imaginary part of an AC `v(out)` sample.
+#[derive(Clone, Copy)]
+enum PartTol {
+    /// `|got - ngspice| <= abs + rel * |ngspice|`.
+    AbsRel { abs: f64, rel: f64 },
+    /// `|got - ngspice| / |ngspice| < rel`.
+    Rel(f64),
+}
+
+impl PartTol {
+    fn assert(self, label: &str, part: &str, freq: f64, got: f64, expected: f64) {
+        let err = (got - expected).abs();
+        match self {
+            PartTol::AbsRel { abs, rel } => assert!(
+                err <= abs + rel * expected.abs(),
+                "{label} AC {part}(vout) at {freq:.3e} Hz: rspice={got:.9e} ngspice={expected:.9e} abs_err={err:.3e}"
+            ),
+            PartTol::Rel(rel) => {
+                let relative = err / expected.abs().max(1e-30);
+                assert!(
+                    relative < rel,
+                    "{label} AC {part}(vout) at {freq:.3e} Hz: rspice={got:.9e} ngspice={expected:.9e} rel={relative:.3e}"
+                );
+            }
+        }
+    }
+}
+
+/// ngspice-46's ACNQSMOD=0 `(real, imag)` of `v(out)` for each reference row;
+/// at 100 GHz the NQS answer must stay at least `min_delta` away from it.
+struct QsGuard {
+    reference: &'static [(f64, f64)],
+    min_delta: f64,
+}
+
+/// A common-source ACNQSMOD=1 AC sweep checked against ngspice-46 `v(out)`
+/// rows `(freq, real, imag, dB, phase)`.
+struct AcnqsCase {
+    label: &'static str,
+    deck: fn() -> String,
+    /// Internal nodes the deck must build, with why each exists.
+    hidden_nodes: &'static [(&'static str, &'static str)],
+    reference: &'static [(f64, f64, f64, f64, f64)],
+    real_tol: PartTol,
+    imag_tol: PartTol,
+    db_tol: f64,
+    phase_tol: f64,
+    qs: Option<QsGuard>,
+}
+
+fn assert_acnqs_ac(case: &AcnqsCase) {
+    let label = case.label;
+    let netlist = Netlist::parse(&(case.deck)()).expect("deck parses");
+    if !case.hidden_nodes.is_empty() {
+        let circuit = engine()
+            .build_circuit(&netlist)
+            .unwrap_or_else(|error| panic!("{label} deck builds natively: {error:?}"));
+        for &(node, why) in case.hidden_nodes {
+            assert!(circuit.get_node_by_name(node).is_some(), "{why}");
+        }
+    }
+    let freqs: Vec<f64> = case.reference.iter().map(|&(f, _, _, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    for (index, (&(freq, real_ref, imag_ref, db_ref, phase_ref), result)) in
+        case.reference.iter().zip(&results).enumerate()
+    {
+        let idx = result
+            .node_names
+            .iter()
+            .position(|n| n.eq_ignore_ascii_case("out"))
+            .expect("out in ac result");
+        let v = result.voltages[idx];
+        let db = 20.0 * v.norm().log10();
+        let phase = v.arg();
+        case.real_tol.assert(label, "real", freq, v.re, real_ref);
+        case.imag_tol.assert(label, "imag", freq, v.im, imag_ref);
+        assert!(
+            (db - db_ref).abs() < case.db_tol,
+            "{label} AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
+        );
+        assert!(
+            (phase - phase_ref).abs() < case.phase_tol,
+            "{label} AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
+        );
+        if let Some(qs) = &case.qs
+            && freq >= 1.0e11
+        {
+            let (qs_re, qs_im) = qs.reference[index];
+            let qs_delta = ((v.re - qs_re).powi(2) + (v.im - qs_im).powi(2)).sqrt();
+            assert!(
+                qs_delta > qs.min_delta,
+                "{label} must not silently degrade to QS at {freq:.3e} Hz: delta={qs_delta:.3e}"
+            );
+        }
+    }
+}
+
+/// The bounds the reduced gain-stage oracles without gate resistance share.
+const ACNQS_REAL_TOL: PartTol = PartTol::AbsRel {
+    abs: 5e-5,
+    rel: 5e-4,
+};
+const ACNQS_IMAG_TOL: PartTol = PartTol::AbsRel {
+    abs: 5e-7,
+    rel: 5e-4,
+};
+
 #[test]
 fn acnqsmod1_common_source_ac_matches_ngspice46() {
     // ngspice-46 reference for the same reduced BSIM4 gain stage as the
@@ -1831,50 +1938,24 @@ fn acnqsmod1_common_source_ac_matches_ngspice46() {
     // Xyce 7.10 binary accepts the selector but produced the same AC output
     // as `ACNQSMOD=0` for this deck, so Xyce is not used as the AC-NQS
     // physics oracle for this slice.
-    let deck = acnqsmod1_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (1.0e6, -3.702_25, 4.295_778e-5, 11.369_31, 3.141_581),
-        (1.0e7, -3.702_25, 4.295_778e-4, 11.369_31, 3.141_477),
-        (1.0e8, -3.702_24, 4.295_774e-3, 11.369_31, 3.140_432),
-        (1.0e9, -3.701_84, 4.295_381e-2, 11.368_93, 3.129_990),
-        (1.0e10, -3.661_32, 4.256_449e-1, 11.331_05, 3.025_858),
-        (1.0e11, -1.554_58, 2.232_057, 8.691_610, 2.179_155),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, real_ref, imag_ref, db_ref, phase_ref), result) in
-        ngspice_reference.iter().zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_err = (v.re - real_ref).abs();
-        let imag_err = (v.im - imag_ref).abs();
-        assert!(
-            real_err <= 5e-5 + 5e-4 * real_ref.abs(),
-            "ACNQSMOD=1 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
-            v.re
-        );
-        assert!(
-            imag_err <= 5e-7 + 5e-4 * imag_ref.abs(),
-            "ACNQSMOD=1 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-3,
-            "ACNQSMOD=1 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-4,
-            "ACNQSMOD=1 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-    }
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1",
+        deck: acnqsmod1_common_source_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (1.0e6, -3.702_25, 4.295_778e-5, 11.369_31, 3.141_581),
+            (1.0e7, -3.702_25, 4.295_778e-4, 11.369_31, 3.141_477),
+            (1.0e8, -3.702_24, 4.295_774e-3, 11.369_31, 3.140_432),
+            (1.0e9, -3.701_84, 4.295_381e-2, 11.368_93, 3.129_990),
+            (1.0e10, -3.661_32, 4.256_449e-1, 11.331_05, 3.025_858),
+            (1.0e11, -1.554_58, 2.232_057, 8.691_610, 2.179_155),
+        ],
+        real_tol: ACNQS_REAL_TOL,
+        imag_tol: ACNQS_IMAG_TOL,
+        db_tol: 2e-3,
+        phase_tol: 2e-4,
+        qs: None,
+    });
 }
 
 #[test]
@@ -1882,58 +1963,27 @@ fn acnqsmod1_trnqsmod1_common_source_ac_matches_ngspice46() {
     // ngspice-46 allows both NQS selectors on the same BSIM4 card. Its AC
     // load isolates the transient q node with a unit diagonal, so the AC
     // output matches the ACNQSMOD-only physics oracle for this deck.
-    let deck = acnqsmod1_trnqsmod1_common_source_ac_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let circuit = engine()
-        .build_circuit(&netlist)
-        .expect("ACNQSMOD=1 with TRNQSMOD=1 deck builds natively");
-    assert!(
-        circuit.get_node_by_name("m1.__charge").is_some(),
-        "TRNQSMOD=1 must still allocate the hidden charge-deficit node"
-    );
-
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (1.0e6, -3.702_25, 4.295_778e-5, 11.369_31, 3.141_581),
-        (1.0e7, -3.702_25, 4.295_778e-4, 11.369_31, 3.141_477),
-        (1.0e8, -3.702_24, 4.295_774e-3, 11.369_31, 3.140_432),
-        (1.0e9, -3.701_84, 4.295_381e-2, 11.368_93, 3.129_990),
-        (1.0e10, -3.661_32, 4.256_449e-1, 11.331_05, 3.025_858),
-        (1.0e11, -1.554_58, 2.232_057, 8.691_610, 2.179_155),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, real_ref, imag_ref, db_ref, phase_ref), result) in
-        ngspice_reference.iter().zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_err = (v.re - real_ref).abs();
-        let imag_err = (v.im - imag_ref).abs();
-        assert!(
-            real_err <= 5e-5 + 5e-4 * real_ref.abs(),
-            "ACNQSMOD=1 TRNQSMOD=1 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
-            v.re
-        );
-        assert!(
-            imag_err <= 5e-7 + 5e-4 * imag_ref.abs(),
-            "ACNQSMOD=1 TRNQSMOD=1 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-3,
-            "ACNQSMOD=1 TRNQSMOD=1 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-4,
-            "ACNQSMOD=1 TRNQSMOD=1 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-    }
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 TRNQSMOD=1",
+        deck: acnqsmod1_trnqsmod1_common_source_ac_deck,
+        hidden_nodes: &[(
+            "m1.__charge",
+            "TRNQSMOD=1 must still allocate the hidden charge-deficit node",
+        )],
+        reference: &[
+            (1.0e6, -3.702_25, 4.295_778e-5, 11.369_31, 3.141_581),
+            (1.0e7, -3.702_25, 4.295_778e-4, 11.369_31, 3.141_477),
+            (1.0e8, -3.702_24, 4.295_774e-3, 11.369_31, 3.140_432),
+            (1.0e9, -3.701_84, 4.295_381e-2, 11.368_93, 3.129_990),
+            (1.0e10, -3.661_32, 4.256_449e-1, 11.331_05, 3.025_858),
+            (1.0e11, -1.554_58, 2.232_057, 8.691_610, 2.179_155),
+        ],
+        real_tol: ACNQS_REAL_TOL,
+        imag_tol: ACNQS_IMAG_TOL,
+        db_tol: 2e-3,
+        phase_tol: 2e-4,
+        qs: None,
+    });
 }
 
 #[test]
@@ -1941,127 +1991,74 @@ fn acnqsmod1_rdsmod1_common_source_ac_matches_ngspice46() {
     // RDSMOD=1 forces intrinsic D'/S' nodes. The AC-NQS correction belongs on
     // those intrinsic rows while the external nonlinear resistance remains in
     // the real small-signal Jacobian. ngspice-46 is the physics oracle here.
-    let deck = acnqsmod1_rdsmod1_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (1.0e6, -2.870_21, 3.657_309e-5, 9.158_286, 3.141_580),
-        (1.0e7, -2.870_21, 3.657_309e-4, 9.158_286, 3.141_465),
-        (1.0e8, -2.870_21, 3.657_305e-3, 9.158_282, 3.140_318),
-        (1.0e9, -2.869_84, 3.656_919e-2, 9.157_847, 3.128_851),
-        (1.0e10, -2.832_79, 3.618_744e-1, 9.114_597, 3.014_536),
-        (1.0e11, -1.036_30, 1.766_660, 6.227_325, 2.101_295),
-    ];
-    let qs_reference: &[(f64, f64)] = &[
-        (-2.870_21, 3.648_074e-5),
-        (-2.870_21, 3.648_074e-4),
-        (-2.870_21, 3.648_070e-3),
-        (-2.869_84, 3.647_684e-2),
-        (-2.832_80, 3.609_426e-1),
-        (-1.041_42, 1.758_038),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for (((freq, real_ref, imag_ref, db_ref, phase_ref), (qs_re, qs_im)), result) in
-        ngspice_reference.iter().zip(qs_reference).zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_err = (v.re - real_ref).abs();
-        let imag_err = (v.im - imag_ref).abs();
-        assert!(
-            real_err <= 5e-5 + 5e-4 * real_ref.abs(),
-            "ACNQSMOD=1 RDSMOD=1 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
-            v.re
-        );
-        assert!(
-            imag_err <= 5e-7 + 5e-4 * imag_ref.abs(),
-            "ACNQSMOD=1 RDSMOD=1 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-3,
-            "ACNQSMOD=1 RDSMOD=1 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-4,
-            "ACNQSMOD=1 RDSMOD=1 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-        if *freq >= 1.0e11 {
-            let qs_delta = ((v.re - qs_re).powi(2) + (v.im - qs_im).powi(2)).sqrt();
-            assert!(
-                qs_delta > 5.0e-3,
-                "ACNQSMOD=1 RDSMOD=1 must not silently degrade to QS at {freq:.3e} Hz: delta={qs_delta:.3e}"
-            );
-        }
-    }
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 RDSMOD=1",
+        deck: acnqsmod1_rdsmod1_common_source_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (1.0e6, -2.870_21, 3.657_309e-5, 9.158_286, 3.141_580),
+            (1.0e7, -2.870_21, 3.657_309e-4, 9.158_286, 3.141_465),
+            (1.0e8, -2.870_21, 3.657_305e-3, 9.158_282, 3.140_318),
+            (1.0e9, -2.869_84, 3.656_919e-2, 9.157_847, 3.128_851),
+            (1.0e10, -2.832_79, 3.618_744e-1, 9.114_597, 3.014_536),
+            (1.0e11, -1.036_30, 1.766_660, 6.227_325, 2.101_295),
+        ],
+        real_tol: ACNQS_REAL_TOL,
+        imag_tol: ACNQS_IMAG_TOL,
+        db_tol: 2e-3,
+        phase_tol: 2e-4,
+        qs: Some(QsGuard {
+            reference: &[
+                (-2.870_21, 3.648_074e-5),
+                (-2.870_21, 3.648_074e-4),
+                (-2.870_21, 3.648_070e-3),
+                (-2.869_84, 3.647_684e-2),
+                (-2.832_80, 3.609_426e-1),
+                (-1.041_42, 1.758_038),
+            ],
+            min_delta: 5.0e-3,
+        }),
+    });
 }
 
 #[test]
 fn acnqsmod1_rdsmod1_rgatemod2_common_source_ac_matches_ngspice46() {
     // The native AC-NQS delta must compose with both intrinsic D'/S' nodes
     // from RDSMOD=1 and the bias-dependent RGATEMOD=2 gate branch.
-    let deck = acnqsmod1_rdsmod1_rgatemod2_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (1.0e6, 9.599_247e-3, 3.189_609e-3, -3.990_04e1, 3.207_995e-1),
-        (1.0e7, 1.063_020e-4, 3.499_864e-6, -7.946_45e1, 3.291_191e-2),
-        (1.0e8, 1.306_723e-6, 2.105_430e-9, -1.176_76e2, 1.611_227e-3),
-        (1.0e9, 2.556_080e-7, -3.726_09e-9, -1.318_48e2, -1.457_63e-2),
-        (
-            1.0e10,
-            2.397_881e-7,
-            -3.545_59e-8,
-            -1.323_10e2,
-            -1.468_00e-1,
-        ),
-        (
-            1.0e11,
-            7.860_173e-8,
-            -1.103_77e-7,
-            -1.373_61e2,
-            -9.519_84e-1,
-        ),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, real_ref, imag_ref, db_ref, phase_ref), result) in
-        ngspice_reference.iter().zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_err = (v.re - real_ref).abs();
-        let imag_err = (v.im - imag_ref).abs();
-        assert!(
-            real_err <= 5e-10 + 2e-3 * real_ref.abs(),
-            "ACNQSMOD=1 RDSMOD=1 RGATEMOD=2 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
-            v.re
-        );
-        assert!(
-            imag_err <= 5e-10 + 2e-3 * imag_ref.abs(),
-            "ACNQSMOD=1 RDSMOD=1 RGATEMOD=2 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-2,
-            "ACNQSMOD=1 RDSMOD=1 RGATEMOD=2 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-3,
-            "ACNQSMOD=1 RDSMOD=1 RGATEMOD=2 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-    }
+    let tol = PartTol::AbsRel {
+        abs: 5e-10,
+        rel: 2e-3,
+    };
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 RDSMOD=1 RGATEMOD=2",
+        deck: acnqsmod1_rdsmod1_rgatemod2_common_source_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (1.0e6, 9.599_247e-3, 3.189_609e-3, -3.990_04e1, 3.207_995e-1),
+            (1.0e7, 1.063_020e-4, 3.499_864e-6, -7.946_45e1, 3.291_191e-2),
+            (1.0e8, 1.306_723e-6, 2.105_430e-9, -1.176_76e2, 1.611_227e-3),
+            (1.0e9, 2.556_080e-7, -3.726_09e-9, -1.318_48e2, -1.457_63e-2),
+            (
+                1.0e10,
+                2.397_881e-7,
+                -3.545_59e-8,
+                -1.323_10e2,
+                -1.468_00e-1,
+            ),
+            (
+                1.0e11,
+                7.860_173e-8,
+                -1.103_77e-7,
+                -1.373_61e2,
+                -9.519_84e-1,
+            ),
+        ],
+        real_tol: tol,
+        imag_tol: tol,
+        db_tol: 2e-2,
+        phase_tol: 2e-3,
+        qs: None,
+    });
 }
 
 #[test]
@@ -2069,86 +2066,64 @@ fn acnqsmod1_rgatemod1_common_source_ac_matches_ngspice46() {
     // `RGATEMOD=1` is a linear GE-GP resistor with the AC-NQS intrinsic
     // rows stamped on GP in ngspice-46 `b4acld.c`. RSpice lowers the same
     // resistor in the builder, so ngspice is the tight physics oracle here.
-    let deck = acnqsmod1_rgatemod1_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (
-            1.0e6,
-            -3.579_280_95e-4,
-            3.641_152_23e-2,
-            -28.774_803_6,
-            1.580_626_09,
-        ),
-        (
-            1.0e7,
-            -3.368_808_27e-6,
-            3.641_500_96e-3,
-            -48.774_387_7,
-            1.571_721_44,
-        ),
-        (
-            1.0e8,
-            1.771_275_46e-7,
-            3.641_503_63e-4,
-            -68.774_384_0,
-            1.570_309_91,
-        ),
-        (
-            1.0e9,
-            2.125_837_51e-7,
-            3.641_421_67e-5,
-            -88.774_432_6,
-            1.564_958_46,
-        ),
-        (
-            1.0e10,
-            2.126_199_85e-7,
-            3.633_234_51e-6,
-            -108.779_284,
-            1.512_342_14,
-        ),
-        (
-            1.0e11,
-            1.849_686_27e-7,
-            2.922_043_24e-7,
-            -129.222_806,
-            1.006_456_84,
-        ),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, real_ref, imag_ref, db_ref, phase_ref), result) in
-        ngspice_reference.iter().zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_err = (v.re - real_ref).abs();
-        let imag_err = (v.im - imag_ref).abs();
-        assert!(
-            real_err <= 5e-10 + 3e-3 * real_ref.abs(),
-            "ACNQSMOD=1 RGATEMOD=1 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
-            v.re
-        );
-        assert!(
-            imag_err <= 5e-10 + 3e-3 * imag_ref.abs(),
-            "ACNQSMOD=1 RGATEMOD=1 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-2,
-            "ACNQSMOD=1 RGATEMOD=1 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-3,
-            "ACNQSMOD=1 RGATEMOD=1 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-    }
+    let tol = PartTol::AbsRel {
+        abs: 5e-10,
+        rel: 3e-3,
+    };
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 RGATEMOD=1",
+        deck: acnqsmod1_rgatemod1_common_source_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (
+                1.0e6,
+                -3.579_280_95e-4,
+                3.641_152_23e-2,
+                -28.774_803_6,
+                1.580_626_09,
+            ),
+            (
+                1.0e7,
+                -3.368_808_27e-6,
+                3.641_500_96e-3,
+                -48.774_387_7,
+                1.571_721_44,
+            ),
+            (
+                1.0e8,
+                1.771_275_46e-7,
+                3.641_503_63e-4,
+                -68.774_384_0,
+                1.570_309_91,
+            ),
+            (
+                1.0e9,
+                2.125_837_51e-7,
+                3.641_421_67e-5,
+                -88.774_432_6,
+                1.564_958_46,
+            ),
+            (
+                1.0e10,
+                2.126_199_85e-7,
+                3.633_234_51e-6,
+                -108.779_284,
+                1.512_342_14,
+            ),
+            (
+                1.0e11,
+                1.849_686_27e-7,
+                2.922_043_24e-7,
+                -129.222_806,
+                1.006_456_84,
+            ),
+        ],
+        real_tol: tol,
+        imag_tol: tol,
+        db_tol: 2e-2,
+        phase_tol: 2e-3,
+        qs: None,
+    });
 }
 
 #[test]
@@ -2158,50 +2133,28 @@ fn acnqsmod1_rgatemod2_common_source_ac_matches_ngspice46() {
     // that Rg and charge-deficit NQS are both selected, but still evaluates
     // this topology. Xyce 7.10 accepts the same deck but produces the
     // ACNQSMOD=0 RGATEMOD=2 output, so ngspice is the numerical oracle.
-    let deck = acnqsmod1_rgatemod2_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (1.0e6, 7.791_500e-3, 1.938_628e-3, -41.906_7, 2.438_614e-1),
-        (1.0e7, 8.273_123e-5, 2.040_029e-6, -81.644_0, 2.465_352e-2),
-        (1.0e8, 1.076_789e-6, 9.830_259e-10, -119.357, 9.129_233e-4),
-        (1.0e9, 2.597_115e-7, -3.651_06e-9, -131.709, -1.405_72e-2),
-        (1.0e10, 2.465_890e-7, -3.512_57e-8, -132.073, -1.414_94e-1),
-        (1.0e11, 8.301_734e-8, -1.182_70e-7, -136.803, -9.587_77e-1),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, real_ref, imag_ref, db_ref, phase_ref), result) in
-        ngspice_reference.iter().zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_err = (v.re - real_ref).abs();
-        let imag_err = (v.im - imag_ref).abs();
-        assert!(
-            real_err <= 5e-10 + 2e-3 * real_ref.abs(),
-            "ACNQSMOD=1 RGATEMOD=2 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
-            v.re
-        );
-        assert!(
-            imag_err <= 5e-10 + 2e-3 * imag_ref.abs(),
-            "ACNQSMOD=1 RGATEMOD=2 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-2,
-            "ACNQSMOD=1 RGATEMOD=2 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-3,
-            "ACNQSMOD=1 RGATEMOD=2 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-    }
+    let tol = PartTol::AbsRel {
+        abs: 5e-10,
+        rel: 2e-3,
+    };
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 RGATEMOD=2",
+        deck: acnqsmod1_rgatemod2_common_source_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (1.0e6, 7.791_500e-3, 1.938_628e-3, -41.906_7, 2.438_614e-1),
+            (1.0e7, 8.273_123e-5, 2.040_029e-6, -81.644_0, 2.465_352e-2),
+            (1.0e8, 1.076_789e-6, 9.830_259e-10, -119.357, 9.129_233e-4),
+            (1.0e9, 2.597_115e-7, -3.651_06e-9, -131.709, -1.405_72e-2),
+            (1.0e10, 2.465_890e-7, -3.512_57e-8, -132.073, -1.414_94e-1),
+            (1.0e11, 8.301_734e-8, -1.182_70e-7, -136.803, -9.587_77e-1),
+        ],
+        real_tol: tol,
+        imag_tol: tol,
+        db_tol: 2e-2,
+        phase_tol: 2e-3,
+        qs: None,
+    });
 }
 
 #[test]
@@ -2210,86 +2163,64 @@ fn acnqsmod1_rgatemod3_common_source_ac_matches_ngspice46() {
     // rows while keeping RGATEMOD=3 overlap charge on the middle-gate node.
     // Xyce 7.10 accepts ACNQSMOD but does not expose the AC-NQS delta for
     // this reduced deck, so ngspice is the numerical oracle.
-    let deck = acnqsmod1_rgatemod3_common_source_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (
-            1.0e6,
-            -3.579_272_44e-4,
-            3.641_152_34e-2,
-            -28.774_803_4,
-            1.580_626_06,
-        ),
-        (
-            1.0e7,
-            -3.367_953_06e-6,
-            3.641_501_07e-3,
-            -48.774_387_4,
-            1.571_721_21,
-        ),
-        (
-            1.0e8,
-            1.779_828_00e-7,
-            3.641_503_74e-4,
-            -68.774_383_7,
-            1.570_307_57,
-        ),
-        (
-            1.0e9,
-            2.134_390_50e-7,
-            3.641_422_22e-5,
-            -88.774_430_0,
-            1.564_934_97,
-        ),
-        (
-            1.0e10,
-            2.134_796_80e-7,
-            3.633_278_22e-6,
-            -108.779_059,
-            1.512_107_04,
-        ),
-        (
-            1.0e11,
-            1.861_488_84e-7,
-            2.924_245_47e-7,
-            -129.202_273,
-            1.003_919_78,
-        ),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, real_ref, imag_ref, db_ref, phase_ref), result) in
-        ngspice_reference.iter().zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_err = (v.re - real_ref).abs();
-        let imag_err = (v.im - imag_ref).abs();
-        assert!(
-            real_err <= 5e-10 + 3e-3 * real_ref.abs(),
-            "ACNQSMOD=1 RGATEMOD=3 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} abs_err={real_err:.3e}",
-            v.re
-        );
-        assert!(
-            imag_err <= 5e-10 + 3e-3 * imag_ref.abs(),
-            "ACNQSMOD=1 RGATEMOD=3 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} abs_err={imag_err:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-2,
-            "ACNQSMOD=1 RGATEMOD=3 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-3,
-            "ACNQSMOD=1 RGATEMOD=3 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-    }
+    let tol = PartTol::AbsRel {
+        abs: 5e-10,
+        rel: 3e-3,
+    };
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 RGATEMOD=3",
+        deck: acnqsmod1_rgatemod3_common_source_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (
+                1.0e6,
+                -3.579_272_44e-4,
+                3.641_152_34e-2,
+                -28.774_803_4,
+                1.580_626_06,
+            ),
+            (
+                1.0e7,
+                -3.367_953_06e-6,
+                3.641_501_07e-3,
+                -48.774_387_4,
+                1.571_721_21,
+            ),
+            (
+                1.0e8,
+                1.779_828_00e-7,
+                3.641_503_74e-4,
+                -68.774_383_7,
+                1.570_307_57,
+            ),
+            (
+                1.0e9,
+                2.134_390_50e-7,
+                3.641_422_22e-5,
+                -88.774_430_0,
+                1.564_934_97,
+            ),
+            (
+                1.0e10,
+                2.134_796_80e-7,
+                3.633_278_22e-6,
+                -108.779_059,
+                1.512_107_04,
+            ),
+            (
+                1.0e11,
+                1.861_488_84e-7,
+                2.924_245_47e-7,
+                -129.202_273,
+                1.003_919_78,
+            ),
+        ],
+        real_tol: tol,
+        imag_tol: tol,
+        db_tol: 2e-2,
+        phase_tol: 2e-3,
+        qs: None,
+    });
 }
 
 #[test]
@@ -2347,130 +2278,68 @@ fn acnqsmod1_pole_zero_response_matches_native_topologies() {
 fn acnqsmod1_rbodymod1_ac_matches_ngspice46() {
     // AC-NQS belongs on the intrinsic D'/G/S'/body-prime rows while the
     // RBODYMOD=1 junction capacitances remain routed through dbody/sbody.
-    let deck = acnqsmod1_rbodymod1_high_resistance_common_source_ac_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (1.0e6, -6.305_46e-2, 1.466_701e-6, -2.400_57e1, 3.141_569),
-        (1.0e7, -6.305_46e-2, 1.466_701e-5, -2.400_57e1, 3.141_360),
-        (1.0e8, -6.305_44e-2, 1.466_666e-4, -2.400_57e1, 3.139_267),
-        (1.0e9, -6.303_52e-2, 1.463_333e-3, -2.400_60e1, 3.118_382),
-        (1.0e10, -6.246_49e-2, 1.390_416e-2, -2.387_73e1, 2.922_572),
-        (1.0e11, -4.716_48e-2, 1.345_290e-1, -1.692_02e1, 1.907_999),
-    ];
-    let qs_reference: &[(f64, f64)] = &[
-        (-6.305_464_522_572_059e-2, 1.466_560_146_708_436e-6),
-        (-6.305_464_323_451_500e-2, 1.466_559_800_179_500e-5),
-        (-6.305_444_418_162_238e-2, 1.466_525_160_795_036e-4),
-        (-6.303_518_930_650_295e-2, 1.463_190_960_354_446e-3),
-        (-6.245_988_548_165_470e-2, 1.390_243_926_406_921e-2),
-        (-4.670_179_795_137_225e-2, 1.343_934_147_655_109e-1),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for (((freq, real_ref, imag_ref, db_ref, phase_ref), (qs_re, qs_im)), result) in
-        ngspice_reference.iter().zip(qs_reference).zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_rel = (v.re - real_ref).abs() / real_ref.abs().max(1e-30);
-        let imag_rel = (v.im - imag_ref).abs() / imag_ref.abs().max(1e-30);
-        assert!(
-            real_rel < 1e-4,
-            "ACNQSMOD=1 RBODYMOD=1 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} rel={real_rel:.3e}",
-            v.re
-        );
-        assert!(
-            imag_rel < 1e-4,
-            "ACNQSMOD=1 RBODYMOD=1 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} rel={imag_rel:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-3,
-            "ACNQSMOD=1 RBODYMOD=1 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-4,
-            "ACNQSMOD=1 RBODYMOD=1 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-        if *freq >= 1.0e11 {
-            let qs_delta = ((v.re - qs_re).powi(2) + (v.im - qs_im).powi(2)).sqrt();
-            assert!(
-                qs_delta > 1.0e-4,
-                "ACNQSMOD=1 RBODYMOD=1 must not silently degrade to QS at {freq:.3e} Hz: delta={qs_delta:.3e}"
-            );
-        }
-    }
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 RBODYMOD=1",
+        deck: acnqsmod1_rbodymod1_high_resistance_common_source_ac_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (1.0e6, -6.305_46e-2, 1.466_701e-6, -2.400_57e1, 3.141_569),
+            (1.0e7, -6.305_46e-2, 1.466_701e-5, -2.400_57e1, 3.141_360),
+            (1.0e8, -6.305_44e-2, 1.466_666e-4, -2.400_57e1, 3.139_267),
+            (1.0e9, -6.303_52e-2, 1.463_333e-3, -2.400_60e1, 3.118_382),
+            (1.0e10, -6.246_49e-2, 1.390_416e-2, -2.387_73e1, 2.922_572),
+            (1.0e11, -4.716_48e-2, 1.345_290e-1, -1.692_02e1, 1.907_999),
+        ],
+        real_tol: PartTol::Rel(1e-4),
+        imag_tol: PartTol::Rel(1e-4),
+        db_tol: 2e-3,
+        phase_tol: 2e-4,
+        qs: Some(QsGuard {
+            reference: &[
+                (-6.305_464_522_572_059e-2, 1.466_560_146_708_436e-6),
+                (-6.305_464_323_451_500e-2, 1.466_559_800_179_500e-5),
+                (-6.305_444_418_162_238e-2, 1.466_525_160_795_036e-4),
+                (-6.303_518_930_650_295e-2, 1.463_190_960_354_446e-3),
+                (-6.245_988_548_165_470e-2, 1.390_243_926_406_921e-2),
+                (-4.670_179_795_137_225e-2, 1.343_934_147_655_109e-1),
+            ],
+            min_delta: 1.0e-4,
+        }),
+    });
 }
 
 #[test]
 fn acnqsmod1_rbodymod2_ac_matches_ngspice46() {
     // Same AC-NQS/RBODY composition as RBODYMOD=1, with ngspice's
     // geometry-scaled substrate-resistance selector.
-    let deck = acnqsmod1_rbodymod2_common_source_ac_deck();
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let ngspice_reference: &[(f64, f64, f64, f64, f64)] = &[
-        (1.0e6, -6.305_46e-2, 1.461_074e-6, -2.400_57e1, 3.141_569),
-        (1.0e7, -6.305_46e-2, 1.461_074e-5, -2.400_57e1, 3.141_361),
-        (1.0e8, -6.305_46e-2, 1.461_074e-4, -2.400_56e1, 3.139_276),
-        (1.0e9, -6.305_14e-2, 1.461_067e-3, -2.400_38e1, 3.118_424),
-        (1.0e10, -6.272_65e-2, 1.460_308e-2, -2.382_18e1, 2.912_861),
-        (1.0e11, -3.191_96e-2, 1.388_416e-1, -1.692_59e1, 1.796_769),
-    ];
-    let qs_reference: &[(f64, f64)] = &[
-        (-6.305_46e-2, 1.460_933e-6),
-        (-6.305_46e-2, 1.460_933e-5),
-        (-6.305_46e-2, 1.460_933e-4),
-        (-6.305_13e-2, 1.460_925e-3),
-        (-6.272_11e-2, 1.460_140e-2),
-        (-3.147_60e-2, 1.385_873e-1),
-    ];
-    let freqs: Vec<f64> = ngspice_reference.iter().map(|&(f, _, _, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for (((freq, real_ref, imag_ref, db_ref, phase_ref), (qs_re, qs_im)), result) in
-        ngspice_reference.iter().zip(qs_reference).zip(&results)
-    {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let phase = v.arg();
-        let real_rel = (v.re - real_ref).abs() / real_ref.abs().max(1e-30);
-        let imag_rel = (v.im - imag_ref).abs() / imag_ref.abs().max(1e-30);
-        assert!(
-            real_rel < 1e-4,
-            "ACNQSMOD=1 RBODYMOD=2 AC real(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={real_ref:.9e} rel={real_rel:.3e}",
-            v.re
-        );
-        assert!(
-            imag_rel < 1e-4,
-            "ACNQSMOD=1 RBODYMOD=2 AC imag(vout) at {freq:.3e} Hz: rspice={:.9e} ngspice={imag_ref:.9e} rel={imag_rel:.3e}",
-            v.im
-        );
-        assert!(
-            (db - db_ref).abs() < 2e-3,
-            "ACNQSMOD=1 RBODYMOD=2 AC dB(vout) at {freq:.3e} Hz: rspice={db:.9e} ngspice={db_ref:.9e}"
-        );
-        assert!(
-            (phase - phase_ref).abs() < 2e-4,
-            "ACNQSMOD=1 RBODYMOD=2 AC phase(vout) at {freq:.3e} Hz: rspice={phase:.9e} ngspice={phase_ref:.9e}"
-        );
-        if *freq >= 1.0e11 {
-            let qs_delta = ((v.re - qs_re).powi(2) + (v.im - qs_im).powi(2)).sqrt();
-            assert!(
-                qs_delta > 1.0e-4,
-                "ACNQSMOD=1 RBODYMOD=2 must not silently degrade to QS at {freq:.3e} Hz: delta={qs_delta:.3e}"
-            );
-        }
-    }
+    assert_acnqs_ac(&AcnqsCase {
+        label: "ACNQSMOD=1 RBODYMOD=2",
+        deck: acnqsmod1_rbodymod2_common_source_ac_deck,
+        hidden_nodes: &[],
+        reference: &[
+            (1.0e6, -6.305_46e-2, 1.461_074e-6, -2.400_57e1, 3.141_569),
+            (1.0e7, -6.305_46e-2, 1.461_074e-5, -2.400_57e1, 3.141_361),
+            (1.0e8, -6.305_46e-2, 1.461_074e-4, -2.400_56e1, 3.139_276),
+            (1.0e9, -6.305_14e-2, 1.461_067e-3, -2.400_38e1, 3.118_424),
+            (1.0e10, -6.272_65e-2, 1.460_308e-2, -2.382_18e1, 2.912_861),
+            (1.0e11, -3.191_96e-2, 1.388_416e-1, -1.692_59e1, 1.796_769),
+        ],
+        real_tol: PartTol::Rel(1e-4),
+        imag_tol: PartTol::Rel(1e-4),
+        db_tol: 2e-3,
+        phase_tol: 2e-4,
+        qs: Some(QsGuard {
+            reference: &[
+                (-6.305_46e-2, 1.460_933e-6),
+                (-6.305_46e-2, 1.460_933e-5),
+                (-6.305_46e-2, 1.460_933e-4),
+                (-6.305_13e-2, 1.460_925e-3),
+                (-6.272_11e-2, 1.460_140e-2),
+                (-3.147_60e-2, 1.385_873e-1),
+            ],
+            min_delta: 1.0e-4,
+        }),
+    });
 }
 
 #[test]
