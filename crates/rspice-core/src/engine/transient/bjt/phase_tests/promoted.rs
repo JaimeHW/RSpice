@@ -17,7 +17,7 @@ fn promoted_circuit(bjt: &Bjt) -> crate::CircuitData {
         device.assign_mna_rbi_branch(circuit.allocate_branch_named("irbi"));
     }
     device.resolve_mna_rbi_branch(circuit.num_nodes());
-    circuit.bjts.add(device);
+    circuit.bjts.add(Box::new(device));
     circuit
 }
 

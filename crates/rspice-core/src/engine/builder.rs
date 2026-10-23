@@ -5528,6 +5528,35 @@ fn add_connect_rule_converter(
     Ok(())
 }
 
+/// A BJT built in a frame of its own and handed back boxed.
+///
+/// `elaborate_circuit`'s frame stays on the stack under all the work an
+/// elaboration does, the flattener's first parse of the foundation library
+/// and a B-source's expression included, and an unoptimized build gives every
+/// by-value temporary in it a slot of its own. A `Bjt` is about 15 KiB, and
+/// building one by value there took eight such slots, a third of the frame.
+#[inline(never)]
+fn boxed_bjt(
+    bjt_type: crate::netlist::BjtType,
+    name: String,
+    collector: crate::NodeId,
+    base: crate::NodeId,
+    emitter: crate::NodeId,
+) -> Box<crate::device::Bjt> {
+    Box::new(match bjt_type {
+        crate::netlist::BjtType::Npn => crate::device::Bjt::new_npn(name, collector, base, emitter),
+        crate::netlist::BjtType::Pnp => crate::device::Bjt::new_pnp(name, collector, base, emitter),
+    })
+}
+
+/// One by-value builder step on a boxed device, taken in a frame of its own
+/// for the reason [`boxed_bjt`] gives.
+#[inline(never)]
+fn rebuilt<T>(mut device: Box<T>, step: impl FnOnce(T) -> T) -> Box<T> {
+    *device = step(*device);
+    device
+}
+
 impl Engine {
     /// Effective resistor parameters after parameter substitution.
     ///
@@ -7588,20 +7617,14 @@ impl Engine {
                         }
                     }
 
-                    let mut bjt = match resolved_bjt_type {
-                        crate::netlist::BjtType::Npn => crate::device::Bjt::new_npn(
-                            element.name.clone(),
-                            collector,
-                            base,
-                            emitter,
-                        ),
-                        crate::netlist::BjtType::Pnp => crate::device::Bjt::new_pnp(
-                            element.name.clone(),
-                            collector,
-                            base,
-                            emitter,
-                        ),
-                    };
+                    // Boxed, and rebuilt in frames of their own (`boxed_bjt`).
+                    let mut bjt = boxed_bjt(
+                        resolved_bjt_type,
+                        element.name.clone(),
+                        collector,
+                        base,
+                        emitter,
+                    );
 
                     // Look up model and apply parameters
                     if let Some(device_model) = model_def {
@@ -7629,7 +7652,7 @@ impl Engine {
                                 || !device_model.real_vector_expr_params.is_empty()
                                 || !device_model.integer_vector_params.is_empty(),
                         )?;
-                        bjt = bjt.with_params(&params_map);
+                        bjt = rebuilt(bjt, |bjt| bjt.with_params(&params_map));
                     } else if let Some(card) = foundation_model {
                         let mut effective_params = card.params.clone();
                         let effective_tnom = effective_native_bjt_tnom_celsius(
@@ -7644,7 +7667,7 @@ impl Engine {
                             .or_insert(effective_tnom);
                         // Fallback to embedded transistor library models when no
                         // explicit .MODEL card is present in the parsed netlist.
-                        bjt = bjt.with_params(&effective_params);
+                        bjt = rebuilt(bjt, |bjt| bjt.with_params(&effective_params));
                         // Once per run, not once per elaboration of it.
                         let line = format!(
                             "{} uses the built-in transistor model '{}': the deck defines no \
@@ -7677,7 +7700,7 @@ impl Engine {
                         self.config.spice_dialect,
                         instance_params,
                     )?;
-                    bjt = bjt.with_instance_params(instance_params);
+                    bjt = rebuilt(bjt, |bjt| bjt.with_instance_params(instance_params));
                     bjt.set_xyce_compatibility(self.config.spice_dialect == SpiceDialect::Xyce);
                     bjt.set_ngspice_compatibility(
                         self.config.spice_dialect == SpiceDialect::Ngspice,

@@ -188,8 +188,12 @@ impl Bjts {
         Self::default()
     }
 
-    pub(crate) fn add(&mut self, bjt: Bjt) {
-        self.devices.push(bjt);
+    /// Add a BJT as the elaboration builds it, boxed, moving it out here
+    /// rather than in the caller's frame (see the engine builder's
+    /// `boxed_bjt`).
+    #[inline(never)]
+    pub(crate) fn add(&mut self, bjt: Box<Bjt>) {
+        self.devices.push(*bjt);
     }
 
     pub(crate) fn len(&self) -> usize {

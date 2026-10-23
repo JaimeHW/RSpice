@@ -141,7 +141,7 @@ fn charge_event_solves_native_coupled_bjt_charge_and_held_transport_history() {
         let ports: Vec<_> = bjt.charge_storage_nodes().into_iter().flatten().collect();
         // The incoming endpoint comes from the existing DC analysis owner,
         // including its independently solved private nodes and RBI current.
-        circuit.bjts.add(bjt);
+        circuit.bjts.add(Box::new(bjt));
         let mut engine = crate::Engine::default();
         let convergence = &mut engine.config.convergence_config;
         convergence.gmin_target = 0.0;

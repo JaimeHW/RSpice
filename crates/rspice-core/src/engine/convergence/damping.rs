@@ -617,12 +617,12 @@ mod tests {
         let collector = circuit.get_or_create_node("c");
         let base = circuit.get_or_create_node("b");
         let mut bjt = crate::device::Bjt::new_npn("q1".to_string(), collector, base, 0);
-        circuit.bjts.add(bjt.clone());
+        circuit.bjts.add(Box::new(bjt.clone()));
         assert!(Engine::junction_limiting_owns_newton_steps(&circuit));
 
         bjt.set_voltage_limiting_enabled(false);
         circuit.bjts.devices.clear();
-        circuit.bjts.add(bjt);
+        circuit.bjts.add(Box::new(bjt));
         assert!(!Engine::junction_limiting_owns_newton_steps(&circuit));
     }
 }
