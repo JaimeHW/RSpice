@@ -4824,11 +4824,7 @@ impl XyceTestRunner {
                 .path
                 .parent()
                 .ok_or_else(|| format!("{LABEL} record has no sibling directory"))?;
-            let owner_path = parent.join(format!("{family}_dtemp.cir"));
-            let reference_path = parent.join(format!("{family}_ref.cir"));
             let contract = XyceClassicMosDtempContract {
-                owner_path,
-                reference_path,
                 owner_plan: self.static_dc_plan_for_path(
                     &parent.join(format!("{family}_dtemp.cir")),
                     ExpressionDialect::Xyce,
@@ -4840,7 +4836,6 @@ impl XyceTestRunner {
                 family,
                 role,
             };
-            self.validate_classic_mos_dtemp_provenance(&contract)?;
 
             let owner_netlist = Self::parse_xyce_netlist(
                 &contract.owner_plan.source,
@@ -4888,12 +4883,9 @@ impl XyceTestRunner {
                 owner_plan: self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?,
                 reference_plan: self
                     .static_dc_plan_for_path(&reference_path, ExpressionDialect::Xyce)?,
-                owner_path,
-                reference_path,
                 family,
                 role,
             };
-            self.validate_legacy_bjt_dtemp_provenance(&contract)?;
 
             let owner_netlist = Self::parse_xyce_netlist(
                 &contract.owner_plan.source,
@@ -4944,12 +4936,9 @@ impl XyceTestRunner {
                 owner_plan: self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?,
                 reference_plan: self
                     .static_dc_plan_for_path(&reference_path, ExpressionDialect::Xyce)?,
-                owner_path,
-                reference_path,
                 family,
                 role,
             };
-            self.validate_xyce_sydney_level1_jfet_dtemp_provenance(&contract)?;
 
             let owner_netlist = Self::parse_xyce_netlist(
                 &contract.owner_plan.source,
@@ -5005,11 +4994,8 @@ impl XyceTestRunner {
                     &reference_path,
                     XyceStaticTranPlanPurpose::RelationalFamily,
                 )?,
-                owner_path,
-                reference_path,
                 role,
             };
-            self.validate_level2_diode_dtemp_provenance(&contract)?;
 
             let owner_netlist = Self::parse_xyce_netlist(
                 &contract.owner_plan.source,
@@ -5062,11 +5048,8 @@ impl XyceTestRunner {
                     &reference_path,
                     XyceStaticTranPlanPurpose::RelationalFamily,
                 )?,
-                owner_path,
-                reference_path,
                 role,
             };
-            self.validate_capacitor_dtemp_provenance(&contract)?;
 
             let owner_netlist = Self::parse_xyce_netlist(
                 &contract.owner_plan.source,

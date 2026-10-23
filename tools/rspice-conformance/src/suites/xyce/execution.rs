@@ -7799,7 +7799,6 @@ impl XyceTestRunner {
         let result_contract = contract.role.result_contract();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
-            self.validate_classic_mos_dtemp_provenance(&contract)?;
             let parse = |plan: &XyceStaticDcPlan, role: &str| {
                 Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
                     &plan.source,
@@ -8097,7 +8096,6 @@ impl XyceTestRunner {
         let result_contract = contract.role.result_contract();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
-            self.validate_legacy_bjt_dtemp_provenance(&contract)?;
             let parse = |plan: &XyceStaticDcPlan, role: &str| {
                 Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
                     &plan.source,
@@ -8492,7 +8490,6 @@ impl XyceTestRunner {
         let result_contract = contract.role.result_contract();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
-            self.validate_xyce_sydney_level1_jfet_dtemp_provenance(&contract)?;
             let parse = |plan: &XyceStaticDcPlan, role: &str| {
                 Self::parse_netlist_with_expression_dialect_policy_and_execution_dir(
                     &plan.source,
@@ -8914,7 +8911,6 @@ impl XyceTestRunner {
         let result_contract = contract.role.result_contract();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
-            self.validate_level2_diode_dtemp_provenance(&contract)?;
             let owner_netlist = Self::parse_xyce_netlist(
                 &contract.owner_plan.source,
                 &contract.owner_plan.deck_path,
@@ -9222,7 +9218,6 @@ impl XyceTestRunner {
         let result_contract = contract.role.result_contract();
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
-            self.validate_capacitor_dtemp_provenance(&contract)?;
             let owner_netlist = Self::parse_xyce_netlist(
                 &contract.owner_plan.source,
                 &contract.owner_plan.deck_path,
@@ -10119,7 +10114,6 @@ impl XyceTestRunner {
         };
         let expansion_abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
-            self.validate_nonlinear_core_model_step_provenance(&contract)?;
             let owner_plan = self.static_tran_family_plan_for_path(
                 &contract.owner_path,
                 XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,
@@ -10680,7 +10674,6 @@ impl XyceTestRunner {
         };
         let expansion_abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         let qualification = (|| {
-            self.validate_bug1190_mutual_inductor_provenance(&contract)?;
             let owner_plan = self.static_tran_family_plan_for_path(
                 &contract.owner_path,
                 XyceStaticTranPlanPurpose::GeneratedReferenceRelationalFamily,

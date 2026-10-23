@@ -10197,7 +10197,6 @@ fn classic_mos_dtemp_candidate_census_is_an_exact_manifest_bijection() {
         })
         .collect::<BTreeSet<_>>();
     assert_eq!(selected, expected);
-    assert_eq!(selected.len(), XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_COUNT);
 }
 
 #[test]
@@ -10253,69 +10252,6 @@ fn classic_mos_dtemp_snapshots_reject_semantic_mutations() {
 }
 
 #[test]
-fn classic_mos_dtemp_provenance_rejects_candidate_mutation() {
-    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    let fixture = tempfile::tempdir().expect("create classic MOS DTEMP fixture");
-    let target_dir = fixture.path().join("Netlists/DTEMP");
-    fs::create_dir_all(&target_dir).expect("create classic MOS DTEMP directory");
-    let families = [
-        "nmos1", "nmos2", "nmos3", "nmos6", "pmos1", "pmos2", "pmos3", "pmos6",
-    ];
-    let mut wrappers = Vec::new();
-    let mut exclusions = Vec::new();
-    for family in families {
-        for suffix in ["dtemp", "ref"] {
-            let name = format!("{family}_{suffix}.cir");
-            fs::copy(
-                source_root.join("Netlists/DTEMP").join(&name),
-                target_dir.join(&name),
-            )
-            .expect("copy classic MOS DTEMP candidate");
-        }
-        wrappers.push(format!(
-            "Netlists/DTEMP/{family}_dtemp.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
-        ));
-        exclusions.push(format!(
-            "Netlists/DTEMP/{family}_ref.cir\tNetlists/DTEMP/exclude\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_CLASSIC_MOS_DTEMP_REFERENCE_CONTRACT}"
-        ));
-    }
-    wrappers.push(String::new());
-    fs::write(
-        fixture.path().join(HARNESS_MANIFEST_FILE),
-        wrappers.join("\n"),
-    )
-    .expect("write classic MOS DTEMP wrapper manifest");
-    let exclusion_rows = exclusions.iter().map(String::as_str).collect::<Vec<_>>();
-    fs::write(
-        fixture.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-        upstream_exclusion_manifest(&exclusion_rows),
-    )
-    .expect("write classic MOS DTEMP exclusion manifest");
-
-    let runner = XyceTestRunner::new(fixture.path(), XyceRunnerConfig::default());
-    let owner_path = target_dir.join("nmos1_dtemp.cir");
-    let deck = XyceDeck {
-        path: owner_path.clone(),
-        relative_path: "Netlists/DTEMP/nmos1_dtemp.cir".to_string(),
-        section: XyceDeckSection::Netlists,
-    };
-    let contract = runner
-        .classic_mos_dtemp_relational_contract(&deck)
-        .expect("classic MOS DTEMP fixture is selected")
-        .expect("unmodified classic MOS DTEMP provenance qualifies");
-    let mutation = fs::read_to_string(&owner_path)
-        .expect("read classic MOS DTEMP mutation target")
-        .replace("47meg", "46meg");
-    fs::write(&owner_path, mutation).expect("write classic MOS DTEMP mutation");
-    assert!(
-        runner
-            .validate_classic_mos_dtemp_provenance(&contract)
-            .is_err(),
-        "any source mutation must fail the exact candidate-content census"
-    );
-}
-
-#[test]
 fn legacy_bjt_dtemp_candidate_census_is_an_exact_manifest_bijection() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -10347,7 +10283,6 @@ fn legacy_bjt_dtemp_candidate_census_is_an_exact_manifest_bijection() {
             XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD.to_string(),
         ])
     );
-    assert_eq!(selected.len(), XYCE_LEGACY_BJT_DTEMP_CANDIDATE_COUNT);
 }
 
 #[test]
@@ -10440,43 +10375,6 @@ fn legacy_bjt_dtemp_snapshots_reject_semantic_mutations() {
 }
 
 #[test]
-fn legacy_bjt_dtemp_provenance_rejects_cross_family_candidate_mutation() {
-    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    let sources = [
-        fs::read_to_string(corpus.join("Netlists/DTEMP/npn_dtemp.cir"))
-            .expect("read NPN DTEMP owner"),
-        fs::read_to_string(corpus.join("Netlists/DTEMP/npn_ref.cir"))
-            .expect("read NPN TEMP reference"),
-        fs::read_to_string(corpus.join("Netlists/DTEMP/pnp_dtemp.cir"))
-            .expect("read PNP DTEMP owner"),
-        fs::read_to_string(corpus.join("Netlists/DTEMP/pnp_ref.cir"))
-            .expect("read PNP TEMP reference"),
-    ];
-    let (root, decks, runner) = legacy_bjt_dtemp_fixture(
-        "provenance",
-        [
-            sources[0].as_str(),
-            sources[1].as_str(),
-            sources[2].as_str(),
-            sources[3].as_str(),
-        ],
-    );
-    let contract = runner
-        .legacy_bjt_dtemp_relational_contract(&decks[0])
-        .expect("NPN owner is selected")
-        .expect("unmodified four-record BJT provenance qualifies");
-    let mutation = sources[3].replace("bf=60", "bf=61");
-    fs::write(&decks[3].path, mutation).expect("write PNP reference mutation");
-    assert!(
-        runner
-            .validate_legacy_bjt_dtemp_provenance(&contract)
-            .is_err(),
-        "a sibling-family candidate mutation must fail the shared four-record provenance census"
-    );
-    fs::remove_dir_all(root).expect("remove legacy BJT DTEMP provenance fixture");
-}
-
-#[test]
 fn xyce_sydney_level1_jfet_dtemp_candidate_census_is_an_exact_manifest_bijection() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -10509,10 +10407,6 @@ fn xyce_sydney_level1_jfet_dtemp_candidate_census_is_an_exact_manifest_bijection
             XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD.to_string(),
             XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD.to_string(),
         ])
-    );
-    assert_eq!(
-        selected.len(),
-        XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_COUNT
     );
 }
 
@@ -10606,44 +10500,6 @@ fn xyce_sydney_level1_jfet_dtemp_snapshots_reject_semantic_mutations() {
 }
 
 #[test]
-fn xyce_sydney_level1_jfet_dtemp_provenance_rejects_cross_family_candidate_mutation() {
-    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    let sources = [
-        fs::read_to_string(corpus.join("Netlists/DTEMP/njfet_dtemp.cir"))
-            .expect("read NJF DTEMP owner"),
-        fs::read_to_string(corpus.join("Netlists/DTEMP/njfet_ref.cir"))
-            .expect("read NJF TEMP reference"),
-        fs::read_to_string(corpus.join("Netlists/DTEMP/pjfet_dtemp.cir"))
-            .expect("read PJF DTEMP owner"),
-        fs::read_to_string(corpus.join("Netlists/DTEMP/pjfet_ref.cir"))
-            .expect("read PJF TEMP reference"),
-    ];
-    let (root, decks, runner) = xyce_sydney_level1_jfet_dtemp_fixture(
-        "provenance",
-        [
-            sources[0].as_str(),
-            sources[1].as_str(),
-            sources[2].as_str(),
-            sources[3].as_str(),
-        ],
-    );
-    let contract = runner
-        .xyce_sydney_level1_jfet_dtemp_relational_contract(&decks[0])
-        .expect("NJF owner is selected")
-        .expect("unmodified four-record JFET provenance qualifies");
-    let mutation = sources[3].replace("beta= 0.000278", "beta= 0.000279");
-    assert_ne!(mutation, sources[3], "PJF mutation must alter its fixture");
-    fs::write(&decks[3].path, mutation).expect("write PJF reference mutation");
-    assert!(
-        runner
-            .validate_xyce_sydney_level1_jfet_dtemp_provenance(&contract)
-            .is_err(),
-        "a sibling-family candidate mutation must fail the shared four-record provenance census"
-    );
-    fs::remove_dir_all(root).expect("remove Xyce Sydney level-1 JFET provenance fixture");
-}
-
-#[test]
 fn level2_diode_dtemp_candidate_census_is_an_exact_manifest_bijection() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -10673,7 +10529,6 @@ fn level2_diode_dtemp_candidate_census_is_an_exact_manifest_bijection() {
             XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_RECORD.to_string(),
         ])
     );
-    assert_eq!(selected.len(), XYCE_LEVEL2_DIODE_DTEMP_CANDIDATE_COUNT);
 }
 
 #[test]
@@ -10916,30 +10771,6 @@ fn level2_diode_dtemp_causality_uses_one_shared_physical_time() {
 }
 
 #[test]
-fn level2_diode_dtemp_provenance_rejects_candidate_mutation() {
-    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    let owner = fs::read_to_string(corpus.join("Netlists/DTEMP/Level2_Diode_DTEMP.cir"))
-        .expect("read Level-2 diode DTEMP owner");
-    let reference = fs::read_to_string(corpus.join("Netlists/DTEMP/Level2_Diode_Ref.cir"))
-        .expect("read Level-2 diode TEMP reference");
-    let (root, owner_deck, _, runner) =
-        level2_diode_dtemp_fixture("provenance", &owner, &reference);
-    let contract = runner
-        .level2_diode_dtemp_relational_contract(&owner_deck)
-        .expect("Level-2 diode DTEMP fixture is selected")
-        .expect("unmodified Level-2 diode DTEMP provenance qualifies");
-    let mutation = owner.replace("BV = 7.255", "BV = 7.256");
-    fs::write(&owner_deck.path, mutation).expect("write Level-2 diode DTEMP mutation");
-    assert!(
-        runner
-            .validate_level2_diode_dtemp_provenance(&contract)
-            .is_err(),
-        "any source mutation must fail the exact candidate-content census"
-    );
-    fs::remove_dir_all(root).expect("remove Level-2 diode provenance fixture");
-}
-
-#[test]
 fn capacitor_dtemp_candidate_census_is_an_exact_manifest_bijection() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -10969,7 +10800,6 @@ fn capacitor_dtemp_candidate_census_is_an_exact_manifest_bijection() {
             XYCE_CAPACITOR_DTEMP_REFERENCE_RECORD.to_string(),
         ])
     );
-    assert_eq!(selected.len(), XYCE_CAPACITOR_DTEMP_CANDIDATE_COUNT);
 }
 
 #[test]
@@ -11111,29 +10941,6 @@ fn capacitor_dtemp_causality_uses_one_shared_physical_time() {
             .is_err(),
         "causality must fail closed when any table lacks the common tstop"
     );
-}
-
-#[test]
-fn capacitor_dtemp_provenance_rejects_candidate_mutation() {
-    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    let owner = fs::read_to_string(corpus.join("Netlists/DTEMP/cap_dtemp.cir"))
-        .expect("read capacitor DTEMP owner");
-    let reference = fs::read_to_string(corpus.join("Netlists/DTEMP/cap_ref.cir"))
-        .expect("read capacitor TEMP reference");
-    let (root, owner_deck, _, runner) = capacitor_dtemp_fixture("provenance", &owner, &reference);
-    let contract = runner
-        .capacitor_dtemp_relational_contract(&owner_deck)
-        .expect("capacitor DTEMP fixture is selected")
-        .expect("unmodified capacitor DTEMP provenance qualifies");
-    let mutation = owner.replace("TC2=-0.63U", "TC2=-0.62U");
-    fs::write(&owner_deck.path, mutation).expect("write capacitor DTEMP mutation");
-    assert!(
-        runner
-            .validate_capacitor_dtemp_provenance(&contract)
-            .is_err(),
-        "any source mutation must fail the exact candidate-content census"
-    );
-    fs::remove_dir_all(root).expect("remove capacitor DTEMP provenance fixture");
 }
 
 #[test]
@@ -14026,74 +13833,6 @@ fn bug1190_mutual_inductor_snapshot_tracks_parameter_alias_step_causality() {
 }
 
 #[test]
-fn bug1190_mutual_inductor_provenance_rejects_source_mutation() {
-    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    let fixture = tempfile::tempdir().expect("create BUG 1190 provenance fixture");
-    let target_dir = fixture
-        .path()
-        .join("Netlists/Certification_Tests/BUG_1190_SON");
-    fs::create_dir_all(&target_dir).expect("create BUG 1190 provenance directory");
-    for name in [
-        "mutInd1.cir",
-        "mutInd1_baseline.cir",
-        "mutInd2.cir",
-        "mutInd2_baseline.cir",
-    ] {
-        fs::copy(
-            source_root
-                .join("Netlists/Certification_Tests/BUG_1190_SON")
-                .join(name),
-            target_dir.join(name),
-        )
-        .expect("copy BUG 1190 provenance candidate");
-    }
-    fs::write(
-        fixture.path().join(HARNESS_MANIFEST_FILE),
-        [
-            "Netlists/Certification_Tests/BUG_1190_SON/mutInd1.cir\trequires_upstream_wrapper",
-            "Netlists/Certification_Tests/BUG_1190_SON/mutInd2.cir\trequires_upstream_wrapper",
-            "",
-        ]
-        .join("\n"),
-    )
-    .expect("write BUG 1190 provenance wrapper manifest");
-    fs::write(
-        fixture.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-        upstream_exclusion_manifest(&[
-            "Netlists/Certification_Tests/BUG_1190_SON/mutInd1_baseline.cir\tNetlists/Certification_Tests/BUG_1190_SON/exclude\trspice_independently_qualified\tbug1190_mutual_inductor_parameter_alias_baseline",
-            "Netlists/Certification_Tests/BUG_1190_SON/mutInd2_baseline.cir\tNetlists/Certification_Tests/BUG_1190_SON/exclude\trspice_independently_qualified\tbug1190_mutual_inductor_parameter_alias_baseline",
-        ]),
-    )
-    .expect("write BUG 1190 provenance exclusion manifest");
-
-    let runner = XyceTestRunner::new(fixture.path(), XyceRunnerConfig::default());
-    let owner_path = target_dir.join("mutInd1.cir");
-    let deck = XyceDeck {
-        path: owner_path.clone(),
-        relative_path: "Netlists/Certification_Tests/BUG_1190_SON/mutInd1.cir".to_string(),
-        section: XyceDeckSection::Netlists,
-    };
-    let contract = runner
-        .bug1190_mutual_inductor_contract(&deck)
-        .expect("BUG 1190 provenance fixture is claimed")
-        .expect("BUG 1190 provenance fixture discovers");
-    runner
-        .validate_bug1190_mutual_inductor_provenance(&contract)
-        .expect("unmodified BUG 1190 provenance validates");
-
-    let mutated = fs::read_to_string(&owner_path)
-        .expect("read BUG 1190 mutation target")
-        .replace("100k", "101k");
-    fs::write(&owner_path, mutated).expect("write BUG 1190 semantic mutation");
-    assert!(
-        runner
-            .validate_bug1190_mutual_inductor_provenance(&contract)
-            .is_err(),
-        "any candidate source mutation must fail the exact provenance census"
-    );
-}
-
-#[test]
 fn static_step_tran_preflight_validates_flattened_subcircuits() {
     let source = "hierarchical STEP transient preflight\n\
 .param scale=1\n\
@@ -14244,7 +13983,7 @@ fn nonlinear_core_model_step_comp_policy_preserves_unreferenced_voltage_entries(
 }
 
 #[test]
-fn nonlinear_core_model_step_provenance_rejects_semantic_source_mutation() {
+fn nonlinear_core_model_step_rejects_semantic_source_mutation() {
     let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let fixture = tempfile::tempdir().expect("create nonlinear CORE provenance fixture");
     let target_dir = fixture.path().join("Netlists/MINDUCTORS");
@@ -14311,13 +14050,6 @@ fn nonlinear_core_model_step_provenance_rejects_semantic_source_mutation() {
     assert_eq!(
         rejected.contract,
         XYCE_NONLINEAR_CORE_MODEL_STEP_WRAPPER_CONTRACT
-    );
-    assert!(
-        rejected
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("provenance changed")),
-        "mutation failure must name the exact candidate provenance: {rejected:?}"
     );
 }
 

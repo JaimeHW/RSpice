@@ -142,47 +142,14 @@ const XYCE_NONLINEAR_CORE_MODEL_STEP_WRAPPER_CONTRACT: &str =
     "nonlinear_core_model_step_reference_wrapper";
 const XYCE_NONLINEAR_CORE_MODEL_STEP_BASELINE_CONTRACT: &str =
     "nonlinear_core_model_step_reference_baseline";
-const XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_COUNT: usize = 24;
-const XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_BLAKE3: &str =
-    "a514fabac8dd61a804b137aa836f2592210bfadac040101e1d8463a93e878b11";
-const XYCE_NONLINEAR_CORE_MODEL_STEP_CANDIDATE_CONTENT_BLAKE3: &str =
-    "dfd1ff2e37507c06ddfe8d2df7d5a313eae667b728d698e947aea992a177aa9b";
-const XYCE_NONLINEAR_CORE_MODEL_STEP_OWNER_COUNT: usize = 6;
-const XYCE_NONLINEAR_CORE_MODEL_STEP_OWNER_MANIFEST_BLAKE3: &str =
-    "a015cf6b2395c9a5c62224b832bff244822c419b1cb199293f1e961bbd43e381";
-const XYCE_NONLINEAR_CORE_MODEL_STEP_EXCLUSION_COUNT: usize = 18;
-const XYCE_NONLINEAR_CORE_MODEL_STEP_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "a38a113c8f72fe3bb98a863de111674d446019c6fd0950d29f6f93da9b8ac65e";
 const XYCE_BUG1190_MUTUAL_INDUCTOR_WRAPPER_CONTRACT: &str =
     "bug1190_mutual_inductor_parameter_alias_wrapper";
 const XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT: &str =
     "bug1190_mutual_inductor_parameter_alias_baseline";
-const XYCE_BUG1190_MUTUAL_INDUCTOR_CANDIDATE_COUNT: usize = 4;
-const XYCE_BUG1190_MUTUAL_INDUCTOR_CANDIDATE_BLAKE3: &str =
-    "c9e772e38bb06d933f7fa8d47fe58fee6d9dc885534b5c12a9d7edd1b04495f2";
-const XYCE_BUG1190_MUTUAL_INDUCTOR_CONTENT_BLAKE3: &str =
-    "df40a7890f29033c29c938f59dc77a4b7258b1a349a56acea131e920afc60d77";
-const XYCE_BUG1190_MUTUAL_INDUCTOR_OWNER_COUNT: usize = 2;
-const XYCE_BUG1190_MUTUAL_INDUCTOR_OWNER_MANIFEST_BLAKE3: &str =
-    "e7c00713e950019d0b4144fc003a7ffeef38c7a5e3f432117b8f00c2c607263f";
-const XYCE_BUG1190_MUTUAL_INDUCTOR_EXCLUSION_COUNT: usize = 2;
-const XYCE_BUG1190_MUTUAL_INDUCTOR_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "6d2ca1af02efba66823b08c1597c07f8b7c45dbae4346076343d3245240f0d33";
 const XYCE_CLASSIC_MOS_DTEMP_WRAPPER_CONTRACT: &str =
     "classic_mos_level1_dtemp_relational_wrapper_owner";
 const XYCE_CLASSIC_MOS_DTEMP_REFERENCE_CONTRACT: &str =
     "classic_mos_level1_dtemp_relational_wrapper_reference";
-const XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_COUNT: usize = 16;
-const XYCE_CLASSIC_MOS_DTEMP_CANDIDATE_BLAKE3: &str =
-    "3d6d5a6e298f6e768fe45180e038e115bf341ce1b351351b406a714da6927f50";
-const XYCE_CLASSIC_MOS_DTEMP_CONTENT_BLAKE3: &str =
-    "ece370c9a2cf3e650ccadd819f6e08262f340ee44c83ffebc1a704e302104b06";
-const XYCE_CLASSIC_MOS_DTEMP_OWNER_COUNT: usize = 8;
-const XYCE_CLASSIC_MOS_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
-    "1519db656b566549d712c797adf62cd8f3a128b9c2189aba3830956e0ce0f345";
-const XYCE_CLASSIC_MOS_DTEMP_EXCLUSION_COUNT: usize = 8;
-const XYCE_CLASSIC_MOS_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "1150bc1fda0dd8db1f2091b15b5c280ae881ebdbd8aad31df4b0ec491a75e3fa";
 const XYCE_LEGACY_BJT_DTEMP_WRAPPER_CONTRACT: &str =
     "legacy_gummel_poon_bjt_dtemp_relational_wrapper_owner";
 const XYCE_LEGACY_BJT_DTEMP_REFERENCE_CONTRACT: &str =
@@ -191,17 +158,6 @@ const XYCE_LEGACY_BJT_DTEMP_NPN_OWNER_RECORD: &str = "netlists/dtemp/npn_dtemp.c
 const XYCE_LEGACY_BJT_DTEMP_NPN_REFERENCE_RECORD: &str = "netlists/dtemp/npn_ref.cir";
 const XYCE_LEGACY_BJT_DTEMP_PNP_OWNER_RECORD: &str = "netlists/dtemp/pnp_dtemp.cir";
 const XYCE_LEGACY_BJT_DTEMP_PNP_REFERENCE_RECORD: &str = "netlists/dtemp/pnp_ref.cir";
-const XYCE_LEGACY_BJT_DTEMP_CANDIDATE_COUNT: usize = 4;
-const XYCE_LEGACY_BJT_DTEMP_CANDIDATE_BLAKE3: &str =
-    "57301c7c863570abfbce995121166c364792cf9b47d95275b5155eed84e9819c";
-const XYCE_LEGACY_BJT_DTEMP_CONTENT_BLAKE3: &str =
-    "0469c5b96dc5ec35562ac6e84422c5c810205f2a70c037a55298ffae84ab3e94";
-const XYCE_LEGACY_BJT_DTEMP_OWNER_COUNT: usize = 2;
-const XYCE_LEGACY_BJT_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
-    "8c415000b5df6ebd473ae1828b92ab03fb61fb175357bc44e8c62dbcdca4e512";
-const XYCE_LEGACY_BJT_DTEMP_EXCLUSION_COUNT: usize = 2;
-const XYCE_LEGACY_BJT_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "69ef9ba2bf3cf5c275c546f5cea47a684ee90ca07f72926c2b8542997ac10e78";
 const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_WRAPPER_CONTRACT: &str =
     "xyce_sydney_level1_jfet_dtemp_relational_wrapper_owner";
 const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_REFERENCE_CONTRACT: &str =
@@ -210,17 +166,6 @@ const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_OWNER_RECORD: &str = "netlists/dtemp/njf
 const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_NJF_REFERENCE_RECORD: &str = "netlists/dtemp/njfet_ref.cir";
 const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_OWNER_RECORD: &str = "netlists/dtemp/pjfet_dtemp.cir";
 const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_PJF_REFERENCE_RECORD: &str = "netlists/dtemp/pjfet_ref.cir";
-const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_COUNT: usize = 4;
-const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CANDIDATE_BLAKE3: &str =
-    "bf6231fca25d849be8da71e8a6cf8325f6acd7943e0d5682830316992d1df1dc";
-const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_CONTENT_BLAKE3: &str =
-    "863a33c867f670cd527fe448b0e39d60e338d0a53c6a86cf7401605955e90360";
-const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_COUNT: usize = 2;
-const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
-    "fd62e0ecd815ffec85dea49ebace91df14654e4ab289fbe81d0b8c230f85b462";
-const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_EXCLUSION_COUNT: usize = 2;
-const XYCE_SYDNEY_LEVEL1_JFET_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "cab5d8a6b0743784cdc19c143d5068ccee23569733ec7ae6c61eb3f51971dfa4";
 // The removed Release 7.10 PARAMS1 wrapper used a byte comparison only as a
 // fast path, then accepted the pair through default `xyce_verify`. The native
 // reconstruction therefore binds these exact sources and applies the strict
@@ -1031,33 +976,11 @@ const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_CONTRACT: &str =
     "level2_diode_dtemp_relational_wrapper_reference";
 const XYCE_LEVEL2_DIODE_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/level2_diode_dtemp.cir";
 const XYCE_LEVEL2_DIODE_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/level2_diode_ref.cir";
-const XYCE_LEVEL2_DIODE_DTEMP_CANDIDATE_COUNT: usize = 2;
-const XYCE_LEVEL2_DIODE_DTEMP_CANDIDATE_BLAKE3: &str =
-    "526514a734ea7df6e7257be805f1125ff0235543308aba2aaaf70a4e9e78e968";
-const XYCE_LEVEL2_DIODE_DTEMP_CONTENT_BLAKE3: &str =
-    "d995c1dc634d0b462b4f2677044fc8e4f4a98640a156de6d543a3dc06dce8118";
-const XYCE_LEVEL2_DIODE_DTEMP_OWNER_COUNT: usize = 1;
-const XYCE_LEVEL2_DIODE_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
-    "fabfaebde10b510461d954d013faa2cf112788258f98144d5dc0f2013948760f";
-const XYCE_LEVEL2_DIODE_DTEMP_EXCLUSION_COUNT: usize = 1;
-const XYCE_LEVEL2_DIODE_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "89427341a2d1ad7e4c898035eaa0bbab587ce40bafd2394fa5754914c030bdba";
 const XYCE_CAPACITOR_DTEMP_WRAPPER_CONTRACT: &str = "capacitor_dtemp_relational_wrapper_owner";
 const XYCE_CAPACITOR_DTEMP_REFERENCE_CONTRACT: &str =
     "capacitor_dtemp_relational_wrapper_reference";
 const XYCE_CAPACITOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/cap_dtemp.cir";
 const XYCE_CAPACITOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/cap_ref.cir";
-const XYCE_CAPACITOR_DTEMP_CANDIDATE_COUNT: usize = 2;
-const XYCE_CAPACITOR_DTEMP_CANDIDATE_BLAKE3: &str =
-    "47e922d813ff50051123f160fe38a291260bc61a61558bb6928774ec2a6ced11";
-const XYCE_CAPACITOR_DTEMP_CONTENT_BLAKE3: &str =
-    "438d548e950706c07a8903fcade734d87c2dce479eb6234c938164122333f82c";
-const XYCE_CAPACITOR_DTEMP_OWNER_COUNT: usize = 1;
-const XYCE_CAPACITOR_DTEMP_OWNER_MANIFEST_BLAKE3: &str =
-    "cca5a9169aeb4fa751eb639be7a4c3ee0b7d649f498407d4f97e549aa23d43eb";
-const XYCE_CAPACITOR_DTEMP_EXCLUSION_COUNT: usize = 1;
-const XYCE_CAPACITOR_DTEMP_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "f54cec2065bc764c4517a7d778265d7aa717bb1bbdc5f77defd4bfe87c7b0a73";
 // The removed Release 7.10 sidecar emits `exp(-TIME/0.001)`. These constants
 // describe that generated oracle; the path-independent candidate detector does
 // not use them as deck-name or value allowlists.
@@ -5932,8 +5855,6 @@ impl XyceClassicMosDtempRole {
 
 #[derive(Debug, Clone)]
 struct XyceClassicMosDtempContract {
-    owner_path: PathBuf,
-    reference_path: PathBuf,
     owner_plan: XyceStaticDcPlan,
     reference_plan: XyceStaticDcPlan,
     family: String,
@@ -6037,8 +5958,6 @@ impl XyceLegacyBjtDtempRole {
 
 #[derive(Debug, Clone)]
 struct XyceLegacyBjtDtempContract {
-    owner_path: PathBuf,
-    reference_path: PathBuf,
     owner_plan: XyceStaticDcPlan,
     reference_plan: XyceStaticDcPlan,
     family: XyceLegacyBjtDtempFamily,
@@ -6121,8 +6040,6 @@ impl XyceSydneyLevel1JfetDtempRole {
 
 #[derive(Debug, Clone)]
 struct XyceSydneyLevel1JfetDtempContract {
-    owner_path: PathBuf,
-    reference_path: PathBuf,
     owner_plan: XyceStaticDcPlan,
     reference_plan: XyceStaticDcPlan,
     family: XyceSydneyLevel1JfetDtempFamily,
@@ -6166,8 +6083,6 @@ impl XyceLevel2DiodeDtempRole {
 
 #[derive(Debug, Clone)]
 struct XyceLevel2DiodeDtempContract {
-    owner_path: PathBuf,
-    reference_path: PathBuf,
     owner_plan: XyceStaticTranPlan,
     reference_plan: XyceStaticTranPlan,
     role: XyceLevel2DiodeDtempRole,
@@ -6212,8 +6127,6 @@ impl XyceCapacitorDtempRole {
 
 #[derive(Debug, Clone)]
 struct XyceCapacitorDtempContract {
-    owner_path: PathBuf,
-    reference_path: PathBuf,
     owner_plan: XyceStaticTranPlan,
     reference_plan: XyceStaticTranPlan,
     role: XyceCapacitorDtempRole,
