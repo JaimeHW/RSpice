@@ -1,9 +1,11 @@
-//! The data files XSPICE code models read, sealed into a prepared run.
+//! The data files XSPICE code models and `.VEC` cards read, sealed into a
+//! prepared run.
 //!
 //! Preparation finds every code-model parameter that names a data file
-//! (`d_source` `input_file`, `d_vcd` `file`, the tables' `file`, ...) through
-//! the engine's own parameter resolution, reads each file once under the run's
-//! resource limits and binds its digest into the run's identity. The bytes
+//! (`d_source` `input_file`, `d_vcd` `file`, the tables' `file`, ...) and
+//! every `.VEC` card's vector file through the engine's own parameter
+//! resolution, reads each file once under the run's resource limits and
+//! binds its digest into the run's identity. The bytes
 //! travel with the run, and whatever solves it registers them under the path
 //! the model asks for, so the solve reads exactly what preparation read, with
 //! or without a file system.
@@ -382,12 +384,13 @@ fn discover(
     limits: ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<CodeModelDataFile>, PreparationError> {
-    // A code model is named by its type on a `.model` card, so a deck that
-    // spells no such type needs no parse.
+    // A code model is named by its type on a `.model` card, and a vector
+    // file by a `.vec` card, so a deck that spells neither needs no parse.
     let lower = deck.to_ascii_lowercase();
-    if !data_file_models()
-        .iter()
-        .any(|model| lower.contains(model.as_str()))
+    if !lower.contains(".vec")
+        && !data_file_models()
+            .iter()
+            .any(|model| lower.contains(model.as_str()))
     {
         return Ok(Vec::new());
     }

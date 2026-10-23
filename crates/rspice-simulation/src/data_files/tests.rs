@@ -193,6 +193,50 @@ fn a_d_vcd_replays_its_dump_through_a_prepared_run() {
     assert_eq!(changes(&execute(snapshot), "clk"), expected);
 }
 
+/// A `.VEC` file is sealed like a code model's: the run solved after the
+/// file is gone drives its input from the sealed bytes and checks its
+/// expected output against them, with the one mismatch the file plants.
+#[test]
+fn a_vector_file_drives_and_checks_through_a_prepared_run() {
+    let fixture = Fixture::new();
+    // Input a rises over 10..11 ns; output b follows it. The row at 18 ns
+    // expects b low, where it is 1.8 V.
+    fixture.write(
+        "sealed-drive.vec",
+        "radix 1 1\nvname a b\nio i o\ntunit ns\nvih 1.8\nvil 0\ntrise 1\n\
+         0 0 0\n10 1 0\n15 1 1\n18 1 0\n",
+    );
+    let source = "vec stimulus\nR1 a b 1\nR2 b 0 1meg\n.vec 'sealed-drive.vec'\n.end\n";
+    let snapshot = prepare(&fixture, source, &transient(20e-9)).unwrap();
+    std::fs::remove_file(fixture.0.join("sealed-drive.vec")).unwrap();
+    let SimulationResult::Transient {
+        waveforms, checks, ..
+    } = execute(snapshot)
+    else {
+        panic!("transient result")
+    };
+    let a = waveforms
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("a"))
+        .map(|(_, waveform)| &waveform.y_values)
+        .unwrap_or_else(|| panic!("V(a) in {:?}", waveforms.keys()));
+    assert_eq!((a.first(), a.last()), (Some(&0.0), Some(&1.8)));
+    let violations: Vec<_> = checks
+        .assertions
+        .iter()
+        .flat_map(|report| &report.violations)
+        .collect();
+    assert_eq!(violations.len(), 1, "{:?}", checks.assertions);
+    assert!(
+        checks
+            .assertions
+            .iter()
+            .all(|report| report.name == "sealed-drive.vec"),
+        "{:?}",
+        checks.assertions
+    );
+}
+
 /// The file's bytes are part of the run's identity: the same bytes prepare
 /// the same run, and an edited file a different one.
 #[test]
