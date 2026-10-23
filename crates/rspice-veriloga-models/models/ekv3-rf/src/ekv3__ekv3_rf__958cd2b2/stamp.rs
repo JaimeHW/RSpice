@@ -248,7 +248,7 @@ pub(super) fn canonical_instance_preprocess(
 	let AX=AW* (AQ* ((AV+ AO)+ (((AV* AV)+ AP).sqrt())));
 	let AY=(X/ parameters[61]).ln();
 	let AZ=AW* (AQ* ((AY+ AO)+ (((AY* AY)+ AP).sqrt())));
-	let BA=parameters[62]* ((((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, N)))* parameters[63])+ N).ln());
+	let BA=parameters[62]* ((((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, A, N)))* parameters[63])+ N).log10());
 	let BB=parameters[36]* (N+ (parameters[118]/ X));
 	let BC=parameters[37]* (N+ (parameters[119]/ X));
 	let BD=parameters[64]* (N+ (parameters[115]/ X));

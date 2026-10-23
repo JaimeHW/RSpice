@@ -910,7 +910,7 @@ impl Instance {
 		let AZ=AX* (AR* ((AY+ A)+ (((AY* AY)+ AT).sqrt())));
 		let BA=(AH/ parameters[61]).ln();
 		let BB=AX* (AR* ((BA+ A)+ (((BA* BA)+ AT).sqrt())));
-		let BC=parameters[62]* ((((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, B)))* parameters[63])+ B).ln());
+		let BC=parameters[62]* ((((ctx.integer_result(integer::integer_arithmetic(integer::IntegerArithmeticOperation::Sub, O, B)))* parameters[63])+ B).log10());
 		let BD=parameters[36]* (B+ (parameters[118]/ AH));
 		let BE=parameters[37]* (B+ (parameters[119]/ AH));
 		let BF=parameters[64]* (B+ (parameters[115]/ AH));

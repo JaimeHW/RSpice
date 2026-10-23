@@ -7969,7 +7969,7 @@ impl Instance {
 		let DGW;
 		if CUN{
 		let CUP=BZB- CUO;
-		let CUR=((CUP* CUP)+ (AAD.powf(((BA* (-3f64- (CUL.ln())))/ CUQ)))).sqrt();
+		let CUR=((CUP* CUP)+ (AAD.powf(((BA* (-3f64- (CUL.log10())))/ CUQ)))).sqrt();
 		let CUU=((CUB* CUS)* CUT)* (H+ (CUL* (CUR.powf(CUQ))));
 		CVJ=CUU;
 		DGW=CUR;
@@ -8031,7 +8031,7 @@ impl Instance {
 		let DGU;
 		if CWE{
 		let CWF=BZB- CUO;
-		let CWH=((CWF* CWF)+ (AAD.powf(((BA* (-3f64- (CWD.ln())))/ CWG)))).sqrt();
+		let CWH=((CWF* CWF)+ (AAD.powf(((BA* (-3f64- (CWD.log10())))/ CWG)))).sqrt();
 		let CWJ=(CUB* CWI)* (H+ (CWD* (CWH.powf(CWG))));
 		CWV=CWJ;
 		DGU=CWH;

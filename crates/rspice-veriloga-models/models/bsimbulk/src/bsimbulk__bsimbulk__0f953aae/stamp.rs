@@ -361,7 +361,7 @@ pub(super) fn canonical_model_preprocess(
 	let FH=(FF!= Y)&& (FG> Y);
 	oFH=FH;
 	if FH{
-	let FJ=EV.powf(((DG* (-3f64- (FG.ln())))/ FI));
+	let FJ=EV.powf(((DG* (-3f64- (FG.log10())))/ FI));
 	oFJ=FJ;
 	let FK=FI- DS;
 	oFK=FK;
@@ -383,7 +383,7 @@ pub(super) fn canonical_model_preprocess(
 	let FT=(FF!= Y)&& (FS> Y);
 	oFT=FT;
 	if FT{
-	let FV=EV.powf(((DG* (-3f64- (FS.ln())))/ FU));
+	let FV=EV.powf(((DG* (-3f64- (FS.log10())))/ FU));
 	oFV=FV;
 	let FW=FU- DS;
 	oFW=FW;

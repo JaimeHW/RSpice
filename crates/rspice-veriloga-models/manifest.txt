@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "fb5bb5c0652623058dc9e5e8aa2bc476b894d2dd5bcb35da97eb769c2b532835",
-  "generator_digest": "b84dbb5c8912aae460e5843b43825ef05f14acc734d52ebb84b3febff9ec2d60",
-  "bundle_digest": "8aec29e2ce023083a06d098dce41b597933183306420ddd9a3dcb7965b55d590",
+  "generator_digest": "18814d5ecbd4898ef1d07ee27baa81e10d3b400941628b16ada6c67936f8fa8a",
+  "bundle_digest": "cf52a3eef8b114df6bcd830aa67f9afa2fba62f0433befc0e356817e36212521",
   "device_count": 43,
   "file_count": 348,
-  "source_bytes": 34784147,
+  "source_bytes": 34784165,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -420,7 +420,7 @@
       "feature_name": "veriloga-model-bsimbulk",
       "package_name": "rspice-veriloga-model-bsimbulk",
       "file_count": 5,
-      "source_bytes": 959363,
+      "source_bytes": 959375,
       "workspace": {
         "abi_version": 3,
         "variable_count": 1913,
@@ -582,7 +582,7 @@
       "feature_name": "veriloga-model-ekv3-rf",
       "package_name": "rspice-veriloga-model-ekv3-rf",
       "file_count": 5,
-      "source_bytes": 261745,
+      "source_bytes": 261751,
       "workspace": {
         "abi_version": 3,
         "variable_count": 654,
@@ -1563,13 +1563,13 @@
     },
     {
       "relative_path": "models/bsimbulk/src/bsimbulk__bsimbulk__0f953aae/noise.rs",
-      "bytes": 296527,
-      "blake3": "926eb96b5a5de3c6e5eb8d3f1e26c1a842dd0dc626c00c8943b3cd56c03508c7"
+      "bytes": 296533,
+      "blake3": "7e178c5ec5ed865d0d0470c288663727a453d18d5fb3fa2575388ca9fbbb4108"
     },
     {
       "relative_path": "models/bsimbulk/src/bsimbulk__bsimbulk__0f953aae/stamp.rs",
-      "bytes": 409363,
-      "blake3": "b2dd398978af301462c9756827f83bff2a806f44b28fb2b75c08eb661e3faa7a"
+      "bytes": 409369,
+      "blake3": "4f216c3d7f8eda85500d8381effee0b3b532b97db3446a9ef7e06009fb953fbd"
     },
     {
       "relative_path": "models/bsimbulk/src/bsimbulk__bsimbulk__0f953aae/state.rs",
@@ -1883,13 +1883,13 @@
     },
     {
       "relative_path": "models/ekv3-rf/src/ekv3__ekv3_rf__958cd2b2/noise.rs",
-      "bytes": 73095,
-      "blake3": "9ad2468f1d858ea901f320f3f3fc33357e948d93052d51443093354ed3b338b3"
+      "bytes": 73098,
+      "blake3": "ec6294e83de4bf5f496a90f97200de7126ca055946d33afe31dadd2b163b28dc"
     },
     {
       "relative_path": "models/ekv3-rf/src/ekv3__ekv3_rf__958cd2b2/stamp.rs",
-      "bytes": 110032,
-      "blake3": "dcdd3c82b7d7655f507f5bf9a8aa2ec12fbba94c23f36468a821ddd0bb664844"
+      "bytes": 110035,
+      "blake3": "58f0cf116144706131da035b294fc70c4baf4f97288d793969a82f8e8962da65"
     },
     {
       "relative_path": "models/ekv3-rf/src/ekv3__ekv3_rf__958cd2b2/state.rs",
