@@ -5491,13 +5491,11 @@ dependencies = [
  "rspice-simulation-contract",
  "rspice-veriloga",
  "rspice-vocabulary",
- "rustix 1.1.5",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
  "toml",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
