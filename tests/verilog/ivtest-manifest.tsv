@@ -252,7 +252,7 @@ br_gh316a	vlg	passed	L6	pass	PASSED
 br_gh316b	vlg	passed	L6	pass	PASSED
 br_gh316c	vlg	passed	L6	pass	PASSED
 br_gh33	vlg	gold	L3	pass	matches the gold file
-br_gh330	vlg	passed	L3	fail	compile error: Parse error: Expression nesting exceeds the compiler's limit of 256 levels; every parenthesis, `?:` branch, unary operator and call argument is a level
+br_gh330	vlg	passed	L3	pass	PASSED
 br_gh345	vlg	passed	L3	pass	PASSED
 br_gh356a	vlg	passed	L6	pass	PASSED
 br_gh356b	vlg	passed	L6	pass	PASSED
@@ -1044,7 +1044,7 @@ pr2138979	vlg	passed	L1	pass	PASSED
 pr2138979b	vlg	gold	L1	pass	matches the gold file
 pr2138979c	vlg	gold	L1	pass	matches the gold file
 pr2138979d	vlg	gold	L1	pass	matches the gold file
-pr2139593	vlg	passed	L4	refused:feature	Semantic error: Unsupported feature: system function '$clog2' is not supported in analog code
+pr2139593	vlg	passed	L4	pass	PASSED
 pr2146620	vlg	gold	L1	pass	matches the gold file
 pr2146620b	vlg	gold	L1	pass	matches the gold file
 pr2146620c	vlg	passed	L1	pass	PASSED
