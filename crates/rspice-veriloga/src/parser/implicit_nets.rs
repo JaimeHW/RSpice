@@ -74,6 +74,23 @@ fn scope(
         }
     }
     let mut candidates = Vec::new();
+    let mut connected = |actual: &Expression| {
+        visit_expression(actual, &mut |expression| {
+            let (name, span) = match expression {
+                Expression::Identifier(id) => (&id.name, id.span),
+                Expression::ArrayAccess(access) => (&access.array, access.span),
+                Expression::Digital(DigitalExpr::PartSelect(select)) => (&select.name, select.span),
+                Expression::Digital(DigitalExpr::ArraySelect(select)) => {
+                    (&select.name, select.span)
+                }
+                Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => {
+                    (&select.name, select.span)
+                }
+                _ => return,
+            };
+            candidates.push((name.clone(), span));
+        });
+    };
     for instance in &module.instances {
         for connection in &instance.connections {
             let actual = match connection {
@@ -82,25 +99,15 @@ fn scope(
                 }
             };
             if let Some(actual) = actual {
-                visit_expression(actual, &mut |expression| {
-                    let (name, span) = match expression {
-                        Expression::Identifier(id) => (&id.name, id.span),
-                        Expression::ArrayAccess(access) => (&access.array, access.span),
-                        Expression::Digital(DigitalExpr::PartSelect(select)) => {
-                            (&select.name, select.span)
-                        }
-                        Expression::Digital(DigitalExpr::ArraySelect(select)) => {
-                            (&select.name, select.span)
-                        }
-                        Expression::Digital(DigitalExpr::IndexedPartSelect(select)) => {
-                            (&select.name, select.span)
-                        }
-                        _ => return,
-                    };
-                    candidates.push((name.clone(), span));
-                });
+                connected(actual);
             }
         }
+    }
+    // IEEE 1364-2005 section 6.5: so does an identifier in a gate's terminal
+    // list, an array of gate instances' (section 7.1.5) included, whose
+    // one-bit terminal section 7.1.6 then shares with every instance.
+    for terminal in &std::mem::take(&mut module.gate_terminals) {
+        connected(terminal);
     }
     // Continuous-assignment targets can declare implicit nets. Reads in an
     // arbitrary behavioral expression do not create declarations.

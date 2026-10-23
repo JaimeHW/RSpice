@@ -920,6 +920,7 @@ impl Parser<'_> {
             }
             self.expect(TokenKind::RParen)?;
             let span = instance_start.extend(self.previous_span());
+            module.gate_terminals.extend(terminals.iter().cloned());
             match range {
                 Some((left, right)) => {
                     // Checked here, where the instance is, so the expanded

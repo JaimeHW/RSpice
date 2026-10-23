@@ -334,3 +334,46 @@ fn gate_instance_arrays_share_their_terminals_out_by_width() {
         "10xx 01 z HiZ\nzzzz zz x PuX\nzzzz zz 1 Pu1\n"
     );
 }
+
+/// IEEE 1364-2005 section 6.5: an identifier first named in a gate's
+/// terminal list is an implicit scalar net of the default net type, and an
+/// array of gate instances (section 7.1.5) is a gate instance like any other.
+/// Section 7.1.6 then gives that one-bit terminal to every instance.
+///
+/// In the first design `a` and `b` are named nowhere else and nothing drives
+/// them, so each is `z`, which a `not` reads as `x` (section 7.2, table 7-3):
+/// `xxxx` and `x`. In the second a one-element `buf` array drives `a` from
+/// `d`, so `y` is `~d` in every bit: `xxxx` while `d` is `x`, then 1111 and
+/// 0000. `c` stays `z`, so `v = a & c` is `x` but for `a = 0`, where it is 0
+/// (table 7-3). Under `default_nettype none` the name is refused.
+#[test]
+fn a_gate_terminal_names_an_implicit_net() {
+    let report = bench(
+        "module top;\n  wire [3:0] y;\n  wire w;\n  not n[3:0] (y, a);\n  not (w, b);\n\
+         \x20 initial #1 $display(\"%b %b\", y, w);\nendmodule\n",
+        &[],
+    );
+    assert_eq!(stdout(&report), "xxxx x\n");
+    let report = bench(
+        "module top;\n  wire [3:0] y;\n  reg d;\n  not n[3:0] (y, a);\n  buf b[0:0] (a, d);\n\
+         \x20 and (v, a, c);\n\
+         \x20 initial begin\n\
+         \x20   #1 $display(\"%b %b\", y, v);\n    d = 0;\n    #1 $display(\"%b %b\", y, v);\n\
+         \x20   d = 1;\n    #1 $display(\"%b %b\", y, v);\n\
+         \x20 end\nendmodule\n",
+        &[],
+    );
+    assert_eq!(stdout(&report), "xxxx x\n1111 0\n0000 x\n");
+    let sources = vec![(
+        std::path::PathBuf::from("tb.v"),
+        "`default_nettype none\nmodule top;\n  wire [3:0] y;\n  not n[3:0] (y, a);\nendmodule\n"
+            .to_owned(),
+    )];
+    let error = run_digital_testbench(&sources, &HdlTestbenchOptions::default())
+        .expect_err("an undeclared terminal under `default_nettype none` is refused")
+        .to_string();
+    assert!(
+        error.contains("`a` requires a net declaration under `default_nettype none`"),
+        "{error}"
+    );
+}

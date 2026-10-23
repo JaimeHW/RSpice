@@ -303,6 +303,9 @@ pub struct Module {
     /// Arrays of gate instances, until expansion turns them into continuous
     /// assignments.
     pub gate_arrays: Vec<GateInstanceArray>,
+    /// Every terminal of a gate instance, single or in an array, until the
+    /// implicit nets they name are declared (IEEE 1364-2005 section 6.5).
+    pub gate_terminals: Vec<Expression>,
     /// Procedural processes (`always`, `initial`), in declaration order.
     ///
     /// Each carries the [`DigitalProcessId`] it was given here, so a later
@@ -446,6 +449,7 @@ impl Module {
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
             gate_arrays: Vec::new(),
+            gate_terminals: Vec::new(),
             digital_processes: Vec::new(),
             digital_routines: Vec::new(),
             genvars: Vec::new(),
