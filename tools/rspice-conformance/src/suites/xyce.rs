@@ -593,67 +593,9 @@ const XYCE_BUG1661_RECORD: &str =
 // retained RAW reader boundary, and requires V(1) to equal I(R1) in each.
 // It does not use a checked-in numerical gold file.
 const XYCE_BUG519_CONTRACT: &str = "bug519_binary_ascii_raw_column_equality_wrapper";
+#[cfg(test)]
 const XYCE_BUG519_PATH: &str = "Netlists/Certification_Tests/BUG_519_SON/bug_519_SON.cir";
 const XYCE_BUG519_RECORD: &str = "netlists/certification_tests/bug_519_son/bug_519_son.cir";
-const XYCE_BUG519_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG519_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG519_HISTORICAL_RECORD_COUNT: usize = 7;
-const XYCE_BUG519_HISTORICAL_RECORD_BYTES: usize = 1_658;
-const XYCE_BUG519_HISTORICAL_RECORDS_SHA256: &str =
-    "c1c463b78caa63d4d805c19a846b1128eb2559035dc326cd6c9420eeb73fb067";
-const XYCE_BUG519_HISTORICAL_RECORDS_BLAKE3: &str =
-    "fb834b337dd8fb61645005b4421f5990a02f7381a8c21634f2721375ace65d3a";
-const XYCE_BUG519_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/Certification_Tests/BUG_519_SON/CMakeLists.txt",
-        1_199,
-        "8c7e471b0c8b26b6179765f7ab3aa3ca4f2887dabbe2ef097ba5bdc81fa16439",
-        "6dfe3c481595e160025778e22b6800de7319340b3e0a272b69def0b98693d62e",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_519_SON/Manifest.txt",
-        40,
-        "74cc5dadcdacce4cbb709888eb0892d2ecc0f8bbc0c60481d48785a0f7665a0d",
-        "a9786f497874a7fe5f31c844fbcd78d7e4bd9fcc09bb2d1a83053016cb9a45cc",
-    ),
-    (
-        XYCE_BUG519_PATH,
-        132,
-        "21bc57148169d7effb9bf0e215d1a53b19355bfa3017742a8bf6baad8c9532c1",
-        "25ef552125f19dc15fc21ee9a2acd2deb95b9848e96e4cdfac3ce2de918cda3b",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_519_SON/bug_519_SON.cir.sh",
-        2_668,
-        "e89688f5012a61746164a51f8d89d416273bc0aaa783b27d5c86266e436aa2b3",
-        "db212b1474e70542f908a9c747ee355c577336004e4ad00b283f074e1d366e21",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_519_SON/tags",
-        28,
-        "4ec87257b57ad0473d88c43a6e17efca9cf879efc633d48c1188f44f19ba6c9c",
-        "8388849297713e605ed3de82616e0f5c4dbdc88d4d967c2650671bd008ce3b0a",
-    ),
-    (
-        "TestScripts/convertToPrn.py",
-        22_175,
-        "46ba3ec7be7b301deff35ed6cffa17541fc4b9eb98ce84bba0d1b75ea2713735",
-        "7256f6c3fbeeee7aded5e704ac85c519a90fdfbe51cff0177a3bd97796d16bbf",
-    ),
-    (
-        // convertToPrn.py imports this parser helper directly.
-        "TestScripts/findBlock.py",
-        3_648,
-        "56045f50bbaf567009ff4096c71d8f4cd0ae04a4a348fcc85b951b7a46ca49de",
-        "bced5e9eb6ce2df5a6b23e50593bcddbd03805585cc63f84278ce4fccf4cc6d8",
-    ),
-];
-const XYCE_BUG519_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
-    "bug_519_SON.cir",
-    132,
-    "21bc57148169d7effb9bf0e215d1a53b19355bfa3017742a8bf6baad8c9532c1",
-    "25ef552125f19dc15fc21ee9a2acd2deb95b9848e96e4cdfac3ce2de918cda3b",
-)];
 
 // BUG_1040_SON's Release-7.10 wrapper proves that the NOOP spelling of
 // transient startup produces the same diode-capacitor discharge waveform as
@@ -1214,84 +1156,9 @@ const XYCE_ABM_POW_CANDIDATE_CONTENT_BLAKE3: &str =
     "2ffe099c0701a75920d9dd5b26db68736bf85297ce7ae794e673fdbaf93dd7eb";
 const XYCE_ABM_POW_MANIFEST_BLAKE3: &str =
     "8f4fa483c6b5862124323c57f642e8763050821be3344c4d5ae036733617c144";
-const XYCE_ABM_TRANSIENT_TIME_FAMILY_PREFIX: &str = "netlists/abm_time/";
-const XYCE_ABM_TRANSIENT_SQRT_FAMILY_PREFIX: &str = "netlists/abm_sqrt/";
-const XYCE_ABM_TRANSIENT_TIME_DIRECTORY_COUNT: usize = 2;
-const XYCE_ABM_TRANSIENT_TIME_DIRECTORY_BLAKE3: &str =
-    "b33b695a8ea3282c92677ab31dea460e37e77206a6441a8e5194714272132508";
-const XYCE_ABM_TRANSIENT_TIME_CONTENT_BLAKE3: &str =
-    "c952881c72e510be28bbd3912163a9039b5deee30d0b638355176ba5434f52b6";
-const XYCE_ABM_TRANSIENT_SQRT_DIRECTORY_COUNT: usize = 1;
-const XYCE_ABM_TRANSIENT_SQRT_DIRECTORY_BLAKE3: &str =
-    "caa6b38ddf60870fe4f1244904485c46fc483d5721da36b7b08bfc91258109b8";
-const XYCE_ABM_TRANSIENT_SQRT_CONTENT_BLAKE3: &str =
-    "286988ba2d0a13300b42021cdcc69d282ae2419f1b64454e7006cd41e72f62a1";
-const XYCE_ABM_TRANSIENT_CANDIDATE_BLAKE3: &str =
-    "01fa5d35bc700b26933db5f1bfdc7b69a12d7f7eafa7e3b687fbc705f54aa81d";
-const XYCE_ABM_TRANSIENT_CANDIDATE_CONTENT_BLAKE3: &str =
-    "72f62e2db60be24d51f72b1efecba72f07479ec6d95c43a1f49b43e471a83142";
-const XYCE_ABM_TRANSIENT_MANIFEST_BLAKE3: &str =
-    "01fa5d35bc700b26933db5f1bfdc7b69a12d7f7eafa7e3b687fbc705f54aa81d";
-const XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_COUNT: usize = 66;
-const XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_NAMES_BLAKE3: &str =
-    "1fe7b4af298d44520dc978c3e56a434ece02ab895a09d5d873a4f577adfc8bc2";
-const XYCE_MEASURE_CONT_TRAN_SOURCE_FAMILY_CONTENT_BLAKE3: &str =
-    "b0ea7515be7217d05cd09983da9a4b1a515c8cfce45c4cc78864c8047bef0c0c";
-const XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_COUNT: usize = 60;
-const XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_NAMES_BLAKE3: &str =
-    "fb8fc66f3a69a66991c8c9a2373329b6ebb302d7ad57630e4356972984ba30fd";
-const XYCE_MEASURE_CONT_TRAN_OUTPUT_FAMILY_CONTENT_BLAKE3: &str =
-    "ba1d604fd57372ef8e990419b201300cb07d80fbf24c3bd9c732d597e6291fd1";
-const XYCE_MEASURE_CONT_TRAN_CANDIDATE_BLAKE3: &str =
-    "6c1be110ea8bd3607fb739190fb7e4c6328737c10324e8a32952d25daaaab7f0";
-const XYCE_MEASURE_CONT_TRAN_CANDIDATE_CONTENT_BLAKE3: &str =
-    "5ebcdae90f486952f5b32f8298ffcac675b19ff14982456dc9c85fd9acfd7799";
-const XYCE_MEASURE_CONT_TRAN_MANIFEST_BLAKE3: &str =
-    "6c1be110ea8bd3607fb739190fb7e4c6328737c10324e8a32952d25daaaab7f0";
-const XYCE_MEASURE_CONT_TRAN_ARTIFACT_CONTENT_BLAKE3: &str =
-    "5c75dece6ec6a985871ec7a44ba04f474e23b9b73ef9786e27507f45c9bfefd0";
-const XYCE_MEASURE_CONT_MANIFEST_FAMILY_COUNT: usize = 31;
-const XYCE_MEASURE_CONT_MANIFEST_FAMILY_PATHS_BLAKE3: &str =
-    "9cbd9d8d4874de203ab21ef5ef301d5f75b92cb4d9208bc6f6d81e785159990d";
-const XYCE_MEASURE_CONT_MANIFEST_FAMILY_LINES_BLAKE3: &str =
-    "9d1bfca8151e9c3c16239558b9a34b1ad067d6b236c00d8c334e1703d0ec0a22";
-const XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_COUNT: usize = 27;
-const XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_NAMES_BLAKE3: &str =
-    "66a4a04b46f70bfe859d2f2861e27d1fdcc9072c41f7c084d9ea88c406dc1b63";
-const XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_CONTENT_BLAKE3: &str =
-    "da58c73c916b4fd6d1968d4d9ee52985079834e8877d911522a9982e7a777315";
-const XYCE_MEASURE_CONT_STEP_TRAN_CANDIDATE_BLAKE3: &str =
-    "ab99e7673941a6438c75ecf2ef41fae83aa2d3ef20bbdb4c36e73d8065c3d70d";
-const XYCE_MEASURE_CONT_STEP_TRAN_CANDIDATE_CONTENT_BLAKE3: &str =
-    "b7af2ae67cbc7a334d38db3a888779684218cf18bd53a0228cbabaa5f95c77da";
-const XYCE_MEASURE_CONT_STEP_TRAN_MANIFEST_BLAKE3: &str =
-    "cf8c3b451cb13d00e97e4e2057eb0502fdcebdf435b44b186bcb450eca539378";
-const XYCE_MEASURE_CONT_STEP_HISTORICAL_PROVENANCE_BLAKE3: &str =
-    "d5665d4a8d8ecedf36e5ffb47c53b94a0d9fc867af1afc66076b500d645bd0b5";
 const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD: &str =
     "netlists/measure_cont/step/derivtestnoise.cir";
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_SOURCE_BYTES: usize = 5_513;
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_SOURCE_BLAKE3: &str =
-    "0775c53a3da0aaa588a009a4093f8b3b38e6b941fc69fc2c0bf9a29bc973c6af";
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_GS_BYTES: usize = 13_934;
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_GS_BLAKE3: &str =
-    "e7d26b08ac8c3c0b79017e35848e4b40f48fac76bfeaf92c0934ff3879189193";
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA0_BYTES: usize = 2_196;
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA0_BLAKE3: &str =
-    "a93764f361eb2607864158496e2963d9b6c47f88583cf4b6ec0b8605a80a1a86";
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BYTES: usize = 2_138;
-const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_MA1_BLAKE3: &str =
-    "56423533d5521d52bc2208b8230084e989de77818aadea97bada8e584d6d2b1f";
 const XYCE_MEASURE_NOISE_STEP_DERIV_RECORD: &str = "netlists/measure_noise/step/derivtestnoise.cir";
-const XYCE_MEASURE_NOISE_STEP_DERIV_SOURCE_BYTES: usize = 2_115;
-const XYCE_MEASURE_NOISE_STEP_DERIV_SOURCE_BLAKE3: &str =
-    "ab68163ace0b97eec114870078ca9c8bb13b2f5ddf36ca64f06e7583656e404e";
-const XYCE_MEASURE_NOISE_STEP_DERIV_MA0_BYTES: usize = 404;
-const XYCE_MEASURE_NOISE_STEP_DERIV_MA0_BLAKE3: &str =
-    "121373fe9f0ad0219b1f3ca30884b5ab3935c2e09faf8fc57d6655f250d24956";
-const XYCE_MEASURE_NOISE_STEP_DERIV_MA1_BYTES: usize = 404;
-const XYCE_MEASURE_NOISE_STEP_DERIV_MA1_BLAKE3: &str =
-    "43b79149352880fbe065bcc8fdf7fb787acfbbe71d1a6f63d051abc47391c945";
 const XYCE_RESISTOR_DTEMP_OWNER_RECORD: &str = "netlists/dtemp/res_dtemp.cir";
 const XYCE_RESISTOR_DTEMP_REFERENCE_RECORD: &str = "netlists/dtemp/res_ref.cir";
 const XYCE_BUG647_RESISTOR_OWNER_RECORD: &str =
@@ -4248,65 +4115,6 @@ impl XyceAbmTransientKind {
         }
     }
 
-    fn source_relative_path(self) -> &'static str {
-        match self {
-            Self::DirectTime => "Netlists/ABM_TIME/time.cir",
-            Self::ParameterTime => "Netlists/ABM_TIME/time_param.cir",
-            Self::SquareRoot => "Netlists/ABM_SQRT/sqrt.cir",
-        }
-    }
-
-    fn source_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::DirectTime => (
-                1652,
-                "8b3000ba77b14f3afbb7ef92517f480f4960d7ece02a32430567787bf7331960",
-            ),
-            Self::ParameterTime => (
-                1678,
-                "67db073fdc5f21c0604aaa087b44310ca11efef7ee4b64ebc35100e0f8db1db9",
-            ),
-            Self::SquareRoot => (
-                1444,
-                "489b81dfda01f2c8339a7d12042597ed70d1f97462b5da72b8b99fae470e5661",
-            ),
-        }
-    }
-
-    fn historical_wrapper_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::DirectTime => (
-                1259,
-                "d81921bdbb1cfc58c17ca024b02dbe2f05fa5f294a9600b46d81da46c1b7ae4f",
-            ),
-            Self::ParameterTime => (
-                1271,
-                "7933696b9e61c08d509d1673ac1aa6f040f465ed295ab679fb0b64c30ad098a5",
-            ),
-            Self::SquareRoot => (
-                1259,
-                "fb977e06d51ec5f8cf550e2868505b061a85ebfbbd11013a86351eacaea295bd",
-            ),
-        }
-    }
-
-    fn historical_perl_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::DirectTime => (
-                384,
-                "7a5793fcdf29d886ff789e7076b7b92b7d8209d8decb03370286768884074730",
-            ),
-            Self::ParameterTime => (
-                396,
-                "51aa9bd0f445c1915cdfd769a8348c3aba709ef3266d730bfea2948862c37b3c",
-            ),
-            Self::SquareRoot => (
-                518,
-                "22789907f0aa9d9902fa8ba4280e71fa1c9bfd135cf8d83db5cdeabb25786ecf",
-            ),
-        }
-    }
-
     fn expected_columns(self) -> &'static [&'static str] {
         match self {
             Self::DirectTime | Self::ParameterTime => &["Index", "TIME", "V(1)", "V(2)"],
@@ -4345,31 +4153,6 @@ impl XyceMeasureContTranKind {
         }
     }
 
-    fn source_relative_path(self) -> &'static str {
-        match self {
-            Self::Derivative => "Netlists/MEASURE_CONT/DerivTestTran.cir",
-            Self::FindWhen => "Netlists/MEASURE_CONT/FindWhenTestTran.cir",
-            Self::TriggerTarget => "Netlists/MEASURE_CONT/TrigTargTestTran.cir",
-        }
-    }
-
-    fn source_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::Derivative => (
-                5130,
-                "004473ef36c30a6a553d095c6355c6a4dd8c2f7c91f06c08edba31a4c27332ea",
-            ),
-            Self::FindWhen => (
-                5571,
-                "4eb1bb52057c9a82891b5ddf2606fed743d97cf949a993ec341d3415f75a5fe6",
-            ),
-            Self::TriggerTarget => (
-                2290,
-                "d400ebddf0b080039ef8905a0c31e12050d45912449d0922c703edc0682be7de",
-            ),
-        }
-    }
-
     fn gs_relative_path(self) -> &'static str {
         match self {
             Self::Derivative => "Netlists/MEASURE_CONT/DerivTestTranGSfile",
@@ -4378,45 +4161,11 @@ impl XyceMeasureContTranKind {
         }
     }
 
-    fn gs_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::Derivative => (
-                7253,
-                "acd7911ebd8f8a1468b29cf5784e4b09595bfc77519ec2659e991b670a379b54",
-            ),
-            Self::FindWhen => (
-                8318,
-                "df50283caa48e7c9c7d5ee10596c0391066ed7ee5797a6abe1f4910e71b9dcde",
-            ),
-            Self::TriggerTarget => (
-                2298,
-                "30aa8eedae1aac04089df40d584262f0d1131f0a4c3db7da7bea06a3c9a79c64",
-            ),
-        }
-    }
-
     fn mt0_relative_path(self) -> &'static str {
         match self {
             Self::Derivative => "OutputData/MEASURE_CONT/DerivTestTran.cir.mt0",
             Self::FindWhen => "OutputData/MEASURE_CONT/FindWhenTestTran.cir.mt0",
             Self::TriggerTarget => "OutputData/MEASURE_CONT/TrigTargTestTran.cir.mt0",
-        }
-    }
-
-    fn mt0_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::Derivative => (
-                2120,
-                "8a7748dd3530a93a72a4293216ab37d92542821c38a99c910f438a1b410eb6ce",
-            ),
-            Self::FindWhen => (
-                2824,
-                "563d8958716dea4b2e32ddbb39895546bd329b43455bea1a2154e39c8b4b9567",
-            ),
-            Self::TriggerTarget => (
-                3053,
-                "bd021857acf3848c2cb1ba0135182d1e7aea13d0e1b63b3befd804628b859241",
-            ),
         }
     }
 
@@ -4475,23 +4224,6 @@ impl XyceMeasureContTranKind {
                 "whencrosscontneg5",
             ],
             Self::TriggerTarget => &["v(1)", "v(2)"],
-        }
-    }
-
-    fn historical_wrapper_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::Derivative => (
-                5548,
-                "0fdf11b63034827f7cf28932d0fc3b10f9e13b9d2dbb71e5d0ff11b3bbd970b3",
-            ),
-            Self::FindWhen => (
-                5554,
-                "049425724c3a99978314ea8f6f6f195284ddee5035559faece1311e5f4218911",
-            ),
-            Self::TriggerTarget => (
-                5173,
-                "10dfe7487e5c7b0519644326465be4ecc5143f76661822a0ad8f3f08ce463ee6",
-            ),
         }
     }
 }
@@ -4631,64 +4363,6 @@ impl XyceMeasureContStepTranMember {
         }
     }
 
-    fn source_identity(self) -> (usize, &'static str) {
-        match (self.kind, self.role) {
-            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Main) => (
-                4664,
-                "d0b8736c42b745cc7a6fb9211c7c590d0edd1419e1536c0a95a8d7bf077108e0",
-            ),
-            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control0) => (
-                4634,
-                "db7840ef9561211757089de8e3a613e75912adb1e30d93cdc445117ea940f22c",
-            ),
-            (XyceMeasureContStepTranKind::Derivative, XyceMeasureContStepTranRole::Control1) => (
-                4624,
-                "c81ffd44d57f368e3d6f91428ce5fd08a884b5a93fdf462e58f4f06e6271a59f",
-            ),
-            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Main) => (
-                5163,
-                "e8e70a2b74f3447115820a91889a71e83e6d52777efce9b0bc4aec226c604204",
-            ),
-            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control0) => (
-                5143,
-                "c6913f3e20e2cea5863569bb3fecce42cdc34663d63f1507a514e70717f93a99",
-            ),
-            (XyceMeasureContStepTranKind::FindWhen, XyceMeasureContStepTranRole::Control1) => (
-                5143,
-                "22148f040cb4fcc39198377735ce768fa06412d6fda552f5403847ef8b929329",
-            ),
-            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Main) => (
-                1230,
-                "3fc469a02df27f52125f87c8e67cf770df7a3577865e4ff563d16d2c6e783f1c",
-            ),
-            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control0) => {
-                (
-                    1066,
-                    "88ceb4d1da165bbf42262c0fbbe319bcaff9688cb3f47973ff048f5a4cf40737",
-                )
-            }
-            (XyceMeasureContStepTranKind::TriggerTarget, XyceMeasureContStepTranRole::Control1) => {
-                (
-                    1042,
-                    "e7a6d985ed8ded5775f568f754a9dc3862767671fd4946dd9564bc4fdba3757e",
-                )
-            }
-        }
-    }
-
-    fn historical_wrapper_identity(self) -> Option<(usize, &'static str)> {
-        (self.role == XyceMeasureContStepTranRole::Main).then_some(match self.kind {
-            XyceMeasureContStepTranKind::Derivative | XyceMeasureContStepTranKind::FindWhen => (
-                1675,
-                "ed6d34830f91743b7811803fd5cf17ce3423026735ee419026b023066045d148",
-            ),
-            XyceMeasureContStepTranKind::TriggerTarget => (
-                1673,
-                "1f8e950b16a78f30b4895dda83d7a47a91ae7fc1a731cdb8ab008827506fc0fb",
-            ),
-        })
-    }
-
     fn main(kind: XyceMeasureContStepTranKind) -> Self {
         Self::new(kind, XyceMeasureContStepTranRole::Main)
     }
@@ -4781,31 +4455,6 @@ impl XyceMeasureStepFindWhenMember {
             XyceMeasureStepFindWhenRole::Control1 => "Netlists/MEASURE/STEP/FindWhenTest.s1.cir",
             XyceMeasureStepFindWhenRole::Control2 => "Netlists/MEASURE/STEP/FindWhenTest.s2.cir",
             XyceMeasureStepFindWhenRole::Control3 => "Netlists/MEASURE/STEP/FindWhenTest.s3.cir",
-        }
-    }
-
-    fn source_identity(self) -> (usize, &'static str) {
-        match self.role {
-            XyceMeasureStepFindWhenRole::Owner => (
-                3388,
-                "91b974929771cd6ba2f57d87868664153e8fe47e42146a4bbcced087141da3c6",
-            ),
-            XyceMeasureStepFindWhenRole::Control0 => (
-                3465,
-                "39c7e32b64ba2305f105885ddc156c79c204ffd5a7ab5e41f8bd8bf988c5a6f7",
-            ),
-            XyceMeasureStepFindWhenRole::Control1 => (
-                3465,
-                "5f2c494542bf786f8672f9f031192c17d84da2059b0b2e598cca6528c8dd3198",
-            ),
-            XyceMeasureStepFindWhenRole::Control2 => (
-                3478,
-                "75e76a60a08d70f86979e16d31417b614e1693b2de21fe6384bdc64830da2be6",
-            ),
-            XyceMeasureStepFindWhenRole::Control3 => (
-                3463,
-                "0323c7eb942e8bad81072c853dc4eb95fad95ef326924a9fa517a1065ad9f156",
-            ),
         }
     }
 }

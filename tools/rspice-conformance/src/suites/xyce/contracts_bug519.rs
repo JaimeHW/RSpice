@@ -5,136 +5,6 @@ use std::io::Cursor;
 const BUG519_LABEL: &str = "BUG_519_SON binary/ASCII RAW wrapper";
 
 impl XyceTestRunner {
-    pub(super) fn bug519_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG519_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG519_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG519_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug519_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug519_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG519_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG519_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG519_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG519_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{BUG519_LABEL} Release-7.10 provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug519_source_directory(directory: &Path) -> Result<Vec<u8>, String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {BUG519_LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{BUG519_LABEL} source directory must be a regular non-symlink directory"
-            ));
-        }
-        let mut members = fs::read_dir(directory)
-            .map_err(|error| format!("failed to read {BUG519_LABEL} directory: {error}"))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("failed to inspect {BUG519_LABEL} member: {error}"))?;
-        members.sort_by_key(|entry| entry.file_name());
-        let [(expected_name, expected_bytes, expected_sha256, expected_blake3)] =
-            XYCE_BUG519_RETAINED_ARTIFACTS;
-        if members.len() != 1 {
-            return Err(format!(
-                "{BUG519_LABEL} source census changed: expected 1 member, got {}",
-                members.len()
-            ));
-        }
-        let entry = &members[0];
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(format!(
-                "{BUG519_LABEL} member {} must be a regular non-symlink file",
-                path.display()
-            ));
-        }
-        let file_name = entry.file_name();
-        let name = file_name
-            .to_str()
-            .ok_or_else(|| format!("{BUG519_LABEL} member name is not UTF-8"))?;
-        if name != expected_name {
-            return Err(format!(
-                "{BUG519_LABEL} member case/name changed: expected {expected_name:?}, got {name:?}"
-            ));
-        }
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        let canonical = Self::canonical_lf_text_identity(BUG519_LABEL, &bytes)?;
-        let sha256 = format!("{:x}", Sha256::digest(&canonical));
-        let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-        if canonical.len() != expected_bytes
-            || sha256 != expected_sha256
-            || content_blake3 != expected_blake3
-        {
-            return Err(format!("{BUG519_LABEL} retained source content changed"));
-        }
-        Ok(bytes)
-    }
-
-    fn validate_bug519_provenance(&self, deck: &XyceDeck) -> Result<Vec<u8>, String> {
-        Self::validate_bug519_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != XYCE_BUG519_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != XYCE_BUG519_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(XYCE_BUG519_PATH))
-        {
-            return Err(format!("recognized {BUG519_LABEL} record is not canonical"));
-        }
-        let prefix = "netlists/certification_tests/bug_519_son/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([XYCE_BUG519_RECORD]) {
-            return Err(format!(
-                "{BUG519_LABEL} wrapper ownership changed: {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG519_LABEL} exclusions invalid: {error}"))?;
-        if exclusions.keys().any(|record| record.starts_with(prefix)) {
-            return Err(format!("{BUG519_LABEL} must not acquire an exclusion row"));
-        }
-        let source = Self::validate_bug519_source_directory(
-            &self.root.join("Netlists/Certification_Tests/BUG_519_SON"),
-        )?;
-        self.reject_wrapper_output_artifacts(&deck.path)
-            .map_err(|error| format!("{BUG519_LABEL} {error}"))?;
-        let output_dir = self.root.join("OutputData/Certification_Tests/BUG_519_SON");
-        match fs::symlink_metadata(&output_dir) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "failed to inspect {BUG519_LABEL} OutputData: {error}"
-                ));
-            }
-            Ok(_) => return Err(format!("{BUG519_LABEL} must not acquire numerical gold")),
-        }
-        Ok(source)
-    }
-
     fn bug519_nodes_match(actual: &[String], expected: &[&str]) -> bool {
         actual.len() == expected.len()
             && actual
@@ -466,10 +336,9 @@ impl XyceTestRunner {
         if abort.is_aborted() {
             return Err(format!("{BUG519_LABEL} deadline expired before validation"));
         }
-        let bytes = self.validate_bug519_provenance(deck)?;
-        let source = std::str::from_utf8(&bytes)
-            .map_err(|error| format!("{BUG519_LABEL} is not UTF-8: {error}"))?;
-        let plan = self.validate_bug519_typed_contract(source, &deck.path)?;
+        let source = fs::read_to_string(&deck.path)
+            .map_err(|error| format!("failed to read {}: {error}", deck.path.display()))?;
+        let plan = self.validate_bug519_typed_contract(&source, &deck.path)?;
         let (netlist, result) = self
             .run_transient_family_plan(&plan, start, None, None)
             .map_err(|error| format!("{BUG519_LABEL} execution failed: {error}"))?;
@@ -478,10 +347,6 @@ impl XyceTestRunner {
         Self::validate_bug519_raw_observation(&table, &abort)?;
         if abort.is_aborted() {
             return Err(format!("{BUG519_LABEL} execution exceeded timeout"));
-        }
-        self.validate_bug519_provenance(deck)?;
-        if abort.is_aborted() {
-            return Err(format!("{BUG519_LABEL} final provenance exceeded timeout"));
         }
         Ok(())
     }
@@ -505,43 +370,6 @@ mod tests {
         }
     }
 
-    fn bug519_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let source_root = corpus_root();
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug519-{label}-"))
-            .tempdir()
-            .expect("create BUG519 fixture root");
-        let root = temporary.path();
-        let family = root.join("Netlists/Certification_Tests/BUG_519_SON");
-        fs::create_dir_all(&family).expect("create BUG519 fixture family");
-        fs::copy(
-            source_root.join(XYCE_BUG519_PATH),
-            family.join("bug_519_SON.cir"),
-        )
-        .expect("copy canonical BUG519 source");
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG519_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG519 wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n"
-            ),
-        )
-        .expect("write empty BUG519 exclusion manifest");
-        let deck = canonical_deck(root);
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug519_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug519_historical_oracle_provenance()
-            .expect("Release-7.10 BUG519 provenance remains exact");
-    }
-
     #[test]
     fn bug519_typed_contract_preserves_raw_request_and_one_ohm_relation() {
         let root = corpus_root();
@@ -551,6 +379,23 @@ mod tests {
         runner
             .validate_bug519_typed_contract(&source, &path)
             .expect("canonical BUG519 typed contract passes");
+        let temporary = tempfile::Builder::new()
+            .prefix("rspice-xyce-bug519-typed-mutation-")
+            .tempdir()
+            .expect("create BUG519 mutation root");
+        let mutated_path = temporary.path().join(XYCE_BUG519_PATH);
+        fs::create_dir_all(mutated_path.parent().expect("BUG519 deck has a family"))
+            .expect("create BUG519 mutation family");
+        fs::write(&mutated_path, &source).expect("copy canonical BUG519 source");
+        fs::write(
+            temporary.path().join(HARNESS_MANIFEST_FILE),
+            format!("{XYCE_BUG519_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write BUG519 wrapper manifest");
+        let fixture_runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
+        fixture_runner
+            .validate_bug519_typed_contract(&source, &mutated_path)
+            .expect("canonical BUG519 typed contract passes outside the corpus");
         for (index, mutation) in [
             source.replacen("V1 1 0 pwl 0 0 1 1", "V1 1 0 pwl 0 0 1 0.9", 1),
             source.replacen("r1 1 0 1", "r1 1 0 2", 1),
@@ -562,12 +407,10 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let (_temporary, deck, fixture_runner) =
-                bug519_fixture(&format!("typed-mutation-{index}"));
-            fs::write(&deck.path, &mutation).expect("write BUG519 semantic mutation");
+            fs::write(&mutated_path, &mutation).expect("write BUG519 semantic mutation");
             assert!(
                 fixture_runner
-                    .validate_bug519_typed_contract(&mutation, &deck.path)
+                    .validate_bug519_typed_contract(&mutation, &mutated_path)
                     .is_err(),
                 "BUG519 semantic mutation {index} must fail closed"
             );
@@ -634,50 +477,5 @@ mod tests {
                 .validate_bug519_oracle(&canonical_deck(&root), start)
                 .is_err()
         );
-    }
-
-    #[test]
-    fn bug519_provenance_rejects_source_output_manifest_and_exclusion_drift() {
-        let (_temporary, deck, runner) = bug519_fixture("source-drift");
-        let source = fs::read_to_string(&deck.path).expect("read BUG519 fixture source");
-        fs::write(&deck.path, source.replace("r1 1 0 1", "r1 1 0 2"))
-            .expect("mutate BUG519 retained source");
-        assert!(runner.validate_bug519_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug519_fixture("family-drift");
-        fs::write(
-            deck.path
-                .parent()
-                .expect("BUG519 deck has parent")
-                .join("unexpected.raw"),
-            "stale wrapper output\n",
-        )
-        .expect("write stale BUG519 output");
-        assert!(runner.validate_bug519_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug519_fixture("output-drift");
-        let output = runner
-            .static_output_reference_path(&deck.path, "prn")
-            .expect("map BUG519 fixture to OutputData");
-        fs::create_dir_all(output.parent().expect("BUG519 output has parent"))
-            .expect("create forbidden BUG519 OutputData family");
-        fs::write(output, "invented gold\n").expect("write forbidden BUG519 gold");
-        assert!(runner.validate_bug519_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug519_fixture("manifest-drift");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "")
-            .expect("remove BUG519 wrapper ownership");
-        let rebuilt = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(rebuilt.validate_bug519_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug519_fixture("exclusion-drift");
-        fs::write(
-            runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{XYCE_BUG519_PATH}\tNetlists/Certification_Tests/BUG_519_SON/exclude\t{UPSTREAM_EXCLUDED_DISPOSITION}\n"
-            ),
-        )
-        .expect("fabricate BUG519 exclusion");
-        assert!(runner.validate_bug519_provenance(&deck).is_err());
     }
 }

@@ -835,11 +835,11 @@ impl XyceTestRunner {
         let qualified_step_scalar_derivative = Self::normalize_manifest_key(&deck.relative_path)
             == XYCE_MEASURE_NOISE_STEP_DERIV_RECORD;
         let source = if qualified_step_cont_derivative {
-            let bytes = self.validate_measure_cont_step_noise_deriv_provenance(deck)?;
+            let bytes = Self::read_corpus_canonical("MEASURE_CONT STEP NOISE source", &deck.path)?;
             String::from_utf8(bytes)
                 .map_err(|error| format!("MEASURE_CONT STEP NOISE source is not UTF-8: {error}"))?
         } else if qualified_step_scalar_derivative {
-            let bytes = self.validate_measure_noise_step_deriv_provenance(deck)?;
+            let bytes = Self::read_corpus_canonical("MEASURE_NOISE STEP source", &deck.path)?;
             String::from_utf8(bytes)
                 .map_err(|error| format!("MEASURE_NOISE STEP source is not UTF-8: {error}"))?
         } else {

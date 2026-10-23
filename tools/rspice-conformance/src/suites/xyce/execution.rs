@@ -363,7 +363,7 @@ impl XyceTestRunner {
             } else {
                 "measure_step_find_when_relational_control"
             };
-            let result = match self.validate_measure_step_find_when_oracle(deck, member, start) {
+            let result = match self.validate_measure_step_find_when_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -385,7 +385,7 @@ impl XyceTestRunner {
                     "measure_cont_step_tran_relational_control"
                 }
             };
-            let result = match self.validate_measure_cont_step_tran_oracle(deck, member, start) {
+            let result = match self.validate_measure_cont_step_tran_oracle(member, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };

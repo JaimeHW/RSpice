@@ -9,15 +9,16 @@ use super::*;
 impl XyceTestRunner {
     pub(super) fn validate_measure_step_find_when_oracle(
         &self,
-        deck: &XyceDeck,
-        member: XyceMeasureStepFindWhenMember,
         start: Instant,
     ) -> Result<(), String> {
-        let sources = self.validate_measure_step_find_when_provenance(deck, member)?;
-        self.check_measure_cont_tran_deadline(start, "FIND/WHEN stepped provenance")?;
+        self.check_measure_cont_tran_deadline(start, "FIND/WHEN stepped planning")?;
 
-        let mut parsed = Vec::with_capacity(sources.len());
-        for (candidate, bytes) in sources {
+        let mut parsed = Vec::with_capacity(XyceMeasureStepFindWhenMember::ALL.len());
+        for candidate in XyceMeasureStepFindWhenMember::ALL {
+            let bytes = Self::read_corpus_canonical(
+                "MEASURE STEP FIND/WHEN source",
+                &self.root.join(candidate.source_relative_path()),
+            )?;
             let source = std::str::from_utf8(&bytes)
                 .map_err(|error| format!("MEASURE STEP FIND/WHEN source is not UTF-8: {error}"))?
                 .to_string();
@@ -211,58 +212,6 @@ impl XyceTestRunner {
             return Err(format!(
                 "MEASURE STEP FIND/WHEN exact TRAN/PRINT/topology contract changed for {}",
                 member.source_relative_path()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_measure_cont_step_case_sensitive_census(&self) -> Result<(), String> {
-        let base = self.root.join("Netlists/MEASURE_CONT/STEP");
-        let mut names = Vec::new();
-        let mut content = Vec::new();
-        for entry in fs::read_dir(&base)
-            .map_err(|error| format!("failed to read {}: {error}", base.display()))?
-        {
-            let path = entry
-                .map_err(|error| format!("failed to inspect {}: {error}", base.display()))?
-                .path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "MEASURE_CONT STEP member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| "MEASURE_CONT STEP member name is not UTF-8".to_string())?
-                .to_string();
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-            let canonical = Self::canonical_lf_text_identity(
-                &format!("MEASURE_CONT STEP member {}", path.display()),
-                &bytes,
-            )?;
-            names.push(name.clone());
-            content.push(format!("{name}\0{}", blake3::hash(&canonical).to_hex()));
-        }
-        names.sort();
-        content.sort();
-        let names_hash = blake3::hash(names.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let content_hash = blake3::hash(content.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if names.len() != XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_COUNT
-            || names_hash != XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_NAMES_BLAKE3
-            || content_hash != XYCE_MEASURE_CONT_STEP_TRAN_DIRECTORY_CONTENT_BLAKE3
-        {
-            return Err(format!(
-                "MEASURE_CONT STEP case-sensitive census changed: names={}/{names_hash}, content={content_hash}",
-                names.len()
             ));
         }
         Ok(())

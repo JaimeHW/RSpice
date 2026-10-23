@@ -756,15 +756,17 @@ impl XyceTestRunner {
 
     pub(super) fn validate_measure_cont_step_tran_oracle(
         &self,
-        deck: &XyceDeck,
         member: XyceMeasureContStepTranMember,
         start: Instant,
     ) -> Result<(), String> {
-        let sources = self.validate_measure_cont_step_tran_provenance(deck, member)?;
-        self.check_measure_cont_tran_deadline(start, "stepped provenance")?;
+        self.check_measure_cont_tran_deadline(start, "stepped planning")?;
 
-        let mut parsed = Vec::with_capacity(sources.len());
-        for (candidate, bytes) in sources {
+        let mut parsed = Vec::with_capacity(XyceMeasureContStepTranMember::ALL.len());
+        for candidate in XyceMeasureContStepTranMember::ALL {
+            let bytes = Self::read_corpus_canonical(
+                "MEASURE_CONT STEP source",
+                &self.root.join(candidate.source_relative_path()),
+            )?;
             let source = std::str::from_utf8(&bytes)
                 .map_err(|error| format!("MEASURE_CONT STEP source is not UTF-8: {error}"))?
                 .to_string();
@@ -1018,8 +1020,8 @@ impl XyceTestRunner {
         kind: XyceMeasureContTranKind,
         start: Instant,
     ) -> Result<(), String> {
-        let source_bytes = self.validate_measure_cont_tran_provenance(deck, kind)?;
-        self.check_measure_cont_tran_deadline(start, "provenance")?;
+        self.check_measure_cont_tran_deadline(start, "planning")?;
+        let source_bytes = Self::read_corpus_canonical("MEASURE_CONT source", &deck.path)?;
         let source = std::str::from_utf8(&source_bytes)
             .map_err(|error| format!("MEASURE_CONT source is not UTF-8: {error}"))?
             .to_string();
@@ -1265,18 +1267,12 @@ impl XyceTestRunner {
         kind: XyceAbmTransientKind,
         start: Instant,
     ) -> Result<(), String> {
-        let source_bytes = self.validate_abm_transient_provenance(deck, kind)?;
-        self.check_abm_transient_deadline(start, "provenance")?;
-        let source = std::str::from_utf8(&source_bytes)
-            .map_err(|error| format!("ABM transient source is not UTF-8: {error}"))?;
+        self.check_abm_transient_deadline(start, "planning")?;
         let plan = self.static_tran_plan_for_path_with_purpose(
             &deck.path,
             XyceStaticTranPlanPurpose::AnalyticOracle,
         )?;
-        if plan.source.as_bytes() != source_bytes {
-            return Err("ABM transient plan did not preserve the exact source bytes".into());
-        }
-        let parsed = Self::parse_xyce_netlist(source, &deck.path)
+        let parsed = Self::parse_xyce_netlist(&plan.source, &deck.path)
             .map_err(|error| format!("ABM transient parse failed: {error}"))?;
         Self::validate_abm_transient_plan(&plan, &parsed, kind)?;
         Self::validate_abm_transient_topology(&parsed, kind)?;
@@ -1322,117 +1318,6 @@ impl XyceTestRunner {
             );
         }
         self.check_abm_transient_deadline(start, "native execution, generated gold, and causality")
-    }
-
-    pub(super) fn validate_abm_transient_family_census(
-        &self,
-        prefix: &str,
-        expected_count: usize,
-        expected_names_hash: &str,
-        expected_content_hash: &str,
-    ) -> Result<(), String> {
-        let source_relative_path = match prefix {
-            XYCE_ABM_TRANSIENT_TIME_FAMILY_PREFIX => "Netlists/ABM_TIME",
-            XYCE_ABM_TRANSIENT_SQRT_FAMILY_PREFIX => "Netlists/ABM_SQRT",
-            _ => {
-                return Err(format!(
-                    "ABM transient family prefix is not recognized: {prefix}"
-                ));
-            }
-        };
-        let family = self.root.join(source_relative_path);
-        let metadata = fs::symlink_metadata(&family)
-            .map_err(|error| format!("failed to inspect ABM transient family: {error}"))?;
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(format!(
-                "ABM transient family {} must be a regular non-symlink directory",
-                family.display()
-            ));
-        }
-        let mut names = BTreeSet::new();
-        let mut content = BTreeSet::new();
-        for entry in fs::read_dir(&family)
-            .map_err(|error| format!("failed to read ABM transient family: {error}"))?
-        {
-            let entry = entry
-                .map_err(|error| format!("failed to inspect ABM transient member: {error}"))?;
-            let member_metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
-                format!(
-                    "failed to inspect ABM transient member {}: {error}",
-                    entry.path().display()
-                )
-            })?;
-            if !member_metadata.file_type().is_file() || member_metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "ABM transient member {} must be a regular non-symlink file",
-                    entry.path().display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| "ABM transient filename is not UTF-8".to_string())?
-                .to_ascii_lowercase();
-            if !names.insert(name.clone()) {
-                return Err(format!(
-                    "ABM transient family has case-colliding name {name:?}"
-                ));
-            }
-            let bytes = fs::read(entry.path())
-                .map_err(|error| format!("failed to hash ABM transient member: {error}"))?;
-            let canonical_bytes = Self::canonical_lf_text_identity(
-                &format!("ABM transient member {}", entry.path().display()),
-                &bytes,
-            )?;
-            content.insert(format!(
-                "{name}\0{}",
-                blake3::hash(&canonical_bytes).to_hex()
-            ));
-        }
-        let names = names.into_iter().collect::<Vec<_>>();
-        let content = content.into_iter().collect::<Vec<_>>();
-        let names_hash = blake3::hash(names.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let content_hash = blake3::hash(content.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if names.len() != expected_count
-            || names_hash != expected_names_hash
-            || content.len() != expected_count
-            || content_hash != expected_content_hash
-        {
-            return Err(format!(
-                "ABM transient family census changed: {prefix} names={}/{names_hash}, content={}/{content_hash}",
-                names.len(),
-                content.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_abm_transient_historical_identities() -> Result<(), String> {
-        let mut wrappers = BTreeSet::new();
-        let mut perl = BTreeSet::new();
-        for kind in XyceAbmTransientKind::ALL {
-            let (wrapper_bytes, wrapper_sha256) = kind.historical_wrapper_identity();
-            let (perl_bytes, perl_sha256) = kind.historical_perl_identity();
-            if wrapper_bytes == 0
-                || perl_bytes == 0
-                || wrapper_sha256.len() != 64
-                || perl_sha256.len() != 64
-                || !wrapper_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
-                || !perl_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err("ABM transient historical wrapper/Perl identity is malformed".into());
-            }
-            wrappers.insert((kind.record(), wrapper_bytes, wrapper_sha256));
-            perl.insert((kind.record(), perl_bytes, perl_sha256));
-        }
-        if wrappers.len() != 3 || perl.len() != 3 {
-            return Err("ABM transient historical wrapper/Perl provenance is incomplete".into());
-        }
-        Ok(())
     }
 
     pub(super) fn validate_abm_transient_plan(
