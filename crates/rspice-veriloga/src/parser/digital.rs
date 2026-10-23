@@ -1170,14 +1170,22 @@ impl Parser<'_> {
                 let kind = DigitalGateKind::Mos { resistive };
                 return Ok(vec![assign(&terminals[0], value, Some(kind))?]);
             }
+            // Section 7.7: an `nmos` and a `pmos` sharing data and output,
+            // one primitive and so one driver. It passes the data when either
+            // control turns it on, nothing when neither does, and otherwise
+            // the range a MOS switch under an unknown control passes: exactly
+            // one switch under `ncontrol | ~pcontrol`, which is 1 when either
+            // is on, 0 when both are off, and `x` otherwise (section 5.1.10).
             GateFamily::Cmos { resistive } => {
-                let kind = Some(DigitalGateKind::Mos { resistive });
-                let n = pair(terminals[2].clone(), terminals[1].clone());
-                let p = pair(invert(&terminals[3], true), terminals[1].clone());
-                return Ok(vec![
-                    assign(&terminals[0], n, kind)?,
-                    assign(&terminals[0], p, kind)?,
-                ]);
+                let enable = Expression::Binary(BinaryExpr {
+                    op: BinaryOp::BitOr,
+                    left: Box::new(terminals[2].clone()),
+                    right: Box::new(invert(&terminals[3], true)),
+                    span,
+                });
+                let value = pair(enable, terminals[1].clone());
+                let kind = DigitalGateKind::Mos { resistive };
+                return Ok(vec![assign(&terminals[0], value, Some(kind))?]);
             }
             GateFamily::Pull { one } => {
                 let value = Self::gate_constant(gate, one, span)?;

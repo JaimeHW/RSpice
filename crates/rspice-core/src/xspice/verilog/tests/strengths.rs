@@ -75,6 +75,47 @@ fn a_uwire_with_two_drivers_is_refused() {
     assert_eq!(stdout(&one), "1\n");
 }
 
+/// IEEE 1364-2005 sections 4.6.2 and 7.7: a `cmos` or `rcmos` gate is one
+/// primitive, an `nmos` and a `pmos` sharing data and output, so it is one
+/// driver of a `uwire`, and a second gate on the net is refused.
+///
+/// With `d = 1` from a `reg` (strong), the switch passes `St1` when `n = 1`
+/// or `p = 0` turns it on, nothing when `n = 0` and `p = 1`, and `StH` (1 or
+/// nothing, section 7.10.1) when a control is `x` and the other is off; a
+/// `z` control reads as `x`. `rcmos` passes strong as pull (table 7-14).
+#[test]
+fn a_cmos_gate_is_one_driver_of_a_uwire() {
+    let report = bench(
+        "module top;\n  reg d, n, p;\n  uwire u, r;\n  cmos (u, d, n, p);\n  rcmos (r, d, n, p);\n\
+         \x20 initial begin\n    d = 1;\n\
+         \x20   n = 1; p = 1;\n    #1 $display(\"%v %v\", u, r);\n\
+         \x20   n = 0; p = 0;\n    #1 $display(\"%v %v\", u, r);\n\
+         \x20   n = 0; p = 1;\n    #1 $display(\"%v %v\", u, r);\n\
+         \x20   n = 1'bx; p = 1;\n    #1 $display(\"%v %v\", u, r);\n\
+         \x20   n = 1'bx; p = 0;\n    #1 $display(\"%v %v\", u, r);\n\
+         \x20   d = 0; n = 0; p = 1'bz;\n    #1 $display(\"%v %v\", u, r);\n\
+         \x20 end\nendmodule\n",
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "St1 Pu1\nSt1 Pu1\nHiZ HiZ\nStH PuH\nSt1 Pu1\nStL PuL\n"
+    );
+    let sources = vec![(
+        std::path::PathBuf::from("tb.v"),
+        "module top;\n  reg d, n, p;\n  uwire u;\n  cmos (u, d, n, p);\n  cmos (u, d, p, n);\n\
+         \x20 initial #1 $display(\"%b\", u);\nendmodule\n"
+            .to_owned(),
+    )];
+    let error = run_digital_testbench(&sources, &HdlTestbenchOptions::default())
+        .expect_err("a second cmos on a uwire is refused")
+        .to_string();
+    assert!(
+        error.contains("`u` is a `uwire` with more than one driver"),
+        "{error}"
+    );
+}
+
 /// The rows a loop over data and control in `0 1 x z` prints.
 const SWEEP: &str = "  integer i, j;\n  reg [3:0] vals;\n";
 
