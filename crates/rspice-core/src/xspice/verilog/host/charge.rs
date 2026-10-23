@@ -81,8 +81,14 @@ impl ChargeTimers {
 
 impl DigitalHost {
     /// Schedule a decay for every bit the store says started holding charge
-    /// at `tick`, and cancel it for every bit that stopped.
+    /// at `tick`, and cancel it for every bit that stopped. A bit whose exact
+    /// value the store cannot keep refuses the run first.
     pub(super) fn schedule_charge_changes(&mut self, tick: u64) -> Result<(), DigitalRunError> {
+        if let Some(detail) = self.store.take_charge_refusal() {
+            return Err(DigitalRunError::Unsupported(Box::new(
+                crate::UnsupportedCapabilityError::new("verilog.trireg.ambiguous_charge", detail),
+            )));
+        }
         let changes = self.store.take_charge_changes();
         let Some(timers) = self.charge.as_mut().filter(|_| !changes.is_empty()) else {
             return Ok(());

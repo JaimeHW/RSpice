@@ -69,7 +69,7 @@ impl DigitalSignalStore {
     }
 
     fn check_checkpoint_boundary(&self) -> Result<(), String> {
-        if self.sequence.is_none() || self.expression_error.is_some() {
+        if self.sequence.is_none() || self.expression_error.is_some() || self.has_charge_refusal() {
             return Err("failed digital store cannot be checkpointed".into());
         }
         if !self.external_changes.is_empty()

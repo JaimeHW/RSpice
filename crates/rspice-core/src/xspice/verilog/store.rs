@@ -1482,6 +1482,7 @@ impl DigitalSignalStore {
         if self.settle_islands(signal, depth) {
             return;
         }
+        self.note_ambiguous_charge(signal);
         let resolved = self.resolve(signal);
         if self.hold_net(signal, &resolved) {
             return;

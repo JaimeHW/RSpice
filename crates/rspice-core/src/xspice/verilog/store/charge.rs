@@ -22,6 +22,12 @@
 //! `L` from a strong driver against a stored 1 of medium charge is `St0` or
 //! `Me1`, an `x` from `St0` to `Me1`, and the net then holds `x`.
 //!
+//! The charge is kept only as the net's value, so once the net reads `x` the
+//! held case is `x` at the charge strength. That covers the same range while
+//! the drivers reach the charge's strength on the side opposite it. A weaker
+//! one would have its side overstated, `We0` against `LaX` giving `LaX`
+//! where `We0` or `La1` is `34X`, so that case is refused by name.
+//!
 //! What a bidirectional switch passes is not a driver of the bit here: it is
 //! the island's resolution, of which the charge is a part. The net starts at
 //! `x` at its charge strength (section 4.2.1).
@@ -44,9 +50,9 @@
 //! it, decaying when it does, and starts holding of its own when the switch
 //! turns off. Only the bidirectional switches share charge.
 
-use super::DigitalSignalStore;
 use super::StrengthTables;
 use super::strength::{SlotGate, StrengthBit};
+use super::{DigitalSignalStore, signal_name};
 use rspice_veriloga::canonical_ir::digital::{DigitalDriveStrength, DigitalNetType};
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
@@ -174,6 +180,9 @@ pub(super) struct ChargeState {
     bridged_free: Vec<StrengthBit>,
     /// The bit whose charge is decaying in the settle under way.
     decaying: Option<(DigitalSignalId, u32)>,
+    /// Why the run is refused: a bit whose exact value the store cannot keep
+    /// ([`DigitalSignalStore::note_ambiguous_charge`]). The host drains it.
+    refused: Option<String>,
 }
 
 impl ChargeState {
@@ -268,6 +277,64 @@ impl DigitalSignalStore {
                 }
             };
         }
+    }
+
+    /// Before `signal` publishes a new value, note the first of its bits
+    /// whose exact value [`Self::resolve_charge`] cannot keep, for the host
+    /// to refuse the run with (sections 4.6.3 and 7.10).
+    ///
+    /// Such a bit holds 0 or 1, and drivers that may be off leave it at the
+    /// range covering their drive and that charge, an `x`. That range then
+    /// stands on the net's value alone, `x`, which reaches the charge's
+    /// strength on both sides; a driver weaker than the charge on the side
+    /// opposite it would be overstated.
+    pub(super) fn note_ambiguous_charge(&mut self, signal: DigitalSignalId) {
+        let Some(charge) = self.charge_of(signal) else {
+            return;
+        };
+        if self.charge.refused.is_some() {
+            return;
+        }
+        let (_, own) = self.fold_strengths(signal, false);
+        let value = &self.values[usize::from(signal)];
+        let stored = |held| StrengthBit::driven(held, charge.strength);
+        for (position, own) in (0u32..).zip(&own) {
+            let held = value.bit(position);
+            if own.sure
+                || own.maybe.is_empty()
+                || !matches!(held, FourStateBit::Zero | FourStateBit::One)
+                || self.charge.decaying == Some((signal, position))
+            {
+                continue;
+            }
+            let exact = own.either(stored(held));
+            let kept = own.either(stored(FourStateBit::Unknown));
+            if exact.value() == held || exact == kept {
+                continue;
+            }
+            self.charge.refused = Some(format!(
+                "the `trireg` net `{}` bit {position} holds {} and a driver under an `x` \
+                 enable drives {}, weaker than that charge: by IEEE 1364-2005 sections 4.6.3 \
+                 and 7.10 the net is {}, the ambiguous combination of the two, but a `trireg` \
+                 keeps its charge only as its value, and the `x` that leaves would make it {}; \
+                 give the enable a known value, or the driver at least the charge's strength",
+                signal_name(&self.plan, signal),
+                stored(held).display(),
+                own.either(StrengthBit::HIGH_Z).display(),
+                exact.display(),
+                kept.display(),
+            ));
+            return;
+        }
+    }
+
+    /// The refusal [`Self::note_ambiguous_charge`] noted, once.
+    pub(crate) fn take_charge_refusal(&mut self) -> Option<String> {
+        self.charge.refused.take()
+    }
+
+    pub(super) fn has_charge_refusal(&self) -> bool {
+        self.charge.refused.is_some()
     }
 
     /// Fold an own driver's contribution `passed` to a `trireg` bit into

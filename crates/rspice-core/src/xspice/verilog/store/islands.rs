@@ -171,6 +171,7 @@ impl DigitalSignalStore {
         }
         for &island in owned {
             for &member in &tables.islands.islands[island].signals {
+                self.note_ambiguous_charge(member);
                 let resolved = self.resolve(member);
                 self.publish_connected(member, resolved);
                 self.note_holding(member);
