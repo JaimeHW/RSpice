@@ -14,6 +14,8 @@ rtr1 tr1_h tr1 20
 vtr0 tr0_h 0 1.8
 rtr0 tr0_h tr0 20
 emeas meas 0 vout 0 1
+* fbm is a probe of v(xldo.fb), the value variant oomr also reads.
+efbm fbm 0 xldo.fb 0 1
 .op
-.save v(vout) v(meas)
+.save v(vout) v(meas) v(fbm)
 .end

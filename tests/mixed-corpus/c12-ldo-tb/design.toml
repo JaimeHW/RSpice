@@ -30,18 +30,26 @@ name = "fail"
 families = ["spice", "vams-digital", "vams-analog", "wreal"]
 today = "runs"
 
+# oomr: full, and at each reading the testbench also reads the LDO's feedback
+# node xldo.fb, inside the SPICE hierarchy and no port of the testbench, with
+# $cds_get_analog_value, onto a second wreal.
+[[variant]]
+name = "oomr"
+families = ["spice", "vams-digital", "vams-analog", "wreal"]
+today = "runs"
+
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
 [[analysis]]
 id = "tran"
-variants = ["full", "unrolled", "top", "fail"]
+variants = ["full", "unrolled", "top", "fail", "oomr"]
 oracles = ["O5", "O6", "O5-O1"]
 timeout_s = 30
 phase = "P3"
 
 [[analysis]]
 id = "op"
-variants = ["full", "unrolled", "top"]
+variants = ["full", "unrolled", "top", "oomr"]
 oracles = ["O5", "O6", "O5-O1"]
 timeout_s = 30
 phase = "P3"

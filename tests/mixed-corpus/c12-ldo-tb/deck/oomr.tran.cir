@@ -1,0 +1,17 @@
+* C12 Verilog-AMS testbench over the C5 LDO, variant oomr, tran
+.include ../../c05-ldo-trim/net/models-bsim4.cir
+.include ../net/ldo_sub.cir
+.include ../net/supply_load.cir
+.hdl "../../c05-ldo-trim/net/spi_trim.v"
+.hdl "../net/tb_ldo_oomr.vams"
+xldo vin vout tr3 tr2 tr1 tr0 ldo
+xtrim sclk sdi csn tr3 tr2 tr1 tr0 spi_trim
+xtb vout sclk sdi csn ok meas fbm tb_ldo
+.param vcc=1.8
+* The cell reads ok on its converter's endpoint, which a run records only when
+* named: the deck net ok carries the same bit.
+.esave xtb.ok__event_0
+* When the testbench's verdict rises.
+.measure tran okt WHEN D(xtb.ok__event_0)=0.5 RISE=1
+.tran 0.5u 1.65m
+.end
