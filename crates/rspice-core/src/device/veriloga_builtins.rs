@@ -77,8 +77,8 @@ pub struct GeneratedEvaluationRequest {
 #[doc(hidden)]
 pub struct BuiltinParameterAssignment {
     pub name: String,
-    pub(crate) value: crate::netlist::ParametricValue,
-    pub(crate) origin: GeneratedParameterOrigin,
+    pub value: crate::netlist::ParametricValue,
+    pub origin: GeneratedParameterOrigin,
 }
 
 #[cfg(feature = "veriloga-builtins-base")]
