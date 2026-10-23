@@ -495,6 +495,42 @@ mod vector_files {
         assert!(reports.is_empty(), "{reports:?}");
     }
 
+    /// Expected outputs due after the stop time are not checked, and the file
+    /// says so once: a WARNING naming how many and the first row that states
+    /// one, with no violation.
+    #[test]
+    fn samples_after_the_stop_time_are_one_warning_naming_the_first_row() {
+        register(
+            "assertions-vec/late.vec",
+            "radix 1 1\nvname a y\nio i o\ntunit ns\nvih 1.8\nvil 0\ntrise 1\n\
+             0 0 0\n10 1 X\n15 1 1\n25 1 1\n30 1 0\n",
+        );
+        let netlist = parse(
+            "* vec late\nr1 a y 1\nr2 y 0 1meg\n.vec 'assertions-vec/late.vec'\n\
+             .tran 0.1n 20n\n.end\n",
+        );
+        let reports = tran_reports(&netlist);
+        let [checked, late] = reports.as_slice() else {
+            panic!("{reports:?}")
+        };
+        assert_eq!(checked.target, "V(y)");
+        assert!(checked.violations.is_empty(), "{checked:?}");
+        assert_eq!(late.name, "late.vec");
+        assert_eq!(late.level, AssertLevel::Warning);
+        assert!(
+            late.violations.is_empty() && late.error.is_none(),
+            "{late:?}"
+        );
+        assert_eq!(late.origin.to_string(), "assertions-vec/late.vec:11");
+        assert_eq!(
+            late.message.as_deref(),
+            Some(
+                "2 expected-output samples after the transient's stop time 2e-8 s are not \
+                 checked; the first is on the row at assertions-vec/late.vec:11"
+            )
+        );
+    }
+
     /// The C4 corpus file against an ideal register: b7..b0 hold `S_k` from
     /// 500 ns into conversion k to 999 ns, across each check at k us + 975 ns.
     fn ideal_register(vector_path: &str) -> Netlist {

@@ -119,9 +119,11 @@ pub fn evaluate_tran_assertions(
         }
         match load_vector_file(reference, &netlist.params, limit) {
             Ok(file) => {
-                for statement in file.output_checks(reference) {
-                    evaluate_statement(netlist, &statement, &source, &mut reports);
+                let statements = file.output_checks(reference);
+                for statement in &statements {
+                    evaluate_statement(netlist, statement, &source, &mut reports);
                 }
+                reports.extend(samples_after_stop(reference, &statements, &result.time));
             }
             Err(error) => reports.push(AssertionReport {
                 name: reference.report_name(),
@@ -138,6 +140,47 @@ pub fn evaluate_tran_assertions(
         }
     }
     Ok(reports)
+}
+
+/// The one WARNING a vector file gets when the transient stops before some
+/// of its expected outputs are due: those samples are not checked, so the
+/// finding counts them and names the first row that states one. It is not a
+/// violation.
+fn samples_after_stop(
+    reference: &crate::netlist::VectorFileReference,
+    statements: &[AssertStatement],
+    time: &[Value],
+) -> Option<AssertionReport> {
+    let &stop = time.last()?;
+    let late: Vec<&AssertSample> = statements
+        .iter()
+        .filter_map(|statement| match &statement.check {
+            AssertCheck::Sampled { samples, .. } => Some(samples),
+            _ => None,
+        })
+        .flatten()
+        .filter(|sample| sample.time > stop)
+        .collect();
+    let first = late.iter().min_by_key(|sample| sample.origin.line)?;
+    let count = late.len();
+    Some(AssertionReport {
+        name: reference.report_name(),
+        analysis: AssertAnalysis::Tran,
+        target: reference.path.clone(),
+        instance: None,
+        level: AssertLevel::Warning,
+        message: Some(format!(
+            "{count} expected-output sample{} after the transient's stop time {stop:e} s {} \
+             not checked; the first is on the row at {}",
+            if count == 1 { "" } else { "s" },
+            if count == 1 { "is" } else { "are" },
+            first.origin
+        )),
+        origin: first.origin.clone(),
+        violations: Vec::new(),
+        unknown_stretches: 0,
+        error: None,
+    })
 }
 
 /// Read and parse the vector file a `.VEC` card names, refusing what RSpice
@@ -872,7 +915,8 @@ fn evaluate_statement(
 /// points around it, and each mismatch is a report of its own, located at
 /// the row that states the expectation. A bit with no mismatch has one
 /// report with no violation. A sample outside the run's time span is not
-/// checked.
+/// checked; those after the stop time are counted in the file's one warning
+/// ([`samples_after_stop`]).
 fn sampled(
     statement: &AssertStatement,
     source: &Source<'_>,
