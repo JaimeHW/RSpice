@@ -376,6 +376,10 @@ fn captured_include_errors_keep_the_authored_file_and_line() {
     let contents = "* child line one\nR1 out 0 1k FIRST SECOND\n";
     std::fs::write(&included, contents).unwrap();
     let included = included.canonicalize().unwrap();
+    // A message shows the canonical path the way it would be written: without
+    // the Windows verbatim `\\?\` prefix canonicalize() adds.
+    let shown = included.display().to_string();
+    let shown = shown.strip_prefix(r"\\?\").unwrap_or(&shown);
     for native in [false, true] {
         let mut input = HeadlessRunInput::new(source, &path, vec![op()]);
         input.resolver = if native {
@@ -405,9 +409,10 @@ fn captured_include_errors_keep_the_authored_file_and_line() {
         };
         assert_eq!(line, 2, "native={native}: {message}");
         assert!(
-            message.starts_with(&format!("{}:2: ", included.display())),
+            message.starts_with(&format!("{shown}:2: ")),
             "native={native}: {message}"
         );
+        assert!(!message.contains(r"\\?\"), "native={native}: {message}");
     }
 }
 
