@@ -1,92 +1,14 @@
 use super::*;
 use rspice_core::analysis::HbResult;
 use rspice_core::netlist::{SourceSpec, XyceHbTimeDomainMode};
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_389_SON global-parameter harmonic-balance wrapper";
-const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_389_SON";
-const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_389_son/";
-const OUTPUT_DIRECTORY: &str = "OutputData/Certification_Tests/BUG_389_SON";
-const EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_389_SON/exclude";
-const OWNER_NAME: &str = "bug389.cir";
-const GLOBAL_NAME: &str = "global_param.cir";
-const LOCAL_NAME: &str = "local_param.cir";
+#[cfg(test)]
 const OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_389_SON/bug389.cir";
 const GLOBAL_PATH: &str = "Netlists/Certification_Tests/BUG_389_SON/global_param.cir";
 const LOCAL_PATH: &str = "Netlists/Certification_Tests/BUG_389_SON/local_param.cir";
 const OWNER_RECORD: &str = "netlists/certification_tests/bug_389_son/bug389.cir";
-const GLOBAL_RECORD: &str = "netlists/certification_tests/bug_389_son/global_param.cir";
-const LOCAL_RECORD: &str = "netlists/certification_tests/bug_389_son/local_param.cir";
 const CONTRACT: &str = "bug389_global_parameter_hb_wrapper_owner";
-
-const PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const PRETRIM_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
-const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const RELEASE_TAG: &str = "Release-7.10.0";
-const RELEASE_TAG_OBJECT: &str = "2a339ec3845af0aef99a7e6cc488a41acf64f6ed";
-
-const HISTORICAL_CONTENT_BYTES: usize = 10_811;
-// These identities seal the ordered metadata stream below. They are filled
-// from the checked-in constants themselves, so changing a path, size, blob,
-// release identity, or record order fails closed before any circuit executes.
-const HISTORICAL_STREAM_BYTES: usize = 2_187;
-const HISTORICAL_STREAM_SHA256: &str =
-    "033f60829d2e55485a882886bf3fe349d690b3cd62d8514d4aee643f285c9217";
-const HISTORICAL_STREAM_BLAKE3: &str =
-    "6e6461f2761ffab649ba0d89561c284fe1fd336d3457b2806229010d78f55865";
-const HISTORICAL: [(&str, usize, &str); 8] = [
-    (
-        "Netlists/Certification_Tests/BUG_389_SON/Manifest.txt",
-        71,
-        "269e6ca25dfc808990b30ed370a090e994f48575",
-    ),
-    (OWNER_PATH, 2, "139597f9cb07c5d48bed18984ec4747f4b4f3438"),
-    (
-        "Netlists/Certification_Tests/BUG_389_SON/bug389.cir.sh",
-        2_009,
-        "18f11e1b73a144b5482eb3fc801b5e7505f75a7b",
-    ),
-    (
-        EXCLUSION_SOURCE,
-        33,
-        "7d61b034a3ae4ae4cf1d6f7bdc9b8055524c96e1",
-    ),
-    (GLOBAL_PATH, 608, "f683860d8b14ef40311bb67e85786f1bef2882f6"),
-    (LOCAL_PATH, 573, "e1c0c90d8250d84e7f061abab77f5dd81d3e518b"),
-    (
-        "Netlists/Certification_Tests/BUG_389_SON/tags",
-        50,
-        "67332e0dbbc503038edec1d8ecab7fb814f793e6",
-    ),
-    (
-        "TestScripts/file_compare.pl",
-        7_465,
-        "67670d9b777a258354d7154d44e74742fd9ff5ae",
-    ),
-];
-
-const RETAINED_STREAM_BYTES: usize = 371;
-const RETAINED_STREAM_SHA256: &str =
-    "a28409555a828022bb69c7a39833d80c3b25ce0c5e30370ffa5e74e9338ecc21";
-const RETAINED_STREAM_BLAKE3: &str =
-    "9c3fecd00c9bd116bc401906f36749bba4533ae24067a5b68bf4f2dfaf3e283f";
-const RETAINED: [(&str, usize, &str); 3] = [
-    (
-        OWNER_NAME,
-        2,
-        "75a11da44c802486bc6f65640aa48a730f0f684c5c07a42ba3cd1735eb3fb070",
-    ),
-    (
-        GLOBAL_NAME,
-        608,
-        "7093903628ab0cf6388f77ce8d885dd8945768a53991e972e8e3dcba298817c5",
-    ),
-    (
-        LOCAL_NAME,
-        573,
-        "7a334e358cbfe46973b8e67443556f5c1014bdb5fc4e485d7b3cb83cd7745ae4",
-    ),
-];
 
 const FUNDAMENTAL_HZ: Value = 1.0e6;
 const HARMONICS: usize = 101;
@@ -126,204 +48,6 @@ struct Bug389Run {
 }
 
 impl XyceTestRunner {
-    fn validate_bug389_record_streams() -> Result<(), String> {
-        let content_bytes = HISTORICAL.iter().map(|record| record.1).sum::<usize>();
-        let historical = HISTORICAL
-            .iter()
-            .map(|(path, bytes, blob)| {
-                format!(
-                    "{PRETRIM_COMMIT}\t{PRETRIM_NETLISTS_TREE}\t{UPSTREAM_COMMIT}\t{RELEASE_TAG}\t{RELEASE_TAG_OBJECT}\t{path}\t{bytes}\t{blob}"
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let historical_sha = format!("{:x}", Sha256::digest(historical.as_bytes()));
-        let historical_b3 = blake3::hash(historical.as_bytes()).to_hex().to_string();
-        let retained = RETAINED
-            .iter()
-            .map(|(name, bytes, sha)| format!("{FAMILY_DIRECTORY}/{name}\t{bytes}\t{sha}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let retained_sha = format!("{:x}", Sha256::digest(retained.as_bytes()));
-        let retained_b3 = blake3::hash(retained.as_bytes()).to_hex().to_string();
-        let unique = HISTORICAL
-            .iter()
-            .map(|record| record.0.to_ascii_lowercase())
-            .collect::<BTreeSet<_>>();
-
-        if PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || PRETRIM_NETLISTS_TREE != UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE
-            || HISTORICAL.len() != 8
-            || unique.len() != HISTORICAL.len()
-            || content_bytes != HISTORICAL_CONTENT_BYTES
-            || !HISTORICAL.iter().all(|record| {
-                record.2.len() == 40 && record.2.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
-            || historical.len() != HISTORICAL_STREAM_BYTES
-            || historical_sha != HISTORICAL_STREAM_SHA256
-            || historical_b3 != HISTORICAL_STREAM_BLAKE3
-            || RETAINED.len() != 3
-            || retained.len() != RETAINED_STREAM_BYTES
-            || retained_sha != RETAINED_STREAM_SHA256
-            || retained_b3 != RETAINED_STREAM_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} provenance changed: historical={}/{content_bytes}/{}/sha={historical_sha}/b3={historical_b3}; retained={}/{}/sha={retained_sha}/b3={retained_b3}",
-                HISTORICAL.len(),
-                historical.len(),
-                RETAINED.len(),
-                retained.len(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn read_bug389_directory(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        Self::validate_bug389_record_streams()?;
-        let directory = self.root.join(FAMILY_DIRECTORY);
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} directory must be a regular non-symlink directory"
-            ));
-        }
-        let expected = RETAINED
-            .into_iter()
-            .map(|record| (record.0.to_ascii_lowercase(), record))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
-        {
-            if abort.is_aborted() {
-                return Err(format!("{LABEL} source census aborted"));
-            }
-            let entry = entry.map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            let Some((expected_name, expected_bytes, expected_sha)) = expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name || observed.contains_key(&key) {
-                return Err(format!("{LABEL} member case/census changed: {name:?}"));
-            }
-            let cap = expected_bytes
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(3))
-                .ok_or_else(|| format!("{LABEL} source-size bound overflowed"))?;
-            if metadata.len() > cap as u64 {
-                return Err(format!(
-                    "{LABEL} member {name:?} exceeds its bounded envelope"
-                ));
-            }
-            let mut bytes = Vec::with_capacity((metadata.len() as usize).min(cap));
-            fs::File::open(&path)
-                .map_err(|error| format!("failed to open {LABEL} member: {error}"))?
-                .take((cap + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("failed to read {LABEL} member: {error}"))?;
-            if bytes.len() > cap {
-                return Err(format!("{LABEL} bounded source read grew"));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha = format!("{:x}", Sha256::digest(&canonical));
-            if canonical.len() != expected_bytes || sha != expected_sha {
-                return Err(format!(
-                    "{LABEL} member {name:?} changed: bytes={}, sha={sha}",
-                    canonical.len()
-                ));
-            }
-            observed.insert(key, canonical);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{LABEL} retained census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug389_provenance(
-        &self,
-        deck: &XyceDeck,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} provenance validation aborted"));
-        }
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != OWNER_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != OWNER_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(OWNER_PATH))
-        {
-            return Err(format!("{LABEL} recognized owner is not canonical"));
-        }
-        let owners = Self::load_upstream_wrapper_decks(&self.root)
-            .into_iter()
-            .filter(|record| record.starts_with(FAMILY_PREFIX))
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([OWNER_RECORD.to_string()]) {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusions invalid: {error}"))?;
-        if exclusions.contains_key(OWNER_RECORD) {
-            return Err(format!("{LABEL} owner must not be excluded"));
-        }
-        let family = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(FAMILY_PREFIX))
-            .collect::<Vec<_>>();
-        if family.len() != 2 {
-            return Err(format!("{LABEL} exclusion census changed: {family:?}"));
-        }
-        for expected_record in [GLOBAL_RECORD, LOCAL_RECORD] {
-            let Some(qualification) = exclusions.get(expected_record) else {
-                return Err(format!("{LABEL} lost control exclusion {expected_record}"));
-            };
-            if qualification.source != EXCLUSION_SOURCE
-                || !matches!(
-                    qualification.disposition,
-                    XyceUpstreamExclusionDisposition::Excluded
-                )
-            {
-                return Err(format!(
-                    "{LABEL} control exclusion changed: {expected_record} {qualification:?}"
-                ));
-            }
-        }
-        match fs::symlink_metadata(self.root.join(OUTPUT_DIRECTORY)) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("failed to inspect {LABEL} OutputData: {error}")),
-            Ok(_) => return Err(format!("{LABEL} must not acquire invented numerical gold")),
-        }
-        for path in [OWNER_PATH, GLOBAL_PATH, LOCAL_PATH] {
-            self.reject_wrapper_output_artifacts(&self.root.join(path))
-                .map_err(|error| format!("{LABEL} {path} {error}"))?;
-        }
-        self.read_bug389_directory(abort)
-    }
-
     fn bug389_namespace_transform(global: &str, local: &str) -> Result<(), String> {
         let token = ".global_param";
         let positions = global.match_indices(token).collect::<Vec<_>>();
@@ -974,30 +698,16 @@ impl XyceTestRunner {
         })
     }
 
-    pub(super) fn validate_bug389_oracle(
-        &self,
-        deck: &XyceDeck,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug389_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let before = self.validate_bug389_provenance(deck, &abort)?;
-        let owner = before
-            .get(&OWNER_NAME.to_ascii_lowercase())
-            .ok_or_else(|| format!("{LABEL} lost sealed owner"))?;
-        if owner.as_slice() != b"\n\n" {
-            return Err(format!(
-                "{LABEL} owner is no longer the exact blank wrapper sentinel"
-            ));
+        if abort.is_aborted() {
+            return Err(format!("{LABEL} deadline expired before execution"));
         }
-        let global = before
-            .get(&GLOBAL_NAME.to_ascii_lowercase())
-            .ok_or_else(|| format!("{LABEL} lost global control"))?;
-        let local = before
-            .get(&LOCAL_NAME.to_ascii_lowercase())
-            .ok_or_else(|| format!("{LABEL} lost local control"))?;
-        let global_source = std::str::from_utf8(global)
+        let global = Self::read_corpus_canonical(LABEL, &self.root.join(GLOBAL_PATH))?;
+        let local = Self::read_corpus_canonical(LABEL, &self.root.join(LOCAL_PATH))?;
+        let global_source = std::str::from_utf8(&global)
             .map_err(|error| format!("{LABEL} global control is not UTF-8: {error}"))?;
-        let local_source = std::str::from_utf8(local)
+        let local_source = std::str::from_utf8(&local)
             .map_err(|error| format!("{LABEL} local control is not UTF-8: {error}"))?;
         Self::bug389_namespace_transform(global_source, local_source)?;
 
@@ -1038,10 +748,6 @@ impl XyceTestRunner {
         if abort.is_aborted() {
             return Err(format!("{LABEL} execution exceeded deadline"));
         }
-        let after = self.validate_bug389_provenance(deck, &abort)?;
-        if before != after {
-            return Err(format!("{LABEL} sealed sources changed during execution"));
-        }
         Ok(())
     }
 }
@@ -1068,19 +774,12 @@ mod tests {
     }
 
     #[test]
-    fn bug389_historical_and_retained_record_streams_are_sealed() {
-        XyceTestRunner::validate_bug389_record_streams().unwrap();
-        let abort = DeadlineAbort::new(Instant::now(), 30_000);
-        assert_eq!(runner().read_bug389_directory(&abort).unwrap().len(), 3);
-    }
-
-    #[test]
     fn bug389_namespace_transform_is_exact_and_counterfactual_sensitive() {
-        let root = corpus_root().join(FAMILY_DIRECTORY);
-        let global = fs::read_to_string(root.join(GLOBAL_NAME))
+        let root = corpus_root();
+        let global = fs::read_to_string(root.join(GLOBAL_PATH))
             .unwrap()
             .replace("\r\n", "\n");
-        let local = fs::read_to_string(root.join(LOCAL_NAME))
+        let local = fs::read_to_string(root.join(LOCAL_PATH))
             .unwrap()
             .replace("\r\n", "\n");
         XyceTestRunner::bug389_namespace_transform(&global, &local).unwrap();

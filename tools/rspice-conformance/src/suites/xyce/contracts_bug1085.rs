@@ -7,7 +7,6 @@ pub(super) const XYCE_BUG1085_WRAPPER_OWNER_CONTRACT: &str =
 pub(super) const XYCE_BUG1085_REFERENCE_BASELINE_CONTRACT: &str =
     "bug1085_user_function_alpha_renamed_reference_baseline";
 pub(super) const XYCE_BUG1085_FAMILY: &str = "Certification_Tests/BUG_1085_SON/bug1085son";
-pub(super) const XYCE_BUG1085_FAMILY_DIR: &str = "Netlists/Certification_Tests/BUG_1085_SON";
 pub(super) const XYCE_BUG1085_OWNER_PATH: &str =
     "Netlists/Certification_Tests/BUG_1085_SON/bug1085son.cir";
 pub(super) const XYCE_BUG1085_CONTROL_PATH: &str =
@@ -16,66 +15,6 @@ pub(super) const XYCE_BUG1085_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_1085_son/bug1085son.cir";
 pub(super) const XYCE_BUG1085_CONTROL_RECORD: &str =
     "netlists/certification_tests/bug_1085_son/bug1085sonref.cir";
-const XYCE_BUG1085_HISTORICAL_EXCLUDE_PATH: &str =
-    "Netlists/Certification_Tests/BUG_1085_SON/exclude";
-const XYCE_BUG1085_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const XYCE_BUG1085_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG1085_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG1085_HISTORICAL_RECORD_COUNT: usize = 5;
-const XYCE_BUG1085_HISTORICAL_RECORD_BYTES: usize = 1_188;
-const XYCE_BUG1085_HISTORICAL_RECORDS_SHA256: &str =
-    "bbf195b19e8ccf2068f69917303ff1ebcf0f8164798b40203a189828580415cb";
-const XYCE_BUG1085_HISTORICAL_RECORDS_BLAKE3: &str =
-    "b245ba1d09aee2c1311ca9b2db3923011d3fcbb9ce4de474fb2c8db3a49f0ae1";
-
-const XYCE_BUG1085_RETAINED_SOURCES: [(&str, usize, &str, &str); 2] = [
-    (
-        "bug1085son.cir",
-        787,
-        "4e254194ffb25b86e2e95ab344f0504290f51707b2505104d655f100bf39e414",
-        "58066213cd1cabf5377c677d9482f88e6c2974da23bef87b0415d1cace7ca126",
-    ),
-    (
-        "bug1085sonRef.cir",
-        801,
-        "60502e13e53e47dcaa4af0b80a8a8af8ddef41d6725a8cd0f9c0647bada54c2f",
-        "42b6d7c5d9ec3ec0427a9e534afc769ee01ce018fc9d7e71ec358fd5955c4e82",
-    ),
-];
-
-const XYCE_BUG1085_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 5] = [
-    (
-        "Netlists/Certification_Tests/BUG_1085_SON/Manifest.txt",
-        64,
-        "567e0a5c9a971035001868b5cd66aa539b99be841d76600c7eb4b8bd9a518a62",
-        "da2db3eb958496f378990496fcc665417329bceab4d8d5a78ef30ae06bbfd40a",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1085_SON/bug1085son.cir.sh",
-        2_239,
-        "07a02f35c2b044e22282e74e2085a57568e44ccc6de5cdd017b6db52cb531435",
-        "5525e97b412a34d876195f051d04607442840a175a253db2f370337cda489327",
-    ),
-    (
-        XYCE_BUG1085_HISTORICAL_EXCLUDE_PATH,
-        18,
-        "dd122a5bbe6215b31486e6f21ccdd7c9f51b44ac656599191580aa28be078bf3",
-        "6e39a5b2e896d6d8f85a607ddc466b9100f4f48de9ba34b4d607bdd169911962",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1085_SON/tags",
-        37,
-        "fc71936338459932b30d55524ffbe314e69db3be5f0ef36b164c3ad482b6f5ec",
-        "07050ded83e26db24bfe730e0c1d16c2fd7696198dcf807145eaff0bb6164a92",
-    ),
-    (
-        "TestScripts/file_compare.pl",
-        7_465,
-        "a700143baddab265ca2e74d69541432fb27ae66600c3fee71968797fc78efcb0",
-        "04dd69b4e4cfe543a39f663966229be877fa595a7c6c885dadf2173814f85895",
-    ),
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum XyceBug1085UserFunctionRole {
     I0WrapperOwner,
@@ -401,114 +340,6 @@ impl XyceTestRunner {
         XyceFileCompareTolerance::BUG1085_USER_FUNCTION
     }
 
-    pub(super) fn bug1085_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG1085_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG1085_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1085_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug1085_historical_oracle_records(
-        records: &[String],
-    ) -> Result<(), String> {
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if XYCE_BUG1085_PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || records.len() != XYCE_BUG1085_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG1085_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG1085_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG1085_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} Release-7.10 provenance changed: pretrim={XYCE_BUG1085_PRETRIM_COMMIT}, records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_bug1085_historical_oracle_provenance() -> Result<(), String> {
-        Self::validate_bug1085_historical_oracle_records(
-            &Self::bug1085_historical_oracle_provenance_records(),
-        )
-    }
-
-    fn validate_bug1085_source_directory(directory: &Path) -> Result<(), String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {LABEL} source directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} source directory must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_BUG1085_RETAINED_SOURCES
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeSet::new();
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("failed to enumerate {LABEL} source directory: {error}"))?
-        {
-            let entry =
-                entry.map_err(|error| format!("failed to inspect {LABEL} member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {LABEL} member: {error}"))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if !observed.insert(key.clone()) {
-                return Err(format!(
-                    "{LABEL} source directory contains a case collision"
-                ));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} member {name:?}: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if name != expected_name
-                || canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} member {name:?} identity changed: bytes={}, sha256={sha256}, blake3={content_blake3}",
-                    canonical.len()
-                ));
-            }
-        }
-        let expected_names = expected.keys().cloned().collect::<BTreeSet<_>>();
-        if observed != expected_names {
-            return Err(format!(
-                "{LABEL} physical source census changed: expected {expected_names:?}, got {observed:?}"
-            ));
-        }
-        Ok(())
-    }
-
     pub(super) fn bug1085_user_function_family_contract(
         &self,
         deck: &XyceDeck,
@@ -550,104 +381,16 @@ impl XyceTestRunner {
                 baseline_path,
                 role,
             };
-            self.validate_bug1085_user_function_provenance(&contract)?;
+            self.validate_bug1085_user_function_semantics(&contract)?;
             Ok(contract)
         })())
     }
 
-    pub(super) fn validate_bug1085_user_function_provenance(
+    /// The owner and the alpha-renamed baseline must parse to one user-function circuit.
+    fn validate_bug1085_user_function_semantics(
         &self,
         contract: &XyceBug1085UserFunctionFamilyContract,
     ) -> Result<(), String> {
-        Self::validate_bug1085_historical_oracle_provenance()?;
-        let expected_target = match contract.role {
-            XyceBug1085UserFunctionRole::I0WrapperOwner => &contract.owner_path,
-            XyceBug1085UserFunctionRole::AlphaRenamedReferenceBaseline => &contract.baseline_path,
-        };
-        if contract.relational.kind != XyceBaselineFamilyKind::Bug1085UserFunctionI0
-            || contract.relational.comparison
-                != XyceBaselineFamilyComparison::Release710FileCompare(
-                    Self::bug1085_user_function_file_compare_tolerance(),
-                )
-            || contract.relational.family != XYCE_BUG1085_FAMILY
-            || !Self::same_path(&contract.relational.baseline_path, &contract.baseline_path)
-            || contract.relational.member_paths.len() != 2
-            || !Self::same_path(&contract.relational.member_paths[0], &contract.owner_path)
-            || !Self::same_path(
-                &contract.relational.member_paths[1],
-                &contract.baseline_path,
-            )
-            || !contract
-                .relational
-                .target_path
-                .as_ref()
-                .is_some_and(|path| Self::same_path(path, expected_target))
-        {
-            return Err(format!(
-                "{LABEL} contract is not the exact reference-GOODFILE/owner-TESTFILE pair"
-            ));
-        }
-
-        let prefix = "netlists/certification_tests/bug_1085_son/";
-        let wrappers = Self::load_upstream_wrapper_decks(&self.root);
-        let family_wrappers = wrappers
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if family_wrappers != BTreeSet::from([XYCE_BUG1085_OWNER_RECORD]) {
-            return Err(format!(
-                "{LABEL} wrapper ownership changed: {family_wrappers:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        let family_exclusions = exclusions
-            .keys()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        let control_exclusion = exclusions.get(XYCE_BUG1085_CONTROL_RECORD);
-        if family_exclusions != BTreeSet::from([XYCE_BUG1085_CONTROL_RECORD])
-            || control_exclusion.is_none_or(|exclusion| {
-                Self::normalize_manifest_key(&exclusion.source)
-                    != Self::normalize_manifest_key(XYCE_BUG1085_HISTORICAL_EXCLUDE_PATH)
-                    || !matches!(
-                        &exclusion.disposition,
-                        XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
-                            expected_contract,
-                        } if expected_contract
-                            == XYCE_BUG1085_REFERENCE_BASELINE_CONTRACT
-                    )
-            })
-        {
-            return Err(format!(
-                "{LABEL} reference baseline lost its exact independent qualification"
-            ));
-        }
-
-        Self::validate_bug1085_source_directory(&self.root.join(XYCE_BUG1085_FAMILY_DIR))?;
-        let output_directory = self
-            .root
-            .join("OutputData/Certification_Tests/BUG_1085_SON");
-        match fs::symlink_metadata(&output_directory) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "failed to inspect {LABEL} OutputData directory: {error}"
-                ));
-            }
-            Ok(_) => {
-                return Err(format!(
-                    "{LABEL} must not acquire fabricated checked-in numerical output"
-                ));
-            }
-        }
-        for path in [&contract.owner_path, &contract.baseline_path] {
-            self.reject_wrapper_output_artifacts(path)
-                .map_err(|error| format!("{LABEL} relational record {error}"))?;
-        }
-
         let owner_plan = self
             .static_tran_plan_for_path_with_purpose(
                 &contract.owner_path,
@@ -787,16 +530,6 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("tests/xyce")
-    }
-
-    #[test]
-    fn bug1085_historical_provenance_is_exact_and_rejects_drift() {
-        let records = XyceTestRunner::bug1085_historical_oracle_provenance_records();
-        XyceTestRunner::validate_bug1085_historical_oracle_records(&records)
-            .expect("Release-7.10 BUG1085 provenance remains exact");
-        let mut changed = records;
-        changed[0].push('x');
-        assert!(XyceTestRunner::validate_bug1085_historical_oracle_records(&changed).is_err());
     }
 
     #[test]

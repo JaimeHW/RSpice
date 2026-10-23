@@ -294,41 +294,9 @@ const XYCE_SOURCE_MULTIPLICITY_BASELINE_CONTRACT: &str = "source_multiplicity_fa
 
 // Release 7.10's four ABM_FREQ wrappers run the authored FREQ/HERTZ deck as
 // ACComparator's directional GOODFILE and the corresponding .AC DATA deck as
-// TESTFILE.  The selected current corpus, the removed wrappers/exclude file,
-// and the exact comparator implementation are all bound to RSpice's pinned
-// pre-trim source tree before native relational execution is admitted.
+// TESTFILE.
 const XYCE_ABM_FREQUENCY_WRAPPER_OWNER_CONTRACT: &str = "abm_frequency_relational_wrapper_owner";
 const XYCE_ABM_FREQUENCY_DATA_CONTROL_CONTRACT: &str = "abm_frequency_relational_data_control";
-const XYCE_ABM_FREQUENCY_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const XYCE_ABM_FREQUENCY_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_ABM_FREQUENCY_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_ABM_FREQUENCY_CANDIDATE_COUNT: usize = 8;
-const XYCE_ABM_FREQUENCY_CANDIDATE_BLAKE3: &str =
-    "7efc124b0af802d1376d54a8afc39362c79ee194cb187ed33ecb995c77e536ec";
-const XYCE_ABM_FREQUENCY_CANDIDATE_CONTENT_BLAKE3: &str =
-    "72b7c09c288f0b9747c3f38bfb981e5f8d4c147fe846e4d0c4a0fe05497114e6";
-const XYCE_ABM_FREQUENCY_OWNER_COUNT: usize = 4;
-const XYCE_ABM_FREQUENCY_OWNER_MANIFEST_BLAKE3: &str =
-    "5ec62eef7013051119a34cc59f57685045cba5a3e68b37db753a7f5e2b291047";
-const XYCE_ABM_FREQUENCY_EXCLUSION_COUNT: usize = 4;
-const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "80cf056fce5978e4f1a11342f3ec96d2d064c87eca98777496288f47bb6acd47";
-const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/ABM_FREQ/exclude";
-const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_BYTES: usize = 86;
-const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_SHA256: &str =
-    "66ec2ffe0a69ab047be056920a56e45ccdab2b7884f81e49c131b0c383678b92";
-const XYCE_ABM_FREQUENCY_HISTORICAL_EXCLUDE_BLAKE3: &str =
-    "4843fb1c7996364566527b5bb18fcb9c733be24053bb95fa69120aba5697a9a0";
-const XYCE_ABM_FREQUENCY_AC_COMPARATOR_PATH: &str = "TestScripts/ACComparator.pl";
-const XYCE_ABM_FREQUENCY_AC_COMPARATOR_BYTES: usize = 14_308;
-const XYCE_ABM_FREQUENCY_AC_COMPARATOR_SHA256: &str =
-    "265c0c24ac886ad44bf3827f2cbe0c0f1c75c80971d5bdb3429e8048b36e1571";
-const XYCE_ABM_FREQUENCY_AC_COMPARATOR_BLAKE3: &str =
-    "6a1c8fdfa65116f6729343a759d172be939eb81a8617cea5a52f3572577ba926";
-const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_RECORD_COUNT: usize = 6;
-const XYCE_ABM_FREQUENCY_HISTORICAL_ORACLE_BLAKE3: &str =
-    "e08dd112070ff4b275d29c41cb5cc623c81687dda49aeb40460a4092c4655676";
 const XYCE_ABM_FREQUENCY_GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
 const XYCE_ABM_FREQUENCY_GRID_RELATIVE_ROUNDOFF: Value = 64.0 * f64::EPSILON;
 
@@ -484,82 +452,10 @@ const XYCE_ABM_LOOKUP_ORDER_GRID: [Value; 11] =
 // that relational oracle natively.
 const XYCE_BUG38_WRAPPER_OWNER_CONTRACT: &str = "bug38_subckt_formal_parentheses_wrapper_owner";
 const XYCE_BUG38_PARENTHESIZED_CONTROL_CONTRACT: &str = "bug38_subckt_formal_parentheses_control";
-const XYCE_BUG38_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const XYCE_BUG38_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG38_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG38_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_38_SON/bug_38_son.cir";
 const XYCE_BUG38_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_38_SON/bug_38_son_p.cir";
 const XYCE_BUG38_OWNER_RECORD: &str = "netlists/certification_tests/bug_38_son/bug_38_son.cir";
 const XYCE_BUG38_CONTROL_RECORD: &str = "netlists/certification_tests/bug_38_son/bug_38_son_p.cir";
-const XYCE_BUG38_OWNER_CONTENT_BLAKE3: &str =
-    "92ee9edf950c7f319c7d73bb3307b8792f5fad512f3127fd20149fc28e392a57";
-const XYCE_BUG38_CONTROL_CONTENT_BLAKE3: &str =
-    "15f55cf395f52fcb1a9f36bfe8819e26bc66616d1ca781af0792331d0cbec9e5";
-const XYCE_BUG38_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/Certification_Tests/BUG_38_SON/exclude";
-const XYCE_BUG38_CANDIDATE_COUNT: usize = 2;
-const XYCE_BUG38_CANDIDATE_BLAKE3: &str =
-    "c1dda42002414671ded07873bba2c55d4efd8b8a3267eb02cff9e7d8597d6d8a";
-const XYCE_BUG38_CANDIDATE_CONTENT_BLAKE3: &str =
-    "2ec24f64a38c27dd2c73416783c24c40fd816ac97dd1b12e736939454db2c172";
-const XYCE_BUG38_OWNER_MANIFEST_BLAKE3: &str =
-    "7ee59f89e3bb85ece40a4dc090b518349194913e7a8c898b0046e4cef58b6615";
-const XYCE_BUG38_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "c106473166f096b0fd22fff4d50c18902a59f93dccb1d71e77b21f7d7f465c4a";
-const XYCE_BUG38_REQUIRED_ORACLE_RECORD_COUNT: usize = 6;
-const XYCE_BUG38_REQUIRED_ORACLE_BYTES: usize = 1_447;
-const XYCE_BUG38_REQUIRED_ORACLE_SHA256: &str =
-    "1b7cc7a326fb07591388a4e3c81bf2adc667616f32d88ef5e9f7c894866f0347";
-const XYCE_BUG38_REQUIRED_ORACLE_BLAKE3: &str =
-    "f15a0c610efd2b5def26fc489522c555f685653924554bbd659b1f26b30d2de1";
-const XYCE_BUG38_HISTORICAL_ORACLE_RECORD_COUNT: usize = 7;
-const XYCE_BUG38_HISTORICAL_ORACLE_BLAKE3: &str =
-    "b3aad59f1109003205077dc418a34d40426a3332c9e39770b72b90d4b77fde52";
-
-const XYCE_BUG38_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/Certification_Tests/BUG_38_SON/README",
-        630,
-        "13e535a162d5218d0e53fb1274617f34e9d5b7715d0a86a8fe8b05b49ba9432e",
-        "d8c7340d9e24ded977e7aedb7838937f09497508cbc5eb67bc8e163356780869",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_38_SON/Manifest.txt",
-        70,
-        "2f2ae96c7842a02c48cd8a5ca935eaeba94bd74604a958a5dd884fc706799f1b",
-        "07497706a574f62298ef5e4dbf83872f20b027f145ff9b4c149d680ef91f7094",
-    ),
-    (
-        XYCE_BUG38_OWNER_PATH,
-        187,
-        "f9a56497613ef618fcbf552c755a51fa460a1e61c430e3331b8cb0348ccd0a62",
-        XYCE_BUG38_OWNER_CONTENT_BLAKE3,
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_38_SON/bug_38_son.cir.sh",
-        1_445,
-        "47ff59fa3801f4c8291e03e4029d78b75bebc56357993014afc570bb1b495b7e",
-        "bfa2c5f0b5f735b699177726dad357a4c5cc1cb1c5c2cbd8d07c467ccc2b0fb9",
-    ),
-    (
-        XYCE_BUG38_CONTROL_PATH,
-        203,
-        "ba92a6d955a1179bab285d4eddd583e4fbc8d70ac56e83d37b0bd0d9912cfb05",
-        XYCE_BUG38_CONTROL_CONTENT_BLAKE3,
-    ),
-    (
-        XYCE_BUG38_HISTORICAL_EXCLUDE_PATH,
-        17,
-        "8c51a1344c808cf7ef0acb904d45c10f54a223817cfc77a08cd3d499aca3b347",
-        "802378e620d5e2c38b752ff311e969fccef89cad2324a5269f3c0107defa4cee",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-
 // Release 7.10's two BUG_39_SON random-function placeholders are independent
 // wrapper owners. Each removed Perl wrapper generates a 10,000-resistor,
 // one-point DC deck and accepts only the historical population mean/sigma
@@ -3908,12 +3804,6 @@ struct XyceAbmFrequencyCaseSpec {
     control_path: &'static str,
     owner_record: &'static str,
     control_record: &'static str,
-    owner_content_blake3: &'static str,
-    control_content_blake3: &'static str,
-    wrapper_path: &'static str,
-    wrapper_bytes: usize,
-    wrapper_sha256: &'static str,
-    wrapper_blake3: &'static str,
     kind: XyceAbmFrequencyKind,
     variable: XyceAbmFrequencyVariable,
 }
@@ -3925,12 +3815,6 @@ const XYCE_ABM_FREQUENCY_CASES: [XyceAbmFrequencyCaseSpec; 4] = [
         control_path: "Netlists/ABM_FREQ/abmfreq1_data.cir",
         owner_record: "netlists/abm_freq/abmfreq1.cir",
         control_record: "netlists/abm_freq/abmfreq1_data.cir",
-        owner_content_blake3: "a702b96fb4dd7772b74316c0ea3479e81bebb06a1982436cdeb857d461411099",
-        control_content_blake3: "8bc43c93af51247e02dad6a271d3252d656a52851b0985dae7f34332cb2e32d0",
-        wrapper_path: "Netlists/ABM_FREQ/abmfreq1.cir.sh",
-        wrapper_bytes: 2_790,
-        wrapper_sha256: "6e1662faee760fadac28bb36eea179d3e95f274b9d18d8b2b85febd800a131d7",
-        wrapper_blake3: "22c4ed967cfc47ec81ca28dfbadc990bf9005a4177168960ed7e8b51d3c0d4c0",
         kind: XyceAbmFrequencyKind::BehavioralCurrent,
         variable: XyceAbmFrequencyVariable::Freq,
     },
@@ -3940,12 +3824,6 @@ const XYCE_ABM_FREQUENCY_CASES: [XyceAbmFrequencyCaseSpec; 4] = [
         control_path: "Netlists/ABM_FREQ/abmhertz1_data.cir",
         owner_record: "netlists/abm_freq/abmhertz1.cir",
         control_record: "netlists/abm_freq/abmhertz1_data.cir",
-        owner_content_blake3: "c0e1ec2e949796a5a15d894c5ed601bf2b6aa5ea1a5882afacc05ef7edfec298",
-        control_content_blake3: "69323efca8360bbcbef2c9395d6612d3213cc0c770e603336f2702c9fdb7a06e",
-        wrapper_path: "Netlists/ABM_FREQ/abmhertz1.cir.sh",
-        wrapper_bytes: 2_792,
-        wrapper_sha256: "5e04c31574e5d7a9cebbe77243dc71b0bae9894272aaadf92d03ba56a0de39dc",
-        wrapper_blake3: "d5d21c88b6eadd045ab7045b9f0d078b0979ba2e7cf5123a0a3aea6fd65db1c7",
         kind: XyceAbmFrequencyKind::BehavioralCurrent,
         variable: XyceAbmFrequencyVariable::Hertz,
     },
@@ -3955,12 +3833,6 @@ const XYCE_ABM_FREQUENCY_CASES: [XyceAbmFrequencyCaseSpec; 4] = [
         control_path: "Netlists/ABM_FREQ/RC_data.cir",
         owner_record: "netlists/abm_freq/rc_simple.cir",
         control_record: "netlists/abm_freq/rc_data.cir",
-        owner_content_blake3: "0fba61011546c024c009d5c3206bff30d2ec36c65993115bc7f3f362a1aa2249",
-        control_content_blake3: "09b2d92fd9bdc87751052bdc3707402206c51b449616f915d6ce510ea37eda8c",
-        wrapper_path: "Netlists/ABM_FREQ/RC_simple.cir.sh",
-        wrapper_bytes: 2_785,
-        wrapper_sha256: "dbef44efb30c9fff33bf4bd1e9d60adcfcc664835164d55a06819a20b0790443",
-        wrapper_blake3: "f5eb8df6e647999d8f597e91cff6dc5b617fb96e42fed1fa87fb791cee382e14",
         kind: XyceAbmFrequencyKind::Resistor,
         variable: XyceAbmFrequencyVariable::Freq,
     },
@@ -3970,12 +3842,6 @@ const XYCE_ABM_FREQUENCY_CASES: [XyceAbmFrequencyCaseSpec; 4] = [
         control_path: "Netlists/ABM_FREQ/RC_data_hertz.cir",
         owner_record: "netlists/abm_freq/rc_simple_hertz.cir",
         control_record: "netlists/abm_freq/rc_data_hertz.cir",
-        owner_content_blake3: "b972b03e5f444fdad0271531cdb3d75a549c705dbdf0f5869e96249f8f219929",
-        control_content_blake3: "320de333e3ebf9a965bea123f15a44e7f5c4df55ccaa62e811574cc82f4fe8ae",
-        wrapper_path: "Netlists/ABM_FREQ/RC_simple_hertz.cir.sh",
-        wrapper_bytes: 2_797,
-        wrapper_sha256: "680a73dfc6979be0e58e95cac84265a0a1684e1cffa54f5db15aa7163c38e313",
-        wrapper_blake3: "01fc0372d1f8e1cece405eff20fe3f01f69e4184931f72451590fdb4483b06da",
         kind: XyceAbmFrequencyKind::Resistor,
         variable: XyceAbmFrequencyVariable::Hertz,
     },

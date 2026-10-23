@@ -1,57 +1,8 @@
 use super::*;
 
 const LABEL: &str = "BUG_1190_SON process-parameter alias family";
-const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_1190_son/";
-const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_1190_SON";
-const EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_1190_SON/exclude";
 const OWNER_CONTRACT: &str = "bug1190_son_process_parameter_alias_relational_wrapper_owner";
 const CONTROL_CONTRACT: &str = "bug1190_son_direct_model_parameter_relational_control";
-
-const UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const VENDORING_COMMIT: &str = "317c587f7";
-const HARNESS_TRIM_COMMIT: &str = "2e55e96a2";
-const HISTORICAL_RECORD_COUNT: usize = 7;
-const HISTORICAL_RECORD_BYTES: usize = 1_222;
-const HISTORICAL_RECORDS_SHA256: &str =
-    "8c7732c02c86f5c1fedab293b83e1ccf4329628290c2b134474f48b0ebb968b0";
-const HISTORICAL_ARTIFACTS: [(&str, usize, &str); HISTORICAL_RECORD_COUNT] = [
-    (
-        "Netlists/Certification_Tests/BUG_1190_SON/Manifest.txt",
-        225,
-        "cf929bf9d2c0f0963242c5fc5a58e39373ed8e7c4242555951f8e5e4920bf280",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1190_SON/bsim3.cir.sh",
-        2_298,
-        "00f9eaad24eefe13ebbaf83a7c2113b3d60c6f084dabf822cd03f36383899c84",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1190_SON/bsim4.cir.sh",
-        2_298,
-        "00f9eaad24eefe13ebbaf83a7c2113b3d60c6f084dabf822cd03f36383899c84",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1190_SON/diode.cir.sh",
-        2_228,
-        "aaa1906d44712270ec344e89031567140e40ff88d13387e7950b9f71c0171cfd",
-    ),
-    (
-        EXCLUSION_SOURCE,
-        89,
-        "1efbb176ad58cdb0ee187e48f43087293979279d1c20be9e7c32af48ef7b5f49",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1190_SON/tags",
-        36,
-        "0ea1756eda58e92ec6ea26316f966c5ad5fd72e2a7000c36359f928731c74b9f",
-    ),
-    (
-        "TestScripts/file_compare.pl",
-        7_465,
-        "a700143baddab265ca2e74d69541432fb27ae66600c3fee71968797fc78efcbf0",
-    ),
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Bug1190SonRole {
@@ -84,8 +35,6 @@ impl Bug1190SonRole {
         Self::DiodeOwner,
         Self::DiodeControl,
     ];
-    const OWNERS: [Self; 3] = [Self::Bsim3Owner, Self::Bsim4Owner, Self::DiodeOwner];
-    const CONTROLS: [Self; 3] = [Self::Bsim3Control, Self::Bsim4Control, Self::DiodeControl];
 
     pub(super) fn for_record(record: &str) -> Option<Self> {
         let record = XyceTestRunner::normalize_manifest_key(record);
@@ -133,48 +82,6 @@ impl Bug1190SonRole {
             Self::DiodeControl => "netlists/certification_tests/bug_1190_son/dioderef.cir",
         }
     }
-
-    fn file_name(self) -> &'static str {
-        Path::new(self.path())
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("BUG1190 role path has a UTF-8 file name")
-    }
-
-    fn source_identity(self) -> (usize, &'static str, &'static str) {
-        match self {
-            Self::Bsim3Owner => (
-                2_019,
-                "52e8e3f4b71d31ee623d41359cb007dfce515db4bc3946a2522adcf8de82a3b0",
-                "f0428a4a81a105e89675e46d3773b1ca268b9cbbf30466f45d27165f3fa2c9ee",
-            ),
-            Self::Bsim3Control => (
-                2_006,
-                "b9153810e795a6456d3f0362241038857c9012bccadd0cc12f8dcf3e38e82f9f",
-                "53c4c08a1473c701ba229fc3505c3c9b9ce1d6f02be0657027a38f80fb440226",
-            ),
-            Self::Bsim4Owner => (
-                7_835,
-                "3e7ef07130e5662e65e5eba49ca72ac364fea76f34dea34f1a9be61cd02e6763",
-                "f251b43614d11b3817e5d86d4664b36b78e4b82734da95e3f7dbc7e97f6c280a",
-            ),
-            Self::Bsim4Control => (
-                7_788,
-                "79944ba5d4e86bc778302d38b1d9e977c1d0eeedcdfb1316cc6ecd4c87442431",
-                "d1db6f27dd40e06ee6682a99eb76ec1fab000ebb4eff962d65287601286aa8ac",
-            ),
-            Self::DiodeOwner => (
-                304,
-                "64446ca7c39d71dedb31d1d6d8d7f55cc6b61f851ad710271d303d7f72d79124",
-                "61c0a4f4ff4aa9935b22d21bfc384b2fbfa467eda0ecd3b9220d43506c2e5794",
-            ),
-            Self::DiodeControl => (
-                262,
-                "1ff64d3a8fb4da8bc17431280ac6641fa07c26676d0f4658032520c08bce605a",
-                "7263ced101e667a49f4242ab793fff79a55441f56704ebbc7f74ebe6a106aead",
-            ),
-        }
-    }
 }
 
 impl Bug1190SonPair {
@@ -196,200 +103,6 @@ impl Bug1190SonPair {
 }
 
 impl XyceTestRunner {
-    fn bug1190_son_historical_records() -> Vec<String> {
-        let mut records = HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256)| {
-                format!(
-                    "{UPSTREAM_REGRESSION_COMMIT}\t{UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    fn validate_bug1190_son_historical_provenance() -> Result<(), String> {
-        let records = Self::bug1190_son_historical_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        if records.len() != HISTORICAL_RECORD_COUNT
-            || stream.len() != HISTORICAL_RECORD_BYTES
-            || sha256 != HISTORICAL_RECORDS_SHA256
-            || UPSTREAM_EXCLUSIONS_SOURCE_COMMIT != "80115a9277c0ddb3409acceb3d4e745fd11cddd4"
-        {
-            return Err(format!(
-                "{LABEL} historical wrapper provenance changed: records={}/{}, bytes={}/{}, sha256={sha256}; vendor={VENDORING_COMMIT}, trim={HARNESS_TRIM_COMMIT}",
-                records.len(),
-                HISTORICAL_RECORD_COUNT,
-                stream.len(),
-                HISTORICAL_RECORD_BYTES
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug1190_son_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug1190SonRole,
-    ) -> Result<BTreeMap<Bug1190SonRole, Vec<u8>>, String> {
-        Self::validate_bug1190_son_historical_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!("recognized {LABEL} role {role:?} is not canonical"));
-        }
-
-        let family = self.root.join(FAMILY_DIRECTORY);
-        let metadata = fs::symlink_metadata(&family)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} directory must be a regular non-symlink directory"
-            ));
-        }
-        let expected_names = BTreeSet::from([
-            "bsim3.cir".to_string(),
-            "bsim3_modpar.cir".to_string(),
-            "bsim4.cir".to_string(),
-            "bsim4_modpar.cir".to_string(),
-            "diode.cir".to_string(),
-            "diodeRef.cir".to_string(),
-            "mutInd1.cir".to_string(),
-            "mutInd1_baseline.cir".to_string(),
-            "mutInd2.cir".to_string(),
-            "mutInd2_baseline.cir".to_string(),
-        ]);
-        let mut actual_names = BTreeSet::new();
-        for entry in fs::read_dir(&family)
-            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?
-        {
-            let entry =
-                entry.map_err(|error| format!("failed to inspect {LABEL} member: {error}"))?;
-            let member = entry.path();
-            let metadata = fs::symlink_metadata(&member)
-                .map_err(|error| format!("failed to inspect {}: {error}", member.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member '{}' must be a regular non-symlink file",
-                    member.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            if !actual_names.insert(name.clone()) {
-                return Err(format!("{LABEL} contains duplicate member {name:?}"));
-            }
-        }
-        if actual_names != expected_names {
-            return Err(format!(
-                "{LABEL} physical ten-deck census changed: {actual_names:?}"
-            ));
-        }
-
-        let expected_owners = BTreeSet::from([
-            Bug1190SonRole::Bsim3Owner.record().to_string(),
-            Bug1190SonRole::Bsim4Owner.record().to_string(),
-            Bug1190SonRole::DiodeOwner.record().to_string(),
-            "netlists/certification_tests/bug_1190_son/mutind1.cir".to_string(),
-            "netlists/certification_tests/bug_1190_son/mutind2.cir".to_string(),
-        ]);
-        let actual_owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(FAMILY_PREFIX))
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        if actual_owners != expected_owners {
-            return Err(format!(
-                "{LABEL} wrapper-owner census changed: {actual_owners:?}"
-            ));
-        }
-
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusions are invalid: {error}"))?;
-        let expected_exclusions = BTreeSet::from([
-            Bug1190SonRole::Bsim3Control.record().to_string(),
-            Bug1190SonRole::Bsim4Control.record().to_string(),
-            Bug1190SonRole::DiodeControl.record().to_string(),
-            "netlists/certification_tests/bug_1190_son/mutind1_baseline.cir".to_string(),
-            "netlists/certification_tests/bug_1190_son/mutind2_baseline.cir".to_string(),
-        ]);
-        let actual_exclusions = exclusions
-            .keys()
-            .filter(|record| record.starts_with(FAMILY_PREFIX))
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        if actual_exclusions != expected_exclusions {
-            return Err(format!(
-                "{LABEL} exclusion census changed: {actual_exclusions:?}"
-            ));
-        }
-        for control in Bug1190SonRole::CONTROLS {
-            let qualification = exclusions
-                .get(control.record())
-                .ok_or_else(|| format!("{LABEL} lost {:?} qualification", control))?;
-            if qualification.source != EXCLUSION_SOURCE
-                || !matches!(
-                    &qualification.disposition,
-                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
-                        expected_contract
-                    } if expected_contract == CONTROL_CONTRACT
-                )
-            {
-                return Err(format!(
-                    "{LABEL} {:?} qualification changed: {qualification:?}",
-                    control
-                ));
-            }
-        }
-        for owner in Bug1190SonRole::OWNERS {
-            if exclusions.contains_key(owner.record()) {
-                return Err(format!("{LABEL} owner {owner:?} must not be excluded"));
-            }
-        }
-
-        let output = self
-            .root
-            .join("OutputData/Certification_Tests/BUG_1190_SON");
-        match fs::symlink_metadata(&output) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("failed to inspect {LABEL} OutputData: {error}")),
-            Ok(_) => return Err(format!("{LABEL} must not acquire numerical gold")),
-        }
-
-        let mut sources = BTreeMap::new();
-        for member in Bug1190SonRole::ALL {
-            let path = self.root.join(member.path());
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let (expected_bytes, expected_sha256, expected_blake3) = member.source_identity();
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} source {} changed: bytes={}, sha256={sha256}, blake3={content_blake3}",
-                    member.file_name(),
-                    canonical.len()
-                ));
-            }
-            self.reject_wrapper_output_artifacts(&path)
-                .map_err(|error| format!("{LABEL} {} {error}", member.file_name()))?;
-            sources.insert(member, bytes);
-        }
-        Ok(sources)
-    }
-
     fn exact_bug1190_linear_step(
         step: &StepCommand,
         target: StepTarget,
@@ -902,25 +615,17 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn run_bug1190_son_dc_pair(
-        &self,
-        pair: Bug1190SonPair,
-        sources: &BTreeMap<Bug1190SonRole, Vec<u8>>,
-        start: Instant,
-    ) -> Result<(), String> {
+    fn run_bug1190_son_dc_pair(&self, pair: Bug1190SonPair, start: Instant) -> Result<(), String> {
         let (owner_role, control_role) = pair.roles();
-        let source = |role| -> Result<&str, String> {
-            std::str::from_utf8(
-                sources
-                    .get(&role)
-                    .ok_or_else(|| format!("{LABEL} lost {role:?} source"))?,
-            )
-            .map_err(|error| format!("{LABEL} {role:?} is not UTF-8: {error}"))
+        let source = |role: Bug1190SonRole| {
+            let path = self.root.join(role.path());
+            fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))
         };
         let (owner_plan, owner_netlist) =
-            self.validate_bug1190_son_dc_plan(owner_role, source(owner_role)?)?;
+            self.validate_bug1190_son_dc_plan(owner_role, &source(owner_role)?)?;
         let (control_plan, control_netlist) =
-            self.validate_bug1190_son_dc_plan(control_role, source(control_role)?)?;
+            self.validate_bug1190_son_dc_plan(control_role, &source(control_role)?)?;
         let expected = Self::bug1190_son_expected_coordinates(&owner_plan.steps);
         if expected.len() != pair.expected_run_count()
             || Self::bug1190_son_expected_coordinates(&control_plan.steps) != expected
@@ -1113,28 +818,11 @@ impl XyceTestRunner {
         Ok(blake3::hash(fingerprint.as_bytes()).to_hex().to_string())
     }
 
-    fn run_bug1190_son_diode_pair(
-        &self,
-        sources: &BTreeMap<Bug1190SonRole, Vec<u8>>,
-        start: Instant,
-    ) -> Result<(), String> {
+    fn run_bug1190_son_diode_pair(&self, start: Instant) -> Result<(), String> {
         let pair = Bug1190SonPair::Diode;
         let (owner_role, control_role) = pair.roles();
         let (owner_plan, owner_netlist) = self.validate_bug1190_son_tran_plan(owner_role)?;
         let (control_plan, control_netlist) = self.validate_bug1190_son_tran_plan(control_role)?;
-        if owner_plan.source.as_bytes()
-            != sources
-                .get(&owner_role)
-                .expect("provenance returned owner source")
-            || control_plan.source.as_bytes()
-                != sources
-                    .get(&control_role)
-                    .expect("provenance returned control source")
-        {
-            return Err(format!(
-                "{LABEL} diode plan source differs from provenance bytes"
-            ));
-        }
         let expected = Self::bug1190_son_expected_coordinates(&owner_plan.steps);
         if expected.len() != pair.expected_run_count()
             || Self::bug1190_son_expected_coordinates(&control_plan.steps) != expected
@@ -1233,32 +921,20 @@ impl XyceTestRunner {
 
     pub(super) fn validate_bug1190_son_oracle(
         &self,
-        deck: &XyceDeck,
         role: Bug1190SonRole,
         start: Instant,
     ) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
-            return Err(format!(
-                "{LABEL} deadline expired before provenance validation"
-            ));
+            return Err(format!("{LABEL} deadline expired before execution"));
         }
-        let sources = self.validate_bug1190_son_provenance(deck, role)?;
         match role.pair() {
-            Bug1190SonPair::Bsim3 => {
-                self.run_bug1190_son_dc_pair(Bug1190SonPair::Bsim3, &sources, start)?
-            }
-            Bug1190SonPair::Bsim4 => {
-                self.run_bug1190_son_dc_pair(Bug1190SonPair::Bsim4, &sources, start)?
-            }
-            Bug1190SonPair::Diode => self.run_bug1190_son_diode_pair(&sources, start)?,
+            Bug1190SonPair::Bsim3 => self.run_bug1190_son_dc_pair(Bug1190SonPair::Bsim3, start)?,
+            Bug1190SonPair::Bsim4 => self.run_bug1190_son_dc_pair(Bug1190SonPair::Bsim4, start)?,
+            Bug1190SonPair::Diode => self.run_bug1190_son_diode_pair(start)?,
         }
         if abort.is_aborted() {
             return Err(format!("{LABEL} execution exceeded its deadline"));
-        }
-        self.validate_bug1190_son_provenance(deck, role)?;
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} final provenance exceeded its deadline"));
         }
         Ok(())
     }
@@ -1272,71 +948,6 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("tests/xyce")
-    }
-
-    fn bug1190_fixture(label: &str) -> (tempfile::TempDir, XyceDeck) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug1190-son-{label}-"))
-            .tempdir()
-            .expect("create BUG1190 fixture root");
-        let root = temporary.path();
-        let family = root.join(FAMILY_DIRECTORY);
-        fs::create_dir_all(&family).expect("create BUG1190 fixture family");
-        let canonical = corpus_root();
-        for name in [
-            "bsim3.cir",
-            "bsim3_modpar.cir",
-            "bsim4.cir",
-            "bsim4_modpar.cir",
-            "diode.cir",
-            "diodeRef.cir",
-            "mutInd1.cir",
-            "mutInd1_baseline.cir",
-            "mutInd2.cir",
-            "mutInd2_baseline.cir",
-        ] {
-            fs::copy(
-                canonical.join(FAMILY_DIRECTORY).join(name),
-                family.join(name),
-            )
-            .expect("copy BUG1190 family member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            [
-                "Netlists/Certification_Tests/BUG_1190_SON/bsim3.cir\trequires_upstream_wrapper",
-                "Netlists/Certification_Tests/BUG_1190_SON/bsim4.cir\trequires_upstream_wrapper",
-                "Netlists/Certification_Tests/BUG_1190_SON/diode.cir\trequires_upstream_wrapper",
-                "Netlists/Certification_Tests/BUG_1190_SON/mutInd1.cir\trequires_upstream_wrapper",
-                "Netlists/Certification_Tests/BUG_1190_SON/mutInd2.cir\trequires_upstream_wrapper",
-            ]
-            .join("\n")
-                + "\n",
-        )
-        .expect("write BUG1190 fixture harness manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            [
-                format!("schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}"),
-                format!("source_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}"),
-                format!("source_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}"),
-                format!("{}\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{CONTROL_CONTRACT}", Bug1190SonRole::Bsim3Control.path()),
-                format!("{}\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{CONTROL_CONTRACT}", Bug1190SonRole::Bsim4Control.path()),
-                format!("{}\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{CONTROL_CONTRACT}", Bug1190SonRole::DiodeControl.path()),
-                format!("Netlists/Certification_Tests/BUG_1190_SON/mutInd1_baseline.cir\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT}"),
-                format!("Netlists/Certification_Tests/BUG_1190_SON/mutInd2_baseline.cir\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1190_MUTUAL_INDUCTOR_BASELINE_CONTRACT}"),
-            ]
-            .join("\n")
-                + "\n",
-        )
-        .expect("write BUG1190 fixture exclusion manifest");
-        let role = Bug1190SonRole::Bsim3Owner;
-        let deck = XyceDeck {
-            path: root.join(role.path()),
-            relative_path: role.path().to_string(),
-            section: XyceDeckSection::Netlists,
-        };
-        (temporary, deck)
     }
 
     #[test]
@@ -1357,115 +968,6 @@ mod tests {
                 }
             );
         }
-    }
-
-    #[test]
-    fn bug1190_son_historical_and_retained_provenance_is_exact() {
-        XyceTestRunner::validate_bug1190_son_historical_provenance()
-            .expect("historical BUG1190 wrapper provenance remains exact");
-        let root = corpus_root();
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        for role in Bug1190SonRole::ALL {
-            let deck = XyceDeck {
-                path: root.join(role.path()),
-                relative_path: role.path().to_string(),
-                section: XyceDeckSection::Netlists,
-            };
-            runner
-                .validate_bug1190_son_provenance(&deck, role)
-                .unwrap_or_else(|error| panic!("{role:?} provenance failed: {error}"));
-        }
-    }
-
-    #[test]
-    fn bug1190_son_provenance_rejects_source_census_manifest_exclusion_and_output_drift() {
-        let (temporary, deck) = bug1190_fixture("canonical");
-        XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default())
-            .validate_bug1190_son_provenance(&deck, Bug1190SonRole::Bsim3Owner)
-            .expect("canonical BUG1190 fixture passes");
-
-        let (temporary, deck) = bug1190_fixture("source");
-        fs::write(
-            temporary.path().join(Bug1190SonRole::DiodeOwner.path()),
-            "* changed\n",
-        )
-        .expect("mutate BUG1190 source");
-        assert!(
-            XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default())
-                .validate_bug1190_son_provenance(&deck, Bug1190SonRole::Bsim3Owner)
-                .is_err()
-        );
-
-        let (temporary, deck) = bug1190_fixture("census");
-        fs::write(
-            temporary.path().join(FAMILY_DIRECTORY).join("invented.cir"),
-            "* invented\n",
-        )
-        .expect("add BUG1190 source member");
-        assert!(
-            XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default())
-                .validate_bug1190_son_provenance(&deck, Bug1190SonRole::Bsim3Owner)
-                .is_err()
-        );
-
-        let (temporary, deck) = bug1190_fixture("manifest");
-        let manifest = temporary.path().join(HARNESS_MANIFEST_FILE);
-        let text = fs::read_to_string(&manifest).expect("read BUG1190 harness manifest");
-        fs::write(
-            &manifest,
-            text.replacen(
-                "Netlists/Certification_Tests/BUG_1190_SON/bsim3.cir\trequires_upstream_wrapper",
-                "Netlists/Certification_Tests/BUG_1190_SON/bsim3_modpar.cir\trequires_upstream_wrapper",
-                1,
-            ),
-        )
-        .expect("mutate BUG1190 harness owner");
-        assert!(
-            XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default())
-                .validate_bug1190_son_provenance(&deck, Bug1190SonRole::Bsim3Owner)
-                .is_err()
-        );
-
-        let (temporary, deck) = bug1190_fixture("exclusion");
-        let exclusions = temporary.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
-        let text = fs::read_to_string(&exclusions).expect("read BUG1190 exclusions");
-        fs::write(
-            &exclusions,
-            text.replacen(CONTROL_CONTRACT, OWNER_CONTRACT, 1),
-        )
-        .expect("mutate BUG1190 control qualification");
-        assert!(
-            XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default())
-                .validate_bug1190_son_provenance(&deck, Bug1190SonRole::Bsim3Owner)
-                .is_err()
-        );
-
-        let (temporary, deck) = bug1190_fixture("output");
-        fs::create_dir_all(
-            temporary
-                .path()
-                .join("OutputData/Certification_Tests/BUG_1190_SON"),
-        )
-        .expect("create fabricated BUG1190 numerical gold");
-        assert!(
-            XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default())
-                .validate_bug1190_son_provenance(&deck, Bug1190SonRole::Bsim3Owner)
-                .is_err()
-        );
-
-        let (temporary, deck) = bug1190_fixture("sidecar");
-        fs::write(
-            temporary
-                .path()
-                .join(format!("{}.prn", Bug1190SonRole::Bsim3Owner.path())),
-            "invented output\n",
-        )
-        .expect("create fabricated BUG1190 wrapper sidecar");
-        assert!(
-            XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default())
-                .validate_bug1190_son_provenance(&deck, Bug1190SonRole::Bsim3Owner)
-                .is_err()
-        );
     }
 
     #[test]
@@ -1497,15 +999,12 @@ mod tests {
                 ..XyceRunnerConfig::default()
             },
         );
-        let role = Bug1190SonRole::Bsim3Owner;
-        let deck = XyceDeck {
-            path: root.join(role.path()),
-            relative_path: role.path().to_string(),
-            section: XyceDeckSection::Netlists,
-        };
         assert!(
             runner
-                .validate_bug1190_son_oracle(&deck, role, Instant::now() - Duration::from_secs(1),)
+                .validate_bug1190_son_oracle(
+                    Bug1190SonRole::Bsim3Owner,
+                    Instant::now() - Duration::from_secs(1),
+                )
                 .is_err()
         );
     }

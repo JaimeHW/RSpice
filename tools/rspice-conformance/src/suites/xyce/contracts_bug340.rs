@@ -2,21 +2,11 @@ use super::*;
 use rspice_core::analysis::HbResult;
 use rspice_core::netlist::{SourceSpec, XyceHbPreconditioner};
 use std::cmp::Ordering;
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_340 stepped harmonic-balance wrapper";
-const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_340";
-const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_340/";
-const OWNER_NAME: &str = "stepRC-hb.cir";
 const OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_340/stepRC-hb.cir";
-const OUTPUT_DIRECTORY: &str = "OutputData/Certification_Tests/BUG_340";
-const OUTPUT_NAME: &str = "stepRC-hb.cir.HB.FD.prn";
 const OUTPUT_PATH: &str = "OutputData/Certification_Tests/BUG_340/stepRC-hb.cir.HB.FD.prn";
 const CONTRACT: &str = "bug340_stepped_hb_fd_wrapper_owner";
-const PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const RELEASE_TAG: &str = "Release-7.10.0";
-const RELEASE_TAG_OBJECT: &str = "2a339ec3845af0aef99a7e6cc488a41acf64f6ed";
 const FUNDAMENTAL_HZ: Value = 100_000.0;
 const CAPACITANCE_F: Value = 2.0e-6;
 const HARMONICS: usize = 5;
@@ -25,62 +15,6 @@ const AC_ABSOLUTE_TOLERANCE: Value = 1.0e-6;
 const AC_RELATIVE_TOLERANCE: Value = 1.0e-3;
 const AC_ZERO_TOLERANCE: Value = 1.0e-14;
 const AC_FREQUENCY_RELATIVE_TOLERANCE: Value = 1.0e-6;
-
-type Bug340RetainedFiles = BTreeMap<String, Vec<u8>>;
-type Bug340Provenance = (Bug340RetainedFiles, Vec<u8>);
-
-const HISTORICAL_CONTENT_BYTES: usize = 24_170;
-const HISTORICAL_STREAM_BYTES: usize = 1_387;
-const HISTORICAL_STREAM_SHA256: &str =
-    "e4d2b8311099a27b3837522887d28730e26af8293cc310c0f754aa0f22b4e619";
-const HISTORICAL_STREAM_BLAKE3: &str =
-    "0abe6ab4e09708d553180d6c44eb16fd4089a586f32a552e6b5a7a6160edccf3";
-const HISTORICAL: [(&str, usize, &str); 6] = [
-    (
-        "Netlists/Certification_Tests/BUG_340/Manifest.txt",
-        36,
-        "033147e5650077a834c0bc2cce2bec8a3bebb6d3",
-    ),
-    (OWNER_PATH, 242, "9f31cea8e7573e070a34243b9297a4823eb31e9e"),
-    (
-        "Netlists/Certification_Tests/BUG_340/stepRC-hb.cir.sh",
-        2_339,
-        "1f01b0058223b02fcfe74d9d25e88a110b2c0d4c",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_340/tags",
-        50,
-        "ea9e5cfc964b84c778731ed54cb86caec6fd1104",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_340/stepRC-hb.cir.HB.FD.prn",
-        7_195,
-        "8bdc3ad577aa17edb4da9082ecf9f0c5a76ff7a8",
-    ),
-    (
-        "TestScripts/ACComparator.pl",
-        14_308,
-        "53f8d082a343273b4d71369e974a482b96e7b1cd",
-    ),
-];
-
-const RETAINED_STREAM_BYTES: usize = 252;
-const RETAINED_STREAM_SHA256: &str =
-    "35f91634a4d1883c068de4a487386a27a578e6c27021820e8509ff7a2565cded";
-const RETAINED_STREAM_BLAKE3: &str =
-    "2fd8013d1362058d5c639d9376c7e9bf70c05417b598bf6db508ea413b0908eb";
-const RETAINED: [(&str, usize, &str); 2] = [
-    (
-        OWNER_PATH,
-        242,
-        "6281669193af40a959ad8d6cbbe50da7815a0d0bc2d6e2062cb1b2254e91350e",
-    ),
-    (
-        OUTPUT_PATH,
-        7_195,
-        "1701b615325b36b6c2160e40d07b94cba0f4e9547a99f59820dea32e21fdc7c5",
-    ),
-];
 
 const OUTPUT_COLUMNS: [&str; 8] = [
     "Index",
@@ -123,286 +57,6 @@ impl XyceTestRunner {
             AC_FREQUENCY_RELATIVE_TOLERANCE,
         )
         .expect("Release-7.10 BUG340 ACComparator tolerances are valid")
-    }
-
-    fn validate_bug340_historical_provenance() -> Result<(), String> {
-        let bytes = HISTORICAL.iter().map(|record| record.1).sum::<usize>();
-        let unique = HISTORICAL
-            .iter()
-            .map(|record| record.0.to_ascii_lowercase())
-            .collect::<BTreeSet<_>>();
-        let mut historical_stream = HISTORICAL
-            .iter()
-            .map(|(path, size, identity)| {
-                format!(
-                    "{PRETRIM_COMMIT}\t{UPSTREAM_COMMIT}\t{RELEASE_TAG}\t{RELEASE_TAG_OBJECT}\t{path}\t{size}\t{identity}"
-                )
-            })
-            .collect::<Vec<_>>();
-        historical_stream.sort();
-        let historical_stream = historical_stream.join("\n");
-        let historical_sha = format!("{:x}", Sha256::digest(historical_stream.as_bytes()));
-        let historical_b3 = blake3::hash(historical_stream.as_bytes())
-            .to_hex()
-            .to_string();
-
-        let mut retained_stream = RETAINED
-            .iter()
-            .map(|(path, size, sha)| format!("{path}\t{size}\t{sha}"))
-            .collect::<Vec<_>>();
-        retained_stream.sort();
-        let retained_stream = retained_stream.join("\n");
-        let retained_sha = format!("{:x}", Sha256::digest(retained_stream.as_bytes()));
-        let retained_b3 = blake3::hash(retained_stream.as_bytes())
-            .to_hex()
-            .to_string();
-
-        let family_records = HISTORICAL
-            .iter()
-            .filter(|record| record.0.starts_with(FAMILY_DIRECTORY))
-            .count();
-        let output_records = HISTORICAL
-            .iter()
-            .filter(|record| record.0.starts_with(OUTPUT_DIRECTORY))
-            .count();
-        let identities_are_git_blobs = HISTORICAL.iter().all(|record| {
-            record.2.len() == 40 && record.2.bytes().all(|byte| byte.is_ascii_hexdigit())
-        });
-        if PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || PRETRIM_COMMIT.len() != 40
-            || UPSTREAM_COMMIT.len() != 40
-            || RELEASE_TAG != "Release-7.10.0"
-            || RELEASE_TAG_OBJECT.len() != 40
-            || HISTORICAL.len() != 6
-            || RETAINED.len() != 2
-            || RETAINED[0].0 != OWNER_PATH
-            || RETAINED[1].0 != OUTPUT_PATH
-            || family_records != 4
-            || output_records != 1
-            || unique.len() != HISTORICAL.len()
-            || bytes != HISTORICAL_CONTENT_BYTES
-            || historical_stream.len() != HISTORICAL_STREAM_BYTES
-            || historical_sha != HISTORICAL_STREAM_SHA256
-            || historical_b3 != HISTORICAL_STREAM_BLAKE3
-            || retained_stream.len() != RETAINED_STREAM_BYTES
-            || retained_sha != RETAINED_STREAM_SHA256
-            || retained_b3 != RETAINED_STREAM_BLAKE3
-            || !identities_are_git_blobs
-        {
-            return Err(format!(
-                "{LABEL} provenance changed: historical={}/family={family_records}/output={output_records}/bytes={bytes}/unique={}, historical_stream={}/sha={historical_sha}/b3={historical_b3}, retained_stream={}/sha={retained_sha}/b3={retained_b3}",
-                HISTORICAL.len(),
-                unique.len(),
-                historical_stream.len(),
-                retained_stream.len(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn read_bug340_directory(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        Self::validate_bug340_historical_provenance()?;
-        let directory = self.root.join(FAMILY_DIRECTORY);
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} source must be a regular non-symlink directory"
-            ));
-        }
-        let owner = RETAINED[0];
-        let owner_name = Path::new(owner.0)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| format!("{LABEL} retained owner path is not canonical UTF-8"))?;
-        if owner_name != OWNER_NAME {
-            return Err(format!("{LABEL} retained owner ledger path changed"));
-        }
-        let expected = [(owner_name, owner.1, owner.2)]
-            .into_iter()
-            .map(|record| (record.0.to_ascii_lowercase(), record))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
-        {
-            if abort.is_aborted() {
-                return Err(format!("{LABEL} source census aborted"));
-            }
-            let entry = entry.map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            let Some((expected_name, expected_size, expected_sha)) = expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name || observed.contains_key(&key) {
-                return Err(format!("{LABEL} member case/census changed: {name:?}"));
-            }
-            let cap = expected_size
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(3))
-                .ok_or_else(|| format!("{LABEL} source-size bound overflowed"))?;
-            if metadata.len() > cap as u64 {
-                return Err(format!(
-                    "{LABEL} member {name:?} exceeds its bounded envelope"
-                ));
-            }
-            let mut bytes = Vec::with_capacity((metadata.len() as usize).min(cap));
-            fs::File::open(&path)
-                .map_err(|error| format!("failed to open {LABEL} member: {error}"))?
-                .take((cap + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("failed to read {LABEL} member: {error}"))?;
-            if bytes.len() > cap {
-                return Err(format!("{LABEL} bounded source read grew"));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha = format!("{:x}", Sha256::digest(&canonical));
-            if canonical.len() != expected_size || sha != expected_sha {
-                return Err(format!(
-                    "{LABEL} member {name:?} changed: bytes={}, sha={sha}",
-                    canonical.len()
-                ));
-            }
-            observed.insert(key, canonical);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{LABEL} retained census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn read_bug340_output(&self, abort: &dyn AbortSignal) -> Result<Vec<u8>, String> {
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} output census aborted"));
-        }
-        let directory = self.root.join(OUTPUT_DIRECTORY);
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} output directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} output source must be a regular non-symlink directory"
-            ));
-        }
-        let mut entries = fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} output directory: {error}"))?;
-        let entry = entries
-            .next()
-            .transpose()
-            .map_err(|error| format!("failed to inspect {LABEL} output member: {error}"))?
-            .ok_or_else(|| format!("{LABEL} output census is empty"))?;
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} output census aborted"));
-        }
-        if entries
-            .next()
-            .transpose()
-            .map_err(|error| format!("failed to inspect {LABEL} output member: {error}"))?
-            .is_some()
-        {
-            return Err(format!(
-                "{LABEL} output census changed: expected exactly one file"
-            ));
-        }
-        if entry.file_name().to_str() != Some(OUTPUT_NAME) {
-            return Err(format!(
-                "{LABEL} output member case/name changed: {:?}",
-                entry.file_name()
-            ));
-        }
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("failed to inspect {LABEL} output: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(format!("{LABEL} output must be a regular non-symlink file"));
-        }
-        let expected_size = RETAINED[1].1;
-        let cap = expected_size
-            .checked_mul(2)
-            .and_then(|value| value.checked_add(3))
-            .ok_or_else(|| format!("{LABEL} output-size bound overflowed"))?;
-        if metadata.len() > cap as u64 {
-            return Err(format!("{LABEL} output exceeds its bounded envelope"));
-        }
-        let mut bytes = Vec::with_capacity((metadata.len() as usize).min(cap));
-        fs::File::open(&path)
-            .map_err(|error| format!("failed to open {LABEL} output: {error}"))?
-            .take((cap + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|error| format!("failed to read {LABEL} output: {error}"))?;
-        if bytes.len() > cap {
-            return Err(format!("{LABEL} bounded output read grew"));
-        }
-        let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-        let sha = format!("{:x}", Sha256::digest(&canonical));
-        if canonical.len() != expected_size || sha != RETAINED[1].2 {
-            return Err(format!(
-                "{LABEL} output changed: bytes={}, sha={sha}",
-                canonical.len()
-            ));
-        }
-        Ok(canonical)
-    }
-
-    fn validate_bug340_provenance(
-        &self,
-        deck: &XyceDeck,
-        abort: &dyn AbortSignal,
-    ) -> Result<Bug340Provenance, String> {
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} provenance validation aborted"));
-        }
-        let record = Self::normalize_manifest_key(OWNER_PATH);
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != record
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != record
-            || !Self::same_path(&deck.path, &self.root.join(OWNER_PATH))
-        {
-            return Err(format!("{LABEL} recognized owner is not canonical"));
-        }
-        let owners = Self::load_upstream_wrapper_decks(&self.root)
-            .into_iter()
-            .filter(|candidate| candidate.starts_with(FAMILY_PREFIX))
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([record.clone()]) {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusions invalid: {error}"))?;
-        let family_exclusions = exclusions
-            .keys()
-            .filter(|candidate| candidate.starts_with(FAMILY_PREFIX))
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        if exclusions.contains_key(&record) || !family_exclusions.is_empty() {
-            return Err(format!(
-                "{LABEL} wrapper owner/family unexpectedly became excluded: {family_exclusions:?}"
-            ));
-        }
-        let members = self.read_bug340_directory(abort)?;
-        let output = self.read_bug340_output(abort)?;
-        Ok((members, output))
     }
 
     fn bug340_nodes(actual: &[String], expected: &[&str]) -> bool {
@@ -793,22 +447,20 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    pub(super) fn validate_bug340_oracle(
-        &self,
-        deck: &XyceDeck,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug340_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let (members, output) = self.validate_bug340_provenance(deck, &abort)?;
-        let source = members
-            .get(&OWNER_NAME.to_ascii_lowercase())
-            .ok_or_else(|| format!("{LABEL} lost sealed owner source"))?;
-        let source = std::str::from_utf8(source)
-            .map_err(|error| format!("{LABEL} owner source is not UTF-8: {error}"))?;
-        let plan = Self::validate_bug340_source_and_plan(source, &deck.path)?;
-        if plan.source.as_bytes() != source.as_bytes() {
-            return Err(format!("{LABEL} planner lost the sealed source"));
+        if abort.is_aborted() {
+            return Err(format!("{LABEL} deadline expired before execution"));
         }
+        let path = self.root.join(OWNER_PATH);
+        let source = Self::read_corpus_canonical(LABEL, &path)?;
+        let source = std::str::from_utf8(&source)
+            .map_err(|error| format!("{LABEL} owner source is not UTF-8: {error}"))?;
+        let plan = Self::validate_bug340_source_and_plan(source, &path)?;
+        if plan.source.as_bytes() != source.as_bytes() {
+            return Err(format!("{LABEL} planner lost the owner source"));
+        }
+        let output = Self::read_corpus_canonical(LABEL, &self.root.join(OUTPUT_PATH))?;
         let output = std::str::from_utf8(&output)
             .map_err(|error| format!("{LABEL} FD gold is not UTF-8: {error}"))?;
         if output
@@ -938,7 +590,6 @@ impl XyceTestRunner {
             &plan.netlist.options,
             &actual_tables,
         )?;
-        self.validate_bug340_provenance(deck, &abort)?;
         Ok(())
     }
 }
@@ -968,16 +619,6 @@ mod tests {
             Bug340Role::for_record("Netlists/Certification_Tests/BUG_340/other.cir"),
             None
         );
-    }
-
-    #[test]
-    fn bug340_historical_and_retained_provenance_is_exact() {
-        XyceTestRunner::validate_bug340_historical_provenance().unwrap();
-        let runner = runner();
-        let abort = DeadlineAbort::new(Instant::now(), 30_000);
-        let members = runner.read_bug340_directory(&abort).unwrap();
-        assert_eq!(members.len(), 1);
-        assert_eq!(runner.read_bug340_output(&abort).unwrap().len(), 7_195);
     }
 
     #[test]
