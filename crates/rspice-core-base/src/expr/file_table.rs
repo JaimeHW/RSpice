@@ -879,29 +879,12 @@ mod tests {
 
     #[test]
     fn natural_cubic_matches_xyce_spline_and_clamps_endpoints() {
-        let dir = unique_temp_dir("xyce-natural-cubic");
-        std::fs::create_dir_all(&dir).expect("create temp table directory");
-        std::fs::write(dir.join("curve.dat"), "0 0\n1 1\n2 0\n").expect("write spline data");
-        let deck_path = dir.join("deck.cir");
-
-        for function in ["cubic", "cubicfile"] {
-            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
-                .expect("cubic expression parses");
-            let resolved =
-                resolve_file_lookup_functions(ast, Some(&deck_path)).expect("cubic file resolves");
-            let Expr::LookupTable { input, table } = &resolved else {
-                panic!("cubic file should resolve into lookup data");
-            };
-            assert!(matches!(input.as_ref(), Expr::Time));
-            assert!(!table.transient_breakpoints);
-            assert!(matches!(
-                table.interpolation,
-                LookupInterpolation::NaturalCubic { .. }
-            ));
-
-            let program = compile(&resolved);
-            let mut vm = Vm::new();
-            for (time, expected) in [
+        assert_spline_file(
+            "xyce-natural-cubic",
+            "0 0\n1 1\n2 0\n",
+            &["cubic", "cubicfile"],
+            |kind| matches!(kind, LookupInterpolation::NaturalCubic { .. }),
+            &[
                 (-1.0, 0.0),
                 (0.0, 0.0),
                 (0.5, 0.6875),
@@ -909,11 +892,8 @@ mod tests {
                 (1.5, 0.6875),
                 (2.0, 0.0),
                 (3.0, 0.0),
-            ] {
-                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
-                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
-            }
-        }
+            ],
+        );
     }
 
     #[test]
@@ -990,29 +970,12 @@ mod tests {
 
     #[test]
     fn akima_matches_original_local_slope_construction() {
-        let dir = unique_temp_dir("xyce-akima");
-        std::fs::create_dir_all(&dir).expect("create temp table directory");
-        std::fs::write(dir.join("curve.dat"), "0 0\n1 1\n2 0\n3 1\n").expect("write spline data");
-        let deck_path = dir.join("deck.cir");
-
-        for function in ["akima", "akimafile", "spline", "splinefile"] {
-            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
-                .expect("Akima expression parses");
-            let resolved =
-                resolve_file_lookup_functions(ast, Some(&deck_path)).expect("Akima file resolves");
-            let Expr::LookupTable { input, table } = &resolved else {
-                panic!("Akima file should resolve into lookup data");
-            };
-            assert!(matches!(input.as_ref(), Expr::Time));
-            assert!(!table.transient_breakpoints);
-            assert!(matches!(
-                table.interpolation,
-                LookupInterpolation::Akima { .. }
-            ));
-
-            let program = compile(&resolved);
-            let mut vm = Vm::new();
-            for (time, expected) in [
+        let dir = assert_spline_file(
+            "xyce-akima",
+            "0 0\n1 1\n2 0\n3 1\n",
+            &["akima", "akimafile", "spline", "splinefile"],
+            |kind| matches!(kind, LookupInterpolation::Akima { .. }),
+            &[
                 (-1.0, 0.0),
                 (0.0, 0.0),
                 (0.5, 0.75),
@@ -1020,11 +983,9 @@ mod tests {
                 (2.5, 0.25),
                 (3.0, 1.0),
                 (4.0, 1.0),
-            ] {
-                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
-                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
-            }
-        }
+            ],
+        );
+        let deck_path = dir.join("deck.cir");
 
         std::fs::write(dir.join("two-points.dat"), "0 0\n1 1\n")
             .expect("write two-point spline data");
@@ -1238,30 +1199,12 @@ mod tests {
 
     #[test]
     fn wodicka_uses_its_distinct_rounded_corner_construction() {
-        let dir = unique_temp_dir("xyce-wodicka");
-        std::fs::create_dir_all(&dir).expect("create temp table directory");
-        std::fs::write(dir.join("curve.dat"), "0 0\n1 0\n2 0\n3 2\n4 4\n5 4\n")
-            .expect("write spline data");
-        let deck_path = dir.join("deck.cir");
-
-        for function in ["wodicka", "wodickafile"] {
-            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
-                .expect("Wodicka expression parses");
-            let resolved = resolve_file_lookup_functions(ast, Some(&deck_path))
-                .expect("Wodicka file resolves");
-            let Expr::LookupTable { input, table } = &resolved else {
-                panic!("Wodicka file should resolve into lookup data");
-            };
-            assert!(matches!(input.as_ref(), Expr::Time));
-            assert!(!table.transient_breakpoints);
-            assert!(matches!(
-                table.interpolation,
-                LookupInterpolation::Wodicka { .. }
-            ));
-
-            let program = compile(&resolved);
-            let mut vm = Vm::new();
-            for (time, expected) in [
+        let dir = assert_spline_file(
+            "xyce-wodicka",
+            "0 0\n1 0\n2 0\n3 2\n4 4\n5 4\n",
+            &["wodicka", "wodickafile"],
+            |kind| matches!(kind, LookupInterpolation::Wodicka { .. }),
+            &[
                 (-1.0, 0.0),
                 (0.5, 0.0),
                 (1.5, 0.0),
@@ -1269,11 +1212,9 @@ mod tests {
                 (3.5, 3.0),
                 (4.5, 4.375),
                 (6.0, 4.0),
-            ] {
-                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
-                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
-            }
-        }
+            ],
+        );
+        let deck_path = dir.join("deck.cir");
 
         let akima = parse_expression_strict("akima(\"curve.dat\")")
             .expect("Akima comparison expression parses");
@@ -1357,5 +1298,43 @@ mod tests {
             .expect("system clock before epoch")
             .as_nanos();
         std::env::temp_dir().join(format!("rspice-{label}-{unique}"))
+    }
+
+    /// Writes `data` as `curve.dat` in a fresh `label` directory, which it returns.
+    /// Every spelling in `functions` must resolve it to a time-driven table without
+    /// transient breakpoints, with an interpolation `is_kind` accepts, that meets
+    /// each `(time, expected)` sample to 1e-14.
+    fn assert_spline_file(
+        label: &str,
+        data: &str,
+        functions: &[&str],
+        is_kind: fn(&LookupInterpolation) -> bool,
+        samples: &[(f64, f64)],
+    ) -> PathBuf {
+        let dir = unique_temp_dir(label);
+        std::fs::create_dir_all(&dir).expect("create temp table directory");
+        std::fs::write(dir.join("curve.dat"), data).expect("write spline data");
+        let deck_path = dir.join("deck.cir");
+
+        for function in functions {
+            let ast = parse_expression_strict(&format!("{function}(\"curve.dat\")"))
+                .expect("spline expression parses");
+            let resolved =
+                resolve_file_lookup_functions(ast, Some(&deck_path)).expect("spline file resolves");
+            let Expr::LookupTable { input, table } = &resolved else {
+                panic!("{function} file should resolve into lookup data");
+            };
+            assert!(matches!(input.as_ref(), Expr::Time));
+            assert!(!table.transient_breakpoints);
+            assert!(is_kind(&table.interpolation), "{function}");
+
+            let program = compile(&resolved);
+            let mut vm = Vm::new();
+            for &(time, expected) in samples {
+                let actual = vm.execute(&program, &Context::transient(&[], &[], time));
+                assert!((actual - expected).abs() < 1.0e-14, "time={time}");
+            }
+        }
+        dir
     }
 }
