@@ -997,6 +997,383 @@ fn a_mixed_checkpoint_stream_survives_cancellation_and_resumes_pending_work() {
     assert_eq!(future(&result), future(&baseline));
 }
 
+/// `checkpoint` saved packed and loaded back, which must be the same image.
+fn through_disk(checkpoint: &TransientCheckpoint) -> TransientCheckpoint {
+    let sequence = MODEL_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "rspice_mixed_resume_{}_{sequence}.chk",
+        std::process::id()
+    ));
+    checkpoint
+        .save_with_encoding(&path, TransientCheckpointEncoding::Packed)
+        .unwrap();
+    let loaded = TransientCheckpoint::load(&path);
+    std::fs::remove_file(&path).unwrap();
+    let loaded = loaded.unwrap();
+    assert_eq!(&loaded, checkpoint);
+    loaded
+}
+
+/// Whether the canonical text of `checkpoint` names `text`.
+fn image_names(checkpoint: &TransientCheckpoint, text: &str) -> bool {
+    String::from_utf8(
+        checkpoint
+            .to_bytes(TransientCheckpointEncoding::Unpacked)
+            .unwrap(),
+    )
+    .unwrap()
+    .contains(text)
+}
+
+/// Every event trace of `result`, digital and real, as its name and its
+/// points; a time and a real value as their bits.
+fn event_traces(result: &TransientResult) -> Vec<(String, Vec<(u64, String)>)> {
+    let digital = result.digital_traces.iter().map(|trace| {
+        let points = trace.points.iter();
+        let points = points.map(|point| (point.time.to_bits(), format!("{:?}", point.value)));
+        (format!("digital {}", trace.node_name), points.collect())
+    });
+    let real = result.real_traces.iter().map(|trace| {
+        let points = trace.points.iter();
+        let points =
+            points.map(|point| (point.time.to_bits(), format!("{:x}", point.value.to_bits())));
+        (format!("real {}", trace.node_name), points.collect())
+    });
+    digital.chain(real).collect()
+}
+
+/// The run resumed from the checkpoint at `at` against the uninterrupted run,
+/// bit for bit: the accepted times from the seam on, every node voltage and
+/// branch current at them, and every digital and real event trace, which
+/// holds its seam value at `at` and changes at the same instants to the same
+/// values after it. Returns how many events the traces record after `at`.
+fn assert_resumes_bit_for_bit(
+    baseline: &TransientResult,
+    resumed: &TransientResult,
+    at: f64,
+) -> usize {
+    let seam = baseline
+        .time
+        .iter()
+        .position(|t| t.to_bits() == at.to_bits())
+        .unwrap_or_else(|| panic!("{at:e} is an accepted point of the uninterrupted run"));
+    let bits = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        bits(&resumed.time) == bits(&baseline.time[seam..]),
+        "the accepted times from {at:e}"
+    );
+    assert_eq!(resumed.node_names, baseline.node_names);
+    assert_eq!(resumed.branch_names, baseline.branch_names);
+    let channels = |result: &TransientResult| {
+        let names = result.node_names.iter().map(|name| format!("v({name})"));
+        let names = names.chain(result.branch_names.iter().map(|name| format!("i({name})")));
+        names
+            .zip(result.voltages.iter().chain(&result.branch_currents))
+            .map(|(name, values)| (name, values.clone()))
+            .collect::<Vec<_>>()
+    };
+    let (actual, expected) = (channels(resumed), channels(baseline));
+    assert_eq!(actual.len(), expected.len());
+    let analog = expected
+        .iter()
+        .filter(|(_, values)| !values.is_empty())
+        .count();
+    for ((name, actual), (_, expected)) in actual.iter().zip(&expected) {
+        let expected = if expected.is_empty() {
+            &expected[..]
+        } else {
+            &expected[seam..]
+        };
+        assert!(bits(actual) == bits(expected), "{name} differs from {at:e}");
+    }
+    let split = |result: &TransientResult| {
+        let traces = event_traces(result).into_iter();
+        traces
+            .map(|(name, points)| {
+                let held = points
+                    .iter()
+                    .rev()
+                    .find(|(t, _)| f64::from_bits(*t) <= at)
+                    .map(|(_, value)| value.clone());
+                let after = points.into_iter().filter(|(t, _)| f64::from_bits(*t) > at);
+                (name, held, after.collect::<Vec<_>>())
+            })
+            .collect::<Vec<_>>()
+    };
+    let (actual, expected) = (split(resumed), split(baseline));
+    assert_eq!(
+        actual.iter().map(|(name, ..)| name).collect::<Vec<_>>(),
+        expected.iter().map(|(name, ..)| name).collect::<Vec<_>>()
+    );
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert!(actual == expected, "{} differs from {at:e}", expected.0);
+    }
+    let events: usize = expected.iter().map(|(_, _, after)| after.len()).sum();
+    println!(
+        "resumed from {at:e}: {} accepted points, {analog} analog channels, {events} events \
+         on {} traces, bit for bit",
+        resumed.time.len(),
+        expected.len()
+    );
+    assert!(resumed.time.len() > 1, "the resumed run moves");
+    events
+}
+
+/// A real that steps by 0.5 every 20 ns from 0.25.
+const STEPPING_REAL: &str = r#"
+module stepping_real(s);
+ output s; wreal s;
+ real v;
+ initial v = 0.25;
+ always #20 v = v + 0.5;
+ assign s = v;
+endmodule
+"#;
+
+/// The automatic real-to-voltage converter a wreal port takes onto an
+/// electrical net is checkpointed with its ramp: a run resumed from between
+/// two steps, or from a step's own instant (where the converter has started
+/// its ramp and asked for the breakpoint that completes it), continues the
+/// uninterrupted run bit for bit.
+#[test]
+fn an_automatic_real_to_voltage_converter_resumes_bit_for_bit() {
+    let model = ModelFile::new("stepping_real", STEPPING_REAL);
+    let deck = format!(
+        "* one automatic real-to-voltage converter\nX1 s stepping_real\nR1 s 0 1k\n\
+         .va \"{}\" stepping_real\n.end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    assert!(capability.is_resumable(), "{:?}", capability.blockers());
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            200e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &[90e-9, 100e-9],
+        )
+        .unwrap();
+    let s = baseline.node_index_named("s").unwrap();
+    let held = baseline.time.iter().rposition(|t| *t <= 150e-9).unwrap();
+    assert_eq!(
+        baseline.voltage_waveform(s)[held],
+        3.75,
+        "seven steps by 150 ns"
+    );
+    assert_eq!(scheduled.len(), 2);
+    for point in &scheduled {
+        assert!(image_names(&point.checkpoint, "__rspice_auto_real_to_v_"));
+        let saved = through_disk(&point.checkpoint);
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &saved, 200e-9, 1e-9)
+            .unwrap();
+        let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
+        assert!(events >= 4, "the real steps on after the seam");
+    }
+}
+
+/// A real stepping 1 -> 3 at 50 ns and, halfway up that ramp, to 2 at 80 ns,
+/// behind the connect rule's `r2e` with equal 100 ns edges, which the build
+/// converts with the stock `real_to_v` at a 100 ns transition.
+const RAMPED_REAL: &str = r#"
+module ramped_real(r);
+ output r; wreal r;
+ real v;
+ initial begin v = 1.0; #50 v = 3.0; #30 v = 2.0; end
+ assign r = v;
+endmodule
+"#;
+
+/// A checkpoint taken inside the converter's second ramp resumes from the
+/// ramp it saved: from 1.6 V at 80 ns, the level the first ramp had reached,
+/// to 2 V at 180 ns. A converter resumed with fresh state would know no
+/// earlier target and start that ramp from 0 V, 0.48 V or more lower at every
+/// point to 150 ns.
+#[test]
+fn a_resumed_real_to_voltage_converter_continues_its_saved_ramp() {
+    let mut source = format!("`include \"disciplines.vams\"\n`timescale 1ns/1ps\n{RAMPED_REAL}");
+    for (_, module) in rspice_veriloga::connect::library::BUILTIN_REAL_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    source.push_str(
+        "connectrules deck;\n    connect r2e #(.trise(100n), .tfall(100n));\nendconnectrules\n",
+    );
+    let model = ModelFile::hdl("ramped_real", &source);
+    let deck = format!(
+        "* a ramp interrupted by the next step\n.hdl \"{}\" module=ramped_real\n\
+         .options connectrules=deck\nx1 out ramped_real\nrl out 0 1k\n.end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            200e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &[100e-9],
+        )
+        .unwrap();
+    let checkpoint = &scheduled[0].checkpoint;
+    assert!(image_names(checkpoint, "real_to_v"));
+    let saved = through_disk(checkpoint);
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &saved, 200e-9, 1e-9)
+        .unwrap();
+    assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
+    let out = resumed.node_index_named("out").unwrap();
+    let mut checked = 0;
+    for (t, v) in resumed.time.iter().zip(resumed.voltage_waveform(out)) {
+        if *t <= 100e-9 || *t > 150e-9 {
+            continue;
+        }
+        let fraction = (t - 80e-9) / 100e-9;
+        let (saved, fresh) = (1.6 + 0.4 * fraction, 2.0 * fraction);
+        assert!(
+            (v - saved).abs() < 1e-9,
+            "v(out) at {t:e}: {v}, saved ramp {saved}"
+        );
+        assert!(saved - fresh >= 0.48 - 1e-9, "{saved} against {fresh}");
+        checked += 1;
+    }
+    assert!(checked >= 40, "{checked} accepted points inside the ramp");
+}
+
+/// A clock and a stepping real from one module.
+const CLOCKED_REAL: &str = r#"
+module clocked_real(clk, r);
+ output clk; reg clk;
+ output r; wreal r;
+ real v;
+ initial begin clk = 1'b0; v = 0.5; end
+ always #10 clk = ~clk;
+ always #15 v = v + 0.25;
+ assign r = v;
+endmodule
+"#;
+
+/// Each real-valued event model a deck can name keeps its state in its
+/// context, so each resumes bit for bit under a mixed host: `d_to_real` on the
+/// clock, `real_gain` and the clocked `real_delay` on the stepping real,
+/// `real_to_v` and `r_to_v` onto nodes, and `v_to_real` sampling one of them
+/// back into a real that a third converter drives.
+#[test]
+fn every_real_valued_event_model_resumes_bit_for_bit() {
+    let model = ModelFile::new("clocked_real", CLOCKED_REAL);
+    let deck = format!(
+        "* the real-valued event models\nX1 clk r clocked_real\n\
+         Ad2r clk dr d2r\n.model d2r d_to_real (zero=-1 one=2 delay=1n)\n\
+         Again r rg gainm\n.model gainm real_gain (gain=2 out_offset=0.1 delay=2n)\n\
+         Adly rg clk rd dly\n.model dly real_delay (delay=3n)\n\
+         Aout rd out drv\n.model drv real_to_v (transition_time=4n)\n\
+         Aout2 dr out2 drv2\n.model drv2 r_to_v (transition_time=2n)\n\
+         Aobs out obs obsm\n.model obsm v_to_real (gain=0.5)\n\
+         Aout3 obs out3 drv\n\
+         Rout out 0 1k\nRout2 out2 0 1k\nRout3 out3 0 1k\n\
+         .va \"{}\" clocked_real\n.end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    assert!(capability.is_resumable(), "{:?}", capability.blockers());
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            200e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &[47e-9, 100e-9],
+        )
+        .unwrap();
+    for net in ["dr", "rg", "rd", "obs"] {
+        let points = baseline.real_trace_named(net).unwrap_or_default();
+        assert!(points.len() >= 4, "{net} moves: {points:?}");
+    }
+    for point in &scheduled {
+        let saved = through_disk(&point.checkpoint);
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &saved, 200e-9, 1e-9)
+            .unwrap();
+        let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
+        assert!(events >= 40, "every model publishes after the seam");
+    }
+}
+
+/// The mixed corpus's C12 testbench, checkpointed inside its trim sequence,
+/// resumes bit for bit on either route. Its readings reach the LDO's analog
+/// side on `meas` through the automatic real-to-voltage converter, which once
+/// refused every checkpoint of the deck.
+#[test]
+fn the_ldo_testbench_resumes_bit_for_bit_from_inside_its_trim_sequence() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/mixed-corpus/c12-ldo-tb/deck/full.tran.cir");
+    let netlist = Netlist::parse_file(&path)
+        .unwrap_or_else(|error| panic!("{} parses: {error}", path.display()));
+    let (step, stop, start, max_step, uic) = netlist
+        .analyses
+        .iter()
+        .find_map(|analysis| match analysis {
+            rspice_core::netlist::AnalysisCommand::Tran {
+                step,
+                stop,
+                start,
+                max_step,
+                uic,
+            } => Some((*step, *stop, *start, *max_step, *uic)),
+            _ => None,
+        })
+        .expect("the deck has a .tran card");
+    let max_step =
+        rspice_core::execution::resolve_transient_maximum_step(step, stop, start, max_step)
+            .unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    assert!(capability.is_resumable(), "{:?}", capability.blockers());
+    // Code 8 latches at 800 us and is read 92.5 us later.
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            stop,
+            max_step,
+            TransientStartupMode::from_uic(uic),
+            &[850e-6],
+        )
+        .unwrap();
+    let checkpoint = &scheduled[0].checkpoint;
+    assert!(image_names(checkpoint, "__rspice_auto_real_to_v_"));
+    let saved = through_disk(checkpoint);
+    // The testbench ends with `$finish`, after which no checkpoint exists, so
+    // the run resumes through the stream, which keeps no final one.
+    let resumed = engine
+        .run_tran_checkpoint_stream_with_abort(
+            &netlist,
+            stop,
+            max_step,
+            TransientCheckpointStream {
+                start: TransientCheckpointStart::Resume(&saved),
+                times: &[],
+                observer: &|_| Ok(()),
+            },
+            &rspice_core::NoAbort,
+        )
+        .unwrap();
+    let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
+    assert_eq!(events, 1, "the verdict rises once, after the seam");
+    let meas = baseline.node_index_named("meas").unwrap();
+    let moved = baseline.voltage_waveform(meas)[baseline.time.len() - 1];
+    assert!(moved > 1.0, "the last reading reaches meas: {moved}");
+}
+
 /// Analog-only Verilog-A checkpoint compatibility remains intact alongside the
 /// mixed runtime extension.
 #[test]

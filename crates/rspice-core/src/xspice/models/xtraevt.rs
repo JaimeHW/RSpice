@@ -3,8 +3,18 @@
 use crate::Value;
 use crate::xspice::{
     CmContext, CmError, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortDirection, PortSpec,
-    PortType, XspiceSmallSignalDescriptor,
+    PortType, XspiceCheckpointSupport, XspiceSmallSignalDescriptor,
 };
+
+/// Every model here carries all it keeps between accepted points in its
+/// context, which a transient checkpoint's context image holds whole: the
+/// published output the change test compares against, the event time of each
+/// real input, `real_delay`'s last clock level in an integer state, and
+/// `real_to_v`'s ramp (level, target, start time, start value) in four
+/// states. A resumed run therefore continues each one from its saved state.
+fn context_checkpoint() -> XspiceCheckpointSupport {
+    XspiceCheckpointSupport::Serializable
+}
 
 /// A real-number boundary model at a held event state drives an ideal
 /// source at its held level or reads its input and stamps nothing, so its
@@ -209,6 +219,10 @@ impl CodeModel for DigitalToReal {
         Ok(())
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
+    }
+
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
     }
@@ -264,6 +278,10 @@ impl CodeModel for RealGain {
 
     fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
         Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -324,6 +342,10 @@ impl CodeModel for RealDelay {
         let clk_is_one = ctx.input_digital("clk").unwrap_or_default().state.is_high();
         ctx.set_int_state(0, i64::from(clk_is_one));
         Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
@@ -392,6 +414,10 @@ impl CodeModel for RealToVoltage {
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         ctx.allocate_states(4);
         Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -494,6 +520,10 @@ impl CodeModel for RealToVoltageAlias {
 
     fn init(&self, ctx: &mut CmContext) -> CmResult<()> {
         RealToVoltage.init(ctx)
+    }
+
+    fn checkpoint_support(&self, ctx: &CmContext) -> XspiceCheckpointSupport {
+        RealToVoltage.checkpoint_support(ctx)
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -619,6 +649,10 @@ impl CodeModel for VoltageToReal {
 
     fn init(&self, _ctx: &mut CmContext) -> CmResult<()> {
         Ok(())
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
