@@ -277,7 +277,7 @@ mod tests {
         Command::ManageSimulationPlans.execute(&mut app);
 
         assert!(matches!(
-            app.state.workbench.simulation_workflow,
+            app.state.simulate.simulation_workflow,
             Some(crate::workbench::state::SimulationWorkflowDialog::PlanManager(_))
         ));
         assert_ne!(app.state.workbench.workspace, Workspace::Simulate);

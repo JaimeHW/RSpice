@@ -359,7 +359,7 @@ fn toolbar_outer_gap(viewport_width: f32) -> f32 {
 }
 
 fn run_control_label(app: &RSpiceApp, layout: LayoutSpec) -> String {
-    if app.state.workbench.preflight.checking.is_some() {
+    if app.state.runs.preflight.checking.is_some() {
         "Stop".to_owned()
     } else if app.state.model.simulation.cancellation_is_pending() {
         "Stopping…".to_owned()
@@ -1669,7 +1669,7 @@ fn context_separator(ui: &mut egui::Ui, layout: LayoutSpec) {
 fn run_controls(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
     // A preflight preparing its run or building its decks is stopped the way
     // a run is: the control is Stop until it finishes.
-    let checking = app.state.workbench.preflight.checking.is_some();
+    let checking = app.state.runs.preflight.checking.is_some();
     let execution_active = app.state.model.simulation.execution.has_active_execution() || checking;
     let cancellation_pending = app.state.model.simulation.cancellation_is_pending();
     let command = if execution_active {

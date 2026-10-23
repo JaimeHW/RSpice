@@ -462,7 +462,7 @@ impl SimulationController {
                 if state.model.simulation.execution.run_intent
                     == SimulationRunIntent::SimulateRunSet
                 {
-                    state.workbench.preflight.invalidate();
+                    state.runs.preflight.invalidate();
                 }
                 run_inputs::state_refused_dispatch(state, &error);
                 return;
@@ -472,7 +472,7 @@ impl SimulationController {
             // The retained report describes a one-shot authorization. Once its
             // permit has been consumed, leaving that report reusable would
             // advertise authority the controller no longer owns.
-            state.workbench.preflight.invalidate();
+            state.runs.preflight.invalidate();
         }
         if let Err(error) = self.start_authorized_dispatch(state, dispatch, None) {
             state.record(

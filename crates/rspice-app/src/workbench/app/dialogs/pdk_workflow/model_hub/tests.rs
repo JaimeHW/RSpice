@@ -110,12 +110,12 @@ fn fetching_the_catalog_proves_it_and_changes_no_project_state() {
 
     publish(&mut state, handle, hub, &request, output);
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Ready
     );
     assert!(
         state
-            .workbench
+            .models
             .models_view
             .action_receipt
             .as_ref()
@@ -246,7 +246,7 @@ fn installing_a_release_retains_its_part_pins_it_and_arms_the_placement() {
     assert_eq!(armed.terminal_order, ["IN".to_owned(), "OUT".to_owned()]);
     assert!(armed.interface_bound, "the pins come from the manifest");
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Ready
     );
     let _ = std::fs::remove_dir_all(&tree);
@@ -374,7 +374,7 @@ fn updating_installs_the_newer_release_and_removes_the_older() {
     let mut state = open_project();
     publish(&mut state, handle, hub, &request, output);
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Ready
     );
     assert!(
@@ -517,7 +517,7 @@ fn removing_a_release_leaves_a_project_that_retained_a_part_working() {
     let mut state = open_project();
     publish(&mut state, handle, hub, &request, output);
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Ready
     );
 
@@ -570,12 +570,12 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
     // state, and touches no project state on the way.
     super::emit_model_hub_errors(&mut state, vec![failure]);
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Offline
     );
     assert!(
         state
-            .workbench
+            .models
             .models_view
             .action_receipt
             .as_ref()
@@ -867,18 +867,18 @@ fn a_failed_catalog_refresh_lets_a_later_visit_try_again() {
     // the workspace opened spent its only attempt and never retried — the
     // workspace went on reporting a week-old catalog for the rest of the day.
     let mut state = AppState::default();
-    state.workbench.models_view.catalog_refresh_requested = true;
+    state.models.models_view.catalog_refresh_requested = true;
     super::emit_model_hub_errors(
         &mut state,
         vec!["the model hub could not be reached".to_owned()],
     );
 
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Offline
     );
     assert!(
-        !state.workbench.models_view.catalog_refresh_requested,
+        !state.models.models_view.catalog_refresh_requested,
         "a failed refresh must not consume the session's only attempt"
     );
 }
@@ -1012,10 +1012,10 @@ fn adopting_one_part_moves_its_pin_and_leaves_every_other_pin_where_it_was() {
 
     publish(&mut state, handle, hub, &request, output);
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Ready,
         "the adoption published: {:?}",
-        state.workbench.models_view.action_receipt
+        state.models.models_view.action_receipt
     );
     assert!(
         state
@@ -1265,12 +1265,12 @@ fn an_update_onto_a_recalled_release_refuses_on_the_operation_machine() {
     let mut state = open_project();
     super::emit_model_hub_errors(&mut state, vec![error]);
     assert_eq!(
-        state.workbench.models_view.operational_state,
+        state.models.models_view.operational_state,
         ModelsOperationalState::Recalled
     );
     assert!(
         state
-            .workbench
+            .models
             .models_view
             .action_receipt
             .as_ref()

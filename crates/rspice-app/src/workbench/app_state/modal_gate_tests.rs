@@ -25,36 +25,36 @@ type GateRow = (&'static str, fn(&mut AppState));
 /// first, then the session's own.
 const APPLICATION_GATE: &[GateRow] = &[
     ("workbench.project_launcher_open", |state| {
-        state.workbench.project_launcher_open = true;
+        state.project.project_launcher_open = true;
     }),
     ("workbench.examples_selection", |state| {
-        state.workbench.examples_selection = Some(0);
+        state.project.examples_selection = Some(0);
     }),
     ("workbench.notification_center_open", |state| {
         state.workbench.notification_center_open = true;
     }),
     ("workbench.model_correlation.dialog", |state| {
-        state.workbench.model_correlation.dialog = Some(
+        state.models.model_correlation.dialog = Some(
             crate::workbench::documents::model_correlation::ModelCorrelationDialog::AddMetric(
                 crate::workbench::documents::model_correlation::CorrelationMetricDraft::default(),
             ),
         );
     }),
     ("workbench.create_result_document", |state| {
-        state.workbench.create_result_document.open = true;
+        state.results.create_result_document.open = true;
     }),
     ("workbench.result_document_dialog", |state| {
-        state.workbench.result_document_dialog = Some(
+        state.results.result_document_dialog = Some(
             rspice_results_ui::document_dialogs::ResultDocumentDialog::AddPane(
                 rspice_results_ui::document_dialogs::add_pane::AddPaneDraft::default(),
             ),
         );
     }),
     ("workbench.result_import", |state| {
-        state.workbench.result_import.open = true;
+        state.results.result_import.open = true;
     }),
     ("workbench.models_view.dialog", |state| {
-        state.workbench.models_view.dialog = Some(
+        state.models.models_view.dialog = Some(
             crate::workbench::state::ModelsWorkbenchDialog::SourcePreview {
                 title: "nch".to_owned(),
                 subtitle: "foundation.lib".to_owned(),
@@ -64,7 +64,7 @@ const APPLICATION_GATE: &[GateRow] = &[
         );
     }),
     ("workbench.simulation_workflow", |state| {
-        state.workbench.simulation_workflow = Some(
+        state.simulate.simulation_workflow = Some(
             crate::workbench::state::SimulationWorkflowDialog::DesignVariable(
                 crate::workbench::state::DesignVariableDraft::default(),
             ),
@@ -73,11 +73,11 @@ const APPLICATION_GATE: &[GateRow] = &[
     (
         "workbench.verification.regression_baseline_picker_open",
         |state| {
-            state.workbench.verification.regression_baseline_picker_open = true;
+            state.simulate.verification.regression_baseline_picker_open = true;
         },
     ),
     ("workbench.verification.tuning_review_open", |state| {
-        state.workbench.verification.tuning_review_open = true;
+        state.simulate.verification.tuning_review_open = true;
     }),
     ("route ProjectLauncher", |state| {
         navigate(state, SurfaceId::ProjectLauncher);
@@ -160,6 +160,47 @@ const OUTSIDE_THE_APPLICATION_GATE: &[GateRow] = &[
         );
     }),
 ];
+
+#[test]
+fn application_modals_own_global_input_exclusively() {
+    let mut state = AppState::default();
+    assert!(!state.application_modal_open());
+
+    state.project.project_launcher_open = true;
+    assert!(state.application_modal_open());
+    state.project.project_launcher_open = false;
+    state.simulate.verification.regression_baseline_picker_open = true;
+    assert!(state.application_modal_open());
+    state.simulate.verification.regression_baseline_picker_open = false;
+    state.simulate.verification.tuning_review_open = true;
+    assert!(state.application_modal_open());
+    state.simulate.verification.tuning_review_open = false;
+    state
+        .workbench
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::Preferences),
+            RouteTransitionSource::User,
+        )
+        .expect("Preferences has a registered executor");
+    assert!(state.application_modal_open());
+    state
+        .workbench
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::DesignManagement),
+            RouteTransitionSource::User,
+        )
+        .expect("Design Management has a registered executor");
+    assert_eq!(state.workbench.workspace, Workspace::Design);
+    assert!(state.application_modal_open());
+    state
+        .workbench
+        .navigate(
+            SurfaceRoute::surface(SurfaceId::JobsManager),
+            RouteTransitionSource::User,
+        )
+        .expect("jobs manager has a registered executor");
+    assert!(state.application_modal_open());
+}
 
 #[test]
 fn what_is_drawn_outside_the_application_gate_leaves_it_modeless() {

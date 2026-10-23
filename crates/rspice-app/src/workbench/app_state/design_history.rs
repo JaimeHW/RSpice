@@ -1642,19 +1642,15 @@ fn replace_model_library(
                 .selected_library
                 .as_deref()
                 == Some(library_name)
-                && state
-                    .workbench
-                    .selected_model
-                    .as_ref()
-                    .is_some_and(|model| {
-                        state
-                            .model
-                            .model_library_manager
-                            .get_library(library_name)
-                            .is_none_or(|library| !library.models.contains_key(model))
-                    })
+                && state.models.selected_model.as_ref().is_some_and(|model| {
+                    state
+                        .model
+                        .model_library_manager
+                        .get_library(library_name)
+                        .is_none_or(|library| !library.models.contains_key(model))
+                })
             {
-                state.workbench.selected_model = None;
+                state.models.selected_model = None;
             }
         }
         None => {
@@ -1674,7 +1670,7 @@ fn replace_model_library(
                 == Some(library_name)
             {
                 state.model.model_library_manager.selected_library = None;
-                state.workbench.selected_model = None;
+                state.models.selected_model = None;
             }
         }
     }

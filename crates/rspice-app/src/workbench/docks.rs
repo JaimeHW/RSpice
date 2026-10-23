@@ -9,6 +9,7 @@ pub(crate) use inspector::run_details::{RunDetailsDialogState, show as show_run_
 pub(crate) use inspector::{
     bind_component_model_from_catalog, validate_component_model_catalog_binding,
 };
+pub(crate) use navigator::stimulus::browser_state::StimulusBrowserState;
 
 use egui::{Context, Frame, Id, Key, Panel, Response, containers::PanelState};
 

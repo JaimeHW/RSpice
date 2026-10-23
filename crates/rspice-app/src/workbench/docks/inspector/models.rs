@@ -55,7 +55,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     let Some(model) = app
         .state
-        .workbench
+        .models
         .selected_model
         .as_ref()
         .and_then(|name| library.models.get(name))

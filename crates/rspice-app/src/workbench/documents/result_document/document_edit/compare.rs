@@ -61,7 +61,7 @@ pub(crate) fn open_compare(state: &mut AppState) {
     let Some(baseline) = baseline else {
         return;
     };
-    state.workbench.result_document_dialog = Some(ResultDocumentDialog::Compare(CompareDraft {
+    state.results.result_document_dialog = Some(ResultDocumentDialog::Compare(CompareDraft {
         baseline: Some(baseline),
         ..CompareDraft::default()
     }));

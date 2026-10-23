@@ -440,7 +440,7 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
         .content
         .report_documents
         .push(report.clone());
-    app.workbench.report_authoring.selected_document = Some(report_id);
+    app.hardcopy.report_authoring.selected_document = Some(report_id);
     let app_resolved = report_inventory::resolve(&app, &report, HardcopyScope::CompleteReport)
         .expect("the retained dataset must authenticate the linked report table");
     let HardcopySemanticDocument::Report(app_semantic) = app_resolved.semantic_document() else {
@@ -664,7 +664,7 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
     let project = &mut state.model.workspace.content;
     project.visualization_documents.push(visualization);
     project.report_documents.push(report);
-    state.workbench.report_authoring.selected_document = Some(report_id);
+    state.hardcopy.report_authoring.selected_document = Some(report_id);
     let project_id = project.project.id().as_uuid();
     let source_key = format!("project:{project_id}:report:{report_id}");
 

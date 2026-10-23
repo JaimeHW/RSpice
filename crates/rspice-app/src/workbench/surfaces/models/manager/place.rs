@@ -105,7 +105,7 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
         );
     }
     if matches!(route, PlaceRoute::Retain { .. })
-        && state.workbench.models_view.model_import_in_progress
+        && state.models.models_view.model_import_in_progress
     {
         return Some("Another model-source operation is still running.");
     }

@@ -65,7 +65,7 @@ fn solver_options_iteration_edit_preserves_precise_temperatures() {
         serde_json::to_value(&expected).unwrap(),
         "editing the iteration budget changed an unrelated authored option"
     );
-    assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
+    assert!(!app.state.simulate.analysis_lifecycle_status.is_refusal());
     assert_eq!(
         app.state
             .model
@@ -127,12 +127,12 @@ fn solver_options_invalid_drafts_cannot_replace_effective_policy() {
             edit(&mut app.state.model.sim_setup.session.options_draft, value);
             page_solver::commit_draft(&mut app);
             assert!(
-                app.state.workbench.analysis_lifecycle_status.is_refusal(),
+                app.state.simulate.analysis_lifecycle_status.is_refusal(),
                 "{name}={value} was accepted"
             );
             assert!(
                 app.state
-                    .workbench
+                    .simulate
                     .analysis_lifecycle_status
                     .message()
                     .contains(name),
@@ -178,7 +178,7 @@ fn simulation_compatibility_commits_through_the_solver_transaction() {
         .options_draft
         .compatibility = SimulationCompatibility::Xyce;
     page_solver::commit_draft(&mut app);
-    assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
+    assert!(!app.state.simulate.analysis_lifecycle_status.is_refusal());
     assert_eq!(
         app.state.model.sim_setup.options.compatibility,
         SimulationCompatibility::Xyce

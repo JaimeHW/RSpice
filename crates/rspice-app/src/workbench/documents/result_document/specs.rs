@@ -100,7 +100,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
         ui,
         state.model.simulation.active_run().map(|run| &run.data),
         &state.model.workspace.content.specs,
-        state.workbench.selected_specification.as_deref(),
+        state.simulate.selected_specification.as_deref(),
     );
     if let Some(analysis_index) = focus_analysis {
         let viewer = state
@@ -242,7 +242,7 @@ pub fn apply_drafts(state: &mut AppState) -> bool {
     }
     state.model.workspace = workspace;
     state.model.sim_setup = setup;
-    state.workbench.preflight = Default::default();
+    state.runs.preflight = Default::default();
     state.results.results.session.spec_drafts = None;
     true
 }

@@ -69,7 +69,7 @@ pub(super) fn append_dataset(
     require_dialog_source(app, &context.source)?;
     let selected_suite_id = app
         .state
-        .workbench
+        .models
         .model_correlation
         .selected_suite_id
         .as_deref();
@@ -164,7 +164,7 @@ pub(super) fn append_metric(
     require_dialog_source(app, &context.source)?;
     let selected_suite_id = app
         .state
-        .workbench
+        .models
         .model_correlation
         .selected_suite_id
         .as_deref();
@@ -237,7 +237,7 @@ pub(super) fn append_disposition(
     require_dialog_source(app, &context.source)?;
     let selected_suite_id = app
         .state
-        .workbench
+        .models
         .model_correlation
         .selected_suite_id
         .as_deref();
@@ -332,7 +332,7 @@ pub(super) fn append_review_evidence(
     require_dialog_source(app, &context.source)?;
     let selected_suite_id = app
         .state
-        .workbench
+        .models
         .model_correlation
         .selected_suite_id
         .as_deref();
@@ -423,7 +423,7 @@ fn preflight_mutation(app: &RSpiceApp) -> Result<(), String> {
     }
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some()
@@ -433,7 +433,7 @@ fn preflight_mutation(app: &RSpiceApp) -> Result<(), String> {
                 .to_owned(),
         );
     }
-    if let Some(draft) = app.state.workbench.model_editor.draft.as_ref()
+    if let Some(draft) = app.state.models.model_editor.draft.as_ref()
         && draft.is_dirty()
     {
         return Err(format!(
@@ -454,7 +454,7 @@ fn current_context(app: &RSpiceApp) -> Result<CorrelationContext, String> {
         .ok_or_else(|| "Select a project-owned model library first".to_owned())?;
     let requested_model = app
         .state
-        .workbench
+        .models
         .selected_model
         .clone()
         .ok_or_else(|| "Select a project-owned model family first".to_owned())?;
@@ -834,16 +834,16 @@ fn publish_correlation(
             .publish_project_model_candidate(candidate, commit, description)?;
 
     app.state.select_model_library(&context.library_name);
-    app.state.workbench.selected_model = Some(context.model_name);
-    if let Some(editor_draft) = app.state.workbench.model_editor.draft.as_mut() {
+    app.state.models.selected_model = Some(context.model_name);
+    if let Some(editor_draft) = app.state.models.model_editor.draft.as_mut() {
         editor_draft.base_project_revision = committed_revision;
     }
     app.state
-        .workbench
+        .models
         .model_editor
         .invalidate_candidate_evidence();
 
-    let workspace = &mut app.state.workbench.model_correlation;
+    let workspace = &mut app.state.models.model_correlation;
     workspace.selected_suite_id = Some(selection.suite_id);
     if let Some(dataset_id) = selection.dataset_id {
         workspace.selected_dataset_id = Some(dataset_id);
@@ -863,7 +863,7 @@ fn require_dialog_source(
 ) -> Result<(), String> {
     let opening_source = app
         .state
-        .workbench
+        .models
         .model_correlation
         .dialog_source
         .as_ref()

@@ -18,6 +18,7 @@
 //! they will not find, and a footer inside the list leaves the moment the list
 //! is longer than the dock.
 
+pub(in crate::workbench::docks) mod browser_state;
 mod row;
 
 #[cfg(test)]
@@ -38,8 +39,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{ViewOption, view_switch};
 use crate::workbench::app::actions::stimulus::{self as stimulus_actions, AdopterTally};
-use crate::workbench::state::{NavigatorTreeNode, StimulusBrowserState, StimulusScope, Workspace};
+use crate::workbench::state::{NavigatorTreeNode, Workspace};
 use crate::workbench::{AppState, MessageId};
+use browser_state::{StimulusBrowserState, StimulusScope};
 
 use super::super::super::design_system::{Problem, WorkbenchIcon, labeled_icon_button};
 use super::{empty_navigator_row, nav_matches};
@@ -86,7 +88,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     // the rows can borrow them: a row that cloned its curve would copy
     // sixty-four samples per definition per frame to draw a picture the cache
     // is already holding.
-    let mut browser = std::mem::take(&mut state.workbench.stimulus_browser);
+    let mut browser = std::mem::take(&mut state.design.stimulus_browser);
     let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(state);
     browser.minis(&state.model.workspace.content.stimulus_library, timing);
     let tally = stimulus_actions::design_adopter_tally(state);
@@ -118,7 +120,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     });
     {
         let groups = groups(state, &browser, scope, &tally);
-        let selected = state.workbench.selected_stimulus_definition.clone();
+        let selected = state.design.selected_stimulus_definition.clone();
         in_band(ui, tree_rect, |ui| {
             if groups.is_empty() {
                 no_match(ui, state, &mut scope);
@@ -153,7 +155,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     }
 
     browser.scope = scope;
-    state.workbench.stimulus_browser = browser;
+    state.design.stimulus_browser = browser;
     if let Some(family) = folded {
         state
             .workbench
@@ -162,7 +164,7 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
             .toggle(folded_node(family));
     }
     if let Some(name) = chosen {
-        state.workbench.selected_stimulus_definition = Some(name);
+        state.design.selected_stimulus_definition = Some(name);
     }
 }
 
@@ -224,7 +226,7 @@ fn scope_counts(state: &AppState, tally: &Tally) -> ScopeCounts {
 /// looking at the same unapplied edit.
 fn live_record(state: &AppState, definition: &StimulusDefinition) -> StimulusDefinition {
     state
-        .workbench
+        .design
         .stimulus_editor
         .draft(definition.name())
         .map_or_else(|| definition.clone(), |draft| draft.working().clone())
@@ -308,7 +310,7 @@ fn row<'a>(
     definition: &StimulusDefinition,
     tally: Option<&AdopterTally>,
 ) -> Row<'a> {
-    let dirty = state.workbench.stimulus_editor.is_dirty(definition.name());
+    let dirty = state.design.stimulus_editor.is_dirty(definition.name());
     Row {
         name: definition.name().to_owned(),
         gap: crate::properties::source_preview::MiniGap::of(definition),

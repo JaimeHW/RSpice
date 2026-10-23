@@ -21,18 +21,10 @@ impl PreviewHost for ReportHost<'_> {
         }
     }
     fn selected_block(&self) -> Option<ReportBlockId> {
-        self.0
-            .state
-            .workbench
-            .report_authoring
-            .selected_report_block
+        self.0.state.hardcopy.report_authoring.selected_report_block
     }
     fn select_block(&mut self, block: ReportBlockId) {
-        self.0
-            .state
-            .workbench
-            .report_authoring
-            .selected_report_block = Some(block);
+        self.0.state.hardcopy.report_authoring.selected_report_block = Some(block);
     }
     fn reference_resolves(&self, reference: &ReportReferenceMode) -> bool {
         report_reference_resolves(&self.0.state, reference)
@@ -60,10 +52,10 @@ impl PreviewHost for ReportHost<'_> {
     fn remove_element(&mut self) {
         self.0
             .state
-            .workbench
+            .hardcopy
             .report_authoring
             .remove_report_block_open = true;
-        self.0.state.workbench.report_authoring.transaction_error = None;
+        self.0.state.hardcopy.report_authoring.transaction_error = None;
     }
     fn insert_result(&mut self) {
         open_insert_result_document(self.0);
@@ -83,7 +75,7 @@ impl InspectorHost for ReportHost<'_> {
     fn transaction_error(&self) -> Option<&str> {
         self.0
             .state
-            .workbench
+            .hardcopy
             .report_authoring
             .transaction_error
             .as_deref()
@@ -125,16 +117,12 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
         move_selected_page(self.0, direction);
     }
     fn select_page(&mut self, page: ReportPageId) {
-        self.0.state.workbench.report_authoring.selected_page = Some(page);
-        self.0
-            .state
-            .workbench
-            .report_authoring
-            .selected_report_block = None;
+        self.0.state.hardcopy.report_authoring.selected_page = Some(page);
+        self.0.state.hardcopy.report_authoring.selected_report_block = None;
     }
     fn prepare_page_settings(&mut self, page: &rspice_results::report_document::ReportPage) {
         let page_id = page.id();
-        let editor = &mut self.0.state.workbench.report_authoring;
+        let editor = &mut self.0.state.hardcopy.report_authoring;
         if editor.inline_page_settings_page != Some(page_id) {
             editor.inline_page_settings_page = Some(page_id);
             editor.inline_page_title_draft = page.title().to_owned();
@@ -145,7 +133,7 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
         &mut self
             .0
             .state
-            .workbench
+            .hardcopy
             .report_authoring
             .inline_page_title_draft
     }
@@ -166,7 +154,7 @@ impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_> {
 impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
     type Figure = result_insert::ReportFigureOption;
     fn editor(&mut self) -> &mut rspice_results_ui::report::session::ReportAuthoringState {
-        &mut self.0.state.workbench.report_authoring
+        &mut self.0.state.hardcopy.report_authoring
     }
     fn writable(&self) -> bool {
         report_mutation_allowed(&self.0.state)
@@ -190,12 +178,7 @@ impl rspice_results_ui::report::dialogs::DialogHost for ReportHost<'_> {
             .collect()
     }
     fn removal_target(&self) -> (String, bool) {
-        let block_id = self
-            .0
-            .state
-            .workbench
-            .report_authoring
-            .selected_report_block;
+        let block_id = self.0.state.hardcopy.report_authoring.selected_report_block;
         let block_title = block_id
             .and_then(|id| active_document(&self.0.state)?.block(id))
             .map(|block| report_block_element_title(block.kind()).into_owned())

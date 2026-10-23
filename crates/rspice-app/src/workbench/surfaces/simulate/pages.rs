@@ -10,8 +10,9 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::run_preflight::PreflightCurrency;
 use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::{PreflightCurrency, SimulationPage};
+use crate::workbench::state::SimulationPage;
 
 use super::super::super::design_system::{heading, workspace_title_row};
 use super::page_kit::setup_page;
@@ -187,7 +188,7 @@ pub(super) fn dispatch_contract(ui: &mut Ui, app: &RSpiceApp) {
     }
     let Some(prepared) = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -228,12 +229,12 @@ const CONTRACT_GAP: f32 = 12.0;
 /// every frame of every setup route to learn "no preflight yet" would be the
 /// header charging the whole design for a fact the state already holds.
 fn preflight_currency(app: &RSpiceApp) -> PreflightCurrency {
-    if app.state.workbench.preflight.report.is_none() {
+    if app.state.runs.preflight.report.is_none() {
         return PreflightCurrency::Absent;
     }
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
-    app.state.workbench.preflight.currency(
+    app.state.runs.preflight.currency(
         app.state.model.workspace.content.project.revision().get(),
         &topology_root,
         topology_revision,
@@ -386,7 +387,7 @@ fn primary_action(page: SimulationPage) -> Option<(&'static str, PageCommand)> {
 }
 
 fn open_variable_dialog(app: &mut RSpiceApp) {
-    app.state.workbench.simulation_workflow = Some(
+    app.state.simulate.simulation_workflow = Some(
         crate::workbench::state::SimulationWorkflowDialog::DesignVariable(
             crate::workbench::state::DesignVariableDraft::default(),
         ),
@@ -394,7 +395,7 @@ fn open_variable_dialog(app: &mut RSpiceApp) {
 }
 
 fn open_output_dialog(app: &mut RSpiceApp) {
-    app.state.workbench.simulation_workflow = Some(
+    app.state.simulate.simulation_workflow = Some(
         crate::workbench::state::SimulationWorkflowDialog::SavedOutput(
             crate::workbench::state::SavedOutputDraft::default(),
         ),
@@ -460,7 +461,7 @@ mod tests {
         assert_eq!(preflight_currency(&app), PreflightCurrency::Absent);
         assert!(!PreflightCurrency::Absent.wants_rerun());
 
-        app.state.workbench.preflight.report = Some(current_report(
+        app.state.runs.preflight.report = Some(current_report(
             &app.state,
             Vec::new(),
             Some(prepared_contract(3)),
@@ -471,7 +472,7 @@ mod tests {
         );
         assert!(!preflight_currency(&app).wants_rerun());
 
-        app.state.workbench.preflight.report = Some(current_report(
+        app.state.runs.preflight.report = Some(current_report(
             &app.state,
             vec![blocker()],
             Some(prepared_contract(3)),
@@ -485,7 +486,7 @@ mod tests {
         // routes that are not Analyses are exactly where that editing happens.
         let mut stale = current_report(&app.state, Vec::new(), Some(prepared_contract(3)));
         stale.project_revision += 1;
-        app.state.workbench.preflight.report = Some(stale);
+        app.state.runs.preflight.report = Some(stale);
         assert_eq!(preflight_currency(&app), PreflightCurrency::Expired);
         assert!(preflight_currency(&app).wants_rerun());
     }
@@ -506,7 +507,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.simulation_page = page;
+        app.state.simulate.simulation_page = page;
         seed(&mut app.state);
         let output = ctx.run_ui(
             egui::RawInput {
@@ -546,7 +547,7 @@ mod tests {
             let labels = route_announcements(page, |state| {
                 let mut stale = current_report(state, Vec::new(), Some(prepared_contract(2)));
                 stale.project_revision += 1;
-                state.workbench.preflight.report = Some(stale);
+                state.runs.preflight.report = Some(stale);
             });
             assert!(
                 labels
@@ -578,7 +579,7 @@ mod tests {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.simulation_page = SimulationPage::Analyses;
+        app.state.simulate.simulation_page = SimulationPage::Analyses;
         seed(&mut app.state);
         let output = ctx.run_ui(
             egui::RawInput {
@@ -615,7 +616,7 @@ mod tests {
         const TARGET: &str = "Desktop background thread";
 
         let authorized = analyses_text(|state| {
-            state.workbench.preflight.report = Some(current_report(
+            state.runs.preflight.report = Some(current_report(
                 state,
                 Vec::new(),
                 Some(prepared_contract(3)),
@@ -631,7 +632,7 @@ mod tests {
         }
 
         let blocked = analyses_text(|state| {
-            state.workbench.preflight.report = Some(current_report(
+            state.runs.preflight.report = Some(current_report(
                 state,
                 vec![blocker()],
                 Some(prepared_contract(3)),
@@ -640,7 +641,7 @@ mod tests {
         let expired = analyses_text(|state| {
             let mut stale = current_report(state, Vec::new(), Some(prepared_contract(3)));
             stale.project_revision += 1;
-            state.workbench.preflight.report = Some(stale);
+            state.runs.preflight.report = Some(stale);
         });
         let absent = analyses_text(|_| {});
         for (standing, text) in [
@@ -667,7 +668,7 @@ mod tests {
     fn an_authorized_report_paints_no_chip() {
         for page in [SimulationPage::Solver, SimulationPage::Analyses] {
             let labels = route_announcements(page, |state| {
-                state.workbench.preflight.report = Some(current_report(
+                state.runs.preflight.report = Some(current_report(
                     state,
                     Vec::new(),
                     Some(prepared_contract(2)),

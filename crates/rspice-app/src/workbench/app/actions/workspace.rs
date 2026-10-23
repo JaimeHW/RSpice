@@ -18,11 +18,31 @@ use crate::state::{
 use crate::ui::accessibility::counted;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
-use crate::workbench::state::{SyncFailures, WorkspaceDocumentId};
+use crate::workbench::state::WorkspaceDocumentId;
 use rspice_design::symbol::generated::{
     GENERATED_SYMBOL_VIEW, is_generated_symbol, store_generated_symbol,
 };
 use std::collections::BTreeMap;
+
+/// Failures of the per-frame drawing sync that the Console already holds.
+#[derive(Debug, Clone, Default)]
+pub struct SyncFailures {
+    pub sheet_membership: Option<String>,
+    pub generated_symbol: Option<String>,
+}
+
+impl SyncFailures {
+    /// Note `failure` in `slot`, answering whether it is new and so is to be
+    /// recorded. `None` clears the slot, so the same failure returning later
+    /// is recorded again.
+    pub fn observe(slot: &mut Option<String>, failure: Option<&str>) -> bool {
+        if slot.as_deref() == failure {
+            return false;
+        }
+        *slot = failure.map(str::to_owned);
+        failure.is_some()
+    }
+}
 
 fn view_type_for_reference(state: &AppState, reference: &CellViewRef) -> ViewType {
     state
@@ -723,7 +743,7 @@ impl AppState {
             .err()
             .map(|error| format!("Sheet membership could not be updated: {error}"));
         if SyncFailures::observe(
-            &mut self.workbench.recorded_sync_failures.sheet_membership,
+            &mut self.design.recorded_sync_failures.sheet_membership,
             failure.as_deref(),
         ) && let Some(failure) = failure
         {
@@ -843,7 +863,7 @@ impl AppState {
             }
         };
         if SyncFailures::observe(
-            &mut self.workbench.recorded_sync_failures.generated_symbol,
+            &mut self.design.recorded_sync_failures.generated_symbol,
             symbol_error.as_deref(),
         ) && let Some(error) = symbol_error
         {

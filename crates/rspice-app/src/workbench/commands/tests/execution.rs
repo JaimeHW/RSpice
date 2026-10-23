@@ -12,7 +12,7 @@ use super::*;
 fn tuning_command_opens_the_transactional_sandbox() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
-    app.state.workbench.verification_page = VerificationPage::Yield;
+    app.state.simulate.verification_page = VerificationPage::Yield;
     let command = Command::VerificationPage(VerificationPage::Tuning);
 
     assert!(command.is_enabled(&app));
@@ -21,7 +21,7 @@ fn tuning_command_opens_the_transactional_sandbox() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Verify);
     assert_eq!(
-        app.state.workbench.verification_page,
+        app.state.simulate.verification_page,
         VerificationPage::Tuning
     );
 }

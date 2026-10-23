@@ -147,7 +147,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         // is drawn anywhere else, which is where these pages get reviewed.
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         project_chrome(ui, app);
-        let page = app.state.workbench.project_page;
+        let page = app.state.project.project_page;
         let panel = ui.scope(|ui| match page {
             ProjectPage::Overview => overview::overview(ui, app),
             ProjectPage::Library => library::library(ui, app),
@@ -233,7 +233,7 @@ fn project_context_cluster(ui: &mut Ui, app: &mut RSpiceApp) {
         |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             project_revision_label(ui, app, &tokens);
-            if app.state.workbench.project_page != ProjectPage::Overview {
+            if app.state.project.project_page != ProjectPage::Overview {
                 project_health_chips(ui, app);
                 project_page_actions(ui, app);
             }
@@ -242,7 +242,7 @@ fn project_context_cluster(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project_context_desired_width(app: &RSpiceApp) -> f32 {
-    if app.state.workbench.project_page == ProjectPage::Overview {
+    if app.state.project.project_page == ProjectPage::Overview {
         160.0
     } else {
         610.0
@@ -279,7 +279,7 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                 .x;
             let (_, rect) = ui.allocate_space(vec2(text_width + 20.0, PROJECT_TAB_HEIGHT));
             let response = ui.interact(rect, tab_ids[index], Sense::click());
-            let selected = app.state.workbench.project_page == page;
+            let selected = app.state.project.project_page == page;
             response.widget_info(|| {
                 WidgetInfo::selected(
                     WidgetType::SelectableLabel,
@@ -319,7 +319,7 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             theme::paint_focus_ring(ui, &response, rect);
             if response.clicked() {
-                app.state.workbench.project_page = page;
+                app.state.project.project_page = page;
             }
             if response.has_focus() {
                 let target = ui.input_mut(|input| {
@@ -336,7 +336,7 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 });
                 if let Some(target) = target {
-                    app.state.workbench.project_page = ProjectPage::ALL[target];
+                    app.state.project.project_page = ProjectPage::ALL[target];
                     ui.memory_mut(|memory| memory.request_focus(tab_ids[target]));
                 }
             }
@@ -626,7 +626,7 @@ fn project_status_chip(
 }
 
 fn project_page_actions(ui: &mut Ui, app: &mut RSpiceApp) {
-    match app.state.workbench.project_page {
+    match app.state.project.project_page {
         ProjectPage::Overview => {}
         ProjectPage::Library => {
             if Button::new("Attach library\u{2026}").show(ui).clicked() {
@@ -1051,7 +1051,7 @@ mod tests {
                 let ctx = egui::Context::default();
                 crate::ui::Theme::default().apply(&ctx);
                 let mut app = RSpiceApp::test_instance();
-                app.state.workbench.project_page = page;
+                app.state.project.project_page = page;
 
                 let output = ctx.run_ui(
                     egui::RawInput {
@@ -1180,7 +1180,7 @@ mod tests {
                 "front_end.sp",
             )
         );
-        app.state.workbench.project_page = ProjectPage::Overview;
+        app.state.project.project_page = ProjectPage::Overview;
         app
     }
 
@@ -1209,7 +1209,7 @@ mod tests {
             egui::vec2(390.0, 844.0),
         ] {
             let mut app = populated_project_app();
-            app.state.workbench.project_page = ProjectPage::Overview;
+            app.state.project.project_page = ProjectPage::Overview;
             let text = painted_project_page(size, |ui| show(ui, &mut app));
             for expected in [
                 "lna-frontend-28g",
@@ -1261,7 +1261,7 @@ mod tests {
         };
 
         let mut app = populated_project_app();
-        app.state.workbench.project_page = ProjectPage::Recovery;
+        app.state.project.project_page = ProjectPage::Recovery;
         let now = crate::time_compat::checked_unix_time_ms().expect("clock");
         let name = app.state.model.workspace.content.project.name().to_owned();
         let project_id = app.state.model.workspace.content.project.id().to_string();
@@ -1281,7 +1281,7 @@ mod tests {
             fixture_summary(&name, revision, reason, now - age, bytes)
         })
         .collect::<Vec<_>>();
-        app.state.workbench.project_checkpoint_selection = catalog
+        app.state.project.project_checkpoint_selection = catalog
             .first()
             .map(|checkpoint| checkpoint.checkpoint_id().to_string());
         let recovery = &mut app.state.project.project_checkpoint_recovery;

@@ -248,7 +248,7 @@ pub(crate) fn resolve_retained_hardcopy_source(
         }
     }
 
-    if let Some(document_id) = state.workbench.report_authoring.selected_document {
+    if let Some(document_id) = state.hardcopy.report_authoring.selected_document {
         let report_key = format!("project:{}:report:{}", project_id.as_uuid(), document_id);
         if source_key == report_key {
             let document = state

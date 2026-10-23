@@ -426,7 +426,7 @@ fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
     apply_remediation(&mut app, unnamed.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
-        app.state.workbench.simulation_page,
+        app.state.simulate.simulation_page,
         crate::workbench::state::SimulationPage::Solver,
         "the finding opens the page where the block is named"
     );
@@ -463,7 +463,7 @@ fn a_connect_rule_block_named_in_the_plan_reaches_the_deck_and_clears_the_refusa
 
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()

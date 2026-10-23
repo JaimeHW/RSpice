@@ -47,7 +47,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .unwrap_or_default();
     synchronize_regression_drafts(app, &targets);
-    let mut session = app.state.workbench.verification.clone();
+    let mut session = app.state.simulate.verification.clone();
     let pair = regression_run_pair(app);
     let checks = pair
         .map(|(baseline, current)| derive_regression_checks(baseline, current))
@@ -258,11 +258,11 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     match output.action.and_then(|index| actions.get(index)) {
         Some(RegressionAction::SelectBaseline) => {
             app.state
-                .workbench
+                .simulate
                 .verification
                 .regression_baseline_picker_selection = active_regression_baseline(app);
             app.state
-                .workbench
+                .simulate
                 .verification
                 .regression_baseline_picker_open = true;
         }
@@ -270,7 +270,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(RegressionAction::Export) => match export_documents {
             Some(Ok((junit, tap))) => export_regression_ci(app, &junit, &tap),
             Some(Err(error)) => {
-                app.state.workbench.verification.action_problem =
+                app.state.simulate.verification.action_problem =
                     Some(format!("JUnit / TAP export failed: {error}."));
             }
             None => {}
@@ -278,7 +278,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         Some(RegressionAction::RemoveOrphans) => {
             removed_orphans = true;
             let result = remove_orphaned_regression_rules(app, &orphan_targets).map(|_| ());
-            record_action(&mut app.state.workbench.verification, result);
+            record_action(&mut app.state.simulate.verification, result);
         }
         None => {}
     }
@@ -286,9 +286,9 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         select_verification_run(&mut app.state.model.simulation, index);
     }
     if !removed_orphans {
-        app.state.workbench.verification.regression_selected_target =
+        app.state.simulate.verification.regression_selected_target =
             session.regression_selected_target;
-        app.state.workbench.verification.regression_tolerance_drafts =
+        app.state.simulate.verification.regression_tolerance_drafts =
             session.regression_tolerance_drafts;
     }
 }

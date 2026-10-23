@@ -98,7 +98,7 @@ fn simulate_last_run_failed() -> RSpiceApp {
 fn verify_app(page: VerificationPage) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Verify);
-    app.state.workbench.verification_page = page;
+    app.state.simulate.verification_page = page;
     app
 }
 

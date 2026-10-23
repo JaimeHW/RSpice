@@ -726,7 +726,7 @@ pub(super) fn note_pack_verification(
     let Some(key) = request.verification_key() else {
         return;
     };
-    state.workbench.models_view.pack_verification.insert(
+    state.models.models_view.pack_verification.insert(
         key,
         match outcome {
             Ok(()) => crate::workbench::state::PackReProof::Verified,
@@ -737,8 +737,8 @@ pub(super) fn note_pack_verification(
 
 /// Records a successful hub receipt everywhere a receipt is read.
 fn apply_model_hub_receipt(state: &mut AppState, receipt: String) {
-    state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
-    state.workbench.models_view.action_receipt = Some(Ok(receipt.clone()));
+    state.models.models_view.operational_state = ModelsOperationalState::Ready;
+    state.models.models_view.action_receipt = Some(Ok(receipt.clone()));
     state.record(LogSeverity::Info, LogSource::Studio, receipt);
 }
 
@@ -756,7 +756,7 @@ pub(super) fn emit_model_hub_errors(state: &mut AppState, errors: Vec<String>) {
     // automatic refresh firing every frame the workspace is visible, not to
     // spend a session's only attempt on a machine that happened to be offline
     // when the workspace first opened: a later visit must be allowed to retry.
-    state.workbench.models_view.catalog_refresh_requested = false;
-    state.workbench.models_view.operational_state = ModelsOperationalState::from_failure(&first);
-    state.workbench.models_view.action_receipt = Some(Err(errors.join("; ")));
+    state.models.models_view.catalog_refresh_requested = false;
+    state.models.models_view.operational_state = ModelsOperationalState::from_failure(&first);
+    state.models.models_view.action_receipt = Some(Err(errors.join("; ")));
 }

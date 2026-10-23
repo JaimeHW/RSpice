@@ -211,7 +211,7 @@ fn library_context(ui: &mut Ui, state: &mut AppState) {
                 let search_width = (ui.available_width() * 0.38).clamp(180.0, 420.0);
                 let search = ui.add_sized(
                     [search_width, t.metrics.ctl_h.min(28.0)],
-                    egui::TextEdit::singleline(&mut state.workbench.project_library_filter)
+                    egui::TextEdit::singleline(&mut state.project.project_library_filter)
                         .hint_text("Filter cells and views\u{2026}"),
                 );
                 ui.ctx().accesskit_node_builder(search.id, |node| {
@@ -285,7 +285,7 @@ fn cell_column(ui: &mut Ui, app: &RSpiceApp, width: f32, height: f32) -> Option<
     let selected_library = app.state.model.library_manager.selected_library.clone();
     let query = app
         .state
-        .workbench
+        .project
         .project_library_filter
         .trim()
         .to_ascii_lowercase();
@@ -800,7 +800,7 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
             // bound to.
             let workspace = match view_type {
                 ViewType::Config => {
-                    app.state.workbench.project_page = ProjectPage::Configuration;
+                    app.state.project.project_page = ProjectPage::Configuration;
                     Workspace::Project
                 }
                 _ => Workspace::Design,
@@ -1330,7 +1330,7 @@ mod tests {
             LibraryIntent::OpenView(reference, ViewType::Config),
         );
         assert_eq!(app.state.workbench.workspace, Workspace::Project);
-        assert_eq!(app.state.workbench.project_page, ProjectPage::Configuration);
+        assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
     }
 
     #[test]

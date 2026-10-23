@@ -75,7 +75,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         && let Some(first) = summaries.first()
     {
         app.state.select_model_library(&first.library);
-        app.state.workbench.selected_model = Some(first.model.clone());
+        app.state.models.selected_model = Some(first.model.clone());
     }
     let selected = selected_qualification_summary(app, &summaries).cloned();
     let total_vectors = summaries
@@ -560,7 +560,7 @@ fn family_matrix(
                             .clicked()
                         {
                             state.select_model_library(&summary.library);
-                            state.workbench.selected_model = Some(summary.model.clone());
+                            state.models.selected_model = Some(summary.model.clone());
                         }
                     }
                 });

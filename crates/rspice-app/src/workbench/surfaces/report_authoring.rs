@@ -99,7 +99,7 @@ pub(crate) fn open_add_page(app: &mut RSpiceApp) {
     }
     let next =
         active_document(&app.state).map_or(1, |document| document.pages().len().saturating_add(1));
-    let editor = &mut app.state.workbench.report_authoring;
+    let editor = &mut app.state.hardcopy.report_authoring;
     editor.add_page_title = format!("Report page {next}");
     editor.transaction_error = None;
     editor.add_page_open = true;
@@ -119,7 +119,7 @@ pub(crate) fn open_page_properties(app: &mut RSpiceApp) {
     let title = page.title().to_owned();
     let template = report_template_index(document.template());
     let update_policy = page_update_policy_index(page.update_policy());
-    let editor = &mut app.state.workbench.report_authoring;
+    let editor = &mut app.state.hardcopy.report_authoring;
     editor.page_properties_page = Some(page_id);
     editor.page_title_draft = title;
     editor.report_template_draft = template;
@@ -154,7 +154,7 @@ fn can_move_selected_page(state: &AppState, direction: PageMoveDirection) -> boo
 fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason);
+        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
         return;
     }
     let selected_page =
@@ -199,12 +199,12 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
     });
     match result {
         Ok(changed) => {
-            app.state.workbench.report_authoring.selected_page = Some(page_id);
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.selected_page = Some(page_id);
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error);
+            app.state.hardcopy.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -212,13 +212,13 @@ fn move_selected_page(app: &mut RSpiceApp, direction: PageMoveDirection) {
 fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: PageSettingEdit) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason);
+        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
         return;
     }
     if let PageSettingEdit::Title(title) = &setting
         && !valid_title(title)
     {
-        app.state.workbench.report_authoring.transaction_error = Some(
+        app.state.hardcopy.report_authoring.transaction_error = Some(
             "The page title must be trimmed, non-empty, single-line text of at most 512 characters."
                 .to_owned(),
         );
@@ -285,12 +285,12 @@ fn commit_page_setting(app: &mut RSpiceApp, page_id: ReportPageId, setting: Page
     });
     match result {
         Ok(changed) => {
-            app.state.workbench.report_authoring.selected_page = Some(page_id);
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.selected_page = Some(page_id);
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error);
+            app.state.hardcopy.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -302,7 +302,7 @@ fn commit_document_publication_setting(
 ) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason);
+        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
         return;
     }
     let result = active_document_mut(&mut app.state).and_then(|document| {
@@ -346,10 +346,10 @@ fn commit_document_publication_setting(
     match result {
         Ok(changed) => {
             app.state.model.workspace.content.report_documents_dirty |= changed;
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.transaction_error = None;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error);
+            app.state.hardcopy.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -362,7 +362,7 @@ fn set_report_block_enabled(
 ) {
     if !report_mutation_allowed(&app.state) {
         let reason = report_mutation_block_reason(&app.state).to_owned();
-        app.state.workbench.report_authoring.transaction_error = Some(reason);
+        app.state.hardcopy.report_authoring.transaction_error = Some(reason);
         return;
     }
     let timestamp = timestamp_unix_ms();
@@ -399,12 +399,12 @@ fn set_report_block_enabled(
     });
     match result {
         Ok(changed) => {
-            app.state.workbench.report_authoring.selected_report_block = Some(block_id);
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.selected_report_block = Some(block_id);
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty |= changed;
         }
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error);
+            app.state.hardcopy.report_authoring.transaction_error = Some(error);
         }
     }
 }
@@ -475,7 +475,7 @@ fn open_create_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
         return;
     }
-    let editor = &mut app.state.workbench.report_authoring;
+    let editor = &mut app.state.hardcopy.report_authoring;
     editor.create_document_title = "Verification report".to_owned();
     editor.create_document_template = report_template_index(ReportTemplate::ReleaseVerification42);
     editor.transaction_error = None;
@@ -676,29 +676,25 @@ fn open_release_cockpit(app: &mut RSpiceApp) {
 
 fn commit_create_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some(report_mutation_block_reason(&app.state).to_owned());
         return;
     }
     let title = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .create_document_title
         .to_owned();
     if !valid_title(&title) {
-        app.state.workbench.report_authoring.transaction_error = Some(
+        app.state.hardcopy.report_authoring.transaction_error = Some(
             "The report title must be trimmed, non-empty, single-line text of at most 512 characters."
                 .to_owned(),
         );
         return;
     }
-    let template = report_template_from_index(
-        app.state
-            .workbench
-            .report_authoring
-            .create_document_template,
-    );
+    let template =
+        report_template_from_index(app.state.hardcopy.report_authoring.create_document_template);
     let initial_evidence_binding = app
         .state
         .model
@@ -770,25 +766,25 @@ fn commit_create_document(app: &mut RSpiceApp) {
                 .report_documents
                 .push(document);
             app.state.model.workspace.content.report_documents_dirty = true;
-            let editor = &mut app.state.workbench.report_authoring;
+            let editor = &mut app.state.hardcopy.report_authoring;
             editor.selected_document = Some(document_id);
             editor.selected_page = page_id;
             editor.create_document_open = false;
             editor.transaction_error = None;
         }
-        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
     }
 }
 
 fn commit_add_page(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some(report_mutation_block_reason(&app.state).to_owned());
         return;
     }
     let title = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .add_page_title
         .trim()
@@ -811,12 +807,12 @@ fn commit_add_page(app: &mut RSpiceApp) {
                 ReportEntityRef::Page(id) => Some(*id),
                 _ => None,
             });
-            app.state.workbench.report_authoring.selected_page = created_page;
-            app.state.workbench.report_authoring.add_page_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.selected_page = created_page;
+            app.state.hardcopy.report_authoring.add_page_open = false;
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty = true;
         }
-        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
     }
 }
 
@@ -824,7 +820,7 @@ fn open_add_report_element(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) || active_document(&app.state).is_none() {
         return;
     }
-    let editor = &mut app.state.workbench.report_authoring;
+    let editor = &mut app.state.hardcopy.report_authoring;
     editor.add_report_element_kind = 0;
     editor.add_report_element_title = "Engineering summary".to_owned();
     editor.add_report_element_primary =
@@ -866,11 +862,11 @@ fn report_dataset_snapshot(
 
 fn commit_add_report_element(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some(report_mutation_block_reason(&app.state).to_owned());
         return;
     }
-    let editor = &app.state.workbench.report_authoring;
+    let editor = &app.state.hardcopy.report_authoring;
     let kind_index = editor.add_report_element_kind.min(6);
     let title = editor.add_report_element_title.trim().to_owned();
     let primary = editor.add_report_element_primary.trim().to_owned();
@@ -883,7 +879,7 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
         match report_dataset_snapshot(&app.state, source_index) {
             Ok((snapshot, _)) => Some(ReportReferenceMode::Linked { snapshot }),
             Err(error) => {
-                app.state.workbench.report_authoring.transaction_error = Some(error);
+                app.state.hardcopy.report_authoring.transaction_error = Some(error);
                 return;
             }
         }
@@ -957,7 +953,7 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
             let (_, binding) = match report_dataset_snapshot(&app.state, source_index) {
                 Ok(value) => value,
                 Err(error) => {
-                    app.state.workbench.report_authoring.transaction_error = Some(error);
+                    app.state.hardcopy.report_authoring.transaction_error = Some(error);
                     return;
                 }
             };
@@ -981,8 +977,7 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
             ) {
                 Ok(snapshot) => snapshot,
                 Err(error) => {
-                    app.state.workbench.report_authoring.transaction_error =
-                        Some(error.to_string());
+                    app.state.hardcopy.report_authoring.transaction_error = Some(error.to_string());
                     return;
                 }
             };
@@ -1008,7 +1003,7 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
     let Some(page_id) =
         active_document(&app.state).and_then(|document| selected_page_id(&app.state, document))
     else {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some("Select a report page before adding an element.".to_owned());
         return;
     };
@@ -1032,16 +1027,16 @@ fn commit_add_report_element(app: &mut RSpiceApp) {
     });
     match result {
         Ok(receipt) => {
-            app.state.workbench.report_authoring.selected_report_block =
+            app.state.hardcopy.report_authoring.selected_report_block =
                 receipt.created.iter().find_map(|entity| match entity {
                     ReportEntityRef::Block(id) => Some(*id),
                     _ => None,
                 });
-            app.state.workbench.report_authoring.add_report_element_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.add_report_element_open = false;
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty = true;
         }
-        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
     }
 }
 
@@ -1071,12 +1066,12 @@ fn report_field_key(label: &str) -> String {
 
 fn commit_remove_report_block(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some(report_mutation_block_reason(&app.state).to_owned());
         return;
     }
-    let Some(block_id) = app.state.workbench.report_authoring.selected_report_block else {
-        app.state.workbench.report_authoring.transaction_error =
+    let Some(block_id) = app.state.hardcopy.report_authoring.selected_report_block else {
+        app.state.hardcopy.report_authoring.transaction_error =
             Some("Select a report page element before removing it.".to_owned());
         return;
     };
@@ -1099,32 +1094,29 @@ fn commit_remove_report_block(app: &mut RSpiceApp) {
     });
     match result {
         Ok(_) => {
-            app.state.workbench.report_authoring.selected_report_block = None;
-            app.state
-                .workbench
-                .report_authoring
-                .remove_report_block_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.selected_report_block = None;
+            app.state.hardcopy.report_authoring.remove_report_block_open = false;
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty = true;
         }
-        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
     }
 }
 
 fn commit_page_properties(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some(report_mutation_block_reason(&app.state).to_owned());
         return;
     }
-    let Some(page_id) = app.state.workbench.report_authoring.page_properties_page else {
-        app.state.workbench.report_authoring.transaction_error =
+    let Some(page_id) = app.state.hardcopy.report_authoring.page_properties_page else {
+        app.state.hardcopy.report_authoring.transaction_error =
             Some("The selected report page no longer exists.".to_owned());
         return;
     };
     let title = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .page_title_draft
         .trim()
@@ -1132,13 +1124,9 @@ fn commit_page_properties(app: &mut RSpiceApp) {
     let inline_title = title.clone();
     let timestamp = timestamp_unix_ms();
     let template =
-        report_template_from_index(app.state.workbench.report_authoring.report_template_draft);
-    let update_policy = page_update_policy_from_index(
-        app.state
-            .workbench
-            .report_authoring
-            .page_update_policy_draft,
-    );
+        report_template_from_index(app.state.hardcopy.report_authoring.report_template_draft);
+    let update_policy =
+        page_update_policy_from_index(app.state.hardcopy.report_authoring.page_update_policy_draft);
     let result = active_document_mut(&mut app.state).and_then(|document| {
         let page = document
             .page(page_id)
@@ -1181,33 +1169,33 @@ fn commit_page_properties(app: &mut RSpiceApp) {
     });
     match result {
         Ok(changed) => {
-            app.state.workbench.report_authoring.selected_page = Some(page_id);
+            app.state.hardcopy.report_authoring.selected_page = Some(page_id);
             app.state
-                .workbench
+                .hardcopy
                 .report_authoring
                 .inline_page_settings_page = Some(page_id);
-            app.state.workbench.report_authoring.inline_page_title_draft = inline_title;
-            app.state.workbench.report_authoring.page_properties_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.inline_page_title_draft = inline_title;
+            app.state.hardcopy.report_authoring.page_properties_open = false;
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty |= changed;
         }
-        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
     }
 }
 
 fn synchronize_report_selection(state: &mut AppState) {
     let documents = &state.model.workspace.content.report_documents;
     let selected_is_valid = state
-        .workbench
+        .hardcopy
         .report_authoring
         .selected_document
         .is_some_and(|id| documents.iter().any(|doc| doc.id() == id));
     if !selected_is_valid {
-        state.workbench.report_authoring.selected_document =
+        state.hardcopy.report_authoring.selected_document =
             documents.first().map(ReportDocument::id);
     }
-    let current_page = state.workbench.report_authoring.selected_page;
-    let current_block = state.workbench.report_authoring.selected_report_block;
+    let current_page = state.hardcopy.report_authoring.selected_page;
+    let current_block = state.hardcopy.report_authoring.selected_report_block;
     let selection = active_document(state).map(|document| {
         let selected_page = current_page
             .filter(|page_id| document.page(*page_id).is_some())
@@ -1226,17 +1214,17 @@ fn synchronize_report_selection(state: &mut AppState) {
     });
     if let Some((selected_page, selected_block_is_on_page)) = selection {
         if current_page != selected_page {
-            state.workbench.report_authoring.selected_page = selected_page;
+            state.hardcopy.report_authoring.selected_page = selected_page;
         }
         if !selected_block_is_on_page {
-            state.workbench.report_authoring.selected_report_block = None;
+            state.hardcopy.report_authoring.selected_report_block = None;
         }
     } else {
-        state.workbench.report_authoring.selected_page = None;
-        state.workbench.report_authoring.selected_report_block = None;
-        state.workbench.report_authoring.inline_page_settings_page = None;
+        state.hardcopy.report_authoring.selected_page = None;
+        state.hardcopy.report_authoring.selected_report_block = None;
+        state.hardcopy.report_authoring.inline_page_settings_page = None;
         state
-            .workbench
+            .hardcopy
             .report_authoring
             .inline_page_title_draft
             .clear();
@@ -1245,14 +1233,14 @@ fn synchronize_report_selection(state: &mut AppState) {
 
 fn active_document(state: &AppState) -> Option<&ReportDocument> {
     let documents = &state.model.workspace.content.report_documents;
-    let id = state.workbench.report_authoring.selected_document?;
+    let id = state.hardcopy.report_authoring.selected_document?;
     documents.iter().find(|document| document.id() == id)
 }
 
 fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, String> {
     let documents = &mut state.model.workspace.content.report_documents;
     let id = state
-        .workbench
+        .hardcopy
         .report_authoring
         .selected_document
         .ok_or_else(|| "No report document is selected.".to_owned())?;
@@ -1264,7 +1252,7 @@ fn active_document_mut(state: &mut AppState) -> Result<&mut ReportDocument, Stri
 
 fn selected_page_id(state: &AppState, document: &ReportDocument) -> Option<ReportPageId> {
     state
-        .workbench
+        .hardcopy
         .report_authoring
         .selected_page
         .filter(|id| document.page(*id).is_some())

@@ -115,7 +115,7 @@ impl OverviewIntent {
             }
             Self::OpenProjectRoot => open_project_root(app),
             Self::OpenProjectModels => {
-                app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::Project;
+                app.state.models.models_view.catalog_scope = ModelsCatalogScope::Project;
                 Command::ModelsPage(ModelsPage::Models).execute(app);
             }
             Self::OpenRun(index) => {

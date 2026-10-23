@@ -206,18 +206,18 @@ fn the_producing_plan_hop_carries_the_instance_that_made_the_result() {
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     let (_, analysis_id) = plan_binding(&app);
     app.state.workbench.activate(Workspace::Results);
-    app.state.workbench.active_analysis_instance = None;
+    app.state.simulate.active_analysis_instance = None;
 
     assert!(Command::OpenProducingPlan.is_enabled(&app));
     Command::OpenProducingPlan.execute(&mut app);
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
-        app.state.workbench.simulation_page,
+        app.state.simulate.simulation_page,
         SimulationPage::Analyses,
         "the plan opens on the page that owns its instances"
     );
     assert_eq!(
-        app.state.workbench.active_analysis_instance,
+        app.state.simulate.active_analysis_instance,
         Some(analysis_id),
         "and the producing instance is selected on arrival"
     );
@@ -235,7 +235,7 @@ fn the_producing_plan_hop_carries_the_instance_that_made_the_result() {
 fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
     let mut app = app_with_prepared_run(RunOrigin::ActivePlan);
     let (_, analysis_id) = plan_binding(&app);
-    app.state.workbench.active_analysis_instance = Some(analysis_id);
+    app.state.simulate.active_analysis_instance = Some(analysis_id);
     app.state
         .model
         .sim_setup
@@ -250,7 +250,7 @@ fn a_hop_to_a_plan_that_no_longer_owns_the_producer_clears_the_highlight() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert!(
-        app.state.workbench.active_analysis_instance.is_none(),
+        app.state.simulate.active_analysis_instance.is_none(),
         "the hop selected nothing, so nothing may stay selected"
     );
     assert_eq!(app.state.model.log_buffer.revision(), before);

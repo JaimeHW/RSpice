@@ -45,7 +45,7 @@ pub(super) fn recovery_page(
                     // The notice is neutral text in an untinted box. A
                     // warning is the one notice that earns a mark.
                     if let Some(notice) =
-                        app.state.workbench.project_launcher_recovery.notice.clone()
+                        app.state.platform.recovery_catalog.notice.clone()
                     {
                         Frame::new()
                             .stroke(Stroke::new(1.0, t.color.border))
@@ -68,14 +68,14 @@ pub(super) fn recovery_page(
 
                     let candidates = app
                         .state
-                        .workbench
-                        .project_launcher_recovery
+                        .platform
+                        .recovery_catalog
                         .candidates
                         .clone();
                     let selected = app
                         .state
-                        .workbench
-                        .project_launcher_recovery
+                        .platform
+                        .recovery_catalog
                         .selected_checkpoint
                         .clone();
                     Frame::new()
@@ -114,8 +114,8 @@ pub(super) fn recovery_page(
                                     let row = recovery_row(ui, &candidate, is_selected, layout);
                                     if response_activated(ui, &row) {
                                         app.state
-                                            .workbench
-                                            .project_launcher_recovery
+                                            .platform
+                                            .recovery_catalog
                                             .select(candidate.checkpoint.clone());
                                     }
                                     ui.painter().hline(
@@ -129,8 +129,8 @@ pub(super) fn recovery_page(
 
                     if let Some(candidate) = app
                         .state
-                        .workbench
-                        .project_launcher_recovery
+                        .platform
+                        .recovery_catalog
                         .selected()
                         .cloned()
                     {
@@ -140,12 +140,7 @@ pub(super) fn recovery_page(
 
     const LEGACY_CHECKPOINT_ADVISORY: &str = "Legacy checkpoint ownership cannot be proven; open it non-destructively or use explicit recovery maintenance or migration";
 
-    let selected = app
-        .state
-        .workbench
-        .project_launcher_recovery
-        .selected()
-        .cloned();
+    let selected = app.state.platform.recovery_catalog.selected().cloned();
     launcher_page_footer(ui, layout, regions.footer, |ui| {
         let can_discard = selected
             .as_ref()

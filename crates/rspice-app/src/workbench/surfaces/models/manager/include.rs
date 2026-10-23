@@ -37,12 +37,12 @@ pub(super) fn include_page(
             // which accepted whatever the file had become without ever showing
             // the reader what that was.
             if Button::new("Resolve drift…")
-                .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                .enabled(!app.state.models.models_view.model_import_in_progress)
                 .show(ui)
                 .clicked()
             {
                 if let Some(library) = current_library_name(app) {
-                    app.state.workbench.models_view.dialog =
+                    app.state.models.models_view.dialog =
                         Some(ModelsWorkbenchDialog::ResolveDrift { library });
                 } else {
                     receipt(
@@ -56,15 +56,13 @@ pub(super) fn include_page(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.checkbox(
-            &mut app.state.workbench.models_view.include_direct_only,
+            &mut app.state.models.models_view.include_direct_only,
             "Direct dependencies only",
         );
         ui.add(
-            egui::TextEdit::singleline(
-                &mut app.state.workbench.models_view.include_definition_query,
-            )
-            .hint_text("Filter definitions or providers…")
-            .desired_width(260.0),
+            egui::TextEdit::singleline(&mut app.state.models.models_view.include_definition_query)
+                .hint_text("Filter definitions or providers…")
+                .desired_width(260.0),
         );
     });
     // Both panes below read the libraries while the page also writes selection
@@ -134,7 +132,7 @@ fn closure_nodes(app: &ManagerRenderContext<'_>) -> ClosureGraph {
     // "Direct dependencies only" means the root of each library plus whatever
     // the root itself includes; anything reached through another file is a
     // transitive member and folds away.
-    let direct_only = app.state.workbench.models_view.include_direct_only;
+    let direct_only = app.state.models.models_view.include_direct_only;
     let libraries = app.state.model.model_library_manager.libraries_sorted();
     let mut nodes = Vec::new();
     let mut matching = 0usize;
@@ -176,7 +174,7 @@ fn include_closure_graph(
     graph: &ClosureGraph,
     diagnostics: &ClosureFacts,
 ) {
-    let direct_only = app.state.workbench.models_view.include_direct_only;
+    let direct_only = app.state.models.models_view.include_direct_only;
     detail_pane(
         ui,
         "Resolved closure",
@@ -244,7 +242,7 @@ fn include_closure_graph(
                     node_rects.insert(source.path.clone(), node);
                     let selected = app
                         .state
-                        .workbench
+                        .models
                         .models_view
                         .include_selected_source
                         .as_deref()
@@ -308,7 +306,7 @@ fn include_closure_graph(
                     });
                     crate::ui::theme::paint_focus_ring(ui, &response, node);
                     if response.clicked() {
-                        app.state.workbench.models_view.include_selected_source =
+                        app.state.models.models_view.include_selected_source =
                             Some(source.path.to_string_lossy().into_owned());
                     }
                 }
@@ -594,7 +592,7 @@ fn include_definition_table(
 ) {
     let query = app
         .state
-        .workbench
+        .models
         .models_view
         .include_definition_query
         .trim()
@@ -705,7 +703,7 @@ fn include_definition_table(
             .map(|record| record.provider_library.clone())
             .or_else(|| providers.first().cloned())
             .unwrap_or_default();
-        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
+        app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
             definition,
             scope,
             providers,

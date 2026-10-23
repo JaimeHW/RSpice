@@ -280,7 +280,7 @@ fn panel_tabs_content_rect(rect: egui::Rect) -> egui::Rect {
 
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     tabs(ui, &mut app.state);
-    match app.state.workbench.design_panel {
+    match app.state.design.design_panel {
         DesignPanel::Navigator => navigator(ui, app),
         DesignPanel::ComponentShelf => shelf::component_shelf(ui, app),
     }
@@ -330,7 +330,7 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
         );
         tab_left += tab_width;
         let response = ui.interact(tab_rect, tab_ids[index], egui::Sense::click());
-        let selected = state.workbench.design_panel == panel;
+        let selected = state.design.design_panel == panel;
         response.widget_info(|| {
             egui::WidgetInfo::selected(
                 egui::WidgetType::SelectableLabel,
@@ -370,7 +370,7 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
         }
         theme::paint_focus_ring(ui, &response, tab_rect);
         if response.clicked() {
-            state.workbench.design_panel = panel;
+            state.design.design_panel = panel;
         }
         if response.has_focus() {
             let target = ui.input_mut(|input| {
@@ -387,7 +387,7 @@ fn tabs(ui: &mut Ui, state: &mut AppState) {
                 }
             });
             if let Some(target) = target {
-                state.workbench.design_panel = entries[target].0;
+                state.design.design_panel = entries[target].0;
                 ui.memory_mut(|memory| memory.request_focus(tab_ids[target]));
             }
         }
@@ -1947,7 +1947,7 @@ fn find_navigator_object_references(state: &mut AppState, object: &NavigatorObje
         .navigator_trees
         .filter_mut(Workspace::Design) = name;
     state.workbench.navigator_visible = true;
-    state.workbench.design_panel = DesignPanel::Navigator;
+    state.design.design_panel = DesignPanel::Navigator;
     state.workbench.focus_navigator_search = true;
 }
 

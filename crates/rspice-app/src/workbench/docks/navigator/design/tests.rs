@@ -681,7 +681,7 @@ fn navigator_tree_expansion_survives_a_re_render_and_is_per_workspace() {
 #[test]
 fn finding_references_seeds_the_navigator_filter_with_the_object_name() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.design_panel = DesignPanel::ComponentShelf;
+    app.state.design.design_panel = DesignPanel::ComponentShelf;
 
     find_navigator_object_references(
         &mut app.state,
@@ -701,7 +701,7 @@ fn finding_references_seeds_the_navigator_filter_with_the_object_name() {
         "VOUT"
     );
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
-    assert_eq!(app.state.workbench.design_panel, DesignPanel::Navigator);
+    assert_eq!(app.state.design.design_panel, DesignPanel::Navigator);
     assert!(app.state.workbench.navigator_visible);
     assert!(app.state.workbench.focus_navigator_search);
 }
@@ -740,7 +740,7 @@ fn find_brings_the_navigator_tab_forward_over_the_component_shelf() {
     for by_key in [false, true] {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Design);
-        app.state.workbench.design_panel = DesignPanel::ComponentShelf;
+        app.state.design.design_panel = DesignPanel::ComponentShelf;
 
         if by_key {
             app.execute_shortcut_command(Command::FindInDesign);
@@ -749,7 +749,7 @@ fn find_brings_the_navigator_tab_forward_over_the_component_shelf() {
         }
 
         assert_eq!(
-            app.state.workbench.design_panel,
+            app.state.design.design_panel,
             DesignPanel::Navigator,
             "by key: {by_key}"
         );

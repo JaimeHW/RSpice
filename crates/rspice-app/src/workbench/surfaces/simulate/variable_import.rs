@@ -152,7 +152,7 @@ pub(super) fn poll_pending_import(
     match file_exchange::take_opened(ctx, exchange_id()) {
         Some(Ok(Some(sheet))) => {
             let draft = import_draft_for_sheet(app, plan_id, &sheet.name, &sheet.text);
-            app.state.workbench.simulation_workflow =
+            app.state.simulate.simulation_workflow =
                 Some(SimulationWorkflowDialog::DesignVariableImport(draft));
         }
         // The picker failed before any of the sheet was read, so there is no
@@ -504,7 +504,7 @@ pub(super) fn design_variable_import_dialog(
     mut draft: DesignVariableImportDraft,
 ) {
     let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
-        app.state.workbench.simulation_workflow = None;
+        app.state.simulate.simulation_workflow = None;
         return;
     };
     let plan_id = plan.id();
@@ -903,7 +903,7 @@ fn commit_selected_rows(
             .map_err(|error| error.to_string())
     });
 
-    let status = &app.state.workbench.analysis_lifecycle_status;
+    let status = &app.state.simulate.analysis_lifecycle_status;
     if status.is_refusal() {
         return Err(status.message().to_owned());
     }
@@ -1102,9 +1102,9 @@ mod tests {
         sheet: &str,
     ) -> DesignVariableImportDraft {
         let draft = import_draft_for_sheet(app, plan_id, "spec.csv", sheet);
-        app.state.workbench.simulation_workflow =
+        app.state.simulate.simulation_workflow =
             Some(SimulationWorkflowDialog::DesignVariableImport(draft));
-        match app.state.workbench.simulation_workflow.clone() {
+        match app.state.simulate.simulation_workflow.clone() {
             Some(SimulationWorkflowDialog::DesignVariableImport(draft)) => draft,
             other => panic!("the import dialog must open, got {other:?}"),
         }

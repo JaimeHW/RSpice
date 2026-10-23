@@ -67,6 +67,21 @@ struct BrowserConflict {
     observed_digest: ContentDigest,
 }
 
+/// Where the validated close-project transaction should leave the user.
+///
+/// This is runtime-only intent. Keeping it beside the launcher state lets a
+/// browser canonical-save continuation complete the exact originally requested
+/// transition without inferring intent from whichever surface is visible later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ProjectCloseDestination {
+    /// The no-project landing: `Workspace::Project` with nothing open.
+    #[default]
+    EmptyWorkbench,
+    /// Joining a live session: the same landing, where this install then
+    /// waits for the session host's project snapshot.
+    LiveMirror,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ProjectLifecycleState {
     pub(crate) authority: ProjectLifecycle,
@@ -530,7 +545,7 @@ pub(crate) fn accept_loaded_project(
     baseline: ProjectSnapshot,
     binding: Option<PersistenceBinding>,
 ) {
-    state.workbench.clear_project_model_editor();
+    state.models.clear_project_model_editor();
     state.clear_project_design_history();
     state.project.check_and_save.close();
     #[cfg(not(target_arch = "wasm32"))]
@@ -569,7 +584,7 @@ pub(crate) fn accept_loaded_project(
 }
 
 pub(crate) fn reset_for_new_project(state: &mut AppState) {
-    state.workbench.clear_project_model_editor();
+    state.models.clear_project_model_editor();
     state.clear_project_design_history();
     state.project.check_and_save.close();
     state.native_project_binding_receipt = None;
@@ -591,14 +606,14 @@ pub(crate) fn reset_for_new_project(state: &mut AppState) {
 }
 
 pub(crate) fn mark_project_closed(state: &mut AppState) {
-    state.workbench.clear_project_model_editor();
+    state.models.clear_project_model_editor();
     // Stimulus drafts belong to the library of the project that is going
     // away. The close guard has already named every unapplied one, so what is
     // left here is bookkeeping: carrying them into the next project would
     // offer to publish a revision of a definition it does not hold.
-    state.workbench.selected_stimulus_definition = None;
-    state.workbench.stimulus_editor.clear();
-    state.workbench.stimulus_browser.clear();
+    state.design.selected_stimulus_definition = None;
+    state.design.stimulus_editor.clear();
+    state.design.stimulus_browser.clear();
     state.clear_project_design_history();
     state.project.check_and_save.close();
     state.native_project_binding_receipt = None;
@@ -1491,13 +1506,13 @@ fn revert_document_in_place(
             // The reverted definitions may no longer hold the one the library
             // browser was reading, and a selection that resolves to nothing
             // leaves the workspace on an empty stage with a name in the dock.
-            state.workbench.selected_stimulus_definition = None;
+            state.design.selected_stimulus_definition = None;
             // The drafts belonged to the revisions that have just been thrown
             // away. Keeping one would leave the instrument editing a record
             // whose saved side no longer exists, and Apply would publish it as
             // a revision of a definition the revert removed.
-            state.workbench.stimulus_editor.clear();
-            state.workbench.stimulus_browser.clear();
+            state.design.stimulus_editor.clear();
+            state.design.stimulus_browser.clear();
         }
         ProjectDocumentId::NetlistSource => {
             state.model.workspace.content.netlist_source = baseline.file.workspace.netlist_source;
@@ -1521,7 +1536,7 @@ fn revert_document_in_place(
             state.code.netlist = Default::default();
             *state.model.netlist_artifacts = Default::default();
             *state.manual_run = Default::default();
-            state.workbench.netlist_open_documents.clear();
+            state.code.netlist_open_documents.clear();
             state.model.simulation.source.netlist_content = state
                 .model
                 .workspace

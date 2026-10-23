@@ -658,7 +658,7 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
         Some("foundry_65lp")
     );
     assert_eq!(
-        app.state.workbench.selected_model.as_deref(),
+        app.state.models.selected_model.as_deref(),
         Some("nmos_ulvt_precision")
     );
     assert_eq!(
@@ -667,7 +667,7 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     );
     assert_eq!(app.state.model.model_library_manager.filter_type, None);
     assert_eq!(
-        app.state.workbench.models_page,
+        app.state.models.models_page,
         crate::state::ModelsPage::Models
     );
     assert_eq!(
@@ -705,10 +705,7 @@ fn enter_executes_a_dynamic_row_without_polluting_command_recents() {
             .as_deref(),
         Some("vendor_models")
     );
-    assert_eq!(
-        app.state.workbench.selected_model.as_deref(),
-        Some("opa189_a")
-    );
+    assert_eq!(app.state.models.selected_model.as_deref(), Some("opa189_a"));
     assert!(app.state.workbench.command_palette.recent.is_empty());
 }
 

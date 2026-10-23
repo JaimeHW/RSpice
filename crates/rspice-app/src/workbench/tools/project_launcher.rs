@@ -305,7 +305,7 @@ impl LauncherLayout {
 }
 
 pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
-    if !app.state.workbench.project_launcher_open {
+    if !app.state.project.project_launcher_open {
         show_discard_confirmation(ctx, app);
         return;
     }
@@ -327,8 +327,8 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     let opened_this_pass = begin_launcher_focus(ctx, focus_state_id);
     let confirmation_open = app
         .state
-        .workbench
-        .project_launcher_recovery
+        .platform
+        .recovery_catalog
         .pending_discard
         .is_some();
     let popup_was_open = Popup::is_any_open(ctx);
@@ -447,7 +447,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
         && !confirmation_open
         && (opened_this_pass || !focus_is_within_launcher(ctx, modal_layer))
     {
-        let target = if app.state.workbench.project_launcher_page == ProjectLauncherPage::Projects {
+        let target = if app.state.project.project_launcher_page == ProjectLauncherPage::Projects {
             project_search_id()
         } else {
             close_control_id
@@ -475,23 +475,17 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 app.open_recent_file(recent);
             }
             LauncherAction::Page(page) => {
-                app.state.workbench.project_launcher_page = page;
+                app.state.project.project_launcher_page = page;
                 if page == ProjectLauncherPage::Recovery {
-                    app.state
-                        .workbench
-                        .project_launcher_recovery
-                        .request_refresh();
+                    app.state.platform.recovery_catalog.request_refresh();
                 }
             }
             LauncherAction::Recover(candidate) => match open_comparison(app, &candidate) {
                 Ok(()) => dismiss_launcher(app),
-                Err(error) => app.state.workbench.project_launcher_recovery.warning(error),
+                Err(error) => app.state.platform.recovery_catalog.warning(error),
             },
             LauncherAction::RequestDiscard(candidate) => {
-                app.state
-                    .workbench
-                    .project_launcher_recovery
-                    .pending_discard = Some(candidate);
+                app.state.platform.recovery_catalog.pending_discard = Some(candidate);
             }
             LauncherAction::OpenDiagnosticsFolder => match open_diagnostics_folder(&app.state) {
                 Ok(path) => app
@@ -506,12 +500,12 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                 }
             },
             LauncherAction::StartSafeMode(options) => match start_local_safe_mode(app, options) {
-                Ok(()) => app.state.workbench.project_launcher_open = false,
-                Err(error) => app.state.workbench.project_launcher_recovery.warning(error),
+                Ok(()) => app.state.project.project_launcher_open = false,
+                Err(error) => app.state.platform.recovery_catalog.warning(error),
             },
         }
     }
-    if !app.state.workbench.project_launcher_open {
+    if !app.state.project.project_launcher_open {
         Popup::close_all(ctx);
         restore_launcher_focus(ctx, focus_state_id, area_response.response.id, modal_layer);
     }
@@ -522,7 +516,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
 /// transaction. Keeping those two state owners synchronized prevents a
 /// browser-back traversal from immediately reopening a dismissed launcher.
 fn dismiss_launcher(app: &mut RSpiceApp) {
-    app.state.workbench.project_launcher_open = false;
+    app.state.project.project_launcher_open = false;
     if app.state.workbench.current_route().surface_id()
         != crate::workbench::SurfaceId::ProjectLauncher
     {
@@ -674,7 +668,7 @@ fn launcher_nav(ui: &mut Ui, app: &RSpiceApp, action: &mut Option<LauncherAction
             ProjectLauncherPage::SafeMode => WorkbenchIcon::Warning,
         };
         let label = page.label();
-        let selected = app.state.workbench.project_launcher_page == page;
+        let selected = app.state.project.project_launcher_page == page;
         let label_font = theme::sans(tokens::FS_2, FontWeight::Regular);
         let label_width = ui
             .painter()
@@ -791,7 +785,7 @@ fn launcher_page(
     layout: LauncherLayout,
 ) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
-    match app.state.workbench.project_launcher_page {
+    match app.state.project.project_launcher_page {
         ProjectLauncherPage::Projects => launcher_body(ui, app, action, layout),
         ProjectLauncherPage::Recovery => recovery_page(ui, app, action, layout),
         ProjectLauncherPage::SafeMode => safe_mode_page(ui, app, action, layout),
@@ -1023,8 +1017,8 @@ fn project_list(
     if entries.is_empty() {
         empty_project_list(
             ui,
-            app.state.workbench.project_launcher_query.is_empty()
-                && app.state.workbench.project_launcher_filter == ProjectLauncherFilter::All,
+            app.state.project.project_launcher_query.is_empty()
+                && app.state.project.project_launcher_filter == ProjectLauncherFilter::All,
         );
         return;
     }
@@ -1155,13 +1149,7 @@ fn launcher_footer_reserve(ui: &Ui, layout: LauncherLayout, buttons: &[(&str, bo
 }
 
 fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
-    let Some(candidate) = app
-        .state
-        .workbench
-        .project_launcher_recovery
-        .pending_discard
-        .clone()
-    else {
+    let Some(candidate) = app.state.platform.recovery_catalog.pending_discard.clone() else {
         return;
     };
     let choice = Dialog::new("Discard recovery checkpoint?", "Discard checkpoint")
@@ -1184,7 +1172,7 @@ fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
         DialogChoice::None => {}
         DialogChoice::Primary => {
             let outcome = discard_checkpoint(&candidate);
-            let catalog = &mut app.state.workbench.project_launcher_recovery;
+            let catalog = &mut app.state.platform.recovery_catalog;
             catalog.pending_discard = None;
             match outcome {
                 Ok(message) => catalog.info(message),
@@ -1193,10 +1181,7 @@ fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
             catalog.request_refresh();
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state
-                .workbench
-                .project_launcher_recovery
-                .pending_discard = None;
+            app.state.platform.recovery_catalog.pending_discard = None;
         }
         DialogChoice::Secondary => {}
     }
@@ -1225,18 +1210,18 @@ fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp, layout: LauncherLayout) {
                     .clamp(1.0, LAUNCHER_SEARCH_MAX_WIDTH);
                 launcher_search_field(
                     ui,
-                    &mut app.state.workbench.project_launcher_query,
+                    &mut app.state.project.project_launcher_query,
                     search_width,
-                    std::mem::take(&mut app.state.workbench.focus_project_launcher_search),
+                    std::mem::take(&mut app.state.project.focus_project_launcher_search),
                 );
 
                 if !layout.compact {
-                    launcher_filter_segments(ui, &mut app.state.workbench.project_launcher_filter);
+                    launcher_filter_segments(ui, &mut app.state.project.project_launcher_filter);
                 }
 
                 if !layout.phone {
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let selected = app.state.workbench.project_launcher_sort.label();
+                        let selected = app.state.project.project_launcher_sort.label();
                         let options = vec![
                             "Last opened".to_owned(),
                             "Name".to_owned(),
@@ -1250,7 +1235,7 @@ fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp, layout: LauncherLayout) {
                             &options,
                             LAUNCHER_SORT_WIDTH,
                         ) {
-                            app.state.workbench.project_launcher_sort = match index {
+                            app.state.project.project_launcher_sort = match index {
                                 0 => ProjectLauncherSort::LastOpened,
                                 1 => ProjectLauncherSort::Name,
                                 _ => ProjectLauncherSort::Owner,
@@ -1365,13 +1350,13 @@ fn launcher_filter_segments(ui: &mut Ui, selected: &mut ProjectLauncherFilter) {
 fn project_entries(app: &RSpiceApp) -> Vec<ProjectEntry> {
     let query = app
         .state
-        .workbench
+        .project
         .project_launcher_query
         .trim()
         .to_lowercase();
     let current_path = app.state.model.workspace.content.project.path.as_deref();
     let current_name = app.state.model.workspace.content.project.display_name();
-    let filter = app.state.workbench.project_launcher_filter;
+    let filter = app.state.project.project_launcher_filter;
     let mut entries = app
         .state
         .recent_files
@@ -1412,7 +1397,7 @@ fn project_entries(app: &RSpiceApp) -> Vec<ProjectEntry> {
         })
         .collect::<Vec<_>>();
 
-    match app.state.workbench.project_launcher_sort {
+    match app.state.project.project_launcher_sort {
         ProjectLauncherSort::LastOpened => {}
         ProjectLauncherSort::Name => entries.sort_by(|left, right| {
             left.name
@@ -1973,13 +1958,13 @@ mod tests {
     fn launcher_dismissal_returns_through_canonical_history() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Results);
-        app.state.workbench.open_project_launcher();
+        app.state.open_project_launcher();
 
         assert_eq!(
             app.state.workbench.current_route().surface_id(),
             crate::workbench::SurfaceId::ProjectLauncher
         );
-        assert!(app.state.workbench.project_launcher_open);
+        assert!(app.state.project.project_launcher_open);
 
         dismiss_launcher(&mut app);
 
@@ -1987,7 +1972,7 @@ mod tests {
             app.state.workbench.current_route().surface_id(),
             crate::workbench::SurfaceId::Results
         );
-        assert!(!app.state.workbench.project_launcher_open);
+        assert!(!app.state.project.project_launcher_open);
     }
 
     #[test]
@@ -2002,7 +1987,7 @@ mod tests {
                 crate::workbench::RouteTransitionSource::BrowserPop,
             )
             .expect("Project Launcher has a canonical executor");
-        app.state.workbench.project_launcher_open = true;
+        app.state.project.project_launcher_open = true;
 
         dismiss_launcher(&mut app);
 
@@ -2010,7 +1995,7 @@ mod tests {
             app.state.workbench.current_route().surface_id(),
             crate::workbench::SurfaceId::Design
         );
-        assert!(!app.state.workbench.project_launcher_open);
+        assert!(!app.state.project.project_launcher_open);
     }
 
     #[test]
@@ -2022,7 +2007,7 @@ mod tests {
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
         ));
-        app.state.workbench.open_project_launcher();
+        app.state.open_project_launcher();
         assert!(matches!(
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
@@ -2040,7 +2025,7 @@ mod tests {
             Some(crate::workbench::BrowserHistoryEffect::Replace(destination))
         );
         assert!(app.state.workbench.take_browser_history_effect().is_none());
-        assert!(!app.state.workbench.project_launcher_open);
+        assert!(!app.state.project.project_launcher_open);
     }
 
     #[test]
@@ -2180,8 +2165,8 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.open_project_launcher();
-        app.state.workbench.project_launcher_page = page;
+        app.state.open_project_launcher();
+        app.state.project.project_launcher_page = page;
         app.state.model.safe_mode.active = safe_mode;
         let mut output = None;
         for _ in 0..3 {

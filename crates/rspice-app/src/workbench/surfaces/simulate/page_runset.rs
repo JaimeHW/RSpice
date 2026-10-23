@@ -218,8 +218,8 @@ fn issue_summary(ui: &mut Ui, app: &mut RSpiceApp, validation: &RunSetValidation
         });
     });
     if let Some(id) = focus {
-        app.state.workbench.selected_run_set_dimension = Some(id);
-        app.state.workbench.run_set_values_draft = None;
+        app.state.simulate.selected_run_set_dimension = Some(id);
+        app.state.simulate.run_set_values_draft = None;
     }
 }
 
@@ -257,7 +257,7 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
         |ui| card_head_row(ui, "Run space", Some((status.as_str(), tone)), |_| {}),
         |ui| {
             card_body(ui, |ui| {
-                let selected = app.state.workbench.selected_run_set_dimension.clone();
+                let selected = app.state.simulate.selected_run_set_dimension.clone();
                 let dimensions = app.state.model.sim_setup.run_set.dimensions.clone();
                 for row in space_rows(ui.available_width(), dimensions.len()) {
                     // Top-aligned, because an egui row places each item
@@ -306,8 +306,8 @@ fn run_space(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     );
 
     if let Some(id) = selection {
-        app.state.workbench.selected_run_set_dimension = Some(id);
-        app.state.workbench.run_set_values_draft = None;
+        app.state.simulate.selected_run_set_dimension = Some(id);
+        app.state.simulate.run_set_values_draft = None;
     }
     if let Some(action) = action {
         commit(app, action);
@@ -728,7 +728,7 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
 fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
     let selected = app
         .state
-        .workbench
+        .simulate
         .selected_run_set_dimension
         .clone()
         .filter(|id| app.state.model.sim_setup.run_set.dimension(id).is_some())
@@ -861,17 +861,17 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                 // refuse the space while a number was half-typed.
                 let draft_matches = app
                     .state
-                    .workbench
+                    .simulate
                     .run_set_values_draft
                     .as_ref()
                     .is_some_and(|(draft_id, _)| *draft_id == id);
                 if !draft_matches {
-                    app.state.workbench.run_set_values_draft =
+                    app.state.simulate.run_set_values_draft =
                         Some((id.clone(), dimension.values_text()));
                 }
                 let mut text = app
                     .state
-                    .workbench
+                    .simulate
                     .run_set_values_draft
                     .as_ref()
                     .map(|(_, text)| text.clone())
@@ -897,14 +897,14 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                     &format!("{} \u{b7} typed values", dimension.name),
                 );
                 if response.changed() {
-                    app.state.workbench.run_set_values_draft = Some((id.clone(), text.clone()));
+                    app.state.simulate.run_set_values_draft = Some((id.clone(), text.clone()));
                 }
                 if response.lost_focus() && text != dimension.values_text() {
                     *action.borrow_mut() = Some(RunSetAction::SetValues {
                         id: id.clone(),
                         text,
                     });
-                    app.state.workbench.run_set_values_draft = None;
+                    app.state.simulate.run_set_values_draft = None;
                 }
 
                 let policies = InvalidValuePolicy::ALL
@@ -1170,8 +1170,8 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
         .errors
         .iter()
         .any(|error| error.id.ends_with("BUDGET"));
-    if app.state.workbench.run_set_budget_drafts.is_none() {
-        app.state.workbench.run_set_budget_drafts = Some(drafts_from(&current));
+    if app.state.simulate.run_set_budget_drafts.is_none() {
+        app.state.simulate.run_set_budget_drafts = Some(drafts_from(&current));
     }
     let mut action: Option<RunSetAction> = None;
 
@@ -1183,7 +1183,7 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
             card_body(ui, |ui| {
                 let mut drafts = app
                     .state
-                    .workbench
+                    .simulate
                     .run_set_budget_drafts
                     .clone()
                     .unwrap_or_else(|| drafts_from(&current));
@@ -1237,7 +1237,7 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
                         );
                     })),
                 );
-                app.state.workbench.run_set_budget_drafts = Some(drafts.clone());
+                app.state.simulate.run_set_budget_drafts = Some(drafts.clone());
                 if released.get() {
                     match budgets_from(&drafts) {
                         Ok(budgets) if budgets != current => {
@@ -1246,7 +1246,7 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
                         Ok(_) => {}
                         Err(error) => {
                             app.state.record_plan_refusal(error);
-                            app.state.workbench.run_set_budget_drafts = Some(drafts_from(&current));
+                            app.state.simulate.run_set_budget_drafts = Some(drafts_from(&current));
                         }
                     }
                 }
@@ -1255,7 +1255,7 @@ fn budgets(ui: &mut Ui, app: &mut RSpiceApp, frame: &RunSetFrame) {
     );
     if let Some(action) = action {
         commit(app, action);
-        app.state.workbench.run_set_budget_drafts = None;
+        app.state.simulate.run_set_budget_drafts = None;
     }
 }
 

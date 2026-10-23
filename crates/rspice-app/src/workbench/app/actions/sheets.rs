@@ -94,7 +94,7 @@ pub(crate) fn reveal_sheet_properties(state: &mut AppState) {
     state.model.schematic.session.editor.net_highlight.clear();
     state.workbench.inspector_visible = true;
     state.workbench.drawer = Some(crate::workbench::state::Drawer::Inspector);
-    state.workbench.reveal_sheet_section = true;
+    state.sheets.reveal_sheet_section = true;
 }
 
 pub(in crate::workbench) fn active_sheet_id(state: &AppState) -> Option<SheetId> {

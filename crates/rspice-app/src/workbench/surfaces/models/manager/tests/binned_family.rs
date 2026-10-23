@@ -26,7 +26,7 @@ fn kit_project(models: &[&str]) -> RSpiceApp {
         kit.add_model(card);
     }
     app.state.model.model_library_manager.add_library(kit);
-    app.state.workbench.models_page = ModelsPage::Models;
+    app.state.models.models_page = ModelsPage::Models;
 
     app.state.model.workspace.ensure_active_buffer();
     let mut schematic = app
@@ -164,7 +164,7 @@ fn binding_from_the_catalog_binds_the_family_with_its_library() {
         studio.announcements()
     );
     assert_eq!(
-        studio.app.state.workbench.selected_model.as_deref(),
+        studio.app.state.models.selected_model.as_deref(),
         Some("nch.1"),
         "a family's selection is a card, so every reader of it still reads one"
     );
@@ -178,7 +178,7 @@ fn binding_from_the_catalog_binds_the_family_with_its_library() {
 
     studio.click(|label| label.starts_with("nch.2 · L "));
     assert_eq!(
-        studio.app.state.workbench.selected_model.as_deref(),
+        studio.app.state.models.selected_model.as_deref(),
         Some("nch.2")
     );
     assert!(

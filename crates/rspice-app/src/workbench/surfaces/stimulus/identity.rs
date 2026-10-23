@@ -149,7 +149,7 @@ fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<St
     let editing = stage.editing_field.as_deref() == Some(NAME_FIELD);
     let mut text = if editing {
         state
-            .workbench
+            .design
             .stimulus_editor
             .field_text(stage.saved.name(), NAME_FIELD)
             .unwrap_or_default()

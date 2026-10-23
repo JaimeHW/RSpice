@@ -242,7 +242,7 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     observe_placements(ui, &mut app.state);
     let enter_rows = shelf_search(ui, &mut app.state);
     rail::open(ui.ctx());
-    let query = normalized(&app.state.workbench.placement_query);
+    let query = normalized(&app.state.design.placement_query);
     let library_parts = library_part_rows(app, &query);
     let cells = cell_candidates(&app.state);
     let visible_matches = component_shelf_match_count(&app.state, &query) + library_parts.len();
@@ -493,7 +493,7 @@ fn library_parts_section(
     if rows.is_empty() {
         return None;
     }
-    let query = normalized(&state.workbench.placement_query);
+    let query = normalized(&state.design.placement_query);
     let visible = if query.is_empty() {
         catalog_group_row(
             ui,
@@ -597,7 +597,7 @@ fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, v
         ));
         return;
     };
-    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
         pack_id,
         attach: true,
         release: Some(Box::new(release)),
@@ -660,10 +660,10 @@ pub(super) fn component_shelf_match_count(state: &AppState, query: &str) -> usiz
 fn shelf_search(ui: &mut Ui, state: &mut AppState) -> bool {
     panel_search(
         ui,
-        &mut state.workbench.placement_query,
+        &mut state.design.placement_query,
         "workbench.design.component_shelf.search",
         "Place component or cell…",
-        &mut state.workbench.focus_placement_search,
+        &mut state.design.focus_placement_search,
     )
 }
 
@@ -1130,7 +1130,7 @@ fn pinned_band(
 ) -> Option<ShelfArm> {
     // Search asks the catalog a question; the personal rail is not an answer
     // to it.
-    if !normalized(&state.workbench.placement_query).is_empty() {
+    if !normalized(&state.design.placement_query).is_empty() {
         return None;
     }
     let rows = pinned_keys(state)
@@ -1166,7 +1166,7 @@ fn recent_band(
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
 ) -> Option<ShelfArm> {
-    if !normalized(&state.workbench.placement_query).is_empty() {
+    if !normalized(&state.design.placement_query).is_empty() {
         return None;
     }
     let pinned = pinned_keys(state);
@@ -1266,7 +1266,7 @@ fn apply_shelf_arm(app: &mut RSpiceApp, arm: ShelfArm, ctx: &egui::Context) {
 }
 
 pub(super) fn primitive_catalog(ui: &mut Ui, state: &mut AppState) -> Option<ComponentType> {
-    let query = normalized(&state.workbench.placement_query);
+    let query = normalized(&state.design.placement_query);
     let mut armed = None;
     let visible_count = PRIMITIVE_GROUPS
         .iter()
@@ -1452,7 +1452,7 @@ fn primitive_rows(
 ///
 /// Returns the definition a click armed.
 fn stimulus_library_section(ui: &mut Ui, state: &mut AppState) -> Option<String> {
-    let query = normalized(&state.workbench.placement_query);
+    let query = normalized(&state.design.placement_query);
     let rows = stimulus_library_rows(state, &query);
     if rows.is_empty() {
         return None;
@@ -1558,7 +1558,7 @@ fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context
 }
 
 fn builtin_xspice_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {
-    let query = normalized(&state.workbench.placement_query);
+    let query = normalized(&state.design.placement_query);
     let descriptors = engine_only_xspice_devices()
         .iter()
         .filter(|descriptor| {
@@ -1676,7 +1676,7 @@ pub(super) fn place_builtin_xspice(
 }
 
 fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {
-    let query = normalized(&state.workbench.placement_query);
+    let query = normalized(&state.design.placement_query);
     let descriptors = generated_veriloga_devices()
         .iter()
         .filter(|descriptor| {
@@ -1767,7 +1767,7 @@ fn project_library(
     state: &mut AppState,
     cells: &[CellCandidate],
 ) -> Option<LibraryCellInstance> {
-    let query = normalized(&state.workbench.placement_query);
+    let query = normalized(&state.design.placement_query);
     let mut grouped = BTreeMap::<String, Vec<CellCandidate>>::new();
     for candidate in cells.iter().cloned() {
         if matches_query(

@@ -509,7 +509,7 @@ fn a_stimulus_verb_goes_where_component_properties_sends_it() {
     let mut adopted = state_with_selected_source(0, true);
     stimulus::execute(ContextAction::OpenStimulusDefinition, &mut adopted);
     assert_eq!(
-        adopted.workbench.selected_stimulus_definition.as_deref(),
+        adopted.design.selected_stimulus_definition.as_deref(),
         Some("sensor_drive")
     );
 

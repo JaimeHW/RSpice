@@ -173,18 +173,18 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if view.technology_draft.is_none()
         && app
             .state
-            .workbench
+            .models
             .pdk_technology_authoring
             .working_draft
             .is_some()
     {
         view.technology_draft = app
             .state
-            .workbench
+            .models
             .pdk_technology_authoring
             .working_draft
             .clone();
-        view.technology_draft_dirty = app.state.workbench.pdk_technology_authoring.dirty;
+        view.technology_draft_dirty = app.state.models.pdk_technology_authoring.dirty;
     }
     let snapshot = registry_snapshot(app);
     reconcile_selection(&mut view, &snapshot);
@@ -275,8 +275,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::new(VIEW_STATE_ID), view.clone()));
     }
-    app.state.workbench.pdk_technology_authoring.working_draft = view.technology_draft.clone();
-    app.state.workbench.pdk_technology_authoring.dirty = view.technology_draft_dirty;
+    app.state.models.pdk_technology_authoring.working_draft = view.technology_draft.clone();
+    app.state.models.pdk_technology_authoring.dirty = view.technology_draft_dirty;
 }
 
 #[cfg(target_arch = "wasm32")]

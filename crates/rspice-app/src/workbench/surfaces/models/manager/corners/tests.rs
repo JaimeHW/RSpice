@@ -389,7 +389,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     inspect_corner(&mut app, &inspected);
 
     assert_eq!(
-        app.state.workbench.models_view.selected_corner.as_deref(),
+        app.state.models.models_view.selected_corner.as_deref(),
         Some(inspected.key.as_str())
     );
     assert_eq!(
@@ -793,7 +793,7 @@ fn a_section_the_retained_file_does_not_carry_is_stated_rather_than_left_blank()
         .corners
         .insert("ff".to_owned(), corner_bound_to("ff", "ff"));
     library.selected_corner = Some("ff".to_owned());
-    state.workbench.models_view.selected_corner = Some("pdk\u{1f}ff".to_owned());
+    state.models.models_view.selected_corner = Some("pdk\u{1f}ff".to_owned());
 
     let labels = rendered_corner_page(&mut state)
         .into_iter()

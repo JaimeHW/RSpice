@@ -14,12 +14,12 @@ pub(super) fn project_catalog_scan(
 ) -> ProjectCatalogScan {
     let query = app
         .state
-        .workbench
+        .models
         .models_view
         .catalog_query
         .trim()
         .to_ascii_lowercase();
-    let facet = app.state.workbench.models_view.project_facet;
+    let facet = app.state.models.models_view.project_facet;
     let mut rows = Vec::new();
     let mut total = 0usize;
     let mut facets = [0usize; ProjectModelFacet::ALL.len()];
@@ -103,7 +103,7 @@ pub(super) fn project_catalog_scan(
             });
         }
     }
-    sort_catalog_rows(&mut rows, app.state.workbench.models_view.catalog_sort);
+    sort_catalog_rows(&mut rows, app.state.models.models_view.catalog_sort);
     ProjectCatalogScan {
         rows,
         total,

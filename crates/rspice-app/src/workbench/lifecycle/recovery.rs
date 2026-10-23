@@ -167,12 +167,7 @@ impl RecoveryCatalog {
 /// Refresh once when the launcher opens, enters Recovery, or completes a
 /// destructive checkpoint action. Parsing never occurs in every paint frame.
 pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
-    if !app
-        .state
-        .workbench
-        .project_launcher_recovery
-        .refresh_requested
-    {
+    if !app.state.platform.recovery_catalog.refresh_requested {
         return;
     }
 
@@ -205,7 +200,7 @@ pub(crate) fn refresh_catalog_if_requested(app: &mut RSpiceApp) {
     }
 
     let candidates = discover_candidates(&source_paths, &live_paths, app.file_workflow_io.as_ref());
-    let catalog = &mut app.state.workbench.project_launcher_recovery;
+    let catalog = &mut app.state.platform.recovery_catalog;
     let previous = catalog.selected_checkpoint.clone();
     catalog.candidates = candidates;
     catalog.selected_checkpoint = previous
@@ -865,14 +860,14 @@ pub(crate) fn start_local_safe_mode(
         .map_err(|error| format!("The current session could not be protected: {error}"))?;
 
     if options.isolate_prior_documents && app.state.project_lifecycle.is_open() {
-        app.state
-            .workbench
-            .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
+        app.state.project.begin_project_close(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        );
         if !crate::workbench::workflows::project_workflow::close_project_discard(&mut app.state) {
             return Err("The current project could not be isolated safely".to_owned());
         }
     } else if options.isolate_prior_documents {
-        app.state.workbench.project_launcher_open = false;
+        app.state.project.project_launcher_open = false;
     }
     if options.reset_layout {
         app.state.workbench.reset_layout();

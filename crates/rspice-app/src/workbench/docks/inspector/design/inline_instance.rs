@@ -507,7 +507,7 @@ pub(super) fn prepare_component_tuning(
         })
         .map(|run| run.run_id);
 
-    let session = &app.state.workbench.verification;
+    let session = &app.state.simulate.verification;
     let current_session = session.tuning_plan_id == Some(plan_id)
         && session.tuning_plan_revision == Some(plan_revision);
     if current_session && let Some(pending) = session.tuning_instance_binding.as_ref() {
@@ -634,7 +634,7 @@ pub(super) fn stage_component_tuning(app: &mut RSpiceApp, component_id: u64) -> 
         .ok_or_else(|| "the selected instance no longer exists".to_owned())?;
     let prepared = prepare_component_tuning(app, &component)?;
 
-    let session = &mut app.state.workbench.verification;
+    let session = &mut app.state.simulate.verification;
     if session.tuning_plan_id != Some(prepared.plan_id)
         || session.tuning_plan_revision != Some(prepared.plan_revision)
     {
@@ -867,7 +867,7 @@ pub(super) fn edit_row_with_hint(
             Ok(()) => tuning.execute(app),
             Err(error) => {
                 let problem = format!("Could not tune {}: {error}", component.name);
-                app.state.workbench.verification.action_problem = Some(problem.clone());
+                app.state.simulate.verification.action_problem = Some(problem.clone());
                 app.state.prompt(problem);
             }
         }

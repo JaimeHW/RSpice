@@ -146,17 +146,17 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     // state for the current frame.
     let launcher_route_active =
         app.state.workbench.current_route().surface_id() == SurfaceId::ProjectLauncher;
-    if launcher_route_active && !app.state.workbench.project_launcher_open {
-        app.state.workbench.open_project_launcher();
-    } else if !launcher_route_active && app.state.workbench.project_launcher_open {
-        app.state.workbench.project_launcher_open = false;
+    if launcher_route_active && !app.state.project.project_launcher_open {
+        app.state.open_project_launcher();
+    } else if !launcher_route_active && app.state.project.project_launcher_open {
+        app.state.project.project_launcher_open = false;
     }
     tools::project_launcher::show(ctx, app);
     tools::examples_browser::show(ctx, &mut app.state);
     // Shortcuts and dialogs record the intent to run; the pass itself belongs
     // to the frame loop, so a caller never has to name the workflow to ask
     // for it. Consumed before the dialog so a blocked report opens this frame.
-    if app.state.workbench.preflight.take_run_and_queue_request() {
+    if app.state.runs.preflight.take_run_and_queue_request() {
         preflight::start(&mut app.state, &mut app.simulation_controller, true);
     }
     // A finding the reader chose to follow. The page that offered it holds

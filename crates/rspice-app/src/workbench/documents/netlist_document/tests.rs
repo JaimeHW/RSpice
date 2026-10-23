@@ -430,7 +430,7 @@ fn editing_root_include_cards_preserves_reachable_edges_and_prunes_removed_owner
 fn secondary_document_limit_refusal_leaves_the_active_document_unchanged() {
     let mut state = owned_dependency_state();
     for index in 0..MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS {
-        state.workbench.netlist_open_documents.insert(
+        state.code.netlist_open_documents.insert(
             crate::workbench::state::WorkspaceDocumentId::NetlistDependency {
                 root: NetlistDocumentId::new(),
                 logical_identity: format!("fixture-{index}.inc"),

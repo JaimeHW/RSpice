@@ -307,12 +307,12 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
 #[test]
 fn overview_model_closure_always_opens_the_project_catalog_scope() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
+    app.state.models.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
     OverviewIntent::OpenProjectModels.execute(&mut app);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
     assert_eq!(
-        app.state.workbench.models_view.catalog_scope,
+        app.state.models.models_view.catalog_scope,
         ModelsCatalogScope::Project
     );
 }

@@ -36,7 +36,7 @@ pub(crate) fn open_properties(state: &mut AppState) {
             phase_continuous: state.results.results.session.phase_continuous,
         },
     };
-    state.workbench.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
+    state.results.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
 }
 
 /// What the properties apply to: the open document, or every quick view.

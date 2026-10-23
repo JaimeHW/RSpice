@@ -25,7 +25,7 @@ impl Route {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.simulation_page = SimulationPage::Analyses;
+        app.state.simulate.simulation_page = SimulationPage::Analyses;
         let selected = app
             .state
             .model
@@ -39,7 +39,7 @@ impl Route {
                     .map(AnalysisInstance::id)
             })
             .unwrap_or_else(|| panic!("the test plan holds a {kind:?}"));
-        app.state.workbench.active_analysis_instance = Some(selected);
+        app.state.simulate.active_analysis_instance = Some(selected);
         let mut route = Self {
             ctx,
             app,
@@ -187,7 +187,7 @@ fn policies() -> [crate::quantity::QuantityPresentationPolicy; 2] {
 #[test]
 fn transient_checkpoint_interval_edit_reaches_the_authored_plan() {
     let mut route = Route::analyses(AnalysisKind::Transient);
-    let selected = route.app.state.workbench.active_analysis_instance.unwrap();
+    let selected = route.app.state.simulate.active_analysis_instance.unwrap();
     route
         .app
         .state

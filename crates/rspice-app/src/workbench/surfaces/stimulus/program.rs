@@ -578,7 +578,7 @@ fn text_row(
     let editing = stage.editing_field.as_deref() == Some(field);
     let mut text = if editing {
         state
-            .workbench
+            .design
             .stimulus_editor
             .field_text(stage.saved.name(), field)
             .unwrap_or_default()

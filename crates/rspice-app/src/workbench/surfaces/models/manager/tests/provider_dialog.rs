@@ -28,8 +28,8 @@ fn resolved_model_and_subcircuit_rows_reopen_and_clear_their_provider_decisions(
             .model_library_manager
             .resolve_definition_provider(scope, "shared", "beta", "Accepted provider")
             .unwrap();
-        app.state.workbench.models_page = ModelsPage::Include;
-        app.state.workbench.models_view.include_definition_query = "shared".to_owned();
+        app.state.models.models_page = ModelsPage::Include;
+        app.state.models.models_view.include_definition_query = "shared".to_owned();
         let mut studio = ModelsStudio::open(app);
         let revision = studio.app.state.model.workspace.content.project.revision();
         let row = format!("shared · {} ·", scope.label());
@@ -38,14 +38,14 @@ fn resolved_model_and_subcircuit_rows_reopen_and_clear_their_provider_decisions(
             selected_provider,
             error,
             ..
-        }) = &studio.app.state.workbench.models_view.dialog
+        }) = &studio.app.state.models.models_view.dialog
         else {
             panic!("the resolved {} row must open its decision", scope.label());
         };
         assert_eq!(selected_provider, "beta");
         assert!(error.is_none());
         studio.click(|label| label == "Clear provider decision");
-        assert!(studio.app.state.workbench.models_view.dialog.is_none());
+        assert!(studio.app.state.models.models_view.dialog.is_none());
         assert!(
             studio
                 .app
@@ -87,7 +87,7 @@ fn failed_provider_publication_preserves_the_dialog_draft_and_accepted_decision(
         .resolve_definition_provider(scope, "nch", "alpha", "Previously accepted provider")
         .unwrap();
     let draft = "Use the reviewed characterization source.\nRetain this audit reason.";
-    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
+    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
         definition: "nch".to_owned(),
         scope,
         providers: vec!["alpha".to_owned(), "beta".to_owned()],
@@ -114,7 +114,7 @@ fn failed_provider_publication_preserves_the_dialog_draft_and_accepted_decision(
             reason,
             error,
             ..
-        }) = &studio.app.state.workbench.models_view.dialog
+        }) = &studio.app.state.models.models_view.dialog
         else {
             panic!("a failed publication must retain its dialog");
         };
@@ -148,9 +148,9 @@ fn failed_provider_publication_preserves_the_dialog_draft_and_accepted_decision(
 
     studio.click(|label| label == "Publish provider decision");
     assert!(
-        studio.app.state.workbench.models_view.dialog.is_none(),
+        studio.app.state.models.models_view.dialog.is_none(),
         "healthy retry did not publish: {:?}",
-        studio.app.state.workbench.models_view.dialog
+        studio.app.state.models.models_view.dialog
     );
     let accepted = studio
         .app

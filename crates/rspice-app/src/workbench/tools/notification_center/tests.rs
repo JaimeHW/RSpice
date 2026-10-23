@@ -677,7 +677,7 @@ fn the_bell_is_a_toggle() {
     state.workbench.toggle_notification_center();
     assert!(state.workbench.notification_center_showing());
     assert!(
-        state.workbench.application_modal_open(),
+        state.application_modal_open(),
         "an open panel holds keyboard intent: shortcuts must not edit the document behind it"
     );
     state.workbench.toggle_notification_center();

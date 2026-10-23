@@ -168,14 +168,14 @@ impl RSpiceApp {
                 .map(|document| (document_icon(document), document.label()))
                 .collect()
         };
-        if self.state.workbench.model_editor_has_unsaved_changes() {
+        if self.state.models.model_editor_has_unsaved_changes() {
             unsaved.push((WorkbenchIcon::Models, "Device model draft".to_owned()));
         }
         // A stimulus draft is runtime-only, so it is not an unsaved document
         // and saving the project would not publish it. Naming it is the only
         // honest thing to do: closing discards it, and nothing offered here
         // can apply a draft the audit strip may be refusing.
-        for definition in self.state.workbench.stimulus_editor.dirty_definitions() {
+        for definition in self.state.design.stimulus_editor.dirty_definitions() {
             unsaved.push((
                 WorkbenchIcon::Source,
                 format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
@@ -235,7 +235,7 @@ impl RSpiceApp {
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.workbench.project_review_dialog.close();
-                self.state.workbench.cancel_project_close();
+                self.state.project.cancel_project_close();
             }
             DialogChoice::None => {}
         }
@@ -276,7 +276,7 @@ impl RSpiceApp {
             }
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.workbench.project_review_dialog.close();
-                self.state.workbench.cancel_project_close();
+                self.state.project.cancel_project_close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

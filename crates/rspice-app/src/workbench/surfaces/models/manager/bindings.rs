@@ -216,7 +216,7 @@ pub(super) fn unresolved_card(
         .model_library_manager
         .selected_library
         .clone()
-        .zip(app.state.workbench.selected_model.clone())
+        .zip(app.state.models.selected_model.clone())
         .map(|(library, model)| {
             let binding = app
                 .state

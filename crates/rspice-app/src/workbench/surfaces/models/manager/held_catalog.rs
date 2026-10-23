@@ -52,7 +52,7 @@ pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub:
             last_attempt(ui, app);
         });
     if choice == DialogChoice::Cancelled {
-        app.state.workbench.models_view.dialog = None;
+        app.state.models.models_view.dialog = None;
     }
 }
 
@@ -239,9 +239,9 @@ fn refusal_contract(host: browser::Host) -> String {
 /// be the most convincing lie on the page.
 fn last_attempt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let t = Tokens::get(ui.ctx());
-    let receipt = app.state.workbench.models_view.action_receipt.clone();
-    let attempted = app.state.workbench.models_view.attempted_operation.clone();
-    let state = app.state.workbench.models_view.operational_state;
+    let receipt = app.state.models.models_view.action_receipt.clone();
+    let attempted = app.state.models.models_view.attempted_operation.clone();
+    let state = app.state.models.models_view.operational_state;
     card(ui, |ui| {
         card_title(ui, "Last attempt", Some("this session only"));
         let Some(ModelsAttemptedOperation { label, .. }) = attempted else {

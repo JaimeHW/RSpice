@@ -112,7 +112,7 @@ fn apply_rule_setup(state: &mut AppState) {
     let draft = state.design.rule_setup.draft.clone();
     *state.model.workspace.content.design_rules = draft;
     state.model.workspace.content.project_metadata_dirty = true;
-    state.workbench.preflight.invalidate();
+    state.runs.preflight.invalidate();
     state.publish_rule_deck_issues();
     state.design.rule_setup = RuleSetupDialogState::default();
 }

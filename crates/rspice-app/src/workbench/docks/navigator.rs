@@ -6,7 +6,7 @@ mod symbol;
 mod netlist;
 mod rail;
 mod source_bundle;
-mod stimulus;
+pub(super) mod stimulus;
 mod veriloga;
 
 use netlist::*;
@@ -292,7 +292,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         egui::Stroke::new(1.0, t.color.border),
     );
     let title = match app.state.workbench.workspace {
-        Workspace::Project => match app.state.workbench.project_page {
+        Workspace::Project => match app.state.project.project_page {
             ProjectPage::Overview | ProjectPage::Library => "Project",
             ProjectPage::Configuration => "Configurations",
             ProjectPage::Dependencies => "Dependencies",
@@ -338,7 +338,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
 
 fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) -> bool {
     let placeholder = match workspace {
-        Workspace::Project => match app.state.workbench.project_page {
+        Workspace::Project => match app.state.project.project_page {
             ProjectPage::Overview | ProjectPage::Library => "Filter libraries, cells, views…",
             ProjectPage::Configuration => "Filter configurations…",
             ProjectPage::Dependencies => "Filter dependencies…",
@@ -487,7 +487,7 @@ fn panel_search_clear(ui: &mut Ui, id: &'static str, field: &Response) -> bool {
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
     ScrollArea::vertical()
         .auto_shrink([false, true])
-        .show(ui, |ui| match app.state.workbench.project_page {
+        .show(ui, |ui| match app.state.project.project_page {
             ProjectPage::Overview | ProjectPage::Library => project_library_navigator(ui, app),
             ProjectPage::Configuration => project_configuration_navigator(ui, app),
             ProjectPage::Dependencies => project_dependency_navigator(ui, app),
@@ -606,7 +606,7 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         // every other row "available" says only that it is a row.
         let active = active_id == Some(id);
         if nav_row(ui, WorkbenchIcon::Sliders, &name, active, None) {
-            app.state.workbench.project_page = ProjectPage::Configuration;
+            app.state.project.project_page = ProjectPage::Configuration;
             if !active {
                 Command::ConfigurationSets.execute(app);
             }
@@ -676,8 +676,8 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.0.cmp(&right.0));
-    if app.state.workbench.project_dependency_selection.is_none() {
-        app.state.workbench.project_dependency_selection =
+    if app.state.project.project_dependency_selection.is_none() {
+        app.state.project.project_dependency_selection =
             rows.first().map(|(name, _, _, _)| name.clone());
     }
     section_header(ui, "Dependencies", Some(&rows.len().to_string()));
@@ -686,10 +686,10 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             *icon,
             name,
-            app.state.workbench.project_dependency_selection.as_deref() == Some(name.as_str()),
+            app.state.project.project_dependency_selection.as_deref() == Some(name.as_str()),
             *status,
         ) {
-            app.state.workbench.project_dependency_selection = Some(name.clone());
+            app.state.project.project_dependency_selection = Some(name.clone());
         }
     }
 }
@@ -720,8 +720,8 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .cloned()
         .collect::<Vec<_>>();
-    if app.state.workbench.project_checkpoint_selection.is_none() {
-        app.state.workbench.project_checkpoint_selection = checkpoints
+    if app.state.project.project_checkpoint_selection.is_none() {
+        app.state.project.project_checkpoint_selection = checkpoints
             .first()
             .map(|checkpoint| checkpoint.checkpoint_id().to_string());
     }
@@ -741,10 +741,10 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             WorkbenchIcon::History,
             checkpoint.reason().label(),
-            app.state.workbench.project_checkpoint_selection.as_deref() == Some(id.as_str()),
+            app.state.project.project_checkpoint_selection.as_deref() == Some(id.as_str()),
             Some(&age),
         ) {
-            app.state.workbench.project_checkpoint_selection = Some(id);
+            app.state.project.project_checkpoint_selection = Some(id);
         }
     }
 }
@@ -823,7 +823,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .id_salt("workbench.simulation.navigator")
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            let active = app.state.workbench.simulation_page;
+            let active = app.state.simulate.simulation_page;
             // Enabled over total. The previous wording called the total
             // "active", which is what `enabled` means, so a one-analysis plan
             // read "1 active · 1 enabled".
@@ -844,7 +844,7 @@ fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                 }
             }
             if let Some(page) = requested {
-                app.state.workbench.simulation_page = page;
+                app.state.simulate.simulation_page = page;
                 app.state.workbench.close_drawer();
             }
             simulation_plan_creator(ui, app);
@@ -5776,8 +5776,8 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
         {
             continue;
         }
-        if flow_row(ui, &flow, app.state.workbench.verification_page == page) {
-            app.state.workbench.verification_page = page;
+        if flow_row(ui, &flow, app.state.simulate.verification_page == page) {
+            app.state.simulate.verification_page = page;
         }
     }
     // The one coverage number a designer acts on, and what is missing from
@@ -5925,7 +5925,7 @@ fn verification_flow_presentation(
                 .map_or(0, |payload| payload.design_variables.len());
             let dirty_count = app
                 .state
-                .workbench
+                .simulate
                 .verification
                 .tuning_variables
                 .iter()
@@ -6131,7 +6131,7 @@ mod tests {
         let mut app = RSpiceApp::test_instance();
         app.state = crate::workbench::examples::hierarchy_reference::build().state;
         app.state.workbench.workspace = Workspace::Project;
-        app.state.workbench.project_page = page;
+        app.state.project.project_page = page;
         // A checkpoint locator names native files, so the recovery catalog
         // has rows only where those exist.
         #[cfg(not(target_arch = "wasm32"))]

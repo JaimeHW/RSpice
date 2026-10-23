@@ -559,7 +559,7 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
         let _ = state.model.workspace.content.stimulus_library.delete(&name);
         return Err(refusal);
     }
-    state.workbench.selected_stimulus_definition = Some(name.clone());
+    state.design.selected_stimulus_definition = Some(name.clone());
     Ok(format!(
         "Saved stimulus definition {name} at r1 from {}.",
         session.reference
@@ -568,7 +568,7 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
 
 /// Open the Stimulus Library workspace on one definition.
 pub(crate) fn open_stimulus_definition(state: &mut AppState, name: &str) {
-    state.workbench.selected_stimulus_definition = Some(name.to_owned());
+    state.design.selected_stimulus_definition = Some(name.to_owned());
     state.workbench.activate(Workspace::Stimulus);
 }
 

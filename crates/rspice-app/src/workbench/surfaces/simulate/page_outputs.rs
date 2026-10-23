@@ -166,7 +166,7 @@ fn registry(
     let reports = app
         .simulation_controller
         .saved_outputs_preflight(&app.state, outputs);
-    let query = app.state.workbench.saved_output_filter.clone();
+    let query = app.state.simulate.saved_output_filter.clone();
     // Which group holds each output, and what it will cost. Both were readable
     // only after selecting a row, so the registry could not be scanned for the
     // one output that dominates the forecast or for the one that landed in the
@@ -237,7 +237,7 @@ fn registry(
     if shown != outputs.len() {
         status.push_str(&format!(" · showing {shown} of {}", outputs.len()));
     }
-    let selected = app.state.workbench.selected_saved_output.clone();
+    let selected = app.state.simulate.selected_saved_output.clone();
     let selected_output = selected
         .as_deref()
         .and_then(|name| outputs.iter().find(|output| output.name == name))
@@ -268,7 +268,7 @@ fn registry(
                         ui,
                         "simulation-plan.output-registry.filter",
                         "Filter name, expression or status…",
-                        &mut app.state.workbench.saved_output_filter,
+                        &mut app.state.simulate.saved_output_filter,
                     );
                 });
             }
@@ -398,9 +398,9 @@ fn registry(
                 // Selecting the copy is what makes duplicating useful: every
                 // capture decision is already carried over, so the record
                 // editor opens on the one field the copy exists to change.
-                app.state.workbench.saved_output_name_draft = None;
-                app.state.workbench.saved_output_expression_draft = None;
-                app.state.workbench.selected_saved_output = Some(committed);
+                app.state.simulate.saved_output_name_draft = None;
+                app.state.simulate.saved_output_expression_draft = None;
+                app.state.simulate.selected_saved_output = Some(committed);
             }
         } else if remove {
             // An output a group holds or a specification reads is not removed
@@ -432,19 +432,19 @@ fn registry(
                 .remove_saved_output(plan_id, output_id)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
-        }) && app.state.workbench.selected_saved_output.as_deref() == Some(name.as_str())
+        }) && app.state.simulate.selected_saved_output.as_deref() == Some(name.as_str())
         {
-            app.state.workbench.selected_saved_output = None;
+            app.state.simulate.selected_saved_output = None;
         }
     }
     if let Some(name) = pick {
         // A draft belongs to the row it was typed into. Selecting another row
         // must not carry a half-typed name or expression onto it.
-        if app.state.workbench.selected_saved_output.as_deref() != Some(name.as_str()) {
-            app.state.workbench.saved_output_name_draft = None;
-            app.state.workbench.saved_output_expression_draft = None;
+        if app.state.simulate.selected_saved_output.as_deref() != Some(name.as_str()) {
+            app.state.simulate.saved_output_name_draft = None;
+            app.state.simulate.saved_output_expression_draft = None;
         }
-        app.state.workbench.selected_saved_output = Some(name);
+        app.state.simulate.selected_saved_output = Some(name);
     }
 }
 
@@ -707,7 +707,7 @@ fn status_cell(
 fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let selected = app
         .state
-        .workbench
+        .simulate
         .selected_saved_output
         .as_ref()
         .and_then(|name| {
@@ -783,13 +783,13 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
 
     let mut name = app
         .state
-        .workbench
+        .simulate
         .saved_output_name_draft
         .clone()
         .unwrap_or_else(|| output.name.clone());
     let mut expression = app
         .state
-        .workbench
+        .simulate
         .saved_output_expression_draft
         .clone()
         .unwrap_or_else(|| output.source_expression.clone());
@@ -1064,30 +1064,30 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
             // The registry selects by name, so a rename has to carry the
             // selection with it or the record would deselect itself.
             if committed && renamed {
-                app.state.workbench.selected_saved_output = Some(name.trim().to_owned());
+                app.state.simulate.selected_saved_output = Some(name.trim().to_owned());
             }
             committed
         } else {
             true
         };
         if settled {
-            app.state.workbench.saved_output_name_draft = None;
-            app.state.workbench.saved_output_expression_draft = None;
+            app.state.simulate.saved_output_name_draft = None;
+            app.state.simulate.saved_output_expression_draft = None;
         } else {
             // A refused edit keeps both fields exactly as they were typed. The
             // refusal is reported on the lifecycle channel; clearing the drafts
             // as well snapped the card back to the stored record, so the reader
             // was told an expression was rejected and simultaneously shown the
             // one it replaced, with no way back to what they had written.
-            app.state.workbench.saved_output_name_draft = Some(name);
-            app.state.workbench.saved_output_expression_draft = Some(expression);
+            app.state.simulate.saved_output_name_draft = Some(name);
+            app.state.simulate.saved_output_expression_draft = Some(expression);
         }
     } else {
         if name != output.name {
-            app.state.workbench.saved_output_name_draft = Some(name);
+            app.state.simulate.saved_output_name_draft = Some(name);
         }
         if expression != output.source_expression {
-            app.state.workbench.saved_output_expression_draft = Some(expression);
+            app.state.simulate.saved_output_expression_draft = Some(expression);
         }
     }
     // Dispatched after the record's own edits so that clicking a hand-off,

@@ -20,8 +20,7 @@ use rspice_schematic_editor::view::navigation::ZoomRequest;
 use std::cell::RefCell;
 
 use super::state::{
-    ConsoleChannel, ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter,
-    WorkbenchState, Workspace,
+    ConsoleChannel, ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, Workspace,
 };
 
 pub(crate) mod code_context;
@@ -182,7 +181,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
         .ok_or("select one model in Model & library catalog")?;
     let model_name = app
         .state
-        .workbench
+        .models
         .selected_model
         .as_deref()
         .ok_or("select one model in Model & library catalog")?;
@@ -233,7 +232,7 @@ fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'st
         .ok_or("select one external or built-in model in Model & library catalog")?;
     let model_name = app
         .state
-        .workbench
+        .models
         .selected_model
         .as_deref()
         .ok_or("select one external or built-in model in Model & library catalog")?;
@@ -254,7 +253,7 @@ fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'st
     }
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some()
@@ -263,7 +262,7 @@ fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'st
     }
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -303,7 +302,7 @@ pub(crate) fn request_model_editor_workflow(
     app: &RSpiceApp,
     workflow: ModelEditorWorkflow,
 ) -> bool {
-    let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
         return false;
     };
     MODEL_EDITOR_WORKFLOW.with(|state| {
@@ -321,7 +320,7 @@ pub(crate) fn request_model_editor_workflow(
 pub(crate) fn active_model_editor_workflow(app: &RSpiceApp) -> Option<ModelEditorWorkflowRequest> {
     let identity = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -533,8 +532,8 @@ impl Command {
                     activate_workspace(app, workspace);
                 }
             }
-            Self::ProjectLauncher => app.state.workbench.open_project_launcher(),
-            Self::RecentProjects => open_recent_projects(&mut app.state.workbench),
+            Self::ProjectLauncher => app.state.open_project_launcher(),
+            Self::RecentProjects => open_recent_projects(&mut app.state),
             Self::NewProject => file_action(app, FileMenuAction::NewProject),
             Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
             // File Save always persists the project, including incomplete or
@@ -696,7 +695,7 @@ impl Command {
                     app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
                     // The search box is the Navigator tab's; the Component
                     // shelf that Place instance brings forward has none.
-                    app.state.workbench.design_panel = super::state::DesignPanel::Navigator;
+                    app.state.design.design_panel = super::state::DesignPanel::Navigator;
                     app.state.workbench.focus_navigator_search = true;
                 }
             }
@@ -983,8 +982,8 @@ impl Command {
                 activate_workspace(app, Workspace::Design);
                 app.state.workbench.navigator_visible = true;
                 app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
-                app.state.workbench.design_panel = super::state::DesignPanel::ComponentShelf;
-                app.state.workbench.focus_placement_search = true;
+                app.state.design.design_panel = super::state::DesignPanel::ComponentShelf;
+                app.state.design.focus_placement_search = true;
             }
             Self::PlaceWire => set_tool(app, Tool::Wire),
             Self::PlaceBus => set_tool(app, Tool::Bus),
@@ -1290,14 +1289,14 @@ impl Command {
                         app.state.request_netlist_manual_deck_run();
                     }
                 } else {
-                    app.state.workbench.preflight.request_run_and_queue();
+                    app.state.runs.preflight.request_run_and_queue();
                 }
             }
             // Stop is disabled, and names why, while the run cannot take it.
             Self::StopSimulation => {
-                if app.state.workbench.preflight.checking.is_some() {
+                if app.state.runs.preflight.checking.is_some() {
                     // The frame loop stops it before it looks for a verdict.
-                    app.state.workbench.preflight.request_check_cancel();
+                    app.state.runs.preflight.request_check_cancel();
                 } else if stop_simulation_enabled(&app.state.model.simulation)
                     && let Err(error) = app.state.model.simulation.request_abort_active_run()
                 {
@@ -1321,7 +1320,7 @@ impl Command {
                 {
                     Ok(plan_id) => {
                         let name = app.state.model.sim_setup.active_plan_name().clone();
-                        app.state.workbench.simulation_workflow =
+                        app.state.simulate.simulation_workflow =
                             Some(super::state::SimulationWorkflowDialog::PlanManager(
                                 super::state::SimulationPlanManagerDraft::new(
                                     plan_id,
@@ -1340,7 +1339,7 @@ impl Command {
                 // command routes there rather than opening a second surface
                 // over the same state.
                 crate::workbench::menu_bar::open_simulation_options(&mut app.state);
-                app.state.workbench.simulation_page =
+                app.state.simulate.simulation_page =
                     crate::workbench::state::SimulationPage::Solver;
                 activate_workspace(app, Workspace::Simulate);
             }
@@ -1444,19 +1443,19 @@ impl Command {
             }
             Self::VerificationPage(page) => {
                 activate_workspace(app, Workspace::Verify);
-                app.state.workbench.verification_page = page;
+                app.state.simulate.verification_page = page;
             }
             Self::ProjectPage(page) => {
                 activate_workspace(app, Workspace::Project);
-                app.state.workbench.project_page = page;
+                app.state.project.project_page = page;
             }
             Self::ModelsPage(page) => {
                 activate_workspace(app, Workspace::Models);
-                app.state.workbench.models_page = page;
+                app.state.models.models_page = page;
             }
             Self::SimulationPage(page) => {
                 activate_workspace(app, Workspace::Simulate);
-                app.state.workbench.simulation_page = page;
+                app.state.simulate.simulation_page = page;
             }
             Self::ModelBrowser => app.state.model_browser_state.open = true,
             // Disabled, with the reason, while nothing can be copied.
@@ -1523,7 +1522,7 @@ impl Command {
                 request_model_editor_workflow(app, ModelEditorWorkflow::RunQualification);
             }
             Self::ModelCompareRelease => {
-                app.state.workbench.model_editor.comparison_open = true;
+                app.state.models.model_editor.comparison_open = true;
             }
             Self::PdkSettings => app
                 .state
@@ -1634,7 +1633,7 @@ impl Command {
                     // highlighted one selected, so the page arrived showing an
                     // analysis that produced nothing the reader was looking at
                     // — while the note said nothing had been selected.
-                    app.state.workbench.active_analysis_instance = hop.instance;
+                    app.state.simulate.active_analysis_instance = hop.instance;
                     let notes = [hop.selected_note, hop.instance_note]
                         .into_iter()
                         .flatten()

@@ -107,7 +107,7 @@ impl PageGeometry {
 /// without rasterizing it.
 pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageGeometry {
     app.state.workbench.activate(Workspace::Verify);
-    app.state.workbench.verification_page = page;
+    app.state.simulate.verification_page = page;
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut probes = Vec::new();
@@ -374,7 +374,7 @@ pub(super) fn regression_app() -> RSpiceApp {
     app.state.model.simulation.retained.runs = vec![baseline, candidate].into();
     assert!(app.state.model.simulation.select_run(1));
     super::commit_regression_baseline(&mut app, baseline_id).expect("the baseline commits");
-    app.state.workbench.verification.regression_selected_target = Some(waveform);
+    app.state.simulate.verification.regression_selected_target = Some(waveform);
     app
 }
 

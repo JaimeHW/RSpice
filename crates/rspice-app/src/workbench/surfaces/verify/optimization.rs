@@ -172,11 +172,11 @@ pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
     match output.action.and_then(|index| actions.get(index)) {
         Some(OptimizationAction::Configure) => {
             let result = open_analysis_configuration(app, kind);
-            record_action(&mut app.state.workbench.verification, result);
+            record_action(&mut app.state.simulate.verification, result);
         }
         Some(OptimizationAction::Run) => {
             let result = request_analysis_run(app, &[kind]);
-            record_action(&mut app.state.workbench.verification, result);
+            record_action(&mut app.state.simulate.verification, result);
         }
         None => {}
     }

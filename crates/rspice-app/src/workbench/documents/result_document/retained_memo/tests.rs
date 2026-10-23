@@ -160,7 +160,7 @@ fn retained_memo_restored_history_invalidates_an_older_resolved_view() {
 fn retained_memo_immutable_pane_binding_rejects_changed_source_content() {
     let mut app = RSpiceApp::test_instance();
     app.state = retained_state(AnalysisType::Transient, 3);
-    app.state.workbench.create_result_document =
+    app.state.results.create_result_document =
         rspice_results_ui::create_document::CreateResultDocumentDialogState {
             open: true,
             name: "Pinned evidence".to_owned(),

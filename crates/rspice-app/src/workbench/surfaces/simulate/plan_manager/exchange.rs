@@ -751,7 +751,7 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
     let imported_name = setup.active_plan_name().to_string();
     app.state.model.sim_setup = setup;
     app.state.model.workspace = workspace;
-    app.state.workbench.active_analysis_instance = first_instance;
+    app.state.simulate.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     Ok((
         id,

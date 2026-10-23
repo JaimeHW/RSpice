@@ -203,6 +203,7 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         settings: Box::default(),
         cloud: Box::default(),
         sheets: Box::default(),
+        models: Box::default(),
         runs: Box::default(),
         manual_run: Box::default(),
         project_lifecycle: Box::default(),

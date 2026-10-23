@@ -16,7 +16,7 @@ const QUICK_VIEW: &str = "Create a result document to keep measurements.";
 
 /// Open Add measurement on the result the reader is looking at.
 pub(crate) fn open_measurement(state: &mut AppState) {
-    state.workbench.result_document_dialog = Some(ResultDocumentDialog::Measurement(
+    state.results.result_document_dialog = Some(ResultDocumentDialog::Measurement(
         MeasurementDraft::default(),
     ));
 }

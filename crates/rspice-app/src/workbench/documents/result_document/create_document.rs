@@ -64,7 +64,7 @@ pub(crate) fn open(app: &mut RSpiceApp) {
     let viewer_id =
         first_compatible_viewer(&app.state, dataset_id, family).unwrap_or("viewer-waveform");
     let name = next_document_name(&app.state, family);
-    app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+    app.state.results.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name,
         name_touched: false,
@@ -78,16 +78,16 @@ pub(crate) fn open(app: &mut RSpiceApp) {
 
 /// Render the modal transaction editor.
 pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.workbench.create_result_document.open {
+    if !app.state.results.create_result_document.open {
         return;
     }
-    let mut draft = app.state.workbench.create_result_document.clone();
+    let mut draft = app.state.results.create_result_document.clone();
     let submit = create_document::show(ctx, &mut draft, &CreateDocumentSources(&app.state));
-    app.state.workbench.create_result_document = draft;
+    app.state.results.create_result_document = draft;
     if submit {
         let name = app
             .state
-            .workbench
+            .results
             .create_result_document
             .name
             .trim()
@@ -101,8 +101,7 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
                 );
             }
             Err(error) => {
-                app.state.workbench.create_result_document.validation_error =
-                    Some(error.to_string());
+                app.state.results.create_result_document.validation_error = Some(error.to_string());
             }
         }
     }
@@ -1024,7 +1023,7 @@ fn document_tracking(
 
 /// Revalidate and commit the current draft into the project authority.
 pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResultDocumentError> {
-    let resolved = resolve_draft(&app.state, &app.state.workbench.create_result_document)?;
+    let resolved = resolve_draft(&app.state, &app.state.results.create_result_document)?;
     let tracking = document_tracking(
         &app.state.model.simulation.retained.runs,
         resolved.run,
@@ -1080,8 +1079,8 @@ pub(crate) fn commit(app: &mut RSpiceApp) -> Result<ResultDocumentId, CreateResu
                 .to_owned(),
         ));
     }
-    app.state.workbench.create_result_document.open = false;
-    app.state.workbench.create_result_document.validation_error = None;
+    app.state.results.create_result_document.open = false;
+    app.state.results.create_result_document.validation_error = None;
     Ok(document_id)
 }
 
@@ -1175,7 +1174,7 @@ mod tests {
         let run = retained_run_with(AnalysisType::Transient);
         let dataset_id = run.dataset_id;
         app.state.model.simulation.retained.runs = vec![run].into();
-        app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+        app.state.results.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Transient review".to_owned(),
             name_touched: true,
@@ -1245,7 +1244,7 @@ mod tests {
         run.analyses.push(analysis);
         let dataset_id = run.dataset_id;
         app.state.model.simulation.retained.runs = vec![run].into();
-        app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+        app.state.results.create_result_document = CreateResultDocumentDialogState {
             open: true,
             name: "Typed OP datasheet".to_owned(),
             name_touched: true,
@@ -1384,7 +1383,7 @@ mod tests {
             run.analyses.push(analysis);
             let dataset_id = run.dataset_id;
             app.state.model.simulation.retained.runs = vec![run].into();
-            app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+            app.state.results.create_result_document = CreateResultDocumentDialogState {
                 open: true,
                 name: format!("{viewer_id} review"),
                 name_touched: true,
@@ -1426,9 +1425,9 @@ mod tests {
             layout_id: ResultDocumentLayout::SinglePane.id().to_owned(),
             validation_error: None,
         };
-        app.state.workbench.create_result_document = draft.clone();
+        app.state.results.create_result_document = draft.clone();
         commit(&mut app).expect("first document commits");
-        app.state.workbench.create_result_document = draft;
+        app.state.results.create_result_document = draft;
         let before = app
             .state
             .model

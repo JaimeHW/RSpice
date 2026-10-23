@@ -56,7 +56,7 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 900.0))),
@@ -226,8 +226,8 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
         Some(instance) => instance.id(),
         None => plan.insert(kind).ok()?.0,
     };
-    app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
-    app.state.workbench.active_analysis_instance = Some(instance);
+    app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    app.state.simulate.active_analysis_instance = Some(instance);
     let mut run = || {
         ctx.run_ui(
             egui::RawInput {
@@ -455,7 +455,7 @@ impl AnalysesRoute {
     fn open(mut app: RSpiceApp, height: f32) -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        app.state.workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+        app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
         let mut route = Self { ctx, app, height };
         route.settle(Vec::new());
         route
@@ -544,7 +544,7 @@ fn select_transient(state: &mut crate::workbench::AppState) {
         Some(instance) => instance.id(),
         None => plan.insert(AnalysisKind::Transient).expect("transient").0,
     };
-    state.workbench.active_analysis_instance = Some(transient);
+    state.simulate.active_analysis_instance = Some(transient);
 }
 
 /// A wheel turned over `at`, asking to move the content up by 400 points.
@@ -748,7 +748,7 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
     };
     let inserted = super::insert_analysis_instance(&mut route.app, last_kind)
         .expect("a second instance of the kind inserts");
-    route.app.state.workbench.active_analysis_instance = Some(inserted);
+    route.app.state.simulate.active_analysis_instance = Some(inserted);
 
     let after = route.settle(Vec::new());
     let moved = after

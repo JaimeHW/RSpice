@@ -17,6 +17,7 @@ mod fft;
 pub(crate) mod frame_work;
 mod harmonic_balance;
 mod hist;
+pub(crate) mod import;
 mod instrument;
 pub(crate) mod manifest;
 pub(crate) mod network_matrix;
@@ -71,7 +72,7 @@ pub(crate) fn open_specification_editor(state: &mut AppState) {
     // frame boundaries. Carry a one-shot intent separately from `viewer` and
     // the draft rows so those projections cannot erase the requested editor
     // before the Results destination gets its first frame.
-    state.workbench.specification_editor_route_pending = true;
+    state.results.specification_editor_route_pending = true;
     state.results.results.session.viewer = crate::workbench::ResultViewer::Specs;
     specs::open_editor(state);
     state
@@ -85,7 +86,7 @@ pub(crate) fn open_specification_editor(state: &mut AppState) {
 /// reconciliation. Returning `true` lets the surface give the editor
 /// precedence over an active persistent result document in the same frame.
 pub(crate) fn consume_pending_specification_editor(state: &mut AppState) -> bool {
-    if !std::mem::take(&mut state.workbench.specification_editor_route_pending) {
+    if !std::mem::take(&mut state.results.specification_editor_route_pending) {
         return false;
     }
     state.results.results.session.viewer = crate::workbench::ResultViewer::Specs;

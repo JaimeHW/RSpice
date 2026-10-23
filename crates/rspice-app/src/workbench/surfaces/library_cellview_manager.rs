@@ -67,7 +67,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         surface_header(ui, app);
         page_tabs(ui, app);
 
-        let page = app.state.workbench.library_cellview_page;
+        let page = app.state.project.library_cellview_page;
         let panel = ui.scope(|ui| match page {
             LibraryCellviewPage::Libraries => project::show_library_browser(ui, app),
             LibraryCellviewPage::SymbolForm => symbol_form_page(ui, app),
@@ -249,7 +249,7 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                         + 24.0;
                     let (_, rect) = ui.allocate_space(vec2(width, TAB_HEIGHT));
                     let response = ui.interact(rect, tab_ids[index], Sense::click());
-                    let selected = app.state.workbench.library_cellview_page == page;
+                    let selected = app.state.project.library_cellview_page == page;
                     response.widget_info(|| {
                         WidgetInfo::selected(
                             WidgetType::SelectableLabel,
@@ -289,7 +289,7 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                     theme::paint_focus_ring(ui, &response, rect);
                     if response.clicked() {
-                        app.state.workbench.library_cellview_page = page;
+                        app.state.project.library_cellview_page = page;
                     }
                     if response.has_focus() {
                         let target = ui.input_mut(|input| {
@@ -309,7 +309,7 @@ fn page_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                             }
                         });
                         if let Some(target) = target {
-                            app.state.workbench.library_cellview_page =
+                            app.state.project.library_cellview_page =
                                 LibraryCellviewPage::ALL[target];
                             ui.memory_mut(|memory| memory.request_focus(tab_ids[target]));
                         }
@@ -1197,7 +1197,7 @@ mod tests {
             .model
             .library_manager
             .select_view("authoring", "amp", "symbol");
-        app.state.workbench.library_cellview_page = LibraryCellviewPage::SymbolForm;
+        app.state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
         app
     }
 
@@ -1233,7 +1233,7 @@ mod tests {
         for page in LibraryCellviewPage::ALL {
             for size in [vec2(1440.0, 900.0), vec2(820.0, 1180.0), vec2(390.0, 844.0)] {
                 let mut app = app_with_typed_symbol();
-                app.state.workbench.library_cellview_page = page;
+                app.state.project.library_cellview_page = page;
                 let output = render(&mut app, size);
                 assert!(
                     !output.shapes.is_empty(),
@@ -1323,7 +1323,7 @@ mod tests {
             .model
             .library_manager
             .select_view("legacy", "amp", "symbol");
-        app.state.workbench.library_cellview_page = LibraryCellviewPage::SymbolForm;
+        app.state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
 
         let output = render(&mut app, vec2(1100.0, 760.0));
         let nodes = access_nodes(&output);

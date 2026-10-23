@@ -191,7 +191,7 @@ pub(in crate::workbench) fn apply_remediation(
                     .stable_analysis_plan()
                     .is_ok_and(|plan| plan.instance(analysis).is_some());
                 if held {
-                    app.state.workbench.active_analysis_instance = Some(analysis);
+                    app.state.simulate.active_analysis_instance = Some(analysis);
                 } else {
                     app.state.prompt(
                         "The analysis this finding names is no longer in the simulation plan.",
@@ -221,7 +221,7 @@ pub(in crate::workbench) fn apply_remediation(
             if let Some(library) = library.as_deref()
                 && app.state.select_model_library(library)
             {
-                app.state.workbench.models_view.selected_corner = corner
+                app.state.models.models_view.selected_corner = corner
                     .as_deref()
                     .map(|corner| format!("{library}\u{1f}{corner}"));
             }

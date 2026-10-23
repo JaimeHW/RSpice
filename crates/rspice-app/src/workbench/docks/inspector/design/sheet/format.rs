@@ -51,7 +51,7 @@ pub(super) fn sheet_section(
     let top = ui.cursor().min;
     section_header(ui, "Sheet", None);
     // Sheet properties asks for this section; bring it to the top once.
-    if std::mem::take(&mut state.workbench.reveal_sheet_section) {
+    if std::mem::take(&mut state.sheets.reveal_sheet_section) {
         ui.scroll_to_rect(
             egui::Rect::from_min_max(top, ui.cursor().min),
             Some(egui::Align::TOP),

@@ -908,13 +908,13 @@ fn handle_plan_manager_action(
 ) {
     let result = match action {
         Some(PlanManagerAction::Close) => {
-            app.state.workbench.simulation_workflow = None;
+            app.state.simulate.simulation_workflow = None;
             return;
         }
         Some(PlanManagerAction::OpenSelected) => {
             match lifecycle::commit_activate_plan(app, draft.selected_plan_id) {
                 Ok(message) => {
-                    app.state.workbench.simulation_workflow = None;
+                    app.state.simulate.simulation_workflow = None;
                     app.state.prompt(message);
                     return;
                 }
@@ -990,7 +990,7 @@ fn handle_plan_manager_action(
                 &draft.campaign.member_ids,
             ) {
                 Ok(message) => {
-                    app.state.workbench.simulation_workflow = None;
+                    app.state.simulate.simulation_workflow = None;
                     app.state.prompt(message);
                     return;
                 }
@@ -1012,7 +1012,7 @@ fn handle_plan_manager_action(
                 simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.selected_plan_id)
                     .map(|entry| entry.0)
                     .unwrap_or_else(|| "Simulation plan".to_owned());
-            app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
+            app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
                 ClonePlanDraft::for_source(draft.selected_plan_id, &name),
             ));
             return;
@@ -1049,7 +1049,7 @@ fn handle_plan_manager_action(
         None => {}
         Some(Err(error)) => draft.validation_error = Some(error),
     }
-    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(draft));
+    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(draft));
 }
 
 #[cfg(test)]

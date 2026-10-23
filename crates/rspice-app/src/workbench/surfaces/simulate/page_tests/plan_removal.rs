@@ -40,7 +40,7 @@ impl Registry {
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.simulation_page = page;
+        app.state.simulate.simulation_page = page;
         seed(&mut app.state);
         let mut registry = Self {
             ctx,
@@ -160,7 +160,7 @@ impl Registry {
     fn receipt(&self) -> String {
         self.app
             .state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .to_owned()
@@ -256,7 +256,7 @@ fn seed_variable(state: &mut AppState, name: &str) {
         .content
         .add_design_variable(id, variable)
         .expect("the plan accepts it");
-    state.workbench.selected_design_variable = Some(name.to_owned());
+    state.simulate.selected_design_variable = Some(name.to_owned());
 }
 
 /// An output named `name`, selected in the registry.
@@ -278,7 +278,7 @@ fn seed_output(state: &mut AppState, name: &str, expression: &str) {
         .content
         .add_saved_output(id, output)
         .expect("the plan accepts it");
-    state.workbench.selected_saved_output = Some(name.to_owned());
+    state.simulate.selected_saved_output = Some(name.to_owned());
 }
 
 /// Switch every analysis off, so the plan resolves a variable into nothing.
@@ -502,7 +502,7 @@ fn seed_capture_group(state: &mut AppState, name: &str, holding: bool) {
         .content
         .add_capture_group(id, group)
         .expect("the plan accepts the group");
-    state.workbench.selected_capture_group = Some(group_id);
+    state.simulate.selected_capture_group = Some(group_id);
 }
 
 /// Removing a group that holds outputs is stopped, and cancelling keeps it.
@@ -697,14 +697,14 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
     use super::super::lifecycle::{apply_requested_blocker_reveal, remove_analysis_instance};
 
     let (mut app, dependent, prerequisite) = bound_pair();
-    app.state.workbench.simulation_page = SimulationPage::Solver;
-    app.state.workbench.active_analysis_instance = Some(prerequisite);
+    app.state.simulate.simulation_page = SimulationPage::Solver;
+    app.state.simulate.active_analysis_instance = Some(prerequisite);
 
     remove_analysis_instance(&mut app, prerequisite);
     // Nothing moves until the reader asks for it.
     apply_requested_blocker_reveal(&mut app.state);
     assert_eq!(
-        app.state.workbench.simulation_page,
+        app.state.simulate.simulation_page,
         SimulationPage::Solver,
         "an unanswered refusal must not navigate anywhere"
     );
@@ -712,12 +712,12 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
     app.state.simulate.plan_removal_refusal.reveal = true;
     apply_requested_blocker_reveal(&mut app.state);
     assert_eq!(
-        app.state.workbench.simulation_page,
+        app.state.simulate.simulation_page,
         SimulationPage::Analyses,
         "the hop must land on the page that edits an analysis"
     );
     assert_eq!(
-        app.state.workbench.active_analysis_instance,
+        app.state.simulate.active_analysis_instance,
         Some(dependent),
         "the hop must select the analysis that is blocking the removal"
     );
@@ -726,10 +726,10 @@ fn the_refusal_hops_to_the_blocking_analysis_exactly_once() {
         "the refusal must close behind the hop it sent the reader on"
     );
 
-    app.state.workbench.simulation_page = SimulationPage::Solver;
+    app.state.simulate.simulation_page = SimulationPage::Solver;
     apply_requested_blocker_reveal(&mut app.state);
     assert_eq!(
-        app.state.workbench.simulation_page,
+        app.state.simulate.simulation_page,
         SimulationPage::Solver,
         "an answered refusal must not navigate a second time"
     );
@@ -840,7 +840,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     );
     let status = app
         .state
-        .workbench
+        .simulate
         .analysis_lifecycle_status
         .message()
         .to_owned();
@@ -851,7 +851,7 @@ fn a_removal_costing_only_retained_runs_still_stages_and_commits() {
     apply_confirmed_analysis_removal(&mut app);
     assert_eq!(
         app.state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .to_owned(),
@@ -931,7 +931,7 @@ fn the_plan_transaction_refuses_a_blocked_removal_and_names_the_analyses() {
     );
     let status = app
         .state
-        .workbench
+        .simulate
         .analysis_lifecycle_status
         .message()
         .to_owned();

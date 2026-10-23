@@ -60,7 +60,7 @@ mod tests {
     fn pending_specs_route_survives_viewer_and_draft_reconciliation() {
         let mut app = RSpiceApp::test_instance();
         crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
-        assert!(app.state.workbench.specification_editor_route_pending);
+        assert!(app.state.results.specification_editor_route_pending);
 
         // Model the destination's persistent-document/viewer reconciliation.
         app.state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
@@ -77,7 +77,7 @@ mod tests {
             app.state.results.results.session.viewer,
             crate::workbench::ResultViewer::Specs
         );
-        assert!(!app.state.workbench.specification_editor_route_pending);
+        assert!(!app.state.results.specification_editor_route_pending);
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Results

@@ -702,7 +702,7 @@ fn project_replacement_clears_open_model_editor_state() {
         )
         .expect("create project model");
     state
-        .workbench
+        .models
         .model_editor
         .open(
             &state.model.model_library_manager,
@@ -712,23 +712,23 @@ fn project_replacement_clears_open_model_editor_state() {
         )
         .expect("open editor");
     state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
         .expect("draft")
         .description = "Unsaved".to_owned();
-    state.workbench.capture_authoring_recovery();
-    assert!(state.workbench.model_editor.draft.is_some());
-    assert!(state.workbench.model_editor_recovery.is_some());
+    state.models.capture_authoring_recovery();
+    assert!(state.models.model_editor.draft.is_some());
+    assert!(state.models.model_editor_recovery.is_some());
 
     reset_for_new_project(&mut state);
     state.assert_project_open_fact();
-    assert!(state.workbench.model_editor.draft.is_none());
-    assert!(state.workbench.model_editor_recovery.is_none());
+    assert!(state.models.model_editor.draft.is_none());
+    assert!(state.models.model_editor_recovery.is_none());
 
     state
-        .workbench
+        .models
         .model_editor
         .open(
             &state.model.model_library_manager,
@@ -739,8 +739,8 @@ fn project_replacement_clears_open_model_editor_state() {
         .expect("reopen editor");
     mark_project_closed(&mut state);
     state.assert_project_open_fact();
-    assert!(state.workbench.model_editor.draft.is_none());
-    assert!(state.workbench.model_editor_recovery.is_none());
+    assert!(state.models.model_editor.draft.is_none());
+    assert!(state.models.model_editor_recovery.is_none());
 }
 
 #[cfg(not(target_arch = "wasm32"))]

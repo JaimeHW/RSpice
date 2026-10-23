@@ -64,7 +64,7 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
             let availability = app.simulation_controller.engine_availability();
             let checking = app
                 .state
-                .workbench
+                .runs
                 .preflight
                 .checking
                 .as_ref()

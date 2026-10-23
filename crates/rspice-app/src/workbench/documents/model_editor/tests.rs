@@ -292,7 +292,7 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
     app.state.model.model_library_manager = manager;
     let project_revision = app.state.model.workspace.content.project.revision();
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -301,24 +301,19 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
             project_revision,
         )
         .expect("open sectioned sibling");
-    populate_operating_point_suite(&mut app.state.workbench.model_editor);
+    populate_operating_point_suite(&mut app.state.models.model_editor);
     app.state
-        .workbench
+        .models
         .model_editor
         .qualification_authoring
         .model_section = "TT".to_owned();
-    assert!(
-        app.state
-            .workbench
-            .model_editor
-            .commit_qualification_suite()
-    );
+    assert!(app.state.models.model_editor.commit_qualification_suite());
     start_qualification_execution(&mut app).expect("start desktop qualification");
     advance_qualification_execution(&mut app);
 
     let draft = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
@@ -424,7 +419,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         .create_project_model("second-owned-model", &second)
         .expect("create second model");
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -434,7 +429,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         )
         .expect("open first candidate");
     app.state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
@@ -449,7 +444,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
     );
     let retained = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -462,7 +457,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         .expect("reselecting the same dirty candidate retains it");
     assert_eq!(
         app.state
-            .workbench
+            .models
             .model_editor
             .draft
             .as_ref()
@@ -908,7 +903,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
     let starting_project_revision = app.state.model.workspace.content.project.revision();
     let starting_execution_epoch = app.state.model.design_execution_epoch;
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -918,7 +913,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         )
         .expect("open editor");
     app.state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
@@ -952,7 +947,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
     assert_eq!(library.models["nch_owned"].parameters["vth0"], 0.51);
     let reopened = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -963,7 +958,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         ObjectRevision::new(2).expect("source revision")
     );
     assert!(!reopened.is_dirty());
-    assert!(app.state.workbench.model_editor.validation.is_some());
+    assert!(app.state.models.model_editor.validation.is_some());
 
     assert!(
         save_open_candidate(&mut app)
@@ -1023,7 +1018,7 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         .expect("create sectioned revision");
     let project_revision = app.state.model.workspace.content.project.revision();
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -1034,7 +1029,7 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         .expect("open sectioned editor");
     assert!(
         !app.state
-            .workbench
+            .models
             .model_editor
             .draft
             .as_ref()
@@ -1042,7 +1037,7 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
             .is_dirty()
     );
     app.state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
@@ -1241,7 +1236,7 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
         .expect("create model");
     let revision = app.state.model.workspace.content.project.revision();
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -1250,23 +1245,16 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
             revision,
         )
         .expect("open editor");
-    populate_operating_point_suite(&mut app.state.workbench.model_editor);
+    populate_operating_point_suite(&mut app.state.models.model_editor);
     assert!(
-        app.state
-            .workbench
-            .model_editor
-            .commit_qualification_suite(),
+        app.state.models.model_editor.commit_qualification_suite(),
         "{:?}",
-        app.state
-            .workbench
-            .model_editor
-            .qualification_authoring
-            .error
+        app.state.models.model_editor.qualification_authoring.error
     );
     assert!(start_qualification_execution(&mut app).is_ok());
     assert!(
         app.state
-            .workbench
+            .models
             .model_editor
             .draft
             .as_ref()
@@ -1279,18 +1267,12 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
     advance_qualification_execution(&mut app);
     assert!(
         app.state
-            .workbench
+            .models
             .model_editor
             .qualification_execution
             .is_none()
     );
-    let draft = app
-        .state
-        .workbench
-        .model_editor
-        .draft
-        .as_ref()
-        .expect("draft");
+    let draft = app.state.models.model_editor.draft.as_ref().expect("draft");
     assert_eq!(draft.qualification.platform_runs.len(), 1);
     assert!(draft.qualification.evidence.is_empty());
     assert!(draft.qualification_is_dirty());
@@ -1307,7 +1289,7 @@ fn selected_vector_rerun_executes_only_its_complete_suite() {
         .unwrap();
     let revision = app.state.model.workspace.content.project.revision();
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -1316,32 +1298,22 @@ fn selected_vector_rerun_executes_only_its_complete_suite() {
             revision,
         )
         .unwrap();
-    populate_operating_point_suite(&mut app.state.workbench.model_editor);
-    assert!(
-        app.state
-            .workbench
-            .model_editor
-            .commit_qualification_suite()
-    );
-    populate_operating_point_suite(&mut app.state.workbench.model_editor);
+    populate_operating_point_suite(&mut app.state.models.model_editor);
+    assert!(app.state.models.model_editor.commit_qualification_suite());
+    populate_operating_point_suite(&mut app.state.models.model_editor);
     {
-        let fields = &mut app.state.workbench.model_editor.qualification_authoring;
+        let fields = &mut app.state.models.model_editor.qualification_authoring;
         fields.suite_id = "dc-second".to_owned();
         fields.suite_name = "Second DC suite".to_owned();
         fields.vector_id = "second-vector".to_owned();
         fields.vector_name = "Second vector".to_owned();
     }
-    assert!(
-        app.state
-            .workbench
-            .model_editor
-            .commit_qualification_suite()
-    );
+    assert!(app.state.models.model_editor.commit_qualification_suite());
 
     start_qualification_vector_execution(&mut app, "dc-second", "second-vector").unwrap();
     assert_eq!(
         app.state
-            .workbench
+            .models
             .model_editor
             .qualification_execution
             .as_ref()
@@ -1395,7 +1367,7 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .expect("create model");
     let revision = app.state.model.workspace.content.project.revision();
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -1404,23 +1376,12 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
             revision,
         )
         .expect("open editor");
-    populate_operating_point_suite(&mut app.state.workbench.model_editor);
-    assert!(
-        app.state
-            .workbench
-            .model_editor
-            .commit_qualification_suite()
-    );
+    populate_operating_point_suite(&mut app.state.models.model_editor);
+    assert!(app.state.models.model_editor.commit_qualification_suite());
     assert!(start_qualification_execution(&mut app).is_ok());
     advance_qualification_execution(&mut app);
 
-    let draft = app
-        .state
-        .workbench
-        .model_editor
-        .draft
-        .as_mut()
-        .expect("draft");
+    let draft = app.state.models.model_editor.draft.as_mut().expect("draft");
     let desktop = draft.qualification.platform_runs[0].clone();
     let mut webassembly = desktop.clone();
     webassembly.platform = QualificationPlatform::WebAssembly;
@@ -1446,10 +1407,10 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .evidence
         .insert(0, foreign_identity_evidence);
 
-    app.state.workbench.model_editor.begin_promotion_review();
+    app.state.models.model_editor.begin_promotion_review();
     assert_eq!(
         app.state
-            .workbench
+            .models
             .model_editor
             .promotion_candidate
             .evidence_id,
@@ -1457,7 +1418,7 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         "promotion prefill must include source_id in its exact-source projection"
     );
     app.state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
@@ -1465,11 +1426,11 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .qualification
         .evidence
         .retain(|evidence| evidence.id != "foreign-source-evidence");
-    populate_complete_promotion_candidate(&mut app.state.workbench.model_editor);
-    assert!(app.state.workbench.model_editor.commit_release_candidate());
+    populate_complete_promotion_candidate(&mut app.state.models.model_editor);
+    assert!(app.state.models.model_editor.commit_release_candidate());
     let candidate = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -1485,7 +1446,7 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
 
     let before_duplicate = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -1493,14 +1454,14 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .qualification
         .clone();
     app.state
-        .workbench
+        .models
         .model_editor
         .promotion_candidate
         .candidate_id = "conflicting-candidate".to_owned();
-    assert!(!app.state.workbench.model_editor.commit_release_candidate());
+    assert!(!app.state.models.model_editor.commit_release_candidate());
     assert_eq!(
         app.state
-            .workbench
+            .models
             .model_editor
             .draft
             .as_ref()
@@ -1515,20 +1476,20 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
     };
     assert!(
         !app.state
-            .workbench
+            .models
             .model_editor
             .commit_promotion(&candidate.identity.id, &invalid_correlation),
         "the authoritative promotion transaction must fail closed when retained correlation state is invalid"
     );
     assert!(
         app.state
-            .workbench
+            .models
             .model_editor
             .commit_promotion(&candidate.identity.id, &ModelCorrelationState::default())
     );
     let qualification = &app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()

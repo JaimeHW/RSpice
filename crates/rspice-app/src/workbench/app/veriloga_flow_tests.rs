@@ -468,7 +468,7 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
     assert!(Command::RunSimulation.is_enabled(&user.app));
     Command::RunSimulation.execute(&mut user.app);
     user.frame(Vec::new());
-    if let Some(report) = user.app.state.workbench.preflight.report.as_ref() {
+    if let Some(report) = user.app.state.runs.preflight.report.as_ref() {
         assert!(
             report.blockers.is_empty(),
             "Run plan is blocked: {:#?}",

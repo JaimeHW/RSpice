@@ -354,7 +354,7 @@ impl RSpiceApp {
     /// mutable simulation input. Call this at the same commit boundary as
     /// plan, PVT, solver-option, model, variable, output, or topology edits.
     pub(crate) fn invalidate_simulation_preflight(&mut self) {
-        self.state.workbench.preflight.invalidate();
+        self.state.runs.preflight.invalidate();
         self.simulation_controller.clear_prepared_run();
     }
 
@@ -372,7 +372,7 @@ impl RSpiceApp {
     fn end_frame(&mut self, simulation_input_before_frame: &FrameSimulationInput) {
         self.invalidate_simulation_preflight_after_frame_edit(simulation_input_before_frame);
         crate::workbench::synchronize_schematic_cross_probe(&mut self.state);
-        self.state.workbench.capture_authoring_recovery();
+        self.state.models.capture_authoring_recovery();
         // A project replacement can commit from a dialog after prepare_frame.
         // Terminate at the same frame boundary so old authority cannot survive.
         self.terminate_automation_runtime_after_project_change();
@@ -707,7 +707,7 @@ impl RSpiceApp {
             self.state.model.simulation.execution.has_active_execution(),
         );
         if self.state.model.simulation.execution.has_active_execution()
-            || self.state.workbench.preflight.checking.is_some()
+            || self.state.runs.preflight.checking.is_some()
         {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
@@ -730,7 +730,7 @@ impl RSpiceApp {
     fn sync_window_title(&mut self, ctx: &Context) {
         let project_has_unsaved_changes =
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state);
-        let authoring_has_unsaved_changes = self.state.workbench.has_unsaved_authoring_changes();
+        let authoring_has_unsaved_changes = self.state.models.has_unsaved_authoring_changes();
         let should_warn_before_unload = should_warn_before_browser_unload(
             project_has_unsaved_changes,
             authoring_has_unsaved_changes,
@@ -1183,7 +1183,7 @@ impl eframe::App for RSpiceApp {
         }
         log::debug!("save: sync schematic");
         self.state.sync_active_schematic_to_workspace();
-        self.state.workbench.capture_authoring_recovery();
+        self.state.models.capture_authoring_recovery();
         log::debug!("save: veriloga library");
         if let Err(error) = save_global_veriloga_library(
             &self.state.model.library_manager,
@@ -1510,12 +1510,12 @@ mod tests {
             fixture.frame(Vec::new());
             assert_eq!(fixture.app.state.workbench.drawer, Some(Drawer::Navigator));
             assert!(
-                fixture.app.state.workbench.placement_query.is_empty(),
+                fixture.app.state.design.placement_query.is_empty(),
                 "the opening shortcut must not become search text: {:?}",
-                fixture.app.state.workbench.placement_query
+                fixture.app.state.design.placement_query
             );
             let output = fixture.frame(vec![egui::Event::Text("resistor".to_owned())]);
-            assert_eq!(fixture.app.state.workbench.placement_query, "resistor");
+            assert_eq!(fixture.app.state.design.placement_query, "resistor");
             fixture.frame(click(target(&output, "Resistor")));
             assert_eq!(fixture.app.state.workbench.drawer, None);
             assert_eq!(
@@ -1696,16 +1696,15 @@ mod tests {
     #[test]
     fn frame_topology_edits_drop_preflight_authority_at_one_central_boundary() {
         let mut app = RSpiceApp::test_instance();
-        app.state.workbench.preflight.report =
-            Some(crate::state::PreflightReport::retained_for_test(
-                app.state.model.workspace.content.project.revision().get(),
-            ));
+        app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
+            app.state.model.workspace.content.project.revision().get(),
+        ));
         let before = FrameSimulationInput::capture(&app.state);
 
         app.state.model.schematic.bump_topology_version();
         app.invalidate_simulation_preflight_after_frame_edit(&before);
 
-        assert!(app.state.workbench.preflight.report.is_none());
+        assert!(app.state.runs.preflight.report.is_none());
     }
 
     #[test]
@@ -2055,7 +2054,7 @@ mod tests {
         assert!(state.application_modal_open());
         state.code.netlist.export_dialog.open = false;
 
-        state.workbench.open_project_launcher();
+        state.open_project_launcher();
         assert!(state.application_modal_open());
     }
 

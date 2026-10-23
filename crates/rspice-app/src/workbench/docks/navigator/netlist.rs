@@ -43,7 +43,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         app.state.workbench.navigator_filter(),
         &root_label,
         app.state.code.netlist.active_document == ActiveNetlistDocument::Generated,
-        &app.state.workbench.netlist_outline_collapsed,
+        &app.state.code.netlist_outline_collapsed,
         &retained_include_facts(&app.state, messages),
         messages,
     );
@@ -501,7 +501,7 @@ pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(section) = toggled {
         // Collapsing is stored, expanding clears the store, so the default for
         // a category the engineer has never touched stays "disclosed".
-        let collapsed = &mut app.state.workbench.netlist_outline_collapsed;
+        let collapsed = &mut app.state.code.netlist_outline_collapsed;
         if !collapsed.remove(&section) {
             collapsed.insert(section);
         }

@@ -667,20 +667,20 @@ fn validating_a_dependent_checks_every_transitive_prerequisite_draft() {
 
     assert!(
         app.state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .contains(&pss.to_string())
     );
     assert!(
         app.state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .starts_with("Validate rejected fail-closed")
     );
     assert!(
-        app.state.workbench.analysis_lifecycle_status.is_refusal(),
+        app.state.simulate.analysis_lifecycle_status.is_refusal(),
         "a rejected validation is a refusal, not a receipt"
     );
 }
@@ -700,7 +700,7 @@ fn selected_analysis_exposes_every_compatible_earlier_prerequisite() {
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.workbench.active_analysis_instance = Some(ac);
+    app.state.simulate.active_analysis_instance = Some(ac);
     let dependency_sources = EnvelopeSourceCatalog {
         source_digest: ContentDigest::from_bytes([7; 32]),
         names: vec!["VIN_DIFF".to_owned()],
@@ -750,7 +750,7 @@ fn selected_dependent_reports_contextual_pss_mismatch_and_only_offers_executable
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.workbench.active_analysis_instance = Some(pac);
+    app.state.simulate.active_analysis_instance = Some(pac);
 
     let exact_sources = EnvelopeSourceCatalog {
             source_digest: ContentDigest::from_bytes([8; 32]),
@@ -798,7 +798,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     plan.set_enabled(ac, false).expect("AC disables");
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.workbench.active_analysis_instance = Some(ac);
+    app.state.simulate.active_analysis_instance = Some(ac);
     let sources = build_envelope_source_catalog(&app.state);
 
     let selected = selected_analysis(&app, &sources)
@@ -818,7 +818,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     assert!(op.enabled());
     assert!(
         app.state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .contains("Prerequisites repaired")
@@ -838,7 +838,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     .expect("phase-noise selection commits");
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = Some(plan);
-    app.state.workbench.active_analysis_instance = Some(pnoise);
+    app.state.simulate.active_analysis_instance = Some(pnoise);
     let sources = build_envelope_source_catalog(&app.state);
 
     let selected = selected_analysis(&app, &sources)
@@ -853,7 +853,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     apply_analysis_action(&mut app, pnoise, AnalysisAction::PrepareAutonomousPss);
     let prepared = app
         .state
-        .workbench
+        .simulate
         .active_analysis_instance
         .expect("prepared PSS becomes selected");
     let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
@@ -868,13 +868,13 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     assert!(plan.instance(pnoise).unwrap().dependencies().is_empty());
     assert!(
         app.state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .contains("Enter the oscillator node")
     );
 
-    app.state.workbench.active_analysis_instance = Some(pnoise);
+    app.state.simulate.active_analysis_instance = Some(pnoise);
     let selected = selected_analysis(&app, &sources)
         .expect("selection resolves after prerequisite preparation")
         .expect("PNOISE becomes selected again");
@@ -893,10 +893,10 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     apply_analysis_action(&mut app, pnoise, AnalysisAction::PrepareAutonomousPss);
     let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     assert_eq!(plan.instances().len(), before_count);
-    assert_eq!(app.state.workbench.active_analysis_instance, Some(prepared));
+    assert_eq!(app.state.simulate.active_analysis_instance, Some(prepared));
     assert!(
         app.state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .contains("without creating a duplicate")
@@ -1366,12 +1366,12 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
         app.state.model.sim_setup.active_plan_name().as_str(),
     );
     draft.name = "Cancelled clone".to_owned();
-    app.state.workbench.simulation_workflow =
+    app.state.simulate.simulation_workflow =
         Some(SimulationWorkflowDialog::ClonePlan(draft.clone()));
 
     finish_workflow_choice(&mut app, DialogChoice::Cancelled, draft, commit_clone_plan);
 
-    assert!(app.state.workbench.simulation_workflow.is_none());
+    assert!(app.state.simulate.simulation_workflow.is_none());
     assert_eq!(
         app.state
             .model
@@ -1406,7 +1406,7 @@ fn a_committed_simulation_workflow_answers_on_the_status_bar() {
     finish_workflow_choice(&mut app, DialogChoice::Primary, draft, commit_clone_plan);
     app.state.drain_notices(&egui::Context::default());
 
-    assert!(app.state.workbench.simulation_workflow.is_none());
+    assert!(app.state.simulate.simulation_workflow.is_none());
     assert!(app.state.prompt_text().is_some());
     assert!(app.state.workbench.toasts.activity().is_empty());
 }
@@ -1907,7 +1907,7 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::workbench::state::Sim
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     if let Some(page) = page {
-        app.state.workbench.simulation_page = page;
+        app.state.simulate.simulation_page = page;
     }
     let _ = ctx.run_ui(
         egui::RawInput {
@@ -1933,25 +1933,26 @@ fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::workbench::state::Sim
 /// nobody just made.
 #[test]
 fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
+    use crate::workbench::AppState;
     use crate::workbench::app_state::session::wire::{WorkbenchWire, WorkbenchWireRef};
-    use crate::workbench::state::{AnalysisLifecycleOutcome, WorkbenchState};
+    use crate::workbench::state::AnalysisLifecycleOutcome;
 
     assert!(!AnalysisLifecycleOutcome::default().message().is_empty());
 
     let mut app = RSpiceApp::test_instance();
     app.state
-        .workbench
+        .simulate
         .analysis_lifecycle_status
         .record_receipt("Receipt #9 · Insert committed for instance 5.");
-    let saved = serde_json::to_value(WorkbenchWireRef::capture(&app.state.workbench))
+    let saved = serde_json::to_value(WorkbenchWireRef::capture(&app.state))
         .expect("the workbench serializes");
-    let mut restored = WorkbenchState::default();
+    let mut restored = AppState::default();
     serde_json::from_value::<WorkbenchWire>(saved)
         .expect("the workbench restores")
         .scatter(&mut restored);
 
     assert_eq!(
-        restored.analysis_lifecycle_status,
+        restored.simulate.analysis_lifecycle_status,
         AnalysisLifecycleOutcome::default(),
         "the outcome is runtime-only, so a restore starts from the default line"
     );
@@ -1973,7 +1974,7 @@ fn a_render_path_refusal_restated_every_frame_is_one_event() {
     }
     app.state.drain_notices(&egui::Context::default());
 
-    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    let outcome = &app.state.simulate.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
     assert!(
         app.state.workbench.toasts.activity().is_empty(),

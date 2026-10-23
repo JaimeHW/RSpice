@@ -50,13 +50,13 @@ pub(super) fn save_revision_workflow(
         && !app.state.model.safe_mode.project_read_only()
         && app
             .state
-            .workbench
+            .models
             .model_editor
             .qualification_execution
             .is_none();
     let dirty = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -106,7 +106,7 @@ pub(super) fn save_revision_workflow(
 }
 
 pub(super) fn save_review_rows(app: &RSpiceApp) -> Vec<Vec<DisplayCell>> {
-    let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
         return Vec::new();
     };
     let delta = draft.delta().ok();
@@ -224,11 +224,11 @@ pub(super) fn validation_review_body(
     );
     if let Some(error) = request.error.as_deref() {
         blocker_note(ui, error);
-    } else if !app.state.workbench.model_editor.diagnostics.is_empty() {
+    } else if !app.state.models.model_editor.diagnostics.is_empty() {
         blocker_note(
             ui,
             &app.state
-                .workbench
+                .models
                 .model_editor
                 .diagnostics
                 .iter()
@@ -245,7 +245,7 @@ pub(super) fn validation_review_rows(
     prepared: bool,
 ) -> Vec<Vec<DisplayCell>> {
     if !prepared {
-        let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+        let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
             return Vec::new();
         };
         // Before the report is prepared there is one thing to state: which
@@ -262,9 +262,9 @@ pub(super) fn validation_review_rows(
             DisplayCell::plain(""),
         ]];
     }
-    let valid = app.state.workbench.model_editor.validation.is_some();
+    let valid = app.state.models.model_editor.validation.is_some();
     let definition_valid =
-        records.metadata_error.is_none() && app.state.workbench.model_editor.diagnostics.is_empty();
+        records.metadata_error.is_none() && app.state.models.model_editor.diagnostics.is_empty();
     let qualification_valid = records.qualification_error.is_none();
     let qualification = qualification_totals(app, records);
     let parity_complete = qualification.total > 0
@@ -378,7 +378,7 @@ pub(super) fn qualification_run_rows(
     app: &RSpiceApp,
     _records: &PersistedModelRecords,
 ) -> Vec<Vec<DisplayCell>> {
-    let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
         return Vec::new();
     };
     let Ok(source) = ModelSourceEvidenceBinding::try_new_project_bound(
@@ -434,7 +434,7 @@ pub(super) fn qualification_run_rows(
         ],
         vec![
             DisplayCell::plain("Validation"),
-            DisplayCell::plain(if app.state.workbench.model_editor.validation.is_some() {
+            DisplayCell::plain(if app.state.models.model_editor.validation.is_some() {
                 ""
             } else {
                 "not validated"

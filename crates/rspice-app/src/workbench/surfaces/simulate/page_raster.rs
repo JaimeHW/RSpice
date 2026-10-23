@@ -80,7 +80,7 @@ const PAGE_HEIGHT: f32 = 2600.0;
 /// Render one page and rasterize it.
 fn raster(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceApp)) -> Canvas {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.simulation_page = page;
+    app.state.simulate.simulation_page = page;
     seed(&mut app);
 
     crate::ui::raster::render(vec2(width, PAGE_HEIGHT), |ui, background| {

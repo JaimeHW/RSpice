@@ -269,8 +269,8 @@ fn studio(kind: AnalysisKind) -> (RSpiceApp, AnalysisInstanceId) {
                 .map(|(id, _)| id)
                 .unwrap_or_else(|error| panic!("{kind:?} inserts into the default plan: {error}"))
         });
-    app.state.workbench.simulation_page = SimulationPage::Analyses;
-    app.state.workbench.active_analysis_instance = Some(instance);
+    app.state.simulate.simulation_page = SimulationPage::Analyses;
+    app.state.simulate.active_analysis_instance = Some(instance);
     (app, instance)
 }
 
@@ -632,17 +632,17 @@ fn a_refused_value_is_announced_once_and_leaves_the_plan_alone() {
         "a refused value is not a plan change"
     );
     assert!(
-        app.state.workbench.analysis_lifecycle_status.is_refusal(),
+        app.state.simulate.analysis_lifecycle_status.is_refusal(),
         "the refusal is stated, not swallowed"
     );
     assert!(
         app.state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .contains("TRTOL"),
         "and it names the option it refused: {}",
-        app.state.workbench.analysis_lifecycle_status.message()
+        app.state.simulate.analysis_lifecycle_status.message()
     );
     assert_eq!(
         plan_records(&app),

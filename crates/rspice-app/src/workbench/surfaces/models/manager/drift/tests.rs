@@ -80,14 +80,7 @@ fn source_verification_retains_findings_without_inventing_a_scan_date() {
         Ok(std::time::Duration::MAX),
     ] {
         crate::time_compat::with_unix_epoch(epoch, || scan(&mut state));
-        assert!(
-            state
-                .workbench
-                .models_view
-                .source_drift
-                .scanned_at
-                .is_none()
-        );
+        assert!(state.models.models_view.source_drift.scanned_at.is_none());
         assert_eq!(findings_for(&state, "moved").len(), 1);
         assert!(!needs_scan(&state));
     }
@@ -95,12 +88,7 @@ fn source_verification_retains_findings_without_inventing_a_scan_date() {
         scan(&mut state)
     });
     assert_eq!(
-        state
-            .workbench
-            .models_view
-            .source_drift
-            .scanned_at
-            .as_deref(),
+        state.models.models_view.source_drift.scanned_at.as_deref(),
         Some("2026-08-15 09:30 UTC")
     );
     assert_eq!(findings_for(&state, "moved").len(), 1);
@@ -154,12 +142,7 @@ fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
          nothing honest can be said about what changed"
     );
     assert!(
-        state
-            .workbench
-            .models_view
-            .source_drift
-            .scanned_at
-            .is_some(),
+        state.models.models_view.source_drift.scanned_at.is_some(),
         "a finding says when it was found"
     );
 }
@@ -287,7 +270,7 @@ fn an_external_source_edited_on_disk_reports_how_much_of_it_moved() {
     // Somebody edits the PDK under the project's feet.
     std::fs::write(&path, b".model a nmos\n.model b pmos\n.model c nmos\n")
         .expect("rewrite the source");
-    state.workbench.models_view.source_drift = Default::default();
+    state.models.models_view.source_drift = Default::default();
     scan(&mut state);
     let findings = findings_for(&state, "external");
     assert_eq!(findings.len(), 1);
@@ -296,7 +279,7 @@ fn an_external_source_edited_on_disk_reports_how_much_of_it_moved() {
     // And a source that has been removed outright is drift too, of a kind the
     // digest cannot describe.
     std::fs::remove_file(&path).expect("remove the source");
-    state.workbench.models_view.source_drift = Default::default();
+    state.models.models_view.source_drift = Default::default();
     scan(&mut state);
     let findings = findings_for(&state, "external");
     assert_eq!(findings.len(), 1);

@@ -325,7 +325,7 @@ pub(crate) fn enumerate_retained_hardcopy_sources(
         });
     }
 
-    if let Some(document_id) = state.workbench.report_authoring.selected_document
+    if let Some(document_id) = state.hardcopy.report_authoring.selected_document
         && let Some(document) = state
             .model
             .workspace
@@ -657,7 +657,7 @@ pub(crate) fn prepare_retained_hardcopy_resolution(
         }
     }
 
-    if let Some(document_id) = state.workbench.report_authoring.selected_document {
+    if let Some(document_id) = state.hardcopy.report_authoring.selected_document {
         let report_key = format!("project:{}:report:{}", project_id.as_uuid(), document_id);
         if source_key == report_key {
             let document = state
@@ -767,7 +767,7 @@ pub(crate) fn active_app_hardcopy_source_available(state: &AppState) -> bool {
             _ => false,
         },
         SurfaceId::ReportAuthoring => state
-            .workbench
+            .hardcopy
             .report_authoring
             .selected_document
             .and_then(|document_id| {
@@ -1309,7 +1309,7 @@ pub(crate) fn resolve_active_app_hardcopy_source(
             )),
         },
         SurfaceId::ReportAuthoring => {
-            let document_id = state.workbench.report_authoring.selected_document.ok_or(
+            let document_id = state.hardcopy.report_authoring.selected_document.ok_or(
                 HardcopySourceError::NoActiveDocumentAuthority("report document"),
             )?;
             let matching = state

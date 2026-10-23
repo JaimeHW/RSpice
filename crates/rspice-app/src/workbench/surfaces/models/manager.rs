@@ -229,12 +229,12 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         page_tabs(ui, &mut render);
     }
 
-    if app.state.workbench.models_view.model_import_in_progress {
+    if app.state.models.models_view.model_import_in_progress {
         ui.horizontal(|ui| {
             crate::ui::widgets::busy_mark(ui, 14.0);
             ui.label(
                 app.state
-                    .workbench
+                    .models
                     .models_view
                     .model_import_label
                     .as_deref()
@@ -247,7 +247,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         pending_actions.push(ManagerAction::ScanSourceDrift);
     }
 
-    let page = app.state.workbench.models_page;
+    let page = app.state.models.models_page;
     let include_diagnostics = (page == ModelsPage::Include)
         .then(|| closure_facts(app.state.model.model_library_manager.libraries_sorted()));
     // Projected before the render borrow, and settled there too: both the
@@ -487,8 +487,8 @@ fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
                         for page in ModelsPage::ALL {
-                            if page_tab(ui, page.label(), app.state.workbench.models_page == page) {
-                                app.state.workbench.models_page = page;
+                            if page_tab(ui, page.label(), app.state.models.models_page == page) {
+                                app.state.models.models_page = page;
                             }
                         }
                     });
@@ -559,7 +559,7 @@ fn catalog_page(
     // the rows, once more for the selected model's consumers, each a pass over
     // every placed instance in the design.
     let pass = matches!(
-        app.state.workbench.models_view.catalog_scope,
+        app.state.models.models_view.catalog_scope,
         ModelsCatalogScope::Project
     )
     .then(|| {
@@ -574,7 +574,7 @@ fn catalog_page(
         hub,
         installed,
     );
-    match app.state.workbench.models_view.catalog_scope {
+    match app.state.models.models_view.catalog_scope {
         ModelsCatalogScope::Project => {
             project_catalog(ui, app, pass.as_ref().expect("the project scope scans"));
         }
@@ -629,7 +629,7 @@ fn catalog_bar(
                 let options = labels.each_ref().map(String::as_str);
                 let mut selected = SCOPES
                     .iter()
-                    .position(|scope| *scope == app.state.workbench.models_view.catalog_scope)
+                    .position(|scope| *scope == app.state.models.models_view.catalog_scope)
                     .unwrap_or(0);
                 if widgets::segmented(
                     ui,
@@ -638,10 +638,10 @@ fn catalog_bar(
                     &mut selected,
                     SegmentedWidth::Natural,
                 ) {
-                    app.state.workbench.models_view.catalog_scope = SCOPES[selected];
-                    app.state.workbench.models_view.catalog_query.clear();
-                    app.state.workbench.models_view.part_catalog_offset = 0;
-                    app.state.workbench.models_view.selected_part = None;
+                    app.state.models.models_view.catalog_scope = SCOPES[selected];
+                    app.state.models.models_view.catalog_query.clear();
+                    app.state.models.models_view.part_catalog_offset = 0;
+                    app.state.models.models_view.selected_part = None;
                 }
 
                 // The source mockup drops the facet rail before it can squeeze
@@ -651,7 +651,7 @@ fn catalog_bar(
                         .id_salt("models-catalog-facets")
                         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .show(ui, |ui| {
-                            match app.state.workbench.models_view.catalog_scope {
+                            match app.state.models.models_view.catalog_scope {
                                 ModelsCatalogScope::Project => {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -662,15 +662,13 @@ fn catalog_bar(
                                                 scan.map(|scan| scan.facets[index]).unwrap_or(0);
                                             if facet_button(
                                                 ui,
-                                                app.state.workbench.models_view.project_facet
-                                                    == facet,
+                                                app.state.models.models_view.project_facet == facet,
                                                 facet.label(),
                                                 Some(count),
                                             )
                                             .clicked()
                                             {
-                                                app.state.workbench.models_view.project_facet =
-                                                    facet;
+                                                app.state.models.models_view.project_facet = facet;
                                             }
                                         }
                                     });
@@ -691,13 +689,13 @@ fn catalog_bar(
                                         {
                                             if facet_button(
                                                 ui,
-                                                app.state.workbench.models_view.hub_facet == facet,
+                                                app.state.models.models_view.hub_facet == facet,
                                                 facet.label(),
                                                 Some(counts[index]),
                                             )
                                             .clicked()
                                             {
-                                                app.state.workbench.models_view.hub_facet = facet;
+                                                app.state.models.models_view.hub_facet = facet;
                                             }
                                         }
                                     });
@@ -708,19 +706,16 @@ fn catalog_bar(
                                         for facet in RSpicePartFacet::ALL {
                                             if facet_button(
                                                 ui,
-                                                app.state.workbench.models_view.part_facet == facet,
+                                                app.state.models.models_view.part_facet == facet,
                                                 facet.label(),
                                                 None,
                                             )
                                             .clicked()
                                             {
-                                                app.state.workbench.models_view.part_facet = facet;
-                                                app.state.workbench.models_view.selected_part =
-                                                    None;
-                                                app.state
-                                                    .workbench
-                                                    .models_view
-                                                    .part_catalog_offset = 0;
+                                                app.state.models.models_view.part_facet = facet;
+                                                app.state.models.models_view.selected_part = None;
+                                                app.state.models.models_view.part_catalog_offset =
+                                                    0;
                                             }
                                         }
                                     });
@@ -730,7 +725,7 @@ fn catalog_bar(
                 }
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let hint = match app.state.workbench.models_view.catalog_scope {
+                    let hint = match app.state.models.models_view.catalog_scope {
                         ModelsCatalogScope::Project => {
                             "Search models, parameters or consumers…".to_owned()
                         }
@@ -741,14 +736,12 @@ fn catalog_bar(
                     };
                     let query = ui.add_sized(
                         [ui.available_width().clamp(170.0, 340.0), 24.0],
-                        egui::TextEdit::singleline(
-                            &mut app.state.workbench.models_view.catalog_query,
-                        )
-                        .hint_text(hint),
+                        egui::TextEdit::singleline(&mut app.state.models.models_view.catalog_query)
+                            .hint_text(hint),
                     );
                     if query.changed() {
-                        app.state.workbench.models_view.part_catalog_offset = 0;
-                        app.state.workbench.models_view.selected_part = None;
+                        app.state.models.models_view.part_catalog_offset = 0;
+                        app.state.models.models_view.selected_part = None;
                     }
                 });
             });
@@ -918,7 +911,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
                 .model_library_manager
                 .selected_library
                 .as_deref(),
-            app.state.workbench.selected_model.as_deref(),
+            app.state.models.selected_model.as_deref(),
         )
     });
     if !selected_visible && let Some(row) = rows.first() {
@@ -933,7 +926,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
     egui::Frame::NONE
         .fill(Tokens::get(ui.ctx()).color.bg_panel)
         .show(ui, |ui| {
-        let sort = app.state.workbench.models_view.catalog_sort;
+        let sort = app.state.models.models_view.catalog_sort;
         if let Some(key) = sortable_table_header(
             ui,
             "models-project-catalog-sort",
@@ -950,7 +943,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
         ) {
             // Next frame's scan reads the new order; this frame's rows were
             // derived under the old one and are painted as they were derived.
-            app.state.workbench.models_view.catalog_sort.toggle(key);
+            app.state.models.models_view.catalog_sort.toggle(key);
         }
         let table = ScrollArea::vertical()
             .id_salt("models-project-table")
@@ -964,8 +957,8 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
                     "Search covers names, families, sources, libraries, consumers and resolved parameters.",
                 );
                 if Button::new("Clear filter").show(ui).clicked() {
-                    app.state.workbench.models_view.catalog_query.clear();
-                    app.state.workbench.models_view.project_facet = ProjectModelFacet::All;
+                    app.state.models.models_view.catalog_query.clear();
+                    app.state.models.models_view.project_facet = ProjectModelFacet::All;
                 }
             });
         } else {
@@ -1018,7 +1011,7 @@ fn select_catalog_row(app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow)
         .flatten()
         .unwrap_or_else(|| row.model.clone());
     app.state.select_model_library(&row.library);
-    app.state.workbench.selected_model = Some(card);
+    app.state.models.selected_model = Some(card);
 }
 
 /// The family the catalog's selection belongs to: the family of the selected
@@ -1037,7 +1030,7 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
             .model_library_manager
             .selected_library
             .as_deref(),
-        app.state.workbench.selected_model.as_deref(),
+        app.state.models.selected_model.as_deref(),
     );
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
@@ -1385,7 +1378,7 @@ fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, le
     // Opened on a chosen counterpart, never on whichever definition the
     // catalog happens to iterate first: comparing a MOS card against an
     // unrelated BJT because it sorted first is not a comparison.
-    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
+    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
         left_library: left_library.to_owned(),
         left_model: left_model.to_owned(),
         right: default_comparison_counterpart(app, left_library, left_model),
@@ -1605,7 +1598,7 @@ fn author_technology_symbol_variant(
         target_cell,
         format!("author project variant of signed symbol {package_id}/{source_cell}"),
     )?;
-    app.state.workbench.models_view.selected_symbol =
+    app.state.models.models_view.selected_symbol =
         Some(format!("{target_library}\u{1f}{target_cell}\u{1f}symbol"));
     Ok(format!(
         "Authored '{target_library}/{target_cell}' from signed technology symbol '{package_id}/{source_cell}' at project revision {}.",
@@ -1853,11 +1846,11 @@ fn receipt(app: &mut ManagerRenderContext<'_>, result: Result<String, String>) {
 /// Show an action's outcome on the page. A caller whose action changed the
 /// project or wrote a file records it as well; a refusal stays on the page.
 fn apply_receipt(state: &mut AppState, result: Result<String, String>) {
-    state.workbench.models_view.operational_state = match &result {
+    state.models.models_view.operational_state = match &result {
         Ok(_) => ModelsOperationalState::Ready,
         Err(message) => ModelsOperationalState::from_failure(message),
     };
-    state.workbench.models_view.action_receipt = Some(result);
+    state.models.models_view.action_receipt = Some(result);
 }
 
 fn navigate_specialist(app: &mut ManagerRenderContext<'_>, surface: crate::workbench::SurfaceId) {

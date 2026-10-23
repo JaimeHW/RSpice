@@ -133,11 +133,11 @@ impl AppState {
         *self.model.netlist_artifacts = Default::default();
         *self.manual_run = Default::default();
         self.code.code_workspace = Default::default();
-        self.workbench.netlist_open_documents.clear();
+        self.code.netlist_open_documents.clear();
         self.results.results_seen_version = 0;
         self.results.results.clear_design_scoped_state();
         self.start_waveform_view_from_preferences();
-        self.workbench.specification_editor_route_pending = false;
+        self.results.specification_editor_route_pending = false;
         self.model.design_checks.drc_results = None;
         self.model.design_checks.drc_checked_version = 0;
         self.clear_all_design_checks();
@@ -969,7 +969,7 @@ mod tests {
         results.session.op_filter = "M1".to_string();
         results.session.op_sort = Some(("gm".to_string(), true));
         results.session.spec_drafts = Some(Vec::new());
-        state.workbench.specification_editor_route_pending = true;
+        state.results.specification_editor_route_pending = true;
 
         state.clear_design_execution_context();
         let results = &state.results.results;
@@ -989,6 +989,6 @@ mod tests {
         assert!(results.session.op_filter.is_empty());
         assert_eq!(results.session.op_sort, None);
         assert!(results.session.spec_drafts.is_none());
-        assert!(!state.workbench.specification_editor_route_pending);
+        assert!(!state.results.specification_editor_route_pending);
     }
 }

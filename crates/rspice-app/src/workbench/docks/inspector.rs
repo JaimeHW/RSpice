@@ -352,7 +352,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
         "Result details".to_owned()
     } else {
         match app.state.workbench.workspace {
-            Workspace::Project => match app.state.workbench.project_page {
+            Workspace::Project => match app.state.project.project_page {
                 ProjectPage::Overview => "Project overview".to_owned(),
                 ProjectPage::Library => "Cell view".to_owned(),
                 ProjectPage::Configuration => "Configuration".to_owned(),
@@ -360,11 +360,11 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
                 ProjectPage::Recovery => "Checkpoint".to_owned(),
             },
             Workspace::Verify
-                if app.state.workbench.verification_page == VerificationPage::Yield =>
+                if app.state.simulate.verification_page == VerificationPage::Yield =>
             {
                 "Yield details".to_owned()
             }
-            Workspace::Verify => app.state.workbench.verification_page.label().to_owned(),
+            Workspace::Verify => app.state.simulate.verification_page.label().to_owned(),
             Workspace::Netlist => match app.state.code.code_workspace.page {
                 crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist => {
                     messages.text(MessageId::CodeInspectorNetlistTitle)
@@ -407,7 +407,7 @@ fn header(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project(ui: &mut Ui, app: &mut RSpiceApp) {
-    match app.state.workbench.project_page {
+    match app.state.project.project_page {
         ProjectPage::Overview => project_overview(ui, app),
         ProjectPage::Library => project_library(ui, app),
         ProjectPage::Configuration => project_configuration(ui, app),
@@ -605,7 +605,7 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
         // editor and states what a SPICE or Verilog view is bound to.
         let workspace = match view_type {
             ViewType::Config => {
-                app.state.workbench.project_page = ProjectPage::Configuration;
+                app.state.project.project_page = ProjectPage::Configuration;
                 Workspace::Project
             }
             _ => Workspace::Design,
@@ -664,7 +664,7 @@ fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
 fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
     let selection = app
         .state
-        .workbench
+        .project
         .project_dependency_selection
         .clone()
         .unwrap_or_else(|| "No dependency selected".to_owned());
@@ -740,7 +740,7 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
 }
 
 fn project_recovery(ui: &mut Ui, app: &mut RSpiceApp) {
-    let selected = app.state.workbench.project_checkpoint_selection.as_deref();
+    let selected = app.state.project.project_checkpoint_selection.as_deref();
     let checkpoint = app
         .state
         .project
@@ -1631,7 +1631,7 @@ fn cross_probe_trace_to_design(app: &mut RSpiceApp, signal: &str) -> Result<Stri
 /// tuning session's uncommitted or invalid values. The other pages already
 /// show everything there is to say about them.
 fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
-    match app.state.workbench.verification_page {
+    match app.state.simulate.verification_page {
         VerificationPage::Yield => yield_details(ui, app),
         VerificationPage::Corners => {
             let failed = app.state.model.simulation.active_run().and_then(|run| {
@@ -1649,7 +1649,7 @@ fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
         VerificationPage::Tuning => {
-            let session = &app.state.workbench.verification;
+            let session = &app.state.simulate.verification;
             let dirty_count = session
                 .tuning_variables
                 .iter()

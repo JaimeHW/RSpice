@@ -14,20 +14,20 @@ pub(super) fn open_correlation_dialog(
 ) {
     match model_correlation_controller::current_source_binding(app) {
         Ok(source) => {
-            app.state.workbench.model_correlation.dialog_source = Some(source);
+            app.state.models.model_correlation.dialog_source = Some(source);
             ctx.data_mut(|data| {
                 data.remove::<String>(correlation_dialog_error_id());
             });
-            app.state.workbench.model_correlation.dialog = Some(dialog);
+            app.state.models.model_correlation.dialog = Some(dialog);
         }
         Err(error) => {
-            app.state.workbench.model_correlation.notice = Some(error);
+            app.state.models.model_correlation.notice = Some(error);
         }
     }
 }
 
 pub(super) fn correlation_dialog_source_blocker(app: &RSpiceApp) -> Option<String> {
-    let Some(opening) = app.state.workbench.model_correlation.dialog_source.as_ref() else {
+    let Some(opening) = app.state.models.model_correlation.dialog_source.as_ref() else {
         return Some(
             "The dialog has no opening source identity; close it and reopen from the current model"
                 .to_owned(),
@@ -56,7 +56,7 @@ pub(super) fn dialog_field_width(ui: &Ui) -> f32 {
 }
 
 pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    let Some(mut dialog) = app.state.workbench.model_correlation.dialog.take() else {
+    let Some(mut dialog) = app.state.models.model_correlation.dialog.take() else {
         return;
     };
     let (title, primary, description, contains_multiline) = match &dialog {
@@ -137,7 +137,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
         DialogChoice::None | DialogChoice::Secondary => true,
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             clear_correlation_dialog_runtime(ctx);
-            app.state.workbench.model_correlation.dialog_source = None;
+            app.state.models.model_correlation.dialog_source = None;
             false
         }
         DialogChoice::Primary => {
@@ -161,7 +161,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
             match result {
                 Ok(()) => {
                     clear_correlation_dialog_runtime(ctx);
-                    app.state.workbench.model_correlation.dialog_source = None;
+                    app.state.models.model_correlation.dialog_source = None;
                     false
                 }
                 Err(error) => {
@@ -174,7 +174,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
         }
     };
     if keep_open {
-        app.state.workbench.model_correlation.dialog = Some(dialog);
+        app.state.models.model_correlation.dialog = Some(dialog);
     }
 }
 
@@ -214,7 +214,7 @@ pub(super) struct RetainedRunOption {
 }
 
 pub(super) fn retained_run_options(app: &RSpiceApp) -> Vec<RetainedRunOption> {
-    let Some(source) = app.state.workbench.model_correlation.dialog_source.as_ref() else {
+    let Some(source) = app.state.models.model_correlation.dialog_source.as_ref() else {
         return Vec::new();
     };
     let Some(source_id) = source.source_id else {
@@ -1100,7 +1100,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
             )
             .expect("retained correlation");
         app.state.model.model_library_manager.selected_library = Some("owned-models".to_owned());
-        app.state.workbench.selected_model = Some("nch_corr".to_owned());
+        app.state.models.selected_model = Some("nch_corr".to_owned());
         app
     }
 
@@ -1193,7 +1193,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
     #[test]
     fn the_datasets_panel_owns_the_retained_dataset_count() {
         let mut app = correlated_app();
-        app.state.workbench.model_correlation.section = ModelCorrelationSection::Datasets;
+        app.state.models.model_correlation.section = ModelCorrelationSection::Datasets;
         let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
         assert!(
             nodes

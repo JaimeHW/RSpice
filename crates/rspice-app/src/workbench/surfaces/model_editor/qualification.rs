@@ -13,7 +13,7 @@ pub(super) fn qualification_plan_dialog(
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.workbench.model_editor.qualification_plan_open {
+    if !app.state.models.model_editor.qualification_plan_open {
         return;
     }
     let rows = qualification_rows(app, records);
@@ -32,11 +32,7 @@ pub(super) fn qualification_plan_dialog(
             .find(|vector| vector.id.eq_ignore_ascii_case(&plan.selected_vector_id))
             .cloned()
     });
-    let authoring_open = app
-        .state
-        .workbench
-        .model_editor
-        .qualification_authoring_open;
+    let authoring_open = app.state.models.model_editor.qualification_authoring_open;
     let child_transaction_open = authoring_open
         || plan.edit_open
         || plan.delete_target != QualificationDeleteTarget::None
@@ -49,13 +45,13 @@ pub(super) fn qualification_plan_dialog(
         .show(ctx, |ui| {
             let execution_active = app
                 .state
-                .workbench
+                .models
                 .model_editor
                 .qualification_execution
                 .is_some();
             let definition_dirty = app
                 .state
-                .workbench
+                .models
                 .model_editor
                 .draft
                 .as_ref()
@@ -90,7 +86,7 @@ pub(super) fn qualification_plan_dialog(
                 new_suite
             };
             if new_suite.clicked() {
-                app.state.workbench.model_editor.begin_qualification_suite();
+                app.state.models.model_editor.begin_qualification_suite();
             }
 
             qualification_execution_status(ui, app);
@@ -145,7 +141,7 @@ pub(super) fn qualification_plan_dialog(
     qualification_store_plan_ui_state(ctx, plan.clone());
     if !child_transaction_open && matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled)
     {
-        app.state.workbench.model_editor.qualification_plan_open = false;
+        app.state.models.model_editor.qualification_plan_open = false;
     }
     qualification_authoring_dialog(ctx, app);
     qualification_vector_edit_dialog(ctx, app, &qualification, &mut plan);
@@ -316,13 +312,13 @@ fn qualification_plan_actions(
     let read_only = app.state.model.safe_mode.project_read_only();
     let execution_active = app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some();
     let definition_dirty = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -452,7 +448,7 @@ fn qualification_plan_button(ui: &mut Ui, label: &str, width: f32, enabled: bool
 
 fn qualification_vector_is_current(app: &RSpiceApp, vector: &QualificationVector) -> bool {
     app.state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -499,7 +495,7 @@ fn qualification_disposition_cause(
 ) -> Option<QualificationVectorDispositionCause> {
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -691,7 +687,7 @@ fn qualification_vector_edit_dialog(
         && !app.state.model.safe_mode.project_read_only()
         && app
             .state
-            .workbench
+            .models
             .model_editor
             .qualification_execution
             .is_none()
@@ -720,15 +716,11 @@ fn qualification_vector_edit_dialog(
         DialogChoice::Primary => {
             if let Some(mut replacement) = vector {
                 replacement.name = plan.edit_name.clone();
-                match app
-                    .state
-                    .workbench
-                    .model_editor
-                    .replace_qualification_vector(
-                        &plan.selected_suite_id,
-                        &plan.selected_vector_id,
-                        replacement,
-                    ) {
+                match app.state.models.model_editor.replace_qualification_vector(
+                    &plan.selected_suite_id,
+                    &plan.selected_vector_id,
+                    replacement,
+                ) {
                     Ok(()) => {
                         plan.edit_open = false;
                         plan.action_error = None;
@@ -793,12 +785,12 @@ fn qualification_delete_dialog(
         DialogChoice::Primary => {
             let result = if deleting_suite {
                 app.state
-                    .workbench
+                    .models
                     .model_editor
                     .delete_qualification_suite(&plan.selected_suite_id)
             } else {
                 app.state
-                    .workbench
+                    .models
                     .model_editor
                     .delete_qualification_vector(&plan.selected_suite_id, &plan.selected_vector_id)
             };
@@ -880,13 +872,13 @@ fn qualification_disposition_dialog(
     let writable = !app.state.model.safe_mode.project_read_only()
         && app
             .state
-            .workbench
+            .models
             .model_editor
             .qualification_execution
             .is_none()
         && app
             .state
-            .workbench
+            .models
             .model_editor
             .draft
             .as_ref()
@@ -1012,7 +1004,7 @@ fn qualification_disposition_dialog(
                 } else if disposition.required_action == QualificationVectorRequiredAction::Rerun {
                     match app
                         .state
-                        .workbench
+                        .models
                         .model_editor
                         .resolve_qualification_vector_rerun(&disposition.id)
                     {
@@ -1029,7 +1021,7 @@ fn qualification_disposition_dialog(
             } else {
                 match app
                     .state
-                    .workbench
+                    .models
                     .model_editor
                     .record_qualification_vector_disposition(
                         plan.disposition_id.clone(),
@@ -1103,7 +1095,7 @@ fn qualification_execution_status(ui: &mut Ui, app: &mut RSpiceApp) {
     let t = Tokens::get(ui.ctx());
     let execution = app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .as_ref()
@@ -1118,7 +1110,7 @@ fn qualification_execution_status(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     let notice = app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution_notice
         .clone();
@@ -1290,12 +1282,7 @@ pub(super) fn qualification_progress_fraction(
 }
 
 fn qualification_authoring_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app
-        .state
-        .workbench
-        .model_editor
-        .qualification_authoring_open
-    {
+    if !app.state.models.model_editor.qualification_authoring_open {
         return;
     }
     let write_allowed = !app.state.model.safe_mode.project_read_only();
@@ -1309,13 +1296,10 @@ fn qualification_authoring_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     .show(ctx, |ui| qualification_authoring_form(ui, app, write_allowed));
     match choice {
         DialogChoice::Primary => {
-            app.state
-                .workbench
-                .model_editor
-                .commit_qualification_suite();
+            app.state.models.model_editor.commit_qualification_suite();
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
-            cancel_qualification_authoring(&mut app.state.workbench.model_editor);
+            cancel_qualification_authoring(&mut app.state.models.model_editor);
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -1324,7 +1308,7 @@ fn qualification_authoring_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
 fn qualification_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, write_allowed: bool) {
     let section_options = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -1340,7 +1324,7 @@ fn qualification_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, write_allowed:
             values
         })
         .unwrap_or_else(|| vec![(String::new(), "Base model".to_owned())]);
-    let fields = &mut app.state.workbench.model_editor.qualification_authoring;
+    let fields = &mut app.state.models.model_editor.qualification_authoring;
 
     let error = if write_allowed {
         fields.error.as_deref()

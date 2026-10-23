@@ -1,4 +1,5 @@
-//! The hardcopy feature's session: Page Setup, Print and Export Active View.
+//! The hardcopy feature's session: Page Setup, Print and Export Active View,
+//! and the report documents being authored.
 
 /// What the hardcopy feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -15,4 +16,7 @@ pub(crate) struct HardcopyState {
     /// one pipeline that renders a sheet as PDF/A, PDF, SVG or PNG at a
     /// chosen resolution, and the same one Print already used.
     pub export_figure_requested: bool,
+    /// Session-local selection and editor drafts for the project-owned report
+    /// documents.
+    pub report_authoring: rspice_results_ui::report::session::ReportAuthoringState,
 }

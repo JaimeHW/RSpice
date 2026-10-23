@@ -507,7 +507,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
                 Some(&reference),
             )
         });
-    let compare = app.state.workbench.verification.corner_compare_nominal;
+    let compare = app.state.simulate.verification.corner_compare_nominal;
 
     let mut actions = Vec::new();
     let mut toolbar_actions = Vec::new();
@@ -539,7 +539,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
     .show(ui);
     match output.action.and_then(|index| actions.get(index)) {
         Some(CornerAction::CompareNominal) => {
-            app.state.workbench.verification.corner_compare_nominal = !compare;
+            app.state.simulate.verification.corner_compare_nominal = !compare;
         }
         Some(CornerAction::Export) => export_active_corner_matrix(app),
         None => {}
@@ -664,9 +664,9 @@ pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
     if let Some(index) = analysis_index {
         app.state.model.simulation.select_analysis(index);
         Command::ExportWaveformsCsv.execute(app);
-        app.state.workbench.verification.action_problem = None;
+        app.state.simulate.verification.action_problem = None;
     } else {
-        app.state.workbench.verification.action_problem =
+        app.state.simulate.verification.action_problem =
             Some("Nothing to export: this run holds no completed corner result.".to_owned());
     }
 }

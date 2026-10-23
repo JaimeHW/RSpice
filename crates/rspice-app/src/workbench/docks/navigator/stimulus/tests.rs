@@ -76,7 +76,7 @@ fn prompt_says(state: &AppState, fragment: &str) -> bool {
 fn library(state: &mut AppState) {
     state.model.workspace.content.stimulus_library = fixtures::library();
     state.workbench.activate(Workspace::Stimulus);
-    state.workbench.selected_stimulus_definition = Some("sensor_diff_1k".to_owned());
+    state.design.selected_stimulus_definition = Some("sensor_diff_1k".to_owned());
 }
 
 /// One placed source carrying `definition`, wired across two nets.
@@ -183,7 +183,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
         .cloned()
         .expect("held");
     app.state
-        .workbench
+        .design
         .stimulus_editor
         .draft_for(&saved)
         .edit(|working| working.params = "va=4m freq=2k".to_owned());
@@ -206,7 +206,7 @@ fn the_row_states_an_unapplied_draft_and_whether_it_is_refused() {
         .cloned()
         .expect("held");
     app.state
-        .workbench
+        .design
         .stimulus_editor
         .draft_for(&ramp)
         .edit(|working| working.params = "td=-1n".to_owned());
@@ -235,7 +235,7 @@ fn the_scope_strip_counts_the_library_and_narrows_the_tree() {
         );
     }
 
-    app.state.workbench.stimulus_browser.scope = StimulusScope::Adopted;
+    app.state.design.stimulus_browser.scope = StimulusScope::Adopted;
     let published = browser(&mut app.state);
     assert!(
         published
@@ -368,7 +368,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     let _ = browser(&mut app.state);
-    let after_first = app.state.workbench.stimulus_browser.evaluations();
+    let after_first = app.state.design.stimulus_browser.evaluations();
     assert_eq!(
         after_first, 14,
         "every fixture definition should have been evaluated exactly once"
@@ -377,7 +377,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
     let _ = browser(&mut app.state);
     let _ = browser(&mut app.state);
     assert_eq!(
-        app.state.workbench.stimulus_browser.evaluations(),
+        app.state.design.stimulus_browser.evaluations(),
         after_first,
         "a frame that changed nothing asked the engine again"
     );
@@ -403,7 +403,7 @@ fn the_minis_are_evaluated_once_across_two_frames() {
         .apply(&mut draft, crate::state::stimulus_library::now_unix_ms);
     let _ = browser(&mut app.state);
     assert_eq!(
-        app.state.workbench.stimulus_browser.evaluations(),
+        app.state.design.stimulus_browser.evaluations(),
         after_first + 1,
         "a published revision did not re-evaluate its mini"
     );
@@ -418,7 +418,7 @@ fn a_family_with_no_waveform_at_this_boundary_holds_its_refusal_rather_than_a_cu
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
     let _ = browser(&mut app.state);
-    let browser_state = &app.state.workbench.stimulus_browser;
+    let browser_state = &app.state.design.stimulus_browser;
 
     let sine = browser_state
         .mini("sensor_diff_1k", 1)
@@ -460,7 +460,7 @@ fn every_row_track_survives_the_navigator_minimum() {
 fn the_inspector_cards_every_adopter_in_the_design() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    app.state.workbench.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
+    app.state.design.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
     adopt(&mut app.state, 1, "V1", "bridge_cal_step");
     adopt(&mut app.state, 2, "V2", "bridge_cal_step");
     let published = inspector(&mut app.state);
@@ -522,7 +522,7 @@ fn the_inspector_says_the_definition_is_unused_when_nothing_has_adopted_it() {
 fn the_inspector_drops_the_family_reference_and_the_edit_impact_block() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    app.state.workbench.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
+    app.state.design.selected_stimulus_definition = Some("bridge_cal_step".to_owned());
     let published = inspector(&mut app.state);
 
     for absent in [
@@ -554,7 +554,7 @@ fn the_inspector_drops_the_family_reference_and_the_edit_impact_block() {
 fn the_inspector_paints_nothing_with_no_definition_selected() {
     let mut app = RSpiceApp::test_instance();
     library(&mut app.state);
-    app.state.workbench.selected_stimulus_definition = None;
+    app.state.design.selected_stimulus_definition = None;
     assert!(inspector(&mut app.state).is_empty());
 }
 
@@ -567,15 +567,12 @@ fn editing_the_purpose_goes_through_the_draft_and_is_undoable() {
     stimulus_verbs::edit_field(&mut app.state, PURPOSE_FIELD, "differential sensor drive");
 
     assert!(
-        app.state
-            .workbench
-            .stimulus_editor
-            .is_dirty("sensor_diff_1k"),
+        app.state.design.stimulus_editor.is_dirty("sensor_diff_1k"),
         "the purpose edit did not dirty the definition"
     );
     assert_eq!(
         app.state
-            .workbench
+            .design
             .stimulus_editor
             .draft("sensor_diff_1k")
             .map(|draft| draft.working().purpose.as_str()),
@@ -584,7 +581,7 @@ fn editing_the_purpose_goes_through_the_draft_and_is_undoable() {
     assert!(stimulus_verbs::undo_draft(&mut app.state));
     assert_eq!(
         app.state
-            .workbench
+            .design
             .stimulus_editor
             .draft("sensor_diff_1k")
             .map(|draft| draft.working().purpose.as_str()),
@@ -645,7 +642,7 @@ fn place_arms_the_saved_revision_and_warns_about_an_unapplied_draft() {
         .cloned()
         .expect("held");
     app.state
-        .workbench
+        .design
         .stimulus_editor
         .draft_for(&saved)
         .edit(|working| working.params = "va=9m freq=1k".to_owned());

@@ -84,7 +84,7 @@ fn state_with_bound_mos_model() -> AppState {
     model_library.add_model(model);
     models.add_library(model_library);
     state.model.model_library_manager = models;
-    state.workbench.selected_model = Some("nmos_core".to_owned());
+    state.models.selected_model = Some("nmos_core".to_owned());
     state
 }
 
@@ -123,7 +123,7 @@ fn opening_uses_real_writable_library_and_selected_model() {
     );
     models.add_library(model_library);
     state.model.model_library_manager = models;
-    state.workbench.selected_model = Some("OPA189_A".to_owned());
+    state.models.selected_model = Some("OPA189_A".to_owned());
 
     open_create_model_bound_symbol_dialog(&mut state);
 

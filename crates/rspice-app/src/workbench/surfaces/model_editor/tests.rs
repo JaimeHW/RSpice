@@ -34,7 +34,7 @@ fn app_with_open_candidate() -> RSpiceApp {
         .expect("create project model");
     let revision = app.state.model.workspace.content.project.revision();
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -70,7 +70,7 @@ fn painted_surface(app: &mut RSpiceApp, section: ModelEditorSection) -> Vec<(Str
         }
     }
 
-    app.state.workbench.model_editor.active_section = section;
+    app.state.models.model_editor.active_section = section;
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let size = Vec2::new(1_180.0, 900.0);
@@ -319,8 +319,8 @@ fn retained_platform_runs_project_before_cross_platform_evidence_exists() {
 #[test]
 fn cancelling_qualification_authoring_discards_every_partial_field() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.model_editor.begin_qualification_suite();
-    let fields = &mut app.state.workbench.model_editor.qualification_authoring;
+    app.state.models.model_editor.begin_qualification_suite();
+    let fields = &mut app.state.models.model_editor.qualification_authoring;
     fields.suite_id = "partial-suite".to_owned();
     fields.vector_id = "partial-vector".to_owned();
     fields.executable_input = "V1 in 0 1".to_owned();
@@ -329,9 +329,9 @@ fn cancelling_qualification_authoring_discards_every_partial_field() {
     fields.sample = QualificationAuthoringSample::SweepPoint;
     fields.error = Some("partial error".to_owned());
 
-    cancel_qualification_authoring(&mut app.state.workbench.model_editor);
+    cancel_qualification_authoring(&mut app.state.models.model_editor);
 
-    let editor = &app.state.workbench.model_editor;
+    let editor = &app.state.models.model_editor;
     assert!(!editor.qualification_authoring_open);
     assert!(editor.qualification_authoring.suite_id.is_empty());
     assert!(editor.qualification_authoring.vector_id.is_empty());
@@ -427,14 +427,14 @@ fn the_header_announces_no_status_for_a_validated_candidate() {
     let revision = app.state.model.workspace.content.project.revision();
     let evidence = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
         .expect("open candidate")
         .validate(&app.state.model.model_library_manager, revision)
         .expect("the fixture candidate validates");
-    app.state.workbench.model_editor.validation = Some(evidence);
+    app.state.models.model_editor.validation = Some(evidence);
     assert_eq!(candidate_status(&app, &records), None);
 }
 

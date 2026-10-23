@@ -100,7 +100,7 @@ fn scope(state: &AppState) -> ModelSourceDriftScope {
 
 /// Whether the retained report still describes what is in front of us.
 pub(in crate::workbench::surfaces) fn needs_scan(state: &AppState) -> bool {
-    state.workbench.models_view.source_drift.scanned != Some(scope(state))
+    state.models.models_view.source_drift.scanned != Some(scope(state))
 }
 
 /// Rehashes every pinned source and records what no longer matches.
@@ -115,7 +115,7 @@ pub(in crate::workbench::surfaces) fn scan(state: &mut AppState) {
             (!findings.is_empty()).then(|| (library.name.clone(), findings))
         })
         .collect();
-    state.workbench.models_view.source_drift = ModelSourceDrift {
+    state.models.models_view.source_drift = ModelSourceDrift {
         scanned: Some(scope(state)),
         scanned_at: scanned_at(),
         libraries,
@@ -240,7 +240,7 @@ pub(in crate::workbench::surfaces) fn findings_for<'a>(
     library: &str,
 ) -> &'a [ModelSourceDriftFinding] {
     state
-        .workbench
+        .models
         .models_view
         .source_drift
         .libraries
@@ -338,7 +338,7 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
     );
     let detected = app
         .state
-        .workbench
+        .models
         .models_view
         .source_drift
         .scanned_at
@@ -375,10 +375,9 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
                 DRIFT_EFFECT,
             );
             if Button::new("Resolve drift…").show(ui).clicked() {
-                app.state.workbench.models_view.dialog =
-                    Some(ModelsWorkbenchDialog::ResolveDrift {
-                        library: library.to_owned(),
-                    });
+                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ResolveDrift {
+                    library: library.to_owned(),
+                });
             }
         });
 }
@@ -444,7 +443,7 @@ pub(super) fn repin_block_reason(
         return Some("There is nothing here to re-pin.");
     }
     app.state
-        .workbench
+        .models
         .models_view
         .model_import_in_progress
         .then_some("Another model-source operation is still running.")

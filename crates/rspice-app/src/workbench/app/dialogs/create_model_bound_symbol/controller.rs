@@ -44,7 +44,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     };
 
     let selected_model = state
-        .workbench
+        .models
         .selected_model
         .as_deref()
         .and_then(|selected| {

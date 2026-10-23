@@ -198,7 +198,7 @@ impl AppState {
         state.serialize_field("project_workspace", workspace)?;
         state.serialize_field("library_manager", &self.model.library_manager)?;
         state.serialize_field("ui_session", &UiSessionWire::capture(self))?;
-        state.serialize_field("workbench", &WorkbenchWireRef::capture(&self.workbench))?;
+        state.serialize_field("workbench", &WorkbenchWireRef::capture(self))?;
         state.serialize_field("recent_files", &self.recent_files)?;
         state.serialize_field("license_key", &self.license_key)?;
         state.serialize_field("execution_context_json", &execution_context_json)?;
@@ -378,7 +378,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         state.model.schematic = schematic;
         state.model.workspace = project_workspace;
         state.model.library_manager = library_manager;
-        de.workbench.scatter(&mut state.workbench);
+        de.workbench.scatter(&mut state);
         if de.no_project_open {
             state
                 .project_lifecycle
@@ -491,14 +491,14 @@ impl<'de> serde::Deserialize<'de> for AppState {
         {
             state.record(LogSeverity::Warning, LogSource::Studio, warning);
         }
-        if let Some(recovery) = state.workbench.model_editor_recovery.clone() {
+        if let Some(recovery) = state.models.model_editor_recovery.clone() {
             match recovery.restore(
                 &state.model.model_library_manager,
                 state.model.workspace.content.project.revision(),
             ) {
-                Ok(draft) => state.workbench.model_editor.draft = Some(draft),
+                Ok(draft) => state.models.model_editor.draft = Some(draft),
                 Err(error) => {
-                    state.workbench.model_editor_recovery = None;
+                    state.models.model_editor_recovery = None;
                     state.record(
                         LogSeverity::Warning,
                         LogSource::Studio,
@@ -1111,15 +1111,15 @@ mod tests {
         workbench.inspector_width = 287.0;
         workbench.inspector_width_custom = true;
         workbench.split_with_results = true;
-        workbench.project_library_filter = "afe".to_owned();
-        workbench.project_dependency_filter = "pdk".to_owned();
-        workbench.project_dependency_selection = Some("models/afe.lib".to_owned());
-        workbench.selected_specification = Some("gain".to_owned());
-        workbench.selected_design_variable = Some("rload".to_owned());
-        workbench.selected_saved_output = Some("vout".to_owned());
-        workbench.selected_model = Some("nch".to_owned());
+        state.project.project_library_filter = "afe".to_owned();
+        state.project.project_dependency_filter = "pdk".to_owned();
+        state.project.project_dependency_selection = Some("models/afe.lib".to_owned());
+        state.simulate.selected_specification = Some("gain".to_owned());
+        state.simulate.selected_design_variable = Some("rload".to_owned());
+        state.simulate.selected_saved_output = Some("vout".to_owned());
+        state.models.selected_model = Some("nch".to_owned());
         workbench.command_query = "probe".to_owned();
-        workbench.active_analysis_instance = state
+        state.simulate.active_analysis_instance = state
             .model
             .sim_setup
             .stable_analysis_plan()
@@ -1159,8 +1159,8 @@ mod tests {
             "Run 3 (bias sweep)"
         );
         assert_eq!(
-            serde_json::to_value(WorkbenchWireRef::capture(&restored.workbench)).unwrap(),
-            serde_json::to_value(WorkbenchWireRef::capture(&state.workbench)).unwrap(),
+            serde_json::to_value(WorkbenchWireRef::capture(&restored)).unwrap(),
+            serde_json::to_value(WorkbenchWireRef::capture(&state)).unwrap(),
             "the workbench restores as it was saved"
         );
         assert_eq!(restored.recent_files, state.recent_files);
@@ -1213,7 +1213,7 @@ mod tests {
     #[test]
     fn a_session_holding_an_option_written_plainly_restores() {
         let mut state = AppState::default();
-        state.workbench.selected_specification = Some("gain".to_owned());
+        state.simulate.selected_specification = Some("gain".to_owned());
         let written = saved_session(&state);
         let plain = written.replace(
             "selected_specification:Some(\"gain\")",
@@ -1225,7 +1225,7 @@ mod tests {
         let restored = relaunch(plain);
 
         assert_eq!(
-            restored.workbench.selected_specification.as_deref(),
+            restored.simulate.selected_specification.as_deref(),
             Some("gain")
         );
     }

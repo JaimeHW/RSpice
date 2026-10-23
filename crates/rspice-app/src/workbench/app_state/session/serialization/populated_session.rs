@@ -78,7 +78,7 @@ pub(super) fn populated_session() -> AppState {
 
     // An unsaved edit of that model, kept for recovery.
     state
-        .workbench
+        .models
         .model_editor
         .open(
             &state.model.model_library_manager,
@@ -88,13 +88,13 @@ pub(super) fn populated_session() -> AppState {
         )
         .expect("the model editor opens on the project model");
     state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
         .expect("an open draft")
         .description = "Unsaved description".to_owned();
-    state.workbench.capture_authoring_recovery();
+    state.models.capture_authoring_recovery();
 
     // One retained run, finished: a run still in flight when the session is
     // saved restores as interrupted.
@@ -265,8 +265,9 @@ fn customized_shortcuts() -> crate::state::shortcuts::ShortcutPreferences {
     profile
 }
 
-/// Every field `WorkbenchState` persists. The model-editor recovery is set
-/// by [`populated_session`], which owns the model it recovers.
+/// Every field the workbench wire persists, on the workbench and on the slots
+/// that own the rest. The model-editor recovery is set by
+/// [`populated_session`], which owns the model it recovers.
 fn populate_workbench(state: &mut AppState, operating_point: crate::product::AnalysisInstanceId) {
     let workbench = &mut state.workbench;
     // Navigating records the route, the workspace and the layout left behind,
@@ -286,42 +287,45 @@ fn populate_workbench(state: &mut AppState, operating_point: crate::product::Ana
     workbench.inspector_width_custom = true;
     workbench.console_height = 244.0;
     workbench.console_page = ConsolePage::Problems;
-    workbench.design_panel = DesignPanel::ComponentShelf;
+    state.design.design_panel = DesignPanel::ComponentShelf;
     workbench
         .documents
         .activate(WorkspaceDocumentId::SimulationPlan);
-    workbench
+    state
+        .code
         .netlist_open_documents
         .insert(WorkspaceDocumentId::NetlistComparison);
-    workbench.project_page = ProjectPage::Recovery;
-    workbench.project_library_filter = "afe".to_owned();
-    workbench.project_dependency_filter = "pdk".to_owned();
-    workbench.project_dependency_selection = Some("models/afe.lib".to_owned());
-    workbench.project_checkpoint_selection = Some("checkpoint-2".to_owned());
-    workbench.library_cellview_page = LibraryCellviewPage::SymbolForm;
-    workbench.verification_page = VerificationPage::Corners;
-    workbench.simulation_page = SimulationPage::Outputs;
-    workbench.verification.corner_compare_nominal = true;
-    workbench.verification.regression_baseline_run = Some(crate::product::RunId::new());
-    workbench.models_page = ModelsPage::Bins;
-    workbench.models_view.catalog_query = "nch".to_owned();
-    workbench.active_analysis = 3;
-    workbench.active_analysis_instance = Some(operating_point);
-    workbench.selected_specification = Some("gain".to_owned());
-    workbench.selected_design_variable = Some("rload".to_owned());
-    workbench.selected_saved_output = Some("vout".to_owned());
-    workbench.selected_capture_group = Some(crate::product::CaptureGroupId::new());
-    workbench.selected_run_set_dimension = Some("temperature".to_owned());
-    workbench.selected_model = Some("nch".to_owned());
-    workbench
+    state.project.project_page = ProjectPage::Recovery;
+    state.project.project_library_filter = "afe".to_owned();
+    state.project.project_dependency_filter = "pdk".to_owned();
+    state.project.project_dependency_selection = Some("models/afe.lib".to_owned());
+    state.project.project_checkpoint_selection = Some("checkpoint-2".to_owned());
+    state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
+    state.simulate.verification_page = VerificationPage::Corners;
+    state.simulate.simulation_page = SimulationPage::Outputs;
+    state.simulate.verification.corner_compare_nominal = true;
+    state.simulate.verification.regression_baseline_run = Some(crate::product::RunId::new());
+    state.models.models_page = ModelsPage::Bins;
+    state.models.models_view.catalog_query = "nch".to_owned();
+    state.simulate.active_analysis = 3;
+    state.simulate.active_analysis_instance = Some(operating_point);
+    state.simulate.selected_specification = Some("gain".to_owned());
+    state.simulate.selected_design_variable = Some("rload".to_owned());
+    state.simulate.selected_saved_output = Some("vout".to_owned());
+    state.simulate.selected_capture_group = Some(crate::product::CaptureGroupId::new());
+    state.simulate.selected_run_set_dimension = Some("temperature".to_owned());
+    state.models.selected_model = Some("nch".to_owned());
+    state
+        .code
         .netlist_outline_collapsed
         .insert(crate::state::OutlineSectionKind::Parameters);
     workbench.command_query = "probe".to_owned();
     workbench
         .specialist_tool_browser
         .toggle_favorite(crate::workbench::SurfaceId::RfWorkbench);
-    workbench.report_authoring.selected_document = Some(crate::product::ResultDocumentId::new());
-    workbench.pdk_technology_authoring.dirty = true;
+    state.hardcopy.report_authoring.selected_document =
+        Some(crate::product::ResultDocumentId::new());
+    state.models.pdk_technology_authoring.dirty = true;
 }
 
 /// `state` as a restore leaves it before anything else is read back.
@@ -433,7 +437,7 @@ fn a_populated_session_restores_and_saves_again_unchanged() {
     assert!(!restored.project_lifecycle.is_open());
     assert_eq!(restored.model.simulation.retained.run_count(), 1);
     assert!(
-        restored.workbench.model_editor.draft.is_some(),
+        restored.models.model_editor.draft.is_some(),
         "the unsaved model edit reopens"
     );
     let shortcuts = restored.model.preferences.shortcuts();

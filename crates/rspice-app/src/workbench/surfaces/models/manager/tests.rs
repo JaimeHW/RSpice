@@ -651,8 +651,8 @@ fn one_model_project() -> RSpiceApp {
         .insert("nch".to_owned(), ModelQualificationState::default());
     app.state.model.model_library_manager.add_library(library);
     app.state.select_model_library("alpha");
-    app.state.workbench.selected_model = Some("nch".to_owned());
-    app.state.workbench.models_page = ModelsPage::Models;
+    app.state.models.selected_model = Some("nch".to_owned());
+    app.state.models.models_page = ModelsPage::Models;
 
     let mut component = Component::new(1, ComponentType::Nmos, Point::origin());
     component.name = "M1".to_owned();
@@ -709,7 +709,7 @@ fn the_bind_primary_names_the_instance_it_would_bind() {
 fn a_qualification_count_opens_the_page_that_holds_it() {
     let mut studio = ModelsStudio::open(one_model_project());
     assert_eq!(
-        studio.app.state.workbench.models_page,
+        studio.app.state.models.models_page,
         ModelsPage::Models,
         "the studio opens on the catalog"
     );
@@ -717,7 +717,7 @@ fn a_qualification_count_opens_the_page_that_holds_it() {
     studio.click(|label| label.starts_with("Suites:"));
 
     assert_eq!(
-        studio.app.state.workbench.models_page,
+        studio.app.state.models.models_page,
         ModelsPage::Qualification
     );
 }

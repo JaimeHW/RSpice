@@ -479,24 +479,24 @@ fn reset_active_view_command_resets_and_reports_in_the_same_frame() {
 fn resetting_the_simulation_view_clears_the_narrowing_and_not_the_plan() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Simulate);
-    app.state.workbench.saved_output_filter = "db20".to_owned();
-    app.state.workbench.specification_filter = "bw(".to_owned();
-    app.state.workbench.specification_evidence_filter =
+    app.state.simulate.saved_output_filter = "db20".to_owned();
+    app.state.simulate.specification_filter = "bw(".to_owned();
+    app.state.simulate.specification_evidence_filter =
         crate::workbench::state::SpecificationEvidenceFilter::Failing;
-    app.state.workbench.selected_specification = Some("bw(vout)".to_owned());
+    app.state.simulate.selected_specification = Some("bw(vout)".to_owned());
 
     super::reset_active_view(&mut app);
 
-    assert!(app.state.workbench.saved_output_filter.is_empty());
-    assert!(app.state.workbench.specification_filter.is_empty());
+    assert!(app.state.simulate.saved_output_filter.is_empty());
+    assert!(app.state.simulate.specification_filter.is_empty());
     assert_eq!(
-        app.state.workbench.specification_evidence_filter,
+        app.state.simulate.specification_evidence_filter,
         crate::workbench::state::SpecificationEvidenceFilter::All
     );
     // A view reset restores what the reader can see, not what the plan says
     // or which record they were reading.
     assert_eq!(
-        app.state.workbench.selected_specification.as_deref(),
+        app.state.simulate.selected_specification.as_deref(),
         Some("bw(vout)")
     );
 }

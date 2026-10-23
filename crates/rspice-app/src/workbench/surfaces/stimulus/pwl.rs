@@ -194,7 +194,7 @@ fn raw_table(
     let editing = stage.editing_field.as_deref() == Some(POINTS_FIELD);
     let mut buffer = if editing {
         state
-            .workbench
+            .design
             .stimulus_editor
             .field_text(stage.saved.name(), POINTS_FIELD)
             .unwrap_or_default()
@@ -395,7 +395,7 @@ fn cell_edit(
     let editing = stage.editing_field.as_deref() == Some(field.as_str());
     let mut text = if editing {
         state
-            .workbench
+            .design
             .stimulus_editor
             .field_text(stage.saved.name(), &field)
             .unwrap_or_default()

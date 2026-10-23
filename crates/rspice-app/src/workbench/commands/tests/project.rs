@@ -43,12 +43,12 @@ fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         app.state.workbench.workspace = Workspace::Results;
-        app.state.workbench.project_page = ProjectPage::Overview;
+        app.state.project.project_page = ProjectPage::Overview;
 
         Command::ProjectPage(page).execute(&mut app);
 
         assert_eq!(app.state.workbench.workspace, Workspace::Project);
-        assert_eq!(app.state.workbench.project_page, page);
+        assert_eq!(app.state.project.project_page, page);
     }
 }
 
@@ -227,21 +227,21 @@ fn standalone_schematic_save_remains_available_without_a_project() {
 
 #[test]
 fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
-    let mut workbench = WorkbenchState::default();
-    workbench.project_launcher_filter = ProjectLauncherFilter::Pinned;
-    workbench.project_launcher_open = false;
-    workbench.focus_project_launcher_search = false;
+    let mut state = AppState::default();
+    state.project.project_launcher_filter = ProjectLauncherFilter::Pinned;
+    state.project.project_launcher_open = false;
+    state.project.focus_project_launcher_search = false;
 
-    open_recent_projects(&mut workbench);
+    open_recent_projects(&mut state);
 
-    assert!(workbench.project_launcher_open);
-    assert!(workbench.focus_project_launcher_search);
+    assert!(state.project.project_launcher_open);
+    assert!(state.project.focus_project_launcher_search);
     assert_eq!(
-        workbench.project_launcher_page,
+        state.project.project_launcher_page,
         crate::workbench::state::ProjectLauncherPage::Projects
     );
     assert_eq!(
-        workbench.project_launcher_filter,
+        state.project.project_launcher_filter,
         ProjectLauncherFilter::Recent
     );
 }

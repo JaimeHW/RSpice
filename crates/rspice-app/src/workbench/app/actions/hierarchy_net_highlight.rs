@@ -92,10 +92,10 @@ impl AppState {
             .flatten();
         match &lit {
             Some(name) => self
-                .workbench
+                .design
                 .occurrence_net_highlights
                 .insert(key, name.clone()),
-            None => self.workbench.occurrence_net_highlights.remove(&key),
+            None => self.design.occurrence_net_highlights.remove(&key),
         };
         let lit = lit?;
         match carry {
@@ -114,12 +114,12 @@ impl AppState {
         self.model.schematic.session.editor.net_highlight.clear();
         let key = self.occurrence_highlight_key();
         let Some(name) =
-            carried.or_else(|| self.workbench.occurrence_net_highlights.get(&key).cloned())
+            carried.or_else(|| self.design.occurrence_net_highlights.get(&key).cloned())
         else {
             return;
         };
         if self.light_net_named(&name) {
-            self.workbench.occurrence_net_highlights.insert(key, name);
+            self.design.occurrence_net_highlights.insert(key, name);
         }
     }
 

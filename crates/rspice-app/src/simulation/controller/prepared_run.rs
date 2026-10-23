@@ -870,7 +870,7 @@ impl SimulationController {
         let campaign_id = crate::product::SimulationCampaignId::new();
         let member_count = members.len();
         self.clear_prepared_run();
-        state.workbench.preflight.invalidate();
+        state.runs.preflight.invalidate();
         self.design_execution_epoch = state.model.design_execution_epoch;
         self.active_campaign = Some(super::ActiveSimulationCampaign {
             id: campaign_id,

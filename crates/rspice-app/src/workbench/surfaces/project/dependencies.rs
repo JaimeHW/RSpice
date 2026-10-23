@@ -157,7 +157,7 @@ fn dependency_context_strip(ui: &mut Ui, state: &mut AppState, rows: &[Dependenc
 fn dependency_filter_field(ui: &mut Ui, state: &mut AppState, width: f32) {
     let search = ui.add_sized(
         [width, Tokens::get(ui.ctx()).metrics.ctl_h],
-        egui::TextEdit::singleline(&mut state.workbench.project_dependency_filter)
+        egui::TextEdit::singleline(&mut state.project.project_dependency_filter)
             .hint_text("Dependency, type, source, version\u{2026}"),
     );
     ui.ctx().accesskit_node_builder(search.id, |node| {
@@ -452,7 +452,7 @@ fn dependency_inventory(
     let mut selected = None;
     for row in &visible {
         let kind = WorkspaceRowKind::body(
-            state.workbench.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
+            state.project.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
         );
         let status = status_label(&row.status);
         let problem = status_problem(&row.status);
@@ -509,7 +509,7 @@ fn dependency_inventory(
         }
     }
     if let Some(identity) = selected {
-        state.workbench.project_dependency_selection = Some(identity);
+        state.project.project_dependency_selection = Some(identity);
     }
     if compact {
         ledger_grid_floor(ui, width, pane_height, top, LEDGER_COMPACT_FRACTIONS);
@@ -550,7 +550,7 @@ fn ledger_grid_floor<const N: usize>(
 
 fn dependency_filter(state: &AppState) -> String {
     state
-        .workbench
+        .project
         .project_dependency_filter
         .trim()
         .to_ascii_lowercase()

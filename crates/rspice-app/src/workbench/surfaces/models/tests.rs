@@ -73,8 +73,8 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
 
 fn models_canvas(page: ModelsPage, scope: ModelsCatalogScope) -> crate::ui::raster::Canvas {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.models_page = page;
-    app.state.workbench.models_view.catalog_scope = scope;
+    app.state.models.models_page = page;
+    app.state.models.models_view.catalog_scope = scope;
     crate::ui::raster::render(MODELS_RASTER_SIZE, |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
@@ -182,7 +182,7 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
             crate::ui::Theme::default().apply(&ctx);
             ctx.enable_accesskit();
             let mut app = RSpiceApp::test_instance();
-            app.state.workbench.models_page = page;
+            app.state.models.models_page = page;
             app.state.model.library_manager.clear();
             app.state.model.model_library_manager.clear();
 
@@ -365,7 +365,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
         .model_library_manager
         .select_library(&summary.library)
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some(summary.model.clone());
+    app.state.models.selected_model = Some(summary.model.clone());
     assert_eq!(
         qualification_action_block_reason(&app, Some(&summary), QualificationPageAction::RunSuite)
             .as_deref(),
@@ -381,16 +381,16 @@ fn project_model_without_suites_is_truthfully_unqualified() {
     );
     execute_qualification_action(&mut app, QualificationPageAction::ReviewVectors);
     assert_eq!(
-        app.state.workbench.model_editor.active_section,
+        app.state.models.model_editor.active_section,
         ModelEditorSection::Tests
     );
-    assert!(app.state.workbench.model_editor.qualification_plan_open);
+    assert!(app.state.models.model_editor.qualification_plan_open);
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
         SurfaceId::ModelEditor
     );
 
-    let editor = &mut app.state.workbench.model_editor;
+    let editor = &mut app.state.models.model_editor;
     editor.begin_qualification_suite();
     let authoring = &mut editor.qualification_authoring;
     authoring.suite_id = "dc-op".to_owned();
@@ -665,8 +665,8 @@ fn no_models_page_ends_in_unpainted_canvas() {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
             let mut app = RSpiceApp::test_instance();
-            app.state.workbench.models_page = page;
-            app.state.workbench.models_view.catalog_scope = scope;
+            app.state.models.models_page = page;
+            app.state.models.models_view.catalog_scope = scope;
             let size = egui::vec2(1_180.0, 900.0);
             let output = ctx.run_ui(
                 egui::RawInput {
@@ -722,7 +722,7 @@ fn the_model_detail_panes_are_one_row_of_equal_columns_filling_the_document() {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.models_page = ModelsPage::Models;
+    app.state.models.models_page = ModelsPage::Models;
     let size = egui::vec2(1_180.0, 900.0);
     let output = ctx.run_ui(
         egui::RawInput {

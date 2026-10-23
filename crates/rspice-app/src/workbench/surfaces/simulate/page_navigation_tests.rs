@@ -41,7 +41,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut AppState
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.simulation_page = page;
+    app.state.simulate.simulation_page = page;
     seed(&mut app.state);
     let output = ctx.run_ui(
         egui::RawInput {
@@ -214,7 +214,7 @@ fn the_selected_limit_offers_its_evidence_and_its_producer() {
                 scope: SpecPointScope::AllPoints,
             }],
         );
-        state.workbench.selected_specification = Some("gain_dc".to_owned());
+        state.simulate.selected_specification = Some("gain_dc".to_owned());
     });
     assert!(
         without.contains("Open in Results"),
@@ -245,7 +245,7 @@ fn a_saved_output_offers_the_trace_it_stored() {
             .content
             .add_saved_output(plan_id, output)
             .expect("the plan accepts one saved output");
-        state.workbench.selected_saved_output = Some(name);
+        state.simulate.selected_saved_output = Some(name);
     });
     assert!(
         rendered.contains("View trace"),
@@ -346,7 +346,7 @@ fn a_point_is_carried_into_the_family_view_as_a_filter_over_its_own_axes() {
         "the hop lands where the family view is drawn"
     );
     let Some(rspice_results_ui::document_dialogs::ResultDocumentDialog::Family(draft)) =
-        &app.state.workbench.result_document_dialog
+        &app.state.results.result_document_dialog
     else {
         panic!("the hop opens Family slicing");
     };

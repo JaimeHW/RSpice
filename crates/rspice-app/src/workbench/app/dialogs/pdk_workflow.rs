@@ -46,7 +46,7 @@ fn note_models_operation(
     reissuable: bool,
     landing_pack: Option<String>,
 ) {
-    state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+    state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
         label,
         reissuable,
         landing_pack,
@@ -389,19 +389,19 @@ fn emit_pdk_file_load_success_message(
 
 impl RSpiceApp {
     pub(in crate::workbench) fn start_model_source_import(&mut self, _ctx: &Context) {
-        if self.state.workbench.models_view.model_import_in_progress {
+        if self.state.models.models_view.model_import_in_progress {
             self.state.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
         #[cfg(target_arch = "wasm32")]
         {
             note_models_operation(&mut self.state, "model import".to_owned(), false, None);
-            self.state.workbench.models_view.model_import_in_progress = true;
-            self.state.workbench.models_view.model_import_label =
+            self.state.models.models_view.model_import_in_progress = true;
+            self.state.models.models_view.model_import_label =
                 Some("Selecting and reading browser model sources…".to_owned());
             if let Err(error) = start_browser_model_import(_ctx, &self.state, None) {
-                self.state.workbench.models_view.model_import_in_progress = false;
-                self.state.workbench.models_view.model_import_label = None;
+                self.state.models.models_view.model_import_in_progress = false;
+                self.state.models.models_view.model_import_label = None;
                 self.state.record(
                     LogSeverity::Error,
                     LogSource::Studio,
@@ -433,7 +433,7 @@ impl RSpiceApp {
         let Some(pending) = pending else {
             self.state
                 .prompt("The model source selection is gone; choose the files again.");
-            self.state.workbench.models_view.dialog = None;
+            self.state.models.models_view.dialog = None;
             return;
         };
         if !pending
@@ -470,9 +470,9 @@ impl RSpiceApp {
             );
             return;
         }
-        self.state.workbench.models_view.dialog = None;
-        self.state.workbench.models_view.model_import_in_progress = true;
-        self.state.workbench.models_view.model_import_label =
+        self.state.models.models_view.dialog = None;
+        self.state.models.models_view.model_import_in_progress = true;
+        self.state.models.models_view.model_import_label =
             Some(format!("Reading model source tree from '{root_name}'..."));
     }
 
@@ -481,9 +481,9 @@ impl RSpiceApp {
         BROWSER_PENDING_MODEL_ROOT.with(|pending| {
             pending.borrow_mut().take();
         });
-        self.state.workbench.models_view.dialog = None;
-        self.state.workbench.models_view.operational_state = ModelsOperationalState::Cancelled;
-        self.state.workbench.models_view.action_receipt = Some(Ok(
+        self.state.models.models_view.dialog = None;
+        self.state.models.models_view.operational_state = ModelsOperationalState::Cancelled;
+        self.state.models.models_view.action_receipt = Some(Ok(
             "Browser model-source selection was cancelled.".to_owned(),
         ));
     }
@@ -530,7 +530,7 @@ impl RSpiceApp {
         );
         #[cfg(target_arch = "wasm32")]
         {
-            if self.state.workbench.models_view.model_import_in_progress {
+            if self.state.models.models_view.model_import_in_progress {
                 self.state.prompt(MODEL_OPERATION_RUNNING);
                 return;
             }
@@ -540,13 +540,13 @@ impl RSpiceApp {
                 false,
                 None,
             );
-            self.state.workbench.models_view.model_import_in_progress = true;
-            self.state.workbench.models_view.model_import_label = Some(format!(
+            self.state.models.models_view.model_import_in_progress = true;
+            self.state.models.models_view.model_import_label = Some(format!(
                 "Selecting replacement sources for '{library_name}'…"
             ));
             if let Err(error) = start_browser_model_import(ctx, &self.state, Some(library_name)) {
-                self.state.workbench.models_view.model_import_in_progress = false;
-                self.state.workbench.models_view.model_import_label = None;
+                self.state.models.models_view.model_import_in_progress = false;
+                self.state.models.models_view.model_import_label = None;
                 self.state.record(
                     LogSeverity::Error,
                     LogSource::Studio,
@@ -626,9 +626,9 @@ impl RSpiceApp {
     #[cfg(target_arch = "wasm32")]
     fn refuse_shipped_tree_operation(&mut self, attempted: String, reason: String) {
         note_models_operation(&mut self.state, attempted, false, None);
-        self.state.workbench.models_view.operational_state =
+        self.state.models.models_view.operational_state =
             ModelsOperationalState::from_failure(&reason);
-        self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
+        self.state.models.models_view.action_receipt = Some(Err(reason.clone()));
         self.state.prompt(reason);
     }
 
@@ -680,9 +680,9 @@ impl RSpiceApp {
             poll_browser_model_imports(&mut self.state);
             poll_browser_model_hub_operations(ctx, &mut self.state, &mut self.model_hub);
         }
-        self.state.workbench.models_view.model_import_progress = self
+        self.state.models.models_view.model_import_progress = self
             .state
-            .workbench
+            .models
             .models_view
             .model_import_in_progress
             .then(|| model_hub_progress().fraction())
@@ -721,10 +721,10 @@ impl RSpiceApp {
                 &self.state.model.model_library_manager,
             ),
         };
-        if self.state.workbench.models_view.recall_notice.as_ref() == Some(&scope) {
+        if self.state.models.models_view.recall_notice.as_ref() == Some(&scope) {
             return;
         }
-        self.state.workbench.models_view.recall_notice = Some(scope);
+        self.state.models.models_view.recall_notice = Some(scope);
         let Some(hub) = self.model_hub.hub() else {
             return;
         };
@@ -778,9 +778,9 @@ impl RSpiceApp {
                 matches!(operation, ModelHubRequest::FetchSnapshot),
                 operation.landing_pack(),
             );
-            self.state.workbench.models_view.operational_state =
+            self.state.models.models_view.operational_state =
                 ModelsOperationalState::from_failure(&reason);
-            self.state.workbench.models_view.action_receipt = Some(Err(reason.clone()));
+            self.state.models.models_view.action_receipt = Some(Err(reason.clone()));
             self.state.prompt(reason);
             return;
         }
@@ -799,7 +799,7 @@ impl RSpiceApp {
         ctx: &Context,
         operation: NativeModelCatalogOperation,
     ) {
-        if self.state.workbench.models_view.model_import_in_progress {
+        if self.state.models.models_view.model_import_in_progress {
             self.state.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
@@ -815,8 +815,8 @@ impl RSpiceApp {
             ),
             operation.landing_pack(),
         );
-        self.state.workbench.models_view.model_import_in_progress = true;
-        self.state.workbench.models_view.model_import_label = Some(operation.progress_label());
+        self.state.models.models_view.model_import_in_progress = true;
+        self.state.models.models_view.model_import_label = Some(operation.progress_label());
         model_hub_progress().clear();
         let repaint = ctx.clone();
         let worker_operation = operation.clone();
@@ -849,12 +849,12 @@ impl RSpiceApp {
                 repaint.request_repaint();
             });
         if let Err(error) = spawn {
-            self.state.workbench.models_view.model_import_in_progress = false;
-            self.state.workbench.models_view.model_import_label = None;
+            self.state.models.models_view.model_import_in_progress = false;
+            self.state.models.models_view.model_import_label = None;
             let message = format!("Could not start the background model-source operation: {error}");
-            self.state.workbench.models_view.operational_state =
+            self.state.models.models_view.operational_state =
                 ModelsOperationalState::from_failure(&message);
-            self.state.workbench.models_view.action_receipt = Some(Err(message.clone()));
+            self.state.models.models_view.action_receipt = Some(Err(message.clone()));
             self.state
                 .record(LogSeverity::Error, LogSource::Studio, message);
         }
@@ -1092,9 +1092,9 @@ fn poll_native_model_imports(
         Err(poisoned) => poisoned.into_inner().drain(..).collect::<Vec<_>>(),
     };
     for completion in completions {
-        state.workbench.models_view.model_import_in_progress = false;
-        state.workbench.models_view.model_import_label = None;
-        state.workbench.models_view.model_import_progress = None;
+        state.models.models_view.model_import_in_progress = false;
+        state.models.models_view.model_import_label = None;
+        state.models.models_view.model_import_progress = None;
         model_hub_progress().clear();
         // A re-proof's verdict is recorded whichever way it went, before any
         // of the publishing below can return early on an unrelated condition.
@@ -1126,8 +1126,8 @@ fn poll_native_model_imports(
                 "The {} finished after the project or model catalog changed, so its result was discarded and nothing changed. Run it again against the current project.",
                 completion.operation.description()
             );
-            state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
-            state.workbench.models_view.action_receipt = Some(Err(error.clone()));
+            state.models.models_view.operational_state = ModelsOperationalState::Stale;
+            state.models.models_view.action_receipt = Some(Err(error.clone()));
             state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
             state
                 .workbench
@@ -1148,8 +1148,8 @@ fn poll_native_model_imports(
                 library_stats,
             ) {
                 Ok(receipt) => {
-                    state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
-                    state.workbench.models_view.action_receipt = Some(Ok(receipt.clone()));
+                    state.models.models_view.operational_state = ModelsOperationalState::Ready;
+                    state.models.models_view.action_receipt = Some(Ok(receipt.clone()));
                     state.record(LogSeverity::Info, LogSource::Studio, receipt);
                 }
                 Err(errors) => {
@@ -1179,8 +1179,8 @@ fn poll_native_model_imports(
                 if state.model.pdk_config != previous {
                     let error = "PDK settings changed while their model sources were loading, so the loaded result was discarded and nothing changed. Apply the current settings again."
                         .to_owned();
-                    state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
-                    state.workbench.models_view.action_receipt = Some(Err(error.clone()));
+                    state.models.models_view.operational_state = ModelsOperationalState::Stale;
+                    state.models.models_view.action_receipt = Some(Err(error.clone()));
                     state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
                     state.workbench.toasts.warn_with_title(
                         ctx,
@@ -1201,9 +1201,8 @@ fn poll_native_model_imports(
                     Ok(loaded) => {
                         emit_pdk_apply_messages(state, Ok(loaded));
                         let receipt = format!("Applied PDK settings ({loaded} libraries loaded).");
-                        state.workbench.models_view.operational_state =
-                            ModelsOperationalState::Ready;
-                        state.workbench.models_view.action_receipt = Some(Ok(receipt));
+                        state.models.models_view.operational_state = ModelsOperationalState::Ready;
+                        state.models.models_view.action_receipt = Some(Ok(receipt));
                     }
                     Err(errors) => {
                         // The settings line already names every reason; the
@@ -1236,8 +1235,8 @@ fn note_native_model_catalog_failure(state: &mut AppState, errors: &[String]) {
         "The model-source operation failed without a diagnostic.",
         String::as_str,
     );
-    state.workbench.models_view.operational_state = ModelsOperationalState::from_failure(first);
-    state.workbench.models_view.action_receipt = Some(Err(errors.join("; ")));
+    state.models.models_view.operational_state = ModelsOperationalState::from_failure(first);
+    state.models.models_view.action_receipt = Some(Err(errors.join("; ")));
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -1594,7 +1593,7 @@ impl RSpiceApp {
     /// the authority stamp before going async, work on a candidate nothing
     /// else can see, queue the completion, and wake the frame loop.
     fn start_browser_model_hub_operation(&mut self, ctx: &Context, request: ModelHubRequest) {
-        if self.state.workbench.models_view.model_import_in_progress {
+        if self.state.models.models_view.model_import_in_progress {
             self.state.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
@@ -1624,8 +1623,8 @@ impl RSpiceApp {
             matches!(request, ModelHubRequest::FetchSnapshot),
             request.landing_pack(),
         );
-        self.state.workbench.models_view.model_import_in_progress = true;
-        self.state.workbench.models_view.model_import_label = Some(request.progress_label());
+        self.state.models.models_view.model_import_in_progress = true;
+        self.state.models.models_view.model_import_label = Some(request.progress_label());
         model_hub_progress().clear();
         let repaint = ctx.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -1653,9 +1652,9 @@ fn poll_browser_model_hub_operations(
     let completions =
         BROWSER_MODEL_HUB.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        state.workbench.models_view.model_import_in_progress = false;
-        state.workbench.models_view.model_import_label = None;
-        state.workbench.models_view.model_import_progress = None;
+        state.models.models_view.model_import_in_progress = false;
+        state.models.models_view.model_import_label = None;
+        state.models.models_view.model_import_progress = None;
         model_hub_progress().clear();
         match completion.result {
             Ok(output) => {
@@ -1677,8 +1676,8 @@ fn poll_browser_model_hub_operations(
                          and nothing changed. Run it again against the current project.",
                         completion.request.description()
                     );
-                    state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
-                    state.workbench.models_view.action_receipt = Some(Err(error.clone()));
+                    state.models.models_view.operational_state = ModelsOperationalState::Stale;
+                    state.models.models_view.action_receipt = Some(Err(error.clone()));
                     state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
                     state.workbench.toasts.warn_with_title(
                         ctx,
@@ -1707,8 +1706,8 @@ fn poll_browser_model_imports(state: &mut AppState) {
     let completions =
         BROWSER_MODEL_IMPORTS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        state.workbench.models_view.model_import_in_progress = false;
-        state.workbench.models_view.model_import_label = None;
+        state.models.models_view.model_import_in_progress = false;
+        state.models.models_view.model_import_label = None;
         browser_model_import_worker::finish();
         let current_project_id = state
             .project_lifecycle
@@ -1722,7 +1721,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
         let replace_library = completion.authority.replace_library.clone();
         if let Some(candidates) = completion.root_candidates {
             if authority_current {
-                state.workbench.models_view.dialog = Some(
+                state.models.models_view.dialog = Some(
                     crate::workbench::state::ModelsWorkbenchDialog::SelectBrowserImportRoot {
                         candidates,
                         selected: 0,
@@ -1736,9 +1735,9 @@ fn poll_browser_model_imports(state: &mut AppState) {
                 state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Models);
-                state.workbench.models_page = crate::state::ModelsPage::Models;
-                state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
-                state.workbench.models_view.action_receipt = Some(Ok(
+                state.models.models_page = crate::state::ModelsPage::Models;
+                state.models.models_view.operational_state = ModelsOperationalState::Ready;
+                state.models.models_view.action_receipt = Some(Ok(
                     "Select the executable entry file for the browser model source tree."
                         .to_owned(),
                 ));
@@ -1748,8 +1747,8 @@ fn poll_browser_model_imports(state: &mut AppState) {
                 });
                 let error = "The project or model catalog changed while browser model sources were being selected; the pending selection was discarded."
                     .to_owned();
-                state.workbench.models_view.operational_state = ModelsOperationalState::Stale;
-                state.workbench.models_view.action_receipt = Some(Err(error.clone()));
+                state.models.models_view.operational_state = ModelsOperationalState::Stale;
+                state.models.models_view.action_receipt = Some(Err(error.clone()));
                 state.record(LogSeverity::Error, LogSource::Studio, error);
             }
             continue;
@@ -1820,23 +1819,23 @@ fn poll_browser_model_imports(state: &mut AppState) {
                     if replaced { "Refreshed" } else { "Imported" },
                     if file_count == 1 { "" } else { "s" }
                 );
-                state.workbench.models_view.operational_state = ModelsOperationalState::Ready;
-                state.workbench.models_view.action_receipt = Some(Ok(message.clone()));
+                state.models.models_view.operational_state = ModelsOperationalState::Ready;
+                state.models.models_view.action_receipt = Some(Ok(message.clone()));
                 state.record(LogSeverity::Info, LogSource::Studio, message);
             }
             Ok(None) => {
-                state.workbench.models_view.operational_state = ModelsOperationalState::Cancelled;
-                state.workbench.models_view.action_receipt = Some(Ok(
+                state.models.models_view.operational_state = ModelsOperationalState::Cancelled;
+                state.models.models_view.action_receipt = Some(Ok(
                     "Browser model-source selection was cancelled.".to_owned(),
                 ));
             }
             Err(error) => {
-                state.workbench.models_view.operational_state = if authority_current {
+                state.models.models_view.operational_state = if authority_current {
                     ModelsOperationalState::from_failure(&error)
                 } else {
                     ModelsOperationalState::Stale
                 };
-                state.workbench.models_view.action_receipt = Some(Err(error.clone()));
+                state.models.models_view.action_receipt = Some(Err(error.clone()));
                 state.record(LogSeverity::Error, LogSource::Studio, error);
             }
         }

@@ -227,7 +227,7 @@ fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
     use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
     let Some(name) = state
-        .workbench
+        .design
         .stimulus_editor
         .pending_delete()
         .map(str::to_owned)
@@ -245,11 +245,11 @@ fn ask_before_deleting(ui: &Ui, state: &mut AppState) {
         });
     match choice {
         DialogChoice::Primary => {
-            state.workbench.stimulus_editor.take_pending_delete();
+            state.design.stimulus_editor.take_pending_delete();
             crate::workbench::app::actions::stimulus::delete_definition(state);
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.workbench.stimulus_editor.take_pending_delete();
+            state.design.stimulus_editor.take_pending_delete();
         }
         DialogChoice::Secondary | DialogChoice::None => {}
     }
@@ -278,7 +278,7 @@ fn show_empty(ui: &mut Ui, state: &mut AppState) {
 /// cannot happen after [`select_first_if_unresolved`] except in the single
 /// frame a delete lands on.
 fn resolve(state: &mut AppState) -> Option<Stage> {
-    let name = state.workbench.selected_stimulus_definition.clone()?;
+    let name = state.design.selected_stimulus_definition.clone()?;
     let saved = state
         .model
         .workspace
@@ -287,7 +287,7 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
         .get(&name)?
         .clone();
     let timing = crate::workbench::app::actions::property_edit::stimulus_preview_timing(state);
-    let editor = &mut state.workbench.stimulus_editor;
+    let editor = &mut state.design.stimulus_editor;
     let draft = editor.draft_for(&saved);
     let working = draft.working().clone();
     let dirty = draft.is_dirty();
@@ -301,7 +301,7 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
     let adopters = crate::workbench::app::actions::stimulus::design_adopters(state, &name);
     let findings = findings(state, &live, &spec);
     let realization = state
-        .workbench
+        .design
         .stimulus_editor
         .realization(&live, span, timing)
         .clone();
@@ -330,7 +330,7 @@ fn resolve(state: &mut AppState) -> Option<Stage> {
 /// library that holds one always has a first.
 fn select_first_if_unresolved(state: &mut AppState) {
     let resolved = state
-        .workbench
+        .design
         .selected_stimulus_definition
         .as_deref()
         .is_some_and(|name| {
@@ -345,7 +345,7 @@ fn select_first_if_unresolved(state: &mut AppState) {
     if resolved {
         return;
     }
-    state.workbench.selected_stimulus_definition = state
+    state.design.selected_stimulus_definition = state
         .model
         .workspace
         .content
@@ -411,7 +411,7 @@ fn name_findings(state: &AppState, record: &StimulusDefinition) -> Vec<String> {
             "'{name}' is not a SPICE identifier, so no placed source could carry it"
         ));
     }
-    let selected = state.workbench.selected_stimulus_definition.as_deref();
+    let selected = state.design.selected_stimulus_definition.as_deref();
     let collides = state
         .model
         .workspace
@@ -548,44 +548,44 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
 
     match action {
         StageAction::Rename(name) => {
-            state.workbench.stimulus_editor.clear_field();
+            state.design.stimulus_editor.clear_field();
             stimulus::edit_name(state, &name);
         }
         StageAction::SetFamily(family) => {
-            state.workbench.stimulus_editor.clear_field();
+            state.design.stimulus_editor.clear_field();
             stimulus::edit_family(state, family);
         }
         StageAction::SetKind(kind) => {
-            state.workbench.stimulus_editor.clear_field();
+            state.design.stimulus_editor.clear_field();
             stimulus::edit_kind(state, kind);
         }
         StageAction::TypeField { field, value } => {
             let name = stage.saved.name().to_owned();
             state
-                .workbench
+                .design
                 .stimulus_editor
                 .set_field_text(&name, &field, value);
         }
         StageAction::CommitField { field, value } => {
-            state.workbench.stimulus_editor.clear_field();
+            state.design.stimulus_editor.clear_field();
             stimulus::edit_field(state, &field, &value);
         }
         StageAction::SetPoints(points) => {
-            state.workbench.stimulus_editor.clear_field();
+            state.design.stimulus_editor.clear_field();
             stimulus::edit_field(state, "pwl_data", &points);
         }
         StageAction::SelectPoint(index) => {
             let name = stage.saved.name().to_owned();
-            state.workbench.stimulus_editor.select_point(&name, index);
+            state.design.stimulus_editor.select_point(&name, index);
         }
-        StageAction::SetSpan(span) => state.workbench.stimulus_editor.span = span,
+        StageAction::SetSpan(span) => state.design.stimulus_editor.span = span,
         StageAction::Apply => stimulus::apply_draft(state),
         StageAction::Revert => stimulus::revert_draft(state),
         StageAction::Duplicate => stimulus::duplicate_definition(state),
         StageAction::Delete => {
             if stimulus::delete_needs_confirmation(state).is_some() {
                 let name = stage.saved.name().to_owned();
-                state.workbench.stimulus_editor.ask_before_deleting(&name);
+                state.design.stimulus_editor.ask_before_deleting(&name);
             } else {
                 stimulus::delete_definition(state);
             }

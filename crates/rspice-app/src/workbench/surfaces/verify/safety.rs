@@ -133,12 +133,12 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
     match output.action.and_then(|index| actions.get(index)) {
         Some(SoaAction::Run) => {
             let result = request_analysis_run(app, &[crate::simulation::plan::AnalysisKind::Soa]);
-            record_action(&mut app.state.workbench.verification, result);
+            record_action(&mut app.state.simulate.verification, result);
         }
         Some(SoaAction::Edit) => {
             let result =
                 open_analysis_configuration(app, crate::simulation::plan::AnalysisKind::Soa);
-            record_action(&mut app.state.workbench.verification, result);
+            record_action(&mut app.state.simulate.verification, result);
         }
         None => {}
     }
@@ -187,7 +187,7 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
         .clicked;
     if let Some(index) = clicked {
         let result = cross_probe_soa_device(app, &rows[index].device);
-        record_action(&mut app.state.workbench.verification, result);
+        record_action(&mut app.state.simulate.verification, result);
     }
 }
 

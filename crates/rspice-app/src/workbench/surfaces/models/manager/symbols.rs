@@ -100,7 +100,7 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 };
                 let selected = app
                     .state
-                    .workbench
+                    .models
                     .models_view
                     .selected_symbol
                     .as_deref()
@@ -110,8 +110,7 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     symbol_registry(ui, height, &rows, &layout, selected.as_deref())
                 {
                     let row = &rows[index];
-                    app.state.workbench.models_view.selected_symbol =
-                        Some(symbol_key(&row.reference));
+                    app.state.models.models_view.selected_symbol = Some(symbol_key(&row.reference));
                     if !row.read_only() {
                         app.state.model.library_manager.select_view(
                             &row.reference.library,
@@ -479,7 +478,7 @@ fn symbol_detail(
 ) {
     let selected = app
         .state
-        .workbench
+        .models
         .models_view
         .selected_symbol
         .as_deref()
@@ -489,7 +488,7 @@ fn symbol_detail(
     let Some(row) = selected else {
         return;
     };
-    app.state.workbench.models_view.selected_symbol = Some(symbol_key(&row.reference));
+    app.state.models.models_view.selected_symbol = Some(symbol_key(&row.reference));
     ScrollArea::vertical()
         .id_salt("models-symbol-detail")
         .auto_shrink([false, true])
@@ -1101,7 +1100,7 @@ fn open_author_symbol_variant_dialog(app: &mut ManagerRenderContext<'_>, row: &S
         );
         return;
     };
-    app.state.workbench.models_view.dialog =
+    app.state.models.models_view.dialog =
         Some(ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
             package_id: row.reference.library.clone(),
             source_cell: row.reference.cell.clone(),

@@ -47,7 +47,7 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
                 .plan_data(plan_id)
                 .map(|payload| (plan_id, revision, payload.design_variables.clone()))
         });
-    let session = &mut app.state.workbench.verification;
+    let session = &mut app.state.simulate.verification;
     let Some((plan_id, plan_revision, variables)) = source else {
         session.tuning_plan_id = None;
         session.tuning_plan_revision = None;
@@ -84,7 +84,7 @@ pub(super) fn sync_tuning_session(app: &mut RSpiceApp) {
 }
 
 pub(super) fn tuning_is_dirty(app: &RSpiceApp) -> bool {
-    let session = &app.state.workbench.verification;
+    let session = &app.state.simulate.verification;
     session
         .tuning_variables
         .iter()
@@ -95,7 +95,7 @@ pub(super) fn tuning_is_dirty(app: &RSpiceApp) -> bool {
 }
 
 pub(super) fn tuning_is_valid(app: &RSpiceApp) -> bool {
-    let session = &app.state.workbench.verification;
+    let session = &app.state.simulate.verification;
     let drafts = &session.tuning_variables;
     let binding_is_consistent = session
         .tuning_instance_binding
@@ -113,7 +113,7 @@ pub(super) fn tuning_is_valid(app: &RSpiceApp) -> bool {
 
 fn tuning_schematic_edit_block_reason(app: &RSpiceApp) -> Option<String> {
     app.state
-        .workbench
+        .simulate
         .verification
         .tuning_instance_binding
         .as_ref()
@@ -126,7 +126,7 @@ fn tuning_schematic_edit_block_reason(app: &RSpiceApp) -> Option<String> {
 }
 
 pub(super) fn tuning_commit_block_reason(app: &RSpiceApp) -> String {
-    let drafts = &app.state.workbench.verification.tuning_variables;
+    let drafts = &app.state.simulate.verification.tuning_variables;
     if drafts.is_empty() {
         return "Add at least one design variable to the active simulation plan.".to_owned();
     }
@@ -148,7 +148,7 @@ pub(super) fn tuning_commit_block_reason(app: &RSpiceApp) -> String {
 }
 
 pub(super) fn revert_tuning_session(app: &mut RSpiceApp) {
-    let session = &mut app.state.workbench.verification;
+    let session = &mut app.state.simulate.verification;
     session.tuning_review_open = false;
     session.tuning_variables.retain(|draft| !draft.proposed);
     for draft in &mut session.tuning_variables {
@@ -164,7 +164,7 @@ pub(super) fn revert_tuning_session(app: &mut RSpiceApp) {
 }
 
 fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable> {
-    let session = &app.state.workbench.verification;
+    let session = &app.state.simulate.verification;
     let mut variables = session
         .tuning_plan_id
         .and_then(|plan_id| app.state.model.workspace.content.plan_data(plan_id))
@@ -184,7 +184,7 @@ fn tuning_session_variables(app: &RSpiceApp) -> Vec<crate::state::DesignVariable
 }
 
 fn tuning_baseline_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
-    let run_id = app.state.workbench.verification.tuning_baseline_run?;
+    let run_id = app.state.simulate.verification.tuning_baseline_run?;
     app.state
         .model
         .simulation
@@ -195,9 +195,9 @@ fn tuning_baseline_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> 
 }
 
 fn tuning_candidate_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
-    let baseline_id = app.state.workbench.verification.tuning_baseline_run;
+    let baseline_id = app.state.simulate.verification.tuning_baseline_run;
     let baseline_sequence = tuning_baseline_run(app).map(|run| run.id);
-    let plan_id = app.state.workbench.verification.tuning_plan_id?;
+    let plan_id = app.state.simulate.verification.tuning_plan_id?;
     verification_run(app).filter(|run| {
         Some(run.run_id) != baseline_id
             && baseline_sequence.is_none_or(|sequence| run.id > sequence)
@@ -221,7 +221,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
     let plan = app.state.model.sim_setup.stable_analysis_plan()?;
     let plan_id = plan.id();
     let plan_revision = plan.revision();
-    let verification = &app.state.workbench.verification;
+    let verification = &app.state.simulate.verification;
     if verification.tuning_plan_id != Some(plan_id)
         || verification.tuning_plan_revision != Some(plan_revision)
     {
@@ -264,7 +264,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
     let original_workspace = app.state.model.workspace.clone();
     let original_setup = app.state.model.sim_setup.clone();
     let original_schematic = app.state.model.schematic.clone();
-    let original_preflight = app.state.workbench.preflight.clone();
+    let original_preflight = app.state.runs.preflight.clone();
     let mut workspace = original_workspace.clone();
     let mut setup = original_setup.clone();
     let mut schematic = original_schematic.clone();
@@ -360,12 +360,12 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
     app.state.model.workspace = workspace;
     app.state.model.sim_setup = setup;
     app.state.model.schematic = schematic;
-    app.state.workbench.preflight = Default::default();
+    app.state.runs.preflight = Default::default();
     if let Some(reason) = app.state.simulation_run_block_reason() {
         app.state.model.workspace = original_workspace;
         app.state.model.sim_setup = original_setup;
         app.state.model.schematic = original_schematic;
-        app.state.workbench.preflight = original_preflight;
+        app.state.runs.preflight = original_preflight;
         return Err(format!(
             "the tuned revision was not committed because its required run is blocked: {reason}"
         ));
@@ -377,7 +377,7 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
         app.state.model.workspace = original_workspace;
         app.state.model.sim_setup = original_setup;
         app.state.model.schematic = original_schematic;
-        app.state.workbench.preflight = original_preflight;
+        app.state.runs.preflight = original_preflight;
         return Err(format!(
             "the tuned revision was not committed because the run could not be prepared: {}",
             error.message()
@@ -398,26 +398,26 @@ pub(super) fn commit_tuning_and_run(app: &mut RSpiceApp) -> Result<(), String> {
 }
 
 pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.workbench.verification.tuning_review_open {
+    if !app.state.simulate.verification.tuning_review_open {
         return;
     }
-    if app.state.workbench.verification_page != VerificationPage::Tuning
+    if app.state.simulate.verification_page != VerificationPage::Tuning
         || !tuning_is_dirty(app)
         || !tuning_is_valid(app)
     {
-        app.state.workbench.verification.tuning_review_open = false;
+        app.state.simulate.verification.tuning_review_open = false;
         return;
     }
     let variables = tuning_session_variables(app);
     let instance_binding = app
         .state
-        .workbench
+        .simulate
         .verification
         .tuning_instance_binding
         .clone();
     let mut rows = app
         .state
-        .workbench
+        .simulate
         .verification
         .tuning_variables
         .iter()
@@ -471,7 +471,7 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
         ]);
     }
     if rows.is_empty() {
-        app.state.workbench.verification.tuning_review_open = false;
+        app.state.simulate.verification.tuning_review_open = false;
         return;
     }
 
@@ -548,7 +548,7 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     if commit {
         let result = commit_tuning_and_run(app);
         let succeeded = result.is_ok();
-        record_action(&mut app.state.workbench.verification, result);
+        record_action(&mut app.state.simulate.verification, result);
         if succeeded {
             open = false;
         }
@@ -556,7 +556,7 @@ pub(super) fn tuning_review_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
     if cancel {
         open = false;
     }
-    app.state.workbench.verification.tuning_review_open = open;
+    app.state.simulate.verification.tuning_review_open = open;
 }
 
 fn tuning_delta(
@@ -630,7 +630,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
     let variables = tuning_session_variables(app);
     let dirty_count = app
         .state
-        .workbench
+        .simulate
         .verification
         .tuning_variables
         .iter()
@@ -638,7 +638,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         .count()
         + usize::from(
             app.state
-                .workbench
+                .simulate
                 .verification
                 .tuning_instance_binding
                 .as_ref()
@@ -648,7 +648,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
         );
     let invalid_count = app
         .state
-        .workbench
+        .simulate
         .verification
         .tuning_variables
         .iter()
@@ -704,7 +704,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
     .show(ui);
     match output.action {
         Some(0) => revert_tuning_session(app),
-        Some(1) => app.state.workbench.verification.tuning_review_open = true,
+        Some(1) => app.state.simulate.verification.tuning_review_open = true,
         _ => {}
     }
     action_problem_line(ui, app);
@@ -797,7 +797,7 @@ fn tuning_variable_editor(
 ) {
     let Some(index) = app
         .state
-        .workbench
+        .simulate
         .verification
         .tuning_variables
         .iter()
@@ -806,7 +806,7 @@ fn tuning_variable_editor(
         return;
     };
     let t = Tokens::get(ui.ctx());
-    let proposed = app.state.workbench.verification.tuning_variables[index].proposed;
+    let proposed = app.state.simulate.verification.tuning_variables[index].proposed;
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(
@@ -827,7 +827,7 @@ fn tuning_variable_editor(
         });
     });
     let response = {
-        let draft = &mut app.state.workbench.verification.tuning_variables[index];
+        let draft = &mut app.state.simulate.verification.tuning_variables[index];
         ui.add_sized(
             [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
             egui::TextEdit::singleline(&mut draft.candidate_expression)
@@ -835,24 +835,24 @@ fn tuning_variable_editor(
                 .id_source(("workbench.verify.tuning.variable", variable.id)),
         )
     };
-    if app.state.workbench.verification.tuning_focus_variable == Some(variable.id) {
+    if app.state.simulate.verification.tuning_focus_variable == Some(variable.id) {
         response.request_focus();
-        app.state.workbench.verification.tuning_focus_variable = None;
+        app.state.simulate.verification.tuning_focus_variable = None;
     }
     if response.clicked() || response.gained_focus() {
-        app.state.workbench.verification.tuning_selected_variable = Some(variable.id);
+        app.state.simulate.verification.tuning_selected_variable = Some(variable.id);
     }
     if response.changed() {
-        let expression = app.state.workbench.verification.tuning_variables[index]
+        let expression = app.state.simulate.verification.tuning_variables[index]
             .candidate_expression
             .clone();
         let mut candidate = variable.clone();
         candidate.expression = expression;
-        app.state.workbench.verification.tuning_variables[index].validation_error =
+        app.state.simulate.verification.tuning_variables[index].validation_error =
             candidate.validate().err();
     }
     let current_value = {
-        let draft = &app.state.workbench.verification.tuning_variables[index];
+        let draft = &app.state.simulate.verification.tuning_variables[index];
         let mut candidate = variable.clone();
         candidate.expression.clone_from(&draft.candidate_expression);
         candidate.resolved_value_si().ok()
@@ -867,13 +867,13 @@ fn tuning_variable_editor(
             )
             .changed()
     {
-        let draft = &mut app.state.workbench.verification.tuning_variables[index];
+        let draft = &mut app.state.simulate.verification.tuning_variables[index];
         draft.candidate_expression = format!("{value:.12e}");
         let mut candidate = variable.clone();
         candidate.expression.clone_from(&draft.candidate_expression);
         draft.validation_error = candidate.validate().err();
     }
-    let draft = &app.state.workbench.verification.tuning_variables[index];
+    let draft = &app.state.simulate.verification.tuning_variables[index];
     if let Some(error) = &draft.validation_error {
         let _ = crate::ui::widgets::problem_line(ui, Problem::Failure, error);
     } else {

@@ -58,7 +58,7 @@ fn session(catalog: Vec<u8>, archive: &[u8]) -> (ModelHub, Store, AppState) {
         BIAS_PART_ID,
     )
     .expect("the project retains the bias network");
-    state.workbench.models_view.selected_pack = Some(PACK_ID.to_owned());
+    state.models.models_view.selected_pack = Some(PACK_ID.to_owned());
     (hub, store, state)
 }
 
@@ -110,7 +110,7 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
     let catalog = hub::hub_catalog(&service, &state);
     refresh_release_diff(&service, &mut state, &catalog);
     let first = state
-        .workbench
+        .models
         .models_view
         .release_diff
         .clone()
@@ -120,7 +120,7 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
 
     // A value only a recomputation would destroy.
     state
-        .workbench
+        .models
         .models_view
         .release_diff
         .as_mut()
@@ -132,7 +132,7 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
     }
     assert_eq!(
         state
-            .workbench
+            .models
             .models_view
             .release_diff
             .as_ref()
@@ -165,7 +165,7 @@ fn a_catalog_replaced_wholesale_cannot_reuse_a_diff_it_did_not_earn() {
     let catalog = hub::hub_catalog(&service, &state);
     refresh_release_diff(&service, &mut state, &catalog);
     let before = state
-        .workbench
+        .models
         .models_view
         .release_diff
         .clone()
@@ -207,7 +207,7 @@ fn a_catalog_replaced_wholesale_cannot_reuse_a_diff_it_did_not_earn() {
 
     refresh_release_diff(&service, &mut state, &replaced_catalog);
     let after = state
-        .workbench
+        .models
         .models_view
         .release_diff
         .as_ref()
@@ -246,7 +246,7 @@ fn a_pack_this_project_pinned_nothing_from_offers_no_adoption() {
     );
     refresh_release_diff(&service, &mut state, &catalog);
     assert!(
-        state.workbench.models_view.release_diff.is_some(),
+        state.models.models_view.release_diff.is_some(),
         "the diff is still worth stating: an update is on offer"
     );
 }

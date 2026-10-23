@@ -108,7 +108,7 @@ fn report(state: &mut AppState, result: Result<(), String>) {
 
 /// Draw the open form, if any, and commit what it asks for.
 pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
-    let Some(dialog) = app.state.workbench.result_document_dialog.clone() else {
+    let Some(dialog) = app.state.results.result_document_dialog.clone() else {
         return;
     };
     let (dialog, choice) = match dialog {
@@ -142,11 +142,11 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
             (ResultDocumentDialog::Properties(draft), choice)
         }
     };
-    app.state.workbench.result_document_dialog = Some(dialog);
+    app.state.results.result_document_dialog = Some(dialog);
     match choice {
         DialogChoice::Primary => commit_open_dialog(&mut app.state),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.workbench.result_document_dialog = None;
+            app.state.results.result_document_dialog = None;
         }
         DialogChoice::None | DialogChoice::Secondary => {}
     }
@@ -155,7 +155,7 @@ pub(crate) fn show(ctx: &Context, app: &mut RSpiceApp) {
 /// Commit the open form's draft. The form closes when its edit lands, or
 /// moves on to what it shows next.
 fn commit_open_dialog(state: &mut AppState) {
-    let result = match state.workbench.result_document_dialog.clone() {
+    let result = match state.results.result_document_dialog.clone() {
         Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft).map(|()| None),
         Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
         Some(ResultDocumentDialog::Measurement(draft)) => measurement::commit(state, &draft),
@@ -164,7 +164,7 @@ fn commit_open_dialog(state: &mut AppState) {
         None => return,
     };
     match result {
-        Ok(next) => state.workbench.result_document_dialog = next,
+        Ok(next) => state.results.result_document_dialog = next,
         Err(error) => state.prompt(error),
     }
 }
@@ -198,7 +198,7 @@ pub(crate) fn open_add_pane(state: &mut AppState) {
             .map(|analysis| analysis.id),
         viewer: Some(state.results.results.session.viewer),
     };
-    state.workbench.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
+    state.results.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
 }
 
 /// The sheets a pane bound to `analysis` can draw: release viewers whose data

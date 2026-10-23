@@ -55,7 +55,7 @@ fn collision(state: &mut AppState) -> (Option<WaiverTarget>, bool) {
 
 fn blocked(app: &RSpiceApp) -> bool {
     app.state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -83,7 +83,7 @@ fn a_waived_error_is_run_and_an_unwaived_one_is_refused() {
         .waive_finding(&target, REASON)
         .expect("a case collision may be waived");
     assert!(
-        app.state.workbench.preflight.report.is_none(),
+        app.state.runs.preflight.report.is_none(),
         "the report that refused the run no longer stands"
     );
     assert!(collision(&mut app.state).1, "the page lists it waived");
@@ -93,7 +93,7 @@ fn a_waived_error_is_run_and_an_unwaived_one_is_refused() {
     // its verdict.
     start(&mut app.state, &mut app.simulation_controller, true);
     app.settle_preflight();
-    assert!(!blocked(&app), "{:?}", app.state.workbench.preflight.report);
+    assert!(!blocked(&app), "{:?}", app.state.runs.preflight.report);
     assert!(
         app.state.model.simulation.execution.trigger_simulation,
         "the waived error is run"

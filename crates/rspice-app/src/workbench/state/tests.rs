@@ -426,28 +426,6 @@ fn toggling_the_active_drawer_closes_it_deterministically() {
 }
 
 #[test]
-fn invalidating_preflight_drops_every_revision_bound_presentation_artifact() {
-    let mut preflight = PreflightDialogState {
-        report: Some(crate::state::PreflightReport {
-            project_revision: 4,
-            topology_root: "user/top/schematic".to_owned(),
-            topology_revision: 9,
-            topology_closure: vec![("user/top/schematic".to_owned(), 9)],
-            simulation_plan_id: Some(crate::product::SimulationPlanId::new()),
-            simulation_plan_revision: Some(crate::product::ObjectRevision::INITIAL),
-            blockers: Vec::new(),
-            advisories: Vec::new(),
-            prepared: None,
-        }),
-        ..Default::default()
-    };
-
-    preflight.invalidate();
-
-    assert!(preflight.report.is_none());
-}
-
-#[test]
 fn mixed_dock_composition_keeps_only_the_supported_drawer() {
     let mut state = WorkbenchState::default();
     state.toggle_drawer(Drawer::Navigator);
@@ -461,44 +439,6 @@ fn mixed_dock_composition_keeps_only_the_supported_drawer() {
     state.toggle_drawer(Drawer::Workspaces);
     state.reconcile_drawer_mode(false, true, false);
     assert_eq!(state.drawer, None);
-}
-
-#[test]
-fn application_modals_own_global_input_exclusively() {
-    let mut state = WorkbenchState::default();
-    assert!(!state.application_modal_open());
-
-    state.project_launcher_open = true;
-    assert!(state.application_modal_open());
-    state.project_launcher_open = false;
-    state.verification.regression_baseline_picker_open = true;
-    assert!(state.application_modal_open());
-    state.verification.regression_baseline_picker_open = false;
-    state.verification.tuning_review_open = true;
-    assert!(state.application_modal_open());
-    state.verification.tuning_review_open = false;
-    state
-        .navigate(
-            SurfaceRoute::surface(SurfaceId::Preferences),
-            RouteTransitionSource::User,
-        )
-        .expect("Preferences has a registered executor");
-    assert!(state.application_modal_open());
-    state
-        .navigate(
-            SurfaceRoute::surface(SurfaceId::DesignManagement),
-            RouteTransitionSource::User,
-        )
-        .expect("Design Management has a registered executor");
-    assert_eq!(state.workspace, Workspace::Design);
-    assert!(state.application_modal_open());
-    state
-        .navigate(
-            SurfaceRoute::surface(SurfaceId::JobsManager),
-            RouteTransitionSource::User,
-        )
-        .expect("jobs manager has a registered executor");
-    assert!(state.application_modal_open());
 }
 
 #[test]
@@ -706,17 +646,6 @@ fn a_session_left_on_the_retired_interactive_page_restores_onto_the_console() {
     let page: ConsolePage =
         serde_json::from_str("\"Interactive\"").expect("a retired page name still deserializes");
     assert_eq!(page, ConsolePage::Console);
-}
-
-/// The drawing sync runs every frame; a failure that stands is one record.
-#[test]
-fn a_standing_sync_failure_is_recorded_once_and_again_after_it_clears() {
-    let mut slot = None;
-    assert!(SyncFailures::observe(&mut slot, Some("locked")));
-    assert!(!SyncFailures::observe(&mut slot, Some("locked")));
-    assert!(SyncFailures::observe(&mut slot, Some("missing")));
-    assert!(!SyncFailures::observe(&mut slot, None));
-    assert!(SyncFailures::observe(&mut slot, Some("missing")));
 }
 
 #[test]

@@ -203,7 +203,7 @@ pub(super) fn commit_activate_plan(
     let name = setup.active_plan_name().to_string();
     app.state.model.sim_setup = setup;
     app.state.model.workspace = workspace;
-    app.state.workbench.active_analysis_instance = first_instance;
+    app.state.simulate.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     Ok(format!(
         "Opened '{name}' with its own analyses and settings."

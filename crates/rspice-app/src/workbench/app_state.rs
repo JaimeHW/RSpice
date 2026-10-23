@@ -40,9 +40,10 @@ pub(in crate::workbench) mod waivers;
 use crate::services::recent_files::{RecentFile, RecentKind};
 use crate::state::notices::{Notice, NoticeKind};
 use crate::workbench::slots::{
-    CloudState, CodeState, DesignState, HardcopyState, PlatformState, ProjectState, ResultsState,
-    RunsState, SettingsState, SheetsState, ShellState, SimulateState,
+    CloudState, CodeState, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState,
+    ResultsState, RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
+use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 pub(crate) use design_checks::{DesignCheckRuntime, DesignCheckStatus};
 pub(crate) use design_history::{
@@ -95,6 +96,7 @@ pub struct AppState {
     pub(crate) settings: Box<SettingsState>,
     pub(crate) cloud: Box<CloudState>,
     pub(crate) sheets: Box<SheetsState>,
+    pub(crate) models: Box<ModelsState>,
     /// What watching the simulations in flight keeps between frames.
     pub(crate) runs: Box<RunsState>,
     /// The deck a manual-deck run started from and the baseline the last one
@@ -813,7 +815,27 @@ impl AppState {
         #[cfg(not(target_arch = "wasm32"))]
         let browser_file_operation_open = false;
 
-        self.workbench.application_modal_open()
+        self.project.project_launcher_open
+            || self.project.examples_selection.is_some()
+            || self.workbench.notification_center_open
+            || self.models.model_correlation.dialog_open()
+            || self.results.create_result_document.open
+            || self.results.result_document_dialog.is_some()
+            || self.results.result_import.open
+            || self.models.models_view.dialog.is_some()
+            || self.simulate.simulation_workflow.is_some()
+            || self.simulate.verification.regression_baseline_picker_open
+            || self.simulate.verification.tuning_review_open
+            || matches!(
+                self.workbench.current_route().surface_id(),
+                SurfaceId::ProjectLauncher
+                    | SurfaceId::Preferences
+                    | SurfaceId::DesignManagement
+                    | SurfaceId::AccountOrganization
+                    | SurfaceId::JobsManager
+                    | SurfaceId::SpecialistToolBrowser
+                    | SurfaceId::NotificationCenter
+            )
             || self.dialog_modal_open()
             || (self.workbench.workspace == crate::workbench::state::Workspace::Netlist
                 && self.code.netlist.application_modal_open())
@@ -822,6 +844,22 @@ impl AppState {
             || self.pdk_settings_dialog.open
             || self.model_browser_state.open
             || browser_file_operation_open
+    }
+
+    pub fn open_project_launcher(&mut self) {
+        let route = SurfaceRoute::surface(SurfaceId::ProjectLauncher);
+        if self.workbench.current_route() != route
+            && let Err(error) = self.workbench.navigate(route, RouteTransitionSource::User)
+        {
+            self.workbench.record_route_diagnostic(format!(
+                "The Project Launcher could not be opened: {error}"
+            ));
+            return;
+        }
+        self.project.project_launcher_open = true;
+        self.project.project_launcher_page = crate::workbench::state::ProjectLauncherPage::Projects;
+        self.platform.recovery_catalog.request_refresh();
+        self.project.focus_project_launcher_search = true;
     }
 
     /// Arm the analysis catalogue, from wherever the reader asked for it.
@@ -1129,7 +1167,7 @@ impl AppState {
     pub(crate) fn record_plan_receipt(&mut self, message: impl Into<String>) {
         let message = message.into();
         if self
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .record_receipt(message.as_str())
         {
@@ -1152,7 +1190,7 @@ impl AppState {
     pub(crate) fn record_plan_refusal(&mut self, message: impl Into<String>) {
         let message = message.into();
         if self
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .record_refusal(message.as_str())
         {

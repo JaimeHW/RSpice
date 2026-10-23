@@ -599,7 +599,7 @@ pub(super) fn active_regression_baseline(app: &RSpiceApp) -> Option<crate::produ
         .content
         .plan_data(plan_id)
         .and_then(|payload| payload.regression_baseline_run)
-        .or(app.state.workbench.verification.regression_baseline_run)
+        .or(app.state.simulate.verification.regression_baseline_run)
 }
 
 pub(super) fn commit_regression_baseline(
@@ -677,11 +677,11 @@ pub(super) fn commit_regression_baseline(
     app.state.model.sim_setup = setup;
     app.state.model.simulation = simulation;
     invalidate_plan_bound_preflight(app);
-    app.state.workbench.verification.regression_baseline_run = Some(run_id);
-    app.state.workbench.verification.regression_comparison = None;
-    app.state.workbench.verification.regression_selected_target = None;
+    app.state.simulate.verification.regression_baseline_run = Some(run_id);
+    app.state.simulate.verification.regression_comparison = None;
+    app.state.simulate.verification.regression_selected_target = None;
     app.state
-        .workbench
+        .simulate
         .verification
         .regression_tolerance_drafts
         .clear();
@@ -805,7 +805,7 @@ pub(super) fn synchronize_regression_drafts(
         .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
-    let state = &mut app.state.workbench.verification;
+    let state = &mut app.state.simulate.verification;
     state.regression_tolerance_drafts.retain(|draft| {
         targets
             .iter()
@@ -917,7 +917,7 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
     let policy = active_regression_specification_policy(app);
     let drafts = app
         .state
-        .workbench
+        .simulate
         .verification
         .regression_tolerance_drafts
         .iter()
@@ -940,7 +940,7 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
             Err(error) => {
                 if let Some(authoritative) = app
                     .state
-                    .workbench
+                    .simulate
                     .verification
                     .regression_tolerance_drafts
                     .get_mut(index)
@@ -1005,11 +1005,11 @@ pub(super) fn commit_regression_tolerance_drafts(app: &mut RSpiceApp) -> Result<
     app.state.model.workspace = workspace;
     app.state.model.sim_setup = setup;
     invalidate_plan_bound_preflight(app);
-    for draft in &mut app.state.workbench.verification.regression_tolerance_drafts {
+    for draft in &mut app.state.simulate.verification.regression_tolerance_drafts {
         draft.dirty = false;
         draft.validation_error = None;
     }
-    app.state.workbench.verification.regression_comparison = None;
+    app.state.simulate.verification.regression_comparison = None;
     Ok(())
 }
 
@@ -1049,7 +1049,7 @@ pub(super) fn remove_orphaned_regression_rules(
     app.state.model.workspace = workspace;
     app.state.model.sim_setup = setup;
     invalidate_plan_bound_preflight(app);
-    let verification = &mut app.state.workbench.verification;
+    let verification = &mut app.state.simulate.verification;
     verification.regression_comparison = None;
     verification.regression_selected_target = None;
     verification.regression_tolerance_drafts.clear();
@@ -1058,8 +1058,8 @@ pub(super) fn remove_orphaned_regression_rules(
 
 pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
     if let Err(error) = commit_regression_tolerance_drafts(app) {
-        app.state.workbench.verification.regression_comparison = None;
-        app.state.workbench.verification.action_problem =
+        app.state.simulate.verification.regression_comparison = None;
+        app.state.simulate.verification.action_problem =
             Some(format!("Regression not run: {error}."));
         return;
     }
@@ -1083,8 +1083,8 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
     let tolerance_digest = regression_tolerance_digest(&rules);
     let regression_policy = active_regression_specification_policy(app);
     let Some((baseline, current)) = regression_run_pair(app) else {
-        app.state.workbench.verification.regression_comparison = None;
-        app.state.workbench.verification.action_problem =
+        app.state.simulate.verification.regression_comparison = None;
+        app.state.simulate.verification.action_problem =
             Some("Regression not run: select a baseline run other than this one.".to_owned());
         return;
     };
@@ -1161,8 +1161,8 @@ pub(super) fn run_regression_comparison(app: &mut RSpiceApp) {
         unevaluated_targets,
     };
     drop(waveforms);
-    app.state.workbench.verification.regression_comparison = Some(receipt);
-    app.state.workbench.verification.action_problem = None;
+    app.state.simulate.verification.regression_comparison = Some(receipt);
+    app.state.simulate.verification.action_problem = None;
 }
 
 #[derive(Debug, Clone)]
@@ -1525,7 +1525,7 @@ pub(super) fn export_regression_ci(app: &mut RSpiceApp, junit: &str, tap: &str) 
         app.export_workflow_io
             .write_bytes_file_observed(&destination, &package, "application/zip")
     })();
-    app.state.workbench.verification.action_problem = result
+    app.state.simulate.verification.action_problem = result
         .err()
         .map(|error| format!("JUnit / TAP export failed: {error}"));
 }

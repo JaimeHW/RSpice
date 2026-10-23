@@ -1394,7 +1394,7 @@ mod tests {
         let sheet = crate::schematic::view::drawing_sheet::resolve_active_drawing_sheet(&app.state);
         assert_eq!(sheet.format.authored_size.label(), "Lab panel");
         assert!(!app.state.sheets.drawing_sheet_presets.any_open());
-        assert!(app.state.workbench.reveal_sheet_section);
+        assert!(app.state.sheets.reveal_sheet_section);
         assert!(app.state.can_undo_project_design());
     }
 

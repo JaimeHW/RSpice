@@ -86,7 +86,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
         .unwrap();
     state.design.schematic_snap.grid_size = 777;
     state
-        .workbench
+        .project
         .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
 
     assert!(close_project_discard(&mut state));
@@ -175,7 +175,7 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     assert!(close_project_discard(&mut state));
     assert!(!state.project_lifecycle.is_open());
     state.assert_project_open_fact();
-    assert!(!state.workbench.project_launcher_open);
+    assert!(!state.project.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Project
@@ -256,7 +256,7 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
 
     let mut state = AppState::default();
     state
-        .workbench
+        .project
         .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
     assert!(close_project_discard(&mut state));
     let session = ron::to_string(&state).expect("the session serializes");
@@ -273,7 +273,7 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
             !restored.project_lifecycle.is_open(),
             "On startup choice {choice} opened a project"
         );
-        assert!(!restored.workbench.project_launcher_open);
+        assert!(!restored.project.project_launcher_open);
         assert_eq!(
             restored.workbench.workspace,
             crate::workbench::state::Workspace::Project
@@ -397,18 +397,18 @@ fn closing_a_project_as_an_edit_settles_checks_nothing() {
 fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
     let mut state = AppState::default();
     state
-        .workbench
+        .project
         .begin_project_close(ProjectCloseDestination::LiveMirror);
 
     assert!(close_project_discard(&mut state));
     assert!(!state.project_lifecycle.is_open());
-    assert!(!state.workbench.project_launcher_open);
+    assert!(!state.project.project_launcher_open);
     assert_eq!(
         state.workbench.workspace,
         crate::workbench::state::Workspace::Project
     );
-    assert!(state.workbench.take_live_mirror_entry());
-    assert!(!state.workbench.take_live_mirror_entry());
+    assert!(state.cloud.take_live_mirror_entry());
+    assert!(!state.cloud.take_live_mirror_entry());
 }
 
 #[test]

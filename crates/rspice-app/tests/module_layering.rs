@@ -839,9 +839,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // `state -> *` entries describe, one layer down: `WorkbenchState` stores
     // what a surface is showing instead of the surface deriving it.
     ("state", "routing/availability", 4),
-    ("state", "documents/model_correlation", 2),
-    ("state", "documents/model_editor", 5),
-    ("state", "lifecycle/recovery", 2),
     ("state", "lifecycle/window_session", 2),
     ("state", "preferences", 1),
     ("state", "simulation_analysis_tabs", 1),

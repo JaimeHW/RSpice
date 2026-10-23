@@ -1452,7 +1452,7 @@ fn resolution_ledger(ui: &mut Ui, app: &mut RSpiceApp) {
         // The row names the analysis; the analysis's own form is where the
         // option it names is a field. Nothing else needs carrying: the field is
         // always on screen there, under the analysis's own parameters.
-        super::advanced_options::reveal_in_analyses(&mut app.state.workbench, instance);
+        super::advanced_options::reveal_in_analyses(&mut app.state, instance);
     }
 }
 
@@ -1985,7 +1985,7 @@ mod transaction_tests {
             .key();
         let topology_revision = app.state.model.schematic.topology_version();
         let topology_closure = vec![(topology_root.to_ascii_lowercase(), topology_revision)];
-        app.state.workbench.preflight.report = Some(crate::state::PreflightReport {
+        app.state.runs.preflight.report = Some(crate::state::PreflightReport {
             project_revision: app.state.model.workspace.content.project.revision().get(),
             topology_root,
             topology_revision,
@@ -2014,7 +2014,7 @@ mod transaction_tests {
             source_revision.next().expect("revision advances")
         );
         assert_eq!(app.state.model.sim_setup.options.reltol, options.reltol);
-        assert!(app.state.workbench.preflight.report.is_none());
+        assert!(app.state.runs.preflight.report.is_none());
     }
 
     #[test]

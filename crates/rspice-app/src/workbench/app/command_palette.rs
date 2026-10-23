@@ -519,8 +519,8 @@ impl PaletteEntry {
                 app.state.select_model_library(&entry.library);
                 app.state.model.model_library_manager.filter_text = entry.model.clone();
                 app.state.model.model_library_manager.filter_type = None;
-                app.state.workbench.selected_model = Some(entry.model);
-                app.state.workbench.models_page = crate::state::ModelsPage::Models;
+                app.state.models.selected_model = Some(entry.model);
+                app.state.models.models_page = crate::state::ModelsPage::Models;
                 app.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Models);

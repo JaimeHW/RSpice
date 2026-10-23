@@ -468,7 +468,7 @@ fn extraction_publishes_the_instance_card_and_leaves_it_adopted() {
         ProvenanceState::Adopted { revision: 1 }
     );
     assert_eq!(
-        app.state.workbench.selected_stimulus_definition.as_deref(),
+        app.state.design.selected_stimulus_definition.as_deref(),
         Some("v1_pulse")
     );
 }

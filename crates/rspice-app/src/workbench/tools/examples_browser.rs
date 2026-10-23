@@ -95,7 +95,7 @@ fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Res
 
 /// The Examples dialog, while it is open.
 pub(crate) fn show(ctx: &Context, state: &mut AppState) {
-    let Some(mut selected) = state.workbench.examples_selection else {
+    let Some(mut selected) = state.project.examples_selection else {
         return;
     };
     selected = selected.min(EXAMPLES.len() - 1);
@@ -141,17 +141,17 @@ pub(crate) fn show(ctx: &Context, state: &mut AppState) {
                 selected = selected.saturating_sub(1);
             }
         });
-    state.workbench.examples_selection = Some(selected);
+    state.project.examples_selection = Some(selected);
     match choice {
         DialogChoice::Primary => open = true,
         DialogChoice::None => {}
         _ => {
-            state.workbench.examples_selection = None;
+            state.project.examples_selection = None;
             return;
         }
     }
     if open {
-        state.workbench.examples_selection = None;
+        state.project.examples_selection = None;
         if create_example_project(state, EXAMPLES[selected]).is_ok() {
             save_project_as(state);
         }
@@ -178,7 +178,7 @@ mod tests {
             let app = open_and_press_run(example, "10n");
             let report = app
                 .state
-                .workbench
+                .runs
                 .preflight
                 .report
                 .as_ref()
@@ -262,12 +262,12 @@ mod tests {
             .update(&mut app.state, &*app.export_workflow_io);
         assert!(Command::RunSimulation.is_enabled(&app));
         Command::RunSimulation.execute(&mut app);
-        assert!(app.state.workbench.preflight.take_run_and_queue_request());
+        assert!(app.state.runs.preflight.take_run_and_queue_request());
         crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
         app.settle_preflight();
         let blockers = app
             .state
-            .workbench
+            .runs
             .preflight
             .report
             .as_ref()

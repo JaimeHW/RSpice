@@ -132,7 +132,7 @@ fn studio_form(kind: crate::simulation::plan::AnalysisKind) -> Option<RSpiceApp>
     use crate::simulation::plan::AnalysisInstance;
 
     let mut app = studio_fixture();
-    app.state.workbench.simulation_page = SimulationPage::Analyses;
+    app.state.simulate.simulation_page = SimulationPage::Analyses;
     let existing = app
         .state
         .model
@@ -169,7 +169,7 @@ fn studio_form(kind: crate::simulation::plan::AnalysisKind) -> Option<RSpiceApp>
             id
         }
     };
-    app.state.workbench.active_analysis_instance = Some(selected);
+    app.state.simulate.active_analysis_instance = Some(selected);
     Some(app)
 }
 
@@ -348,7 +348,7 @@ pub(super) fn studio_route(
 ) -> RSpiceApp {
     use crate::simulation::plan::AnalysisInstance;
     let mut app = studio_fixture();
-    app.state.workbench.simulation_page = page;
+    app.state.simulate.simulation_page = page;
     if let Some(kind) = kind {
         let selected = app
             .state
@@ -366,7 +366,7 @@ pub(super) fn studio_route(
             selected.is_some(),
             "the fixture holds no {kind:?} to open a form on"
         );
-        app.state.workbench.active_analysis_instance = selected;
+        app.state.simulate.active_analysis_instance = selected;
     }
     app
 }
@@ -509,7 +509,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     if let Some(mut app) = studio_form(AnalysisKind::OperatingPoint) {
         let instance = app
             .state
-            .workbench
+            .simulate
             .active_analysis_instance
             .expect("the fixture selects the analysis it opened the form on");
         let mut record = AnalysisNumericOverride::default();
@@ -537,7 +537,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
         .expect("the fixture holds a stable plan")
         .id();
     let plan_name = app.state.model.sim_setup.active_plan_name().to_string();
-    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(
+    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(
         SimulationPlanManagerDraft::new(plan_id, plan_name),
     ));
     overlays.push(("plan manager".to_owned(), app));
@@ -545,7 +545,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
     // Renaming an analysis.
     let mut app = studio_route(SimulationPage::Analyses, None);
     let instance = first_enabled_instance(&app);
-    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
+    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
         RenameAnalysisDraft::for_instance(instance, "Transient", "Startup transient"),
     ));
     overlays.push(("rename analysis".to_owned(), app));
@@ -558,14 +558,14 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
 
     // A new design variable.
     let mut app = studio_route(SimulationPage::Variables, None);
-    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::DesignVariable(
+    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::DesignVariable(
         DesignVariableDraft::default(),
     ));
     overlays.push(("design variable".to_owned(), app));
 
     // A new saved output.
     let mut app = studio_route(SimulationPage::Outputs, None);
-    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::SavedOutput(
+    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::SavedOutput(
         SavedOutputDraft::default(),
     ));
     overlays.push(("saved output".to_owned(), app));
@@ -580,14 +580,14 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
         .expect("the fixture holds a stable plan")
         .id();
     let plan_name = app.state.model.sim_setup.active_plan_name().to_string();
-    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
+    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
         ClonePlanDraft::for_source(plan_id, &plan_name),
     ));
     overlays.push(("clone plan".to_owned(), app));
 
     // A new capture group, on the page that holds them.
     let mut app = studio_route(SimulationPage::Save, None);
-    app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
+    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
         CaptureGroupDraft::default(),
     ));
     overlays.push(("capture group".to_owned(), app));
@@ -612,7 +612,7 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
          CFB,capacitance,2.2p,,,testbench,feedback capacitor\n\
          IBIAS,current,banana,,,testbench,not a current\n",
     );
-    app.state.workbench.simulation_workflow =
+    app.state.simulate.simulation_workflow =
         Some(SimulationWorkflowDialog::DesignVariableImport(draft));
     overlays.push(("design variable import".to_owned(), app));
 
@@ -633,7 +633,7 @@ fn every_studio_workflow_draft_has_an_overlay_fixture() {
         .into_iter()
         .filter_map(|(_, app)| {
             app.state
-                .workbench
+                .simulate
                 .simulation_workflow
                 .as_ref()
                 .map(|workflow| match workflow {

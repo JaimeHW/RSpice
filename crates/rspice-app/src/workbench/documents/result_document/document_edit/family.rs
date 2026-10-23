@@ -87,7 +87,7 @@ pub(crate) fn open_family(state: &mut AppState) {
     });
     match draft {
         Ok(draft) => {
-            state.workbench.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
+            state.results.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
         }
         Err(refusal) => state.prompt(refusal),
     }
@@ -96,7 +96,7 @@ pub(crate) fn open_family(state: &mut AppState) {
 /// Narrow the open Family slicing form to `filter`, as a hop that carries a
 /// point into the family does.
 pub(crate) fn set_family_filter(state: &mut AppState, filter: String) {
-    if let Some(ResultDocumentDialog::Family(draft)) = &mut state.workbench.result_document_dialog {
+    if let Some(ResultDocumentDialog::Family(draft)) = &mut state.results.result_document_dialog {
         draft.filter = filter;
     }
 }

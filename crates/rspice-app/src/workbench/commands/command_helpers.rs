@@ -225,9 +225,9 @@ pub(super) fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     app.state.model.schematic.arm_tool(tool);
 }
 
-pub(super) fn open_recent_projects(workbench: &mut WorkbenchState) {
-    workbench.open_project_launcher();
-    workbench.project_launcher_filter = ProjectLauncherFilter::Recent;
+pub(super) fn open_recent_projects(state: &mut AppState) {
+    state.open_project_launcher();
+    state.project.project_launcher_filter = ProjectLauncherFilter::Recent;
 }
 
 pub(super) const fn reset_active_view_available(_workspace: Workspace) -> bool {
@@ -276,17 +276,17 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             // The studio's view state is what narrows its two registries.
             // Everything else on these pages is the plan itself, which a
             // view reset has no business touching.
-            app.state.workbench.saved_output_filter.clear();
-            app.state.workbench.specification_filter.clear();
-            app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::All;
+            app.state.simulate.saved_output_filter.clear();
+            app.state.simulate.specification_filter.clear();
+            app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::All;
         }
         // Which definition the library is reading, and the drafts open behind
         // it, are the whole of this workspace's view state; the definitions
         // themselves are the project and a view reset never touches them.
         Workspace::Stimulus => {
-            app.state.workbench.selected_stimulus_definition = None;
-            app.state.workbench.stimulus_editor.clear();
-            app.state.workbench.stimulus_browser.clear();
+            app.state.design.selected_stimulus_definition = None;
+            app.state.design.stimulus_editor.clear();
+            app.state.design.stimulus_browser.clear();
         }
         Workspace::Results => {
             let viewer = app.state.results.results.session.viewer;
@@ -304,10 +304,10 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             }
         }
         Workspace::Verify => {
-            app.state.workbench.selected_specification = None;
+            app.state.simulate.selected_specification = None;
         }
         Workspace::Models => {
-            app.state.workbench.selected_model = None;
+            app.state.models.selected_model = None;
         }
         Workspace::Netlist => {
             app.state.code.netlist.cursor_line = 0;

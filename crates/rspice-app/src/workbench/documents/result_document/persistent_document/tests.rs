@@ -35,7 +35,7 @@ fn transient_fixture_with_layout(layout_id: &str) -> (RSpiceApp, ResultDocumentI
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+    app.state.results.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name: "Durable transient review".to_owned(),
         name_touched: true,
@@ -813,7 +813,7 @@ fn completed_prepared_run(
 #[test]
 fn pane_selection_belongs_to_the_document_it_was_made_in() {
     let (mut app, first) = persistent_transient_fixture();
-    app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+    app.state.results.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name: "Second transient review".to_owned(),
         name_touched: true,
@@ -1298,7 +1298,7 @@ fn latest_tracking_fixture() -> LatestFixture {
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+    app.state.results.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name: "Latest transient review".to_owned(),
         name_touched: true,

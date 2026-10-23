@@ -304,13 +304,8 @@ impl CorrelationProjection {
                 .model_library_manager
                 .selected_library
                 .clone(),
-            model: app.state.workbench.selected_model.clone(),
-            selected_suite_id: app
-                .state
-                .workbench
-                .model_correlation
-                .selected_suite_id
-                .clone(),
+            model: app.state.models.selected_model.clone(),
+            selected_suite_id: app.state.models.model_correlation.selected_suite_id.clone(),
         };
         if let Some(cache) = ctx.data(|data| {
             data.get_temp::<CorrelationProjectionCache>(correlation_projection_cache_id())
@@ -338,7 +333,7 @@ impl CorrelationProjection {
             .model_library_manager
             .selected_library
             .clone();
-        let model = app.state.workbench.selected_model.clone();
+        let model = app.state.models.selected_model.clone();
         let resolved = match (library.as_deref(), model.as_deref()) {
             (Some(library), Some(model)) => resolve_project_model_for_editor(
                 &app.state.model.model_library_manager,
@@ -372,7 +367,7 @@ impl CorrelationProjection {
         });
         let selected_id = app
             .state
-            .workbench
+            .models
             .model_correlation
             .selected_suite_id
             .as_deref();
@@ -605,25 +600,25 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let projected_suite_id = projection.suite.as_ref().map(|suite| suite.id.clone());
     let creating_suite_for_current_source = app
         .state
-        .workbench
+        .models
         .model_correlation
         .selected_suite_id
         .is_none()
         && !projection.source_current
         && matches!(
-            &app.state.workbench.model_correlation.dialog,
+            &app.state.models.model_correlation.dialog,
             Some(ModelCorrelationDialog::AddDataset(_))
         );
     if !creating_suite_for_current_source
         && app
             .state
-            .workbench
+            .models
             .model_correlation
             .selected_suite_id
             .as_deref()
             != projected_suite_id.as_deref()
     {
-        let workspace = &mut app.state.workbench.model_correlation;
+        let workspace = &mut app.state.models.model_correlation;
         workspace.selected_suite_id = projected_suite_id;
         workspace.selected_dataset_id = None;
         workspace.selected_metric_id = None;
@@ -721,7 +716,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         .show(&mut actions);
     if viewer.clicked() {
         select_section(
-            &mut app.state.workbench.model_correlation,
+            &mut app.state.models.model_correlation,
             ModelCorrelationSection::Comparison,
         );
     } else if !viewer_enabled {
@@ -759,7 +754,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         add_dataset.on_disabled_hover_text(blocker);
     } else if add_dataset.clicked() {
         if projection.suite.is_some() && !projection.source_current {
-            app.state.workbench.model_correlation.selected_suite_id = None;
+            app.state.models.model_correlation.selected_suite_id = None;
         }
         open_correlation_dialog(
             ui.ctx(),
@@ -1036,7 +1031,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                     for section in ModelCorrelationSection::ALL {
-                        let selected = app.state.workbench.model_correlation.section == section;
+                        let selected = app.state.models.model_correlation.section == section;
                         let response = navigation_row(
                             ui,
                             section,
@@ -1045,7 +1040,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
                             true,
                         );
                         if response.clicked() {
-                            select_section(&mut app.state.workbench.model_correlation, section);
+                            select_section(&mut app.state.models.model_correlation, section);
                         }
                     }
                 });
@@ -1065,7 +1060,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
     );
     nav.spacing_mut().item_spacing = Vec2::ZERO;
     for section in ModelCorrelationSection::ALL {
-        let selected = app.state.workbench.model_correlation.section == section;
+        let selected = app.state.models.model_correlation.section == section;
         let response = navigation_row(
             &mut nav,
             section,
@@ -1074,7 +1069,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
             false,
         );
         if response.clicked() {
-            select_section(&mut app.state.workbench.model_correlation, section);
+            select_section(&mut app.state.models.model_correlation, section);
         }
     }
 }
@@ -1178,14 +1173,14 @@ fn section_content(
 ) {
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
-    let section = app.state.workbench.model_correlation.section;
+    let section = app.state.models.model_correlation.section;
     let mut content = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
             .layout(Layout::top_down(Align::Min)),
     );
     content.spacing_mut().item_spacing = Vec2::ZERO;
-    let initial_scroll_offset = app.state.workbench.model_correlation.scroll_offset;
+    let initial_scroll_offset = app.state.models.model_correlation.scroll_offset;
     let output = ScrollArea::vertical()
         .id_salt(("model-correlation-content", section as u8))
         .vertical_scroll_offset(initial_scroll_offset)
@@ -1195,7 +1190,7 @@ fn section_content(
             section_body(ui, app, projection, section);
             ui.add_space(14.0);
         });
-    app.state.workbench.model_correlation.scroll_offset = output.state.offset.y;
+    app.state.models.model_correlation.scroll_offset = output.state.offset.y;
 }
 
 fn section_heading(ui: &mut Ui, section: ModelCorrelationSection) {

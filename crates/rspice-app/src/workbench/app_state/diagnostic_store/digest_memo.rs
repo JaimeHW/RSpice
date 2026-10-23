@@ -101,7 +101,7 @@ impl DigestKey {
                     )
                     .map(|source| source.design.topology_version()),
                 plan: state.active_plan_revision(),
-                preflight: state.workbench.preflight.report.is_some(),
+                preflight: state.runs.preflight.report.is_some(),
                 project,
             }),
             DiagnosticInputs::Run { run_sequence } => Some(Self::Run {

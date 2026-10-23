@@ -1,6 +1,7 @@
 //! The results feature's dialogs, the dataset export format question, the
 //! waveform calculator and the expression diagnostics tool, and the results
-//! workspace's session.
+//! workspace's session; the result-document forms, the external-result import
+//! and the request to open the specification editor.
 
 /// What the results feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -33,4 +34,18 @@ pub(crate) struct ResultsState {
         Option<Vec<rspice_results_ui::selection::ResultBrowserSelectionKey>>,
     /// Results workspace state (viewer, cursors, plot caches).
     pub results: crate::workbench::documents::result_document::ResultsState,
+
+    /// One-shot request to open the canonical specification authoring surface.
+    /// Runtime-only and owned by navigation rather than Results presentation:
+    /// activating the destination document is allowed to reconcile viewer UI,
+    /// but must not erase the route that caused that activation.
+    pub(crate) specification_editor_route_pending: bool,
+    /// Runtime-only draft for the project-owned result-document transaction.
+    pub create_result_document: rspice_results_ui::create_document::CreateResultDocumentDialogState,
+    /// Runtime-only draft of the form open over a project result document.
+    pub result_document_dialog: Option<rspice_results_ui::document_dialogs::ResultDocumentDialog>,
+    /// Runtime-only external-result draft. Retained history changes only when
+    /// this transaction explicitly commits.
+    pub result_import:
+        crate::workbench::documents::result_document::import::ResultImportDialogState,
 }

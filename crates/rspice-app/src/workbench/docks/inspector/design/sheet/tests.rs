@@ -963,10 +963,10 @@ fn a_value_the_block_cuts_short_says_so_under_its_row() {
 fn the_panel_brings_its_sheet_section_into_view_once_when_asked() {
     let mut app = RSpiceApp::test_instance();
     crate::workbench::app::reveal_sheet_properties(&mut app.state);
-    assert!(app.state.workbench.reveal_sheet_section);
+    assert!(app.state.sheets.reveal_sheet_section);
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(painted.starts_with("Sheet\nSize\n"), "{painted}");
-    assert!(!app.state.workbench.reveal_sheet_section);
+    assert!(!app.state.sheets.reveal_sheet_section);
 }
 
 /// At the inspector's default width the panel stays inside the inspector: a

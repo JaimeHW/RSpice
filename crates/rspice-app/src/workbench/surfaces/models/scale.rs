@@ -317,7 +317,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    app.state.workbench.models_page = page;
+    app.state.models.models_page = page;
     let input = || egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
         ..Default::default()

@@ -50,7 +50,7 @@ pub(super) fn open_insert_result_document(app: &mut RSpiceApp) {
     }
     let first = &options[0];
     let source = &app.state.model.workspace.content.visualization_documents[first.document_index];
-    let editor = &mut app.state.workbench.report_authoring;
+    let editor = &mut app.state.hardcopy.report_authoring;
     editor.insert_result_document_index = 0;
     editor.insert_result_caption = first.label.clone();
     editor.insert_result_alternative_text = format!(
@@ -66,18 +66,18 @@ pub(super) fn open_insert_result_document(app: &mut RSpiceApp) {
 
 pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     if !report_mutation_allowed(&app.state) {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some(report_mutation_block_reason(&app.state).to_owned());
         return;
     }
     let option_index = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .insert_result_document_index;
     let figure_options = report_figure_options(&app.state);
     let Some(option) = figure_options.get(option_index).cloned() else {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some("The selected result figure no longer exists.".to_owned());
         return;
     };
@@ -90,25 +90,25 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
         .get(option.document_index)
         .cloned()
     else {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some("The selected result document no longer exists.".to_owned());
         return;
     };
     let caption = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .insert_result_caption
         .trim()
         .to_owned();
     let alternative_text = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .insert_result_alternative_text
         .trim()
         .to_owned();
-    let sizing = match app.state.workbench.report_authoring.insert_result_sizing {
+    let sizing = match app.state.hardcopy.report_authoring.insert_result_sizing {
         1 => FigureSizing::FitPage,
         2 => FigureSizing::Natural,
         _ => FigureSizing::FitWidth,
@@ -116,7 +116,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     let source_digest = match source.content_digest() {
         Ok(digest) => digest,
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error =
+            app.state.hardcopy.report_authoring.transaction_error =
                 Some(format!("The result document is invalid: {error}"));
             return;
         }
@@ -136,11 +136,11 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     ) {
         Ok(snapshot) => snapshot,
         Err(error) => {
-            app.state.workbench.report_authoring.transaction_error = Some(error.to_string());
+            app.state.hardcopy.report_authoring.transaction_error = Some(error.to_string());
             return;
         }
     };
-    let reference = if app.state.workbench.report_authoring.insert_result_frozen {
+    let reference = if app.state.hardcopy.report_authoring.insert_result_frozen {
         let raster = match render_visualization_report_figure(
             &source,
             &snapshot,
@@ -150,7 +150,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
         ) {
             Ok(raster) => raster,
             Err(error) => {
-                app.state.workbench.report_authoring.transaction_error = Some(format!(
+                app.state.hardcopy.report_authoring.transaction_error = Some(format!(
                     "The selected result figure cannot be frozen for publication: {error}"
                 ));
                 return;
@@ -166,7 +166,7 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     let Some(page_id) =
         active_document(&app.state).and_then(|document| selected_page_id(&app.state, document))
     else {
-        app.state.workbench.report_authoring.transaction_error =
+        app.state.hardcopy.report_authoring.transaction_error =
             Some("Select a report page before inserting a result document.".to_owned());
         return;
     };
@@ -199,19 +199,19 @@ pub(super) fn commit_insert_result_document(app: &mut RSpiceApp) {
     });
     match result {
         Ok(receipt) => {
-            app.state.workbench.report_authoring.selected_report_block =
+            app.state.hardcopy.report_authoring.selected_report_block =
                 receipt.created.iter().find_map(|entity| match entity {
                     ReportEntityRef::Block(id) => Some(*id),
                     _ => None,
                 });
             app.state
-                .workbench
+                .hardcopy
                 .report_authoring
                 .insert_result_document_open = false;
-            app.state.workbench.report_authoring.transaction_error = None;
+            app.state.hardcopy.report_authoring.transaction_error = None;
             app.state.model.workspace.content.report_documents_dirty = true;
         }
-        Err(error) => app.state.workbench.report_authoring.transaction_error = Some(error),
+        Err(error) => app.state.hardcopy.report_authoring.transaction_error = Some(error),
     }
 }
 
@@ -227,7 +227,7 @@ pub(super) fn select_result_document(
     figure: Option<&ReportFigureOption>,
 ) {
     app.state
-        .workbench
+        .hardcopy
         .report_authoring
         .insert_result_document_index = index;
     if let Some(option) = figure {
@@ -235,9 +235,9 @@ pub(super) fn select_result_document(
             [option.document_index]
             .revision()
             .get();
-        app.state.workbench.report_authoring.insert_result_caption = option.label.clone();
+        app.state.hardcopy.report_authoring.insert_result_caption = option.label.clone();
         app.state
-            .workbench
+            .hardcopy
             .report_authoring
             .insert_result_alternative_text =
             format!("Result figure {} at revision {revision}.", option.label);

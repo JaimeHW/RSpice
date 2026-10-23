@@ -62,7 +62,7 @@ fn a_press_returns_before_its_run_is_prepared_or_checked() {
 
     start(&mut app.state, &mut app.simulation_controller, true);
 
-    assert!(app.state.workbench.preflight.run_awaits_check());
+    assert!(app.state.runs.preflight.run_awaits_check());
     assert_eq!(
         app.simulation_controller.preflight_stage(),
         Some(PreflightStage::Preparing(PreparationProgress::default()))
@@ -73,7 +73,7 @@ fn a_press_returns_before_its_run_is_prepared_or_checked() {
     );
     poll(&mut app.state, &mut app.simulation_controller);
     assert!(
-        app.state.workbench.preflight.checking.is_some(),
+        app.state.runs.preflight.checking.is_some(),
         "a frame without a verdict finishes nothing"
     );
     assert!(!app.state.model.simulation.execution.trigger_simulation);
@@ -87,7 +87,7 @@ fn a_press_returns_before_its_run_is_prepared_or_checked() {
     );
     let prepared = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -135,10 +135,10 @@ fn stop_during_preparation_queues_nothing_and_leaves_nothing_behind() {
     await_workers(&app, 1);
     poll(&mut app.state, &mut app.simulation_controller);
 
-    assert!(app.state.workbench.preflight.checking.is_none());
+    assert!(app.state.runs.preflight.checking.is_none());
     assert!(app.simulation_controller.preflight_stage().is_none());
     assert!(app.simulation_controller.retained_run_deck().is_none());
-    assert!(app.state.workbench.preflight.report.is_none());
+    assert!(app.state.runs.preflight.report.is_none());
     assert!(!app.state.model.simulation.execution.trigger_simulation);
     assert!(
         !app.state
@@ -184,7 +184,7 @@ fn an_edit_during_preparation_queues_nothing_and_stales_what_the_pass_found() {
     assert!(!app.state.model.simulation.execution.trigger_simulation);
     assert!(app.simulation_controller.retained_run_deck().is_none());
     assert!(
-        app.state.workbench.preflight.report.is_none(),
+        app.state.runs.preflight.report.is_none(),
         "a stale pass retains no report"
     );
     let dispatch = app
@@ -223,7 +223,7 @@ fn a_second_run_press_on_the_unedited_design_joins_the_pass_in_flight() {
     start(&mut app.state, &mut app.simulation_controller, false);
     start(&mut app.state, &mut app.simulation_controller, true);
     assert!(
-        app.state.workbench.preflight.run_awaits_check(),
+        app.state.runs.preflight.run_awaits_check(),
         "the press asks the pass in flight for its run"
     );
     release.send(()).expect("the worker waits to prepare");
@@ -280,7 +280,7 @@ fn a_run_press_after_an_edit_restarts_the_pass_on_the_edited_design() {
     );
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .clone()
@@ -325,7 +325,7 @@ impl RSpiceApp {
             "the pass queues the run it authorized"
         );
         self.state
-            .workbench
+            .runs
             .preflight
             .report
             .as_ref()
@@ -429,7 +429,7 @@ fn assert_refused_for(app: &RSpiceApp, moved: &str) {
         Some(stated.as_str()),
         "the status bar names what moved"
     );
-    assert!(app.state.workbench.preflight.report.is_none());
+    assert!(app.state.runs.preflight.report.is_none());
     assert!(app.simulation_controller.retained_run_deck().is_none());
 }
 
@@ -1008,7 +1008,7 @@ fn a_run_prepared_off_the_ui_thread_is_the_one_the_frame_would_have_prepared() {
         app.settle_preflight();
         let prepared = app
             .state
-            .workbench
+            .runs
             .preflight
             .report
             .as_ref()

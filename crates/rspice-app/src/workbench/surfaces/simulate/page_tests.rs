@@ -63,7 +63,7 @@ fn render_with(page: SimulationPage, width: f32, seed: impl FnOnce(&mut RSpiceAp
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.simulation_page = page;
+    app.state.simulate.simulation_page = page;
     seed(&mut app);
     let output = ctx.run_ui(
         egui::RawInput {
@@ -165,7 +165,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
             .content
             .add_saved_output(id, output)
             .expect("the plan accepts it");
-        app.state.workbench.selected_saved_output = Some("vout".to_owned());
+        app.state.simulate.selected_saved_output = Some("vout".to_owned());
     });
     for field in [
         "Name",
@@ -200,7 +200,7 @@ fn a_selected_record_paints_every_field_of_its_contract() {
             .content
             .add_design_variable(id, variable)
             .expect("the plan accepts it");
-        app.state.workbench.selected_design_variable = Some("rload".to_owned());
+        app.state.simulate.selected_design_variable = Some("rload".to_owned());
     });
     for field in [
         "Expression",
@@ -314,9 +314,9 @@ fn the_model_reference_temperature_commits_without_moving_the_run_temperature() 
     assert_eq!(app.state.model.sim_setup.options.tnom, 40.0);
     assert_eq!(app.state.model.sim_setup.options.temp, run_temperature);
     assert!(
-        !app.state.workbench.analysis_lifecycle_status.is_refusal(),
+        !app.state.simulate.analysis_lifecycle_status.is_refusal(),
         "{}",
-        app.state.workbench.analysis_lifecycle_status.message()
+        app.state.simulate.analysis_lifecycle_status.message()
     );
 }
 
@@ -759,7 +759,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
     // The selected requirement outlives the removal of an earlier row.
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.workbench.selected_specification = Some("bandwidth".to_owned());
+        app.state.simulate.selected_specification = Some("bandwidth".to_owned());
         app.state
             .model
             .workspace
@@ -775,7 +775,7 @@ fn a_selected_specification_is_identified_by_its_measurement_not_its_row() {
     // took its place must not inherit the selection.
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
-        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state.simulate.selected_specification = Some("gain".to_owned());
         app.state
             .model
             .workspace
@@ -1429,7 +1429,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
         app.state.model.sim_setup.run_set = six_point_run_set();
-        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state.simulate.selected_specification = Some("gain".to_owned());
         app.state
             .model
             .workspace
@@ -1450,7 +1450,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
         app.state.model.sim_setup.run_set = six_point_run_set();
-        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state.simulate.selected_specification = Some("gain".to_owned());
         app.state.model.workspace.content.replace_active_specs(
             id,
             vec![spec(SpecPointScope::SelectedCorners {
@@ -1472,7 +1472,7 @@ fn the_applies_to_control_is_built_from_the_declared_run_set() {
     let rendered = render_with(SimulationPage::Specifications, 1400.0, |app| {
         let id = plan_id(app);
         app.state.model.sim_setup.run_set = six_point_run_set();
-        app.state.workbench.selected_specification = Some("gain".to_owned());
+        app.state.simulate.selected_specification = Some("gain".to_owned());
         app.state.model.workspace.content.replace_active_specs(
             id,
             vec![spec(SpecPointScope::SelectedCorners {
@@ -1533,7 +1533,7 @@ fn a_scope_change_commits_as_a_plan_transaction_and_a_rejected_one_changes_nothi
         "an accepted edit moves the plan revision"
     );
     assert!(
-        !app.state.workbench.analysis_lifecycle_status.is_refusal(),
+        !app.state.simulate.analysis_lifecycle_status.is_refusal(),
         "the transaction reports its receipt"
     );
 
@@ -1621,7 +1621,7 @@ fn specification_policy_commits_atomically_and_rejects_an_invalid_yield_gate() {
         after_accept,
         "a rejected policy cannot move the plan revision"
     );
-    assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
+    assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
 }
 
 /// A solver value the page refuses to apply has to say so on the channel the
@@ -1644,7 +1644,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
 
     super::page_solver::commit_draft(&mut app);
 
-    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    let outcome = &app.state.simulate.analysis_lifecycle_status;
     assert!(outcome.is_refusal(), "{}", outcome.message());
     assert!(
         plan_records(&app) > committed,
@@ -1664,7 +1664,7 @@ fn a_refused_solver_value_reports_on_the_plan_lifecycle_channel() {
     // Repairing the value applies it, and the channel carries the receipt.
     app.state.model.sim_setup.session.options_draft.reltol = "2e-3".to_owned();
     super::page_solver::commit_draft(&mut app);
-    let outcome = &app.state.workbench.analysis_lifecycle_status;
+    let outcome = &app.state.simulate.analysis_lifecycle_status;
     assert!(!outcome.is_refusal(), "{}", outcome.message());
     assert_eq!(app.state.model.sim_setup.options.reltol, 2e-3);
 }
@@ -1941,7 +1941,7 @@ fn the_output_filter_narrows_the_rendered_rows_and_not_the_plan() {
 
     let filtered = render_with(SimulationPage::Outputs, 1200.0, |app| {
         seed_three_outputs(&mut app.state);
-        app.state.workbench.saved_output_filter = "db20".to_owned();
+        app.state.simulate.saved_output_filter = "db20".to_owned();
     });
     // Scoped to the registry card, which ends at its closing note: the storage
     // forecast below it is a total over every output the plan holds and is
@@ -1968,7 +1968,7 @@ fn the_output_filter_narrows_the_rendered_rows_and_not_the_plan() {
     seed_three_outputs(&mut app.state);
     let id = plan_id(&app);
     let before = app.state.model.workspace.content.plan_data(id).cloned();
-    app.state.workbench.saved_output_filter = "db20".to_owned();
+    app.state.simulate.saved_output_filter = "db20".to_owned();
     assert_eq!(
         app.state.model.workspace.content.plan_data(id).cloned(),
         before,
@@ -1999,7 +1999,7 @@ fn an_output_filter_matching_nothing_is_distinguishable_from_an_empty_registry()
 
     let narrowed = render_with(SimulationPage::Outputs, 1200.0, |app| {
         seed_three_outputs(&mut app.state);
-        app.state.workbench.saved_output_filter = "no such signal".to_owned();
+        app.state.simulate.saved_output_filter = "no such signal".to_owned();
     });
     assert!(
         narrowed.contains("No matches"),
@@ -2071,7 +2071,7 @@ fn seed_two_specifications(state: &mut AppState) {
 fn the_specification_filter_narrows_the_table_over_the_cells_it_paints() {
     let filtered = render_with(SimulationPage::Specifications, 1200.0, |app| {
         seed_two_specifications(&mut app.state);
-        app.state.workbench.specification_filter = "bw(".to_owned();
+        app.state.simulate.specification_filter = "bw(".to_owned();
     });
     assert!(
         filtered.contains("bandwidth_3db"),
@@ -2104,7 +2104,7 @@ fn the_evidence_class_keeps_exactly_the_rows_the_head_counted() {
 
     let failing = render_with(SimulationPage::Specifications, 1200.0, |app| {
         seed_two_specifications(&mut app.state);
-        app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::Failing;
+        app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::Failing;
     });
     assert!(
         failing.contains(SpecificationEvidenceFilter::Failing.label()),
@@ -2125,7 +2125,7 @@ fn the_evidence_class_keeps_exactly_the_rows_the_head_counted() {
 
     let unmapped = render_with(SimulationPage::Specifications, 1200.0, |app| {
         seed_two_specifications(&mut app.state);
-        app.state.workbench.specification_evidence_filter =
+        app.state.simulate.specification_evidence_filter =
             SpecificationEvidenceFilter::WithoutEvidence;
     });
     assert!(
@@ -2135,7 +2135,7 @@ fn the_evidence_class_keeps_exactly_the_rows_the_head_counted() {
 
     let partial = render_with(SimulationPage::Specifications, 1200.0, |app| {
         seed_two_specifications(&mut app.state);
-        app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::Partial;
+        app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::Partial;
     });
     assert!(
         partial.contains("No specification matches the filter"),
@@ -2181,7 +2181,7 @@ fn every_expression_editor_handoff_opens_the_surface_it_names() {
     );
     assert!(
         matches!(
-            app.state.workbench.result_document_dialog,
+            app.state.results.result_document_dialog,
             Some(rspice_results_ui::document_dialogs::ResultDocumentDialog::Measurement(_))
         ),
         "the hand-off opens Add measurement"
@@ -2196,7 +2196,7 @@ fn a_dataset_backed_handoff_states_its_condition_before_a_run_exists() {
 
     let rendered = render_with(SimulationPage::Outputs, 1200.0, |app| {
         seed_three_outputs(&mut app.state);
-        app.state.workbench.selected_saved_output = Some("vout".to_owned());
+        app.state.simulate.selected_saved_output = Some("vout".to_owned());
         assert!(!app.state.model.simulation.retained.has_results());
     });
 
@@ -2256,7 +2256,7 @@ fn the_variables_page_states_the_rules_it_enforces_instead_of_offering_them() {
             .content
             .add_design_variable(id, variable)
             .expect("the plan accepts it");
-        app.state.workbench.selected_design_variable = Some("rload".to_owned());
+        app.state.simulate.selected_design_variable = Some("rload".to_owned());
     });
 
     for stated in ["Unit policy", "Out of bounds"] {

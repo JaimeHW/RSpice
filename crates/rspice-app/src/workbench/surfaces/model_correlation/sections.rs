@@ -48,10 +48,10 @@ pub(super) fn suite_selector(ui: &mut Ui, app: &mut RSpiceApp, projection: &Corr
                         )
                         .clicked()
                     {
-                        app.state.workbench.model_correlation.selected_suite_id =
+                        app.state.models.model_correlation.selected_suite_id =
                             Some(suite.id.clone());
-                        app.state.workbench.model_correlation.selected_dataset_id = None;
-                        app.state.workbench.model_correlation.selected_metric_id = None;
+                        app.state.models.model_correlation.selected_dataset_id = None;
+                        app.state.models.model_correlation.selected_metric_id = None;
                     }
                 }
             });
@@ -113,13 +113,13 @@ pub(super) fn datasets_section(
                         for dataset in &datasets {
                             let selected = app
                                 .state
-                                .workbench
+                                .models
                                 .model_correlation
                                 .selected_dataset_id
                                 .as_deref()
                                 .is_some_and(|id| id.eq_ignore_ascii_case(&dataset.id));
                             if ui.selectable_label(selected, &dataset.name).clicked() {
-                                app.state.workbench.model_correlation.selected_dataset_id =
+                                app.state.models.model_correlation.selected_dataset_id =
                                     Some(dataset.id.clone());
                             }
                             ui.label(dataset_class_label(dataset.class));
@@ -136,7 +136,7 @@ pub(super) fn datasets_section(
     section_panel(ui, "Selected dataset", |ui| {
         let selected = app
             .state
-            .workbench
+            .models
             .model_correlation
             .selected_dataset_id
             .as_deref()
@@ -379,13 +379,13 @@ pub(super) fn metrics_section(
                         for metric in &suite.metrics[page.start..page.end] {
                             let selected = app
                                 .state
-                                .workbench
+                                .models
                                 .model_correlation
                                 .selected_metric_id
                                 .as_deref()
                                 .is_some_and(|id| id.eq_ignore_ascii_case(&metric.id));
                             if ui.selectable_label(selected, &metric.name).clicked() {
-                                app.state.workbench.model_correlation.selected_metric_id =
+                                app.state.models.model_correlation.selected_metric_id =
                                     Some(metric.id.clone());
                             }
                             ui.monospace(&metric.quantity);
@@ -403,7 +403,7 @@ pub(super) fn metrics_section(
         ui.add_space(8.0);
         let selected_metric = app
             .state
-            .workbench
+            .models
             .model_correlation
             .selected_metric_id
             .as_deref()
@@ -453,7 +453,7 @@ pub(super) fn comparison_section(
     };
     let selected = app
         .state
-        .workbench
+        .models
         .model_correlation
         .selected_metric_id
         .as_deref()
@@ -508,13 +508,13 @@ pub(super) fn comparison_section(
                         for outcome in &evaluation.metric_outcomes[page.start..page.end] {
                             let selected = app
                                 .state
-                                .workbench
+                                .models
                                 .model_correlation
                                 .selected_metric_id
                                 .as_deref()
                                 .is_some_and(|id| id.eq_ignore_ascii_case(&outcome.metric_id));
                             if ui.selectable_label(selected, &outcome.metric_id).clicked() {
-                                app.state.workbench.model_correlation.selected_metric_id =
+                                app.state.models.model_correlation.selected_metric_id =
                                     Some(outcome.metric_id.clone());
                             }
                             ui.label(release_role_label(outcome.release_role));
@@ -1116,7 +1116,7 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
         } else if review_vectors.clicked()
             && let Err(error) = open_affected_vectors(app)
         {
-            app.state.workbench.model_correlation.notice = Some(error);
+            app.state.models.model_correlation.notice = Some(error);
         }
         if Button::new("Return to qualification")
             .accent()
@@ -1124,12 +1124,12 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
             .show(ui)
             .clicked()
         {
-            app.state.workbench.models_page = crate::state::ModelsPage::Qualification;
+            app.state.models.models_page = crate::state::ModelsPage::Qualification;
             if let Err(error) = app.state.workbench.navigate(
                 SurfaceRoute::surface(SurfaceId::Models),
                 RouteTransitionSource::User,
             ) {
-                app.state.workbench.model_correlation.notice = Some(error.to_string());
+                app.state.models.model_correlation.notice = Some(error.to_string());
             }
         }
     });
@@ -1145,7 +1145,7 @@ pub(super) fn open_affected_vectors(app: &mut RSpiceApp) -> Result<(), String> {
         .ok_or_else(|| "Select a project-owned model library first".to_owned())?;
     let model = app
         .state
-        .workbench
+        .models
         .selected_model
         .clone()
         .ok_or_else(|| "Select a project-owned model family first".to_owned())?;
@@ -1158,8 +1158,8 @@ pub(super) fn open_affected_vectors(app: &mut RSpiceApp) -> Result<(), String> {
             RouteTransitionSource::User,
         )
         .map_err(|error| format!("Qualification vector browser cannot be shown: {error}"))?;
-    app.state.workbench.model_editor.active_section = ModelEditorSection::Tests;
-    app.state.workbench.model_editor.qualification_plan_open = true;
+    app.state.models.model_editor.active_section = ModelEditorSection::Tests;
+    app.state.models.model_editor.qualification_plan_open = true;
     Ok(())
 }
 
@@ -1226,7 +1226,7 @@ pub(super) fn empty_state(
 }
 
 pub(super) fn correlation_notice(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some(notice) = app.state.workbench.model_correlation.notice.clone() else {
+    let Some(notice) = app.state.models.model_correlation.notice.clone() else {
         return;
     };
     let t = Tokens::get(ui.ctx());
@@ -1260,7 +1260,7 @@ pub(super) fn correlation_notice(ui: &mut Ui, app: &mut RSpiceApp) {
             .layout(Layout::right_to_left(Align::Center)),
     );
     if Button::new("Dismiss").ghost().show(&mut dismiss).clicked() {
-        app.state.workbench.model_correlation.notice = None;
+        app.state.models.model_correlation.notice = None;
     }
     describe_region(ui, &response, "Correlation notification", &notice);
 }

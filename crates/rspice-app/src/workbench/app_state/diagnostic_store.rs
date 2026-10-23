@@ -679,7 +679,7 @@ impl DiagnosticInputs {
                 subject,
                 state.symbol_pin_check_inputs(subject)?,
             )),
-            Self::Dispatch => dispatch_digest(scope, state.workbench.preflight.report.is_some()),
+            Self::Dispatch => dispatch_digest(scope, state.runs.preflight.report.is_some()),
             Self::Run { run_sequence } => {
                 let retained = state
                     .model

@@ -61,7 +61,7 @@ fn seeded(selection: &str) -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     app.state.model.workspace.content.stimulus_library = fixtures::library();
     app.state.workbench.workspace = crate::workbench::state::Workspace::Stimulus;
-    app.state.workbench.selected_stimulus_definition = Some(selection.to_owned());
+    app.state.design.selected_stimulus_definition = Some(selection.to_owned());
     app
 }
 
@@ -172,7 +172,7 @@ fn a_library_with_no_selection_opens_on_its_first_definition() {
     app.state.model.workspace.content.stimulus_library = fixtures::library();
     let published = published(&mut app.state, vec2(900.0, 470.0));
     assert_eq!(
-        app.state.workbench.selected_stimulus_definition.as_deref(),
+        app.state.design.selected_stimulus_definition.as_deref(),
         Some("sensor_diff_1k")
     );
     assert!(published.contains(&"sensor_diff_1k".to_owned()));
@@ -297,7 +297,7 @@ fn many_cycle_train() -> RSpiceApp {
     for (field, value) in [("tr", "1n"), ("tf", "1n"), ("pw", "1u"), ("per", "2u")] {
         crate::workbench::app::actions::stimulus::edit_field(&mut app.state, field, value);
     }
-    app.state.workbench.stimulus_editor.span = crate::workbench::state::PreviewSpan::Transient;
+    app.state.design.stimulus_editor.span = crate::workbench::state::PreviewSpan::Transient;
     app
 }
 
@@ -318,7 +318,7 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
     crate::workbench::app::actions::stimulus::edit_family(&mut app.state, StimulusFamily::Sin);
     let draft = app
         .state
-        .workbench
+        .design
         .stimulus_editor
         .draft("bridge_cal_step")
         .expect("draft");
@@ -333,7 +333,7 @@ fn a_family_switch_resets_the_shape_parameters_and_undo_restores_them() {
     ));
     let draft = app
         .state
-        .workbench
+        .design
         .stimulus_editor
         .draft("bridge_cal_step")
         .expect("draft");
@@ -550,17 +550,14 @@ fn a_frame_that_changed_nothing_does_not_re_evaluate_the_waveform() {
     let mut app = seeded("sensor_diff_1k");
     let size = stage_size(1024.0, 640.0);
     let _ = published(&mut app.state, size);
-    let after_first = app.state.workbench.stimulus_editor.evaluations();
+    let after_first = app.state.design.stimulus_editor.evaluations();
     let _ = published(&mut app.state, size);
-    assert_eq!(
-        app.state.workbench.stimulus_editor.evaluations(),
-        after_first
-    );
+    assert_eq!(app.state.design.stimulus_editor.evaluations(), after_first);
 
     crate::workbench::app::actions::stimulus::edit_field(&mut app.state, "va", "9m");
     let _ = published(&mut app.state, size);
     assert_eq!(
-        app.state.workbench.stimulus_editor.evaluations(),
+        app.state.design.stimulus_editor.evaluations(),
         after_first + 1
     );
 }

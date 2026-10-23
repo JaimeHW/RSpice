@@ -35,7 +35,7 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
     app.state.model.model_library_manager.selected_library = None;
-    app.state.workbench.selected_model = None;
+    app.state.models.selected_model = None;
     assert_eq!(
         Command::ModelEditor.availability(&app),
         CommandAvailability::Disabled("select one model in Model & library catalog")
@@ -49,7 +49,7 @@ fn model_editor_command_has_mockup_identity_and_fail_closed_selection_authority(
         .model_library_manager
         .select_library("command-editor-built-in")
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some("readonly_nch".to_owned());
+    app.state.models.selected_model = Some("readonly_nch".to_owned());
     assert_eq!(
         Command::ModelEditor.availability(&app),
         CommandAvailability::Disabled(
@@ -99,7 +99,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
         .model_library_manager
         .select_library("command copy built-in")
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some("copy_nch".to_owned());
+    app.state.models.selected_model = Some("copy_nch".to_owned());
 
     assert_eq!(
         Command::ModelCreateProjectCopy.availability(&app),
@@ -121,10 +121,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
             .as_deref(),
         Some("copy_nch project")
     );
-    assert_eq!(
-        app.state.workbench.selected_model.as_deref(),
-        Some("copy_nch")
-    );
+    assert_eq!(app.state.models.selected_model.as_deref(), Some("copy_nch"));
     let project_copy = app
         .state
         .model
@@ -143,7 +140,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     );
     let draft = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -205,7 +202,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         .model_library_manager
         .select_library("external command source")
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some("external_nch".to_owned());
+    app.state.models.selected_model = Some("external_nch".to_owned());
     assert_eq!(
         Command::ModelCreateProjectCopy.availability(&app),
         CommandAvailability::Available
@@ -230,7 +227,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         .model_library_manager
         .select_library("already owned")
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some("owned_nch".to_owned());
+    app.state.models.selected_model = Some("owned_nch".to_owned());
     assert_eq!(
         Command::ModelCreateProjectCopy.availability(&app),
         CommandAvailability::Disabled("the selected model is already an editable project copy")
@@ -241,7 +238,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         .model_library_manager
         .select_library("external command source")
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some("external_nch".to_owned());
+    app.state.models.selected_model = Some("external_nch".to_owned());
     app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
             open_project_read_only: true,
@@ -286,7 +283,7 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
         .model_library_manager
         .select_library(&commit.library_name)
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some(commit.model_name);
+    app.state.models.selected_model = Some(commit.model_name);
 
     assert_eq!(
         Command::ModelEditor.availability(&app),
@@ -310,7 +307,7 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
         app.state.workbench.current_route().surface_id(),
         crate::workbench::SurfaceId::ModelEditor
     );
-    assert!(app.state.workbench.model_editor.draft.is_some());
+    assert!(app.state.models.model_editor.draft.is_some());
     assert_eq!(
         Command::ModelSaveRevision.availability(&app),
         CommandAvailability::Disabled("the project is open read-only")
@@ -355,7 +352,7 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
         .model_library_manager
         .select_library(&commit.library_name)
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some(commit.model_name);
+    app.state.models.selected_model = Some(commit.model_name);
     app.state.close_project_session();
 
     assert_eq!(
@@ -393,7 +390,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
         .expect("create project model");
     let project_revision = app.state.model.workspace.content.project.revision();
     app.state
-        .workbench
+        .models
         .model_editor
         .open(
             &app.state.model.model_library_manager,
@@ -402,8 +399,8 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
             project_revision,
         )
         .expect("open editor");
-    app.state.workbench.model_editor.begin_qualification_suite();
-    let authoring = &mut app.state.workbench.model_editor.qualification_authoring;
+    app.state.models.model_editor.begin_qualification_suite();
+    let authoring = &mut app.state.models.model_editor.qualification_authoring;
     authoring.suite_id = "dc-op".to_owned();
     authoring.suite_name = "DC operating point".to_owned();
     authoring.vector_id = "nominal".to_owned();
@@ -415,22 +412,17 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
     authoring.expected = "1".to_owned();
     authoring.absolute_tolerance = "1e-9".to_owned();
     authoring.relative_tolerance = "1e-9".to_owned();
+    assert!(app.state.models.model_editor.commit_qualification_suite());
     assert!(
         app.state
-            .workbench
-            .model_editor
-            .commit_qualification_suite()
-    );
-    assert!(
-        app.state
-            .workbench
+            .models
             .model_editor
             .validate_candidate(&app.state.model.model_library_manager, project_revision)
     );
     assert!(Command::ModelRunQualificationTests.is_enabled(&app));
 
     app.state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_mut()
@@ -442,7 +434,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
         .source_id = Some(crate::product::ModelSourceId::new());
     assert!(
         app.state
-            .workbench
+            .models
             .model_editor
             .draft
             .as_ref()

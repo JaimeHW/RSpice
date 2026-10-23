@@ -575,7 +575,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
                 root: generated.id(),
                 logical_identity: dependency.locator().logical_identity().to_owned(),
             };
-            if !state.workbench.netlist_open_documents.contains(&id) {
+            if !state.code.netlist_open_documents.contains(&id) {
                 return None;
             }
             Some(WorkspaceDocument {
@@ -610,7 +610,7 @@ fn netlist_workspace_documents(state: &AppState) -> Vec<WorkspaceDocument> {
                 root: owned.id(),
                 logical_identity: identity.to_owned(),
             };
-            if !state.workbench.netlist_open_documents.contains(&id) {
+            if !state.code.netlist_open_documents.contains(&id) {
                 return None;
             }
             let project_owned = state
@@ -1122,7 +1122,7 @@ fn close_document(
         }
         _ => {
             if matches!(document, WorkspaceDocumentId::NetlistDependency { .. }) {
-                state.workbench.netlist_open_documents.remove(document);
+                state.code.netlist_open_documents.remove(document);
             }
             state.workbench.documents.close(document);
             true

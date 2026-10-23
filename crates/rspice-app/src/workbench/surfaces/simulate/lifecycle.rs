@@ -12,8 +12,8 @@ use crate::simulation::plan::AnalysisPlanError;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
 
 pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(), String> {
-    let current = app.workbench.active_analysis_instance;
-    let legacy_index = app.workbench.active_analysis;
+    let current = app.simulate.active_analysis_instance;
+    let legacy_index = app.simulate.active_analysis;
     let resolved = {
         let plan = app.model.sim_setup.stable_analysis_plan()?;
         match current {
@@ -29,7 +29,7 @@ pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(),
                 .map(|instance| instance.id()),
         }
     };
-    app.workbench.active_analysis_instance = resolved;
+    app.simulate.active_analysis_instance = resolved;
     Ok(())
 }
 
@@ -37,7 +37,7 @@ pub(super) fn selected_analysis(
     app: &RSpiceApp,
     dependency_sources: &EnvelopeSourceCatalog,
 ) -> Result<Option<SelectedAnalysis>, String> {
-    let Some(id) = app.state.workbench.active_analysis_instance else {
+    let Some(id) = app.state.simulate.active_analysis_instance else {
         return Ok(None);
     };
     let plan = app.state.model.sim_setup.stable_analysis_plan()?;
@@ -303,7 +303,7 @@ pub(super) fn insert_analysis_instance(
     match result {
         Ok((id, insert_receipt, bind_receipt)) => {
             refresh_analysis_projections(app);
-            app.state.workbench.active_analysis_instance = Some(id);
+            app.state.simulate.active_analysis_instance = Some(id);
             match bind_receipt {
                 None => record_receipt(&mut app.state, &insert_receipt),
                 Some(Ok(bind_receipt)) => {
@@ -362,7 +362,7 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok((clone_id, receipt)) => {
                     refresh_analysis_projections(app);
-                    app.state.workbench.active_analysis_instance = Some(clone_id);
+                    app.state.simulate.active_analysis_instance = Some(clone_id);
                     record_receipt(&mut app.state, &receipt);
                 }
                 Err(error) => record_failure(&mut app.state, "Clone", &error),
@@ -452,7 +452,7 @@ pub(super) fn apply_analysis_action(
                 .ok()
                 .and_then(|plan| prepared_autonomous_pss_id(plan, id));
             if let Some(pss_id) = existing {
-                app.state.workbench.active_analysis_instance = Some(pss_id);
+                app.state.simulate.active_analysis_instance = Some(pss_id);
                 app.state.record_plan_receipt(format!(
                     "Selected the existing autonomous PSS {pss_id} for phase-noise analysis {id}. Complete its oscillator node and remaining settings, enable it, then run dependency repair to link it without creating a duplicate."
                 ));
@@ -480,7 +480,7 @@ pub(super) fn apply_analysis_action(
             match result {
                 Ok((pss_id, receipt)) => {
                     refresh_analysis_projections(app);
-                    app.state.workbench.active_analysis_instance = Some(pss_id);
+                    app.state.simulate.active_analysis_instance = Some(pss_id);
                     app.state.record_plan_receipt(format!(
                         "Receipt #{} committed. Added autonomous PSS {pss_id} and its own prerequisites ahead of phase-noise analysis {id}. Enter the oscillator node, review the remaining PSS settings, then enable it; dependency repair will reuse it, and runs stay blocked until it is complete.",
                         receipt.sequence(),
@@ -689,7 +689,7 @@ pub(super) fn apply_confirmed_analysis_removal(app: &mut RSpiceApp) {
 /// application could mutate every subsystem to do it.
 pub(super) fn apply_requested_blocker_reveal(state: &mut AppState) {
     if let Some(blocker) = state.simulate.plan_removal_refusal.take_reveal_target() {
-        super::advanced_options::reveal_in_analyses(&mut state.workbench, blocker);
+        super::advanced_options::reveal_in_analyses(state, blocker);
     }
 }
 
@@ -742,7 +742,7 @@ fn commit_analysis_removal(app: &mut RSpiceApp, id: AnalysisInstanceId) {
                         .get(next_position)
                         .map(|instance| instance.id())
                 });
-            app.state.workbench.active_analysis_instance = next;
+            app.state.simulate.active_analysis_instance = next;
             record_receipt(&mut app.state, &receipt);
         }
         Err(RemovalFailure::Unavailable(error)) => {

@@ -15,7 +15,7 @@ use crate::ui::widgets::IconButton;
 use crate::workbench::state::{CaptureGroupDraft, CaptureGroupRuleDraft};
 
 pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    let Some(workflow) = app.state.workbench.simulation_workflow.clone() else {
+    let Some(workflow) = app.state.simulate.simulation_workflow.clone() else {
         return;
     };
     match workflow {
@@ -148,12 +148,12 @@ pub(super) fn rename_analysis_dialog(
     if matches!(choice, DialogChoice::Secondary) {
         match commit_clear_analysis_name(app, &draft) {
             Ok(message) => {
-                app.state.workbench.simulation_workflow = None;
+                app.state.simulate.simulation_workflow = None;
                 app.state.prompt(message);
             }
             Err(error) => {
                 set_workflow_error(&mut draft, error);
-                app.state.workbench.simulation_workflow = Some(draft.into());
+                app.state.simulate.simulation_workflow = Some(draft.into());
             }
         }
         return;
@@ -177,7 +177,7 @@ fn commit_clear_analysis_name(
                 .map_err(|error| error.to_string())
         })?;
     super::lifecycle::refresh_analysis_projections(app);
-    app.state.workbench.active_analysis_instance = Some(draft.instance_id);
+    app.state.simulate.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
     super::lifecycle::record_receipt(&mut app.state, &receipt);
     Ok(message)
@@ -200,7 +200,7 @@ fn commit_rename_analysis(
     // Selection is held by identity, and a rename does not mint one, so the
     // renamed analysis stays selected. Saying so here is what keeps a later
     // change from quietly moving selection to a position instead.
-    app.state.workbench.active_analysis_instance = Some(draft.instance_id);
+    app.state.simulate.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
     super::lifecycle::record_receipt(&mut app.state, &receipt);
     Ok(message)
@@ -930,7 +930,7 @@ pub(super) fn commit_capture_group(
         // caused it.
         return Err(app
             .state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .message()
             .to_owned());
@@ -1038,7 +1038,7 @@ pub(super) fn commit_clone_plan(
         .map(|instance| instance.id());
     app.state.model.sim_setup = setup;
     app.state.model.workspace = workspace;
-    app.state.workbench.active_analysis_instance = first_instance;
+    app.state.simulate.active_analysis_instance = first_instance;
     app.invalidate_simulation_preflight();
     app.state.record_plan_receipt(format!(
         "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
@@ -1117,13 +1117,9 @@ pub(super) fn design_variable_from_draft_categorized(
             cell: app.state.model.workspace.content.active_view.clone(),
         },
         3 => DesignVariableScope::SelectedAnalysis {
-            analysis_id: app
-                .state
-                .workbench
-                .active_analysis_instance
-                .ok_or_else(|| {
-                    record("Select an analysis before using analysis-only scope.".to_owned())
-                })?,
+            analysis_id: app.state.simulate.active_analysis_instance.ok_or_else(|| {
+                record("Select an analysis before using analysis-only scope.".to_owned())
+            })?,
         },
         _ => return Err(record("Ownership scope selection is invalid.".to_owned())),
     };
@@ -1482,7 +1478,7 @@ pub(super) fn unique_copy_name(base: &str, taken: impl Fn(&str) -> bool) -> Stri
 pub(super) fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableDraft) -> String {
     design_variable_consumers_scoped(
         app,
-        (draft.scope == 3).then_some(app.state.workbench.active_analysis_instance),
+        (draft.scope == 3).then_some(app.state.simulate.active_analysis_instance),
     )
 }
 
@@ -1543,13 +1539,13 @@ fn saved_output_compatibility(
     match selection {
         0 => Ok(SavedOutputCompatibility::OpTranAc),
         1 => Ok(SavedOutputCompatibility::AllCompatibleAnalyses),
-        2 => Ok(SavedOutputCompatibility::SelectedAnalysis {
-            analysis_id: app
-                .state
-                .workbench
-                .active_analysis_instance
-                .ok_or_else(|| "Select an analysis before using analysis-only scope.".to_owned())?,
-        }),
+        2 => {
+            Ok(SavedOutputCompatibility::SelectedAnalysis {
+                analysis_id: app.state.simulate.active_analysis_instance.ok_or_else(|| {
+                    "Select an analysis before using analysis-only scope.".to_owned()
+                })?,
+            })
+        }
         _ => Err("Compatible analyses selection is invalid.".to_owned()),
     }
 }
@@ -1666,19 +1662,19 @@ pub(super) fn finish_workflow_choice<D>(
     match choice {
         DialogChoice::Primary => match commit(app, &draft) {
             Ok(message) => {
-                app.state.workbench.simulation_workflow = None;
+                app.state.simulate.simulation_workflow = None;
                 app.state.prompt(message);
             }
             Err(error) => {
                 set_workflow_error(&mut draft, error);
-                app.state.workbench.simulation_workflow = Some(draft.into());
+                app.state.simulate.simulation_workflow = Some(draft.into());
             }
         },
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.workbench.simulation_workflow = None;
+            app.state.simulate.simulation_workflow = None;
         }
         DialogChoice::None | DialogChoice::Secondary => {
-            app.state.workbench.simulation_workflow = Some(draft.into());
+            app.state.simulate.simulation_workflow = Some(draft.into());
         }
     }
 }

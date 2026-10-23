@@ -987,8 +987,8 @@ pub(crate) fn open_netlist_dependency_from_root(
         root: root_document_id,
         logical_identity: logical_identity.to_owned(),
     };
-    if !state.workbench.netlist_open_documents.contains(&tab)
-        && state.workbench.netlist_open_documents.len() >= MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS
+    if !state.code.netlist_open_documents.contains(&tab)
+        && state.code.netlist_open_documents.len() >= MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS
     {
         return Err(format!(
             "Close an include tab before opening another; the workspace retains at most {MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS} secondary netlist documents."
@@ -997,7 +997,7 @@ pub(crate) fn open_netlist_dependency_from_root(
     state.code.netlist.active_document = root;
     state.code.netlist.active_dependency_root = Some(root);
     state.code.netlist.active_dependency_identity = Some(logical_identity.to_owned());
-    state.workbench.netlist_open_documents.insert(tab);
+    state.code.netlist_open_documents.insert(tab);
     state.code.netlist.active_document_initialized = true;
     state.model.simulation.source.netlist_content = source;
     state.code.netlist.requested_line = None;
@@ -1527,8 +1527,8 @@ pub(crate) fn commit_owned_include_lifecycle_action(
         root: transaction.root_document_id,
         logical_identity: proposed.clone(),
     };
-    if candidate.workbench.netlist_open_documents.remove(&old_tab) {
-        candidate.workbench.netlist_open_documents.insert(new_tab);
+    if candidate.code.netlist_open_documents.remove(&old_tab) {
+        candidate.code.netlist_open_documents.insert(new_tab);
     }
     candidate.model.workspace.content.netlist_document = Some(next_document.clone());
     candidate.model.workspace.content.netlist_source_dirty = true;

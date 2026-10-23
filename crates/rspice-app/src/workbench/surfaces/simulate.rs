@@ -315,7 +315,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         let track = ui.available_width();
         let gutter = ui.spacing().scroll.allocated_width();
         let surface_width = (track - gutter).max(1.0);
-        let page = app.state.workbench.simulation_page;
+        let page = app.state.simulate.simulation_page;
         let responsive_width = ui.ctx().content_rect().width().min(surface_width);
         if page == SimulationPage::Analyses
             && analysis_workspace_is_split(responsive_width, surface_width)
@@ -325,7 +325,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         }
         let output = ScrollArea::vertical()
             .id_salt("workbench.simulate.surface")
-            .vertical_scroll_offset(app.state.workbench.simulation_surface_scroll_y)
+            .vertical_scroll_offset(app.state.simulate.simulation_surface_scroll_y)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 let scroll_content_origin_y = ui.min_rect().top();
@@ -359,8 +359,8 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
 /// editor's anchor asked for this frame.
 fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
     let pending_delta =
-        std::mem::take(&mut state.workbench.simulation_surface_pending_scroll_delta_y);
-    state.workbench.simulation_surface_scroll_y =
+        std::mem::take(&mut state.simulate.simulation_surface_pending_scroll_delta_y);
+    state.simulate.simulation_surface_scroll_y =
         adjusted_scroll_for_stack_delta(offset_y, 0.0, pending_delta);
     if pending_delta != 0.0 {
         ui.ctx().request_repaint();
@@ -421,8 +421,8 @@ fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
     // opened from anywhere. Carrying the reader to the one route that edits the
     // new instance is the same move `page_excitations::reveal` makes towards
     // Design: the insert alone would leave a receipt on a page nobody is on.
-    app.state.workbench.active_analysis_instance = Some(id);
-    app.state.workbench.simulation_page = SimulationPage::Analyses;
+    app.state.simulate.active_analysis_instance = Some(id);
+    app.state.simulate.simulation_page = SimulationPage::Analyses;
     app.state.workbench.activate(Workspace::Simulate);
 }
 
@@ -481,7 +481,7 @@ fn split_analysis_route(
     let editor_width = (editor_rect.width() - editor.spacing().scroll.allocated_width()).max(1.0);
     let output = ScrollArea::vertical()
         .id_salt("workbench.simulate.analysis-editor")
-        .vertical_scroll_offset(app.state.workbench.simulation_surface_scroll_y)
+        .vertical_scroll_offset(app.state.simulate.simulation_surface_scroll_y)
         .auto_shrink([false, false])
         .show(&mut editor, |ui| {
             let scroll_content_origin_y = ui.min_rect().top();
@@ -559,7 +559,7 @@ fn ordered_instance_stack(
             return;
         }
     };
-    let active = app.state.workbench.active_analysis_instance;
+    let active = app.state.simulate.active_analysis_instance;
     let mut action = None;
     let mut add_analysis = false;
     let t = Tokens::get(ui.ctx());
@@ -619,7 +619,7 @@ fn ordered_instance_stack(
 
     match action {
         Some(StackAction::Select(id)) => {
-            app.state.workbench.active_analysis_instance = Some(id);
+            app.state.simulate.active_analysis_instance = Some(id);
         }
         Some(StackAction::SetEnabled(id, enabled)) => {
             apply_analysis_action(app, id, AnalysisAction::SetEnabled(enabled));
@@ -1304,7 +1304,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         Command::ManageSimulationPlans.execute(app);
     }
     if clone_plan {
-        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
+        app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
             ClonePlanDraft::for_source(
                 app.state
                     .model
@@ -1580,14 +1580,14 @@ fn analysis_editor(
     let selected = match selected_analysis(app, &dependency_sources) {
         Ok(Some(selected)) => selected,
         Ok(None) => {
-            app.state.workbench.simulation_surface_editor_anchor_y = None;
+            app.state.simulate.simulation_surface_editor_anchor_y = None;
             flat_notice(ui, |ui| {
                 page_kit::note_line(ui, "Add an analysis to start.", page_kit::Tone::Dim);
             });
             return;
         }
         Err(error) => {
-            app.state.workbench.simulation_surface_editor_anchor_y = None;
+            app.state.simulate.simulation_surface_editor_anchor_y = None;
             record_failure(&mut app.state, "Analysis editor", &error);
             flat_notice(ui, |ui| {
                 page_kit::note_line(ui, "Plan unavailable", page_kit::Tone::Error);
@@ -1659,7 +1659,7 @@ fn analysis_editor(
         checkpoint_exchange::apply(ui.ctx(), app, action);
     }
     if let Some(page) = run_space_route {
-        app.state.workbench.simulation_page = page;
+        app.state.simulate.simulation_page = page;
     }
     let (form_anchor_y, rename_requested) = editor_response.inner;
     let form_anchor_content_y = content_space_anchor(form_anchor_y, scroll_content_origin_y);
@@ -1670,15 +1670,8 @@ fn analysis_editor(
         Stroke::new(1.0, t.color.border_strong),
     );
 
-    if let Some(anchor_y) = app
-        .state
-        .workbench
-        .simulation_surface_editor_anchor_y
-        .take()
-    {
-        app.state
-            .workbench
-            .simulation_surface_pending_scroll_delta_y +=
+    if let Some(anchor_y) = app.state.simulate.simulation_surface_editor_anchor_y.take() {
+        app.state.simulate.simulation_surface_pending_scroll_delta_y +=
             editor_anchor_scroll_delta(anchor_y, form_anchor_content_y);
     }
 
@@ -1690,7 +1683,7 @@ fn analysis_editor(
                 "Analysis edit",
                 &format!("the draft could not be serialized: {error}"),
             );
-            app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+            app.state.simulate.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
             return;
         }
     };
@@ -1699,7 +1692,7 @@ fn analysis_editor(
     // dependency bind, enable toggle, insertion, removal, or repair that changes
     // content above it is then compensated on the next frame without maintaining
     // a fragile action whitelist.
-    app.state.workbench.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
+    app.state.simulate.simulation_surface_editor_anchor_y = Some(form_anchor_content_y);
     // Ahead of every commit below, for the reason the participation action is:
     // an option field commits when it is let go of, which is the same instant
     // focus lands somewhere else, and that must not also commit an edit to the
@@ -1722,7 +1715,7 @@ fn analysis_editor(
     if rename_requested {
         // Opened on what the header showed, and told which analysis it is by
         // the two facts the header's own second line states.
-        app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
+        app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::RenameAnalysis(
             RenameAnalysisDraft::for_instance(
                 selected.id,
                 format!("{} · {}", selected.kind.label(), selected.id),

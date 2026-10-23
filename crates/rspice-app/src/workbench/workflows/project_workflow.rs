@@ -13,10 +13,10 @@ use crate::io::ProjectSnapshot;
 use crate::workbench::app_state::AppState;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
+use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::lifecycle::project_lifecycle::{
     PersistenceBinding, ProjectLifecycleError, SaveScope,
 };
-use crate::workbench::state::ProjectCloseDestination;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
 
@@ -1004,7 +1004,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
         return false;
     }
     state
-        .workbench
+        .project
         .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
     if closing_loses_nothing(state) {
         return close_project_discard(state);
@@ -1018,7 +1018,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
 /// saved to a file always has something to lose.
 fn closing_loses_nothing(state: &AppState) -> bool {
     !state.model.simulation.execution.has_active_execution()
-        && !state.workbench.model_editor_has_unsaved_changes()
+        && !state.models.model_editor_has_unsaved_changes()
         && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty()
 }
 
@@ -1093,13 +1093,13 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
     emit_session_model_restore_errors(state, "project close", model_restore_errors);
-    let destination = state.workbench.take_project_close_destination();
-    state.workbench.project_launcher_open = false;
+    let destination = state.project.take_project_close_destination();
+    state.project.project_launcher_open = false;
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Project);
     if destination == ProjectCloseDestination::LiveMirror {
-        state.workbench.request_live_mirror_entry();
+        state.cloud.request_live_mirror_entry();
     }
     true
 }

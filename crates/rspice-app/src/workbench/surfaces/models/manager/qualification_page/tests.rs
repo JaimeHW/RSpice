@@ -51,10 +51,10 @@ fn source_owned_app() -> RSpiceApp {
         .model_library_manager
         .select_library(&summary.library)
         .expect("the fixture library is loaded");
-    app.state.workbench.selected_model = Some(summary.model.clone());
+    app.state.models.selected_model = Some(summary.model.clone());
     execute_qualification_action(&mut app, QualificationPageAction::ReviewVectors);
 
-    let editor = &mut app.state.workbench.model_editor;
+    let editor = &mut app.state.models.model_editor;
 
     editor.begin_qualification_suite();
     {
@@ -128,7 +128,7 @@ fn source_owned_app() -> RSpiceApp {
         editor.qualification_authoring.error
     );
 
-    app.state.workbench.models_page = ModelsPage::Qualification;
+    app.state.models.models_page = ModelsPage::Qualification;
     app
 }
 
@@ -193,7 +193,7 @@ fn painted_text(output: &egui::FullOutput) -> Vec<PaintedText> {
 #[cfg(not(target_arch = "wasm32"))]
 fn run_page(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
     let size = egui::vec2(width, PAGE_SIZE[1]);
-    app.state.workbench.models_page = ModelsPage::Qualification;
+    app.state.models.models_page = ModelsPage::Qualification;
     let ctx = themed_context();
     ctx.run_ui(
         egui::RawInput {
@@ -591,7 +591,7 @@ fn the_engine_owned_band_states_its_whole_exemption() {
 
     let ctx = themed_context();
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.models_page = ModelsPage::Qualification;
+    app.state.models.models_page = ModelsPage::Qualification;
     let size = egui::vec2(PAGE_SIZE[0], PAGE_SIZE[1]);
     let output = ctx.run_ui(
         egui::RawInput {

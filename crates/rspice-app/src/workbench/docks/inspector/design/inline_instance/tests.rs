@@ -411,23 +411,9 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
     Command::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
     assert_eq!(editor.app.state.workbench.workspace, Workspace::Design);
     Command::RunSimulation.execute(&mut editor.app);
-    assert!(
-        !editor
-            .app
-            .state
-            .workbench
-            .preflight
-            .take_run_and_queue_request()
-    );
+    assert!(!editor.app.state.runs.preflight.take_run_and_queue_request());
     editor.app.execute_shortcut_command(Command::RunSimulation);
-    assert!(
-        !editor
-            .app
-            .state
-            .workbench
-            .preflight
-            .take_run_and_queue_request()
-    );
+    assert!(!editor.app.state.runs.preflight.take_run_and_queue_request());
     assert_eq!(
         editor.app.state.model.schematic.document().components[0].name,
         "V1"

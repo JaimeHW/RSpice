@@ -27,7 +27,10 @@ use crate::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 use crate::workbench::lifecycle::session::normalize_autosave_minutes;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
 use crate::workbench::preferences::UserPreferences;
-use crate::workbench::slots::{DesignState, PlatformState, ResultsState, SettingsState};
+use crate::workbench::slots::{
+    CodeState, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState, ResultsState,
+    SettingsState, SimulateState,
+};
 use crate::workbench::state::{
     ConsolePage, DesignPanel, LibraryCellviewPage, ModelsWorkbenchViewState,
     PdkTechnologyAuthoringRecovery, ProjectPage, SimulationPage, SpecialistToolBrowserState,
@@ -257,8 +260,9 @@ impl UiSessionWire {
 /// What a session keeps of [`WorkbenchState`], as it is read back.
 ///
 /// Each field's attribute says what a session without it restores. A session
-/// with no workbench at all restores [`WorkbenchState::default`], which is
-/// what [`Self::default`] holds.
+/// with no workbench at all restores the defaults of [`WorkbenchState`] and
+/// of the slots that own the rest of what it keeps, which is what
+/// [`Self::default`] holds.
 #[derive(Deserialize)]
 #[serde(rename = "WorkbenchState")]
 pub(in crate::workbench) struct WorkbenchWire {
@@ -465,7 +469,30 @@ pub(in crate::workbench) struct WorkbenchWireRef<'a> {
 
 impl<'a> WorkbenchWireRef<'a> {
     /// Borrow what a session keeps of `state`.
-    pub(in crate::workbench) fn capture(state: &'a WorkbenchState) -> Self {
+    pub(in crate::workbench) fn capture(state: &'a AppState) -> Self {
+        Self::capture_parts(
+            &state.workbench,
+            &state.design,
+            &state.code,
+            &state.project,
+            &state.simulate,
+            &state.models,
+            &state.hardcopy,
+        )
+    }
+
+    /// Borrow what a session keeps of the workbench and of the slots that
+    /// own the rest of what it keeps. The slots' fields are read by name; the
+    /// session round trip of a populated session is what guards them.
+    fn capture_parts(
+        workbench: &'a WorkbenchState,
+        design: &'a DesignState,
+        code: &'a CodeState,
+        project: &'a ProjectState,
+        simulate: &'a SimulateState,
+        models: &'a ModelsState,
+        hardcopy: &'a HardcopyState,
+    ) -> Self {
         // No `..`: a field added to `WorkbenchState` does not compile until it
         // is either kept here or named as runtime-only.
         let WorkbenchState {
@@ -477,7 +504,6 @@ impl<'a> WorkbenchWireRef<'a> {
             route_diagnostic: _,
             navigator_visible,
             inspector_visible,
-            reveal_sheet_section: _,
             console_visible,
             console_maximized,
             focus_mode,
@@ -485,16 +511,6 @@ impl<'a> WorkbenchWireRef<'a> {
             full_screen: _,
             full_screen_presentation: _,
             coarse_pointer: _,
-            project_launcher_open: _,
-            project_launcher_query: _,
-            project_launcher_sort: _,
-            project_launcher_filter: _,
-            project_launcher_page: _,
-            project_launcher_recovery: _,
-            examples_selection: _,
-            project_close_destination: _,
-            live_mirror_entry_pending: _,
-            focus_project_launcher_search: _,
             navigator_width,
             navigator_width_custom,
             inspector_width,
@@ -504,69 +520,15 @@ impl<'a> WorkbenchWireRef<'a> {
             workspace_preset,
             console_page,
             console_view: _,
-            design_panel,
             documents,
-            netlist_open_documents,
-            project_page,
-            project_library_filter,
-            project_dependency_filter,
-            project_dependency_selection,
-            project_checkpoint_selection,
-            library_cellview_page,
-            verification_page,
-            simulation_page,
-            verification,
-            models_page,
-            models_view,
-            active_analysis,
-            active_analysis_instance,
-            simulation_surface_scroll_y: _,
-            simulation_surface_pending_scroll_delta_y: _,
-            simulation_surface_editor_anchor_y: _,
-            analysis_lifecycle_status: _,
             prompt: _,
-            recorded_sync_failures: _,
-            simulation_workflow: _,
-            selected_specification,
-            specification_editor_route_pending: _,
-            selected_design_variable,
-            selected_saved_output,
-            selected_capture_group,
-            selected_run_set_dimension,
-            run_set_values_draft: _,
-            run_set_budget_drafts: _,
-            design_variable_expression_draft: _,
-            design_variable_bounds_draft: _,
-            saved_output_name_draft: _,
-            saved_output_expression_draft: _,
-            saved_output_filter: _,
-            specification_filter: _,
-            specification_evidence_filter: _,
-            selected_model,
-            selected_stimulus_definition: _,
-            stimulus_editor: _,
-            stimulus_browser: _,
             navigator_trees: _,
-            netlist_outline_collapsed,
             command_query,
             inline_edit: _,
-            occurrence_net_highlights: _,
             last_repeatable_command: _,
             drawer: _,
             focus_navigator_search: _,
-            placement_query: _,
-            focus_placement_search: _,
-            preflight: _,
-            jobs_manager: _,
             specialist_tool_browser,
-            create_result_document: _,
-            result_document_dialog: _,
-            result_import: _,
-            report_authoring,
-            model_editor: _,
-            model_editor_recovery,
-            pdk_technology_authoring,
-            model_correlation: _,
             notification_center_open: _,
             notification_filter: _,
             notification_unread_only: _,
@@ -585,7 +547,7 @@ impl<'a> WorkbenchWireRef<'a> {
             active_source_editor: _,
             source_editor_request: _,
             full_screen_request: _,
-        } = state;
+        } = workbench;
         Self {
             workspace,
             window_session,
@@ -606,34 +568,34 @@ impl<'a> WorkbenchWireRef<'a> {
             workspace_layouts,
             workspace_preset,
             console_page,
-            design_panel,
+            design_panel: &design.design_panel,
             documents,
-            netlist_open_documents,
-            project_page,
-            project_library_filter,
-            project_dependency_filter,
-            project_dependency_selection,
-            project_checkpoint_selection,
-            library_cellview_page,
-            verification_page,
-            simulation_page,
-            verification,
-            models_page,
-            models_view,
-            active_analysis,
-            active_analysis_instance,
-            selected_specification,
-            selected_design_variable,
-            selected_saved_output,
-            selected_capture_group,
-            selected_run_set_dimension,
-            selected_model,
-            netlist_outline_collapsed,
+            netlist_open_documents: &code.netlist_open_documents,
+            project_page: &project.project_page,
+            project_library_filter: &project.project_library_filter,
+            project_dependency_filter: &project.project_dependency_filter,
+            project_dependency_selection: &project.project_dependency_selection,
+            project_checkpoint_selection: &project.project_checkpoint_selection,
+            library_cellview_page: &project.library_cellview_page,
+            verification_page: &simulate.verification_page,
+            simulation_page: &simulate.simulation_page,
+            verification: &simulate.verification,
+            models_page: &models.models_page,
+            models_view: &models.models_view,
+            active_analysis: &simulate.active_analysis,
+            active_analysis_instance: &simulate.active_analysis_instance,
+            selected_specification: &simulate.selected_specification,
+            selected_design_variable: &simulate.selected_design_variable,
+            selected_saved_output: &simulate.selected_saved_output,
+            selected_capture_group: &simulate.selected_capture_group,
+            selected_run_set_dimension: &simulate.selected_run_set_dimension,
+            selected_model: &models.selected_model,
+            netlist_outline_collapsed: &code.netlist_outline_collapsed,
             command_query,
             specialist_tool_browser,
-            report_authoring,
-            model_editor_recovery: model_editor_recovery.as_ref(),
-            pdk_technology_authoring,
+            report_authoring: &hardcopy.report_authoring,
+            model_editor_recovery: models.model_editor_recovery.as_ref(),
+            pdk_technology_authoring: &models.pdk_technology_authoring,
         }
     }
 
@@ -746,18 +708,31 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
 }
 
 impl Default for WorkbenchWire {
+    /// Built from each owner's default rather than from a whole `AppState`,
+    /// which would build the model and the PDK configuration only to drop
+    /// them. Each owner is boxed so the frame holds none of them inline.
     fn default() -> Self {
-        WorkbenchWireRef::capture(&WorkbenchState::default()).to_wire()
+        WorkbenchWireRef::capture_parts(
+            &Box::<WorkbenchState>::default(),
+            &Box::<DesignState>::default(),
+            &Box::<CodeState>::default(),
+            &Box::<ProjectState>::default(),
+            &Box::<SimulateState>::default(),
+            &Box::<ModelsState>::default(),
+            &Box::<HardcopyState>::default(),
+        )
+        .to_wire()
     }
 }
 
 impl WorkbenchWire {
-    /// Restore what the session kept onto `state`.
+    /// Restore what the session kept onto `state`: the workbench, and the
+    /// slots that own the rest of what it keeps.
     ///
     /// Runtime-only fields keep what `state` holds. A restored session
-    /// scatters onto [`WorkbenchState::default`], whose runtime-only fields
-    /// hold their types' defaults.
-    pub(in crate::workbench) fn scatter(self, state: &mut WorkbenchState) {
+    /// scatters onto the defaults, whose runtime-only fields hold their
+    /// types' defaults.
+    pub(in crate::workbench) fn scatter(self, state: &mut AppState) {
         // No `..`: a field added to `WorkbenchState` does not compile until it
         // is either restored here or named as runtime-only.
         let WorkbenchState {
@@ -769,7 +744,6 @@ impl WorkbenchWire {
             route_diagnostic: _,
             navigator_visible,
             inspector_visible,
-            reveal_sheet_section: _,
             console_visible,
             console_maximized,
             focus_mode,
@@ -777,16 +751,6 @@ impl WorkbenchWire {
             full_screen: _,
             full_screen_presentation: _,
             coarse_pointer: _,
-            project_launcher_open: _,
-            project_launcher_query: _,
-            project_launcher_sort: _,
-            project_launcher_filter: _,
-            project_launcher_page: _,
-            project_launcher_recovery: _,
-            examples_selection: _,
-            project_close_destination: _,
-            live_mirror_entry_pending: _,
-            focus_project_launcher_search: _,
             navigator_width,
             navigator_width_custom,
             inspector_width,
@@ -796,69 +760,15 @@ impl WorkbenchWire {
             workspace_preset,
             console_page,
             console_view: _,
-            design_panel,
             documents,
-            netlist_open_documents,
-            project_page,
-            project_library_filter,
-            project_dependency_filter,
-            project_dependency_selection,
-            project_checkpoint_selection,
-            library_cellview_page,
-            verification_page,
-            simulation_page,
-            verification,
-            models_page,
-            models_view,
-            active_analysis,
-            active_analysis_instance,
-            simulation_surface_scroll_y: _,
-            simulation_surface_pending_scroll_delta_y: _,
-            simulation_surface_editor_anchor_y: _,
-            analysis_lifecycle_status: _,
             prompt: _,
-            recorded_sync_failures: _,
-            simulation_workflow: _,
-            selected_specification,
-            specification_editor_route_pending: _,
-            selected_design_variable,
-            selected_saved_output,
-            selected_capture_group,
-            selected_run_set_dimension,
-            run_set_values_draft: _,
-            run_set_budget_drafts: _,
-            design_variable_expression_draft: _,
-            design_variable_bounds_draft: _,
-            saved_output_name_draft: _,
-            saved_output_expression_draft: _,
-            saved_output_filter: _,
-            specification_filter: _,
-            specification_evidence_filter: _,
-            selected_model,
-            selected_stimulus_definition: _,
-            stimulus_editor: _,
-            stimulus_browser: _,
             navigator_trees: _,
-            netlist_outline_collapsed,
             command_query,
             inline_edit: _,
-            occurrence_net_highlights: _,
             last_repeatable_command: _,
             drawer: _,
             focus_navigator_search: _,
-            placement_query: _,
-            focus_placement_search: _,
-            preflight: _,
-            jobs_manager: _,
             specialist_tool_browser,
-            create_result_document: _,
-            result_document_dialog: _,
-            result_import: _,
-            report_authoring,
-            model_editor: _,
-            model_editor_recovery,
-            pdk_technology_authoring,
-            model_correlation: _,
             notification_center_open: _,
             notification_filter: _,
             notification_unread_only: _,
@@ -877,7 +787,7 @@ impl WorkbenchWire {
             active_source_editor: _,
             source_editor_request: _,
             full_screen_request: _,
-        } = state;
+        } = &mut *state.workbench;
         *workspace = self.workspace;
         *window_session = self.window_session;
         *navigation_schema_version = self.navigation_schema_version;
@@ -897,34 +807,34 @@ impl WorkbenchWire {
         *workspace_layouts = self.workspace_layouts;
         *workspace_preset = self.workspace_preset;
         *console_page = self.console_page;
-        *design_panel = self.design_panel;
+        state.design.design_panel = self.design_panel;
         *documents = self.documents;
-        *netlist_open_documents = self.netlist_open_documents;
-        *project_page = self.project_page;
-        *project_library_filter = self.project_library_filter;
-        *project_dependency_filter = self.project_dependency_filter;
-        *project_dependency_selection = self.project_dependency_selection;
-        *project_checkpoint_selection = self.project_checkpoint_selection;
-        *library_cellview_page = self.library_cellview_page;
-        *verification_page = self.verification_page;
-        *simulation_page = self.simulation_page;
-        *verification = self.verification;
-        *models_page = self.models_page;
-        *models_view = self.models_view;
-        *active_analysis = self.active_analysis;
-        *active_analysis_instance = self.active_analysis_instance;
-        *selected_specification = self.selected_specification;
-        *selected_design_variable = self.selected_design_variable;
-        *selected_saved_output = self.selected_saved_output;
-        *selected_capture_group = self.selected_capture_group;
-        *selected_run_set_dimension = self.selected_run_set_dimension;
-        *selected_model = self.selected_model;
-        *netlist_outline_collapsed = self.netlist_outline_collapsed;
+        state.code.netlist_open_documents = self.netlist_open_documents;
+        state.project.project_page = self.project_page;
+        state.project.project_library_filter = self.project_library_filter;
+        state.project.project_dependency_filter = self.project_dependency_filter;
+        state.project.project_dependency_selection = self.project_dependency_selection;
+        state.project.project_checkpoint_selection = self.project_checkpoint_selection;
+        state.project.library_cellview_page = self.library_cellview_page;
+        state.simulate.verification_page = self.verification_page;
+        state.simulate.simulation_page = self.simulation_page;
+        state.simulate.verification = self.verification;
+        state.models.models_page = self.models_page;
+        state.models.models_view = self.models_view;
+        state.simulate.active_analysis = self.active_analysis;
+        state.simulate.active_analysis_instance = self.active_analysis_instance;
+        state.simulate.selected_specification = self.selected_specification;
+        state.simulate.selected_design_variable = self.selected_design_variable;
+        state.simulate.selected_saved_output = self.selected_saved_output;
+        state.simulate.selected_capture_group = self.selected_capture_group;
+        state.simulate.selected_run_set_dimension = self.selected_run_set_dimension;
+        state.models.selected_model = self.selected_model;
+        state.code.netlist_outline_collapsed = self.netlist_outline_collapsed;
         *command_query = self.command_query;
         *specialist_tool_browser = self.specialist_tool_browser;
-        *report_authoring = self.report_authoring;
-        *model_editor_recovery = self.model_editor_recovery;
-        *pdk_technology_authoring = self.pdk_technology_authoring;
+        state.hardcopy.report_authoring = self.report_authoring;
+        state.models.model_editor_recovery = self.model_editor_recovery;
+        state.models.pdk_technology_authoring = self.pdk_technology_authoring;
     }
 }
 
@@ -1258,8 +1168,8 @@ mod workbench_session_tests {
     use super::*;
     use crate::workbench::{BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute};
 
-    fn restore(wire: WorkbenchWire) -> WorkbenchState {
-        let mut state = WorkbenchState::default();
+    fn restore(wire: WorkbenchWire) -> AppState {
+        let mut state = AppState::default();
         wire.scatter(&mut state);
         state
     }
@@ -1267,7 +1177,7 @@ mod workbench_session_tests {
     #[test]
     fn workbench_without_a_project_page_defaults_to_overview() {
         let mut encoded =
-            serde_json::to_value(WorkbenchWireRef::capture(&WorkbenchState::default())).unwrap();
+            serde_json::to_value(WorkbenchWireRef::capture(&AppState::default())).unwrap();
         encoded
             .as_object_mut()
             .expect("workbench is an object")
@@ -1275,7 +1185,7 @@ mod workbench_session_tests {
 
         let restored = restore(serde_json::from_value(encoded).unwrap());
 
-        assert_eq!(restored.project_page, ProjectPage::Overview);
+        assert_eq!(restored.project.project_page, ProjectPage::Overview);
     }
 
     /// A session saved while the Visualization Studio existed carries its
@@ -1300,8 +1210,8 @@ mod workbench_session_tests {
             "display_lod:r#envelope-preserving,tile_memory_mib:2048,significant_digits:9,",
             "touch_pane:stage)"
         );
-        let mut state = WorkbenchState::default();
-        state.activate(Workspace::Results);
+        let mut state = AppState::default();
+        state.workbench.activate(Workspace::Results);
         let saved =
             ron::to_string(&WorkbenchWireRef::capture(&state)).expect("workbench serializes");
         let saved = saved.replacen(
@@ -1325,14 +1235,15 @@ mod workbench_session_tests {
         let mut restored = restore(
             ron::from_str(&saved).expect("a session that kept the Studio's state restores"),
         );
-        restored.reconcile_restored_navigation();
+        restored.workbench.reconcile_restored_navigation();
 
         assert_eq!(
-            restored.current_route(),
+            restored.workbench.current_route(),
             SurfaceRoute::surface(SurfaceId::Design)
         );
         assert!(
             restored
+                .workbench
                 .take_route_diagnostic()
                 .is_some_and(|message| message.contains("Malformed routes"))
         );
@@ -1340,18 +1251,19 @@ mod workbench_session_tests {
 
     #[test]
     fn library_cellview_route_and_page_restore_with_models_workspace_ownership() {
-        let mut state = WorkbenchState::default();
-        state.library_cellview_page = LibraryCellviewPage::SymbolForm;
+        let mut state = AppState::default();
+        state.project.library_cellview_page = LibraryCellviewPage::SymbolForm;
         state
+            .workbench
             .navigate(
                 SurfaceRoute::surface(SurfaceId::LibraryCellviewManager),
                 RouteTransitionSource::User,
             )
             .expect("Library Cellview Manager has a registered executor");
 
-        assert_eq!(state.workspace, Workspace::Models);
+        assert_eq!(state.workbench.workspace, Workspace::Models);
         assert_eq!(
-            state.current_route().surface_id(),
+            state.workbench.current_route().surface_id(),
             SurfaceId::LibraryCellviewManager
         );
         assert!(!state.application_modal_open());
@@ -1360,16 +1272,16 @@ mod workbench_session_tests {
             .expect("workbench session serializes");
         let mut restored =
             restore(serde_json::from_str(&encoded).expect("workbench session restores"));
-        restored.workspace = Workspace::Project;
-        restored.reconcile_restored_navigation();
+        restored.workbench.workspace = Workspace::Project;
+        restored.workbench.reconcile_restored_navigation();
 
-        assert_eq!(restored.workspace, Workspace::Models);
+        assert_eq!(restored.workbench.workspace, Workspace::Models);
         assert_eq!(
-            restored.current_route().surface_id(),
+            restored.workbench.current_route().surface_id(),
             SurfaceId::LibraryCellviewManager
         );
         assert_eq!(
-            restored.library_cellview_page,
+            restored.project.library_cellview_page,
             LibraryCellviewPage::SymbolForm
         );
     }
@@ -1379,7 +1291,10 @@ mod workbench_session_tests {
         let state = restore(
             serde_json::from_str(r#"{"workspace":"Models"}"#).expect("legacy workbench restores"),
         );
-        assert_eq!(state.library_cellview_page, LibraryCellviewPage::Libraries);
+        assert_eq!(
+            state.project.library_cellview_page,
+            LibraryCellviewPage::Libraries
+        );
     }
 
     #[test]
@@ -1387,13 +1302,19 @@ mod workbench_session_tests {
         let mut state = restore(
             serde_json::from_str(r#"{"workspace":"Results"}"#).expect("legacy workbench restores"),
         );
-        assert_eq!(state.current_route().surface_id(), SurfaceId::Design);
-
-        state.reconcile_restored_navigation();
-        assert_eq!(state.workspace, Workspace::Results);
-        assert_eq!(state.current_route().surface_id(), SurfaceId::Results);
         assert_eq!(
-            state.take_browser_history_effect(),
+            state.workbench.current_route().surface_id(),
+            SurfaceId::Design
+        );
+
+        state.workbench.reconcile_restored_navigation();
+        assert_eq!(state.workbench.workspace, Workspace::Results);
+        assert_eq!(
+            state.workbench.current_route().surface_id(),
+            SurfaceId::Results
+        );
+        assert_eq!(
+            state.workbench.take_browser_history_effect(),
             Some(BrowserHistoryEffect::Replace(SurfaceRoute::surface(
                 SurfaceId::Results
             )))
@@ -1406,8 +1327,8 @@ mod workbench_session_tests {
     /// dropped with one diagnostic, and the rest of the session survives.
     #[test]
     fn session_saved_with_the_deleted_capability_matrix_still_restores() {
-        let mut state = WorkbenchState::default();
-        state.activate(Workspace::Results);
+        let mut state = AppState::default();
+        state.workbench.activate(Workspace::Results);
         let mut saved =
             serde_json::to_value(WorkbenchWireRef::capture(&state)).expect("workbench serializes");
         saved["engineering_profile"] = serde_json::json!("rf-microwave");
@@ -1420,18 +1341,19 @@ mod workbench_session_tests {
         });
 
         let mut restored = restore(serde_json::from_value(saved).expect("an old session restores"));
-        restored.reconcile_restored_navigation();
+        restored.workbench.reconcile_restored_navigation();
 
         assert_eq!(
-            restored.current_route(),
+            restored.workbench.current_route(),
             SurfaceRoute::surface(SurfaceId::Design)
         );
         assert_eq!(
-            restored.previous_route(),
+            restored.workbench.previous_route(),
             Some(SurfaceRoute::surface(SurfaceId::Results))
         );
         assert!(
             restored
+                .workbench
                 .take_route_diagnostic()
                 .is_some_and(|message| message.contains("Malformed routes"))
         );
@@ -1439,21 +1361,30 @@ mod workbench_session_tests {
 
     #[test]
     fn independent_workspace_layouts_round_trip_with_the_session() {
-        let mut state = WorkbenchState::default();
-        state.apply_workspace_preset(WorkspacePreset::Diagnostics);
-        state.activate(Workspace::Results);
-        state.apply_results_review_layout();
+        let mut state = AppState::default();
+        state
+            .workbench
+            .apply_workspace_preset(WorkspacePreset::Diagnostics);
+        state.workbench.activate(Workspace::Results);
+        state.workbench.apply_results_review_layout();
 
         let encoded = serde_json::to_string(&WorkbenchWireRef::capture(&state)).unwrap();
         let restored = restore(serde_json::from_str(&encoded).unwrap());
-        assert!(restored.workspace_layout(Workspace::Design).console_visible);
+        assert!(
+            restored
+                .workbench
+                .workspace_layout(Workspace::Design)
+                .console_visible
+        );
         assert!(
             !restored
+                .workbench
                 .workspace_layout(Workspace::Results)
                 .navigator_visible
         );
         assert_eq!(
             restored
+                .workbench
                 .workspace_layout(Workspace::Results)
                 .inspector_width,
             332.0

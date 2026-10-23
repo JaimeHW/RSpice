@@ -244,7 +244,7 @@ fn confirm_pack_nodes(
     state: &mut AppState,
     confirmation: &PackReleaseConfirmation,
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
-    state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+    state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
         pack_id: "rspice-proving".to_owned(),
         attach: true,
         release: Some(Box::new(confirmation.clone())),
@@ -394,7 +394,7 @@ fn every_pack_state_is_reachable_and_offers_the_action_it_earns() {
         (unrunnable, vec![], vec!["Install"]),
     ] {
         let mut app_state = AppState::default();
-        app_state.workbench.models_view.selected_pack = Some(ledger.pack_id.clone());
+        app_state.models.models_view.selected_pack = Some(ledger.pack_id.clone());
         let listed = catalog(vec![ledger], Some(2), false);
         let nodes =
             accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), move |ui, app| {
@@ -811,9 +811,9 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
         pinned_pack(releases, None, &[])
     };
     let running = |state: &mut AppState, progress: Option<f32>| {
-        state.workbench.models_view.model_import_in_progress = true;
-        state.workbench.models_view.model_import_progress = progress;
-        state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+        state.models.models_view.model_import_in_progress = true;
+        state.models.models_view.model_import_progress = progress;
+        state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
             label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
             reissuable: false,
             landing_pack: Some(landing.pack_id.clone()),
@@ -829,7 +829,7 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
         pack_transfer(&state, &landing).map(|transfer| transfer.phrase),
         Some("installing 42%".to_owned())
     );
-    state.workbench.models_view.model_import_progress = None;
+    state.models.models_view.model_import_progress = None;
     assert_eq!(
         pack_transfer(&state, &landing).map(|transfer| transfer.phrase),
         Some("installing".to_owned())
@@ -854,7 +854,7 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
 
     let mut state = AppState::default();
     running(&mut state, Some(0.42));
-    state.workbench.models_view.selected_pack = Some(landing.pack_id.clone());
+    state.models.models_view.selected_pack = Some(landing.pack_id.clone());
     let listed = catalog(vec![landing.clone(), other.clone()], Some(1), false);
     let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), |ui, app| {
         packs_page(ui, app, &listed);
@@ -870,9 +870,9 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
     );
 
     // The receipt lands: the operation is over, and so is the cell.
-    state.workbench.models_view.model_import_in_progress = false;
-    state.workbench.models_view.model_import_progress = None;
-    state.workbench.models_view.action_receipt =
+    state.models.models_view.model_import_in_progress = false;
+    state.models.models_view.model_import_progress = None;
+    state.models.models_view.action_receipt =
         Some(Ok("RSpice proving pack 1.0.0 installed.".to_owned()));
     assert!(pack_transfer(&state, &landing).is_none());
     let listed = catalog(vec![landing, other], Some(1), false);
@@ -961,10 +961,10 @@ fn every_operational_state_paints_its_word_and_its_consequence() {
 
     for state in ModelsOperationalState::ALL {
         let mut app_state = AppState::default();
-        app_state.workbench.models_view.operational_state = state;
-        app_state.workbench.models_view.action_receipt =
+        app_state.models.models_view.operational_state = state;
+        app_state.models.models_view.action_receipt =
             Some(Err("the pack format refused: truncated archive".to_owned()));
-        app_state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+        app_state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
             label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
             reissuable: false,
             landing_pack: None,
@@ -1009,10 +1009,10 @@ fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
     use crate::workbench::state::{ModelsAttemptedOperation, ModelsOperationalState};
 
     let mut app_state = AppState::default();
-    app_state.workbench.models_view.operational_state = ModelsOperationalState::Offline;
-    app_state.workbench.models_view.action_receipt =
+    app_state.models.models_view.operational_state = ModelsOperationalState::Offline;
+    app_state.models.models_view.action_receipt =
         Some(Err("the model hub could not be reached".to_owned()));
-    app_state.workbench.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+    app_state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
         label: "model-catalog refresh".to_owned(),
         reissuable: true,
         landing_pack: None,
@@ -1032,7 +1032,7 @@ fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
 
     // And a page whose last operation succeeded says nothing at all.
     let mut healthy = AppState::default();
-    healthy.workbench.models_view.action_receipt = Some(Ok("installed".to_owned()));
+    healthy.models.models_view.action_receipt = Some(Ok("installed".to_owned()));
     let current = catalog(
         vec![pack(
             vec![row("Proving", "1.0.0", HubPackState::Available)],
@@ -1087,7 +1087,7 @@ fn an_installed_release_reports_only_what_is_wrong_with_it() {
     // And the action that produces the verdict is reachable on exactly the
     // packs that can be re-proved.
     let mut state = AppState::default();
-    state.workbench.models_view.selected_pack = Some("rspice-proving".to_owned());
+    state.models.models_view.selected_pack = Some("rspice-proving".to_owned());
     let field = catalog(
         vec![pack(
             vec![row("Proving", "1.0.0", HubPackState::Installed)],
@@ -1102,7 +1102,7 @@ fn an_installed_release_reports_only_what_is_wrong_with_it() {
     assert!(button(&nodes, "Verify installed").is_some());
 
     let mut state = AppState::default();
-    state.workbench.models_view.selected_pack = Some("rspice-proving".to_owned());
+    state.models.models_view.selected_pack = Some("rspice-proving".to_owned());
     let offered = catalog(
         vec![pack(
             vec![row("Proving", "1.1.0", HubPackState::Available)],

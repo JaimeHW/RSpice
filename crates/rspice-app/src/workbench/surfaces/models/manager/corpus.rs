@@ -19,10 +19,10 @@ pub(super) fn pack_catalog(
     app: &mut ManagerRenderContext<'_>,
     packs: &[rspice_core::library::SpicePack],
 ) {
-    let facet = app.state.workbench.models_view.pack_facet;
+    let facet = app.state.models.models_view.pack_facet;
     let query = app
         .state
-        .workbench
+        .models
         .models_view
         .catalog_query
         .trim()
@@ -63,7 +63,7 @@ pub(super) fn pack_catalog(
         for candidate in ModelPackFacet::ALL {
             let count = pack_facet_count(app, packs, candidate);
             if facet_button(ui, facet == candidate, candidate.label(), Some(count)).clicked() {
-                app.state.workbench.models_view.pack_facet = candidate;
+                app.state.models.models_view.pack_facet = candidate;
             }
         }
     });
@@ -93,12 +93,12 @@ pub(super) fn pack_catalog(
                         "Facets derive from the installed corpus manifest and live project attachments.",
                     );
                     if Button::new("Clear filter").show(ui).clicked() {
-                        app.state.workbench.models_view.pack_facet = ModelPackFacet::All;
-                        app.state.workbench.models_view.catalog_query.clear();
+                        app.state.models.models_view.pack_facet = ModelPackFacet::All;
+                        app.state.models.models_view.catalog_query.clear();
                     }
                 }
                 for pack in &visible {
-                    let selected = app.state.workbench.models_view.selected_corpus_pack.as_deref()
+                    let selected = app.state.models.models_view.selected_corpus_pack.as_deref()
                         == Some(pack.id.as_str());
                     let attached = !attached_libraries_for_pack(app, &pack.id).is_empty();
                     let built_in = is_builtin_pack(app, &pack.id);
@@ -141,7 +141,7 @@ pub(super) fn pack_catalog(
                     )
                     .clicked()
                     .then(|| {
-                        app.state.workbench.models_view.selected_corpus_pack = Some(pack.id.clone())
+                        app.state.models.models_view.selected_corpus_pack = Some(pack.id.clone())
                     });
                 }
             });
@@ -201,7 +201,7 @@ fn pack_detail(
 ) {
     let selected = app
         .state
-        .workbench
+        .models
         .models_view
         .selected_corpus_pack
         .as_deref()
@@ -216,7 +216,7 @@ fn pack_detail(
         );
         return;
     };
-    app.state.workbench.models_view.selected_corpus_pack = Some(pack.id.clone());
+    app.state.models.models_view.selected_corpus_pack = Some(pack.id.clone());
     let attached = attached_libraries_for_pack(app, &pack.id);
     let built_in = is_builtin_pack(app, &pack.id);
     let catalog_source_available = app
@@ -224,7 +224,7 @@ fn pack_detail(
         .model
         .model_library_manager
         .spice_pack_entry_available(&pack.id);
-    let model_source_job_idle = !app.state.workbench.models_view.model_import_in_progress;
+    let model_source_job_idle = !app.state.models.models_view.model_import_in_progress;
     ui.horizontal_wrapped(|ui| {
         // The workspace zeroes item spacing to paint itself as one document;
         // a line of separate phrases asks for its own gaps back.
@@ -233,11 +233,11 @@ fn pack_detail(
         ui.label(RichText::new(&pack.name).strong());
         ui.label(RichText::new(&pack.id).monospace().small());
         if Button::new("Browse parts").show(ui).clicked() {
-            app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::RSpiceLibrary;
-            app.state.workbench.models_view.catalog_query.clear();
-            app.state.workbench.models_view.selected_pack = Some(pack.id.clone());
-            app.state.workbench.models_view.part_catalog_offset = 0;
-            app.state.workbench.models_view.selected_part = None;
+            app.state.models.models_view.catalog_scope = ModelsCatalogScope::RSpiceLibrary;
+            app.state.models.models_view.catalog_query.clear();
+            app.state.models.models_view.selected_pack = Some(pack.id.clone());
+            app.state.models.models_view.part_catalog_offset = 0;
+            app.state.models.models_view.selected_part = None;
         }
         if built_in {
             ui.label(RichText::new("Built in").small());
@@ -262,7 +262,7 @@ fn pack_detail(
                 refresh_library(app, library);
             }
             if Button::new("Detach…").show(ui).clicked() {
-                app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
                     pack_id: pack.id.clone(),
                     release: None,
                     attach: false,
@@ -287,7 +287,7 @@ fn pack_detail(
             })
             .clicked()
         {
-            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+            app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
                 pack_id: pack.id.clone(),
                 attach: true,
                 release: None,

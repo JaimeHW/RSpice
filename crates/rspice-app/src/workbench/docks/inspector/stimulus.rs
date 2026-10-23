@@ -75,7 +75,7 @@ enum Verb {
 pub(in crate::workbench::docks) fn show(ui: &mut Ui, state: &mut AppState) {
     let library = &state.model.workspace.content.stimulus_library;
     let Some(definition) = state
-        .workbench
+        .design
         .selected_stimulus_definition
         .as_deref()
         .and_then(|name| library.get(name))
@@ -356,7 +356,7 @@ fn definition_section(
     verbs: &mut Vec<Verb>,
 ) {
     let messages = state.workbench.messages();
-    let editor = &state.workbench.stimulus_editor;
+    let editor = &state.design.stimulus_editor;
     let dirty = editor.is_dirty(definition.name());
     // No name in the header's metadata: the browser's selected row and the
     // stage's own title both name the definition this panel is about.
@@ -453,7 +453,7 @@ fn action(ui: &mut Ui, label: &str) -> bool {
 /// Carry out one thing the reader asked for.
 fn apply(state: &mut AppState, adopters: &[StimulusAdopter], verb: Verb) {
     let name = state
-        .workbench
+        .design
         .selected_stimulus_definition
         .clone()
         .unwrap_or_default();
@@ -478,17 +478,17 @@ fn apply(state: &mut AppState, adopters: &[StimulusAdopter], verb: Verb) {
             }
         }
         Verb::OpenPlanReaders => {
-            state.workbench.simulation_page = SimulationPage::Excitations;
+            state.simulate.simulation_page = SimulationPage::Excitations;
             state.workbench.activate(Workspace::Simulate);
         }
         Verb::TypePurpose(text) => {
             state
-                .workbench
+                .design
                 .stimulus_editor
                 .set_field_text(&name, PURPOSE_FIELD, text);
         }
         Verb::CommitPurpose(text) => {
-            state.workbench.stimulus_editor.clear_field();
+            state.design.stimulus_editor.clear_field();
             stimulus_actions::edit_field(state, PURPOSE_FIELD, &text);
         }
     }

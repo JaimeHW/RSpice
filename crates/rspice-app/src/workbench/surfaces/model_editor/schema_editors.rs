@@ -13,7 +13,7 @@ pub(super) fn parameter_schema_dialog(
     app: &mut RSpiceApp,
     _records: &PersistedModelRecords,
 ) {
-    if !app.state.workbench.model_editor.parameter_schema_open {
+    if !app.state.models.model_editor.parameter_schema_open {
         return;
     }
     let writable = !app.state.model.safe_mode.project_read_only();
@@ -26,12 +26,12 @@ pub(super) fn parameter_schema_dialog(
         parameter_schema_editor(ui, app, writable);
     });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.workbench.model_editor.parameter_schema_open = false;
+        app.state.models.model_editor.parameter_schema_open = false;
     }
 }
 
 pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable: bool) {
-    let (sections, parameters) = app.state.workbench.model_editor.draft.as_ref().map_or_else(
+    let (sections, parameters) = app.state.models.model_editor.draft.as_ref().map_or_else(
         || (Vec::new(), Vec::new()),
         |draft| {
             (
@@ -67,7 +67,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
     let [section_rect, parameter_rect, value_rect] = qualification_three_rects(ui);
     let mut selection_changed = false;
     {
-        let editor = &mut app.state.workbench.model_editor;
+        let editor = &mut app.state.models.model_editor;
         selection_changed |= section_override_combo(
             ui,
             section_rect,
@@ -89,7 +89,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
     }
     if selection_changed {
         app.state
-            .workbench
+            .models
             .model_editor
             .refresh_parameter_schema_override_editor();
     }
@@ -99,7 +99,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         "Section value",
         &mut app
             .state
-            .workbench
+            .models
             .model_editor
             .parameter_schema_override_value,
         true,
@@ -108,7 +108,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
 
     let override_exists = app
         .state
-        .workbench
+        .models
         .model_editor
         .parameter_schema_override_exists();
     let (actions_rect, _) = ui.allocate_exact_size(
@@ -132,7 +132,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
     .clicked()
     {
         app.state
-            .workbench
+            .models
             .model_editor
             .commit_parameter_schema_override();
     }
@@ -147,13 +147,13 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         .clicked()
     {
         app.state
-            .workbench
+            .models
             .model_editor
             .remove_parameter_schema_override();
     }
     let error = app
         .state
-        .workbench
+        .models
         .model_editor
         .parameter_schema_override_error
         .clone();
@@ -231,7 +231,7 @@ pub(super) fn parameter_schema_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         .show(ui, |ui| {
             let width = ui.available_width().max(TABLE_MIN_W);
             table_header(ui, width, &COLUMNS);
-            let Some(draft) = app.state.workbench.model_editor.draft.as_mut() else {
+            let Some(draft) = app.state.models.model_editor.draft.as_mut() else {
                 table_empty(ui, width, "No open model parameter schema.");
                 return;
             };
@@ -302,7 +302,7 @@ pub(super) fn parameter_schema_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         });
     if changed {
         app.state
-            .workbench
+            .models
             .model_editor
             .invalidate_candidate_evidence();
     }
@@ -386,11 +386,11 @@ pub(super) fn new_section_dialog(
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.workbench.model_editor.new_section_open {
+    if !app.state.models.model_editor.new_section_open {
         return;
     }
     let writable = !app.state.model.safe_mode.project_read_only();
-    let primary_enabled = writable && !app.state.workbench.model_editor.new_section_name.is_empty();
+    let primary_enabled = writable && !app.state.models.model_editor.new_section_name.is_empty();
     let choice = Dialog::new("New process section", "Add section")
     .description(
         "Create one validated inheritance node. The section remains part of the candidate until Save model revision commits it atomically.",
@@ -406,7 +406,7 @@ pub(super) fn new_section_dialog(
             ui,
             "Section name",
             "Case-insensitive SPICE section identity",
-            &mut app.state.workbench.model_editor.new_section_name,
+            &mut app.state.models.model_editor.new_section_name,
         );
         let parent_names = records
             .metadata
@@ -421,12 +421,12 @@ pub(super) fn new_section_dialog(
             .unwrap_or_default();
         model_parent_field(
             ui,
-            &mut app.state.workbench.model_editor.new_section_parent,
+            &mut app.state.models.model_editor.new_section_parent,
             &parent_names,
         );
         if let Some(error) = app
             .state
-            .workbench
+            .models
             .model_editor
             .new_section_error
             .as_deref()
@@ -436,11 +436,11 @@ pub(super) fn new_section_dialog(
     });
     match choice {
         DialogChoice::Primary => {
-            app.state.workbench.model_editor.commit_new_section();
+            app.state.models.model_editor.commit_new_section();
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.workbench.model_editor.new_section_open = false;
-            app.state.workbench.model_editor.new_section_error = None;
+            app.state.models.model_editor.new_section_open = false;
+            app.state.models.model_editor.new_section_error = None;
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -543,7 +543,7 @@ pub(super) fn correlation_matrix_dialog(
     app: &mut RSpiceApp,
     _records: &PersistedModelRecords,
 ) {
-    if !app.state.workbench.model_editor.correlation_matrix_open {
+    if !app.state.models.model_editor.correlation_matrix_open {
         return;
     }
     let writable = !app.state.model.safe_mode.project_read_only();
@@ -559,7 +559,7 @@ pub(super) fn correlation_matrix_dialog(
         }
         let matrices = app
             .state
-            .workbench
+            .models
             .model_editor
             .correlation_matrix_candidates
             .clone();
@@ -605,7 +605,7 @@ pub(super) fn correlation_matrix_dialog(
                     }
                     let Some(current) = app
                         .state
-                        .workbench
+                        .models
                         .model_editor
                         .correlation_matrix_edits
                         .get(matrix_index)
@@ -634,7 +634,7 @@ pub(super) fn correlation_matrix_dialog(
                     )
                         && let Some(rows) = app
                             .state
-                            .workbench
+                            .models
                             .model_editor
                             .correlation_matrix_edits
                             .get_mut(matrix_index)
@@ -648,7 +648,7 @@ pub(super) fn correlation_matrix_dialog(
             });
         if let Some(error) = app
             .state
-            .workbench
+            .models
             .model_editor
             .correlation_matrix_error
             .as_deref()
@@ -659,23 +659,23 @@ pub(super) fn correlation_matrix_dialog(
     match choice {
         DialogChoice::Primary => {
             app.state
-                .workbench
+                .models
                 .model_editor
                 .commit_correlation_matrix_edit();
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.workbench.model_editor.correlation_matrix_open = false;
+            app.state.models.model_editor.correlation_matrix_open = false;
             app.state
-                .workbench
+                .models
                 .model_editor
                 .correlation_matrix_candidates
                 .clear();
             app.state
-                .workbench
+                .models
                 .model_editor
                 .correlation_matrix_edits
                 .clear();
-            app.state.workbench.model_editor.correlation_matrix_error = None;
+            app.state.models.model_editor.correlation_matrix_error = None;
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -686,7 +686,7 @@ pub(super) fn temperature_preview_dialog(
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.workbench.model_editor.temperature_preview_open {
+    if !app.state.models.model_editor.temperature_preview_open {
         return;
     }
     let choice = Dialog::new("Temperature-law plot", "Close")
@@ -719,7 +719,7 @@ pub(super) fn temperature_preview_dialog(
         }
     });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.workbench.model_editor.temperature_preview_open = false;
+        app.state.models.model_editor.temperature_preview_open = false;
     }
 }
 

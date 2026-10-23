@@ -48,7 +48,7 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
         SurfaceId::ReportAuthoring
     );
 
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     assert!(Command::SaveReportDocument.is_enabled(&app));
     assert!(Command::AddReportPage.is_enabled(&app));
@@ -95,18 +95,16 @@ fn opening_report_authoring_never_mutates_an_empty_project() {
 
     assert!(state.model.workspace.content.report_documents.is_empty());
     assert!(!state.model.workspace.content.report_documents_dirty);
-    assert_eq!(state.workbench.report_authoring.selected_document, None);
-    assert_eq!(state.workbench.report_authoring.selected_page, None);
+    assert_eq!(state.hardcopy.report_authoring.selected_document, None);
+    assert_eq!(state.hardcopy.report_authoring.selected_page, None);
 }
 
 #[test]
 fn explicit_report_plan_creates_the_exact_mockup_outline_once() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
-    app.state
-        .workbench
-        .report_authoring
-        .create_document_template = report_template_index(ReportTemplate::ReleaseVerification42);
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_template =
+        report_template_index(ReportTemplate::ReleaseVerification42);
 
     commit_create_document(&mut app);
 
@@ -116,16 +114,16 @@ fn explicit_report_plan_creates_the_exact_mockup_outline_once() {
         assert_eq!(page.title(), expected);
     }
     assert!(app.state.model.workspace.content.report_documents_dirty);
-    let document_id = app.state.workbench.report_authoring.selected_document;
-    let page_id = app.state.workbench.report_authoring.selected_page;
+    let document_id = app.state.hardcopy.report_authoring.selected_document;
+    let page_id = app.state.hardcopy.report_authoring.selected_page;
     synchronize_report_selection(&mut app.state);
     synchronize_report_selection(&mut app.state);
     assert_eq!(app.state.model.workspace.content.report_documents.len(), 1);
     assert_eq!(
-        app.state.workbench.report_authoring.selected_document,
+        app.state.hardcopy.report_authoring.selected_document,
         document_id
     );
-    assert_eq!(app.state.workbench.report_authoring.selected_page, page_id);
+    assert_eq!(app.state.hardcopy.report_authoring.selected_page, page_id);
 }
 
 #[test]
@@ -141,7 +139,7 @@ fn report_plan_binds_initial_pages_to_the_active_immutable_dataset() {
         crate::product::DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.model.simulation.view.active_run_idx = Some(0);
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
 
     commit_create_document(&mut app);
 
@@ -166,11 +164,11 @@ fn report_plan_binds_initial_pages_to_the_active_immutable_dataset() {
 #[test]
 fn report_page_settings_commit_canonical_revision_checked_transactions() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     let page_id = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .selected_page
         .expect("selected page");
@@ -216,7 +214,7 @@ fn report_page_settings_commit_canonical_revision_checked_transactions() {
     assert!(app.state.model.workspace.content.report_documents_dirty);
     assert!(
         app.state
-            .workbench
+            .hardcopy
             .report_authoring
             .transaction_error
             .is_none()
@@ -226,7 +224,7 @@ fn report_page_settings_commit_canonical_revision_checked_transactions() {
 #[test]
 fn report_page_order_controls_commit_revision_checked_moves() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     let page_ids = active_document(&app.state)
         .expect("active report")
@@ -235,7 +233,7 @@ fn report_page_order_controls_commit_revision_checked_moves() {
         .map(|page| page.id())
         .collect::<Vec<_>>();
     let page_to_move = page_ids[1];
-    app.state.workbench.report_authoring.selected_page = Some(page_to_move);
+    app.state.hardcopy.report_authoring.selected_page = Some(page_to_move);
     app.state.model.workspace.content.report_documents_dirty = false;
 
     assert!(can_move_selected_page(
@@ -259,7 +257,7 @@ fn report_page_order_controls_commit_revision_checked_moves() {
     );
     assert!(app.state.model.workspace.content.report_documents_dirty);
     assert_eq!(
-        app.state.workbench.report_authoring.selected_page,
+        app.state.hardcopy.report_authoring.selected_page,
         Some(page_to_move)
     );
 
@@ -289,10 +287,10 @@ fn report_page_order_controls_commit_revision_checked_moves() {
 #[test]
 fn report_page_order_controls_fail_closed_at_document_boundaries() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     let first_page = active_document(&app.state).expect("active report").pages()[0].id();
-    app.state.workbench.report_authoring.selected_page = Some(first_page);
+    app.state.hardcopy.report_authoring.selected_page = Some(first_page);
     app.state.model.workspace.content.report_documents_dirty = false;
     let revision = active_document(&app.state)
         .expect("active report")
@@ -324,24 +322,24 @@ fn report_element_catalog_commits_every_non_plot_block_kind() {
     ));
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.model.simulation.view.active_run_idx = Some(0);
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
 
     for kind_index in 0..=6 {
         app.state
-            .workbench
+            .hardcopy
             .report_authoring
             .reset_add_report_element_kind(kind_index);
         assert!(
             app.state
-                .workbench
+                .hardcopy
                 .report_authoring
                 .valid_add_report_element_draft(true)
         );
         commit_add_report_element(&mut app);
         assert!(
             app.state
-                .workbench
+                .hardcopy
                 .report_authoring
                 .transaction_error
                 .is_none()
@@ -351,7 +349,7 @@ fn report_element_catalog_commits_every_non_plot_block_kind() {
     let document = active_document(&app.state).expect("active report");
     let page_id = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .selected_page
         .expect("selected page");
@@ -375,17 +373,17 @@ fn report_element_catalog_commits_every_non_plot_block_kind() {
 #[test]
 fn page_element_toggle_and_remove_are_canonical_transactions() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     app.state
-        .workbench
+        .hardcopy
         .report_authoring
         .reset_add_report_element_kind(0);
     commit_add_report_element(&mut app);
     let document_id = active_document(&app.state).expect("active report").id();
     let block_id = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .selected_report_block
         .expect("new block selected");
@@ -398,10 +396,7 @@ fn page_element_toggle_and_remove_are_canonical_transactions() {
             .expect("block")
             .enabled()
     );
-    app.state
-        .workbench
-        .report_authoring
-        .remove_report_block_open = true;
+    app.state.hardcopy.report_authoring.remove_report_block_open = true;
     commit_remove_report_block(&mut app);
     let document = active_document(&app.state).expect("active report");
     assert!(document.block(block_id).is_none());
@@ -412,7 +407,7 @@ fn page_element_toggle_and_remove_are_canonical_transactions() {
             .any(|tombstone| tombstone.entity == ReportEntityRef::Block(block_id))
     );
     assert_eq!(
-        app.state.workbench.report_authoring.selected_report_block,
+        app.state.hardcopy.report_authoring.selected_report_block,
         None
     );
 }
@@ -420,7 +415,7 @@ fn page_element_toggle_and_remove_are_canonical_transactions() {
 #[test]
 fn publication_inspector_edits_are_canonical_document_transactions() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     let document_id = active_document(&app.state).expect("active report").id();
     let initial_revision = active_document(&app.state)
@@ -457,7 +452,7 @@ fn publication_inspector_edits_are_canonical_document_transactions() {
     assert!(app.state.model.workspace.content.report_documents_dirty);
     assert!(
         app.state
-            .workbench
+            .hardcopy
             .report_authoring
             .transaction_error
             .is_none()
@@ -472,7 +467,7 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
     };
 
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     let binding = crate::product::DatasetBinding::new(
         crate::product::DatasetId::new(),
@@ -522,7 +517,7 @@ fn inserting_result_document_binds_exact_revision_digest_and_dataset() {
 
     let block_id = app
         .state
-        .workbench
+        .hardcopy
         .report_authoring
         .selected_report_block
         .expect("inserted plot selected");
@@ -650,7 +645,7 @@ fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
         },
         "report authoring test".to_owned(),
     );
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
 
     commit_create_document(&mut app);
 
@@ -665,7 +660,7 @@ fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
     assert!(!app.state.model.workspace.content.report_documents_dirty);
     assert_eq!(
         app.state
-            .workbench
+            .hardcopy
             .report_authoring
             .transaction_error
             .as_deref(),
@@ -676,7 +671,7 @@ fn direct_report_creation_fails_closed_in_read_only_safe_mode() {
 #[test]
 fn changing_active_run_does_not_mutate_the_project_report_document() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
     app.state.model.simulation.retained.runs = vec![
         crate::state::SimulationRun::new(2),
@@ -694,15 +689,15 @@ fn changing_active_run_does_not_mutate_the_project_report_document() {
 #[test]
 fn invalid_report_page_selection_chooses_a_retained_page() {
     let mut app = RSpiceApp::test_instance();
-    app.state.workbench.report_authoring.create_document_title = "Verification report".to_owned();
+    app.state.hardcopy.report_authoring.create_document_title = "Verification report".to_owned();
     commit_create_document(&mut app);
-    app.state.workbench.report_authoring.selected_page =
+    app.state.hardcopy.report_authoring.selected_page =
         Some(crate::results::report_document::ReportPageId::new());
 
     synchronize_report_selection(&mut app.state);
 
     assert_eq!(
-        app.state.workbench.report_authoring.selected_page,
+        app.state.hardcopy.report_authoring.selected_page,
         active_document(&app.state)
             .and_then(|document| document.pages().first())
             .map(|page| page.id())

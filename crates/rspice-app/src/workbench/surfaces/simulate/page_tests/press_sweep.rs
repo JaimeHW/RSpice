@@ -1235,7 +1235,7 @@ fn spec_sheet_import_answers_without_a_dialog() {
         "the picker took the answer"
     );
     assert!(
-        sweep.app.state.workbench.simulation_workflow.is_none(),
+        sweep.app.state.simulate.simulation_workflow.is_none(),
         "a cancelled pick opened a dialog"
     );
 
@@ -1260,7 +1260,7 @@ fn spec_sheet_import_answers_without_a_dialog() {
     );
     assert!(
         matches!(
-            sweep.app.state.workbench.simulation_workflow,
+            sweep.app.state.simulate.simulation_workflow,
             Some(SimulationWorkflowDialog::DesignVariableImport(_))
         ),
         "the picked sheet did not open the guided import"
@@ -1609,7 +1609,7 @@ impl Sweep {
             .entries()
             .filter(|entry| entry.source == crate::diagnostics::LogSource::Plan)
             .count();
-        let status = &self.app.state.workbench.analysis_lifecycle_status;
+        let status = &self.app.state.simulate.analysis_lifecycle_status;
         (recorded, status.message().to_owned())
     }
 

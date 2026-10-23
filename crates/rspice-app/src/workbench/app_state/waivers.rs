@@ -506,7 +506,7 @@ impl AppState {
                 edit.apply_to_schematic(&mut editor.editor)?;
             }
         }
-        self.workbench.preflight.invalidate();
+        self.runs.preflight.invalidate();
         self.restate_design_checks();
         Ok(())
     }

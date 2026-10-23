@@ -206,7 +206,7 @@ impl RSpiceApp {
             }
             Some(HelpAction::Examples) => {
                 self.close_help_center_route();
-                self.state.workbench.open_examples();
+                self.state.project.open_examples();
             }
             None => {}
         }

@@ -39,7 +39,7 @@ use safety::*;
 use yield_page::*;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let page = app.state.workbench.verification_page;
+    let page = app.state.simulate.verification_page;
     if page == VerificationPage::Tuning {
         sync_tuning_session(app);
     }
@@ -51,7 +51,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .data(|data| data.get_temp::<VerificationPage>(shown_page))
         != Some(page)
     {
-        app.state.workbench.verification.action_problem = None;
+        app.state.simulate.verification.action_problem = None;
         ui.ctx().data_mut(|data| data.insert_temp(shown_page, page));
     }
     let ctx = ui.ctx().clone();
@@ -123,7 +123,7 @@ fn record_action(session: &mut VerificationSessionState, result: Result<(), Stri
 /// refusal of the last action, and the reason the run it reads cannot be held
 /// against the plan's limits.
 fn action_problem_line(ui: &mut Ui, app: &RSpiceApp) {
-    if let Some(problem) = &app.state.workbench.verification.action_problem {
+    if let Some(problem) = &app.state.simulate.verification.action_problem {
         let _ = crate::ui::widgets::problem_line(ui, Problem::Failure, problem);
     }
     // `NoDataset` is the empty state, which already says what produces data;
@@ -180,7 +180,7 @@ fn verification_specs(app: &RSpiceApp) -> Vec<SpecEntry> {
 fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
     if !app
         .state
-        .workbench
+        .simulate
         .verification
         .regression_baseline_picker_open
     {
@@ -211,7 +211,7 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
 
     let mut selected = app
         .state
-        .workbench
+        .simulate
         .verification
         .regression_baseline_picker_selection;
     if selected.is_none_or(|selected| !candidates.iter().any(|row| row.0 == selected)) {
@@ -288,15 +288,15 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
     if commit {
         if let Some(run_id) = selected {
             if let Err(error) = commit_regression_baseline(app, run_id) {
-                app.state.workbench.verification.action_problem =
+                app.state.simulate.verification.action_problem =
                     Some(format!("The baseline was not changed: {error}"));
                 app.state
-                    .workbench
+                    .simulate
                     .verification
                     .regression_baseline_picker_selection = selected;
                 return;
             }
-            app.state.workbench.verification.action_problem = None;
+            app.state.simulate.verification.action_problem = None;
         }
         open = false;
     }
@@ -304,11 +304,11 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
         open = false;
     }
     app.state
-        .workbench
+        .simulate
         .verification
         .regression_baseline_picker_selection = selected;
     app.state
-        .workbench
+        .simulate
         .verification
         .regression_baseline_picker_open = open;
 }
@@ -554,14 +554,14 @@ fn request_analysis_run(
         invalidate_plan_bound_preflight(app);
     }
     if let Some((kind, id)) = selected {
-        app.state.workbench.active_analysis = kind.legacy_index();
-        app.state.workbench.active_analysis_instance = Some(id);
+        app.state.simulate.active_analysis = kind.legacy_index();
+        app.state.simulate.active_analysis_instance = Some(id);
     }
     crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
     // A run that waits on the engine's check of its decks is queued when the
     // check authorizes it.
     if app.state.model.simulation.execution.trigger_simulation
-        || app.state.workbench.preflight.run_awaits_check()
+        || app.state.runs.preflight.run_awaits_check()
     {
         Ok(())
     } else {
@@ -597,8 +597,8 @@ fn open_analysis_configuration(
         app.state.model.sim_setup = setup;
         invalidate_plan_bound_preflight(app);
     }
-    app.state.workbench.active_analysis = kind.legacy_index();
-    app.state.workbench.active_analysis_instance = Some(id);
+    app.state.simulate.active_analysis = kind.legacy_index();
+    app.state.simulate.active_analysis_instance = Some(id);
     app.state
         .workbench
         .activate(super::super::state::Workspace::Simulate);

@@ -162,7 +162,7 @@ impl Registry {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
-        app.state.workbench.simulation_page = page;
+        app.state.simulate.simulation_page = page;
         let mut registry = Self {
             ctx,
             app,
@@ -310,7 +310,7 @@ fn app_with_bounded_variable() -> RSpiceApp {
         .content
         .add_design_variable(id, bounded_variable())
         .expect("the plan accepts a bounded variable");
-    app.state.workbench.selected_design_variable = Some("rload".to_owned());
+    app.state.simulate.selected_design_variable = Some("rload".to_owned());
     app
 }
 
@@ -346,7 +346,7 @@ fn a_refused_variable_expression_stays_on_the_field_that_was_typed_into() {
         registry
             .app
             .state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .is_refusal(),
         "100kohm is outside the variable's own 1k…10k bound, so the workspace must refuse it"
@@ -360,7 +360,7 @@ fn a_refused_variable_expression_stays_on_the_field_that_was_typed_into() {
         registry
             .app
             .state
-            .workbench
+            .simulate
             .design_variable_expression_draft
             .as_deref(),
         Some("100kohm"),
@@ -375,7 +375,7 @@ fn a_refused_variable_expression_stays_on_the_field_that_was_typed_into() {
         registry
             .app
             .state
-            .workbench
+            .simulate
             .design_variable_expression_draft
             .as_deref(),
         Some("100kohm"),
@@ -408,19 +408,14 @@ fn an_accepted_variable_expression_clears_the_draft_it_committed() {
         "a value inside the bound commits"
     );
     assert_eq!(
-        registry
-            .app
-            .state
-            .workbench
-            .design_variable_expression_draft,
-        None,
+        registry.app.state.simulate.design_variable_expression_draft, None,
         "an adopted edit leaves no draft behind"
     );
     assert!(
         !registry
             .app
             .state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .is_refusal()
     );
@@ -455,7 +450,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
             .add_saved_output(id, output)
             .expect("the plan accepts it");
     }
-    app.state.workbench.selected_saved_output = Some("vout".to_owned());
+    app.state.simulate.selected_saved_output = Some("vout".to_owned());
     let mut registry = Registry::open(SimulationPage::Outputs, app);
 
     // A name the registry already holds: the workspace refuses a duplicate
@@ -481,7 +476,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
         registry
             .app
             .state
-            .workbench
+            .simulate
             .analysis_lifecycle_status
             .is_refusal(),
         "a name that duplicates another output's must be refused"
@@ -495,19 +490,14 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
         registry
             .app
             .state
-            .workbench
+            .simulate
             .saved_output_name_draft
             .as_deref(),
         Some("VIN"),
         "and the field keeps the refused name"
     );
     assert_eq!(
-        registry
-            .app
-            .state
-            .workbench
-            .selected_saved_output
-            .as_deref(),
+        registry.app.state.simulate.selected_saved_output.as_deref(),
         Some("vout"),
         "the selection stays on the record that is still there"
     );
@@ -517,7 +507,7 @@ fn a_refused_saved_output_edit_stays_on_the_fields_that_were_typed_into() {
         registry
             .app
             .state
-            .workbench
+            .simulate
             .saved_output_name_draft
             .as_deref(),
         Some("VIN"),

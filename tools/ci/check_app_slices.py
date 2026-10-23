@@ -85,11 +85,12 @@ SLICE_RULES = [
     (W + r"app_state/session/veriloga_library", "code"),
     (W + r"app_state/", "session"),
     # The slots AppState holds, each by the feature that owns it.
-    (W + r"slots(\.rs$|/tests\.rs$)", "session"),
+    (W + r"slots(\.rs$|/(defaults_)?tests\.rs$)", "session"),
     (W + r"slots/cloud\.rs$", "cloud"),
     (W + r"slots/code\.rs$", "code"),
     (W + r"slots/design\.rs$", "design"),
     (W + r"slots/hardcopy\.rs$", "hardcopy"),
+    (W + r"slots/models\.rs$", "models"),
     (W + r"slots/platform\.rs$", "services"),
     (W + r"slots/project\.rs$", "project"),
     (W + r"slots/results\.rs$", "results"),

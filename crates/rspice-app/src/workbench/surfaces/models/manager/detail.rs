@@ -133,7 +133,7 @@ fn project_selection<'a>(
             "The detail area never invents a model when the catalog selection is empty.",
         ));
     };
-    let Some(model_name) = app.state.workbench.selected_model.as_deref() else {
+    let Some(model_name) = app.state.models.selected_model.as_deref() else {
         return Err((
             "Select a model to inspect its source and resolved contract.",
             "Use the table above or choose a model source in the Navigator.",
@@ -402,7 +402,7 @@ pub(super) fn selected_model_detail(
                         app.queue_model_binding(component_id, &detail.library, &detail.binding);
                     }
                     if Button::new("Qualification").show(ui).clicked() {
-                        app.state.workbench.models_page = ModelsPage::Qualification;
+                        app.state.models.models_page = ModelsPage::Qualification;
                     }
                     if Button::new(if detail.project_owned {
                         "Model editor…"
@@ -431,7 +431,7 @@ pub(super) fn selected_model_detail(
                     }
                     let blocked = pin_source_block_reason(
                         detail.has_root,
-                        app.state.workbench.models_view.model_import_in_progress,
+                        app.state.models.models_view.model_import_in_progress,
                     );
                     if Button::new(if detail.pinned {
                         "Refresh pin"
@@ -560,7 +560,7 @@ fn open_model_source(app: &mut ManagerRenderContext<'_>, library_name: &str, mod
         return;
     };
     match opened {
-        Ok(dialog) => app.state.workbench.models_view.dialog = Some(dialog),
+        Ok(dialog) => app.state.models.models_view.dialog = Some(dialog),
         Err(error) => receipt(app, Err(error)),
     }
 }
@@ -805,7 +805,7 @@ fn bins_card(
         |ui| {
             for bin in &detail.bins {
                 if bin_row(ui, bin, bin.name == detail.model).clicked() {
-                    app.state.workbench.selected_model = Some(bin.name.clone());
+                    app.state.models.selected_model = Some(bin.name.clone());
                 }
             }
         },
@@ -1009,7 +1009,7 @@ fn qualification_card(
                     routed |= routed_count(ui, name, &value.to_string(), note).clicked();
                 }
                 if routed {
-                    app.state.workbench.models_page = ModelsPage::Qualification;
+                    app.state.models.models_page = ModelsPage::Qualification;
                 }
             } else {
                 empty_state(
@@ -1063,7 +1063,7 @@ fn usage_card(
                                 .color(t.color.text_faint),
                         );
                         if opened {
-                            app.state.workbench.models_view.dialog =
+                            app.state.models.models_view.dialog =
                                 Some(ModelsWorkbenchDialog::BindingTrace {
                                     model: detail.binding.clone(),
                                     consumers: usages.to_vec(),
@@ -1077,7 +1077,7 @@ fn usage_card(
                         .link(format!("{} more…", usages.len() - USAGE_ROWS))
                         .clicked()
                     {
-                        app.state.workbench.models_view.dialog =
+                        app.state.models.models_view.dialog =
                             Some(ModelsWorkbenchDialog::BindingTrace {
                                 model: detail.binding.clone(),
                                 consumers: usages.to_vec(),

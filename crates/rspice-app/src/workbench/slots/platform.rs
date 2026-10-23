@@ -1,5 +1,5 @@
 //! The platform services' runtime state: what opening, saving and recovering
-//! a project keeps between frames.
+//! a project keeps between frames, the recovery catalog included.
 
 /// What the platform services keep open between frames.
 #[derive(Debug, Clone)]
@@ -18,6 +18,9 @@ pub(crate) struct PlatformState {
     /// What the last save of the session kept. Like `autosave_failing`, it
     /// makes a refusal said when it starts, not at every save. Transient.
     pub(crate) session_kept: crate::services::session::SessionKept,
+    /// The scanned native checkpoint catalog the Project Launcher's recovery
+    /// page lists. Runtime state, never project or user preferences.
+    pub(crate) recovery_catalog: crate::workbench::lifecycle::recovery::RecoveryCatalog,
 }
 
 impl Default for PlatformState {
@@ -29,6 +32,7 @@ impl Default for PlatformState {
             autosave_minutes: 5,
             autosave_failing: false,
             session_kept: Default::default(),
+            recovery_catalog: Default::default(),
         }
     }
 }

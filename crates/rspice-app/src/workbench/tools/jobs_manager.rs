@@ -335,18 +335,18 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         return;
     }
 
-    let scope = app.state.workbench.jobs_manager.plan_scope;
+    let scope = app.state.simulate.jobs_manager.plan_scope;
     let snapshot = JobsSnapshot::capture(
         &app.state,
-        app.state.workbench.jobs_manager.selected_run_id,
+        app.state.simulate.jobs_manager.selected_run_id,
         scope,
     );
-    app.state.workbench.jobs_manager.selected_run_id = snapshot.selected_run_id;
+    app.state.simulate.jobs_manager.selected_run_id = snapshot.selected_run_id;
     let mut requested_selection = None;
     let mut requested_open = None;
     let mut requested_open_deck: Option<u64> = None;
     let mut requested_scope = scope;
-    let mut body_scroll_offset = app.state.workbench.jobs_manager.scroll_offset;
+    let mut body_scroll_offset = app.state.simulate.jobs_manager.scroll_offset;
     let run_label = if snapshot.cancelling {
         "Cancelling…"
     } else if snapshot.running {
@@ -393,13 +393,13 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
         body_scroll_offset = output.state.offset.y;
     });
 
-    app.state.workbench.jobs_manager.scroll_offset = body_scroll_offset;
+    app.state.simulate.jobs_manager.scroll_offset = body_scroll_offset;
     if requested_scope != scope {
-        app.state.workbench.jobs_manager.plan_scope = requested_scope;
-        app.state.workbench.jobs_manager.selected_run_id = None;
+        app.state.simulate.jobs_manager.plan_scope = requested_scope;
+        app.state.simulate.jobs_manager.selected_run_id = None;
     }
     if let Some(run_id) = requested_selection {
-        app.state.workbench.jobs_manager.selected_run_id = Some(run_id);
+        app.state.simulate.jobs_manager.selected_run_id = Some(run_id);
     }
     // The history is where a reader finds a run; opening one is what they came
     // to do next. Routed before the dialog's own choices so the manager closes
@@ -1294,7 +1294,7 @@ fn legacy_task_rows(run: &SimulationRun) -> Vec<TaskRow> {
 }
 
 fn export_selected_manifest(app: &mut RSpiceApp) {
-    let selected_id = app.state.workbench.jobs_manager.selected_run_id;
+    let selected_id = app.state.simulate.jobs_manager.selected_run_id;
     let Some(run) =
         selected_id.and_then(|id| app.state.model.simulation.retained.run_by_stable_id(id))
     else {

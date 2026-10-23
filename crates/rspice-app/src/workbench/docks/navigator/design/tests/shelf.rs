@@ -1535,7 +1535,7 @@ fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
 
     let mut shelf = ShelfHarness::opened().reporting_accessibility().settled();
 
-    shelf.app.state.workbench.focus_placement_search = true;
+    shelf.app.state.design.focus_placement_search = true;
     let output = shelf.output(Vec::new());
     assert_eq!(
         focus(&output).as_deref(),
@@ -1687,7 +1687,7 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
         .stimulus_library
         .insert(definition)
         .expect("insert");
-    shelf.app.state.workbench.placement_query = "sensor_drive".to_owned();
+    shelf.app.state.design.placement_query = "sensor_drive".to_owned();
 
     let mut shelf = shelf.settled();
     let (text, runs) = shelf.frame(Vec::new());

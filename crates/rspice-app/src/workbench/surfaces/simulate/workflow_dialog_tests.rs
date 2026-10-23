@@ -46,7 +46,7 @@ fn the_rename_dialog_refuses_a_rename_that_renames_nothing() {
         let mut draft =
             crate::workbench::state::RenameAnalysisDraft::for_instance(instance, "", &shown_as);
         draft.name = name.to_owned();
-        app.state.workbench.simulation_workflow =
+        app.state.simulate.simulation_workflow =
             Some(SimulationWorkflowDialog::RenameAnalysis(draft));
 
         let mut run = || {

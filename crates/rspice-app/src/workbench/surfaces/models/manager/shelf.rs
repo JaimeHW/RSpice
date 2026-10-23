@@ -284,13 +284,13 @@ pub(super) fn parts_catalog(
     app: &mut ManagerRenderContext<'_>,
     installed: &[InstalledPack],
 ) {
-    let facet = app.state.workbench.models_view.part_facet;
-    let pack_filter = app.state.workbench.models_view.selected_pack.clone();
-    let mut offset = app.state.workbench.models_view.part_catalog_offset;
+    let facet = app.state.models.models_view.part_facet;
+    let pack_filter = app.state.models.models_view.selected_pack.clone();
+    let mut offset = app.state.models.models_view.part_catalog_offset;
     let (mut total, mut rows) = shelf_page(app, installed, pack_filter.as_deref(), facet, offset);
     if total > 0 && offset >= total {
         offset = ((total - 1) / CATALOG_LIMIT) * CATALOG_LIMIT;
-        app.state.workbench.models_view.part_catalog_offset = offset;
+        app.state.models.models_view.part_catalog_offset = offset;
         (total, rows) = shelf_page(app, installed, pack_filter.as_deref(), facet, offset);
     }
     // Nothing narrowed and nothing to show is a machine with no parts on it,
@@ -300,13 +300,7 @@ pub(super) fn parts_catalog(
     if total == 0
         && pack_filter.is_none()
         && facet == RSpicePartFacet::All
-        && app
-            .state
-            .workbench
-            .models_view
-            .catalog_query
-            .trim()
-            .is_empty()
+        && app.state.models.models_view.catalog_query.trim().is_empty()
     {
         page_empty_state(
             ui,
@@ -352,11 +346,11 @@ pub(super) fn parts_catalog(
                         "Private helper models declared inside macromodel bodies are intentionally excluded.",
                     );
                     if Button::new("Clear search").show(ui).clicked() {
-                        app.state.workbench.models_view.catalog_query.clear();
-                        app.state.workbench.models_view.part_facet = RSpicePartFacet::All;
-                        app.state.workbench.models_view.selected_pack = None;
-                        app.state.workbench.models_view.part_catalog_offset = 0;
-                        app.state.workbench.models_view.selected_part = None;
+                        app.state.models.models_view.catalog_query.clear();
+                        app.state.models.models_view.part_facet = RSpicePartFacet::All;
+                        app.state.models.models_view.selected_pack = None;
+                        app.state.models.models_view.part_catalog_offset = 0;
+                        app.state.models.models_view.selected_part = None;
                     }
                 }
                 for row in &rows {
@@ -385,7 +379,7 @@ fn shelf_page(
 ) -> (usize, Vec<ShelfRow>) {
     let needle = app
         .state
-        .workbench
+        .models
         .models_view
         .catalog_query
         .trim()
@@ -439,7 +433,7 @@ fn browse(
         .model
         .model_library_manager
         .browse_pack_models(
-            &app.state.workbench.models_view.catalog_query,
+            &app.state.models.models_view.catalog_query,
             pack_filter,
             facet.device_filters(),
             offset,
@@ -461,7 +455,7 @@ fn shelf_row(
     let t = Tokens::get(ui.ctx());
     let hit = &row.hit;
     let key = part_key(hit);
-    let selected = app.state.workbench.models_view.selected_part.as_deref() == Some(key.as_str());
+    let selected = app.state.models.models_view.selected_part.as_deref() == Some(key.as_str());
     let values = layout
         .columns
         .iter()
@@ -522,7 +516,7 @@ fn shelf_row(
         node.set_label(announcement.clone());
     });
     if response.clicked() {
-        app.state.workbench.models_view.selected_part = Some(key);
+        app.state.models.models_view.selected_part = Some(key);
     }
 }
 
@@ -534,7 +528,7 @@ fn parts_catalog_footer(
     shared: &[String],
 ) {
     let t = Tokens::get(ui.ctx());
-    let offset = app.state.workbench.models_view.part_catalog_offset;
+    let offset = app.state.models.models_view.part_catalog_offset;
     let start = if shown == 0 { 0 } else { offset + 1 };
     let end = offset.saturating_add(shown).min(total);
     let page_count = total.div_ceil(CATALOG_LIMIT).max(1);
@@ -579,9 +573,9 @@ fn parts_catalog_footer(
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if Button::new("Next").enabled(end < total).show(ui).clicked() {
-                            app.state.workbench.models_view.part_catalog_offset =
+                            app.state.models.models_view.part_catalog_offset =
                                 offset.saturating_add(CATALOG_LIMIT);
-                            app.state.workbench.models_view.selected_part = None;
+                            app.state.models.models_view.selected_part = None;
                         }
                         ui.label(
                             RichText::new(format!("Page {page} of {page_count}"))
@@ -594,9 +588,9 @@ fn parts_catalog_footer(
                             .show(ui)
                             .clicked()
                         {
-                            app.state.workbench.models_view.part_catalog_offset =
+                            app.state.models.models_view.part_catalog_offset =
                                 offset.saturating_sub(CATALOG_LIMIT);
-                            app.state.workbench.models_view.selected_part = None;
+                            app.state.models.models_view.selected_part = None;
                         }
                     });
                 },
@@ -613,7 +607,7 @@ fn selected_part_detail(
 ) {
     let selected = app
         .state
-        .workbench
+        .models
         .models_view
         .selected_part
         .as_deref()
@@ -624,7 +618,7 @@ fn selected_part_detail(
         return;
     };
     let hit = row.hit.clone();
-    app.state.workbench.models_view.selected_part = Some(part_key(&hit));
+    app.state.models.models_view.selected_part = Some(part_key(&hit));
     let built_in =
         matches!(row.origin, PartOrigin::Foundation { .. }) || is_builtin_pack(app, &hit.pack);
     ui.horizontal_wrapped(|ui| {
@@ -638,9 +632,9 @@ fn selected_part_detail(
         // reader to a table that cannot contain what they asked for is worse
         // than not offering the trip.
         if pack_scope_identity(app, &row).is_some() && Button::new("Show pack").show(ui).clicked() {
-            app.state.workbench.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
-            app.state.workbench.models_view.selected_pack = pack_scope_identity(app, &row);
-            app.state.workbench.models_view.catalog_query.clear();
+            app.state.models.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
+            app.state.models.models_view.selected_pack = pack_scope_identity(app, &row);
+            app.state.models.models_view.catalog_query.clear();
         }
         if built_in {
             ui.label(RichText::new("Built in").small());
@@ -656,7 +650,7 @@ fn selected_part_detail(
                 hit.source.as_ref().is_some_and(|path| path.is_file())
                     && hit.redistributable
                     && !hit.restricted
-                    && !app.state.workbench.models_view.model_import_in_progress,
+                    && !app.state.models.models_view.model_import_in_progress,
             )
             .show(ui)
             .on_disabled_hover_text(if hit.restricted || !hit.redistributable {
@@ -666,13 +660,13 @@ fn selected_part_detail(
             })
             .clicked()
         {
-            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPart {
+            app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPart {
                 pack_id: hit.pack.clone(),
                 part_name: hit.name.clone(),
             });
         }
         if Button::new("Open qualification").show(ui).clicked() {
-            app.state.workbench.models_page = ModelsPage::Qualification;
+            app.state.models.models_page = ModelsPage::Qualification;
         }
         // Refused rather than merely greyed. On a browser build the source is
         // never readable, so this control was permanently disabled with no
@@ -919,7 +913,7 @@ fn place_action(
 fn open_card(app: &mut ManagerRenderContext<'_>, hit: &PackModelHit, source: &Path) {
     match std::fs::read_to_string(source) {
         Ok(body) => {
-            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
+            app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
                 title: hit.name.clone(),
                 subtitle: format!(
                     "{}:{} · read-only corpus source",

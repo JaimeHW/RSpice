@@ -237,7 +237,7 @@ impl LiveSessionEngine {
         self.reconcile_role(state, cloud);
         self.settle_mirror_discard(state);
         if matches!(self.role, Role::Idle) {
-            if state.workbench.take_live_mirror_entry() {
+            if state.cloud.take_live_mirror_entry() {
                 // The close-to-mirror transaction outlived its session. Its
                 // close already left the no-project landing in place, and a
                 // closed project never raises the project launcher.
@@ -413,23 +413,23 @@ impl LiveSessionEngine {
             return;
         }
         if state.project_lifecycle.is_open() {
-            state
-                .workbench
-                .begin_project_close(crate::workbench::state::ProjectCloseDestination::LiveMirror);
+            state.project.begin_project_close(
+                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror,
+            );
             if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
                 state.workbench.project_review_dialog.show_close_project();
             } else if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
-                state.workbench.cancel_project_close();
+                state.project.cancel_project_close();
             }
         } else {
-            state.workbench.request_live_mirror_entry();
+            state.cloud.request_live_mirror_entry();
         }
     }
 
     /// Complete mirror adoption after the close-to-mirror transaction:
     /// from here every host document applies, starting with a full resync.
     fn finish_mirror_entry(&mut self, state: &mut AppState) {
-        if !state.workbench.take_live_mirror_entry() {
+        if !state.cloud.take_live_mirror_entry() {
             return;
         }
         let Role::Guest(guest) = &mut self.role else {
@@ -518,9 +518,9 @@ impl LiveSessionEngine {
         if !self.mirror_discard_pending || state.model.simulation.execution.has_active_execution() {
             return;
         }
-        state
-            .workbench
-            .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
+        state.project.begin_project_close(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        );
         if crate::workbench::workflows::project_workflow::close_project_discard(state) {
             self.mirror_discard_pending = false;
         }
@@ -644,9 +644,9 @@ impl LiveSessionEngine {
             self.mirror_discard_pending = true;
             return;
         }
-        state
-            .workbench
-            .begin_project_close(crate::workbench::state::ProjectCloseDestination::EmptyWorkbench);
+        state.project.begin_project_close(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        );
         if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
             self.mirror_discard_pending = true;
         }
@@ -1818,20 +1818,20 @@ mod tests {
     #[test]
     fn a_mirror_entry_that_outlives_its_session_stays_on_the_no_project_landing() {
         let mut state = AppState::default();
-        state
-            .workbench
-            .begin_project_close(crate::workbench::state::ProjectCloseDestination::LiveMirror);
+        state.project.begin_project_close(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror,
+        );
         assert!(crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
 
         LiveSessionEngine::default().pump(&mut state, &mut CloudAccountService::unconfigured());
 
-        assert!(!state.workbench.project_launcher_open);
+        assert!(!state.project.project_launcher_open);
         assert_eq!(
             state.workbench.workspace,
             crate::workbench::state::Workspace::Project
         );
         assert!(
-            !state.workbench.take_live_mirror_entry(),
+            !state.cloud.take_live_mirror_entry(),
             "the pump consumes the stale entry"
         );
     }

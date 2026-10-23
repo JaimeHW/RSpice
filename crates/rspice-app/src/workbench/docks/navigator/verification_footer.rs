@@ -153,10 +153,10 @@ pub(super) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             WorkbenchIcon::Models,
             page.label(),
-            app.state.workbench.models_page == page,
+            app.state.models.models_page == page,
             None,
         ) {
-            app.state.workbench.models_page = page;
+            app.state.models.models_page = page;
         }
     }
     section_header(
@@ -194,8 +194,8 @@ pub(super) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
             Some(&count.to_string()),
         ) {
             app.state.select_model_library(&name);
-            app.state.workbench.models_page = ModelsPage::Models;
-            app.state.workbench.selected_model = None;
+            app.state.models.models_page = ModelsPage::Models;
+            app.state.models.selected_model = None;
         }
     }
 }

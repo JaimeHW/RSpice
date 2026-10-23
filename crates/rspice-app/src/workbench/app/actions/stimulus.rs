@@ -44,8 +44,8 @@ pub(crate) fn new_definition(state: &mut AppState) {
         ) {
         Ok(definition) => {
             let name = definition.name().to_owned();
-            state.workbench.selected_stimulus_definition = Some(name.clone());
-            state.workbench.stimulus_editor.focus_name();
+            state.design.selected_stimulus_definition = Some(name.clone());
+            state.design.stimulus_editor.focus_name();
             state.prompt(format!("Stimulus definition '{name}' created at r1."));
         }
         Err(error) => state.prompt(error.to_string()),
@@ -66,7 +66,7 @@ pub(crate) fn duplicate_definition(state: &mut AppState) {
     {
         Ok(copy) => {
             let copy = copy.name().to_owned();
-            state.workbench.selected_stimulus_definition = Some(copy.clone());
+            state.design.selected_stimulus_definition = Some(copy.clone());
             state.prompt(format!(
                 "Stimulus definition '{name}' duplicated as '{copy}' at r1."
             ));
@@ -91,8 +91,8 @@ pub(crate) fn delete_definition(state: &mut AppState) {
     {
         return;
     }
-    state.workbench.stimulus_editor.close(&name);
-    state.workbench.selected_stimulus_definition = state
+    state.design.stimulus_editor.close(&name);
+    state.design.selected_stimulus_definition = state
         .model
         .workspace
         .content
@@ -125,9 +125,9 @@ pub(crate) fn delete_definition(state: &mut AppState) {
 /// and instances that will start reading "definition removed" because of it.
 #[must_use]
 pub(crate) fn delete_needs_confirmation(state: &AppState) -> Option<String> {
-    let name = state.workbench.selected_stimulus_definition.as_deref()?;
+    let name = state.design.selected_stimulus_definition.as_deref()?;
     let adopters = design_adopters(state, name).len();
-    let dirty = state.workbench.stimulus_editor.is_dirty(name);
+    let dirty = state.design.stimulus_editor.is_dirty(name);
     match (adopters, dirty) {
         (0, false) => None,
         (0, true) => Some(format!(
@@ -175,7 +175,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
     else {
         return;
     };
-    let draft = state.workbench.stimulus_editor.draft_for(&saved);
+    let draft = state.design.stimulus_editor.draft_for(&saved);
     if !draft.is_dirty() {
         return;
     }
@@ -199,7 +199,7 @@ pub(crate) fn apply_draft(state: &mut AppState) {
         .stimulus_library
         .apply(&mut published, crate::state::stimulus_library::now_unix_ms);
     if !renamed.eq_ignore_ascii_case(&name) {
-        state.workbench.stimulus_editor.rename_key(&name, &renamed);
+        state.design.stimulus_editor.rename_key(&name, &renamed);
     }
     // The draft the editor holds is the one this publish came from, so it is
     // still the pre-publish record. Replacing it keeps the reader's editing
@@ -213,9 +213,9 @@ pub(crate) fn apply_draft(state: &mut AppState) {
         .get(&renamed)
         .cloned()
     {
-        *state.workbench.stimulus_editor.draft_for(&record) = published;
+        *state.design.stimulus_editor.draft_for(&record) = published;
     }
-    state.workbench.selected_stimulus_definition = Some(renamed.clone());
+    state.design.selected_stimulus_definition = Some(renamed.clone());
     let behind = design_adopters(state, &renamed).len();
     state.record(
         LogSeverity::Info,
@@ -431,7 +431,7 @@ pub(crate) fn place_selected_definition(state: &mut AppState) {
     match crate::workbench::app::arm_placement_from_definition(state, &name) {
         // Issued after arming, so it replaces the arming prompt rather than
         // being replaced by it: which revision is armed is the news.
-        Ok(()) if state.workbench.stimulus_editor.is_dirty(&name) => state.prompt(format!(
+        Ok(()) if state.design.stimulus_editor.is_dirty(&name) => state.prompt(format!(
             "Placement copies the saved r{saved} of '{name}'; apply the draft first to place what \
              you are editing."
         )),
@@ -453,7 +453,7 @@ pub(crate) fn validate_library(state: &mut AppState) {
     let mut advisories = 0_usize;
     for definition in &definitions {
         let record = state
-            .workbench
+            .design
             .stimulus_editor
             .draft(definition.name())
             .map_or_else(|| definition.clone(), |draft| draft.working().clone());
@@ -634,7 +634,7 @@ pub(crate) struct AdopterTally {
 #[must_use]
 pub(crate) fn selected_definition_has_adopter(state: &AppState) -> bool {
     state
-        .workbench
+        .design
         .selected_stimulus_definition
         .as_deref()
         .is_some_and(|name| !design_adopters(state, name).is_empty())
@@ -659,10 +659,10 @@ pub(crate) fn show_adopter_on_schematic(state: &mut AppState) {
 #[must_use]
 pub(crate) fn selected_draft_is_dirty(state: &AppState) -> bool {
     state
-        .workbench
+        .design
         .selected_stimulus_definition
         .as_deref()
-        .is_some_and(|name| state.workbench.stimulus_editor.is_dirty(name))
+        .is_some_and(|name| state.design.stimulus_editor.is_dirty(name))
 }
 
 /// Run one edit against the selected definition's draft.
@@ -680,12 +680,12 @@ fn with_draft(state: &mut AppState, edit: impl FnOnce(&mut DefinitionDraft)) {
     else {
         return;
     };
-    edit(state.workbench.stimulus_editor.draft_for(&saved));
+    edit(state.design.stimulus_editor.draft_for(&saved));
 }
 
 /// The definition the library browser is on, by the name the library spells.
 fn selected(state: &AppState) -> Option<String> {
-    let name = state.workbench.selected_stimulus_definition.as_deref()?;
+    let name = state.design.selected_stimulus_definition.as_deref()?;
     state
         .model
         .workspace

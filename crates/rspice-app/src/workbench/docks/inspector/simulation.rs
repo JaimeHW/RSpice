@@ -93,13 +93,11 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         .ok()
         .and_then(|plan| {
             let legacy_kind = crate::simulation::plan::AnalysisKind::from_legacy_index(
-                app.state.workbench.active_analysis,
+                app.state.simulate.active_analysis,
             );
             plan.instances()
                 .iter()
-                .find(|instance| {
-                    Some(instance.id()) == app.state.workbench.active_analysis_instance
-                })
+                .find(|instance| Some(instance.id()) == app.state.simulate.active_analysis_instance)
                 .or_else(|| {
                     legacy_kind.and_then(|kind| {
                         plan.instances()
@@ -121,8 +119,8 @@ pub(super) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         muted_inspector_copy(ui, "Add an analysis to start.");
         return;
     };
-    app.state.workbench.active_analysis_instance = Some(id);
-    app.state.workbench.active_analysis = kind.legacy_index();
+    app.state.simulate.active_analysis_instance = Some(id);
+    app.state.simulate.active_analysis = kind.legacy_index();
 
     let validation_error = app
         .state

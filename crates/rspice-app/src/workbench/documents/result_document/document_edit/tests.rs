@@ -26,7 +26,7 @@ fn document_fixture(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
     app.state.model.simulation.retained.runs = vec![run].into();
     assert!(app.state.model.simulation.select_run(0));
     assert!(app.state.model.simulation.select_analysis(0));
-    app.state.workbench.create_result_document = CreateResultDocumentDialogState {
+    app.state.results.create_result_document = CreateResultDocumentDialogState {
         open: true,
         name: "Transient review".to_owned(),
         name_touched: true,
@@ -74,16 +74,16 @@ fn show_document(app: &mut RSpiceApp, document_id: ResultDocumentId) {
 fn commit_add_pane(app: &mut RSpiceApp) {
     open_add_pane(&mut app.state);
     let Some(ResultDocumentDialog::AddPane(mut draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("Add pane opens its form");
     };
     let choices = add_pane_choices(&app.state, &mut draft);
     assert_eq!(choices.refusal, None);
-    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
+    app.state.results.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
     commit_open_dialog(&mut app.state);
     assert!(
-        app.state.workbench.result_document_dialog.is_none(),
+        app.state.results.result_document_dialog.is_none(),
         "a landed Add closes its form"
     );
 }
@@ -129,7 +129,7 @@ fn a_pane_from_another_run_attaches_that_run_to_the_document() {
 
     open_add_pane(&mut app.state);
     let Some(ResultDocumentDialog::AddPane(mut draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("Add pane opens its form");
     };
@@ -138,7 +138,7 @@ fn a_pane_from_another_run_attaches_that_run_to_the_document() {
     let choices = add_pane_choices(&app.state, &mut draft);
     assert_eq!(choices.datasets.len(), 2);
     assert_eq!(choices.refusal, None);
-    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
+    app.state.results.result_document_dialog = Some(ResultDocumentDialog::AddPane(draft));
     commit_open_dialog(&mut app.state);
 
     let document = retained(&app, document_id);
@@ -163,7 +163,7 @@ fn the_add_pane_form_draws_over_the_document() {
     open_add_pane(&mut app.state);
     drive_frame(|ui| show(ui.ctx(), &mut app));
     assert!(matches!(
-        app.state.workbench.result_document_dialog,
+        app.state.results.result_document_dialog,
         Some(ResultDocumentDialog::AddPane(_))
     ));
 }
@@ -174,7 +174,7 @@ fn add_pane_is_offered_only_over_a_project_result_document() {
     app.state.model.simulation.retained.runs = vec![transient_run(1)].into();
     assert!(!add_pane_available(&app.state));
     open_add_pane(&mut app.state);
-    assert!(app.state.workbench.result_document_dialog.is_none());
+    assert!(app.state.results.result_document_dialog.is_none());
 }
 
 fn horizontal_link_members(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Vec<EntityRef>> {
@@ -350,7 +350,7 @@ fn run_comparison(
     assert!(compare_available(&app.state));
     open_compare(&mut app.state);
     let Some(ResultDocumentDialog::Compare(mut draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("Compare datasets opens its form");
     };
@@ -358,10 +358,10 @@ fn run_comparison(
     draft.absolute_tolerance = "100m".to_owned();
     let choices = compare::choices(&app.state, &mut draft);
     assert_eq!(choices.refusal, None);
-    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
+    app.state.results.result_document_dialog = Some(ResultDocumentDialog::Compare(draft));
     commit_open_dialog(&mut app.state);
     let Some(ResultDocumentDialog::Compare(draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("the form stays open on its outcome");
     };
@@ -412,7 +412,7 @@ fn a_comparison_over_a_document_is_kept_with_it() {
 
     // Done closes the outcome.
     commit_open_dialog(&mut app.state);
-    assert!(app.state.workbench.result_document_dialog.is_none());
+    assert!(app.state.results.result_document_dialog.is_none());
 }
 
 /// Over a quick view the outcome shows and nothing is kept: no document
@@ -480,7 +480,7 @@ fn compare_is_refused_without_a_compatible_baseline() {
 
     assert!(!compare_available(&app.state));
     open_compare(&mut app.state);
-    assert!(app.state.workbench.result_document_dialog.is_none());
+    assert!(app.state.results.result_document_dialog.is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -495,13 +495,13 @@ fn measurement_preview(
     app.state.workbench.workspace = Workspace::Results;
     open_measurement(&mut app.state);
     let Some(ResultDocumentDialog::Measurement(mut draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("Add measurement opens its form");
     };
     draft.expression = expression.to_owned();
     let preview = measurement::preview(&app.state, &draft);
-    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Measurement(draft));
+    app.state.results.result_document_dialog = Some(ResultDocumentDialog::Measurement(draft));
     preview
 }
 
@@ -524,7 +524,7 @@ fn a_measurement_added_to_a_document_is_kept_with_its_pane() {
     assert!(matches!(preview.value, Ok(Some(_))), "{:?}", preview.value);
     commit_open_dialog(&mut app.state);
     assert!(
-        app.state.workbench.result_document_dialog.is_none(),
+        app.state.results.result_document_dialog.is_none(),
         "a kept measurement closes its form"
     );
 
@@ -587,7 +587,7 @@ fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
     commit_open_dialog(&mut app.state);
     assert!(
         matches!(
-            app.state.workbench.result_document_dialog,
+            app.state.results.result_document_dialog,
             Some(ResultDocumentDialog::Measurement(_))
         ),
         "a refused Add leaves the form open"
@@ -635,7 +635,7 @@ fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
     assert!(family_available(&app.state));
     open_family(&mut app.state);
     let Some(ResultDocumentDialog::Family(mut draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("Family slicing opens its form");
     };
@@ -643,10 +643,10 @@ fn apply_family_slice(app: &mut RSpiceApp, filter: &str) {
     let choices = family::choices(&app.state, &draft);
     assert_eq!(choices.refusal, None);
     assert_eq!(choices.points, Ok("3 of 5 points".to_owned()));
-    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
+    app.state.results.result_document_dialog = Some(ResultDocumentDialog::Family(draft));
     commit_open_dialog(&mut app.state);
     assert!(
-        app.state.workbench.result_document_dialog.is_none(),
+        app.state.results.result_document_dialog.is_none(),
         "an applied slice closes its form"
     );
 }
@@ -850,7 +850,7 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
     show_document(&mut app, document_id);
     open_family(&mut app.state);
     let Some(ResultDocumentDialog::Family(mut draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("Family slicing opens its form");
     };
@@ -871,16 +871,16 @@ fn a_slice_a_document_cannot_keep_is_refused_before_apply() {
 fn apply_properties(app: &mut RSpiceApp, digits: u8, phase_continuous: bool) {
     crate::workbench::commands::vocabulary::Command::VisualizationDocumentProperties.execute(app);
     let Some(ResultDocumentDialog::Properties(mut draft)) =
-        app.state.workbench.result_document_dialog.clone()
+        app.state.results.result_document_dialog.clone()
     else {
         panic!("Plot properties opens its form");
     };
     draft.significant_digits = digits;
     draft.phase_continuous = phase_continuous;
-    app.state.workbench.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
+    app.state.results.result_document_dialog = Some(ResultDocumentDialog::Properties(draft));
     commit_open_dialog(&mut app.state);
     assert!(
-        app.state.workbench.result_document_dialog.is_none(),
+        app.state.results.result_document_dialog.is_none(),
         "applied properties close their form"
     );
 }

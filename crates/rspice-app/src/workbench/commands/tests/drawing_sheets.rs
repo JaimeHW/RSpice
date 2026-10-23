@@ -57,7 +57,7 @@ fn sheet_properties_never_fall_back_to_symbol_hardcopy_media() {
     assert!(!Command::SheetProperties.is_enabled(&app));
     Command::SheetProperties.execute(&mut app);
 
-    assert!(!app.state.workbench.reveal_sheet_section);
+    assert!(!app.state.sheets.reveal_sheet_section);
     assert!(
         !app.state.hardcopy.hardcopy.open,
         "Sheet properties must not substitute output-media setup"
@@ -88,7 +88,7 @@ fn sheet_properties_open_the_inspector_on_the_sheet() {
             .is_empty()
     );
     assert!(app.state.workbench.inspector_visible);
-    assert!(app.state.workbench.reveal_sheet_section);
+    assert!(app.state.sheets.reveal_sheet_section);
 }
 
 #[test]

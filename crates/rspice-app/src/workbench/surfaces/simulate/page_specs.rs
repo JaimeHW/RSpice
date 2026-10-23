@@ -484,8 +484,8 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     // Resolved once for the registry rather than per row: each resolution
     // re-expands the declared space, and this page draws every frame.
     let resolved = super::participation::PlanParticipation::resolve(&app.state);
-    let query = app.state.workbench.specification_filter.clone();
-    let class = app.state.workbench.specification_evidence_filter;
+    let query = app.state.simulate.specification_filter.clone();
+    let class = app.state.simulate.specification_evidence_filter;
     let mut passing = 0usize;
     let mut failing = 0usize;
     let mut unmapped = 0usize;
@@ -612,7 +612,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     } else {
         Tone::Neutral
     };
-    let selected = app.state.workbench.selected_specification.clone();
+    let selected = app.state.simulate.selected_specification.clone();
     let classes: Vec<String> = SpecificationEvidenceFilter::ALL
         .iter()
         .map(|class| (*class).label().to_owned())
@@ -642,7 +642,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
                         ui,
                         "simulation-plan.spec-registry.filter",
                         "Filter measurement, definition or limit…",
-                        &mut app.state.workbench.specification_filter,
+                        &mut app.state.simulate.specification_filter,
                     );
                     picked_class = select(
                         ui,
@@ -739,10 +739,10 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
         crate::workbench::documents::result_document::open_specification_editor(&mut app.state);
     }
     if let Some(index) = picked_class {
-        app.state.workbench.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];
+        app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::ALL[index];
     }
     if let Some(measurement) = pick {
-        app.state.workbench.selected_specification = Some(measurement);
+        app.state.simulate.selected_specification = Some(measurement);
     }
 }
 
@@ -838,7 +838,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // whichever requirement now sits in its place.
     let selected = app
         .state
-        .workbench
+        .simulate
         .selected_specification
         .as_deref()
         .and_then(|measurement| {
@@ -1079,10 +1079,10 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // is the one owner of "which limit is being read", so the Results viewer
     // arrives on the same row this card describes without a second copy of it.
     if select_producer && let Some(id) = producer_id {
-        app.state.workbench.active_analysis_instance = Some(id);
+        app.state.simulate.active_analysis_instance = Some(id);
         Command::SimulationPage(SimulationPage::Analyses).execute(app);
     } else if open_evidence {
-        app.state.workbench.selected_specification = Some(spec.measurement.clone());
+        app.state.simulate.selected_specification = Some(spec.measurement.clone());
         Command::ResultViewer(crate::workbench::ResultViewer::Specs).execute(app);
     }
 }

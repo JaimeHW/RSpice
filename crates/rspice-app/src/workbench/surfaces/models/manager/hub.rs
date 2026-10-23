@@ -202,7 +202,7 @@ pub(super) enum AttentionTone {
 /// One model-catalog operation runs at a time, so the row that lights is the
 /// one the attempted operation named and no other.
 pub(super) fn pack_transfer(state: &AppState, row: &HubLedgerRow) -> Option<Attention> {
-    let view = &state.workbench.models_view;
+    let view = &state.models.models_view;
     if !view.model_import_in_progress {
         return None;
     }
@@ -670,7 +670,7 @@ pub(super) fn prepare(
     hub: &HubCatalog,
 ) -> Option<ModelHubRequest> {
     super::adoption::refresh_release_diff(service, state, hub);
-    let view = &mut state.workbench.models_view;
+    let view = &mut state.models.models_view;
     if hub.unavailable.is_some()
         || !hub.stale
         || view.model_import_in_progress
@@ -690,7 +690,7 @@ pub(super) fn prepare(
 /// releases beside another pack's diff.
 pub(super) fn selected_row<'a>(hub: &'a HubCatalog, state: &AppState) -> Option<&'a HubLedgerRow> {
     state
-        .workbench
+        .models
         .models_view
         .selected_pack
         .as_deref()
@@ -952,7 +952,7 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                     );
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let idle = !app.state.workbench.models_view.model_import_in_progress;
+                    let idle = !app.state.models.models_view.model_import_in_progress;
                     if Button::new("Refresh catalog")
                         .enabled(idle)
                         .show(ui)
@@ -969,10 +969,10 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                         )
                         .clicked()
                     {
-                        app.state.workbench.models_view.dialog =
+                        app.state.models.models_view.dialog =
                             Some(ModelsWorkbenchDialog::HeldCatalog);
                     }
-                    if let Some(fraction) = app.state.workbench.models_view.model_import_progress {
+                    if let Some(fraction) = app.state.models.models_view.model_import_progress {
                         ui.add(
                             egui::ProgressBar::new(fraction)
                                 .desired_width(120.0)
@@ -1057,13 +1057,13 @@ pub(super) fn announced_widget(ui: &mut Ui, widget: egui::Label, label: &str) {
 /// that named the version, so a bare "retry" here would be a button that
 /// guesses which release the reader meant.
 fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    let Some(Err(reason)) = app.state.workbench.models_view.action_receipt.clone() else {
+    let Some(Err(reason)) = app.state.models.models_view.action_receipt.clone() else {
         return;
     };
-    let state = app.state.workbench.models_view.operational_state;
+    let state = app.state.models.models_view.operational_state;
     let attempted = app
         .state
-        .workbench
+        .models
         .models_view
         .attempted_operation
         .clone()
@@ -1106,7 +1106,7 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             );
             if attempted.reissuable
                 && Button::new("Retry the catalog refresh")
-                    .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                    .enabled(!app.state.models.models_view.model_import_in_progress)
                     .show(ui)
                     .on_disabled_hover_text("Another model-source operation is still running.")
                     .clicked()
@@ -1242,10 +1242,10 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
         page_empty_state(ui, headline, &detail);
         return;
     }
-    let facet = app.state.workbench.models_view.hub_facet;
+    let facet = app.state.models.models_view.hub_facet;
     let query = app
         .state
-        .workbench
+        .models
         .models_view
         .catalog_query
         .trim()
@@ -1282,8 +1282,8 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
                          what this project pinned.",
                     );
                     if Button::new("Clear release filter").show(ui).clicked() {
-                        app.state.workbench.models_view.hub_facet = ModelHubFacet::All;
-                        app.state.workbench.models_view.catalog_query.clear();
+                        app.state.models.models_view.hub_facet = ModelHubFacet::All;
+                        app.state.models.models_view.catalog_query.clear();
                     }
                 }
                 for (row, attention) in &visible {
@@ -1325,7 +1325,7 @@ fn verification_of<'a>(
 ) -> Option<&'a PackReProof> {
     let installed = row.installed.as_ref()?;
     app.state
-        .workbench
+        .models
         .models_view
         .pack_verification
         .get(&release_key(&row.pack_id, &installed.version))
@@ -1346,7 +1346,7 @@ fn ledger_line(
     let transfer = pack_transfer(app.state, row);
     let attention = transfer.as_ref().or(attention);
     let selected =
-        app.state.workbench.models_view.selected_pack.as_deref() == Some(row.pack_id.as_str());
+        app.state.models.models_view.selected_pack.as_deref() == Some(row.pack_id.as_str());
     let project = project_cell(&row.adoption);
     let response = selectable_data_row(
         ui,
@@ -1398,7 +1398,7 @@ fn ledger_line(
         None => response,
     };
     if response.clicked() {
-        app.state.workbench.models_view.selected_pack = Some(row.pack_id.clone());
+        app.state.models.models_view.selected_pack = Some(row.pack_id.clone());
     }
 }
 
@@ -1427,7 +1427,7 @@ fn inspector(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, 
     // cannot outlive the row it was computed for by even one frame.
     let diff = app
         .state
-        .workbench
+        .models
         .models_view
         .release_diff
         .clone()
@@ -1476,7 +1476,7 @@ fn inspector_identity(
     attention: Option<&Attention>,
 ) {
     let t = Tokens::get(ui.ctx());
-    let idle = !app.state.workbench.models_view.model_import_in_progress;
+    let idle = !app.state.models.models_view.model_import_in_progress;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         ui.add_space(12.0);
@@ -1514,7 +1514,7 @@ fn pack_actions(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedger
                 .on_disabled_hover_text("Another model-source operation is still running.")
                 .clicked()
         {
-            app.state.workbench.models_view.dialog =
+            app.state.models.models_view.dialog =
                 Some(confirmation(offered, Some(installed.version.clone())));
         }
         if Button::new("Remove")
@@ -1566,7 +1566,7 @@ fn pack_actions(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedger
         .on_disabled_hover_text("Another model-source operation is still running.")
         .clicked()
     {
-        app.state.workbench.models_view.dialog = Some(confirmation(offered, None));
+        app.state.models.models_view.dialog = Some(confirmation(offered, None));
     }
 }
 
@@ -1813,7 +1813,7 @@ pub(super) fn release_install_block_reason(
         ));
     }
     app.state
-        .workbench
+        .models
         .models_view
         .model_import_in_progress
         .then(|| "Another model-source operation is still running.".to_owned())

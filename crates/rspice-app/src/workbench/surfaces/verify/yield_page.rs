@@ -179,7 +179,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
     let shown = shown_yield_row(
         &rows,
         app.state
-            .workbench
+            .simulate
             .verification
             .yield_selected_spec
             .as_deref(),
@@ -222,7 +222,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
         if empty_line(ui, &text, Some("Configure Monte Carlo")) {
             let result =
                 open_analysis_configuration(app, crate::simulation::plan::AnalysisKind::MonteCarlo);
-            record_action(&mut app.state.workbench.verification, result);
+            record_action(&mut app.state.simulate.verification, result);
         }
         return;
     }
@@ -271,7 +271,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .clicked;
     if let Some(index) = clicked {
-        app.state.workbench.verification.yield_selected_spec = Some(rows[index].output.clone());
+        app.state.simulate.verification.yield_selected_spec = Some(rows[index].output.clone());
     }
 
     let Some(index) = shown else {

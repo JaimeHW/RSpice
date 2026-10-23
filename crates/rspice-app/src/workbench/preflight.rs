@@ -33,7 +33,8 @@ use crate::state::{
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::CheckScope;
 
-use super::state::{PreflightCheck, Workspace};
+use super::app_state::run_preflight::PreflightCheck;
+use super::state::Workspace;
 
 /// Run every local preflight check and the engine's build pass, retain the
 /// exact report for the current project revision, and publish what it found.
@@ -71,17 +72,17 @@ pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController,
 
         // A report retained while a check is building decks is the one that
         // check will replace, so it authorizes nothing.
-        if state.workbench.preflight.checking.is_none() && queue_retained_run(state) {
+        if state.runs.preflight.checking.is_none() && queue_retained_run(state) {
             return;
         }
     }
 
-    if let Some(check) = &state.workbench.preflight.checking {
+    if let Some(check) = &state.runs.preflight.checking {
         let revision = check.report.project_revision;
         if checks_the_design_as_it_stands(state, controller, &check.report) {
             // The decks being built are the ones this press would build. A
             // Run press during a check alone asks for the run it authorizes.
-            if let Some(check) = state.workbench.preflight.checking.as_mut() {
+            if let Some(check) = state.runs.preflight.checking.as_mut() {
                 check.queue |= queue;
             }
             return;
@@ -89,7 +90,7 @@ pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController,
         // The design has moved since that pass's press, so its verdict will
         // authorize nothing, and a press that joined it would be lost with
         // it. It stops, and this press checks the design as it stands.
-        state.workbench.preflight.checking = None;
+        state.runs.preflight.checking = None;
         controller.cancel_preflight();
         state.record(
             LogSeverity::Info,
@@ -119,7 +120,7 @@ pub(crate) fn start(state: &mut AppState, controller: &mut SimulationController,
         // authorized until the build says otherwise.
         match controller.start_preflight(state) {
             Ok(()) => {
-                state.workbench.preflight.checking = Some(PreflightCheck {
+                state.runs.preflight.checking = Some(PreflightCheck {
                     report,
                     queue,
                     inputs_at_press: state.dispatch_inputs_at_press().ok(),
@@ -192,11 +193,11 @@ fn contract_of(
 /// findings are still published, against the inputs as they stood at the
 /// press, so they read as stale rather than as current.
 pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) {
-    if state.workbench.preflight.take_check_cancel_request() {
+    if state.runs.preflight.take_check_cancel_request() {
         cancel(state, controller);
         return;
     }
-    let Some(check) = state.workbench.preflight.checking.as_ref() else {
+    let Some(check) = state.runs.preflight.checking.as_ref() else {
         // A pass whose state was dropped — a replaced session — has nothing
         // left to finish.
         controller.cancel_preflight();
@@ -205,7 +206,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
     if controller.preflight_stage().is_none() {
         // The controller dropped the worker: the design was replaced under it.
         let revision = check.report.project_revision;
-        state.workbench.preflight.checking = None;
+        state.runs.preflight.checking = None;
         state.record(
             LogSeverity::Warning,
             LogSource::Studio,
@@ -227,7 +228,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
         mut report,
         queue,
         inputs_at_press,
-    }) = state.workbench.preflight.checking.take()
+    }) = state.runs.preflight.checking.take()
     else {
         return;
     };
@@ -278,7 +279,7 @@ pub(crate) fn poll(state: &mut AppState, controller: &mut SimulationController) 
 /// Stop the pass whose run the worker is preparing or checking. Nothing it
 /// found is published, and the run it was checking is not authorized.
 fn cancel(state: &mut AppState, controller: &mut SimulationController) {
-    let Some(check) = state.workbench.preflight.checking.take() else {
+    let Some(check) = state.runs.preflight.checking.take() else {
         return;
     };
     controller.cancel_preflight();
@@ -370,7 +371,7 @@ fn conclude(
     // Retained before its findings are published: the findings stand only
     // while the report they came from does, and that is part of what their
     // digest is taken over.
-    state.workbench.preflight.report = Some(report.clone());
+    state.runs.preflight.report = Some(report.clone());
     match inputs_at_press {
         Some(inputs_at_press) => {
             state.publish_dispatch_diagnostics_against(&report, inputs_at_press)
@@ -400,20 +401,15 @@ fn queue_retained_run(state: &mut AppState) -> bool {
     let project_revision = state.model.workspace.content.project.revision().get();
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let current_plan = state.active_plan_revision();
-    let runnable = state
-        .workbench
-        .preflight
-        .report
-        .as_ref()
-        .is_some_and(|report| {
-            report.is_runnable_for(
-                project_revision,
-                &topology_root,
-                topology_revision,
-                &topology_closure,
-                current_plan,
-            )
-        });
+    let runnable = state.runs.preflight.report.as_ref().is_some_and(|report| {
+        report.is_runnable_for(
+            project_revision,
+            &topology_root,
+            topology_revision,
+            &topology_closure,
+            current_plan,
+        )
+    });
     if !runnable {
         return false;
     }

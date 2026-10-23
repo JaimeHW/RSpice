@@ -425,7 +425,7 @@ fn the_save_page_lists_every_capture_group_and_the_fallback() {
 fn the_outputs_page_states_which_capture_group_holds_the_selected_output() {
     let rendered = render_with(SimulationPage::Outputs, 1400.0, |app| {
         seed_capture_group(app);
-        app.state.workbench.selected_saved_output = Some("core_n".to_owned());
+        app.state.simulate.selected_saved_output = Some("core_n".to_owned());
     });
 
     assert!(

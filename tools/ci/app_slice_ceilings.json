@@ -63,10 +63,10 @@
     "model->design": 2,
     "model->session": 161,
     "run->code": 6,
-    "run->session": 126,
+    "run->session": 123,
     "services->project": 15,
     "services->results": 1,
-    "services->session": 101,
+    "services->session": 99,
     "services->shell": 8
   },
   "whole-app": {

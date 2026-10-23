@@ -12,6 +12,7 @@ mod cloud;
 mod code;
 mod design;
 mod hardcopy;
+mod models;
 mod platform;
 mod project;
 mod results;
@@ -25,6 +26,7 @@ pub(crate) use cloud::CloudState;
 pub(crate) use code::CodeState;
 pub(crate) use design::DesignState;
 pub(crate) use hardcopy::HardcopyState;
+pub(crate) use models::ModelsState;
 pub(crate) use platform::PlatformState;
 pub(crate) use project::ProjectState;
 pub(crate) use results::ResultsState;
@@ -119,5 +121,7 @@ impl AppState {
     }
 }
 
+#[cfg(test)]
+mod defaults_tests;
 #[cfg(test)]
 mod tests;

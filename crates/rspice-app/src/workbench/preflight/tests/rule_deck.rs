@@ -193,7 +193,7 @@ fn rules_edited_during_a_pass_authorize_nothing() {
             .set_severity(DrcViolationType::OrphanNetLabel, DrcSeverity::Error)
             .expect("an orphan label may be promoted");
         // As applying the Rule Setup dialog does.
-        state.workbench.preflight.invalidate();
+        state.runs.preflight.invalidate();
     });
     let waived = run_with_the_rules_edited_in_flight(|state| {
         let target = page_waiver_target(state, DrcViolationType::OrphanNetLabel);
@@ -211,7 +211,7 @@ fn rules_edited_during_a_pass_authorize_nothing() {
             "{edit}: nothing is authorized"
         );
         assert!(
-            app.state.workbench.preflight.report.is_none(),
+            app.state.runs.preflight.report.is_none(),
             "{edit}: a stale pass retains no report"
         );
     }
@@ -232,7 +232,7 @@ fn a_run_press_after_the_rules_change_in_flight_restarts_the_pass() {
             .set_severity(DrcViolationType::OrphanNetLabel, DrcSeverity::Info)
             .expect("an orphan label may be set as a note");
         // As applying the Rule Setup dialog does.
-        state.workbench.preflight.invalidate();
+        state.runs.preflight.invalidate();
     });
     let waived = run_again_with_the_rules_edited_in_flight(|state| {
         let target = page_waiver_target(state, DrcViolationType::OrphanNetLabel);

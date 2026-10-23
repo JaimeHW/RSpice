@@ -80,7 +80,7 @@ pub(super) fn capture_groups(
         )
     };
     let groups = plan_capture_groups(state);
-    let selected = state.workbench.selected_capture_group;
+    let selected = state.simulate.selected_capture_group;
     let mut command = None;
     // The head strip and the row list both answer with a command, and one
     // variable cannot be borrowed by both closures at once. Row selection wins
@@ -516,16 +516,16 @@ pub(super) fn apply_group_command(
     };
     match command {
         GroupCommand::Select(id) => {
-            app.state.workbench.selected_capture_group = Some(id);
+            app.state.simulate.selected_capture_group = Some(id);
         }
         GroupCommand::Add => {
-            app.state.workbench.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
+            app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::CaptureGroup(
                 CaptureGroupDraft::default(),
             ));
         }
         GroupCommand::Edit(id) => {
             if let Some(group) = groups.iter().find(|group| group.id == id) {
-                app.state.workbench.simulation_workflow =
+                app.state.simulate.simulation_workflow =
                     Some(SimulationWorkflowDialog::CaptureGroup(
                         super::super::workflows::group_draft(group),
                     ));
@@ -554,7 +554,7 @@ pub(super) fn apply_group_command(
                         .map_err(|error| error.to_string())
                 },
             ) {
-                app.state.workbench.selected_capture_group = None;
+                app.state.simulate.selected_capture_group = None;
             }
         }
         GroupCommand::Raise(id) | GroupCommand::Lower(id) => {

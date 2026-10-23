@@ -35,13 +35,12 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                             .map(|library| library.name.clone())
                     })
                 {
-                    app.state.workbench.models_view.dialog =
-                        Some(ModelsWorkbenchDialog::AddCorner {
-                            library,
-                            name: String::new(),
-                            temperature_c: "27".to_owned(),
-                            supply_factor: "1.0".to_owned(),
-                        });
+                    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::AddCorner {
+                        library,
+                        name: String::new(),
+                        temperature_c: "27".to_owned(),
+                        supply_factor: "1.0".to_owned(),
+                    });
                 } else {
                     receipt(
                         app,
@@ -50,7 +49,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 }
             }
             if Button::new("Import section map")
-                .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                .enabled(!app.state.models.models_view.model_import_in_progress)
                 .show(ui)
                 .on_hover_text("Import a SPICE model source whose .lib sections define the map.")
                 .clicked()
@@ -86,7 +85,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     // the same question.
     let selected = app
         .state
-        .workbench
+        .models
         .models_view
         .selected_corner
         .as_deref()
@@ -98,7 +97,7 @@ pub(super) fn corners_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let Some(row) = selected else {
         return;
     };
-    app.state.workbench.models_view.selected_corner = Some(row.key.clone());
+    app.state.models.models_view.selected_corner = Some(row.key.clone());
     section_source_pane(ui, app, &row, (body * 0.24).clamp(45.0, 200.0));
     statistical_and_aging_card(ui, app, &row);
     corner_detail(ui, app, &row);
@@ -157,7 +156,7 @@ fn corner_matrix(
 ) {
     let selected_key = app
         .state
-        .workbench
+        .models
         .models_view
         .selected_corner
         .clone()
@@ -1327,7 +1326,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
             open_corner_source(app, row);
         }
         if Button::new("View include graph").show(ui).clicked() {
-            app.state.workbench.models_page = ModelsPage::Include;
+            app.state.models.models_page = ModelsPage::Include;
         }
         if Button::new("Model editor…").show(ui).clicked() {
             app.queue_command(Command::ModelEditor);
@@ -1340,7 +1339,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
     } else if make_default {
         corner_ops::set_default_corner(app, &row.library, &row.corner.name);
     } else if delete {
-        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmDeleteCorner {
+        app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmDeleteCorner {
             library: row.library.clone(),
             corner: row.corner.name.clone(),
         });
@@ -1581,7 +1580,7 @@ fn open_corner_binding_dialog(app: &mut ManagerRenderContext<'_>, row: &CornerRo
         .find(|required| !bindings.iter().any(|binding| binding.domain == *required))
         .or_else(|| bindings.first().map(|binding| binding.domain))
         .unwrap_or(CornerSectionDomain::Composite);
-    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::BindCornerSection {
+    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::BindCornerSection {
         library: row.library.clone(),
         corner: row.corner.name.clone(),
         domain,
@@ -1613,7 +1612,7 @@ fn open_corner_editor(app: &mut ManagerRenderContext<'_>, row: &CornerRow, dupli
     } else {
         row.corner.name.clone()
     };
-    app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::EditCorner {
+    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::EditCorner {
         library: row.library.clone(),
         original_name: row.corner.name.clone(),
         duplicate,
@@ -1672,7 +1671,7 @@ fn open_corner_source(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
         .find(|content| content.path == path);
     match retained {
         Some(content) => {
-            app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
+            app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
                 title: format!("{} / {}", library.name, row.corner.name.to_uppercase()),
                 subtitle: format!("{} · retained closure member", content.path.display()),
                 source: String::from_utf8_lossy(&content.bytes).into_owned(),
@@ -1681,13 +1680,12 @@ fn open_corner_source(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
         }
         None => match std::fs::read_to_string(path) {
             Ok(source) => {
-                app.state.workbench.models_view.dialog =
-                    Some(ModelsWorkbenchDialog::SourcePreview {
-                        title: format!("{} / {}", library.name, row.corner.name.to_uppercase()),
-                        subtitle: format!("{} · live unpinned source", path.display()),
-                        source,
-                        editable: false,
-                    });
+                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::SourcePreview {
+                    title: format!("{} / {}", library.name, row.corner.name.to_uppercase()),
+                    subtitle: format!("{} · live unpinned source", path.display()),
+                    source,
+                    editable: false,
+                });
             }
             Err(error) => receipt(
                 app,
@@ -1701,7 +1699,7 @@ fn open_corner_source(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
 }
 
 fn inspect_corner(app: &mut ManagerRenderContext<'_>, row: &CornerRow) {
-    app.state.workbench.models_view.selected_corner = Some(row.key.clone());
+    app.state.models.models_view.selected_corner = Some(row.key.clone());
 }
 
 fn activate_corner(app: &mut ManagerRenderContext<'_>, library_name: &str, corner_name: &str) {

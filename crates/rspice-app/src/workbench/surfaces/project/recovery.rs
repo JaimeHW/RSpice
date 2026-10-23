@@ -73,7 +73,7 @@ impl RecoverySnapshot {
             error: recovery.error.clone(),
             loading,
             creating: manual_checkpoint_pending(),
-            selected: state.workbench.project_checkpoint_selection.clone(),
+            selected: state.project.project_checkpoint_selection.clone(),
             location: storage_location(state),
             stored_bytes: recovery
                 .checkpoints
@@ -132,14 +132,14 @@ impl RecoveryIntent {
             Self::Create => create_manual_checkpoint(ctx, &mut app.state),
             Self::RevisionHistory => Command::RevisionHistory.execute(app),
             Self::Reload => app.state.project.project_checkpoint_recovery.invalidate(),
-            Self::Select(id) => app.state.workbench.project_checkpoint_selection = Some(id),
+            Self::Select(id) => app.state.project.project_checkpoint_selection = Some(id),
             Self::Compare(checkpoint) => {
-                app.state.workbench.project_checkpoint_selection =
+                app.state.project.project_checkpoint_selection =
                     Some(checkpoint.checkpoint_id().to_string());
                 compare_project_checkpoint(&mut app.state, &checkpoint);
             }
             Self::Restore(checkpoint) => {
-                app.state.workbench.project_checkpoint_selection =
+                app.state.project.project_checkpoint_selection =
                     Some(checkpoint.checkpoint_id().to_string());
                 export_project_checkpoint_copy(ctx, &mut app.state, checkpoint);
             }

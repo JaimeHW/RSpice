@@ -254,7 +254,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     crate::workbench::documents::model_editor::advance_qualification_execution(app);
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some()
@@ -273,13 +273,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     surface.spacing_mut().item_spacing = Vec2::ZERO;
 
     let records = persisted_records(app);
-    let current_section = app.state.workbench.model_editor.active_section;
+    let current_section = app.state.models.model_editor.active_section;
     let mut requested_action = None;
 
     outer_identity_header(&mut surface, app);
     specialist_header(&mut surface, app, &records);
 
-    if app.state.workbench.model_editor.draft.is_none() {
+    if app.state.models.model_editor.draft.is_none() {
         design_system::empty_state(
             &mut surface,
             WorkbenchIcon::Sliders,
@@ -340,7 +340,7 @@ fn outer_identity_header(ui: &mut Ui, app: &RSpiceApp) {
             .max_rect(button_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    let enabled = app.state.workbench.model_editor.draft.is_some();
+    let enabled = app.state.models.model_editor.draft.is_some();
     let response = Button::new("Validate model candidate")
         .accent()
         .enabled(enabled)
@@ -359,7 +359,7 @@ fn outer_identity_header(ui: &mut Ui, app: &RSpiceApp) {
 }
 
 fn persisted_records(app: &RSpiceApp) -> PersistedModelRecords {
-    let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
         return PersistedModelRecords {
             metadata: None,
             qualification: None,
@@ -437,7 +437,7 @@ fn specialist_header(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRecor
         Pos2::new(left, rect.top()),
         Pos2::new(text_right, rect.bottom()),
     );
-    let title = app.state.workbench.model_editor.draft.as_ref().map_or_else(
+    let title = app.state.models.model_editor.draft.as_ref().map_or_else(
         || "No model candidate".to_owned(),
         |draft| format!("{} model candidate", draft.name),
     );
@@ -503,7 +503,7 @@ fn candidate_status(
             Some(Problem::Failure),
         ));
     }
-    let editor = &app.state.workbench.model_editor;
+    let editor = &app.state.models.model_editor;
     if let Some(diagnostic) = editor.diagnostics.first() {
         return Some((diagnostic.message.clone(), Some(Problem::Failure)));
     }
@@ -551,7 +551,7 @@ fn navigation_meta(
             let count = records.metadata.as_ref().map_or_else(
                 || {
                     app.state
-                        .workbench
+                        .models
                         .model_editor
                         .draft
                         .as_ref()
@@ -639,7 +639,7 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
             wasm_passed: 0,
         };
     }
-    let source = app.state.workbench.model_editor.draft.as_ref();
+    let source = app.state.models.model_editor.draft.as_ref();
     let mut total = 0;
     let mut desktop_passed = 0;
     let mut wasm_passed = 0;
@@ -1025,10 +1025,10 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
         ("Status", 0.18),
     ];
     let metadata = records.metadata.as_ref().map(parameter_metadata_index);
-    let diagnostics = app.state.workbench.model_editor.diagnostics.clone();
+    let diagnostics = app.state.models.model_editor.diagnostics.clone();
     let changed = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -1042,7 +1042,7 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
                 .collect::<BTreeSet<_>>()
         })
         .unwrap_or_default();
-    let selected = app.state.workbench.model_editor.selected_parameter;
+    let selected = app.state.models.model_editor.selected_parameter;
     let read_only = app.state.model.safe_mode.project_read_only();
     let mut changed_value = false;
     let mut selected_parameter = selected;
@@ -1053,7 +1053,7 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
         .show(ui, |ui| {
             let width = ui.available_width().max(TABLE_MIN_W);
             table_header(ui, width, &COLUMNS);
-            let Some(draft) = app.state.workbench.model_editor.draft.as_mut() else {
+            let Some(draft) = app.state.models.model_editor.draft.as_mut() else {
                 table_empty(ui, width, "No open model parameter source.");
                 return;
             };
@@ -1152,10 +1152,10 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
                 paint_cell(ui, row[5], &DisplayCell::toned(status, tone));
             }
         });
-    app.state.workbench.model_editor.selected_parameter = selected_parameter;
+    app.state.models.model_editor.selected_parameter = selected_parameter;
     if changed_value {
         app.state
-            .workbench
+            .models
             .model_editor
             .invalidate_candidate_evidence();
     }
@@ -1409,7 +1409,7 @@ fn qualification_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<Q
     let Some(state) = records.qualification.as_ref() else {
         return Vec::new();
     };
-    let source = app.state.workbench.model_editor.draft.as_ref();
+    let source = app.state.models.model_editor.draft.as_ref();
     state
         .suites
         .iter()
@@ -1649,7 +1649,7 @@ fn release_panel(
     );
     let base_enabled = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -1667,7 +1667,7 @@ fn release_panel(
 }
 
 fn exact_passing_evidence_available(app: &RSpiceApp, records: &PersistedModelRecords) -> bool {
-    let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
         return false;
     };
     if draft.definition_is_dirty() {
@@ -1700,7 +1700,7 @@ fn current_candidate<'a>(
     app: &'a RSpiceApp,
     _records: &PersistedModelRecords,
 ) -> Option<&'a ModelReleaseCandidate> {
-    let draft = app.state.workbench.model_editor.draft.as_ref()?;
+    let draft = app.state.models.model_editor.draft.as_ref()?;
     if draft.definition_is_dirty() {
         return None;
     }
@@ -1839,28 +1839,28 @@ fn release_no_candidate_row(ui: &mut Ui) {
 fn apply_action(app: &mut RSpiceApp, action: SurfaceAction) {
     match action {
         SurfaceAction::SelectSection(section) => {
-            app.state.workbench.model_editor.active_section = section;
+            app.state.models.model_editor.active_section = section;
         }
         SurfaceAction::OpenParameterSchema => {
-            app.state.workbench.model_editor.begin_parameter_schema();
+            app.state.models.model_editor.begin_parameter_schema();
         }
         SurfaceAction::OpenNewSection => {
-            app.state.workbench.model_editor.begin_new_section();
+            app.state.models.model_editor.begin_new_section();
         }
         SurfaceAction::OpenCorrelationMatrix => {
             app.state
-                .workbench
+                .models
                 .model_editor
                 .begin_correlation_matrix_edit();
         }
         SurfaceAction::OpenTemperaturePreview => {
-            app.state.workbench.model_editor.temperature_preview_open = true;
+            app.state.models.model_editor.temperature_preview_open = true;
         }
         SurfaceAction::OpenQualificationPlan => {
-            app.state.workbench.model_editor.qualification_plan_open = true;
+            app.state.models.model_editor.qualification_plan_open = true;
         }
         SurfaceAction::OpenPromotionReview => {
-            app.state.workbench.model_editor.begin_promotion_review();
+            app.state.models.model_editor.begin_promotion_review();
         }
     }
 }
@@ -1870,7 +1870,7 @@ fn release_comparison_dialog(
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.workbench.model_editor.comparison_open {
+    if !app.state.models.model_editor.comparison_open {
         return;
     }
     let releases = records
@@ -1891,21 +1891,16 @@ fn release_comparison_dialog(
         .unwrap_or_default();
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .comparison_release_id
         .is_empty()
         && let Some((release_id, _)) = releases.first()
     {
-        app.state.workbench.model_editor.comparison_release_id = release_id.clone();
+        app.state.models.model_editor.comparison_release_id = release_id.clone();
     }
-    let selected_release = app
-        .state
-        .workbench
-        .model_editor
-        .comparison_release_id
-        .clone();
-    let comparison = app.state.workbench.model_editor.draft.as_ref().map_or_else(
+    let selected_release = app.state.models.model_editor.comparison_release_id.clone();
+    let comparison = app.state.models.model_editor.draft.as_ref().map_or_else(
         || Err("No project-owned model candidate is open".to_owned()),
         |draft| draft.compare_release(&selected_release),
     );
@@ -1946,7 +1941,7 @@ fn release_comparison_dialog(
             .show_ui(&mut selector, |ui| {
                 for (id, version) in &releases {
                     ui.selectable_value(
-                        &mut app.state.workbench.model_editor.comparison_release_id,
+                        &mut app.state.models.model_editor.comparison_release_id,
                         id.clone(),
                         format!("{id} · {version}"),
                     );
@@ -1998,7 +1993,7 @@ fn release_comparison_dialog(
         );
     });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.workbench.model_editor.comparison_open = false;
+        app.state.models.model_editor.comparison_open = false;
     }
 }
 

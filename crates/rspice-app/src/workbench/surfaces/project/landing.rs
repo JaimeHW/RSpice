@@ -175,12 +175,7 @@ fn landing_body(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAct
 }
 
 fn continue_column(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAction>) {
-    let candidates = app
-        .state
-        .workbench
-        .project_launcher_recovery
-        .candidates
-        .clone();
+    let candidates = app.state.platform.recovery_catalog.candidates.clone();
     if !candidates.is_empty() {
         recovery_card(ui, &candidates, action);
         ui.add_space(8.0);
@@ -409,7 +404,7 @@ fn recent_toolbar_title(ui: &mut Ui, shown: usize) {
 fn recent_toolbar_search(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
     let search = ui.add_sized(
         [width.max(1.0), 24.0],
-        egui::TextEdit::singleline(&mut app.state.workbench.project_launcher_query)
+        egui::TextEdit::singleline(&mut app.state.project.project_launcher_query)
             .hint_text("Project, path, owner…"),
     );
     ui.ctx().accesskit_node_builder(search.id, |node| {
@@ -428,11 +423,11 @@ fn recent_toolbar_filters(ui: &mut Ui, app: &mut RSpiceApp) {
             if segment_button(
                 ui,
                 label,
-                app.state.workbench.project_launcher_filter == filter,
+                app.state.project.project_launcher_filter == filter,
             )
             .clicked()
             {
-                app.state.workbench.project_launcher_filter = filter;
+                app.state.project.project_launcher_filter = filter;
             }
         }
     });
@@ -783,11 +778,11 @@ fn recent_empty_state(ui: &mut Ui, no_recents: bool) {
 fn recent_project_rows(app: &RSpiceApp) -> Vec<RecentProjectRow> {
     let query = app
         .state
-        .workbench
+        .project
         .project_launcher_query
         .trim()
         .to_ascii_lowercase();
-    let filter = app.state.workbench.project_launcher_filter;
+    let filter = app.state.project.project_launcher_filter;
     app.state
         .recent_files
         .iter()
@@ -977,12 +972,9 @@ fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
             }
         }
         LandingAction::ReviewRecovery => {
-            app.state.workbench.open_project_launcher();
-            app.state.workbench.project_launcher_page = ProjectLauncherPage::Recovery;
-            app.state
-                .workbench
-                .project_launcher_recovery
-                .request_refresh();
+            app.state.open_project_launcher();
+            app.state.project.project_launcher_page = ProjectLauncherPage::Recovery;
+            app.state.platform.recovery_catalog.request_refresh();
         }
     }
 }
@@ -1009,8 +1001,8 @@ mod tests {
             project_recent("C:/Engineering/afe.rspiceproj", true, Some("Analog Design")),
             project_recent("//lab/rf/rf_pa.rspiceproj", false, Some("RF Systems")),
         ];
-        app.state.workbench.project_launcher_filter = ProjectLauncherFilter::Pinned;
-        app.state.workbench.project_launcher_query = "analog".to_owned();
+        app.state.project.project_launcher_filter = ProjectLauncherFilter::Pinned;
+        app.state.project.project_launcher_query = "analog".to_owned();
 
         let rows = recent_project_rows(&app);
 
@@ -1065,7 +1057,7 @@ mod tests {
             project_recent("C:/Engineering/afe.rspiceproj", false, None),
             project_recent("//lab/rf/rf_pa.rspiceproj", false, None),
         ];
-        app.state.workbench.project_launcher_filter = ProjectLauncherFilter::Shared;
+        app.state.project.project_launcher_filter = ProjectLauncherFilter::Shared;
 
         let rows = recent_project_rows(&app);
 
@@ -1080,7 +1072,7 @@ mod tests {
             crate::ui::Theme::default().apply(&ctx);
             let mut app = RSpiceApp::test_instance();
             app.state.close_project_session();
-            app.state.workbench.project_launcher_recovery = Default::default();
+            app.state.platform.recovery_catalog = Default::default();
 
             let output = ctx.run_ui(
                 egui::RawInput {

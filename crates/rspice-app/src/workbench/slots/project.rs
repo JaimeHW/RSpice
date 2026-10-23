@@ -1,6 +1,7 @@
 //! The project feature's dialogs: the library, cell and view transactions, a
 //! new project's identity, and the project's save, history, technology and
-//! recovery workflows.
+//! recovery workflows; the Project Launcher, the Examples dialog, a pending
+//! close's destination, and the Project workspace's pages and filters.
 
 use crate::workbench::app::{DesignManagementDialogState, ProjectRevisionHistoryDialogState};
 
@@ -136,4 +137,59 @@ pub(crate) struct ProjectState {
     /// Cached, integrity-verified full-project recovery catalog.
     pub(crate) project_checkpoint_recovery:
         crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState,
+
+    /// The Project Launcher is an application-level modal, not a workspace.
+    pub project_launcher_open: bool,
+    /// Search text is transient and never becomes project state.
+    pub project_launcher_query: String,
+    pub project_launcher_sort: crate::workbench::state::ProjectLauncherSort,
+    pub project_launcher_filter: crate::workbench::state::ProjectLauncherFilter,
+    /// Selected startup page and scanned native checkpoint catalog are
+    /// application-modal runtime state, never project or user preferences.
+    pub project_launcher_page: crate::workbench::state::ProjectLauncherPage,
+    /// The Examples dialog, while it is open: the example chosen in it.
+    pub(crate) examples_selection: Option<usize>,
+    /// Destination owned by an in-flight close-project review. It survives an
+    /// asynchronous canonical-save continuation but is never persisted.
+    pub(crate) project_close_destination:
+        crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
+    /// Focus is requested only on the frame in which the launcher opens.
+    pub focus_project_launcher_search: bool,
+    pub project_page: crate::workbench::state::ProjectPage,
+    /// Device-local filters and row selections for the Project workspace.
+    /// They affect presentation only and never participate in project
+    /// revisioning, execution snapshots, or recovery checkpoints.
+    pub project_library_filter: String,
+    pub project_dependency_filter: String,
+    pub project_dependency_selection: Option<String>,
+    pub project_checkpoint_selection: Option<String>,
+    /// Device-local projection retained by the Library/Cellview specialist
+    /// route. Authoritative library, cellview, symbol, and form records remain
+    /// in the project domains.
+    pub library_cellview_page: crate::workbench::state::LibraryCellviewPage,
+}
+
+impl ProjectState {
+    /// Open the Examples dialog on its first circuit.
+    pub(crate) fn open_examples(&mut self) {
+        self.examples_selection = Some(0);
+    }
+
+    pub(crate) fn begin_project_close(
+        &mut self,
+        destination: crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
+    ) {
+        self.project_close_destination = destination;
+    }
+
+    pub(crate) fn cancel_project_close(&mut self) {
+        self.project_close_destination =
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench;
+    }
+
+    pub(crate) fn take_project_close_destination(
+        &mut self,
+    ) -> crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination {
+        std::mem::take(&mut self.project_close_destination)
+    }
 }

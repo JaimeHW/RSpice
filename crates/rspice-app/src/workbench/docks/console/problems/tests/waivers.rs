@@ -351,7 +351,7 @@ fn a_waiver_removed_on_the_page_drops_preflight_and_the_prepared_run() {
 
     assert!(app.state.model.schematic.document().waivers.is_empty());
     assert!(
-        app.state.workbench.preflight.report.is_none(),
+        app.state.runs.preflight.report.is_none(),
         "the report that let the run through no longer stands",
     );
     assert!(
@@ -405,7 +405,7 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
         1
     );
     assert!(
-        app.state.workbench.preflight.report.is_none(),
+        app.state.runs.preflight.report.is_none(),
         "the report that refused the run no longer stands",
     );
     assert!(
@@ -421,7 +421,7 @@ fn a_waiver_recorded_on_the_page_drops_the_report_that_refused_the_run() {
 fn retain_report(state: &mut AppState, blockers: Vec<crate::state::PreflightIssue>) {
     let (topology_root, topology_revision, topology_closure) = state.configured_topology_revision();
     let plan = state.active_plan_revision();
-    state.workbench.preflight.report = Some(crate::state::PreflightReport {
+    state.runs.preflight.report = Some(crate::state::PreflightReport {
         project_revision: state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
@@ -473,7 +473,7 @@ fn undo_and_redo_of_a_waiver_re_state_the_finding_and_drop_preflight() {
         "the finding is stated unwaived without a re-check",
     );
     assert!(
-        app.state.workbench.preflight.report.is_none(),
+        app.state.runs.preflight.report.is_none(),
         "the report checked under the waiver is dropped",
     );
 
@@ -485,5 +485,5 @@ fn undo_and_redo_of_a_waiver_re_state_the_finding_and_drop_preflight() {
     );
     collision_current(&mut app.state);
     assert!(current_record(&app.state).waived(), "redo puts it back");
-    assert!(app.state.workbench.preflight.report.is_none());
+    assert!(app.state.runs.preflight.report.is_none());
 }

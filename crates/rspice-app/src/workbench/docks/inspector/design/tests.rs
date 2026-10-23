@@ -1149,7 +1149,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     );
     let binding = app
         .state
-        .workbench
+        .simulate
         .verification
         .tuning_instance_binding
         .as_ref()
@@ -1164,7 +1164,7 @@ fn literal_value_tuning_stages_a_typed_variable_without_mutating_authority() {
     assert_eq!(binding.binding_expression, "{RLOAD_VALUE}");
     assert!(
         app.state
-            .workbench
+            .simulate
             .verification
             .tuning_variables
             .iter()
@@ -1210,7 +1210,7 @@ fn parameter_bound_value_tuning_selects_the_existing_typed_variable() {
     stage_component_tuning(&mut app, component_id)
         .expect("existing typed parameter reference is tunable");
 
-    let session = &app.state.workbench.verification;
+    let session = &app.state.simulate.verification;
     let binding = session
         .tuning_instance_binding
         .as_ref()
@@ -1249,7 +1249,7 @@ fn value_tuning_fails_closed_when_no_truthful_quantity_exists() {
     assert!(error.contains("truthful typed design-variable mapping"));
     assert!(
         app.state
-            .workbench
+            .simulate
             .verification
             .tuning_instance_binding
             .is_none()

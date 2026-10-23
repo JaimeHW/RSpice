@@ -52,12 +52,12 @@ fn simulation_route_commands_activate_the_simulate_workspace_and_exact_route() {
         let mut app = RSpiceApp::test_instance();
         app.state.open_project_session();
         app.state.workbench.workspace = Workspace::Results;
-        app.state.workbench.simulation_page = SimulationPage::Analyses;
+        app.state.simulate.simulation_page = SimulationPage::Analyses;
 
         Command::SimulationPage(page).execute(&mut app);
 
         assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
-        assert_eq!(app.state.workbench.simulation_page, page);
+        assert_eq!(app.state.simulate.simulation_page, page);
     }
 }
 
@@ -88,7 +88,7 @@ fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
     Command::ManageSimulationPlans.execute(&mut app);
 
     let Some(crate::workbench::state::SimulationWorkflowDialog::PlanManager(draft)) =
-        app.state.workbench.simulation_workflow.as_ref()
+        app.state.simulate.simulation_workflow.as_ref()
     else {
         panic!("the plan manager did not open");
     };
@@ -119,7 +119,7 @@ fn managing_simulation_plans_is_disabled_without_a_stable_analysis_plan() {
 
     Command::ManageSimulationPlans.execute(&mut app);
 
-    assert!(app.state.workbench.simulation_workflow.is_none());
+    assert!(app.state.simulate.simulation_workflow.is_none());
 }
 
 /// The chip lives in the context toolbar, which is chrome in every workspace.

@@ -71,7 +71,7 @@ fn registry(
     payload: &SimulationPlanPayload,
 ) {
     let variables = &payload.design_variables;
-    let selected = app.state.workbench.selected_design_variable.clone();
+    let selected = app.state.simulate.selected_design_variable.clone();
     let selected_index = selected
         .as_ref()
         .and_then(|name| variables.iter().position(|variable| &variable.name == name));
@@ -210,11 +210,11 @@ fn registry(
     if let Some(name) = pick {
         // A draft belongs to the row it was typed into. Selecting another row
         // must not carry a half-typed expression or bound onto it.
-        if app.state.workbench.selected_design_variable.as_deref() != Some(name.as_str()) {
-            app.state.workbench.design_variable_expression_draft = None;
-            app.state.workbench.design_variable_bounds_draft = None;
+        if app.state.simulate.selected_design_variable.as_deref() != Some(name.as_str()) {
+            app.state.simulate.design_variable_expression_draft = None;
+            app.state.simulate.design_variable_bounds_draft = None;
         }
-        app.state.workbench.selected_design_variable = Some(name);
+        app.state.simulate.selected_design_variable = Some(name);
     }
     if import {
         super::variable_import::import_from_file(ui.ctx(), &mut app.state);
@@ -261,9 +261,9 @@ fn registry(
                 // The copy carries the original's whole typed contract, so the
                 // record editor should open on it — that is the field the copy
                 // exists to change.
-                app.state.workbench.design_variable_expression_draft = None;
-                app.state.workbench.design_variable_bounds_draft = None;
-                app.state.workbench.selected_design_variable = Some(committed);
+                app.state.simulate.design_variable_expression_draft = None;
+                app.state.simulate.design_variable_bounds_draft = None;
+                app.state.simulate.selected_design_variable = Some(committed);
             }
         } else if remove {
             // Removing a variable the plan resolves into an analysis is a
@@ -291,9 +291,9 @@ fn registry(
                 .remove_design_variable(plan_id, id)
                 .map(|_| ())
                 .map_err(|error| error.to_string())
-        }) && app.state.workbench.selected_design_variable.as_deref() == Some(name.as_str())
+        }) && app.state.simulate.selected_design_variable.as_deref() == Some(name.as_str())
         {
-            app.state.workbench.selected_design_variable = None;
+            app.state.simulate.selected_design_variable = None;
         }
     }
 }
@@ -336,7 +336,7 @@ fn removal_consequences(
 fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let selected = app
         .state
-        .workbench
+        .simulate
         .selected_design_variable
         .as_ref()
         .and_then(|name| {
@@ -365,7 +365,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     let variable_id = variable.id;
     let mut draft = app
         .state
-        .workbench
+        .simulate
         .design_variable_expression_draft
         .clone()
         .unwrap_or_else(|| variable.expression.clone());
@@ -375,7 +375,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     );
     let mut bounds = app
         .state
-        .workbench
+        .simulate
         .design_variable_bounds_draft
         .clone()
         .unwrap_or_else(|| stored_bounds.clone());
@@ -542,22 +542,22 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
         let bounds_settled =
             bounds == stored_bounds || commit_bounds(app, variable_id, &bounds, &variable.name);
         if expression_settled {
-            app.state.workbench.design_variable_expression_draft = None;
+            app.state.simulate.design_variable_expression_draft = None;
         } else {
-            app.state.workbench.design_variable_expression_draft = Some(draft);
+            app.state.simulate.design_variable_expression_draft = Some(draft);
         }
         if bounds_settled {
-            app.state.workbench.design_variable_bounds_draft = None;
+            app.state.simulate.design_variable_bounds_draft = None;
         } else {
-            app.state.workbench.design_variable_bounds_draft = Some(bounds);
+            app.state.simulate.design_variable_bounds_draft = Some(bounds);
         }
         return;
     }
     if draft != variable.expression {
-        app.state.workbench.design_variable_expression_draft = Some(draft);
+        app.state.simulate.design_variable_expression_draft = Some(draft);
     }
     if bounds != stored_bounds {
-        app.state.workbench.design_variable_bounds_draft = Some(bounds);
+        app.state.simulate.design_variable_bounds_draft = Some(bounds);
     }
 }
 

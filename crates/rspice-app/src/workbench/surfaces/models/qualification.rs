@@ -274,7 +274,7 @@ pub(super) fn qualification_model_summary(
     let key = model_key(&library.name, &model.name);
     let open_draft = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -805,7 +805,7 @@ pub(super) fn selected_qualification_summary<'a>(
         .model_library_manager
         .selected_library
         .as_deref()?;
-    let model = app.state.workbench.selected_model.as_deref()?;
+    let model = app.state.models.selected_model.as_deref()?;
     summaries.iter().find(|summary| {
         summary.library.eq_ignore_ascii_case(library) && summary.model.eq_ignore_ascii_case(model)
     })
@@ -838,7 +838,7 @@ pub(super) fn qualification_action_block_reason(
     }
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some()
@@ -848,7 +848,7 @@ pub(super) fn qualification_action_block_reason(
                 .to_owned(),
         );
     }
-    if let Some(draft) = app.state.workbench.model_editor.draft.as_ref() {
+    if let Some(draft) = app.state.models.model_editor.draft.as_ref() {
         let same_model = draft.library_name.eq_ignore_ascii_case(&selected.library)
             && draft.model_name.eq_ignore_ascii_case(&selected.model);
         if draft.is_dirty() && !same_model {
@@ -916,7 +916,7 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
             .prompt("Select a model family before opening qualification.");
         return;
     };
-    let Some(model) = app.state.workbench.selected_model.clone() else {
+    let Some(model) = app.state.models.selected_model.clone() else {
         app.state
             .prompt("Select a model family before opening qualification.");
         return;
@@ -937,14 +937,14 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
 
     match action {
         QualificationPageAction::ReviewVectors => {
-            app.state.workbench.model_editor.active_section = ModelEditorSection::Tests;
-            app.state.workbench.model_editor.qualification_plan_open = true;
+            app.state.models.model_editor.active_section = ModelEditorSection::Tests;
+            app.state.models.model_editor.qualification_plan_open = true;
         }
         QualificationPageAction::ReviewReleaseBinding => {
-            app.state.workbench.model_editor.active_section = ModelEditorSection::Release;
+            app.state.models.model_editor.active_section = ModelEditorSection::Release;
         }
         QualificationPageAction::RunSuite => {
-            app.state.workbench.model_editor.active_section = ModelEditorSection::Tests;
+            app.state.models.model_editor.active_section = ModelEditorSection::Tests;
             model_editor::validate_open_candidate(app);
             let command = Command::ModelRunQualificationTests;
             if command.is_enabled(app) {
@@ -955,7 +955,7 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
             }
         }
         QualificationPageAction::CompareRelease => {
-            app.state.workbench.model_editor.active_section = ModelEditorSection::Release;
+            app.state.models.model_editor.active_section = ModelEditorSection::Release;
             let command = Command::ModelCompareRelease;
             if command.is_enabled(app) {
                 command.execute(app);

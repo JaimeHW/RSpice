@@ -92,7 +92,7 @@ impl Studio {
                 .workbench
                 .activate(crate::workbench::state::Workspace::Simulate);
         }
-        app.state.workbench.simulation_page = page;
+        app.state.simulate.simulation_page = page;
         let mut studio = Self {
             ctx,
             app,
@@ -243,13 +243,13 @@ fn a_click_on_a_stack_row_selects_it_and_a_click_on_its_switch_enables_it() {
             .collect::<Vec<_>>();
         (rows[0], rows[1])
     };
-    app.state.workbench.active_analysis_instance = Some(first.0);
+    app.state.simulate.active_analysis_instance = Some(first.0);
 
     let mut studio = Studio::open(app, SimulationPage::Analyses, DESKTOP);
     let target = format!("instance {}", second.0);
     studio.click(|label| label.starts_with("Select ") && label.contains(&target));
     assert_eq!(
-        studio.app.state.workbench.active_analysis_instance,
+        studio.app.state.simulate.active_analysis_instance,
         Some(second.0),
         "a click on the row body selects that instance"
     );
@@ -447,7 +447,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     // Selecting a row is what arms the four commands that act on one group.
     studio.click(|label| label.contains("Core rails"));
     assert_eq!(
-        studio.app.state.workbench.selected_capture_group,
+        studio.app.state.simulate.selected_capture_group,
         Some(ids[0]),
         "a click on the ledger row selects that group"
     );
@@ -459,7 +459,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
         "Lower moves the selected group later in resolution order"
     );
     assert_eq!(
-        studio.app.state.workbench.selected_capture_group,
+        studio.app.state.simulate.selected_capture_group,
         Some(ids[0]),
         "and the selection follows the group it moved"
     );
@@ -474,22 +474,22 @@ fn every_capture_group_command_is_reachable_from_the_card() {
     studio.click(|label| label == "Edit");
     assert!(
         matches!(
-            &studio.app.state.workbench.simulation_workflow,
+            &studio.app.state.simulate.simulation_workflow,
             Some(SimulationWorkflowDialog::CaptureGroup(draft)) if draft.name == "Core rails"
         ),
         "Edit opens the group editor on the selected group"
     );
-    studio.app.state.workbench.simulation_workflow = None;
+    studio.app.state.simulate.simulation_workflow = None;
 
     studio.click(|label| label == "Add group");
     assert!(
         matches!(
-            &studio.app.state.workbench.simulation_workflow,
+            &studio.app.state.simulate.simulation_workflow,
             Some(SimulationWorkflowDialog::CaptureGroup(draft)) if draft.name.is_empty()
         ),
         "Add group opens the same editor on an unnamed draft"
     );
-    studio.app.state.workbench.simulation_workflow = None;
+    studio.app.state.simulate.simulation_workflow = None;
 
     studio.click(|label| label == "Remove");
     // A group holding outputs is a reviewed removal: the strip stages it, and
@@ -522,7 +522,7 @@ fn every_capture_group_command_is_reachable_from_the_card() {
         "Remove takes the selected group out of the plan once it is confirmed"
     );
     assert_eq!(
-        studio.app.state.workbench.selected_capture_group, None,
+        studio.app.state.simulate.selected_capture_group, None,
         "and clears a selection that no longer names anything"
     );
     assert!(
@@ -569,7 +569,7 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
         }
         plan.instances()[1].id()
     };
-    app.state.workbench.active_analysis_instance = Some(selected);
+    app.state.simulate.active_analysis_instance = Some(selected);
     let before = names(&app);
 
     let mut studio = Studio::open(app, SimulationPage::Analyses, DESKTOP);
@@ -584,7 +584,7 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
     let clone_id = studio
         .app
         .state
-        .workbench
+        .simulate
         .active_analysis_instance
         .expect("the clone is what the editor is now open on");
     assert!(
@@ -682,7 +682,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
     let added = studio
         .app
         .state
-        .workbench
+        .simulate
         .active_analysis_instance
         .expect("the insert selects what it added");
     assert!(
@@ -690,7 +690,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
         "and the selection names an instance the plan holds"
     );
     assert_eq!(
-        studio.app.state.workbench.simulation_page,
+        studio.app.state.simulate.simulation_page,
         SimulationPage::Analyses,
         "the reader lands on the one route that can configure it"
     );
@@ -758,7 +758,7 @@ fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
             .expect("the plan accepts a bound the transient can use");
         (other, transient)
     };
-    app.state.workbench.active_analysis_instance = Some(other);
+    app.state.simulate.active_analysis_instance = Some(other);
     let name = app
         .state
         .model
@@ -785,14 +785,14 @@ fn a_departed_row_on_the_solver_ledger_opens_its_analysis_advanced_options() {
     let mut studio = Studio::open(app, SimulationPage::Solver, (1280.0, 4000.0));
     studio.click(|label| label == name);
 
-    let workbench = &studio.app.state.workbench;
+    let simulate = &studio.app.state.simulate;
     assert_eq!(
-        workbench.simulation_page,
+        simulate.simulation_page,
         SimulationPage::Analyses,
         "the hop lands on the one route that edits an analysis"
     );
     assert_eq!(
-        workbench.active_analysis_instance,
+        simulate.active_analysis_instance,
         Some(reported),
         "and on the analysis the pressed row reported"
     );
@@ -823,7 +823,7 @@ fn a_click_on_an_option_switch_authors_the_override_it_states() {
         .insert(AnalysisKind::DcSweep)
         .map(|(id, _)| id)
         .expect("a DC sweep inserts");
-    app.state.workbench.active_analysis_instance = Some(sweep);
+    app.state.simulate.active_analysis_instance = Some(sweep);
     let label = NumericOverrideOption::GminStepping.label();
 
     // Tall enough that the option fields, which sit under the analysis's own

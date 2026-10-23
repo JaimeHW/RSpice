@@ -40,7 +40,7 @@ impl SheetBarHost for Host<'_> {
         match action {
             SpecificationAction::Discard => {
                 state.results.results.session.spec_drafts = None;
-                state.workbench.specification_editor_route_pending = false;
+                state.results.specification_editor_route_pending = false;
                 // With no retained dataset there is no read-only Specs
                 // evidence sheet to fall back to. Move to the ordinary
                 // empty Results landing so the destination boundary does

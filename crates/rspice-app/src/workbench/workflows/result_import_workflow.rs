@@ -13,7 +13,9 @@ use crate::state::{
 };
 use crate::ui::tokens::Tokens;
 use crate::workbench::app_state::AppState;
-use crate::workbench::state::{ResultImportDialogState, ResultImportStage};
+use crate::workbench::documents::result_document::import::{
+    ResultImportDialogState, ResultImportStage,
+};
 use rspice_formats::result_import::identify_result_import_format;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
@@ -240,7 +242,7 @@ pub(crate) fn stage_imported_result_dataset(
     }
     let parsed = parse_result_dataset(source_name, bytes)?;
     let signal_count = parsed.waveforms.len();
-    state.workbench.result_import = ResultImportDialogState {
+    state.results.result_import = ResultImportDialogState {
         open: true,
         stage: ResultImportStage::Detect,
         source_name: source_name.to_owned(),
@@ -371,13 +373,13 @@ pub(crate) fn commit_result_import_draft(state: &mut AppState) -> Result<(), Str
     if let Some(reason) = result_import_block_reason(state) {
         return Err(reason);
     }
-    let draft = state.workbench.result_import.clone();
+    let draft = state.results.result_import.clone();
     if !draft.open {
         return Err("No result import draft is open.".to_owned());
     }
     let parsed = parsed_result_from_draft(&draft)?;
     commit_parsed_result_dataset(state, &draft.source_name, parsed)?;
-    state.workbench.result_import = ResultImportDialogState::default();
+    state.results.result_import = ResultImportDialogState::default();
     Ok(())
 }
 
@@ -500,11 +502,11 @@ fn commit_parsed_result_dataset(
 /// Closing or cancelling this window only discards the runtime draft. The
 /// retained simulation model is touched exclusively by the final commit.
 pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut AppState) {
-    if !state.workbench.result_import.open {
+    if !state.results.result_import.open {
         return;
     }
 
-    let mut draft = state.workbench.result_import.clone();
+    let mut draft = state.results.result_import.clone();
     let mut window_open = true;
     let mut cancel = false;
     let mut go_back = false;
@@ -602,11 +604,11 @@ pub(crate) fn show_result_import_dialog(ctx: &egui::Context, state: &mut AppStat
         draft.validation_error = parsed_result_from_draft(&draft).err();
     }
 
-    state.workbench.result_import = draft;
+    state.results.result_import = draft;
     if let Some(Err(error)) = commit.then(|| commit_result_import_draft(state)) {
-        state.workbench.result_import.open = true;
-        state.workbench.result_import.stage = ResultImportStage::Validate;
-        state.workbench.result_import.validation_error = Some(error);
+        state.results.result_import.open = true;
+        state.results.result_import.stage = ResultImportStage::Validate;
+        state.results.result_import.validation_error = Some(error);
     }
 }
 
@@ -620,7 +622,7 @@ fn result_import_dialog_geometry(available: egui::Vec2) -> (egui::Vec2, f32) {
 }
 
 fn discard_result_import_draft(state: &mut AppState) {
-    state.workbench.result_import = ResultImportDialogState::default();
+    state.results.result_import = ResultImportDialogState::default();
 }
 
 fn result_import_stage_header(ui: &mut egui::Ui, active: ResultImportStage) {
@@ -1238,11 +1240,11 @@ mod tests {
             let mut state = loaded_project_state();
             stage_imported_result_dataset(&mut state, "axis.raw", &bytes).unwrap();
             assert_eq!(
-                state.workbench.result_import.coordinate_unit.as_deref(),
+                state.results.result_import.coordinate_unit.as_deref(),
                 Some(canonical)
             );
             assert_eq!(
-                state.workbench.result_import.waveforms[0].x.as_slice(),
+                state.results.result_import.waveforms[0].x.as_slice(),
                 &[0.0, end]
             );
             commit_result_import_draft(&mut state).unwrap();
@@ -1350,8 +1352,8 @@ mod tests {
     fn assert_nullable_import_round_trip(name: &str, bytes: &[u8]) {
         let mut state = loaded_project_state();
         stage_imported_result_dataset(&mut state, name, bytes).unwrap();
-        assert_eq!(state.workbench.result_import.waveforms.len(), 1);
-        assert_eq!(state.workbench.result_import.waveforms[0].sample(1), None);
+        assert_eq!(state.results.result_import.waveforms.len(), 1);
+        assert_eq!(state.results.result_import.waveforms[0].sample(1), None);
         commit_result_import_draft(&mut state).unwrap();
         let project = crate::workbench::lifecycle::project_lifecycle::snapshot(&state).unwrap();
         let text = crate::io::project_io::serialize_project_file(&project).unwrap();
@@ -1455,11 +1457,11 @@ mod tests {
         let mut state = loaded_project_state();
         stage_imported_result_dataset(&mut state, "bias.csv", b"bias [mA],V(out) [V]\n0,0\n1,2\n")
             .unwrap();
-        state.workbench.result_import.analysis_type = AnalysisType::Transient;
+        state.results.result_import.analysis_type = AnalysisType::Transient;
         let error = commit_result_import_draft(&mut state).unwrap_err();
         assert!(error.contains("incompatible"), "{error}");
         assert!(state.model.simulation.retained.runs.is_empty());
-        assert!(state.workbench.result_import.open);
+        assert!(state.results.result_import.open);
     }
 
     #[test]
@@ -1576,7 +1578,7 @@ mod tests {
             crate::workbench::ResultViewer::Smith
         );
         assert_eq!(
-            state.workbench.result_import.source_format_id, "",
+            state.results.result_import.source_format_id, "",
             "successful commit discards the runtime import draft"
         );
     }
@@ -1744,14 +1746,14 @@ mod tests {
         let document = state.workbench.documents.active(workspace).cloned();
         stage_imported_result_dataset(&mut state, "next.csv", b"time [s],V(out) [V]\n0,2\n1,3\n")
             .expect("reviewing a draft requires no sequence");
-        let selected = state.workbench.result_import.selected_signals.clone();
+        let selected = state.results.result_import.selected_signals.clone();
 
         for _ in 0..2 {
             let error = commit_result_import_draft(&mut state).unwrap_err();
             assert!(error.contains("run sequence is exhausted"));
-            assert!(state.workbench.result_import.open);
-            assert_eq!(state.workbench.result_import.source_name, "next.csv");
-            assert_eq!(state.workbench.result_import.selected_signals, selected);
+            assert!(state.results.result_import.open);
+            assert_eq!(state.results.result_import.source_name, "next.csv");
+            assert_eq!(state.results.result_import.selected_signals, selected);
             assert_eq!(state.workbench.workspace, workspace);
             assert_eq!(
                 state.workbench.documents.active(workspace),
@@ -1868,11 +1870,8 @@ mod tests {
         )
         .expect("stage succeeds");
 
-        assert!(state.workbench.result_import.open);
-        assert_eq!(
-            state.workbench.result_import.stage,
-            ResultImportStage::Detect
-        );
+        assert!(state.results.result_import.open);
+        assert_eq!(state.results.result_import.stage, ResultImportStage::Detect);
         assert_eq!(
             state.model.simulation.retained.runs.len(),
             initial_run_count
@@ -1884,7 +1883,7 @@ mod tests {
         );
 
         discard_result_import_draft(&mut state);
-        assert!(!state.workbench.result_import.open);
+        assert!(!state.results.result_import.open);
         assert_eq!(
             state.model.simulation.retained.runs.len(),
             initial_run_count
@@ -1902,11 +1901,11 @@ mod tests {
             b"time [s],V(out) [V]\n0,0\n1,1\n",
         )
         .expect("stage succeeds");
-        state.workbench.result_import.selected_signals.fill(false);
+        state.results.result_import.selected_signals.fill(false);
 
         let error = commit_result_import_draft(&mut state).expect_err("empty mapping rejected");
         assert!(error.contains("at least one signal"), "{error}");
-        assert!(state.workbench.result_import.open);
+        assert!(state.results.result_import.open);
         assert!(state.model.simulation.retained.runs.is_empty());
         assert!(!crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&state));
     }
@@ -1920,7 +1919,7 @@ mod tests {
             b"time [s],V(out) [V],I(VDD) [A]\n0,0,1\n1,1,2\n",
         )
         .expect("stage succeeds");
-        state.workbench.result_import.selected_signals[1] = false;
+        state.results.result_import.selected_signals[1] = false;
 
         commit_result_import_draft(&mut state).expect("commit succeeds");
 
@@ -1931,7 +1930,7 @@ mod tests {
             .expect("active import");
         assert_eq!(analysis.waveforms.len(), 1);
         assert_eq!(analysis.waveforms[0].name, "V(out)");
-        assert!(!state.workbench.result_import.open);
+        assert!(!state.results.result_import.open);
     }
 
     #[test]
@@ -1939,7 +1938,7 @@ mod tests {
         let mut state = loaded_project_state();
         stage_imported_result_dataset(&mut state, "external.csv", b"time,V(out) [V]\n0,0\n1,1\n")
             .expect("stage succeeds");
-        state.workbench.result_import.analysis_type = AnalysisType::Ac;
+        state.results.result_import.analysis_type = AnalysisType::Ac;
 
         let error = commit_result_import_draft(&mut state).expect_err("invalid frequency rejected");
         assert!(error.contains("greater than zero"), "{error}");

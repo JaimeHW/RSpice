@@ -1357,14 +1357,14 @@ impl Command {
             Self::ModelSaveRevision
                 if app
                     .state
-                    .workbench
+                    .models
                     .model_editor
                     .qualification_execution
                     .is_some() =>
             {
                 "qualification execution is active"
             }
-            Self::ModelSaveRevision if app.state.workbench.model_editor.draft.is_none() => {
+            Self::ModelSaveRevision if app.state.models.model_editor.draft.is_none() => {
                 "no project-owned model candidate is open"
             }
             Self::ModelSaveRevision => "the open model candidate has no changes to save",
@@ -1375,7 +1375,7 @@ impl Command {
             Self::ModelRunQualificationTests
                 if app
                     .state
-                    .workbench
+                    .models
                     .model_editor
                     .qualification_execution
                     .is_some() =>

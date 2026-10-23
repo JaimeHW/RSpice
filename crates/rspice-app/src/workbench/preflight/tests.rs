@@ -21,7 +21,7 @@ impl RSpiceApp {
     /// frame loop would on the frame that finds it.
     pub(crate) fn settle_preflight(&mut self) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
-        while self.state.workbench.preflight.checking.is_some() {
+        while self.state.runs.preflight.checking.is_some() {
             assert!(
                 std::time::Instant::now() < deadline,
                 "the engine pass did not finish"
@@ -74,7 +74,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     // the command vocabulary does not have to name a module above it.
     // `frame` serves it in the same pass; this is that hop.
     assert!(
-        app.state.workbench.preflight.take_run_and_queue_request(),
+        app.state.runs.preflight.take_run_and_queue_request(),
         "Run must record a preflight-and-queue request for the frame loop"
     );
     start(&mut app.state, &mut app.simulation_controller, true);
@@ -83,7 +83,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     assert!(!app.state.model.simulation.execution.trigger_simulation);
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -160,7 +160,7 @@ fn a_pass_states_its_outcome_where_the_notice_centre_lifts_it() {
     assert_eq!(outcome.source, crate::diagnostics::LogSource::Studio);
     let blocked = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -183,7 +183,7 @@ fn a_current_retained_report_queues_without_reauthoring_preflight() {
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
     let current_plan = app.state.active_plan_revision();
-    app.state.workbench.preflight.report = Some(PreflightReport {
+    app.state.runs.preflight.report = Some(PreflightReport {
         project_revision: app.state.model.workspace.content.project.revision().get(),
         topology_root,
         topology_revision,
@@ -753,7 +753,7 @@ fn app_with_a_forced_capacitor_island(
 
 fn preflight_blockers(app: &RSpiceApp) -> &[PreflightIssue] {
     &app.state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -794,7 +794,7 @@ fn a_forced_node_without_a_dc_path_is_the_engines_refusal_on_the_drawn_net() {
     let wire = wire.expect("OUT is drawn on a wire");
     assert!(
         app.state
-            .workbench
+            .runs
             .preflight
             .report
             .as_ref()
@@ -861,7 +861,7 @@ fn a_node_shunt_set_where_the_solver_options_are_clears_the_refusal() {
 
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -898,15 +898,15 @@ fn stop_during_the_engine_pass_authorizes_and_queues_nothing() {
 
     start(&mut app.state, &mut app.simulation_controller, true);
     assert!(
-        app.state.workbench.preflight.run_awaits_check(),
+        app.state.runs.preflight.run_awaits_check(),
         "the press waits on the engine's pass over its decks"
     );
     assert!(Command::StopSimulation.is_enabled(&app));
     Command::StopSimulation.execute(&mut app);
     app.settle_preflight();
 
-    assert!(app.state.workbench.preflight.checking.is_none());
-    assert!(app.state.workbench.preflight.report.is_none());
+    assert!(app.state.runs.preflight.checking.is_none());
+    assert!(app.state.runs.preflight.report.is_none());
     assert!(!app.state.model.simulation.execution.trigger_simulation);
     assert!(
         app.state
@@ -946,7 +946,7 @@ fn an_unforced_coupling_node_is_not_refused() {
 
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -1021,7 +1021,7 @@ fn a_voltage_source_loop_is_stated_once_by_the_rule_that_owns_it() {
 
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -1073,7 +1073,7 @@ fn a_source_loop_the_design_rule_does_not_see_is_the_engines_refusal() {
 
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()
@@ -1304,7 +1304,7 @@ fn a_model_binding_blocker_remediates_to_corners_and_sections() {
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
-    assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
+    assert_eq!(app.state.models.models_page, ModelsPage::Corners);
 }
 
 /// One library declaring the reference process is a destination.
@@ -1351,7 +1351,7 @@ fn a_model_binding_blocker_lands_on_the_only_library_that_declares_the_process()
     app.state.workbench.activate(Workspace::Verify);
     apply_remediation(&mut app, binding.remediation.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
-    assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
+    assert_eq!(app.state.models.models_page, ModelsPage::Corners);
     assert_eq!(
         app.state
             .model
@@ -1445,7 +1445,7 @@ fn a_models_route_to_a_departed_library_states_its_refusal() {
         "a refused selection leaves the previous one alone"
     );
     assert!(
-        app.state.workbench.models_view.selected_corner.is_none(),
+        app.state.models.models_view.selected_corner.is_none(),
         "and never pins a corner against a library the selection did not move to"
     );
     assert!(
@@ -1496,7 +1496,7 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
     apply_remediation(&mut app, remediation);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
-    assert_eq!(app.state.workbench.models_page, ModelsPage::Corners);
+    assert_eq!(app.state.models.models_page, ModelsPage::Corners);
     assert_eq!(
         app.state
             .model
@@ -1507,7 +1507,7 @@ fn a_corner_finding_opens_corners_and_sections_on_the_object_it_named() {
         "the page must arrive on the library the advisory named"
     );
     assert_eq!(
-        app.state.workbench.models_view.selected_corner.as_deref(),
+        app.state.models.models_view.selected_corner.as_deref(),
         Some("pdk\u{1f}hot"),
         "and with the corner it named inspected"
     );
@@ -1598,7 +1598,7 @@ fn app_with_an_unfinished_transient_beside_a_selected_operating_point() -> (
         }
     })
     .expect("the transient analysis takes the edit");
-    app.state.workbench.active_analysis_instance = Some(operating_point);
+    app.state.simulate.active_analysis_instance = Some(operating_point);
     (app, transient, operating_point)
 }
 
@@ -1631,11 +1631,11 @@ fn an_analysis_configuration_finding_opens_the_analysis_it_is_about() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
-        app.state.workbench.simulation_page,
+        app.state.simulate.simulation_page,
         crate::workbench::state::SimulationPage::Analyses
     );
     assert_eq!(
-        app.state.workbench.active_analysis_instance,
+        app.state.simulate.active_analysis_instance,
         Some(transient),
         "the page must arrive on the analysis that failed, not the one that was selected"
     );
@@ -1657,7 +1657,7 @@ fn a_plan_route_to_a_departed_analysis_states_its_refusal() {
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
-        app.state.workbench.active_analysis_instance,
+        app.state.simulate.active_analysis_instance,
         Some(operating_point),
         "a departed analysis leaves the selection where it was"
     );
@@ -1747,7 +1747,7 @@ fn preflight_lists_each_design_rule_finding_once_under_the_configured_root() {
 
     let report = app
         .state
-        .workbench
+        .runs
         .preflight
         .report
         .as_ref()

@@ -81,7 +81,7 @@ pub fn create_editable_project_copy_and_open(
     }
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some()
@@ -91,7 +91,7 @@ pub fn create_editable_project_copy_and_open(
                 .to_owned(),
         );
     }
-    if let Some(open) = app.state.workbench.model_editor.draft.as_ref()
+    if let Some(open) = app.state.models.model_editor.draft.as_ref()
         && open.is_dirty()
     {
         return Err(format!(
@@ -141,9 +141,9 @@ pub fn create_editable_project_copy_and_open(
             RouteTransitionSource::User,
         )
         .map_err(|error| error.to_string())?;
-    app.state.workbench.model_editor = editor;
+    app.state.models.model_editor = editor;
     app.state.select_model_library(&project_library_name);
-    app.state.workbench.selected_model = Some(project_model_name.clone());
+    app.state.models.selected_model = Some(project_model_name.clone());
     Ok((project_library_name, project_model_name))
 }
 
@@ -188,7 +188,7 @@ pub fn open_project_model(
 ) -> Result<(), String> {
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some()
@@ -198,7 +198,7 @@ pub fn open_project_model(
                 .to_owned(),
         );
     }
-    if let Some(open) = app.state.workbench.model_editor.draft.as_ref()
+    if let Some(open) = app.state.models.model_editor.draft.as_ref()
         && open.is_dirty()
     {
         if open.library_name.eq_ignore_ascii_case(library_name)
@@ -225,16 +225,16 @@ pub fn open_project_model(
             RouteTransitionSource::User,
         )
         .map_err(|error| error.to_string())?;
-    app.state.workbench.model_editor = editor;
+    app.state.models.model_editor = editor;
     app.state.select_model_library(library_name);
-    app.state.workbench.selected_model = Some(model_name.to_owned());
+    app.state.models.selected_model = Some(model_name.to_owned());
     Ok(())
 }
 
 /// Validate the open model draft and bind the resulting evidence to its exact
 /// model-source and project revisions.
 pub fn validate_open_candidate(app: &mut RSpiceApp) -> bool {
-    let valid = app.state.workbench.model_editor.validate_candidate(
+    let valid = app.state.models.model_editor.validate_candidate(
         &app.state.model.model_library_manager,
         app.state.model.workspace.content.project.revision(),
     );
@@ -243,7 +243,7 @@ pub fn validate_open_candidate(app: &mut RSpiceApp) -> bool {
     } else {
         let summary = app
             .state
-            .workbench
+            .models
             .model_editor
             .diagnostics
             .first()
@@ -284,7 +284,7 @@ pub fn start_qualification_vector_execution(
     vector_id: &str,
 ) -> Result<(), String> {
     app.state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -308,7 +308,7 @@ pub(super) fn start_qualification_execution_for(
     if !validate_open_candidate(app) {
         return Err("Qualification cannot run until the model candidate validates".to_owned());
     }
-    let editor = &mut app.state.workbench.model_editor;
+    let editor = &mut app.state.models.model_editor;
     if editor.qualification_execution.is_some() {
         return Err("A model qualification run is already active".to_owned());
     }
@@ -377,20 +377,14 @@ pub(super) fn start_qualification_execution_for(
 /// Advance at most one qualification vector. Calling this once per frame keeps
 /// desktop and browser shells responsive while preserving atomic run records.
 pub fn advance_qualification_execution(app: &mut RSpiceApp) {
-    let Some(mut execution) = app
-        .state
-        .workbench
-        .model_editor
-        .qualification_execution
-        .take()
-    else {
+    let Some(mut execution) = app.state.models.model_editor.qualification_execution.take() else {
         return;
     };
 
     match execution.session.step(&rspice_core::NoAbort) {
         Ok(QualificationExecutionStep::InProgress(progress)) => {
             execution.progress = progress;
-            app.state.workbench.model_editor.qualification_execution = Some(execution);
+            app.state.models.model_editor.qualification_execution = Some(execution);
         }
         Ok(QualificationExecutionStep::Complete { progress, run }) => {
             execution.progress = progress;
@@ -398,7 +392,7 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
             let outcome = (|| -> Result<(), String> {
                 let draft = app
                     .state
-                    .workbench
+                    .models
                     .model_editor
                     .draft
                     .as_mut()
@@ -469,10 +463,7 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
                 Ok(())
             })();
             if let Err(error) = outcome {
-                app.state
-                    .workbench
-                    .model_editor
-                    .qualification_execution_notice = Some(format!(
+                app.state.models.model_editor.qualification_execution_notice = Some(format!(
                     "Qualification stopped without keeping partial results: {error}"
                 ));
                 return;
@@ -483,7 +474,7 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
                 let next_id = execution.current_suite_id().to_owned();
                 let next_suite = app
                     .state
-                    .workbench
+                    .models
                     .model_editor
                     .draft
                     .as_ref()
@@ -496,7 +487,7 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
                     })
                     .cloned();
                 let Some(next_suite) = next_suite else {
-                    app.state.workbench.model_editor.qualification_execution_notice = Some(
+                    app.state.models.model_editor.qualification_execution_notice = Some(
                         "Qualification plan changed during execution; remaining suites were not run."
                             .to_owned(),
                     );
@@ -506,23 +497,17 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
                     Ok(session) => {
                         execution.progress = session.progress();
                         execution.session = session;
-                        app.state.workbench.model_editor.qualification_execution = Some(execution);
+                        app.state.models.model_editor.qualification_execution = Some(execution);
                     }
                     Err(error) => {
-                        app.state
-                            .workbench
-                            .model_editor
-                            .qualification_execution_notice = Some(format!(
-                            "Qualification stopped before suite '{next_id}': {error}"
-                        ));
+                        app.state.models.model_editor.qualification_execution_notice = Some(
+                            format!("Qualification stopped before suite '{next_id}': {error}"),
+                        );
                     }
                 }
             } else {
                 let platform = qualification_platform_label(execution.progress.platform);
-                app.state
-                    .workbench
-                    .model_editor
-                    .qualification_execution_notice = Some(format!(
+                app.state.models.model_editor.qualification_execution_notice = Some(format!(
                     "{platform} qualification completed for {} suite(s); {} Desktop/WebAssembly result record(s) were assembled. Save the qualification revision to keep the results.",
                     execution.total_suites(),
                     execution.assembled_evidence,
@@ -530,10 +515,7 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
             }
         }
         Err(error) => {
-            app.state
-                .workbench
-                .model_editor
-                .qualification_execution_notice = Some(format!(
+            app.state.models.model_editor.qualification_execution_notice = Some(format!(
                 "Qualification stopped without publishing a partial suite: {error}"
             ));
         }
@@ -543,20 +525,11 @@ pub fn advance_qualification_execution(app: &mut RSpiceApp) {
 /// Cancel between vectors and discard all in-progress outcomes. Completed
 /// suites already committed to the draft remain available for explicit save.
 pub fn cancel_qualification_execution(app: &mut RSpiceApp) -> bool {
-    let Some(mut execution) = app
-        .state
-        .workbench
-        .model_editor
-        .qualification_execution
-        .take()
-    else {
+    let Some(mut execution) = app.state.models.model_editor.qualification_execution.take() else {
         return false;
     };
     execution.session.cancel();
-    app.state
-        .workbench
-        .model_editor
-        .qualification_execution_notice = Some(format!(
+    app.state.models.model_editor.qualification_execution_notice = Some(format!(
         "{} qualification cancelled before the next vector; no partial suite was published.",
         qualification_platform_label(execution.progress.platform),
     ));
@@ -568,17 +541,17 @@ pub fn cancel_qualification_execution(app: &mut RSpiceApp) -> bool {
 /// release through the normal project revision history.
 pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
     if !app.state.project_lifecycle.is_open() {
-        app.state.workbench.model_editor.promotion_error =
+        app.state.models.model_editor.promotion_error =
             Some("Model promotion requires an open project".to_owned());
         return false;
     }
     if app.state.model.safe_mode.project_read_only() {
-        app.state.workbench.model_editor.promotion_error =
+        app.state.models.model_editor.promotion_error =
             Some("Model promotion is unavailable while the project is read-only".to_owned());
         return false;
     }
     if !validate_open_candidate(app) {
-        app.state.workbench.model_editor.promotion_error = Some(
+        app.state.models.model_editor.promotion_error = Some(
             "Model promotion requires a valid candidate bound to the current project revision"
                 .to_owned(),
         );
@@ -586,13 +559,13 @@ pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
     }
     let Some((library_name, model_name)) = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
         .map(|draft| (draft.library_name.clone(), draft.model_name.clone()))
     else {
-        app.state.workbench.model_editor.promotion_error =
+        app.state.models.model_editor.promotion_error =
             Some("No project-owned model candidate is open".to_owned());
         return false;
     };
@@ -604,7 +577,7 @@ pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
         .into_iter()
         .find(|library| library.name.eq_ignore_ascii_case(&library_name))
     else {
-        app.state.workbench.model_editor.promotion_error = Some(format!(
+        app.state.models.model_editor.promotion_error = Some(format!(
             "Model promotion cannot resolve project library '{library_name}'"
         ));
         return false;
@@ -615,7 +588,7 @@ pub fn promote_open_candidate(app: &mut RSpiceApp, candidate_id: &str) -> bool {
         .cloned()
         .unwrap_or_default();
     app.state
-        .workbench
+        .models
         .model_editor
         .commit_promotion(candidate_id, &correlation)
 }
@@ -651,7 +624,7 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     }
     if app
         .state
-        .workbench
+        .models
         .model_editor
         .qualification_execution
         .is_some()
@@ -662,7 +635,7 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     }
     let draft = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .clone()
@@ -722,8 +695,8 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
         app.invalidate_simulation_preflight();
     }
     app.state.select_model_library(&draft.library_name);
-    app.state.workbench.selected_model = Some(definition.base.name.clone());
-    let reopen_result = app.state.workbench.model_editor.open(
+    app.state.models.selected_model = Some(definition.base.name.clone());
+    let reopen_result = app.state.models.model_editor.open(
         &app.state.model.model_library_manager,
         &draft.library_name,
         &definition.base.name,
@@ -731,14 +704,14 @@ pub fn save_open_candidate(app: &mut RSpiceApp) -> Result<ObjectRevision, String
     );
     if reopen_result.is_ok() {
         app.state
-            .workbench
+            .models
             .model_editor
             .validate_candidate(&app.state.model.model_library_manager, committed_revision);
     } else if let Err(error) = reopen_result {
         // Publication has already committed at this point. Never report that
         // the save failed or leave a stale editable draft behind merely
         // because the post-commit convenience reopen could not be rebuilt.
-        app.state.workbench.model_editor = ModelEditorState::default();
+        app.state.models.model_editor = ModelEditorState::default();
         app.state.record(
             LogSeverity::Warning,
             LogSource::Studio,

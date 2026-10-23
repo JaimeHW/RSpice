@@ -324,7 +324,7 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
                 dependency_search_documents(state, ActiveNetlistDocument::Generated, false)
                     .into_iter()
                     .filter(|dependency| {
-                        state.workbench.netlist_open_documents.contains(
+                        state.code.netlist_open_documents.contains(
                             &WorkspaceDocumentId::NetlistDependency {
                                 root: generated.id(),
                                 logical_identity: dependency
@@ -364,7 +364,7 @@ fn open_netlist_search_documents(state: &AppState) -> Vec<NetlistSearchDocument<
             dependency_search_documents(state, ActiveNetlistDocument::OwnedSource, false)
                 .into_iter()
                 .filter(|dependency| {
-                    state.workbench.netlist_open_documents.contains(
+                    state.code.netlist_open_documents.contains(
                         &WorkspaceDocumentId::NetlistDependency {
                             root: owned.id(),
                             logical_identity: dependency

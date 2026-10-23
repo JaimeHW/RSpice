@@ -1,5 +1,6 @@
 //! The sheets feature's dialogs: drawing-sheet defaults, size presets,
-//! reconciliation, the overflow review and sheet deletion.
+//! reconciliation, the overflow review and sheet deletion, and the request to
+//! reveal the inspector's Sheet section.
 
 /// What the sheets feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -20,4 +21,8 @@ pub(crate) struct SheetsState {
     /// A sheet delete waiting for confirmation because it moves objects.
     pub(crate) delete_sheet:
         Option<crate::workbench::app::dialogs::delete_sheet::PendingSheetDelete>,
+
+    /// A one-frame request that the inspector's sheet panel scroll its Sheet
+    /// section into view, the next time it shows.
+    pub reveal_sheet_section: bool,
 }

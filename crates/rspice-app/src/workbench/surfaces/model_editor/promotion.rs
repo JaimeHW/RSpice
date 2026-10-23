@@ -13,7 +13,7 @@ pub(super) fn promotion_review_dialog(
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.workbench.model_editor.promotion_review_open {
+    if !app.state.models.model_editor.promotion_review_open {
         return;
     }
     if !exact_passing_evidence_available(app, records) {
@@ -23,7 +23,7 @@ pub(super) fn promotion_review_dialog(
     let candidate = current_candidate(app, records).cloned();
     let exact_candidate_count = app
         .state
-        .workbench
+        .models
         .model_editor
         .draft
         .as_ref()
@@ -48,13 +48,13 @@ pub(super) fn promotion_review_dialog(
         && !app.state.model.safe_mode.project_read_only()
         && app
             .state
-            .workbench
+            .models
             .model_editor
             .qualification_execution
             .is_none();
     let already_promoted = candidate.as_ref().is_some_and(|candidate| {
         app.state
-            .workbench
+            .models
             .model_editor
             .draft
             .as_ref()
@@ -73,7 +73,7 @@ pub(super) fn promotion_review_dialog(
         && !already_promoted
         && project_writable;
     let inputs_complete = {
-        let editor = &app.state.workbench.model_editor;
+        let editor = &app.state.models.model_editor;
         !editor.promotion_record_id.trim().is_empty()
             && !editor.promotion_release_id.trim().is_empty()
             && !editor.promotion_release_version.trim().is_empty()
@@ -163,7 +163,7 @@ pub(super) fn promotion_review_dialog(
         } else if checklist.is_complete() {
             dialog_subheading(ui, "Release identity");
             let [promotion, release, version] = qualification_three_rects(ui);
-            let editor = &mut app.state.workbench.model_editor;
+            let editor = &mut app.state.models.model_editor;
             qualification_text_field(
                 ui,
                 promotion,
@@ -216,11 +216,11 @@ pub(super) fn promotion_review_dialog(
             }
         }
         DialogChoice::Primary if authoring || editing => {
-            app.state.workbench.model_editor.commit_release_candidate();
+            app.state.models.model_editor.commit_release_candidate();
         }
         DialogChoice::Primary | DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.workbench.model_editor.promotion_review_open = false;
-            app.state.workbench.model_editor.promotion_error = None;
+            app.state.models.model_editor.promotion_review_open = false;
+            app.state.models.model_editor.promotion_error = None;
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -296,25 +296,24 @@ fn promotion_unavailable_dialog(
         });
     });
     if open_plan || review_disposition {
-        app.state.workbench.model_editor.promotion_review_open = false;
-        app.state.workbench.model_editor.qualification_plan_open = true;
-        app.state
-            .workbench
-            .model_editor
-            .qualification_execution_notice = Some(if review_disposition {
-            "Select the unresolved vector and review its disposition. The failure stays visible and cannot count as a pass."
+        app.state.models.model_editor.promotion_review_open = false;
+        app.state.models.model_editor.qualification_plan_open = true;
+        app.state.models.model_editor.qualification_execution_notice = Some(
+            if review_disposition {
+                "Select the unresolved vector and review its disposition. The failure stays visible and cannot count as a pass."
                 .to_owned()
-        } else {
-            "Review and rerun the qualification plan for this source before returning to promotion."
+            } else {
+                "Review and rerun the qualification plan for this source before returning to promotion."
                 .to_owned()
-        });
+            },
+        );
     } else if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.workbench.model_editor.promotion_review_open = false;
+        app.state.models.model_editor.promotion_review_open = false;
     }
 }
 
 fn promotion_gate_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<Vec<DisplayCell>> {
-    let Some(draft) = app.state.workbench.model_editor.draft.as_ref() else {
+    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
         return Vec::new();
     };
     let Ok(source) = ModelSourceEvidenceBinding::try_new_project_bound(
@@ -434,7 +433,7 @@ fn promotion_gate_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<
 
 fn promotion_candidate_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, writable: bool) {
     ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
-    let fields = &mut app.state.workbench.model_editor.promotion_candidate;
+    let fields = &mut app.state.models.model_editor.promotion_candidate;
 
     dialog_subheading(ui, "Candidate and qualification record");
     let [candidate_id, candidate_version] = qualification_pair_rects(ui);

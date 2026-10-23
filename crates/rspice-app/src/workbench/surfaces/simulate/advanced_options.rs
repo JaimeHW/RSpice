@@ -40,8 +40,8 @@ use crate::simulation::plan::{
     AnalysisDraft, AnalysisKind, AnalysisNumericOverride, NumericOverrideOption, OverrideSection,
     SolverOwnership,
 };
+use crate::workbench::AppState;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::WorkbenchState;
 
 pub(super) const PLAN_ORIGIN: &str = "plan policy";
 pub(super) const OVERRIDE_ORIGIN: &str = "analysis override";
@@ -649,9 +649,9 @@ pub(super) const REVEAL_ACTION: &str = "Open in Analyses";
 /// than the application: moving what is on screen touches nothing else, and a
 /// handler that asked for the whole application could mutate every subsystem to
 /// do it.
-pub(super) fn reveal_in_analyses(workbench: &mut WorkbenchState, instance: AnalysisInstanceId) {
-    workbench.simulation_page = crate::workbench::state::SimulationPage::Analyses;
-    workbench.active_analysis_instance = Some(instance);
+pub(super) fn reveal_in_analyses(state: &mut AppState, instance: AnalysisInstanceId) {
+    state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    state.simulate.active_analysis_instance = Some(instance);
 }
 
 #[cfg(test)]

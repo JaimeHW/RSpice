@@ -170,7 +170,7 @@ fn stage_literal_tuning_binding(
     )
     .expect("test literal is a valid resistance");
     let variable_id = variable.id;
-    app.state.workbench.verification.tuning_variables.push(
+    app.state.simulate.verification.tuning_variables.push(
         crate::workbench::state::TuningVariableDraft {
             variable_id,
             baseline_expression: typed_expression.clone(),
@@ -179,7 +179,7 @@ fn stage_literal_tuning_binding(
             proposed: true,
         },
     );
-    app.state.workbench.verification.tuning_instance_binding =
+    app.state.simulate.verification.tuning_instance_binding =
         Some(crate::workbench::state::TuningInstanceBindingDraft {
             component_id,
             component_name: component.name,
@@ -203,7 +203,7 @@ fn retain_preflight_report(app: &mut RSpiceApp) {
         .expect("default plan");
     let (topology_root, topology_revision, topology_closure) =
         app.state.configured_topology_revision();
-    app.state.workbench.preflight = crate::workbench::state::PreflightDialogState {
+    app.state.runs.preflight = crate::workbench::app_state::run_preflight::PreflightDialogState {
         report: Some(crate::state::PreflightReport {
             project_revision: app.state.model.workspace.content.project.revision().get(),
             topology_root,
@@ -243,7 +243,7 @@ fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
             .revision(),
         source_revision.next().expect("revision advances")
     );
-    assert!(app.state.workbench.preflight.report.is_none());
+    assert!(app.state.runs.preflight.report.is_none());
 }
 
 #[test]
@@ -259,8 +259,8 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
         .id();
     sync_tuning_session(&mut app);
 
-    assert_eq!(app.state.workbench.verification.tuning_variables.len(), 1);
-    let draft = &mut app.state.workbench.verification.tuning_variables[0];
+    assert_eq!(app.state.simulate.verification.tuning_variables.len(), 1);
+    let draft = &mut app.state.simulate.verification.tuning_variables[0];
     assert_eq!(draft.variable_id, variable_id);
     draft.candidate_expression = "620 ohm".to_owned();
     assert!(tuning_is_dirty(&app));
@@ -303,8 +303,7 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
         .unwrap()
         .revision();
     sync_tuning_session(&mut app);
-    app.state.workbench.verification.tuning_variables[0].candidate_expression =
-        "620 ohm".to_owned();
+    app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
 
     tuning::commit_tuning_and_run(&mut app).expect("valid candidate commits and dispatches");
 
@@ -341,8 +340,7 @@ fn an_edit_after_a_tuning_commit_refuses_its_run() {
     crate::workbench::examples::load_example("Voltage Divider", &mut app.state.model.schematic);
     add_tuning_variable(&mut app);
     sync_tuning_session(&mut app);
-    app.state.workbench.verification.tuning_variables[0].candidate_expression =
-        "620 ohm".to_owned();
+    app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
     tuning::commit_tuning_and_run(&mut app).expect("valid candidate commits and dispatches");
     assert!(app.state.model.simulation.execution.trigger_simulation);
     thread_preparations::take();
@@ -398,14 +396,14 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
     assert!(!tuning_is_dirty(&app));
     assert!(
         app.state
-            .workbench
+            .simulate
             .verification
             .tuning_instance_binding
             .is_none()
     );
     assert!(
         app.state
-            .workbench
+            .simulate
             .verification
             .tuning_variables
             .iter()
@@ -522,7 +520,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
     assert!(app.state.model.simulation.execution.trigger_simulation);
     assert!(
         app.state
-            .workbench
+            .simulate
             .verification
             .tuning_instance_binding
             .is_none()
@@ -684,7 +682,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
             .design_variables
             .is_empty()
     );
-    assert!(app.state.workbench.preflight.report.is_some());
+    assert!(app.state.runs.preflight.report.is_some());
     assert!(tuning_is_dirty(&app));
     assert!(!app.state.model.simulation.execution.trigger_simulation);
 }
@@ -702,7 +700,7 @@ fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
         .id();
     let before = serde_json::to_vec(&app.state.model.workspace).unwrap();
     sync_tuning_session(&mut app);
-    let draft = &mut app.state.workbench.verification.tuning_variables[0];
+    let draft = &mut app.state.simulate.verification.tuning_variables[0];
     draft.candidate_expression = "2 kohm".to_owned();
     let mut candidate = app
         .state
@@ -742,12 +740,11 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    app.state.workbench.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
+    app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
         app.state.model.workspace.content.project.revision().get(),
     ));
     sync_tuning_session(&mut app);
-    app.state.workbench.verification.tuning_variables[0].candidate_expression =
-        "620 ohm".to_owned();
+    app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
 
     let error = tuning::commit_tuning_and_run(&mut app)
         .expect_err("an empty schematic must block the required run");
@@ -774,7 +771,7 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         "499 ohm"
     );
     assert!(
-        app.state.workbench.preflight.report.is_some(),
+        app.state.runs.preflight.report.is_some(),
         "a blocked tuning run rolls back without dropping retained preflight evidence",
     );
     assert!(tuning_is_dirty(&app));

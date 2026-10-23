@@ -33,23 +33,25 @@ const APP_STATE_INLINE_BUDGET: usize = 32 * 1024;
 /// than taking the rest of the state's headroom.
 const MODEL_INLINE_BUDGET: usize = 24 * 1024;
 
-/// Each boxed feature slot, by its field: what the slot holds today plus
-/// room for ordinary growth. `Default` and `Clone` build a slot by value
-/// before it reaches the heap, so a debug frame holds the whole slot; a slot
-/// that needs more boxes the field that grew.
+/// Each boxed feature slot and the workbench, by its field: what it holds
+/// today plus room for ordinary growth. `Default` and `Clone` build a slot by
+/// value before it reaches the heap, so a debug frame holds the whole slot; a
+/// slot that needs more boxes the field that grew.
 fn slot_budgets() -> Vec<(&'static str, usize, usize)> {
     vec![
         ("platform", held(|state| &*state.platform), 1024),
         ("design", held(|state| &*state.design), 24 * 1024),
         ("code", held(|state| &*state.code), 12 * 1024),
-        ("simulate", held(|state| &*state.simulate), 2 * 1024),
+        ("simulate", held(|state| &*state.simulate), 4 * 1024),
         ("project", held(|state| &*state.project), 8 * 1024),
         ("results", held(|state| &*state.results), 6 * 1024),
         ("hardcopy", held(|state| &*state.hardcopy), 4 * 1024),
         ("settings", held(|state| &*state.settings), 4 * 1024),
         ("cloud", held(|state| &*state.cloud), 1024),
         ("sheets", held(|state| &*state.sheets), 10 * 1024),
+        ("models", held(|state| &*state.models), 12 * 1024),
         ("runs", held(|state| &*state.runs), 1024),
+        ("workbench", held(|state| &*state.workbench), 8 * 1024),
     ]
 }
 

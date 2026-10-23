@@ -43,7 +43,7 @@ impl RSpiceApp {
         match response {
             ConfirmationResponse::Cancel => {
                 if pending == Some(ConfirmationAction::CloseProject) {
-                    self.state.workbench.cancel_project_close();
+                    self.state.project.cancel_project_close();
                 }
             }
             ConfirmationResponse::No => {
@@ -57,10 +57,10 @@ impl RSpiceApp {
                             | ConfirmationAction::CloseProject
                             | ConfirmationAction::Exit
                     ) {
-                        self.state.workbench.clear_project_model_editor();
+                        self.state.models.clear_project_model_editor();
                     }
                     if action == ConfirmationAction::Exit {
-                        self.state.workbench.pdk_technology_authoring =
+                        self.state.models.pdk_technology_authoring =
                             crate::workbench::state::PdkTechnologyAuthoringRecovery::default();
                     }
                     self.execute_pending_action(
@@ -91,7 +91,7 @@ impl RSpiceApp {
                     )
                 );
                 if project_action
-                    && self.state.workbench.model_editor_has_unsaved_changes()
+                    && self.state.models.model_editor_has_unsaved_changes()
                     && let Err(error) =
                         crate::workbench::documents::model_editor::save_open_candidate(self)
                 {
@@ -225,7 +225,7 @@ impl RSpiceApp {
     }
 
     pub(in crate::workbench) fn begin_close_project_after_save(&mut self) {
-        if self.state.workbench.model_editor_has_unsaved_changes()
+        if self.state.models.model_editor_has_unsaved_changes()
             && let Err(error) = crate::workbench::documents::model_editor::save_open_candidate(self)
         {
             self.state.record(
@@ -338,7 +338,7 @@ impl RSpiceApp {
     pub(crate) fn open_recent_file(&mut self, recent: crate::services::recent_files::RecentFile) {
         if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state)
             || (recent.kind == crate::services::recent_files::RecentKind::Project
-                && self.state.workbench.model_editor_has_unsaved_changes())
+                && self.state.models.model_editor_has_unsaved_changes())
         {
             self.state
                 .workbench
@@ -931,7 +931,7 @@ mod tests {
 
         assert!(state.workbench.project_review_dialog.request.is_none());
         assert!(!state.project_lifecycle.is_open());
-        assert!(!state.workbench.project_launcher_open);
+        assert!(!state.project.project_launcher_open);
         assert_eq!(
             state.workbench.workspace,
             crate::workbench::state::Workspace::Project
@@ -973,7 +973,7 @@ mod tests {
 
         assert!(!app.state.project_lifecycle.is_open());
         // Saving first changes nothing about where the close lands.
-        assert!(!app.state.workbench.project_launcher_open);
+        assert!(!app.state.project.project_launcher_open);
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Project

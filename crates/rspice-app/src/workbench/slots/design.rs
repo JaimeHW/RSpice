@@ -1,6 +1,7 @@
 //! The design feature's dialogs and canvas transactions: placement, selection
-//! edits, hierarchy, display options, rule setup and the symbol workflows; and
-//! the schematic and symbol editors' interaction session.
+//! edits, hierarchy, display options, rule setup and the symbol workflows; the
+//! schematic and symbol editors' interaction session; the design panel, the
+//! component chooser's filter and the Stimulus Library's reading and drafts.
 
 use crate::state::{GridStyle, SchematicVisibilityPolicy};
 use crate::workbench::app::{
@@ -177,6 +178,37 @@ pub(crate) struct DesignState {
     pub engineering_table_views: crate::state::engineering_table::EngineeringTableViewStore,
     /// Runtime state for the Schematic-family symbol editor surface.
     pub symbol: crate::workbench::app::actions::workspace::symbol_document::SymbolUiState,
+
+    pub design_panel: crate::workbench::state::DesignPanel,
+    /// The sheet-membership and generated-symbol failures last recorded.
+    ///
+    /// The drawing is synced every frame, so a failure that stands is
+    /// recorded when it first appears or changes, not sixty times a second.
+    pub recorded_sync_failures: crate::workbench::app::actions::workspace::SyncFailures,
+    /// Which stimulus definition the library workspace is reading, by exact
+    /// name. Runtime-only: a definition can be renamed or deleted by another
+    /// session of the same project, and restoring a name that no longer
+    /// resolves would open the workspace on a definition nobody can see.
+    pub selected_stimulus_definition: Option<String>,
+    /// What the Stimulus Library instrument is in the middle of editing: one
+    /// unapplied draft per definition, each with its own undo history, and the
+    /// proof surface's cached evaluation. Runtime-only for the same reason the
+    /// selection is, and for one more: a draft is by construction not in the
+    /// project document, so restoring one would offer a revision the library
+    /// never published.
+    pub stimulus_editor: crate::workbench::state::StimulusEditorState,
+    /// How the library browser is looking at that library: the scope strip's
+    /// slice, and the waveform each row draws. Runtime-only, because both are
+    /// readings of the project rather than part of it.
+    pub stimulus_browser: crate::workbench::docks::StimulusBrowserState,
+    /// The net each hierarchy occurrence lights under "Selected net across
+    /// hierarchy", keyed by root cell view and instance path. One master
+    /// placed twice has one editor session, so the session cannot hold it.
+    pub occurrence_net_highlights: std::collections::BTreeMap<String, String>,
+    /// Filter text in the component chooser.
+    pub placement_query: String,
+    /// One-frame request to focus the component chooser filter.
+    pub focus_placement_search: bool,
 }
 
 impl DesignState {

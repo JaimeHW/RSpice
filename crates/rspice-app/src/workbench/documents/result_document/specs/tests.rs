@@ -50,7 +50,7 @@ fn the_table_marks_the_limit_a_hop_carried_into_it() {
     ];
     // Matched the way the studio matches: a measurement name is one
     // identity however it was typed.
-    state.workbench.selected_specification = Some("BANDWIDTH_3DB".to_owned());
+    state.simulate.selected_specification = Some("BANDWIDTH_3DB".to_owned());
 
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
@@ -816,7 +816,7 @@ fn two_runs_over_a_long_contract() -> AppState {
             scope: SpecPointScope::AllPoints,
         })
         .collect();
-    state.workbench.selected_specification = Some("m59".to_owned());
+    state.simulate.selected_specification = Some("m59".to_owned());
     state
 }
 

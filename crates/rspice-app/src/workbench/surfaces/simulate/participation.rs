@@ -310,7 +310,7 @@ pub(super) fn open_point_picker(app: &mut AppState, id: AnalysisInstanceId) {
         .for_instance(id)
         .filter(|entry| entry.refusal.is_none())
         .map_or_else(|| resolved.point_keys.clone(), |entry| entry.keys.clone());
-    app.workbench.simulation_workflow = Some(
+    app.simulate.simulation_workflow = Some(
         crate::workbench::state::SimulationWorkflowDialog::AnalysisRunPoints(
             AnalysisRunPointsDraft::new(id, selected),
         ),

@@ -987,10 +987,9 @@ mod tests {
         let first = add_sectioned_library(&mut app, "models-first.lib", "first_nch");
         let second = add_sectioned_library(&mut app, "models-second.lib", "second_nch");
         let initial_revision = active_plan_revision(&app);
-        app.state.workbench.preflight.report =
-            Some(crate::state::PreflightReport::retained_for_test(
-                app.state.model.workspace.content.project.revision().get(),
-            ));
+        app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
+            app.state.model.workspace.content.project.revision().get(),
+        ));
 
         apply_model_binding_action(&mut app, ModelBindingAction::Attach(first.clone()));
         assert_eq!(
@@ -998,7 +997,7 @@ mod tests {
             first
         );
         assert_ne!(active_plan_revision(&app), initial_revision);
-        assert!(app.state.workbench.preflight.report.is_none());
+        assert!(app.state.runs.preflight.report.is_none());
 
         apply_model_binding_action(&mut app, ModelBindingAction::Attach(second.clone()));
         assert_eq!(
@@ -1044,7 +1043,7 @@ mod tests {
             app.state.model.sim_setup.model_bindings[0].library_name,
             second
         );
-        assert!(!app.state.workbench.analysis_lifecycle_status.is_refusal());
+        assert!(!app.state.simulate.analysis_lifecycle_status.is_refusal());
     }
 
     #[test]
@@ -1066,7 +1065,7 @@ mod tests {
         );
         assert_eq!(app.state.model.sim_setup.model_bindings, before_bindings);
         assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
+        assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
 
         apply_model_binding_action(
             &mut app,
@@ -1074,7 +1073,7 @@ mod tests {
         );
         assert_eq!(app.state.model.sim_setup.model_bindings, before_bindings);
         assert_eq!(active_plan_revision(&app), before_revision);
-        assert!(app.state.workbench.analysis_lifecycle_status.is_refusal());
+        assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
     }
 
     const fn model_gate<'a>(
@@ -1275,7 +1274,7 @@ mod tests {
             "nch_gated",
         )
         .expect("open the project model for qualification authoring");
-        let editor = &mut app.state.workbench.model_editor;
+        let editor = &mut app.state.models.model_editor;
         editor.begin_qualification_suite();
         let authoring = &mut editor.qualification_authoring;
         authoring.suite_id = "dc-op".to_owned();

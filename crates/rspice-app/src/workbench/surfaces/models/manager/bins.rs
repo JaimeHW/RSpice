@@ -196,7 +196,7 @@ fn bins_blocked(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, error: &str) {
                 app.queue_command(Command::ModelEditor);
             }
             if Button::new("Import bin map")
-                .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                .enabled(!app.state.models.models_view.model_import_in_progress)
                 .show(ui)
                 .on_hover_text(
                     "Import binned model cards; the simulator evaluates L, W, and NFIN bounds from the imported source.",
@@ -268,7 +268,7 @@ fn bins_body(
             }
             // Gated on the fact it traces — the selected model — rather than
             // on a schematic selection it never reads, and it says which.
-            let traced = app.state.workbench.selected_model.clone();
+            let traced = app.state.models.selected_model.clone();
             if Button::new("Trace schematic")
                 .enabled(traced.is_some())
                 .show(ui)
@@ -276,17 +276,16 @@ fn bins_body(
                 .clicked()
                 && let Some(model) = traced
             {
-                app.state.workbench.models_view.dialog =
-                    Some(ModelsWorkbenchDialog::BindingTrace {
-                        consumers: effective_model_consumers(app, &model),
-                        model,
-                    });
+                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
+                    consumers: effective_model_consumers(app, &model),
+                    model,
+                });
             }
             if Button::new("Edit cards…").show(ui).clicked() {
                 app.queue_command(Command::ModelEditor);
             }
             if Button::new("Import bin map")
-                .enabled(!app.state.workbench.models_view.model_import_in_progress)
+                .enabled(!app.state.models.models_view.model_import_in_progress)
                 .show(ui)
                 .on_hover_text(
                     "Import binned model cards; the simulator evaluates L, W, and NFIN bounds from the imported source.",
@@ -309,14 +308,14 @@ fn bins_body(
 
     let selected = app
         .state
-        .workbench
+        .models
         .models_view
         .selected_bin_family
         .clone()
         .filter(|selected| families.iter().any(|family| family.key() == *selected))
         .or_else(|| families.first().map(BinFamily::key))
         .unwrap_or_default();
-    app.state.workbench.models_view.selected_bin_family = Some(selected.clone());
+    app.state.models.models_view.selected_bin_family = Some(selected.clone());
     let Some(family) = families.iter().find(|family| family.key() == selected) else {
         return;
     };
@@ -1104,7 +1103,7 @@ fn family_table(
             });
     });
     if let Some(picked) = picked {
-        app.state.workbench.models_view.selected_bin_family = Some(picked);
+        app.state.models.models_view.selected_bin_family = Some(picked);
     }
 }
 
@@ -1331,7 +1330,7 @@ fn geometry_instance_table(
             .find(|instance| instance.element == element)
     {
         let model = instance.requested_model.clone();
-        app.state.workbench.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
+        app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
             consumers: effective_model_consumers(app, &model),
             model,
         });

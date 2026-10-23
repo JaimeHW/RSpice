@@ -67,7 +67,7 @@ fn a_committed_plan_command_leaves_one_plan_receipt_in_the_console() {
     assert_eq!(entries[0].0, LogSeverity::Info);
     assert_eq!(
         entries[0].1,
-        app.state.workbench.analysis_lifecycle_status.message(),
+        app.state.simulate.analysis_lifecycle_status.message(),
         "the Console records the receipt itself, not a paraphrase of it"
     );
     assert!(
@@ -103,7 +103,7 @@ fn a_refused_plan_command_is_recorded_once_and_raises_no_toast() {
     assert_eq!(entries[0].0, LogSeverity::Warning);
     assert_eq!(
         entries[0].1,
-        app.state.workbench.analysis_lifecycle_status.message()
+        app.state.simulate.analysis_lifecycle_status.message()
     );
     assert_eq!(
         app.state

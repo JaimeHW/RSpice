@@ -494,7 +494,7 @@ impl Command {
                         && !state.model.simulation.execution.trigger_simulation
                 }
             }
-            Self::PreflightChecks => state.workbench.preflight.checking.is_none(),
+            Self::PreflightChecks => state.runs.preflight.checking.is_none(),
             // Both edit the plan catalog through the active plan's stable
             // identity, so a project whose plan never migrated to it has
             // nothing to select, nothing to add to, and no dialog worth opening.
@@ -568,7 +568,7 @@ impl Command {
                     && state.model.netlist_artifacts.generated_document.is_some()
             }
             Self::StopSimulation => {
-                state.workbench.preflight.checking.is_some()
+                state.runs.preflight.checking.is_some()
                     || stop_simulation_enabled(&state.model.simulation)
             }
             Self::ClearResults => {
@@ -606,7 +606,7 @@ impl Command {
             }
             Self::ModelSaveRevision => {
                 state
-                    .workbench
+                    .models
                     .model_editor
                     .draft
                     .as_ref()
@@ -615,13 +615,13 @@ impl Command {
                             && !state.model.safe_mode.project_read_only()
                             && state.project_lifecycle.is_open()
                             && state
-                                .workbench
+                                .models
                                 .model_editor
                                 .qualification_execution
                                 .is_none()
                     })
             }
-            Self::ModelValidate => state.workbench.model_editor.draft.is_some(),
+            Self::ModelValidate => state.models.model_editor.draft.is_some(),
             // Every library verb needs the instrument open, because they all
             // act on the definition it is reading; New and Validate need only
             // that, because a library with nothing in it is exactly where New
@@ -631,13 +631,13 @@ impl Command {
             }
             Self::StimulusDuplicateDefinition | Self::StimulusDeleteDefinition => {
                 state.workbench.workspace == Workspace::Stimulus
-                    && state.workbench.selected_stimulus_definition.is_some()
+                    && state.design.selected_stimulus_definition.is_some()
             }
             // Placing is an edit of the schematic, so a read-only view is the
             // one extra thing it needs beyond a definition to place.
             Self::StimulusPlaceDefinition => {
                 state.workbench.workspace == Workspace::Stimulus
-                    && state.workbench.selected_stimulus_definition.is_some()
+                    && state.design.selected_stimulus_definition.is_some()
                     && !state.schematic_edit_read_only()
             }
             Self::StimulusApplyDraft | Self::StimulusRevertDraft => {
@@ -651,7 +651,7 @@ impl Command {
                     )
             }
             Self::ModelRunQualificationTests => state
-                .workbench
+                .models
                 .model_editor
                 .draft
                 .as_ref()
@@ -675,16 +675,16 @@ impl Command {
                                 .exact_suites_for_source(&source)
                                 .is_ok_and(|suites| !suites.is_empty())
                         })
-                        && state.workbench.model_editor.validation.is_some()
+                        && state.models.model_editor.validation.is_some()
                         && state
-                            .workbench
+                            .models
                             .model_editor
                             .qualification_execution
                             .is_none()
                 }),
             Self::ModelCompareRelease => {
                 state
-                    .workbench
+                    .models
                     .model_editor
                     .draft
                     .as_ref()
@@ -697,7 +697,7 @@ impl Command {
                                 .validate_for_model(&draft.model_name)
                                 .is_ok()
                             && state
-                                .workbench
+                                .models
                                 .model_editor
                                 .qualification_execution
                                 .is_none()
