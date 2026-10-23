@@ -4,8 +4,10 @@
 mod waveform;
 
 use rspice_core::Value;
+use rspice_core::circuit::DeviceOpReport;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::Netlist;
+use rspice_core::solver::SimulationResult;
 use waveform::interpolate;
 
 fn engine() -> Engine {
@@ -180,29 +182,54 @@ fn node_series<'a>(names: &[String], voltages: &'a [Vec<Value>], want: &str) -> 
     &voltages[idx]
 }
 
-#[test]
-fn phfet2_level6_op_matches_ngspice46_polarity() {
-    let netlist = Netlist::parse(phfet2_op_deck()).expect("PHFET2 OP deck parses");
+/// Solves the OP of `deck` and checks I(Vds) against ngspice 46 to 1e-5 relative or 1e-11 A.
+fn assert_op_vds(deck: &str, label: &str, i_vds: Value) -> (SimulationResult, DeviceOpReport) {
+    let netlist = Netlist::parse(deck).expect("HFET2 OP deck parses");
     let (result, report) = engine()
         .run_dc_op_with_report(&netlist)
-        .expect("PHFET2 OP converges");
+        .expect("HFET2 OP converges");
+    let got = result
+        .branch_current_named("vds")
+        .expect("Vds branch current");
+    assert_close(label, got, i_vds, 1.0e-5, 1.0e-11);
+    (result, report)
+}
 
-    let z1 = report
+/// The device kind the OP report gives Z1.
+fn z1_kind(report: &DeviceOpReport) -> &str {
+    &report
         .entries
         .iter()
         .find(|entry| entry.name.eq_ignore_ascii_case("z1"))
-        .expect("z1 OP entry");
-    assert_eq!(z1.device_kind, "HFET2");
+        .expect("z1 OP entry")
+        .device_kind
+}
 
-    assert_close(
+/// Checks V(drain) at 1 GHz against ngspice 46, both parts to 1e-5 relative or 1e-8 V.
+fn assert_drain_ac_at_1ghz(deck: &str, label: &str, re: Value, im: Value) {
+    let netlist = Netlist::parse(deck).expect("HFET2 AC deck parses");
+    let result = engine()
+        .run_ac(&netlist, &[1.0e9])
+        .expect("HFET2 AC runs")
+        .remove(0);
+    let drain = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("drain"))
+        .unwrap_or_else(|| panic!("missing drain node in {:?}", result.node_names));
+    let v = result.voltages[drain];
+    assert_close(&format!("{label} V(drain).re"), v.re, re, 1.0e-5, 1.0e-8);
+    assert_close(&format!("{label} V(drain).im"), v.im, im, 1.0e-5, 1.0e-8);
+}
+
+#[test]
+fn phfet2_level6_op_matches_ngspice46_polarity() {
+    let (_, report) = assert_op_vds(
+        phfet2_op_deck(),
         "PHFET2 OP I(Vds)",
-        result
-            .branch_current_named("vds")
-            .expect("Vds branch current"),
         1.742_091_247_822_555e-5,
-        1.0e-5,
-        1.0e-11,
     );
+    assert_eq!(z1_kind(&report), "HFET2");
 }
 
 #[test]
@@ -239,19 +266,10 @@ fn hfet2_level6_transient_pulse_matches_ngspice46() {
 
 #[test]
 fn hfet2_level6_gate_current_matches_ngspice46() {
-    let netlist = Netlist::parse(hfet2_gate_current_op_deck()).expect("HFET2 gate OP deck parses");
-    let result = engine()
-        .run_dc_op(&netlist)
-        .expect("HFET2 gate OP converges");
-
-    assert_close(
+    let (result, _) = assert_op_vds(
+        hfet2_gate_current_op_deck(),
         "HFET2 JS/GGR OP I(Vds)",
-        result
-            .branch_current_named("vds")
-            .expect("Vds branch current"),
         -3.056_951_993_773_827e-4,
-        1.0e-5,
-        1.0e-11,
     );
     assert_close(
         "HFET2 JS/GGR OP I(Vgs)",
@@ -266,187 +284,72 @@ fn hfet2_level6_gate_current_matches_ngspice46() {
 
 #[test]
 fn hfet2_level6_temperature_coefficients_ac_matches_ngspice46() {
-    let netlist =
-        Netlist::parse(hfet2_temperature_coefficient_ac_deck()).expect("HFET2 temp AC deck parses");
-    let result = engine()
-        .run_ac(&netlist, &[1.0e9])
-        .expect("HFET2 temp AC runs")
-        .remove(0);
-    let drain = result
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case("drain"))
-        .unwrap_or_else(|| panic!("missing drain node in {:?}", result.node_names));
-    let v = result.voltages[drain];
-
-    assert_close(
-        "HFET2 KLAMBDA/KMU/KNMAX/KVTO AC V(drain).re",
-        v.re,
+    assert_drain_ac_at_1ghz(
+        hfet2_temperature_coefficient_ac_deck(),
+        "HFET2 KLAMBDA/KMU/KNMAX/KVTO AC",
         -2.524_407_141_869_349e-1,
-        1.0e-5,
-        1.0e-8,
-    );
-    assert_close(
-        "HFET2 KLAMBDA/KMU/KNMAX/KVTO AC V(drain).im",
-        v.im,
         3.260_119_427_881_715e-3,
-        1.0e-5,
-        1.0e-8,
     );
 }
 
 #[test]
 fn hfet2_level6_temperature_coefficients_match_ngspice46() {
-    let netlist =
-        Netlist::parse(hfet2_temperature_coefficient_op_deck()).expect("HFET2 temp deck parses");
-    let result = engine()
-        .run_dc_op(&netlist)
-        .expect("HFET2 temp OP converges");
-
-    assert_close(
+    assert_op_vds(
+        hfet2_temperature_coefficient_op_deck(),
         "HFET2 KLAMBDA/KMU/KNMAX/KVTO OP I(Vds)",
-        result
-            .branch_current_named("vds")
-            .expect("Vds branch current"),
         -7.820_015_253_063_445e-5,
-        1.0e-5,
-        1.0e-11,
     );
 }
 
 #[test]
 fn hfet2_level6_eta2_density_branch_ac_matches_ngspice46() {
-    let netlist =
-        Netlist::parse(hfet2_eta2_density_branch_ac_deck()).expect("HFET2 ETA2 AC deck parses");
-    let result = engine()
-        .run_ac(&netlist, &[1.0e9])
-        .expect("HFET2 ETA2 AC runs")
-        .remove(0);
-    let drain = result
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case("drain"))
-        .unwrap_or_else(|| panic!("missing drain node in {:?}", result.node_names));
-    let v = result.voltages[drain];
-
-    assert_close(
-        "HFET2 ETA2/D2/VT2 AC V(drain).re",
-        v.re,
+    assert_drain_ac_at_1ghz(
+        hfet2_eta2_density_branch_ac_deck(),
+        "HFET2 ETA2/D2/VT2 AC",
         -3.449_178_104_276_041e-1,
-        1.0e-5,
-        1.0e-8,
-    );
-    assert_close(
-        "HFET2 ETA2/D2/VT2 AC V(drain).im",
-        v.im,
         5.047_432_768_388_053e-3,
-        1.0e-5,
-        1.0e-8,
     );
 }
 
 #[test]
 fn hfet2_level6_eta2_density_branch_matches_ngspice46() {
-    let netlist =
-        Netlist::parse(hfet2_eta2_density_branch_op_deck()).expect("HFET2 ETA2 OP deck parses");
-    let result = engine()
-        .run_dc_op(&netlist)
-        .expect("HFET2 ETA2 OP converges");
-
-    assert_close(
+    assert_op_vds(
+        hfet2_eta2_density_branch_op_deck(),
         "HFET2 ETA2/D2/VT2 OP I(Vds)",
-        result
-            .branch_current_named("vds")
-            .expect("Vds branch current"),
         -9.094_865_075_118_6e-5,
-        1.0e-5,
-        1.0e-11,
     );
 }
 
 #[test]
 fn hfet2_level6_op_matches_ngspice46_and_reports_native_kind() {
-    let netlist = Netlist::parse(hfet2_op_deck()).expect("HFET2 OP deck parses");
-    let (result, report) = engine()
-        .run_dc_op_with_report(&netlist)
-        .expect("HFET2 OP converges");
-
-    let z1 = report
-        .entries
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case("z1"))
-        .expect("z1 OP entry");
+    let (_, report) = assert_op_vds(hfet2_op_deck(), "HFET2 OP I(Vds)", -1.905_464_71e-4);
     assert_eq!(
-        z1.device_kind, "HFET2",
+        z1_kind(&report),
+        "HFET2",
         "NHFET LEVEL=6 must be identified as the native HFET2 path"
-    );
-
-    assert_close(
-        "HFET2 OP I(Vds)",
-        result
-            .branch_current_named("vds")
-            .expect("Vds branch current"),
-        -1.905_464_71e-4,
-        1.0e-5,
-        1.0e-11,
     );
 }
 
 #[test]
 fn nmf_level6_uses_hfet2_route_like_ngspice46() {
-    let deck = nmf_level6_op_deck();
-    let netlist = Netlist::parse(&deck).expect("NMF LEVEL=6 OP deck parses");
-    let (result, report) = engine()
-        .run_dc_op_with_report(&netlist)
-        .expect("NMF LEVEL=6 OP converges");
-
-    let z1 = report
-        .entries
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case("z1"))
-        .expect("z1 OP entry");
-    assert_eq!(
-        z1.device_kind, "HFET2",
-        "NMF LEVEL=6 must route to the native HFET2-compatible path"
-    );
-
-    assert_close(
+    let (_, report) = assert_op_vds(
+        &nmf_level6_op_deck(),
         "NMF LEVEL=6 OP I(Vds)",
-        result
-            .branch_current_named("vds")
-            .expect("Vds branch current"),
         -1.905_464_71e-4,
-        1.0e-5,
-        1.0e-11,
+    );
+    assert_eq!(
+        z1_kind(&report),
+        "HFET2",
+        "NMF LEVEL=6 must route to the native HFET2-compatible path"
     );
 }
 
 #[test]
 fn hfet2_level6_common_source_ac_matches_ngspice46() {
-    let netlist = Netlist::parse(hfet2_ac_deck()).expect("HFET2 AC deck parses");
-    let result = engine()
-        .run_ac(&netlist, &[1.0e9])
-        .expect("HFET2 AC runs")
-        .remove(0);
-    let drain = result
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case("drain"))
-        .unwrap_or_else(|| panic!("missing drain node in {:?}", result.node_names));
-    let v = result.voltages[drain];
-
-    assert_close(
-        "HFET2 AC V(drain).re",
-        v.re,
+    assert_drain_ac_at_1ghz(
+        hfet2_ac_deck(),
+        "HFET2 AC",
         -3.366_156_11e-1,
-        1.0e-5,
-        1.0e-8,
-    );
-    assert_close(
-        "HFET2 AC V(drain).im",
-        v.im,
         4.367_344_92e-3,
-        1.0e-5,
-        1.0e-8,
     );
 }
