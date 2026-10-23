@@ -765,6 +765,31 @@ fn assert_mir_validation_message(mir: &MirModel, expected_substring: &str) {
     );
 }
 
+/// A malformed-IR case: its name, the valid model it starts from, the one
+/// corruption applied to it, and every diagnostic substring validation must
+/// report.
+type Rejection<T> = (&'static str, fn() -> T, fn(&mut T), &'static [&'static str]);
+
+fn assert_rejections<T>(validate: fn(&T) -> Result<(), Vec<IrDiagnostic>>, cases: &[Rejection<T>]) {
+    for (name, fixture, corrupt, expected) in cases {
+        let mut model = fixture();
+        corrupt(&mut model);
+        let Err(diagnostics) = validate(&model) else {
+            panic!("{name}: malformed IR must fail validation");
+        };
+        let messages: Vec<_> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        for &substring in *expected {
+            assert!(
+                messages.iter().any(|message| message.contains(substring)),
+                "{name}: expected diagnostic containing {substring:?}, got {messages:?}"
+            );
+        }
+    }
+}
+
 type IrParts = (CanonicalMetadata, HirModel, MirModel);
 
 /// A mismatched-parts case: its name, the valid parts it starts from, the one
@@ -893,6 +918,16 @@ fn contribution_branch_access_id(hir: &HirModel) -> ExprId {
     };
 
     *left
+}
+
+fn named_branch_mir() -> MirModel {
+    lower_fixture_parts(named_branch_potential_source(), "branch_potential").2
+}
+
+/// Two named branches over one physical branch, the first contributed twice.
+fn shared_branch_unknown_mir() -> MirModel {
+    let source = "module shared(p,n); inout p,n; electrical p,n; branch(p,n) a,b; analog begin V(a)<+2*I(a); V(b)<+3*I(b); V(a)<+4*I(a); end endmodule";
+    lower_fixture_parts(source, "shared").2
 }
 
 fn parameter_array_artifact() -> CanonicalIrArtifact {
@@ -2728,80 +2763,397 @@ fn artifact_digests_distinguish_same_count_ir_content() {
 }
 
 #[test]
-fn mir_validation_rejects_equations_referencing_removed_nodes() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.nodes.clear();
-
-    assert_mir_validation_message(&mir, "MIR unknown branch access node");
-}
-
-#[test]
-fn mir_validation_rejects_non_dense_node_and_equation_ids() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.nodes[1].id = NodeId::new(9);
-    mir.equations[0].id = EquationId::new(3);
-
-    let messages = mir_validation_messages(&mir);
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("MIR node IDs must be dense")),
-        "expected dense node diagnostic, got {messages:?}"
+fn mir_validation_rejects_malformed_models() {
+    assert_rejections(
+        MirModel::validate,
+        &[
+            (
+                "equations referencing removed nodes",
+                lower_tiny_resistor_mir,
+                |mir| mir.nodes.clear(),
+                &["MIR unknown branch access node"],
+            ),
+            (
+                "non-dense node and equation ids",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    mir.nodes[1].id = NodeId::new(9);
+                    mir.equations[0].id = EquationId::new(3);
+                },
+                &[
+                    "MIR node IDs must be dense",
+                    "MIR equation IDs must be dense",
+                ],
+            ),
+            (
+                "equation with empty active domains",
+                lower_tiny_resistor_mir,
+                |mir| mir.equations[0].active_domains.clear(),
+                &["must have at least one active domain"],
+            ),
+            (
+                "equation contribution out of range",
+                lower_tiny_resistor_mir,
+                |mir| mir.equations[0].contribution = ContributionId::new(42),
+                &["contribution ContributionId(42) must match equation id EquationId(0)"],
+            ),
+            (
+                "duplicate contribution refs",
+                || lower_fixture_parts(internal_node_source(), "has_mid").2,
+                |mir| {
+                    assert_eq!(mir.equations.len(), 2);
+                    mir.equations[1].contribution = ContributionId::new(0);
+                },
+                &["contribution ContributionId(0) must match equation id EquationId(1)"],
+            ),
+            (
+                "parameter alias name collision",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    mir.parameters[0].aliases.push("other".into());
+                    let mut other = mir.parameters[0].clone();
+                    other.id = ParamId::new(1);
+                    other.name = "other".into();
+                    other.aliases.clear();
+                    mir.parameters.push(other);
+                },
+                &["parameter alias 'other' collides with parameter name"],
+            ),
+            (
+                "equation expression ref out of range",
+                lower_tiny_resistor_mir,
+                |mir| mir.equations[0].expression.id = ExprId::from(mir.expressions.len()),
+                &["equation 0 expression id ExprId"],
+            ),
+            (
+                "equation expression kind mismatch",
+                lower_tiny_resistor_mir,
+                |mir| mir.equations[0].expression.kind = "identifier".into(),
+                &["equation 0 expression kind 'identifier' does not match 'binary'"],
+            ),
+            (
+                "parameter default expr out of range",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    let default_expr = mir.parameters[0]
+                        .default_expr
+                        .as_mut()
+                        .expect("tiny resistor parameter default expr");
+                    default_expr.id = ExprId::from(mir.expressions.len());
+                },
+                &["parameter 'r' default id ExprId"],
+            ),
+            (
+                "missing branch unknown table",
+                shared_branch_unknown_mir,
+                |mir| mir.branch_unknowns.clear(),
+                &["branch unknown BranchUnknownId(0) is out of range"],
+            ),
+            (
+                "missing branch unknown link",
+                shared_branch_unknown_mir,
+                |mir| mir.equations[2].branch_unknown = None,
+                &["branch unknown presence does not match Potential"],
+            ),
+            (
+                "branch unknown link to a different physical branch",
+                shared_branch_unknown_mir,
+                |mir| mir.equations[2].branch_unknown = Some(BranchUnknownId::new(1)),
+                &["references a different physical branch"],
+            ),
+            (
+                "branch unknown representative after its first contribution",
+                shared_branch_unknown_mir,
+                |mir| mir.branch_unknowns[0].equation = EquationId::new(2),
+                &["representative must be its first contribution"],
+            ),
+            (
+                "duplicate solver unknown for one physical branch",
+                shared_branch_unknown_mir,
+                |mir| {
+                    let mut extra = mir.branch_unknowns[0].clone();
+                    extra.id = BranchUnknownId::new(2);
+                    extra.equation = EquationId::new(2);
+                    mir.branch_unknowns.push(extra);
+                    mir.equations[2].branch_unknown = Some(BranchUnknownId::new(2));
+                },
+                &["duplicate solver unknown for physical branch"],
+            ),
+            (
+                "non-dense branch unknown id",
+                named_branch_mir,
+                |mir| mir.branch_unknowns[0].id = BranchUnknownId::new(7),
+                &["MIR branch unknown IDs must be dense"],
+            ),
+            (
+                "duplicate branch unknown equation",
+                named_branch_mir,
+                |mir| {
+                    let mut duplicate = mir.branch_unknowns[0].clone();
+                    duplicate.id = BranchUnknownId::new(1);
+                    mir.branch_unknowns.push(duplicate);
+                },
+                &["duplicate branch unknown for equation EquationId(0)"],
+            ),
+            (
+                "branch unknown for non-potential equation",
+                named_branch_mir,
+                |mir| mir.equations[0].kind = MirEquationKind::Current,
+                &[
+                    "branch unknown BranchUnknownId(0) must reference a potential or indirect equation",
+                ],
+            ),
+            (
+                "branch unknown equation table mismatch",
+                named_branch_mir,
+                |mir| mir.equations[0].id = EquationId::new(7),
+                &[
+                    "branch unknown BranchUnknownId(0) equation EquationId(0) does not match equation table entry EquationId(7)",
+                ],
+            ),
+            (
+                "branch unknown declared name mismatch",
+                named_branch_mir,
+                |mir| mir.branch_unknowns[0].declared_name = Some("other".into()),
+                &[
+                    "branch unknown BranchUnknownId(0) declared name does not match equation EquationId(0) branch",
+                ],
+            ),
+            (
+                "branch unknown endpoint mismatch",
+                named_branch_mir,
+                |mir| mir.branch_unknowns[0].neg_node = None,
+                &[
+                    "branch unknown BranchUnknownId(0) endpoints do not match equation EquationId(0) branch endpoints",
+                ],
+            ),
+            (
+                "branch unknown pos_node out of range",
+                named_branch_mir,
+                |mir| mir.branch_unknowns[0].pos_node = Some(NodeId::new(99)),
+                &["branch unknown BranchUnknownId(0) pos_node NodeId(99) is out of range"],
+            ),
+            (
+                "branch unknown without concrete endpoint",
+                named_branch_mir,
+                |mir| {
+                    mir.branch_unknowns[0].pos_node = None;
+                    mir.branch_unknowns[0].neg_node = None;
+                },
+                &["branch unknown BranchUnknownId(0) must have a concrete endpoint"],
+            ),
+            (
+                "branch participation out of range",
+                lower_tiny_resistor_mir,
+                |mir| mir.equations[0].branch.pos_node = Some(NodeId::new(99)),
+                &["branch pos_node NodeId(99) is out of range"],
+            ),
+            (
+                "branch label endpoint mismatch",
+                lower_tiny_resistor_mir,
+                |mir| mir.equations[0].branch.label = "n,p".into(),
+                &["branch label 'n,p' does not match endpoints p,n"],
+            ),
+            (
+                "state slot owner out of range",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    mir.state_slots.push(MirStateSlot {
+                        id: StateId::new(0),
+                        name: "hidden_state".into(),
+                        owner: EquationId::new(7),
+                    })
+                },
+                &["owner EquationId(7) is out of range"],
+            ),
+            (
+                "external node after internal node",
+                || lower_fixture_parts(internal_node_source(), "has_mid").2,
+                |mir| {
+                    mir.nodes[1].is_external = false;
+                    mir.nodes[2].is_external = true;
+                },
+                &["external nodes must precede internal nodes"],
+            ),
+            (
+                "duplicate active domains",
+                lower_tiny_resistor_mir,
+                |mir| mir.equations[0].active_domains.push(MirAnalysisDomain::Dc),
+                &["duplicate active domain Dc"],
+            ),
+            (
+                "empty module name",
+                lower_tiny_resistor_mir,
+                |mir| mir.module_name = "".into(),
+                &["MIR module name must not be empty"],
+            ),
+            (
+                "ground-ground branch participation",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    mir.equations[0].branch.pos_node = None;
+                    mir.equations[0].branch.neg_node = None;
+                    mir.equations[0].branch.label = "0,0".into();
+                },
+                &["must have at least one concrete endpoint"],
+            ),
+            (
+                "noncanonical grounded branch label",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    mir.equations[0].branch.neg_node = None;
+                    mir.equations[0].branch.label = "p,gnd".into();
+                },
+                &["branch label 'p,gnd' does not match endpoints p,0"],
+            ),
+            (
+                "expression child out of range",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    let root_id = mir.equations[0].expression.id;
+                    let dangling_id = ExprId::from(mir.expressions.len());
+                    let HirExprKind::Binary { left, .. } =
+                        &mut mir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected MIR equation expression to be binary");
+                    };
+                    *left = dangling_id;
+                },
+                &["child left ExprId"],
+            ),
+            (
+                "expression child postorder violation",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    let root_id = mir.equations[0].expression.id;
+                    let HirExprKind::Binary { left, .. } =
+                        &mut mir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected MIR equation expression to be binary");
+                    };
+                    *left = root_id;
+                },
+                &["violates expression postorder"],
+            ),
+            (
+                "expression branch access missing node",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    let root_id = mir.equations[0].expression.id;
+                    let HirExprKind::Binary { left, .. } =
+                        &mir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected MIR equation expression to be binary");
+                    };
+                    let branch_access_id = *left;
+                    let HirExprKind::BranchAccess { pos, .. } =
+                        &mut mir.expressions[usize::from(branch_access_id)].kind
+                    else {
+                        panic!("expected branch access expression");
+                    };
+                    *pos = "missing".into();
+                },
+                &["unknown branch access node 'missing'"],
+            ),
+            (
+                "expression named branch access missing branch",
+                named_branch_mir,
+                |mir| {
+                    let root_id = mir.equations[0].expression.id;
+                    mir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
+                        access: "V".into(),
+                        kind: rspice_veriloga::ast::AccessKind::Potential,
+                        name: "missing".into(),
+                    };
+                    mir.equations[0].expression.kind = "branch_access".into();
+                },
+                &["unknown named branch access 'missing'"],
+            ),
+            (
+                "empty state slot name",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    mir.state_slots.push(MirStateSlot {
+                        id: StateId::new(0),
+                        name: "".into(),
+                        owner: EquationId::new(0),
+                    })
+                },
+                &["state slot StateId(0) name must not be empty"],
+            ),
+            (
+                "duplicate state slot name",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    mir.state_slots.push(MirStateSlot {
+                        id: StateId::new(0),
+                        name: "state".into(),
+                        owner: EquationId::new(0),
+                    });
+                    mir.state_slots.push(MirStateSlot {
+                        id: StateId::new(1),
+                        name: "state".into(),
+                        owner: EquationId::new(0),
+                    });
+                },
+                &["duplicate state slot name 'state'"],
+            ),
+            (
+                "unknown identifier expression",
+                lower_tiny_resistor_mir,
+                |mir| {
+                    let root_id = mir.equations[0].expression.id;
+                    let HirExprKind::Binary { right, .. } =
+                        mir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected equation expression to be binary");
+                    };
+                    let HirExprKind::Identifier { name } =
+                        &mut mir.expressions[usize::from(right)].kind
+                    else {
+                        panic!("expected binary rhs to be an identifier");
+                    };
+                    *name = "__missing".into();
+                },
+                &["unknown identifier '__missing'"],
+            ),
+            (
+                "duplicate value symbol",
+                lower_tiny_resistor_mir,
+                |mir| mir.value_symbols.push("r".into()),
+                &["duplicate value symbol 'r'"],
+            ),
+            (
+                "unsorted value symbols",
+                lower_tiny_resistor_mir,
+                |mir| mir.value_symbols.push("a".into()),
+                &["value symbols must be sorted"],
+            ),
+            (
+                "alias identifier expression",
+                || {
+                    let (_, mut hir, _) = lower_tiny_resistor_parts();
+                    hir.parameters[0].aliases.push("res".into());
+                    MirModel::from_hir(&hir).expect("lower alias MIR")
+                },
+                |mir| {
+                    let root_id = mir.equations[0].expression.id;
+                    let HirExprKind::Binary { right, .. } =
+                        mir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected equation expression to be binary");
+                    };
+                    let HirExprKind::Identifier { name } =
+                        &mut mir.expressions[usize::from(right)].kind
+                    else {
+                        panic!("expected binary rhs to be an identifier");
+                    };
+                    *name = "res".into();
+                },
+                &["unknown identifier 'res'"],
+            ),
+        ],
     );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("MIR equation IDs must be dense")),
-        "expected dense equation diagnostic, got {messages:?}"
-    );
-}
-
-#[test]
-fn mir_validation_rejects_equation_with_empty_active_domains() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].active_domains.clear();
-
-    assert_mir_validation_message(&mir, "must have at least one active domain");
-}
-
-#[test]
-fn mir_validation_rejects_equation_contribution_out_of_range() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].contribution = ContributionId::new(42);
-
-    assert_mir_validation_message(
-        &mir,
-        "contribution ContributionId(42) must match equation id EquationId(0)",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_duplicate_contribution_refs() {
-    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let mut mir = MirModel::from_hir(&hir).expect("lower MIR");
-
-    assert_eq!(mir.equations.len(), 2);
-    mir.equations[1].contribution = ContributionId::new(0);
-
-    assert_mir_validation_message(
-        &mir,
-        "contribution ContributionId(0) must match equation id EquationId(1)",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_parameter_alias_name_collision() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.parameters[0].aliases.push("other".into());
-    let mut other = mir.parameters[0].clone();
-    other.id = ParamId::new(1);
-    other.name = "other".into();
-    other.aliases.clear();
-    mir.parameters.push(other);
-
-    assert_mir_validation_message(&mir, "parameter alias 'other' collides with parameter name");
 }
 
 #[test]
@@ -2831,25 +3183,6 @@ fn mir_lowering_preserves_equation_expression_arena() {
 }
 
 #[test]
-fn mir_validation_rejects_equation_expression_ref_out_of_range() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].expression.id = ExprId::from(mir.expressions.len());
-
-    assert_mir_validation_message(&mir, "equation 0 expression id ExprId");
-}
-
-#[test]
-fn mir_validation_rejects_equation_expression_kind_mismatch() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].expression.kind = "identifier".into();
-
-    assert_mir_validation_message(
-        &mir,
-        "equation 0 expression kind 'identifier' does not match 'binary'",
-    );
-}
-
-#[test]
 fn mir_lowering_preserves_parameter_semantics() {
     let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
@@ -2864,18 +3197,6 @@ fn mir_lowering_preserves_parameter_semantics() {
         hir.parameters[0].default_expr
     );
     assert_eq!(mir.parameters[0].range, hir.parameters[0].range);
-}
-
-#[test]
-fn mir_validation_rejects_parameter_default_expr_out_of_range() {
-    let mut mir = lower_tiny_resistor_mir();
-    let default_expr = mir.parameters[0]
-        .default_expr
-        .as_mut()
-        .expect("tiny resistor parameter default expr");
-    default_expr.id = ExprId::from(mir.expressions.len());
-
-    assert_mir_validation_message(&mir, "parameter 'r' default id ExprId");
 }
 
 #[test]
@@ -2951,40 +3272,6 @@ fn mir_repeated_potential_sites_share_physical_unknowns_without_merging_named_br
 }
 
 #[test]
-fn mir_validation_rejects_missing_and_misdirected_physical_unknown_links() {
-    let source = "module shared(p,n); inout p,n; electrical p,n; branch(p,n) a,b; analog begin V(a)<+2*I(a); V(b)<+3*I(b); V(a)<+4*I(a); end endmodule";
-    let (_, _, original) = lower_fixture_parts(source, "shared");
-    let mut missing_table = original.clone();
-    missing_table.branch_unknowns.clear();
-    assert_mir_validation_message(
-        &missing_table,
-        "branch unknown BranchUnknownId(0) is out of range",
-    );
-    let mut missing_link = original.clone();
-    missing_link.equations[2].branch_unknown = None;
-    assert_mir_validation_message(
-        &missing_link,
-        "branch unknown presence does not match Potential",
-    );
-    let mut wrong_branch = original.clone();
-    wrong_branch.equations[2].branch_unknown = Some(BranchUnknownId::new(1));
-    assert_mir_validation_message(&wrong_branch, "references a different physical branch");
-    let mut wrong_representative = original.clone();
-    wrong_representative.branch_unknowns[0].equation = EquationId::new(2);
-    assert_mir_validation_message(
-        &wrong_representative,
-        "representative must be its first contribution",
-    );
-    let mut duplicate = original;
-    let mut extra = duplicate.branch_unknowns[0].clone();
-    extra.id = BranchUnknownId::new(2);
-    extra.equation = EquationId::new(2);
-    duplicate.branch_unknowns.push(extra);
-    duplicate.equations[2].branch_unknown = Some(BranchUnknownId::new(2));
-    assert_mir_validation_message(&duplicate, "duplicate solver unknown for physical branch");
-}
-
-#[test]
 fn mir_lowering_promotes_potential_contributions_to_branch_unknowns() {
     let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
         .expect("analyze fixture");
@@ -2998,147 +3285,6 @@ fn mir_lowering_promotes_potential_contributions_to_branch_unknowns() {
     assert_eq!(mir.branch_unknowns[0].declared_name.as_deref(), Some("res"));
     assert_eq!(mir.branch_unknowns[0].pos_node, Some(NodeId::new(0)));
     assert_eq!(mir.branch_unknowns[0].neg_node, Some(NodeId::new(1)));
-}
-
-#[test]
-fn mir_validation_rejects_non_dense_branch_unknown_id() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    mir.branch_unknowns[0].id = BranchUnknownId::new(7);
-
-    assert_mir_validation_message(&mir, "MIR branch unknown IDs must be dense");
-}
-
-#[test]
-fn mir_validation_rejects_duplicate_branch_unknown_equation() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    let mut duplicate = mir.branch_unknowns[0].clone();
-    duplicate.id = BranchUnknownId::new(1);
-    mir.branch_unknowns.push(duplicate);
-
-    assert_mir_validation_message(&mir, "duplicate branch unknown for equation EquationId(0)");
-}
-
-#[test]
-fn mir_validation_rejects_branch_unknown_for_non_potential_equation() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    mir.equations[0].kind = MirEquationKind::Current;
-
-    assert_mir_validation_message(
-        &mir,
-        "branch unknown BranchUnknownId(0) must reference a potential or indirect equation",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_branch_unknown_equation_table_mismatch() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    mir.equations[0].id = EquationId::new(7);
-
-    assert_mir_validation_message(
-        &mir,
-        "branch unknown BranchUnknownId(0) equation EquationId(0) does not match equation table entry EquationId(7)",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_branch_unknown_declared_name_mismatch() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    mir.branch_unknowns[0].declared_name = Some("other".into());
-
-    assert_mir_validation_message(
-        &mir,
-        "branch unknown BranchUnknownId(0) declared name does not match equation EquationId(0) branch",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_branch_unknown_endpoint_mismatch() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    mir.branch_unknowns[0].neg_node = None;
-
-    assert_mir_validation_message(
-        &mir,
-        "branch unknown BranchUnknownId(0) endpoints do not match equation EquationId(0) branch endpoints",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_branch_unknown_pos_node_out_of_range() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    mir.branch_unknowns[0].pos_node = Some(NodeId::new(99));
-
-    assert_mir_validation_message(
-        &mir,
-        "branch unknown BranchUnknownId(0) pos_node NodeId(99) is out of range",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_branch_unknown_without_concrete_endpoint() {
-    let (_, _, mut mir) = lower_fixture_parts(named_branch_potential_source(), "branch_potential");
-    mir.branch_unknowns[0].pos_node = None;
-    mir.branch_unknowns[0].neg_node = None;
-
-    assert_mir_validation_message(
-        &mir,
-        "branch unknown BranchUnknownId(0) must have a concrete endpoint",
-    );
-}
-
-#[test]
-fn mir_validation_rejects_branch_participation_out_of_range() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].branch.pos_node = Some(NodeId::new(99));
-
-    assert_mir_validation_message(&mir, "branch pos_node NodeId(99) is out of range");
-}
-
-#[test]
-fn mir_validation_rejects_branch_label_endpoint_mismatch() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].branch.label = "n,p".into();
-
-    assert_mir_validation_message(&mir, "branch label 'n,p' does not match endpoints p,n");
-}
-
-#[test]
-fn mir_validation_rejects_state_slot_owner_out_of_range() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.state_slots.push(MirStateSlot {
-        id: StateId::new(0),
-        name: "hidden_state".into(),
-        owner: EquationId::new(7),
-    });
-
-    assert_mir_validation_message(&mir, "owner EquationId(7) is out of range");
-}
-
-#[test]
-fn mir_validation_rejects_external_node_after_internal_node() {
-    let analyzed = analyze_fixture(internal_node_source(), "has_mid").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", internal_node_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let mut mir = MirModel::from_hir(&hir).expect("lower MIR");
-    mir.nodes[1].is_external = false;
-    mir.nodes[2].is_external = true;
-
-    assert_mir_validation_message(&mir, "external nodes must precede internal nodes");
-}
-
-#[test]
-fn mir_validation_rejects_duplicate_active_domains() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].active_domains.push(MirAnalysisDomain::Dc);
-
-    assert_mir_validation_message(&mir, "duplicate active domain Dc");
-}
-
-#[test]
-fn mir_validation_rejects_empty_module_name() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.module_name = "".into();
-
-    assert_mir_validation_message(&mir, "MIR module name must not be empty");
 }
 
 #[test]
@@ -3218,111 +3364,6 @@ fn mir_lowering_supports_ground_positive_named_branch() {
     assert_eq!(mir.equations[0].branch.neg_node, Some(NodeId::new(0)));
     assert_eq!(mir.equations[0].branch.label.as_str(), "0,p");
     assert!(mir.validate().is_ok());
-}
-
-#[test]
-fn mir_validation_rejects_ground_ground_branch_participation() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].branch.pos_node = None;
-    mir.equations[0].branch.neg_node = None;
-    mir.equations[0].branch.label = "0,0".into();
-
-    assert_mir_validation_message(&mir, "must have at least one concrete endpoint");
-}
-
-#[test]
-fn mir_validation_rejects_noncanonical_grounded_branch_label() {
-    let mut mir = lower_tiny_resistor_mir();
-    mir.equations[0].branch.neg_node = None;
-    mir.equations[0].branch.label = "p,gnd".into();
-
-    assert_mir_validation_message(&mir, "branch label 'p,gnd' does not match endpoints p,0");
-}
-
-#[test]
-fn mir_validation_rejects_expression_child_out_of_range() {
-    let mut mir = lower_tiny_resistor_mir();
-    let root_id = mir.equations[0].expression.id;
-    let dangling_id = ExprId::from(mir.expressions.len());
-    let HirExprKind::Binary { left, .. } = &mut mir.expressions[usize::from(root_id)].kind else {
-        panic!("expected MIR equation expression to be binary");
-    };
-    *left = dangling_id;
-
-    assert_mir_validation_message(&mir, "child left ExprId");
-}
-
-#[test]
-fn mir_validation_rejects_expression_child_postorder_violation() {
-    let mut mir = lower_tiny_resistor_mir();
-    let root_id = mir.equations[0].expression.id;
-    let HirExprKind::Binary { left, .. } = &mut mir.expressions[usize::from(root_id)].kind else {
-        panic!("expected MIR equation expression to be binary");
-    };
-    *left = root_id;
-
-    assert_mir_validation_message(&mir, "violates expression postorder");
-}
-
-#[test]
-fn mir_validation_rejects_expression_branch_access_missing_node() {
-    let mut mir = lower_tiny_resistor_mir();
-    let root_id = mir.equations[0].expression.id;
-    let HirExprKind::Binary { left, .. } = &mir.expressions[usize::from(root_id)].kind else {
-        panic!("expected MIR equation expression to be binary");
-    };
-    let branch_access_id = *left;
-    let HirExprKind::BranchAccess { pos, .. } =
-        &mut mir.expressions[usize::from(branch_access_id)].kind
-    else {
-        panic!("expected branch access expression");
-    };
-    *pos = "missing".into();
-
-    assert_mir_validation_message(&mir, "unknown branch access node 'missing'");
-}
-
-#[test]
-fn mir_validation_rejects_expression_named_branch_access_missing_branch() {
-    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
-        .expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let mut mir = MirModel::from_hir(&hir).expect("lower MIR");
-
-    let root_id = mir.equations[0].expression.id;
-    mir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
-        access: "V".into(),
-        kind: rspice_veriloga::ast::AccessKind::Potential,
-        name: "missing".into(),
-    };
-    mir.equations[0].expression.kind = "branch_access".into();
-
-    assert_mir_validation_message(&mir, "unknown named branch access 'missing'");
-}
-
-#[test]
-fn mir_validation_rejects_state_slot_name_violations() {
-    let mut empty_name = lower_tiny_resistor_mir();
-    empty_name.state_slots.push(MirStateSlot {
-        id: StateId::new(0),
-        name: "".into(),
-        owner: EquationId::new(0),
-    });
-    assert_mir_validation_message(&empty_name, "state slot StateId(0) name must not be empty");
-
-    let mut duplicate_name = lower_tiny_resistor_mir();
-    duplicate_name.state_slots.push(MirStateSlot {
-        id: StateId::new(0),
-        name: "state".into(),
-        owner: EquationId::new(0),
-    });
-    duplicate_name.state_slots.push(MirStateSlot {
-        id: StateId::new(1),
-        name: "state".into(),
-        owner: EquationId::new(0),
-    });
-    assert_mir_validation_message(&duplicate_name, "duplicate state slot name 'state'");
 }
 
 #[test]
@@ -3529,53 +3570,6 @@ fn hir_validation_rejects_alias_identifier_expression() {
     *name = "res".into();
 
     assert_validation_message(&hir, "unknown identifier 'res'");
-}
-
-#[test]
-fn mir_validation_rejects_unknown_identifier_expression() {
-    let mut mir = lower_tiny_resistor_mir();
-    let root_id = mir.equations[0].expression.id;
-    let HirExprKind::Binary { right, .. } = mir.expressions[usize::from(root_id)].kind else {
-        panic!("expected equation expression to be binary");
-    };
-    let HirExprKind::Identifier { name } = &mut mir.expressions[usize::from(right)].kind else {
-        panic!("expected binary rhs to be an identifier");
-    };
-    *name = "__missing".into();
-
-    assert_mir_validation_message(&mir, "unknown identifier '__missing'");
-}
-
-#[test]
-fn mir_validation_rejects_value_symbol_table_violations() {
-    let mir = lower_tiny_resistor_mir();
-
-    let mut duplicate = mir.clone();
-    duplicate.value_symbols.push("r".into());
-    assert_mir_validation_message(&duplicate, "duplicate value symbol 'r'");
-
-    let mut unsorted = mir;
-    unsorted.value_symbols.push("a".into());
-    assert_mir_validation_message(&unsorted, "value symbols must be sorted");
-}
-
-#[test]
-fn mir_validation_rejects_alias_identifier_expression() {
-    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
-    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    hir.parameters[0].aliases.push("res".into());
-    let mut mir = MirModel::from_hir(&hir).expect("lower alias MIR");
-    let root_id = mir.equations[0].expression.id;
-    let HirExprKind::Binary { right, .. } = mir.expressions[usize::from(root_id)].kind else {
-        panic!("expected equation expression to be binary");
-    };
-    let HirExprKind::Identifier { name } = &mut mir.expressions[usize::from(right)].kind else {
-        panic!("expected binary rhs to be an identifier");
-    };
-    *name = "res".into();
-
-    assert_mir_validation_message(&mir, "unknown identifier 'res'");
 }
 
 #[test]
