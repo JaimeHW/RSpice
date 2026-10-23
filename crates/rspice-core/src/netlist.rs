@@ -554,7 +554,7 @@ pub enum ParseError {
     /// unsupported Xyce Y-device family or Spectre construct is a capability
     /// boundary, and a frontend reports it as a gap rather than as an
     /// authoring mistake. `capability` is the same stable dotted token the
-    /// engine's [`crate::UnsupportedCapabilityError`] publishes.
+    /// engine's `UnsupportedCapabilityError` publishes.
     #[error("{origin}: unsupported capability [{capability}]: {detail}")]
     UnsupportedCapability {
         origin: NetlistSourceLocation,
