@@ -885,6 +885,7 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
 
 fn library_view_usage(state: &AppState, reference: &CellViewRef) -> Vec<String> {
     state
+        .model
         .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
         .into_iter()
         .map(|usage| format!("{} / {}", usage.schematic.display_path(), usage.instance))

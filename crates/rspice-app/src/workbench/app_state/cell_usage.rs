@@ -9,7 +9,7 @@
 use rspice_design::schematic::document::SchematicDocument;
 
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 /// One placed instance of a library cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,7 +22,7 @@ pub(crate) struct CellInstanceUse {
     pub(crate) component_id: u64,
 }
 
-impl AppState {
+impl Model {
     /// Every instance in the project that binds `library`/`cell`, ordered by
     /// schematic and then by instance name.
     ///
@@ -35,7 +35,7 @@ impl AppState {
         cell: &str,
         view: Option<&str>,
     ) -> Vec<CellInstanceUse> {
-        let content = &self.model.workspace.content;
+        let content = &self.workspace.content;
         let live = matches!(
             content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
@@ -44,7 +44,7 @@ impl AppState {
         let mut uses = Vec::new();
         if let Some(reference) = &live {
             collect(
-                self.model.schematic.as_ref(),
+                self.schematic.as_ref(),
                 reference,
                 (library, cell, view),
                 &mut uses,
@@ -145,7 +145,7 @@ mod tests {
             .workspace
             .insert_schematic_editor("work/bench/schematic".to_owned(), bench);
 
-        let every_view = state.cell_instances("behavioral", "gain", None);
+        let every_view = state.model.cell_instances("behavioral", "gain", None);
         assert_eq!(
             every_view
                 .iter()
@@ -156,7 +156,9 @@ mod tests {
                 CellViewRef::new("work", "bench", "schematic")
             ]
         );
-        let symbol_only = state.cell_instances("behavioral", "gain", Some("symbol"));
+        let symbol_only = state
+            .model
+            .cell_instances("behavioral", "gain", Some("symbol"));
         assert_eq!(symbol_only.len(), 1);
         assert_eq!(symbol_only[0].schematic, active);
     }

@@ -813,6 +813,7 @@ fn inspector_action_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
 fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
     let mut consumers = app
         .state
+        .model
         .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
         .into_iter()
         .map(|usage| usage.schematic.display_path())

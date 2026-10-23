@@ -48,6 +48,7 @@ pub(super) fn veriloga(ui: &mut Ui, app: &mut RSpiceApp) {
         actions,
         used_in: Some(
             app.state
+                .model
                 .cell_instances(&reference.library, &reference.cell, None),
         ),
     };
