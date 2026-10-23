@@ -83,14 +83,14 @@ impl RSpiceApp {
             platform,
             environment,
             injected_now,
-            |command| command.availability(self).is_available(),
+            |command| self.command_key_available(command),
         );
         self.state.shortcut_resolver = resolver;
 
         if let Some(delay) = resolution.repaint_after {
             ctx.request_repaint_after(delay);
         }
-        let palette_input = if resolution.command == Some(ShortcutCommand::CommandPalette) {
+        let palette_input = if resolution.command == Some(ShortcutCommand::CommandPalette.key()) {
             ctx.input(|input| {
                 crate::ui::input::InputTransition::after_keys(
                     input,
@@ -107,8 +107,14 @@ impl RSpiceApp {
                 resolution.deferred_start,
             )
         });
+        // A key has no behaviour of its own once it has been resolved: the
+        // command it names runs through the dispatcher the menus, toolbar,
+        // context menu and palette reach, so a key and a menu row cannot
+        // drift apart. What is particular to keys — the chord, the focus
+        // owner, the opening keystroke the palette inherits — is settled
+        // above.
         if consumed && let Some(command) = resolution.command {
-            self.execute_shortcut_command(command);
+            self.execute_command_key(command);
             if self.state.workbench.command_palette.open
                 && let Some(input) = palette_input
             {
@@ -118,16 +124,10 @@ impl RSpiceApp {
         }
     }
 
-    /// Carry out the command a key resolved to.
-    ///
-    /// A key has no behaviour of its own once it has been resolved: the
-    /// command runs through [`ShortcutCommand::execute`], the boundary the
-    /// menus, toolbar, context menu and palette call, so a key and a menu row
-    /// cannot drift apart. What is particular to keys — the chord, the
-    /// focus owner, the opening keystroke the palette inherits — is settled in
-    /// [`Self::handle_shortcuts`] before this runs.
+    /// Carry out `command` the way pressing its key does.
+    #[cfg(test)]
     pub(in crate::workbench) fn execute_shortcut_command(&mut self, command: ShortcutCommand) {
-        command.execute(self);
+        self.execute_command_key(command.key());
     }
 
     fn try_project_design_undo(&mut self) -> bool {
@@ -832,12 +832,15 @@ mod shortcut_ownership_tests {
             CommandPlatform::Desktop,
             environment,
             std::time::Duration::from_millis(1),
-            |command| command.availability(&app).is_available(),
+            |command| app.command_key_available(command),
         );
         app.state.shortcut_resolver = resolver;
-        assert_eq!(resolution.command, Some(ShortcutCommand::NextViolation));
+        assert_eq!(
+            resolution.command,
+            Some(ShortcutCommand::NextViolation.key())
+        );
 
-        app.execute_shortcut_command(resolution.command.unwrap());
+        app.execute_command_key(resolution.command.unwrap());
         assert_eq!(
             app.state.model.diagnostics.current_finding(),
             Some(identities[1])

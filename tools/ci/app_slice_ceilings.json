@@ -55,9 +55,9 @@
     "framework->hardcopy": 6,
     "framework->project": 7,
     "framework->results": 48,
-    "framework->session": 883,
+    "framework->session": 870,
     "framework->sheets": 9,
-    "framework->shell": 168,
+    "framework->shell": 167,
     "framework->simulate": 5,
     "model->design": 2,
     "model->session": 6,
@@ -68,7 +68,7 @@
     "services->shell": 1
   },
   "whole-app": {
-    "&RSpiceApp params outside shell": 323,
+    "&RSpiceApp params outside shell": 322,
     "&mut RSpiceApp params outside shell": 664,
     "impl AppState methods outside session": 241,
     "impl RSpiceApp methods outside shell": 222

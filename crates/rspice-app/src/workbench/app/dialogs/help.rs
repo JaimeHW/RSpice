@@ -4,14 +4,14 @@
 use egui::{Context, Grid, RichText};
 
 use crate::services::license::LicenseInfo;
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
@@ -96,13 +96,13 @@ enum HelpAction {
 /// with none, and its name.
 fn shortcut_help_row(
     shortcuts: &ShortcutPreferences,
-    command: Command,
+    command: CommandKey,
     platform: CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> (String, &'static str) {
     (
-        shortcuts.resolved_label(&CommandRegistry, command.key(), platform, operating_system),
-        command.spec().label,
+        shortcuts.resolved_label(&CommandRegistry, command, platform, operating_system),
+        command_registry().label(command),
     )
 }
 
@@ -129,16 +129,19 @@ fn copyright_holder() -> &'static str {
 
 fn shortcut_row_matches(
     shortcuts: &ShortcutPreferences,
-    command: Command,
+    command: CommandKey,
     filter: &str,
     platform: CommandPlatform,
     operating_system: egui::os::OperatingSystem,
 ) -> bool {
     filter.is_empty()
-        || command.spec().label.to_lowercase().contains(filter)
-        || command.stable_id().contains(filter)
+        || command_registry()
+            .label(command)
+            .to_lowercase()
+            .contains(filter)
+        || command.as_str().contains(filter)
         || shortcuts
-            .resolved_label(&CommandRegistry, command.key(), platform, operating_system)
+            .resolved_label(&CommandRegistry, command, platform, operating_system)
             .to_lowercase()
             .contains(filter)
 }
@@ -885,12 +888,7 @@ mod tests {
             .flat_map(|category| category.commands())
             .find(|command| {
                 shortcuts
-                    .resolved_label(
-                        &CommandRegistry,
-                        command.key(),
-                        CommandPlatform::Desktop,
-                        os,
-                    )
+                    .resolved_label(&CommandRegistry, *command, CommandPlatform::Desktop, os)
                     .is_empty()
             })
             .expect("some listed command has no shortcut");

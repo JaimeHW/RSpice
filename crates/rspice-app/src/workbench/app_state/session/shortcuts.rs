@@ -8,9 +8,9 @@
 
 use egui::{InputState, Key, Modifiers};
 
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
 
 mod canvas_focus;
 mod category;
@@ -36,22 +36,20 @@ pub(crate) fn accessibility_shortcut_summary(
     shortcuts: &ShortcutPreferences,
     platform: CommandPlatform,
     operating_system: egui::os::OperatingSystem,
-    commands: &[Command],
+    commands: &[CommandKey],
 ) -> String {
     let entries = commands
         .iter()
         .filter_map(|command| {
-            let labels = shortcuts.resolved_labels(
-                &CommandRegistry,
-                command.key(),
-                platform,
-                operating_system,
-            );
+            let labels =
+                shortcuts.resolved_labels(&CommandRegistry, *command, platform, operating_system);
             (!labels.is_empty()).then(|| {
                 format!(
                     "{}: {}",
                     labels.join(" or "),
-                    command.spec().label.trim_end_matches('\u{2026}')
+                    command_registry()
+                        .label(*command)
+                        .trim_end_matches('\u{2026}')
                 )
             })
         })
@@ -67,6 +65,7 @@ pub(crate) fn accessibility_shortcut_summary(
 mod accessibility_tests {
     use super::*;
     use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use crate::workbench::commands::vocabulary::Command;
 
     #[test]
     fn accessibility_projection_uses_effective_custom_profile_and_host() {
@@ -90,7 +89,7 @@ mod accessibility_tests {
             &shortcuts,
             CommandPlatform::Desktop,
             egui::os::OperatingSystem::Windows,
-            &[Command::SymbolCircleTool],
+            &[Command::SymbolCircleTool.key()],
         );
 
         assert_eq!(summary, " Shortcuts: Alt+F9: Draw symbol circle.");

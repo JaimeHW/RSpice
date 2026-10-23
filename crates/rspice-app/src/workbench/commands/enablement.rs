@@ -283,7 +283,9 @@ impl Command {
             Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::RepeatLastCommand => {
                 active_schematic_editor(app)
-                    && Self::last_repeatable(app).is_some_and(|command| command.is_enabled(app))
+                    && vocabulary::last_repeatable(state.workbench.last_repeatable_command.as_deref())
+                        .and_then(|spec| vocabulary::legacy_command(spec.key))
+                        .is_some_and(|command| command.is_enabled(app))
             }
             Self::ConfigurationSets | Self::RuleSetup => state.platform.project_lifecycle.is_open(),
             Self::ReviewComments => {

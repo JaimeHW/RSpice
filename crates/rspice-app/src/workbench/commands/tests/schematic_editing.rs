@@ -1693,8 +1693,9 @@ fn repeat_runs_the_last_edit_again_on_the_canvas_key() {
     );
     Command::Undo.execute(&mut app);
     assert_eq!(
-        Command::last_repeatable(&app),
-        Some(Command::RotateSelection),
+        vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
+            .map(|spec| spec.key),
+        Some(Command::RotateSelection.key()),
         "an undo is not what Repeat repeats"
     );
 }

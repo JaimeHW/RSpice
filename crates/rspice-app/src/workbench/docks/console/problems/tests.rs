@@ -1276,7 +1276,7 @@ fn following_a_row_with_a_click_leaves_the_shortcuts_working() {
     };
     assert_eq!(
         next_finding(&harness, &mut state),
-        Some(Command::NextViolation),
+        Some(Command::NextViolation.key()),
         "the next-finding shortcut works straight after the click",
     );
 

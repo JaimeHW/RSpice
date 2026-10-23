@@ -7,12 +7,12 @@
 use std::time::Duration;
 
 use crate::state::ViewType;
-use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+use crate::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform, ShortcutContext};
 use crate::state::shortcuts::{
     ChordTimeoutPolicy, ContextPrecedencePolicy, ShortcutPreferences, SingleKeyCanvasPolicy,
     shortcut_context_precedence_rank,
 };
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::state::Workspace;
 
 use super::ShortcutInputSnapshot;
@@ -30,7 +30,7 @@ pub(crate) struct ShortcutEnvironment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShortcutResolution {
-    pub(crate) command: Option<Command>,
+    pub(crate) command: Option<CommandKey>,
     pub(crate) consume: Vec<(egui::Key, egui::Modifiers)>,
     /// Live presses before this index complete the command; later presses
     /// belong to its continuation and may need a different input owner.
@@ -71,7 +71,7 @@ impl ShortcutResolverState {
         platform: CommandPlatform,
         environment: ShortcutEnvironment,
         injected_now: Duration,
-        mut is_available: impl FnMut(Command) -> bool,
+        mut is_available: impl FnMut(CommandKey) -> bool,
     ) -> ShortcutResolution {
         let now = self.monotonic_now(injected_now);
         if self.observed_profile.as_ref() != Some(profile)
@@ -325,7 +325,7 @@ impl ShortcutResolverState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ExactCandidate {
-    command: Command,
+    command: CommandKey,
     tier: u8,
     registry_index: usize,
     binding_index: usize,
@@ -342,7 +342,7 @@ impl PrefixAnalysis {
         self.exact.is_empty() && !self.has_longer
     }
 
-    fn best_exact(&self) -> Option<Command> {
+    fn best_exact(&self) -> Option<CommandKey> {
         self.exact
             .iter()
             .min_by_key(|candidate| {
@@ -364,11 +364,13 @@ fn analyze_prefix(
     non_canvas_focus: bool,
     precedence: ContextPrecedencePolicy,
     single_key_policy: SingleKeyCanvasPolicy,
-    is_available: &mut impl FnMut(Command) -> bool,
+    is_available: &mut impl FnMut(CommandKey) -> bool,
 ) -> PrefixAnalysis {
     let mut analysis = PrefixAnalysis::default();
-    for (registry_index, command) in COMMAND_REGISTRY.iter().copied().enumerate() {
-        let context = command.shortcut_context();
+    for (registry_index, command) in CommandRegistry.commands().iter().copied().enumerate() {
+        let Some(context) = CommandRegistry.context(command) else {
+            continue;
+        };
         if !context_is_active(context, environment)
             || (non_canvas_focus && context.suppressed_by_text_focus())
             || !is_available(command)
@@ -376,7 +378,7 @@ fn analyze_prefix(
             continue;
         }
         for (binding_index, binding) in profile
-            .effective_bindings(&CommandRegistry, command.key())
+            .effective_bindings(&CommandRegistry, command)
             .into_iter()
             .enumerate()
         {
@@ -518,6 +520,7 @@ mod tests {
 
     use super::*;
     use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
+    use crate::workbench::commands::vocabulary::Command;
 
     fn primary() -> Modifiers {
         Modifiers {
@@ -635,7 +638,7 @@ mod tests {
             Duration::from_millis(100),
             |_| true,
         );
-        assert_eq!(second.command, Some(Command::CommandPalette));
+        assert_eq!(second.command, Some(Command::CommandPalette.key()));
         assert_eq!(second.consume.len(), 2);
         assert_eq!(second.deferred_start, 1);
         let deferred = state.resolve(
@@ -646,7 +649,7 @@ mod tests {
             Duration::from_millis(101),
             |_| true,
         );
-        assert_eq!(deferred.command, Some(Command::Save));
+        assert_eq!(deferred.command, Some(Command::Save.key()));
     }
 
     #[test]
@@ -692,7 +695,7 @@ mod tests {
             Duration::from_millis(6_500),
             |_| true,
         );
-        assert_eq!(expired.command, Some(Command::Preferences));
+        assert_eq!(expired.command, Some(Command::Preferences.key()));
     }
 
     #[test]
@@ -741,7 +744,7 @@ mod tests {
             Duration::from_secs(61),
             |_| true,
         );
-        assert_eq!(mismatch.command, Some(Command::Preferences));
+        assert_eq!(mismatch.command, Some(Command::Preferences.key()));
         assert_eq!(mismatch.consume.len(), 1);
         assert_eq!(mismatch.deferred_start, 0);
         let deferred = state.resolve(
@@ -752,7 +755,7 @@ mod tests {
             Duration::from_secs(62),
             |_| true,
         );
-        assert_eq!(deferred.command, Some(Command::Save));
+        assert_eq!(deferred.command, Some(Command::Save.key()));
         assert!(deferred.consume.is_empty());
     }
 
@@ -805,7 +808,7 @@ mod tests {
             Duration::from_millis(2),
             |_| true,
         );
-        assert_eq!(desktop.command, Some(Command::CommandPalette));
+        assert_eq!(desktop.command, Some(Command::CommandPalette.key()));
     }
 
     #[test]
@@ -831,9 +834,9 @@ mod tests {
             CommandPlatform::Desktop,
             design(true),
             Duration::ZERO,
-            |command| command != Command::ZoomFit,
+            |command| command != Command::ZoomFit.key(),
         );
-        assert_eq!(resolved.command, Some(Command::CommandPalette));
+        assert_eq!(resolved.command, Some(Command::CommandPalette.key()));
         assert_eq!(resolved.consume.len(), 1);
     }
 
@@ -890,7 +893,7 @@ mod tests {
             Duration::ZERO,
             |_| true,
         );
-        assert_eq!(fallback.command, Some(Command::CommandPalette));
+        assert_eq!(fallback.command, Some(Command::CommandPalette.key()));
         let rejected_override = state.resolve(
             &snapshot(&[event(Key::F12, Modifiers::NONE, false)], false),
             &profile,
@@ -908,7 +911,7 @@ mod tests {
             Duration::from_millis(2),
             |_| true,
         );
-        assert_eq!(rejected_policy.command, Some(Command::PlaceWire));
+        assert_eq!(rejected_policy.command, Some(Command::PlaceWire.key()));
     }
 
     #[test]
@@ -932,7 +935,7 @@ mod tests {
             Duration::from_millis(1),
             |_| true,
         );
-        assert_eq!(focused.command, Some(Command::PlaceWire));
+        assert_eq!(focused.command, Some(Command::PlaceWire.key()));
 
         let model_symbol = state.resolve(
             &snapshot(&[event(Key::L, Modifiers::NONE, false)], false),
@@ -942,7 +945,10 @@ mod tests {
             Duration::from_millis(2),
             |_| true,
         );
-        assert_eq!(model_symbol.command, Some(Command::SymbolPolylineTool));
+        assert_eq!(
+            model_symbol.command,
+            Some(Command::SymbolPolylineTool.key())
+        );
     }
 
     #[test]
@@ -964,7 +970,7 @@ mod tests {
                 Duration::from_millis(time),
                 |_| true,
             );
-            assert_eq!(resolved.command, Some(expected), "key {key:?}");
+            assert_eq!(resolved.command, Some(expected.key()), "key {key:?}");
         }
 
         let unbound_select = state.resolve(
@@ -1000,7 +1006,7 @@ mod tests {
 
         assert_eq!(
             resolve(design(true)).command,
-            Some(Command::StretchSelection)
+            Some(Command::StretchSelection.key())
         );
         assert_eq!(resolve(models_symbol(true)).command, None);
     }
@@ -1026,15 +1032,15 @@ mod tests {
 
         assert_eq!(
             resolve(Key::P, shift, design(true)).command,
-            Some(Command::PlacePin)
+            Some(Command::PlacePin.key())
         );
         assert_eq!(
             resolve(Key::P, Modifiers::NONE, design(true)).command,
-            Some(Command::PlaceProbe)
+            Some(Command::PlaceProbe.key())
         );
         assert_eq!(
             resolve(Key::P, Modifiers::NONE, models_symbol(true)).command,
-            Some(Command::SymbolPinTool)
+            Some(Command::SymbolPinTool.key())
         );
         assert_eq!(resolve(Key::P, shift, models_symbol(true)).command, None);
     }
@@ -1059,11 +1065,11 @@ mod tests {
 
         assert_eq!(
             resolve(shift, design(true)).command,
-            Some(Command::PlaceText)
+            Some(Command::PlaceText.key())
         );
         assert_eq!(
             resolve(Modifiers::NONE, design(true)).command,
-            Some(Command::PlaceBusTap)
+            Some(Command::PlaceBusTap.key())
         );
         assert_eq!(resolve(shift, models_symbol(true)).command, None);
     }
@@ -1090,7 +1096,7 @@ mod tests {
             Duration::ZERO,
             |_| true,
         );
-        assert_eq!(result.command, Some(Command::WaveformCalculator));
+        assert_eq!(result.command, Some(Command::WaveformCalculator.key()));
     }
 
     /// The magnification and copy chords reach the Results workspace.
@@ -1136,11 +1142,11 @@ mod tests {
                 CommandPlatform::Desktop,
                 results(),
                 Duration::ZERO,
-                |candidate| candidate == command,
+                |candidate| candidate == command.key(),
             );
             assert_eq!(
                 resolution.command,
-                Some(command),
+                Some(command.key()),
                 "{command:?} must dispatch on the Results workspace"
             );
         }
@@ -1235,7 +1241,7 @@ mod tests {
                     |_| true,
                 )
                 .command,
-            Some(Command::Preferences)
+            Some(Command::Preferences.key())
         );
     }
 
@@ -1267,7 +1273,7 @@ mod tests {
             Duration::ZERO,
             |_| true,
         );
-        assert_eq!(resolution.command, Some(Command::Preferences));
+        assert_eq!(resolution.command, Some(Command::Preferences.key()));
         assert_eq!(resolution.consume.len(), 4);
     }
 
@@ -1305,7 +1311,7 @@ mod tests {
             Duration::from_millis(1),
             |_| true,
         );
-        assert_eq!(alt.command, Some(Command::PlaceWire));
+        assert_eq!(alt.command, Some(Command::PlaceWire.key()));
 
         let mut disabled = ShortcutPreferences::default();
         disabled
@@ -1354,7 +1360,7 @@ mod tests {
             Duration::ZERO,
             |_| true,
         );
-        assert_eq!(chrome.command, Some(Command::Cancel));
+        assert_eq!(chrome.command, Some(Command::Cancel.key()));
 
         let mut editor_first = chrome_first;
         editor_first
@@ -1368,7 +1374,7 @@ mod tests {
             Duration::from_millis(1),
             |_| true,
         );
-        assert_eq!(editor.command, Some(Command::ZoomFit));
+        assert_eq!(editor.command, Some(Command::ZoomFit.key()));
     }
 
     #[test]
@@ -1392,7 +1398,7 @@ mod tests {
             Duration::from_millis(1),
             |_| true,
         );
-        assert_eq!(global.command, Some(Command::CommandPalette));
+        assert_eq!(global.command, Some(Command::CommandPalette.key()));
     }
 
     #[test]
@@ -1409,9 +1415,9 @@ mod tests {
                 CommandPlatform::Desktop,
                 environment,
                 Duration::from_millis(time),
-                |command| command == Command::NextViolation,
+                |command| command == Command::NextViolation.key(),
             );
-            assert_eq!(resolved.command, Some(Command::NextViolation));
+            assert_eq!(resolved.command, Some(Command::NextViolation.key()));
         }
     }
 
@@ -1443,9 +1449,13 @@ mod tests {
                 CommandPlatform::Desktop,
                 environment,
                 Duration::from_millis(time),
-                |candidate| candidate == command,
+                |candidate| candidate == command.key(),
             );
-            assert_eq!(resolved.command, Some(command), "{key:?} {modifiers:?}");
+            assert_eq!(
+                resolved.command,
+                Some(command.key()),
+                "{key:?} {modifiers:?}"
+            );
         }
     }
 
@@ -1463,7 +1473,7 @@ mod tests {
             Duration::ZERO,
             |_| true,
         );
-        assert_eq!(in_editor.command, Some(Command::DuplicateLine));
+        assert_eq!(in_editor.command, Some(Command::DuplicateLine.key()));
         let on_canvas = state.resolve(
             &snapshot(&[event(Key::D, primary(), false)], false),
             &profile,
@@ -1472,7 +1482,7 @@ mod tests {
             Duration::from_millis(1),
             |_| true,
         );
-        assert_eq!(on_canvas.command, Some(Command::Duplicate));
+        assert_eq!(on_canvas.command, Some(Command::Duplicate.key()));
         let unfocused = state.resolve(
             &snapshot(&[event(Key::Slash, primary(), false)], true),
             &profile,

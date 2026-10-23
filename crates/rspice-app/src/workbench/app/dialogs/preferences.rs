@@ -261,7 +261,7 @@ impl RSpiceApp {
         let library = self.state.model.preferences.shortcut_profiles().clone();
         let current_contexts = ShortcutContext::ALL
             .into_iter()
-            .filter(|context| context.matches(self))
+            .filter(|context| context.matches(&self.state.workbench, &self.state.model))
             .collect::<Vec<_>>();
         let environment = ShortcutExportEnvironment {
             runtime_platform: crate::workbench::app_state::runtime_command_platform(ctx),

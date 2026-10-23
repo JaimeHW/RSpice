@@ -149,9 +149,9 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
 }
 
 /// One row per command the registry orders, read through the registry: the
-/// order, the id, the palette listing, the shortcut context, the bindings and
-/// the reserved chords come from its specs and its catalog, and the rest from
-/// the command its key resolves to.
+/// order, the id, the label, the group, the palette listing, the shortcut
+/// context, the bindings and the reserved chords come from its specs and its
+/// catalog, and the rest from the command its key resolves to.
 // Refactor scaffolding: deleted when the split completes.
 fn registry_command_rows() -> Vec<CommandRow> {
     let no_project = no_project_app();
@@ -175,14 +175,14 @@ fn registry_command_rows() -> Vec<CommandRow> {
                 .context(key)
                 .unwrap_or_else(|| panic!("{id} has no shortcut context"));
             let state = |app: &RSpiceApp| StateRow {
-                context_live: context.matches(app),
+                context_live: context.matches(&app.state.workbench, &app.state.model),
                 ..state_row(command, app)
             };
             CommandRow {
                 index,
                 id: spec.key.as_str(),
-                label: command.spec().label,
-                group: command.spec().group,
+                label: spec.label,
+                group: spec.group,
                 requires_open_project: command.requires_open_project(),
                 blocked_by_project_operation: command.blocked_by_project_operation(),
                 mutates_window_session: command.mutates_window_session(),
@@ -220,7 +220,9 @@ fn state_row(command: Command, app: &RSpiceApp) -> StateRow {
         availability: command.availability(app).into(),
         enabled: command.is_enabled(app),
         checked: command.checked(app),
-        context_live: command.shortcut_context().matches(app),
+        context_live: command
+            .shortcut_context()
+            .matches(&app.state.workbench, &app.state.model),
     }
 }
 
@@ -476,7 +478,7 @@ fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
                 shortcut_context_precedence_rank(later.shortcut_context(), precedence),
             );
 
-            let resolve = |available: &dyn Fn(Command) -> bool| {
+            let resolve = |available: &dyn Fn(CommandKey) -> bool| {
                 ShortcutResolverState::default()
                     .resolve(
                         &ShortcutInputSnapshot::from_events_for_test(
@@ -491,11 +493,11 @@ fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
                     )
                     .command
             };
-            assert_eq!(resolve(&|_| true), Some(earlier), "{bound:?}");
+            assert_eq!(resolve(&|_| true), Some(earlier.key()), "{bound:?}");
             // The later command was a live candidate the tie-break passed over.
             assert_eq!(
-                resolve(&|command| command != earlier),
-                Some(later),
+                resolve(&|command| command != earlier.key()),
+                Some(later.key()),
                 "{bound:?}"
             );
         }

@@ -1102,6 +1102,8 @@ impl Command {
     fn registry_spec(self) -> command_registry::CommandSpec {
         command_registry::CommandSpec {
             key: self.key(),
+            label: self.spec().label,
+            group: self.spec().group,
             flags: CommandFlags::NONE
                 .with(CommandFlags::PALETTE_VISIBLE, self.palette_visible())
                 .with(
@@ -1479,7 +1481,7 @@ const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
 
 /// The registry of every command in [`COMMAND_REGISTRY`], built on first use
 /// and checked as it is built.
-pub(super) fn command_registry() -> &'static Registry {
+pub(crate) fn command_registry() -> &'static Registry {
     static REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
         let registry = Registry::new(
             &COMMAND_ORDER,
@@ -1495,9 +1497,19 @@ pub(super) fn command_registry() -> &'static Registry {
     &REGISTRY
 }
 
+/// The command Repeat last command would run, from the id the dispatcher
+/// last recorded: `None` before any command has run, and for an id no
+/// registered command answers to.
+pub(crate) fn last_repeatable(
+    recorded: Option<&str>,
+) -> Option<&'static command_registry::CommandSpec> {
+    let registry = command_registry();
+    registry.spec(registry.resolve(recorded?)?)
+}
+
 /// The command a registered key names. Every registered command is still
 /// declared by this enum, and this table is how a key reaches it.
-fn legacy_command(key: CommandKey) -> Option<Command> {
+pub(in crate::workbench) fn legacy_command(key: CommandKey) -> Option<Command> {
     static BY_KEY: LazyLock<HashMap<CommandKey, Command>> = LazyLock::new(|| {
         let mut commands = HashMap::with_capacity(COMMAND_REGISTRY.len());
         for command in COMMAND_REGISTRY {

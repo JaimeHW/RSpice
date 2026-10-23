@@ -5,12 +5,17 @@
 //! workspace, page, and selection — before anything navigates, so a hop that
 //! cannot land says why instead of arriving somewhere with the object lost.
 
+use crate::state::command_catalog::CommandKey;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
 use crate::workbench::state::ConsoleChannel;
 use crate::workbench::state::plan_provenance::{self, ProducingPlanHop};
 
 use super::vocabulary::Command;
+
+/// The command that opens the selected run in Results, which a notice's
+/// offer and the newest-run hop raise by key.
+const OPEN_RUN_IN_RESULTS: CommandKey = Command::OpenRunInResults.key();
 
 /// Whether "Export dataset…" has a displayed view to write.
 ///
@@ -50,7 +55,7 @@ pub(crate) fn open_newest_retained_run(app: &mut RSpiceApp) -> bool {
     if !app.state.model.simulation.select_run(index) {
         return false;
     }
-    Command::OpenRunInResults.execute(app);
+    app.execute_command_key(OPEN_RUN_IN_RESULTS);
     true
 }
 
@@ -69,7 +74,7 @@ pub(crate) fn perform_notification_action(app: &mut RSpiceApp, action: Notificat
                 .simulation
                 .select_run_by_sequence(run_sequence)
             {
-                Command::OpenRunInResults.execute(app);
+                app.execute_command_key(OPEN_RUN_IN_RESULTS);
             } else {
                 app.state
                     .prompt(crate::workbench::AppState::retired_run_message(

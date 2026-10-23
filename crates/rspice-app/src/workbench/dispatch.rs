@@ -9,21 +9,44 @@
 //! command's owner carry it out, through the shell's legacy table
 //! [`Command::run_legacy_arm`].
 //!
-//! The dispatcher is handed a command value. A key names a command only when
-//! the registry lists it, so a dispatch by key reaches exactly the listed
-//! commands; the few the registry leaves out are raised only by a route that
-//! holds the value. Placing a kind the registry does not list answers the
-//! shared id `place-component`, which names no command, so Repeat after it
-//! does nothing. Placing a port answers the pin command's id and runs that
-//! command.
+//! The dispatcher is handed a command value or a key. A key names a command
+//! only when the registry lists it, so a dispatch by key reaches exactly the
+//! listed commands; the few the registry leaves out are raised only by a
+//! route that holds the value. Placing a kind the registry does not list
+//! answers the shared id `place-component`, which names no command, so Repeat
+//! after it does nothing. Placing a port answers the pin command's id and
+//! runs that command.
 
+use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::PlatformState;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{active_schematic_editor, command_edits_schematic};
 use crate::workbench::documents::text_editor_commands::SourceEditorRequest;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
+
+/// The dispatcher by key: where a key becomes the command it names.
+impl RSpiceApp {
+    /// Carry out the command `key` names behind the prologue every command
+    /// shares. A key no command answers to does nothing.
+    pub(crate) fn execute_command_key(&mut self, key: CommandKey) {
+        if let Some(command) = legacy_command(key) {
+            command.dispatch(self);
+        }
+    }
+
+    /// Whether the command `key` names is available here, as the shortcut
+    /// resolver asks it before a chord may fire.
+    pub(crate) fn command_key_available(&self, key: CommandKey) -> bool {
+        legacy_command(key).is_some_and(|command| command.availability(self).is_available())
+    }
+
+    /// Whether the command `key` names would run if raised now.
+    pub(crate) fn command_key_enabled(&self, key: CommandKey) -> bool {
+        legacy_command(key).is_some_and(|command| command.is_enabled(self))
+    }
+}
 
 impl Command {
     /// Carry this command out behind the prologue every command shares.

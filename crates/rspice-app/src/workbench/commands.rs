@@ -451,15 +451,6 @@ impl Command {
         )
     }
 
-    /// The command Repeat last command would run.
-    pub(crate) fn last_repeatable(app: &RSpiceApp) -> Option<Self> {
-        app.state
-            .workbench
-            .last_repeatable_command
-            .as_deref()
-            .and_then(Self::from_stable_id)
-    }
-
     /// Shared by menu/palette dispatch and the keyboard dispatcher.
     pub(crate) fn commits_inspector_edit(self) -> bool {
         command_edits_schematic(self)
@@ -1311,11 +1302,15 @@ impl Command {
                 crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
             }
             Self::FindReplace => crate::workbench::app::open_find_replace(&mut app.state),
-            Self::RepeatLastCommand => match Self::last_repeatable(app) {
-                Some(command) if command.is_enabled(app) => command.execute(app),
-                Some(command) => app.state.prompt(format!(
+            Self::RepeatLastCommand => match vocabulary::last_repeatable(
+                app.state.workbench.last_repeatable_command.as_deref(),
+            ) {
+                Some(spec) if app.command_key_enabled(spec.key) => {
+                    app.execute_command_key(spec.key);
+                }
+                Some(spec) => app.state.prompt(format!(
                     "{} cannot run here, so it was not repeated.",
-                    command.spec().label
+                    spec.label
                 )),
                 None => app.state.prompt("No placement or edit has run yet."),
             },

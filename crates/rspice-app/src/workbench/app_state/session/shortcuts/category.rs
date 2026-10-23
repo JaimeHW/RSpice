@@ -1,7 +1,9 @@
 //! Shortcut categories, for grouping in the preferences editor and the
 //! keyboard reference.
 
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
+use crate::state::command_catalog::CommandKey;
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::CommandFlags;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShortcutCategory {
@@ -46,10 +48,13 @@ impl ShortcutCategory {
     /// Lossless help projection from the canonical command metadata. Commands
     /// are categorized from `CommandSpec::group`; this deliberately avoids a
     /// second hand-maintained command inventory drifting from the registry.
-    pub(crate) fn commands(self) -> impl Iterator<Item = Command> {
-        COMMAND_REGISTRY.iter().copied().filter(move |command| {
-            command.palette_visible() && self.matches_group(command.spec().group)
-        })
+    pub(crate) fn commands(self) -> impl Iterator<Item = CommandKey> {
+        command_registry()
+            .ordered()
+            .filter(move |spec| {
+                spec.flags.contains(CommandFlags::PALETTE_VISIBLE) && self.matches_group(spec.group)
+            })
+            .map(|spec| spec.key)
     }
 
     const fn matches_group(self, group: &str) -> bool {
@@ -82,13 +87,14 @@ impl ShortcutCategory {
 mod tests {
     use super::*;
     use crate::state::command_catalog::CommandPlatform;
+    use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command};
 
     #[test]
     fn command_reference_is_a_lossless_projection_of_discoverable_commands() {
         let mut seen = Vec::new();
         for category in ShortcutCategory::ALL {
             for command in category.commands() {
-                assert!(COMMAND_REGISTRY.contains(&command));
+                assert!(command_registry().order().contains(&command));
                 assert!(!seen.contains(&command), "duplicate help row: {command:?}");
                 seen.push(command);
             }
@@ -97,7 +103,7 @@ mod tests {
         for command in COMMAND_REGISTRY {
             if command.palette_visible() {
                 assert!(
-                    seen.contains(command),
+                    seen.contains(&command.key()),
                     "discoverable command missing from reference: {command:?}"
                 );
             }

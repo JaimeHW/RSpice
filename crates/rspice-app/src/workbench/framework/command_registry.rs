@@ -62,6 +62,10 @@ impl CommandFlags {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CommandSpec {
     pub(crate) key: CommandKey,
+    /// What menus, the palette and the shortcut editor call the command.
+    pub(crate) label: &'static str,
+    /// The heading the command is listed under.
+    pub(crate) group: &'static str,
     pub(crate) flags: CommandFlags,
     /// The context the command's keys act in.
     pub(crate) context: ShortcutContext,
@@ -125,6 +129,18 @@ impl Registry {
         self.by_key
             .get(key.as_str())
             .map(|&index| &self.specs[index])
+    }
+
+    /// What every ordered command declares, in order.
+    pub(crate) fn ordered(&self) -> impl Iterator<Item = &CommandSpec> {
+        self.order.iter().filter_map(|key| self.spec(*key))
+    }
+
+    /// What the command under `key` is called; the key itself for a key no
+    /// command declares.
+    #[must_use]
+    pub(crate) fn label(&self, key: CommandKey) -> &'static str {
+        self.spec(key).map_or(key.as_str(), |spec| spec.label)
     }
 
     /// Whether the registry holds together: every key is declared by exactly
@@ -191,6 +207,8 @@ mod tests {
     fn spec(key: &'static str, owner: CommandOwner) -> CommandSpec {
         CommandSpec {
             key: CommandKey::new(key),
+            label: key,
+            group: "",
             flags: CommandFlags::NONE,
             context: ShortcutContext::Global,
             bindings: NO_BINDINGS,
