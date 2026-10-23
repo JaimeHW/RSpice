@@ -86,7 +86,7 @@ array_lval_select4a	vlg	passed	L4	refused:force	testbench gap: no defines (__ICA
 array_lval_select4b	vlg	ce	L4	refused:force	Semantic error: Unsupported feature: a `force` names `array1`, a memory or one of its words; IEEE 1364-2005 section 9.3 does not allow either as its target
 array_lval_select5	vlg	passed	L1	pass	testbench gap: no defines (__ICARUS__); PASSED
 array_lval_select6	vlg	passed	L1	refused:for	Parse error: Unsupported module item: for
-array_packed_2d	vlg	gold	L1	fail	compile error: Parse error: Expected declared name, found LBracket
+array_packed_2d	vlg	gold	L1	fail	compile error: Parse error: Expected declared name, found '['
 array_select	vlg	passed	L1	pass	PASSED
 array_select_a	vlg	passed	L5	pass	PASSED
 array_word_check	vlg	gold	L5	fail	compile error: Semantic error: Invalid expression: argument 2 of `$dumpvars` names a module instance, block or signal, not an expression
@@ -118,7 +118,7 @@ attrib06_operator_suffix	vlg	passed	L1	fail	compile error: Parse error: Invalid 
 attrib07_func_call	vlg	passed	L3	pass	PASSED
 attrib08_mod_inst	vlg	passed	L1	pass	PASSED
 attrib09_case	vlg	passed	L1	pass	PASSED
-attrib_expr	vlg	passed	L4	fail	compile error: Parse error: Expected Star, found Plus
+attrib_expr	vlg	passed	L4	fail	compile error: Parse error: Expected '*', found '+'
 automatic_error1	vlg	ce	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `auto_task` is not declared in this module or its generated ancestors or enclosing instances
 automatic_error10	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: a `force` or `release` cannot use `local`, a variable of the automatic task `auto_task` (IEEE 1364-2005 section 10.2.1)
 automatic_error2	vlg	ce	L3	pass	language error: Semantic error: Invalid expression: a nonblocking assignment cannot write `local`, a variable of the automatic task `auto_task` (IEEE 1364-2005 section 10.2.1)
@@ -147,9 +147,9 @@ br1008	vlg	gold	L1	fail	differs from the gold file at line 1 (1 lines against 1)
 br1015a	vlg	ce	-	excluded:systemverilog:^=	
 br1019	vlg	passed	L4	pass	PASSED
 br1027	vlg	passed	L3	pass	PASSED
-br1027a	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found Identifier
-br1027c	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found Integer
-br1027e	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found Integer
+br1027a	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found 'a'
+br1027c	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found 'integer'
+br1027e	vlg	ce	L3	pass	language error: Parse error: Expected `input`, `output` or `inout` before a routine argument declaration (IEEE 1364-2005 section 10.2.1), found 'integer'
 br1029a	vlg	gold	L1	deviation	IEEE 1364-2005 §4.8.2: a real converts to an integer by rounding, so %0d of -0.4 prints 0; Icarus prints -0 (line 7, the only difference)
 br1029b	vlg	gold	L3	deviation	IEEE 1364-2005 §4.8.2: a real converts to an integer by rounding, so %0d of -0.4 prints 0; Icarus prints -0 (line 7, the only difference)
 br1029c	vlg	ce	L1	refused:$signed	Semantic error: Unsupported feature: `$signed` takes one integral argument
@@ -193,7 +193,7 @@ br999	vlg	passed	L1	pass	PASSED
 br_gh103	vlg	passed	L1	pass	PASSED
 br_gh11	vlg	co	L1	fail	compile error: Parse error: Invalid expression
 br_gh1117	vlg	ce	L1	refused:generate-region	Parse error: Unsupported generate region: IEEE 1364-2005 section 12.4 nests generate constructs directly, without reopening a region
-br_gh1173	vlg	ce	L4	pass	language error: Parse error: Expected port name, found RParen
+br_gh1173	vlg	ce	L4	pass	language error: Parse error: Expected port name, found ')'
 br_gh1174a	vlg	ce	L1	refused:case	Parse error: Unsupported module item: case
 br_gh1174b	vlg	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `id_8`, which is a Parameter of the continuous-domain module and is not a discrete-domain assignment ...
 br_gh1175a	vlg	ce	L7	fail	compiled without error; nothing to run: module `ivltests/br_gh1175a.v` declares no digital nets, processes or drivers
@@ -219,13 +219,13 @@ br_gh127e	vlg	gold	L1	pass	matches the gold file
 br_gh127f	vlg	gold	L1	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `out`, which module `copy` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input ...
 br_gh13	vlg	passed	L1	pass	PASSED
 br_gh14	vlg	passed	L1	pass	PASSED
-br_gh142	vlg	ce	L1	fail	internal error: Code generation error: canonical IR validation failed: Error HirValidation at 0:73-74: HIR unknown identifier 'b'
+br_gh142	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'b'
 br_gh15	vlg	passed	L1	pass	PASSED
-br_gh152	vlg	ce	L1	pass	language error: Parse error: Expected RParen, found Identifier
-br_gh156	vlg	gold	L5	fail	compile error: Parse error: Expected Semicolon, found Identifier
+br_gh152	vlg	ce	L1	pass	language error: Parse error: Expected ')', found 'n1'
+br_gh156	vlg	gold	L5	fail	compile error: Parse error: Expected ';', found 'tau'
 br_gh157	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam dut.x` assigns `x`, a `localparam` of module `dut`; IEEE 1364-2005 section 12.2 lets no override reach a local par...
 br_gh162	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
-br_gh163	vlg	ce	L3	pass	language error: Parse error: Expected Semicolon, found Identifier
+br_gh163	vlg	ce	L3	pass	language error: Parse error: Expected ';', found 'i'
 br_gh18	vlg	passed	L1	pass	PASSED
 br_gh19	vlg	passed	L1	pass	PASSED
 br_gh198	vlg	gold	L1	pass	matches the gold file
@@ -237,7 +237,7 @@ br_gh209	vlg	gold	L5	pass	work/br_gh209.dat matches the gold file
 br_gh22	vlg	passed	L1	pass	PASSED
 br_gh244a	vlg	passed	L1	pass	PASSED
 br_gh244b	vlg	passed	L1	pass	PASSED
-br_gh25a	vlg	ce	L3	pass	language error: Parse error: Unexpected token: Function
+br_gh25a	vlg	ce	L3	pass	language error: Parse error: Unexpected token: 'function'
 br_gh25b	vlg	ce	L3	refused:task	Parse error: Verilog-AMS digital construct not yet supported: `task`
 br_gh26	vlg	ce	L1	fail	compiled without error; ran to quiescence
 br_gh277a	vlg	passed	L4	pass	PASSED
@@ -252,16 +252,16 @@ br_gh316a	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not suppo
 br_gh316b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 br_gh316c	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 br_gh33	vlg	gold	L3	pass	matches the gold file
-br_gh330	vlg	passed	L3	pass	PASSED
+br_gh330	vlg	passed	L3	fail	compile error: Parse error: Expression nesting exceeds the compiler's limit of 256 levels; every parenthesis, `?:` branch, unary operator and call argument is a level
 br_gh345	vlg	passed	L3	pass	PASSED
 br_gh356a	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 br_gh356b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
 br_gh37	vlg	passed	L1	pass	PASSED
-br_gh435	vlg	passed	L1	fail	compile error: Parse error: Unexpected token: SystemIdentifier
-br_gh484	vlg	passed	L4	fail	compile error: I/O error: Preprocessor error: line 6: Invalid include syntax: `MY_FILE(ivltests, br_gh484.vh)
-br_gh497a	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found LBracket
-br_gh497c	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found LBracket
-br_gh497e	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found LBracket
+br_gh435	vlg	passed	L1	fail	compile error: Parse error: Unexpected token: '$display'
+br_gh484	vlg	passed	L4	fail	compile error: line 6: Invalid include syntax: `MY_FILE(ivltests, br_gh484.vh)
+br_gh497a	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found '['
+br_gh497c	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found '['
+br_gh497e	vlg	passed	L4	fail	compile error: Parse error: Expected declared name, found '['
 br_gh508b	vlg	passed	L3	pass	PASSED
 br_gh515	vlg	passed	L1	pass	PASSED
 br_gh531	vlg	gold	-	excluded:systemverilog:|=	
@@ -276,11 +276,11 @@ br_gh632b	vlg	passed	-	excluded:flag-S
 br_gh632c	vlg	passed	L1	pass	PASSED
 br_gh674	vlg	passed	L3	refused:feature	Semantic error: Unsupported feature: parameter `av0`: an array declared inside a task or function has no executable form yet
 br_gh7	vlg	passed	L1	pass	PASSED
-br_gh732	vlg	gold	L6	fail	compile error: Parse error: Expected LParen, found Assign_
+br_gh732	vlg	gold	L6	fail	compile error: Parse error: Expected '(', found '='
 br_gh782c	vlg	passed	L4	pass	PASSED
 br_gh782d	vlg	passed	L4	pass	PASSED
 br_gh782e	vlg	passed	L4	pass	PASSED
-br_gh782f	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 3: unsupported `default_nettype `; supported net defaults are wire, tri and none
+br_gh782f	vlg	passed	L7	fail	compile error: line 3: unsupported `default_nettype `; supported net defaults are wire, tri and none
 br_gh788	vlg	gold	-	excluded:flag-gno-io-range-error	
 br_gh79	vlg	ce	L1	pass	language error: Lexer error: Invalid number literal: 4'b_: '4'b_' is missing digits after its base
 br_gh793	vlg	passed	L6	pass	PASSED
@@ -288,7 +288,7 @@ br_gh8	vlg	passed	L1	pass	PASSED
 br_gh827	vlg	gold	L1	pass	matches the gold file
 br_gh889	vlg	gold	-	excluded:sdf-annotate	
 br_gh9	vlg	passed	L1	pass	PASSED
-br_gh956a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: analog port 'o' of instance 'top.i1.i' connects discrete net 'x' without a connect module
+br_gh956a	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: analog port 'o' of instance 'top.i1.i' connects discrete net 'x' without a connect module; this compiler inserts connect mo...
 br_gh956b	vlg	ce	L7	pass	language error: Semantic error: Invalid contribution: cannot contribute to `y`, which is a `reg`; a continuous `assign` drives a net, so declare it `wire` or write it from an `...
 br_gh99a	vlg	passed	L1	pass	PASSED
 br_gh99b	vlg	passed	L1	pass	PASSED
@@ -338,7 +338,7 @@ casez3.10C	vlg	passed	L1	pass	PASSED
 casez3.10D	vlg	passed	L1	pass	PASSED
 casez3.10E	vlg	passed	L1	pass	PASSED
 cast_int	vlg	passed	L1	pass	PASSED
-check_constant_1	vlg	ce	L1	fail	compiled without error; nothing to run: module `ivltests/check_constant_1.v` declares no digital nets, processes or drivers
+check_constant_1	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'Value1'
 check_constant_10	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: `unpacked array Array` vector bounds must be compile-time constants within the supported signed 64-bit index range
 check_constant_11	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: a bit or part select must have constant bounds representable as signed 64-bit integers
 check_constant_12	vlg	ce	L1	pass	language error: Semantic error: Invalid expression: a part select of `In` must have constant bounds; IEEE 1364-2005 section 5.2.1 makes both bounds of a part select constant ex...
@@ -360,8 +360,8 @@ check_constant_8	vlg	ce	L1	refused:wire	Semantic error: Unsupported feature: `wi
 check_constant_9	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: `unpacked array Array` vector bounds must be compile-time constants within the supported signed 64-bit index range
 cmos	vlg	gold	L7	pass	matches the gold file
 cmpi	vlg	passed	L1	pass	PASSED
-comp1000	vlg	gold	L1	fail	differs from the gold file at line 91 (255 lines against 255)
-comp1001	vlg	gold	L1	fail	differs from the gold file at line 179 (255 lines against 255)
+comp1000	vlg	gold	L1	pass	matches the gold file
+comp1001	vlg	gold	L1	pass	matches the gold file
 comp1001_fail3	vlg	passed	L1	pass	PASSED
 comp1001_fail4	vlg	passed	L1	pass	PASSED
 comp1001_fail5	vlg	passed	L1	pass	PASSED
@@ -398,7 +398,7 @@ constfunc9	vlg	passed	L3	pass	PASSED
 constmult	vlg	passed	L1	pass	PASSED
 consttern	vlg	passed	L1	pass	PASSED
 contrib8.1	vlg	passed	L3	pass	PASSED
-contrib8.2	vlg	passed	L4	fail	testbench gap: no root selection (-s test); compile error: Parse error: Expected port name, found Dot
+contrib8.2	vlg	passed	L4	fail	testbench gap: no root selection (-s test); compile error: Parse error: Expected port name, found '.'
 contrib8.3	vlg	ce	L1	pass	language error: Semantic error: Undefined module: 'MUX_REG_8x8'
 contrib8.4	vlg	passed	L1	pass	PASSED
 contrib8.5	vlg	passed	L1	pass	PASSED
@@ -413,7 +413,7 @@ dangling_port	vlg	passed	L3	pass	PASSED
 dcomp1	vlg	gold	L3	pass	matches the gold file
 deassign3.4A	vlg	passed	L4	pass	PASSED
 decl_assign1	vlg	passed	L3	pass	PASSED
-def_nettype	vlg	passed	L7	fail	compile error: I/O error: Preprocessor error: line 118: unsupported `default_nettype tri0`; supported net defaults are wire, tri and none
+def_nettype	vlg	passed	L7	fail	compile error: line 118: unsupported `default_nettype tri0`; supported net defaults are wire, tri and none
 def_nettype_none	vlg	ce	L1	refused:implicit-net-declaration	Parse error: Unsupported implicit net declaration: `b` requires a net declaration under `default_nettype none`
 define1	vlg	passed	L1	pass	PASSED
 defparam	vlg	passed	L4	pass	testbench gap: no root selection (-s main); PASSED
@@ -525,9 +525,9 @@ ga_xor	vlg	passed	L4	pass	PASSED
 galan	vlg	passed	L1	pass	PASSED
 gate_connect1	vlg	passed	L1	pass	PASSED
 gate_connect2	vlg	ce	L4	refused:buf	Parse error: Unsupported `buf` gate array: a 32-bit terminal on an array of 1 instances; IEEE 1364-2005 section 7.1.6 requires one bit or one bit per instance
-gen_case_opt1	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
-gen_case_opt2	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
-gen_case_opt3	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: Semicolon
+gen_case_opt1	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: ';'
+gen_case_opt2	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: ';'
+gen_case_opt3	vlg	passed	L1	refused:module-item	Parse error: Unsupported module item: ';'
 gencrc	vlg	passed	-	excluded:systemverilog:byte	
 generate_case	vlg	passed	L4	refused:case	Parse error: Unsupported module item: case
 generate_case2	vlg	passed	L4	refused:case	Parse error: Unsupported module item: case
@@ -547,7 +547,7 @@ ifdef1	vlg	passed	L1	pass	PASSED
 ifdef2	vlg	passed	L1	pass	PASSED
 ifdef3	vlg	passed	L1	pass	PASSED
 ifdef4	vlg	passed	L1	pass	PASSED
-ifdef_fail	vlg	ce	L1	pass	language error: I/O error: Preprocessor error: line 0: Unclosed conditional (1 `endif missing)
+ifdef_fail	vlg	ce	L1	pass	language error: line 0: Unclosed conditional (1 `endif missing)
 include1	vlg	passed	L1	fail	nothing to run: module `ivltests/include1.v` declares no digital nets, processes or drivers
 include2	vlg	passed	L1	fail	nothing to run: module `ivltests/include2.v` declares no digital nets, processes or drivers
 include3	vlg	passed	L1	fail	nothing to run: module `ivltests/include3.v` declares no digital nets, processes or drivers
@@ -588,7 +588,7 @@ macro_args	vlg	co	-	excluded:flag-yivltests
 macro_comment1	vlg	passed	L1	pass	PASSED
 macro_comment2	vlg	passed	L1	pass	PASSED
 macro_comment3	vlg	passed	L1	pass	PASSED
-macro_comment_multiline	vlg	passed	L1	fail	compile error: Parse error: Unexpected token: Identifier
+macro_comment_multiline	vlg	passed	L1	fail	compile error: Parse error: Unexpected token: 'b'
 macro_redefinition	vlg	gold	-	excluded:flag-Wmacro-redefinition	
 macro_replacement	vlg	gold	-	excluded:flag-Wmacro-replacement	
 macsub	vlg	passed	L1	pass	PASSED
@@ -618,12 +618,12 @@ module_input_port_type	vlg	ce	L3	pass	language error: Parse error: Invalid port 
 module_nonansi_fail1	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail10	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail11	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
-module_nonansi_fail12	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Identifier
+module_nonansi_fail12	vlg	ce	L1	pass	language error: Parse error: Expected ';', found 'x'
 module_nonansi_fail13	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail2	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail3	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail4	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
-module_nonansi_fail5	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Identifier
+module_nonansi_fail5	vlg	ce	L1	pass	language error: Parse error: Expected ';', found 'x'
 module_nonansi_fail6	vlg	ce	L1	pass	language error: Parse error: Invalid port declaration
 module_nonansi_fail7	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
 module_nonansi_fail8	vlg	ce	L1	pass	language error: Semantic error: Duplicate symbol: 'x' already defined
@@ -639,7 +639,7 @@ module_nonansi_vec2	vlg	passed	-	excluded:systemverilog-systf:$bits
 module_nonansi_vec_fail1	vlg	ce	L1	fail	compiled without error; ran to quiescence
 module_nonansi_vec_fail2	vlg	ce	L1	fail	compiled without error; ran to quiescence
 module_nonansi_vec_fail3	vlg	ce	L1	fail	compiled without error; ran to quiescence
-module_output_port_list_def	vlg	passed	L4	fail	compile error: Parse error: Invalid expression
+module_output_port_list_def	vlg	passed	L4	pass	PASSED
 module_output_port_var1	vlg	passed	L3	pass	PASSED
 module_output_port_var2	vlg	passed	L3	pass	PASSED
 module_port_range_mismatch	vlg	ce	L1	fail	compiled without error; ran to quiescence
@@ -698,11 +698,11 @@ param_times	vlg	passed	L1	pass	PASSED
 parameter_1bit	vlg	passed	-	excluded:systemverilog-systf:$bits	
 parameter_in_generate1	vlg	ce	L1	refused:parameter	Parse error: Unsupported generate block: parameter declaration (use localparam); VAMS-2023 6.6 excludes module-interface declarations from a generate block
 parameter_no_default	vlg	ce	L4	pass	language error: Parse error: Expected a value for parameter `A`; IEEE 1364-2005 A.2.4 gives every parameter assignment one, found none
-parameter_omit1	vlg	ce	L4	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found Identifier
-parameter_omit2	vlg	ce	L4	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found Integer
+parameter_omit1	vlg	ce	L4	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found 'A'
+parameter_omit2	vlg	ce	L4	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found 'integer'
 parameter_omit3	vlg	ce	L4	pass	language error: Parse error: Expected a value for parameter `integer`; IEEE 1364-2005 A.2.4 gives every parameter assignment one, found none
-parameter_omit_invalid1	vlg	ce	L1	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found LBracket
-parameter_omit_invalid2	vlg	ce	L1	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found Signed
+parameter_omit_invalid1	vlg	ce	L1	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found '['
+parameter_omit_invalid2	vlg	ce	L1	pass	language error: Parse error: Expected `parameter`, which opens each declaration of a module parameter port list (IEEE 1364-2005 A.1.3), found 'signed'
 parameter_omit_invalid3	vlg	ce	L1	pass	language error: Parse error: Expected a value for parameter `signed`; IEEE 1364-2005 A.2.4 gives every parameter assignment one, found none
 parameter_override_invalid1	vlg	ce	L4	pass	language error: Semantic error: Undeclared symbol: 'Z'
 parameter_override_invalid2	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam i_a.Z`: module `a` declares no parameter `Z`
@@ -713,10 +713,10 @@ parameter_override_invalid6	vlg	ce	L4	pass	language error: Semantic error: Inval
 patch1268	vlg	passed	L1	pass	PASSED
 pca1	vlg	passed	L1	pass	PASSED
 pic	vlg	gold	L5	racy	passes in reverse order only; differs from the gold file at line 1 (200 lines against 200)
-port-test2	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found Comma
+port-test2	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found ','
 port-test3	vlg	ce	L1	pass	language error: Semantic error: Port 'data' is declared both `inout` and `reg`; IEEE 1364-2005 section 12.3.3 lets only an output port be a variable
-port-test4a	vlg	ce	L1	pass	language error: Parse error: Expected port name, found RParen
-port-test4b	vlg	ce	L1	pass	language error: Parse error: Expected port name, found RParen
+port-test4a	vlg	ce	L1	pass	language error: Parse error: Expected port name, found ')'
+port-test4b	vlg	ce	L1	pass	language error: Parse error: Expected port name, found ')'
 port-test5	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (2 output lines)
 port-test6	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (2 output lines)
 port-test7	vlg	passed	L1	pass	PASSED
@@ -853,7 +853,7 @@ pr1701921	vlg	passed	L1	pass	PASSED
 pr1702593	vlg	gold	L1	pass	matches the gold file
 pr1703120	vlg	gold	L1	fail	differs from the gold file at line 2 (19 lines against 19)
 pr1703346	vlg	passed	L7	pass	PASSED
-pr1703959	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: net `c` joins discrete port `ZI` of instance `ia` and analog port `c` of instance `ib`, a discipline boundary inside the HD...
+pr1703959	vlg	passed	L7	pass	PASSED
 pr1704013	vlg	ce	L1	fail	compiled without error; ran to quiescence
 pr1704726a	vlg	ce	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
 pr1704726b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `name_func` is not declared in the selected scope
@@ -1044,7 +1044,7 @@ pr2138979	vlg	passed	L1	pass	PASSED
 pr2138979b	vlg	gold	L1	pass	matches the gold file
 pr2138979c	vlg	gold	L1	pass	matches the gold file
 pr2138979d	vlg	gold	L1	pass	matches the gold file
-pr2139593	vlg	passed	L4	pass	PASSED
+pr2139593	vlg	passed	L4	refused:feature	Semantic error: Unsupported feature: system function '$clog2' is not supported in analog code
 pr2146620	vlg	gold	L1	pass	matches the gold file
 pr2146620b	vlg	gold	L1	pass	matches the gold file
 pr2146620c	vlg	passed	L1	pass	PASSED
@@ -1226,7 +1226,7 @@ pr2991457b	vlg	passed	L1	pass	PASSED
 pr2994193	vlg	passed	L5	pass	PASSED
 pr2998515	vlg	passed	L1	pass	PASSED
 pr3011327	vlg	passed	L1	pass	PASSED
-pr3012758	vlg	passed	L1	fail	compile error: I/O error: Preprocessor error: line 3: Invalid include syntax: `TESTFILE
+pr3012758	vlg	passed	L1	fail	compile error: line 3: Invalid include syntax: `TESTFILE
 pr3015421	vlg	ce	-	excluded:systemverilog:int	
 pr3022502	vlg	passed	L1	pass	PASSED
 pr3024131	vlg	passed	L1	pass	PASSED
@@ -1255,17 +1255,17 @@ pr3098439a	vlg	passed	L5	pass	PASSED
 pr3098439b	vlg	passed	L5	pass	PASSED
 pr3103880	vlg	passed	L5	pass	PASSED
 pr3104254	vlg	passed	L1	pass	PASSED
-pr3112073a	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found Identifier
+pr3112073a	vlg	ce	L1	pass	language error: Parse error: Expected ';', found 'a'
 pr312	vlg	passed	L1	pass	PASSED
 pr3149494	vlg	gold	L1	pass	matches the gold file
 pr3190941	vlg	ce	L1	refused:feature	Semantic error: Unsupported feature: port `x` of instance `foo` is connected to an expression; IEEE 1364-2005 section 12.3.9 permits one, and this compiler conn...
 pr3190948	vlg	passed	L1	pass	PASSED
 pr3194155	vlg	gold	L7	fail	compile error: Semantic error: Invalid contribution: cannot contribute to `x`, which module `foo` declares an `input` port; IEEE 1364-2005 section 12.3.9.1 drives an input por...
 pr3197861	vlg	passed	-	excluded:systemverilog:var	
-pr3197917	vlg	passed	L4	fail	compile error: Parse error: Expected RParen, found LBracket
+pr3197917	vlg	passed	L4	fail	compile error: Parse error: Expected ')', found '['
 pr3270320	vlg	ce	L3	pass	language error: Semantic error: Undeclared symbol: 'missing'
 pr3284821	vlg	passed	L5	pass	PASSED
-pr3292735	vlg	passed	L1	fail	compile error: Parse error: Expected port name, found LParen
+pr3292735	vlg	passed	L1	pass	PASSED
 pr3296466a	vlg	passed	L7	pass	PASSED
 pr3296466b	vlg	passed	L7	refused:module-item	Parse error: Unsupported module item: connect
 pr3296466c	vlg	passed	L7	pass	PASSED
@@ -1298,10 +1298,10 @@ pr3571573	vlg	gold	L1	pass	matches the gold file
 pr3582052	vlg	passed	L1	pass	PASSED
 pr3587570	vlg	passed	L7	pass	PASSED
 pr3592746	vlg	passed	L3	pass	PASSED
-pr377	vlg	gold	L1	fail	compile error: Parse error: Expected port name, found Dot
+pr377	vlg	gold	L1	fail	compile error: Parse error: Expected port name, found '.'
 pr434	vlg	gold	L1	pass	matches the gold file
 pr445	vlg	passed	L1	pass	PASSED
-pr478	vlg	passed	L1	fail	compile error: Parse error: Expected Semicolon, found Directive
+pr478	vlg	passed	L1	fail	compile error: line 5:13: undefined macro `protect
 pr487	vlg	gold	L1	pass	matches the gold file
 pr492	vlg	gold	L1	pass	matches the gold file
 pr498b	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam foo`: module `main` declares no parameter `foo`
@@ -1452,7 +1452,7 @@ real_concat_invalid2	vlg	ce	L1	fail	compiled without error; nothing to run: modu
 real_delay	vlg	gold	-	excluded:sdf-annotate	
 real_events	vlg	gold	L3	refused:fork	Semantic error: Unsupported feature: `fork` inside an automatic task has no executable form yet: its branches would share the activation's frame
 real_force_rel	vlg	passed	L4	pass	PASSED
-real_invalid_ops	vlg	ce	L1	pass	language error: Parse error: Expected Semicolon, found BitNot
+real_invalid_ops	vlg	ce	L1	pass	language error: Parse error: Expected ';', found '~'
 real_logical	vlg	passed	L1	refused:feature	Semantic error: Unsupported feature: parameter 'pargi' requires an exact finite numeric elaboration value
 real_reg_force_rel	vlg	passed	L4	pass	PASSED
 recursive_func1	vlg	gold	L3	pass	matches the gold file
@@ -1580,7 +1580,7 @@ string1	vlg	passed	L1	pass	PASSED
 string10	vlg	gold	L1	pass	matches the gold file
 string11	vlg	gold	L1	pass	matches the gold file
 string12	vlg	passed	L1	pass	PASSED
-string13	vlg	passed	L5	fail	compile error: Parse error: Invalid expression
+string13	vlg	passed	L5	fail	no PASSED line (8 output lines)
 string14	vlg	passed	-	excluded:systemverilog-systf:$bits	
 string2	vlg	passed	L1	pass	PASSED
 string3	vlg	passed	L1	pass	PASSED
@@ -1636,7 +1636,7 @@ task_noop	vlg	passed	L3	pass	PASSED
 task_noop2	vlg	co	L3	pass	compiled
 task_omemw2	vlg	passed	L3	pass	PASSED
 task_omemw3	vlg	co	L3	pass	compiled
-task_port_range_mismatch	vlg	ce	L3	pass	language error: Parse error: Expected Endtask, found SystemIdentifier
+task_port_range_mismatch	vlg	ce	L3	pass	language error: Parse error: Expected 'endtask', found '$display'
 task_port_size	vlg	passed	L3	pass	PASSED
 task_scope	vlg	passed	L4	pass	PASSED
 tern1	vlg	passed	L1	pass	PASSED
@@ -1715,7 +1715,7 @@ unary_xnor1	vlg	passed	L1	pass	PASSED
 unary_xnor2	vlg	passed	L1	pass	PASSED
 unary_xor	vlg	passed	L1	pass	PASSED
 uncon_drive	vlg	passed	L4	pass	PASSED
-undef	vlg	gold	L1	fail	compile error: Parse error: Invalid expression
+undef	vlg	gold	L1	fail	compile error: line 23:8: undefined macro `a (did you mean `b?)
 undef_lval_select	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 undef_lval_select2	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
 undef_lval_select3a	vlg	passed	L4	pass	testbench gap: no defines (__ICARUS__); PASSED
@@ -1727,7 +1727,7 @@ undef_lval_select4c	vlg	ce	L4	refused:feature	Semantic error: Unsupported featur
 undef_lval_select5	vlg	passed	L4	racy	testbench gap: no defines (__ICARUS__); passes in reverse order only; no PASSED line (6 output lines)
 undefined_shift	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (12 output lines)
 unnamed_block_var_decl	vlg	ce	L1	fail	compiled without error; ran to quiescence
-unnamed_fork_var_decl	vlg	ce	L3	pass	language error: Parse error: Expected a statement: an unnamed `fork` block declares nothing (IEEE 1364-2005 section 9.8.2), found Integer
+unnamed_fork_var_decl	vlg	ce	L3	pass	language error: Parse error: Expected a statement: an unnamed `fork` block declares nothing (IEEE 1364-2005 section 9.8.2), found 'integer'
 urand_r	vlg	gold	-	excluded:systemverilog:var	
 urand_r2	vlg	gold	-	excluded:systemverilog:var	
 urand_r3	vlg	gold	-	excluded:systemverilog:var	
@@ -1894,7 +1894,7 @@ br_gh383d	vvp	gold	-	excluded:flag-g2012
 br_gh440	vvp	ce	-	excluded:flag-g2009	
 br_gh483a	vvp	passed	-	excluded:systemverilog-systf:$bits	
 br_gh483b	vvp	passed	-	excluded:systemverilog-systf:$bits	
-br_gh552	vvp	ce	L1	pass	language error: Parse error: Expected Semicolon, found BitNot
+br_gh552	vvp	ce	L1	pass	language error: Parse error: Expected ';', found '~'
 br_gh687	vvp	gold	-	excluded:flag-g2009	
 br_gh703	vvp	passed	-	excluded:flag-g2009	
 br_gh710a	vvp	gold	-	excluded:flag-g2009	
@@ -1902,7 +1902,7 @@ br_gh710b	vvp	gold	-	excluded:flag-g2009
 br_gh710c	vvp	gold	-	excluded:flag-g2009	
 br_gh939	vvp	ce	-	excluded:flag-g2005-sv	
 br_gh99c	vvp	passed	-	excluded:flag-gverilog-ams	
-ca_time_real	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
+ca_time_real	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'rtm'
 case1	vvp	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
 case2	vvp	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
 case2-S	vvp	passed	-	excluded:flag-S	
@@ -1955,7 +1955,7 @@ fmonitor2	vvp	gold	L5	pass	matches the gold file
 fread-error	vvp	-	-	excluded:type-EF	
 line_directive	vvp	gold	-	excluded:flag-g2009	
 localparam_type	vvp	gold	L3	refused:realtime	Parse error: Verilog-AMS digital construct not yet supported: `realtime`
-macro_str_esc	vvp	gold	L4	fail	compile error: Parse error: Invalid expression
+macro_str_esc	vvp	gold	L4	fail	compile error: line 8:47: compiler directive `celldefine must begin its line; this compiler reads directives only at the start of a line
 memsynth1	vvp	-	-	excluded:type-NI	
 memsynth2	vvp	passed	L1	pass	PASSED
 memsynth2-synth	vvp	-	-	excluded:type-NI	
@@ -1991,16 +1991,16 @@ partsel_invalid_idx6	vvp	ce	L4	pass	language error: Semantic error: Undeclared s
 partsel_outside_const	vvp	passed	L4	fail	compile error: Lexer error: Invalid number literal: 'x: ''x' has invalid base 'x'
 partsel_outside_expr	vvp	passed	L4	fail	compile error: Lexer error: Invalid number literal: 'x: ''x' has invalid base 'x'
 partsel_reversed_idx1	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: cannot contribute to `x`, which is a `reg`; a continuous `assign` drives a net, so declare it `wire` or write it from an `...
-partsel_reversed_idx2	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found LBracket
+partsel_reversed_idx2	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found '['
 partsel_reversed_idx3	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: part select `x[0:1]` runs against the direction `x` was declared in, `[1:0]`; IEEE 1364-2005 section 5.2.1 makes the left in...
-partsel_reversed_idx4	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found LBracket
+partsel_reversed_idx4	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found '['
 partsel_reversed_idx5	vvp	ce	L1	pass	language error: Semantic error: Invalid expression: part select `x[0:1]` runs against the direction `x` was declared in, `[1:0]`; IEEE 1364-2005 section 5.2.1 makes the left in...
-partsel_reversed_idx6	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found LBracket
+partsel_reversed_idx6	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found '['
 pr1388974	vvp	passed	L1	pass	PASSED
 pr1701890	vvp	gold	L3	pass	matches the gold file
-pr1864110a	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
-pr1864110b	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
-pr1864115	vvp	gold	L1	fail	compile error: Parse error: Expected Semicolon, found Identifier
+pr1864110a	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'plus'
+pr1864110b	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'minus'
+pr1864115	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'result'
 pr1916261a	vvp	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
 pr2509349a	vvp	gold	-	excluded:nonstandard-systf:$readmempath	
 pr2509349b	vvp	gold	-	excluded:nonstandard-systf:$readmempath	
@@ -2025,7 +2025,7 @@ sf_countones_fail	vvp	-	-	excluded:type-EF
 sf_isunknown_fail	vvp	-	-	excluded:type-EF	
 sf_onehot0_fail	vvp	-	-	excluded:type-EF	
 sf_onehot_fail	vvp	-	-	excluded:type-EF	
-shift6	vvp	passed	L4	fail	compile error: Parse error: Invalid expression
+shift6	vvp	passed	L4	pass	PASSED
 single_element_array	vvp	passed	L1	pass	PASSED
 struct_enum_partsel	vvp	passed	-	excluded:flag-g2009	
 struct_field_left_right	vvp	passed	-	excluded:flag-g2009	
