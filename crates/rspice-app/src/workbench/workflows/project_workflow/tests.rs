@@ -603,6 +603,7 @@ fn seed_specialized_viewer_caches(state: &mut AppState) {
     );
 
     let provenance = state
+        .model
         .active_specialized_viewer_cache_provenance()
         .expect("default test project has an active retained analysis");
     for viewer in [

@@ -210,6 +210,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState) {
     // moving the data version, and a bare ordinal would hand the new
     // selection the previous one's coefficients.
     let owner = state
+        .model
         .active_specialized_viewer_cache_provenance()
         .map_or(0, |provenance| {
             use std::hash::{Hash, Hasher};
@@ -376,6 +377,7 @@ mod tests {
 
         // The cached component array has to have moved with the selection.
         let owner = state
+            .model
             .active_specialized_viewer_cache_provenance()
             .expect("the reloaded cache names its owner");
         let mut hasher = std::collections::hash_map::DefaultHasher::new();

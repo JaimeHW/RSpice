@@ -440,7 +440,7 @@ impl SimulationController {
     ) -> Option<SpecializedViewerCacheProvenance> {
         let analysis = state.model.simulation.active_analysis()?;
         Self::analysis_supports_transient_derivation(analysis.analysis_type)
-            .then(|| state.active_specialized_viewer_cache_provenance())
+            .then(|| state.model.active_specialized_viewer_cache_provenance())
             .flatten()
     }
 
@@ -748,7 +748,10 @@ mod tests {
         run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
         state.model.simulation.retained.runs = vec![run].into();
         assert!(state.model.simulation.select_run(0));
-        let stale = state.active_specialized_viewer_cache_provenance().unwrap();
+        let stale = state
+            .model
+            .active_specialized_viewer_cache_provenance()
+            .unwrap();
         let mut controller = SimulationController::new();
         let (sender, cancelled) = install_fft_task(&mut controller, stale);
 
@@ -758,7 +761,10 @@ mod tests {
         replacement.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "TRAN"));
         state.model.simulation.retained.runs = vec![replacement].into();
         assert!(state.model.simulation.select_run(0));
-        let active = state.active_specialized_viewer_cache_provenance().unwrap();
+        let active = state
+            .model
+            .active_specialized_viewer_cache_provenance()
+            .unwrap();
         assert_ne!(active, stale);
         seed_fft(&mut state, active);
         let retained = state

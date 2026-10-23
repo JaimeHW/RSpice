@@ -10,7 +10,7 @@ use rspice_results_ui::eye_diagram::view;
 
 /// Apply a timebase request to the immutable source selected by the document.
 pub fn inline_actions(ui: &mut Ui, state: &mut AppState) {
-    let owner = state.active_specialized_viewer_cache_provenance();
+    let owner = state.model.active_specialized_viewer_cache_provenance();
     let timebase = owner.map(|owner| state.eye_timebase_for(owner));
     let requested =
         view::inline_actions(ui, &mut state.results.analysis.eye_diagram_state, timebase);

@@ -11,7 +11,7 @@ mod run_events;
 use crate::state::{
     ActiveViewer, SpecializedViewerAnalysisIdentity, SpecializedViewerCacheProvenance,
 };
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
 /// Provenance for the mutable specialized result caches.
@@ -191,18 +191,6 @@ impl AppState {
         self.results.analysis.cache_authority = Default::default();
     }
 
-    /// Exact immutable result currently selected in the Results workspace.
-    pub(crate) fn active_specialized_viewer_cache_provenance(
-        &self,
-    ) -> Option<SpecializedViewerCacheProvenance> {
-        let run = self.model.simulation.active_run()?;
-        let analysis = self.model.simulation.active_analysis()?;
-        Some(SpecializedViewerCacheProvenance::for_analysis(
-            run.dataset_id,
-            analysis,
-        ))
-    }
-
     /// The bit period the eye folds this result at.
     ///
     /// Lives on `AppState` rather than in the simulation controller because
@@ -279,7 +267,7 @@ impl AppState {
     /// controller calls this after selection/polling to release the stale
     /// payload and keep every direct cache consumer safe as well.
     pub(crate) fn synchronize_specialized_viewer_cache_authority(&mut self) {
-        let active = self.active_specialized_viewer_cache_provenance();
+        let active = self.model.active_specialized_viewer_cache_provenance();
         for viewer in [
             ActiveViewer::BodePlot,
             ActiveViewer::Nyquist,
@@ -347,7 +335,8 @@ impl AppState {
     }
 
     fn specialized_viewer_cache_matches_active(&self, viewer: ActiveViewer) -> bool {
-        self.active_specialized_viewer_cache_provenance()
+        self.model
+            .active_specialized_viewer_cache_provenance()
             .is_some_and(|active| self.specialized_viewer_cache_authority(viewer) == Some(active))
     }
 
@@ -384,7 +373,7 @@ impl AppState {
                     && self.results.analysis.eye_diagram_state.trace_count() > 0
                 {
                     ViewerCapability::available("Active analysis eye traces loaded")
-                } else if self.active_analysis_supports_eye_diagram() {
+                } else if self.model.active_analysis_supports_eye_diagram() {
                     ViewerCapability::available(
                         "Can derive eye data from active transient waveforms",
                     )
@@ -435,7 +424,7 @@ impl AppState {
                         .is_some_and(|data| !data.is_empty());
                 if self.specialized_viewer_cache_matches_active(viewer) && has_spectrum {
                     ViewerCapability::available("Active analysis FFT spectrum data loaded")
-                } else if self.active_analysis_supports_fft() {
+                } else if self.model.active_analysis_supports_fft() {
                     ViewerCapability::available("Can derive FFT from active transient waveforms")
                 } else {
                     ViewerCapability::unavailable("Requires sampled time-domain data for FFT")
@@ -472,6 +461,20 @@ impl AppState {
     pub fn viewer_is_available(&self, viewer: ActiveViewer) -> bool {
         self.viewer_capability(viewer).available
     }
+}
+
+impl Model {
+    /// Exact immutable result currently selected in the Results workspace.
+    pub(crate) fn active_specialized_viewer_cache_provenance(
+        &self,
+    ) -> Option<SpecializedViewerCacheProvenance> {
+        let run = self.simulation.active_run()?;
+        let analysis = self.simulation.active_analysis()?;
+        Some(SpecializedViewerCacheProvenance::for_analysis(
+            run.dataset_id,
+            analysis,
+        ))
+    }
 
     fn active_analysis_supports_eye_diagram(&self) -> bool {
         self.active_time_domain_waveform_len()
@@ -486,7 +489,7 @@ impl AppState {
     }
 
     fn active_time_domain_waveform_len(&self) -> Option<usize> {
-        let analysis = self.model.simulation.active_analysis()?;
+        let analysis = self.simulation.active_analysis()?;
         crate::simulation::SimulationController::analysis_supports_transient_derivation(
             analysis.analysis_type,
         )
@@ -585,6 +588,7 @@ mod tests {
         );
 
         let provenance = state
+            .model
             .active_specialized_viewer_cache_provenance()
             .expect("seeded active result");
         for viewer in [
