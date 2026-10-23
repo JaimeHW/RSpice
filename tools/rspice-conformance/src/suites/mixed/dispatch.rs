@@ -1387,7 +1387,9 @@ fn record_hdl_checks(
     }
 }
 
-/// Record the deck's `.ASSERT` reports on `observation`.
+/// Record the deck's `.ASSERT` reports on `observation`. Reports under one
+/// name merge in order: a vector file's checks report per output bit and per
+/// mismatch, all under the file's name.
 fn record_assertions(
     reports: &[rspice_core::analysis::AssertionReport],
     observation: &mut Observation,
@@ -1397,22 +1399,29 @@ fn record_assertions(
             Some(instance) => format!("{}[{instance}]", report.name),
             None => report.name.clone(),
         };
-        observation.assertions.insert(
-            name.to_ascii_lowercase(),
-            AssertCheck {
-                starts: report
-                    .violations
-                    .iter()
-                    .map(|violation| violation.start.unwrap_or(0.0))
-                    .collect(),
-                extremes: report
-                    .violations
-                    .iter()
-                    .map(|violation| violation.extreme.filter(|value| value.is_finite()))
-                    .collect(),
-                error: report.error.clone(),
-            },
+        let check = observation
+            .assertions
+            .entry(name.to_ascii_lowercase())
+            .or_insert_with(|| AssertCheck {
+                starts: Vec::new(),
+                extremes: Vec::new(),
+                error: None,
+            });
+        check.starts.extend(
+            report
+                .violations
+                .iter()
+                .map(|violation| violation.start.unwrap_or(0.0)),
         );
+        check.extremes.extend(
+            report
+                .violations
+                .iter()
+                .map(|violation| violation.extreme.filter(|value| value.is_finite())),
+        );
+        if check.error.is_none() {
+            check.error.clone_from(&report.error);
+        }
     }
 }
 

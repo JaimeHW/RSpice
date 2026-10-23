@@ -7,6 +7,8 @@ split	tran	interp	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.00000
 split	tran	native	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.000000e0, e=0.000000e0)
 vcd	tran	interp	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.000000e0, e=0.000000e0)
 vcd	tran	native	pass	codes (O6) [0] |a−e|=0.000e0 allowed 0.000e0 (a=0.000000e0, e=0.000000e0)
+vec	tran	interp	pass	tconv (O6) [0] |a−e|=1.059e-22 allowed 2.000e-12 (a=9.000000e-7, e=9.000000e-7)
+vec	tran	native	pass	tconv (O6) [0] |a−e|=1.059e-22 allowed 2.000e-12 (a=9.000000e-7, e=9.000000e-7)
 full	op	interp	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
 full	op	native	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)
 ports	op	interp	pass	op (O5-O1) [4] |a−e|=7.194e-14 allowed 2.800e-6 (a=1.800000e0, e=1.800000e0)

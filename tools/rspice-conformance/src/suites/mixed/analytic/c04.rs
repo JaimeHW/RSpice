@@ -14,6 +14,7 @@ pub const REGISTRY: Registry = &[
     ("codes", codes),
     ("tconv", tconv),
     ("known", known),
+    ("vec", vec),
     ("acc", acc),
     ("nz", nz),
 ];
@@ -57,6 +58,13 @@ fn tconv(_: &Context<'_>) -> Result<Expected, String> {
 /// `b7` is driven from sar8's initial block onward (`net/sar8.v`), so the
 /// check that it is never X or Z reports no violation.
 fn known(_: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![0.0]))
+}
+
+/// `net/c04.vec` expects `S_k` on b7..b0 after conversion k, which is the
+/// code the register ends it with ([`codes`]), so its checks report no
+/// violation.
+fn vec(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![0.0]))
 }
 

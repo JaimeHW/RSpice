@@ -1,0 +1,10 @@
+* C4 variant vec (RSpice-authored; corpus design C4): the SAR register
+* (net/sar8.v) clocked and started by the input columns of an HSPICE digital
+* vector file (net/c04.vec), whose output columns check its code on b7..b0
+* through the .ASSERT report. Each input bit is an ideal piecewise-linear
+* source, as HSPICE realizes one, so clk and start reach the register through
+* the same auto-bridge as the ports variant's pulse sources. A vector file is
+* read from the root deck's directory, so the path is spelled from deck/, as
+* the .include lines are.
+.vec '../net/c04.vec'
+xsar clk start cmp samp eoc b7 b6 b5 b4 b3 b2 b1 b0 sar8

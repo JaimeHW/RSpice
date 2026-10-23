@@ -33,11 +33,19 @@ name = "vcd"
 families = ["spice", "xspice", "va-runtime", "vams-digital"]
 today = "runs"
 
+# vec: ports with clk and start driven by the input columns of an HSPICE
+# digital vector file (net/c04.vec, through net/sar_vec.cir), whose output
+# columns check the code on b7..b0 after each conversion.
+[[variant]]
+name = "vec"
+families = ["spice", "va-runtime", "vams-digital"]
+today = "runs"
+
 # Budgets are about five times the slower route's measured case time (at
 # least 30 s), so a hang surfaces quickly.
 [[analysis]]
 id = "tran"
-variants = ["full", "ports", "split", "vcd"]
+variants = ["full", "ports", "split", "vcd", "vec"]
 oracles = ["O6", "O2", "O5"]
 timeout_s = 520
 phase = "P2"
