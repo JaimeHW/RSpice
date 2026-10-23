@@ -69,7 +69,22 @@ pub(crate) struct HostCheckpoint {
     /// sections 6.1.3 and 7.14); absent when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pending_drives: Option<PendingDrivesSection>,
+    /// The `specify` state (IEEE 1364-2005 section 14): when each module
+    /// path's source last changed; absent for a design with no path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    specify: Option<SpecifySection>,
 }
+
+/// The specify section, tagged with its own version: each module path's
+/// last counted source change, in plan order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SpecifySection {
+    version: u32,
+    path_changes: Vec<u64>,
+}
+
+const SPECIFY_SECTION_VERSION: u32 = 1;
 
 /// The pending drives section, tagged with its own version: each pending
 /// update's due tick, owner and value, in due order.
@@ -350,6 +365,14 @@ impl DigitalHost {
                     version: PENDING_DRIVES_SECTION_VERSION,
                     updates,
                 }),
+            specify: self
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.paths.as_ref())
+                .map(|paths| SpecifySection {
+                    version: SPECIFY_SECTION_VERSION,
+                    path_changes: paths.image().to_vec(),
+                }),
             delayed: self
                 .delayed_updates
                 .iter()
@@ -534,6 +557,18 @@ impl DigitalHost {
             }
             Some(section) => restored.restore_pending_drives(&section.updates)?,
             None => {}
+        }
+        let paths = restored
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.paths.as_mut());
+        match (&image.specify, paths) {
+            (Some(section), _) if section.version != SPECIFY_SECTION_VERSION => {
+                return Err("host specify section version differs".into());
+            }
+            (Some(section), Some(paths)) => paths.restore(&section.path_changes)?,
+            (None, None) => {}
+            _ => return Err("host specify section and the design's module paths disagree".into()),
         }
         restored.elaboration_closed = true;
         if let Some(section) = &image.effects {
@@ -1167,6 +1202,87 @@ endmodule
                 .restore_checkpoint(&bad, HostCheckpointLimits::default())
                 .unwrap_err();
             assert!(error.contains("drive"), "{error}");
+        }
+    }
+
+    /// IEEE 1364-2005 section 14.4: an image taken after a module path's
+    /// source changed, while the distributed delay behind the destination is
+    /// still pending, carries that change in its `specify` section, so the
+    /// restored host still counts the path delay from it: `y` follows `a` 4
+    /// after `a` changes at 10, not at once when the 3 of the assignment
+    /// ends. An image whose section disagrees with the design is refused.
+    #[test]
+    fn host_checkpoint_resumes_a_module_path_from_its_source_change() {
+        const PATH: &str = "`timescale 1ns/1ns\nmodule p(input a, output y);\n  \
+             assign #3 y = a;\n  specify (a => y) = (4, 6); endspecify\nendmodule\n";
+        let mut original = host(PATH);
+        original.start().unwrap();
+        force(&mut original, "a", 1, 0, 1);
+        original.advance_to(7).unwrap();
+        force(&mut original, "a", 1, 1, 10);
+        original.advance_to(11).unwrap();
+        let saved = transport(&image(&original));
+        let section = serde_json::to_value(&saved).unwrap()["specify"].clone();
+        assert_eq!(section, json!({"version": 1, "path_changes": [10]}));
+        let mut restored = host(PATH);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            let y = |host: &DigitalHost| host.read(signal(host, "y")).unwrap().spelling();
+            assert_eq!(y(host), "0");
+            assert_eq!(host.next_tick(), Some(13));
+            host.advance_to(13).unwrap();
+            assert_eq!(y(host), "0");
+            assert_eq!(host.next_tick(), Some(14));
+            host.advance_to(14).unwrap();
+            assert_eq!(y(host), "1");
+        }
+        let base = serde_json::to_value(&saved).unwrap();
+        for edit in [
+            |value: &mut Value| value["specify"] = Value::Null,
+            |value: &mut Value| value["specify"]["path_changes"] = json!([10, 10]),
+            |value: &mut Value| value["specify"]["version"] = json!(2),
+        ] {
+            let mut value = base.clone();
+            edit(&mut value);
+            let bad: HostCheckpoint = serde_json::from_value(value).unwrap();
+            let error = host(PATH)
+                .restore_checkpoint(&bad, HostCheckpointLimits::default())
+                .unwrap_err();
+            assert!(error.contains("specify"), "{error}");
+        }
+    }
+
+    /// `hdl_path_delays=no`: a host that leaves its module paths out writes
+    /// no `specify` section, and a host restored from its image, like one
+    /// started anew from it, leaves them out as well: `y` follows `a` 3
+    /// after it changes at 10 (the assignment's delay), not 4.
+    #[test]
+    fn host_checkpoint_keeps_module_paths_left_out() {
+        const PATH: &str = "`timescale 1ns/1ns\nmodule p(input a, output y);\n  \
+             assign #3 y = a;\n  specify (a => y) = (4, 6); endspecify\nendmodule\n";
+        let mut original = host(PATH);
+        original.drop_path_delays();
+        assert!(original.fresh().path_delays_dropped());
+        original.start().unwrap();
+        force(&mut original, "a", 1, 0, 1);
+        original.advance_to(7).unwrap();
+        force(&mut original, "a", 1, 1, 10);
+        original.advance_to(11).unwrap();
+        let saved = transport(&image(&original));
+        assert!(serde_json::to_value(&saved).unwrap()["specify"].is_null());
+        let mut restored = host(PATH);
+        restored.drop_path_delays();
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            assert_eq!(host.next_tick(), Some(13));
+            host.advance_to(13).unwrap();
+            assert_eq!(host.read(signal(host, "y")).unwrap().spelling(), "1");
         }
     }
 

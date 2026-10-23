@@ -723,7 +723,7 @@ pub enum HdlSchedule {
 }
 
 /// How a self-checking testbench run is configured (design P2 section 2.3).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct HdlTestbenchOptions {
     /// Where relative HDL file paths resolve; the working directory when
     /// absent.
@@ -740,14 +740,32 @@ pub struct HdlTestbenchOptions {
     pub seed: u32,
     /// Which value of each min:typ:max expression elaboration keeps.
     pub delay_select: crate::config::HdlDelaySelect,
-    /// Honour `specify` blocks (P2 lane L6).
-    pub specify: bool,
+    /// Delay module path destinations (`hdl_path_delays`, IEEE 1364-2005
+    /// section 14). On by default.
+    pub path_delays: bool,
     /// `` `include `` search directories.
     pub include_dirs: Vec<std::path::PathBuf>,
     pub schedule: HdlSchedule,
     /// The run ends at the first tick past this one. `None` is the exact tick
     /// range's limit.
     pub tick_ceiling: Option<u64>,
+}
+
+impl Default for HdlTestbenchOptions {
+    fn default() -> Self {
+        Self {
+            run_directory: None,
+            unrestricted_io: false,
+            write_files: false,
+            plusargs: Vec::new(),
+            seed: 0,
+            delay_select: crate::config::HdlDelaySelect::default(),
+            path_delays: true,
+            include_dirs: Vec::new(),
+            schedule: HdlSchedule::default(),
+            tick_ceiling: None,
+        }
+    }
 }
 
 /// The compiler's spelling of a run's min:typ:max selection.
@@ -844,23 +862,6 @@ pub fn run_digital_testbench(
     sources: &[(std::path::PathBuf, String)],
     options: &HdlTestbenchOptions,
 ) -> Result<HdlTestbenchReport, DigitalRunError> {
-    // `specify` is refused until it is implemented. The token says which;
-    // the text names the feature.
-    let unavailable = |capability: &'static str, option: &str, reason: &str| {
-        Err(DigitalRunError::Unsupported(Box::new(
-            crate::UnsupportedCapabilityError::new(
-                capability,
-                format!("{option} is not supported yet: {reason}"),
-            ),
-        )))
-    };
-    if options.specify {
-        return unavailable(
-            "hdl.option.specify",
-            "`specify` timing",
-            "`specify` path delays and timing checks are not implemented",
-        );
-    }
     let mut unit = String::new();
     // Each file starts on its own line; a file's own line numbers are
     // recovered from where it starts in the unit.
@@ -991,6 +992,9 @@ pub fn run_digital_testbench(
             Arc::new(effects::files::HdlFileStore::new(target)),
         ),
     });
+    if !options.path_delays {
+        host.drop_path_delays();
+    }
     host.set_reverse_active(options.schedule == HdlSchedule::ReverseActive);
     host.start()?;
     let ceiling = options

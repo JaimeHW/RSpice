@@ -516,7 +516,8 @@ pub fn resolve_simulation_config(
 
 /// The deck's HDL options (design P2 section 4.3) under the front end's:
 /// the deck's plusargs follow the command line's, so the first match is the
-/// command line's, and a command-line run directory or delay selection wins.
+/// command line's, and a command-line run directory, delay selection or
+/// path delays left out wins.
 fn resolve_hdl_options(hdl: &mut crate::config::HdlRunConfig, options: &NetlistSimulationOptions) {
     if let Some(seed) = options.hdl_seed {
         hdl.seed = seed;
@@ -541,7 +542,9 @@ fn resolve_hdl_options(hdl: &mut crate::config::HdlRunConfig, options: &NetlistS
     {
         hdl.delay_select = selection;
     }
-    if let Some(enabled) = options.hdl_path_delays {
+    if hdl.path_delays
+        && let Some(enabled) = options.hdl_path_delays
+    {
         hdl.path_delays = enabled;
     }
     if let Some(enabled) = options.hdl_timing_checks {

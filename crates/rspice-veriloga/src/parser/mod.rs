@@ -17,6 +17,7 @@ mod gate_arrays;
 mod generate;
 mod hierarchical_names;
 mod implicit_nets;
+mod specify;
 mod udp;
 
 pub(crate) use config::WORK_LIBRARY;
@@ -888,6 +889,9 @@ impl<'a> Parser<'a> {
         if self.check_identifier_text("__rspice_default_nettype") {
             return self.parse_default_nettype();
         }
+        if self.check_identifier_text("specparam") {
+            return self.parse_specparam(module);
+        }
         if self.check(TokenKind::End) {
             return Err(self.error(ParseErrorKind::UnexpectedToken(
                 "'end' with no 'begin' open: the block it closes has already ended".into(),
@@ -1049,6 +1053,10 @@ impl<'a> Parser<'a> {
             }
             TokenKind::Generate => {
                 self.parse_generate_region(module)?;
+            }
+            // IEEE 1364-2005 section 14.
+            TokenKind::Specify => {
+                self.parse_specify_block(module)?;
             }
             // An `endgenerate` with no region open. Refused by name rather than
             // as an unrecognized module item, which would blame the keyword

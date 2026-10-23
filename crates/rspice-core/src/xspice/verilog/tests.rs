@@ -1455,6 +1455,7 @@ mod files;
 mod hierarchical;
 mod overrides;
 mod ports;
+mod specify;
 mod strengths;
 mod threads;
 mod trireg;
@@ -1731,33 +1732,6 @@ fn a_free_running_testbench_ends_at_the_tick_ceiling() {
     );
     assert_eq!(report.end, HdlTestbenchEnd::TickCeiling);
     assert_eq!(report.end_tick, 10);
-}
-
-/// Options whose behaviour has not landed are refused at run time as not
-/// supported yet. The text names the feature, never a plan lane.
-#[test]
-fn unlanded_options_are_refused_as_not_supported_yet() {
-    let error = run_digital_testbench(
-        &[(
-            "f.v".into(),
-            "module f; initial $display; endmodule\n".into(),
-        )],
-        &HdlTestbenchOptions {
-            specify: true,
-            ..HdlTestbenchOptions::default()
-        },
-    )
-    .expect_err("`specify` is not supported yet");
-    let DigitalRunError::Unsupported(refusal) = &error else {
-        panic!("expected a typed capability refusal, got {error:?}");
-    };
-    assert_eq!(refusal.capability, "hdl.option.specify");
-    let text = error.to_string();
-    assert!(
-        text.contains("`specify` timing is not supported yet"),
-        "{text}"
-    );
-    assert!(!text.contains("lane"), "{text}");
 }
 
 /// An unpacked real array read through an invalid index, out of bounds or

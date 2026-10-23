@@ -204,7 +204,8 @@ fn verilog_ams_digital_constructs_are_refused_by_name() {
         ("scalared", "scalared b;"),
         ("vectored", "vectored b;"),
         ("endtask", "endtask"),
-        ("specify", "specify endspecify"),
+        // `specify` has a production now (IEEE 1364-2005 section 14); an
+        // `endspecify` with no block open does not.
         ("endspecify", "endspecify"),
     ] {
         assert_unsupported(

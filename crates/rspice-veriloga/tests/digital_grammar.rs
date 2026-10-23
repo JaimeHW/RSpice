@@ -4612,3 +4612,155 @@ fn a_malformed_config_is_a_parse_error() {
         1
     );
 }
+
+/// A SystemVerilog real-valued net (`wire real`, IEEE 1800-2017 section
+/// 6.7.1) is refused by name, pointing at the Verilog-AMS `wreal`.
+#[test]
+fn a_wire_real_net_is_refused_by_name() {
+    let error = parse_error("module m;\n  wire real r;\nendmodule\n");
+    assert!(
+        error.contains("Unsupported net data type: `wire real`") && error.contains("`wreal`"),
+        "{error}"
+    );
+}
+
+// ===========================================================================
+// Section 14 `specify` blocks
+// ===========================================================================
+
+/// IEEE 1364-2005 sections 14.2 and 14.3: each source and destination pair of
+/// a path declaration is one module path in the plan, on the instance's
+/// signals; a specparam names a delay; two delays become twelve by table
+/// 14-3 and section 14.3.2; a condition is the net the module drives from
+/// it; and a variable output port's path delays the net its connection
+/// drives.
+#[test]
+fn specify_paths_lower_one_path_per_source_and_destination() {
+    let plan = plan(
+        "`timescale 1ns/1ns\n\
+         module leaf(input a, input b, input s, input c, output y, output reg q);\n\
+         \x20 assign y = a & b;\n\
+         \x20 always @(posedge c) q <= a;\n\
+         \x20 specify\n\
+         \x20   specparam tr = 1, tf = 2;\n\
+         \x20   (a, b *> y) = (tr, tf);\n\
+         \x20   if (s) (a => y) = 3;\n\
+         \x20   ifnone (a => y) = 4;\n\
+         \x20   (posedge c => (q -: a)) = 5;\n\
+         \x20 endspecify\n\
+         endmodule\n\
+         module top;\n\
+         \x20 reg a, b, s, c;\n\
+         \x20 wire y, q;\n\
+         \x20 leaf u(a, b, s, c, y, q);\n\
+         endmodule\n",
+        "top",
+    );
+    let name = |id| plan.signal(id).unwrap().name.to_string();
+    let paths: Vec<_> = plan
+        .delays
+        .paths
+        .iter()
+        .map(|path| {
+            (
+                name(path.source),
+                name(path.destination),
+                path.edge.map(|edge| edge.keyword()),
+                path.condition.map(&name),
+                path.ifnone,
+                path.delay.transitions[..2].to_vec(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            ("a".into(), "y".into(), None, None, false, vec![1, 2]),
+            ("b".into(), "y".into(), None, None, false, vec![1, 2]),
+            (
+                "a".into(),
+                "y".into(),
+                None,
+                Some("u.specify$if0".into()),
+                false,
+                vec![3, 3]
+            ),
+            ("a".into(), "y".into(), None, None, true, vec![4, 4]),
+            (
+                "c".into(),
+                "q".into(),
+                Some("posedge"),
+                None,
+                false,
+                vec![5, 5]
+            ),
+        ]
+    );
+    assert_eq!(
+        plan.delays.paths[0].delay.transitions,
+        [1, 2, 1, 1, 2, 2, 1, 1, 2, 2, 2, 1]
+    );
+}
+
+/// What `specify` does not run yet is refused by name: timing checks
+/// (section 15), pulse limits and pulse styles (section 14.6). A path runs
+/// from an input or inout port to an output or inout port (section 14.2.1)
+/// and takes one, two, three, six or twelve delays (section 14.3.1), and a
+/// generate block holds no `specify` block (A.4.2).
+#[test]
+fn specify_items_outside_paths_are_refused() {
+    for (item, expected) in [
+        (
+            "$setup(a, posedge c, 2);",
+            "Unsupported `specify` timing check: `$setup`",
+        ),
+        (
+            "specparam PATHPULSE$ = 1;",
+            "Unsupported `specify` pulse limit: `PATHPULSE$`",
+        ),
+        (
+            "pulsestyle_onevent y;",
+            "Unsupported `specify` item: pulsestyle_onevent",
+        ),
+        ("(a => y) = (1, 2, 3, 4);", "4 delays"),
+    ] {
+        let source = format!(
+            "module m(input a, input c, output y);\n  assign y = a;\n  specify {item} \
+             endspecify\nendmodule\n"
+        );
+        let error = parse_error(&source);
+        assert!(error.contains(expected), "{item}: {error}");
+    }
+    let error = parse_error(
+        "module m(input a, output y);\n  generate if (1) begin : g\n    specify (a => y) = 1; \
+         endspecify\n  end endgenerate\nendmodule\n",
+    );
+    assert!(error.contains("generate block item"), "{error}");
+    for (path, port) in [
+        ("(y => a) = 1;", "source `y`"),
+        ("(a => a) = 1;", "destination `a`"),
+    ] {
+        let error = analyze_error(&format!(
+            "module m(input a, output y);\n  assign y = a;\n  specify {path} endspecify\n\
+             endmodule\n"
+        ));
+        assert!(
+            error.contains(&format!("module path {port}")) && error.contains("14.2.1"),
+            "{path}: {error}"
+        );
+    }
+    // Section 14.2.5: a parallel connection joins equal widths; a full one
+    // joins any.
+    let source = |connection: &str| {
+        format!(
+            "module m(input a, output [7:0] y);\n  assign y = {{8{{a}}}};\n  specify \
+             (a {connection} y) = 2; endspecify\nendmodule\n"
+        )
+    };
+    let error = analyze_error(&source("=>"));
+    assert!(
+        error.contains("14.2.5") && error.contains("`*>`"),
+        "{error}"
+    );
+    analyze(&source("*>"));
+}

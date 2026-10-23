@@ -1835,6 +1835,32 @@ impl CanonicalDigitalPlan {
                 return Err(error("digital net delay is off the design's time grid"));
             }
         }
+        for path in &self.delays.paths {
+            let four_state = |signal| {
+                self.signal(signal)
+                    .is_some_and(|signal: &DigitalSignal| !signal.kind.is_real())
+            };
+            let destination = self
+                .signal(path.destination)
+                .is_some_and(|signal| !signal.kind.is_real() && !signal.procedurally_assignable);
+            if !destination
+                || nets.contains(&path.destination)
+                || !four_state(path.source)
+                || path
+                    .condition
+                    .is_some_and(|condition| !four_state(condition))
+            {
+                return Err(error(
+                    "digital module path names an undeclared, real or net-delayed destination, \
+                     or an undeclared or real source or condition",
+                ));
+            }
+            if path.delay.ticks_at(precision).is_none() {
+                return Err(error(
+                    "digital module path delay is off the design's time grid",
+                ));
+            }
+        }
         Ok(())
     }
 

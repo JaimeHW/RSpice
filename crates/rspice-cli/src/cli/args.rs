@@ -671,6 +671,10 @@ pub struct RunArgs {
     /// Which value of each min:typ:max HDL delay to use (default: typ)
     #[arg(long, value_enum, value_name = "WHICH")]
     pub hdl_delay_select: Option<HdlDelaySelectArg>,
+
+    /// Delay the destinations of HDL `specify` module paths (default: yes)
+    #[arg(long, value_name = "yes|no", value_parser = clap::builder::BoolishValueParser::new())]
+    pub hdl_path_delays: Option<bool>,
 }
 
 /// `--hdl-delay-select`.

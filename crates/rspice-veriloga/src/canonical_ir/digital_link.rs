@@ -537,6 +537,15 @@ pub fn link_digital_plans(
                 delay: delayed.delay,
             });
         }
+        for path in &source.delays.paths {
+            let signal = |id: DigitalSignalId| layout.map.signals[usize::from(id)];
+            plan.delays.paths.push(super::digital::DigitalModulePath {
+                source: signal(path.source),
+                destination: signal(path.destination),
+                condition: path.condition.map(signal),
+                ..*path
+            });
+        }
         for process in &source.processes {
             check_cancel(control)?;
             let mut process = process.clone();

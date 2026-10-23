@@ -175,6 +175,7 @@ impl DigitalSignalStore {
             return Err("digital store checkpoint dimensions differ".into());
         }
         let mut restored = Self::from_plan(Arc::clone(&self.plan));
+        restored.inherit_path_stages(self);
         restored.inherit_bit_connections(self);
         restored.inherit_analog_variable_inputs(self);
         restored.traces = self.traces.clone(); // The journal was checked empty above.

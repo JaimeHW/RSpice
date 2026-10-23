@@ -64,6 +64,7 @@ mod coupled;
 mod delays;
 mod image;
 mod oscillation;
+mod paths;
 mod threads;
 use coupled::NoActiveParticipant;
 pub(crate) use coupled::{DigitalActiveExchange, DigitalActiveParticipant};
@@ -857,6 +858,9 @@ impl DigitalHost {
             fresh
                 .external_real_targets
                 .push(fresh.scheduler.intern_target(target.clone()));
+        }
+        if self.path_delays_dropped() {
+            fresh.drop_path_delays();
         }
         fresh
     }
@@ -1738,6 +1742,8 @@ impl DigitalHost {
             if drained.is_empty() {
                 return Ok(());
             }
+            // A module path's source changing (IEEE 1364-2005 section 14).
+            self.note_path_changes(drained, tick);
             let observed = self.effects.observes_changes();
             for transition in drained.iter() {
                 // IEEE 1364-2005 sections 17.1.3, 17.2.2 and 18.1: a change of

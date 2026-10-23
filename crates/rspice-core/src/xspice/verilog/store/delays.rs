@@ -15,11 +15,14 @@ use rspice_veriloga::canonical_ir::digital::{DigitalDriveStrength, DigitalWriteS
 /// Rise, fall and turn-off delays in the plan's ticks.
 pub(crate) type TransitionTicks = [u64; 3];
 
-/// The delays by contribution slot and by net. Empty for a plan with none.
-#[derive(Debug, Default)]
+/// The delays by contribution slot and by net, and the destinations of module
+/// paths (IEEE 1364-2005 section 14), whose delays the host chooses. Empty
+/// for a plan with none.
+#[derive(Debug, Default, Clone)]
 pub(super) struct DelayTables {
     drivers: Vec<Option<TransitionTicks>>,
     nets: Vec<Option<TransitionTicks>>,
+    paths: Vec<bool>,
 }
 
 /// The delay tables and the values held back since the host last took them.
@@ -58,7 +61,13 @@ impl StoreDelays {
         let mut tables = DelayTables {
             drivers: vec![None; spans.last().map_or(0, |span| span.start + span.count)],
             nets: vec![None; plan.signals.len()],
+            paths: vec![false; plan.signals.len()],
         };
+        for path in &plan.delays.paths {
+            if let Some(staged) = tables.paths.get_mut(usize::from(path.destination)) {
+                *staged = true;
+            }
+        }
         for delayed in &plan.delays.drivers {
             if let Some(span) = spans.get(usize::from(delayed.driver.signal))
                 && (delayed.driver.index as usize) < span.count
@@ -85,6 +94,14 @@ impl StoreDelays {
     fn net(&self, signal: DigitalSignalId) -> Option<TransitionTicks> {
         self.tables.nets.get(usize::from(signal)).copied().flatten()
     }
+
+    fn path(&self, signal: DigitalSignalId) -> bool {
+        self.tables
+            .paths
+            .get(usize::from(signal))
+            .copied()
+            .unwrap_or(false)
+    }
 }
 
 /// The delay of one bit's change (section 7.14, table 7-14): to 1 the rise
@@ -108,9 +125,44 @@ impl DigitalSignalStore {
         std::mem::take(&mut self.delays.requests)
     }
 
-    /// Whether `signal` has a net delay.
-    pub(super) fn delays_net(&self, signal: DigitalSignalId) -> bool {
-        self.delays.net(signal).is_some()
+    /// Whether `signal` has a net delay or is a module path's destination.
+    pub(crate) fn delays_net(&self, signal: DigitalSignalId) -> bool {
+        self.delays.net(signal).is_some() || self.delays.path(signal)
+    }
+
+    /// Whether `signal` is a module path's destination, whose changes wait
+    /// for the delay the host chooses.
+    pub(crate) fn path_destination(&self, signal: DigitalSignalId) -> bool {
+        self.delays.path(signal)
+    }
+
+    /// Run every module path destination undelayed (`.options
+    /// hdl_path_delays=no`), before the design starts.
+    pub(crate) fn drop_path_delays(&mut self) {
+        let staged: Vec<usize> = (0..self.delays.tables.paths.len())
+            .filter(|index| self.delays.tables.paths[*index])
+            .collect();
+        if staged.is_empty() {
+            return;
+        }
+        Arc::make_mut(&mut self.delays.tables).paths.fill(false);
+        // A destination started `x` only for its stage's sake; it resolves
+        // its drivers as any net does.
+        for index in staged {
+            if self.spans[index].count > 0 {
+                self.settle(DigitalSignalId::from(index), 0);
+            }
+        }
+        // What that changed is the initial state, not an event.
+        self.delays.requests.clear();
+        self.transitions.clear();
+        self.take_charge_changes();
+    }
+
+    /// Stage the module path destinations `other` stages, for a store
+    /// restored in its place: [`Self::drop_path_delays`] holds for the run.
+    pub(super) fn inherit_path_stages(&mut self, other: &Self) {
+        self.delays.tables = Arc::clone(&other.delays.tables);
     }
 
     /// Whether a value is held back that the host has not taken yet, which
@@ -135,7 +187,7 @@ impl DigitalSignalStore {
     /// Hold a delayed net's resolved value back for the host; `false` for a
     /// net with no delay, which the caller publishes.
     pub(super) fn hold_net(&mut self, signal: DigitalSignalId, value: &FourStateValue) -> bool {
-        if self.delays.net(signal).is_none() {
+        if !self.delays_net(signal) {
             return false;
         }
         self.delays.requests.push(DelayRequest::Net {
@@ -238,6 +290,7 @@ impl DigitalSignalStore {
         if self.delays.tables.drivers.is_empty() && self.delays.tables.nets.is_empty() {
             return;
         }
+        // A module path's destination is a delayed net for this purpose.
         let tables = Arc::clone(&self.delays.tables);
         let mut nets = BTreeSet::new();
         for (index, span) in self.spans.iter().enumerate() {
@@ -258,7 +311,7 @@ impl DigitalSignalStore {
             self.settle(signal, 0);
         }
         for (index, net) in tables.nets.iter().enumerate() {
-            if net.is_some() && self.spans[index].count > 0 {
+            if (net.is_some() || tables.paths[index]) && self.spans[index].count > 0 {
                 let width = self.widths[index];
                 self.values[index] = FourStateValue::splat(width, FourStateBit::Unknown);
             }

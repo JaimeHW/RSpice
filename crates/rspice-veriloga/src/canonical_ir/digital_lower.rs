@@ -460,7 +460,8 @@ fn lower_with_analog_variables(
         digital
             .signals
             .iter()
-            .flat_map(AnalyzedDigitalSignal::elaboration_expressions),
+            .flat_map(AnalyzedDigitalSignal::elaboration_expressions)
+            .chain(digital.paths.iter().flat_map(|path| &path.delays)),
     )?;
     let instance_constants = digital
         .instances
@@ -475,7 +476,8 @@ fn lower_with_analog_variables(
                 instance
                     .signals
                     .iter()
-                    .flat_map(|signal| signal.declared.elaboration_expressions()),
+                    .flat_map(|signal| signal.declared.elaboration_expressions())
+                    .chain(instance.paths.iter().flat_map(|path| &path.delays)),
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -766,6 +768,43 @@ fn lower_with_analog_variables(
         .iter()
         .map(|(name, id)| (name.as_str(), *id))
         .collect();
+
+    // Module path delays (IEEE 1364-2005 section 14), each frame's against
+    // its own scope and constants.
+    let mut paths = Vec::new();
+    let frames = std::iter::once((
+        &digital.paths,
+        &module_scope,
+        &[][..],
+        (&module_constants, digital.time_scale),
+    ))
+    .chain(
+        digital
+            .instances
+            .iter()
+            .zip(&frame_scopes)
+            .zip(&instance_constants)
+            .map(|((instance, scope), constants)| {
+                (
+                    &instance.paths,
+                    scope,
+                    &instance.port_drivers[..],
+                    (constants, instance.time_scale),
+                )
+            }),
+    );
+    for (frame_paths, scope, port_drivers, constants) in frames {
+        lower_paths(
+            frame_paths,
+            scope,
+            port_drivers,
+            constants,
+            (&signals, &elaborated_scope),
+            timing.precision_exponent,
+            &mut paths,
+        )
+        .map_err(|diagnostic| vec![diagnostic])?;
+    }
 
     // ------------------------------------------------------------------
     // Processes and drivers.
@@ -1289,12 +1328,10 @@ fn lower_with_analog_variables(
     // (IEEE 1364-2005 section 6.1.3). A net joined to another through a port
     // or a bidirectional switch resolves with that net, so it has no stage of
     // its own and is refused rather than run undelayed.
-    for delayed in &net_delays {
-        let joined = bit_aliases
+    let joined = |signal: DigitalSignalId| {
+        bit_aliases
             .iter()
-            .find(|alias| {
-                alias.left.signal == delayed.signal || alias.right.signal == delayed.signal
-            })
+            .find(|alias| alias.left.signal == signal || alias.right.signal == signal)
             .map(|alias| alias.span)
             .or_else(|| {
                 driver_strengths
@@ -1302,16 +1339,43 @@ fn lower_with_analog_variables(
                     .iter()
                     .filter(|gate| {
                         matches!(gate.kind, super::digital::DigitalGateKind::Tran { .. })
-                            && (gate.driver.signal == delayed.signal
+                            && (gate.driver.signal == signal
                                 || gate
                                     .source
                                     .as_ref()
-                                    .is_some_and(|source| source.signal == delayed.signal))
+                                    .is_some_and(|source| source.signal == signal))
                     })
                     .find_map(|gate| drivers.iter().find(|driver| driver.id == gate.driver))
                     .map(|driver| driver.span)
-            });
-        if let Some(span) = joined {
+            })
+    };
+    // A module path is the same stage, and one stage per net: a path to a
+    // net with a net delay of its own is refused too.
+    for path in &paths {
+        let name = &signals[usize::from(path.destination)].name;
+        if let Some(span) = joined(path.destination) {
+            diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                format!(
+                    "module path destination `{name}` is joined to another net through a port \
+                     or a bidirectional switch; a path to a joined net has no lowered form"
+                ),
+                span,
+            ));
+        } else if net_delays
+            .iter()
+            .any(|delayed| delayed.signal == path.destination)
+        {
+            diagnostics.push(DigitalLoweringDiagnostic::refusal(
+                format!(
+                    "module path destination `{name}` has a net delay; a net with both has no \
+                     lowered form, so delay its drivers instead"
+                ),
+                signals[usize::from(path.destination)].span,
+            ));
+        }
+    }
+    for delayed in &net_delays {
+        if let Some(span) = joined(delayed.signal) {
             diagnostics.push(DigitalLoweringDiagnostic::refusal(
                 format!(
                     "`{}` has a net delay and is joined to another net through a port or a \
@@ -1380,6 +1444,7 @@ fn lower_with_analog_variables(
         delays: super::digital::DigitalDelayPlan {
             drivers: driver_delays.delays,
             nets: net_delays,
+            paths,
         },
     }
     .seal()
@@ -1481,6 +1546,177 @@ fn net_delay(
     Ok(())
 }
 
+/// One delay value in ticks of `precision`: an elaboration constant in its
+/// module's time units, rounded to the module's precision like any delay.
+/// `section` is the IEEE 1364-2005 section a refusal cites.
+fn delay_value_ticks(
+    value: &Expression,
+    (constants, time_scale): (&ResolvedConstants, crate::time_scale::ModuleTimeScale),
+    precision: i8,
+    section: &str,
+) -> Result<u64, DigitalLoweringDiagnostic> {
+    use crate::numeric_literal::NumericLiteralValue::{Integer, Real};
+    let refuse = |what: &str| {
+        DigitalLoweringDiagnostic::refusal(
+            format!("{what} (IEEE 1364-2005 section {section})"),
+            value.span().into(),
+        )
+    };
+    let converted = match constants::scalar(value, constants, time_scale) {
+        Some(Integer(units)) if units >= 0 => {
+            time_scale.integer_delay_ticks(units as u64, precision)
+        }
+        Some(Real(units)) if units >= 0.0 => time_scale.delay_ticks(units, precision),
+        Some(_) => return Err(refuse("a negative delay")),
+        None => {
+            return Err(refuse(
+                "a delay that is not a constant expression; a driver's, a net's or a module \
+                 path's delay is fixed at elaboration",
+            ));
+        }
+    };
+    match converted {
+        Ok(value) if value != crate::time_scale::DELAY_BEYOND_HORIZON => Ok(value as u64),
+        _ => Err(refuse("a delay too long for the design's time")),
+    }
+}
+
+/// A module path's one, two, three, six or twelve delays as one per
+/// transition (IEEE 1364-2005 section 14.3.1, table 14-3), and the delays
+/// to and from `x` that fewer than twelve leave out as section 14.3.2 makes
+/// them.
+fn path_delay(
+    (values, span): (&[Expression], crate::source::Span),
+    constants: (&ResolvedConstants, crate::time_scale::ModuleTimeScale),
+    precision: i8,
+) -> Result<super::digital::DigitalPathDelay, DigitalLoweringDiagnostic> {
+    let ticks = values
+        .iter()
+        .map(|value| delay_value_ticks(value, constants, precision, "14.3.1"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let transitions = match *ticks.as_slice() {
+        [t01, t10, t0z, tz1, t1z, tz0, t0x, tx1, t1x, tx0, txz, tzx] => {
+            [t01, t10, t0z, tz1, t1z, tz0, t0x, tx1, t1x, tx0, txz, tzx]
+        }
+        _ => {
+            let [t01, t10, t0z, tz1, t1z, tz0] = match *ticks.as_slice() {
+                [t] => [t; 6],
+                [rise, fall] => [rise, fall, rise, rise, fall, fall],
+                [rise, fall, off] => [rise, fall, off, rise, off, fall],
+                [t01, t10, t0z, tz1, t1z, tz0] => [t01, t10, t0z, tz1, t1z, tz0],
+                _ => {
+                    return Err(DigitalLoweringDiagnostic::refusal(
+                        "a module path takes one, two, three, six or twelve delays (IEEE \
+                         1364-2005 section 14.3.1)",
+                        span.into(),
+                    ));
+                }
+            };
+            [
+                t01,
+                t10,
+                t0z,
+                tz1,
+                t1z,
+                tz0,
+                t01.min(t0z),
+                t01.max(tz1),
+                t10.min(t1z),
+                t10.max(tz0),
+                t0z.max(t1z),
+                tz1.min(tz0),
+            ]
+        }
+    };
+    Ok(super::digital::DigitalPathDelay {
+        transitions,
+        exponent: precision,
+    })
+}
+
+/// A frame's module path delays (IEEE 1364-2005 section 14), its names
+/// resolved in `scope`.
+///
+/// A destination that is a variable output port is the net its port
+/// connection drives: the path stands between the variable and that net. A
+/// variable port connected to nothing has no observer outside its module,
+/// and no path.
+fn lower_paths(
+    paths: &[crate::semantic::AnalyzedSpecifyPath],
+    scope: &HashMap<&str, DigitalSignalId>,
+    port_drivers: &[crate::semantic::AnalyzedContinuousAssign],
+    constants: (&ResolvedConstants, crate::time_scale::ModuleTimeScale),
+    (signals, elaborated): (&[DigitalSignal], &HashMap<&str, DigitalSignalId>),
+    precision: i8,
+    lowered: &mut Vec<super::digital::DigitalModulePath>,
+) -> Result<(), DigitalLoweringDiagnostic> {
+    use super::digital::DigitalEdge;
+    use crate::ast::{DigitalLValue, EdgeKind};
+    let resolve = |name: &SmolStr, span: crate::source::Span| {
+        scope.get(name.as_str()).copied().ok_or_else(|| {
+            DigitalLoweringDiagnostic::refusal(
+                format!("module path terminal `{name}` names no discrete signal"),
+                span.into(),
+            )
+        })
+    };
+    for path in paths {
+        let source = resolve(&path.source, path.span)?;
+        let written = resolve(&path.destination, path.span)?;
+        let declared = &signals[usize::from(written)];
+        let destination = if declared.procedurally_assignable {
+            let connection = port_drivers.iter().find(|driver| {
+                matches!(&driver.assignment.value, Expression::Identifier(own) if own.name == declared.name)
+            });
+            match connection.map(|driver| &driver.assignment.target) {
+                None => continue,
+                // A port driver is written in elaborated names.
+                Some(DigitalLValue::Identifier { name, .. }) => {
+                    elaborated.get(name.as_str()).copied().ok_or_else(|| {
+                        DigitalLoweringDiagnostic::refusal(
+                            format!(
+                                "module path destination `{}` drives no net",
+                                path.destination
+                            ),
+                            path.span.into(),
+                        )
+                    })?
+                }
+                Some(_) => {
+                    return Err(DigitalLoweringDiagnostic::refusal(
+                        format!(
+                            "module path destination `{}` is a variable port connected to a \
+                             select or a concatenation; a path here delays a whole net, so \
+                             connect the port to one",
+                            path.destination
+                        ),
+                        path.span.into(),
+                    ));
+                }
+            }
+        } else {
+            written
+        };
+        let condition = path
+            .condition
+            .as_ref()
+            .map(|name| resolve(name, path.span))
+            .transpose()?;
+        lowered.push(super::digital::DigitalModulePath {
+            source,
+            destination,
+            edge: path.edge.map(|edge| match edge {
+                EdgeKind::Posedge => DigitalEdge::Posedge,
+                EdgeKind::Negedge => DigitalEdge::Negedge,
+            }),
+            condition,
+            ifnone: path.ifnone,
+            delay: path_delay((&path.delays, path.span), constants, precision)?,
+        });
+    }
+    Ok(())
+}
+
 /// The driver delays lowered so far, in ticks of the design's precision.
 struct DriverDelays {
     precision: i8,
@@ -1500,35 +1736,11 @@ fn transition_delay(
     time_scale: crate::time_scale::ModuleTimeScale,
     precision: i8,
 ) -> Result<Option<super::digital::DigitalTransitionDelay>, DigitalLoweringDiagnostic> {
-    use crate::numeric_literal::NumericLiteralValue::{Integer, Real};
-    let mut ticks = Vec::with_capacity(delay.values.len());
-    for value in &delay.values {
-        let refuse = |what: &str| {
-            DigitalLoweringDiagnostic::refusal(
-                format!("{what} (IEEE 1364-2005 section 6.1.3)"),
-                value.span().into(),
-            )
-        };
-        let converted = match constants::scalar(value, constants, time_scale) {
-            Some(Integer(units)) if units >= 0 => {
-                time_scale.integer_delay_ticks(units as u64, precision)
-            }
-            Some(Real(units)) if units >= 0.0 => time_scale.delay_ticks(units, precision),
-            Some(_) => return Err(refuse("a negative delay")),
-            None => {
-                return Err(refuse(
-                    "a delay that is not a constant expression; a driver's or a net's delay \
-                     is fixed at elaboration",
-                ));
-            }
-        };
-        match converted {
-            Ok(value) if value != crate::time_scale::DELAY_BEYOND_HORIZON => {
-                ticks.push(value as u64)
-            }
-            _ => return Err(refuse("a delay too long for the design's time")),
-        }
-    }
+    let ticks = delay
+        .values
+        .iter()
+        .map(|value| delay_value_ticks(value, (constants, time_scale), precision, "6.1.3"))
+        .collect::<Result<Vec<_>, _>>()?;
     let (rise, fall) = match ticks.as_slice() {
         [delay] => (*delay, *delay),
         [rise, fall, ..] => (*rise, *fall),

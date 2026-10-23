@@ -27,12 +27,16 @@ pub(super) enum PendingOwner {
     Net(DigitalSignalId),
 }
 
-/// The pending updates, by due tick and by owner.
+/// The pending updates, by due tick and by owner, and the module paths that
+/// choose a path destination's delay.
 #[derive(Debug, Clone)]
 pub(super) struct PendingDrives {
     pub(super) target: TargetId,
     due: BTreeMap<u64, BTreeSet<PendingOwner>>,
     slots: BTreeMap<PendingOwner, (u64, FourStateValue)>,
+    /// `None` for a plan with no module path, or a run that leaves them out
+    /// (`.options hdl_path_delays=no`).
+    pub(super) paths: Option<super::paths::PathDelays>,
 }
 
 /// One pending update as the host image's `pending_drives` section stores it.
@@ -60,7 +64,27 @@ impl PendingDrives {
             }),
             due: BTreeMap::new(),
             slots: BTreeMap::new(),
+            paths: super::paths::PathDelays::for_plan(plan),
         })
+    }
+
+    /// How long `request`'s driver or net takes to go from `from` to `to`,
+    /// or `None` when that is no change: a module path destination's delay
+    /// from its paths, counted from `now`, and any other's from the store.
+    fn transition_ticks(
+        &self,
+        store: &DigitalSignalStore,
+        request: &DelayRequest,
+        (from, to): (&FourStateValue, &FourStateValue),
+        now: u64,
+    ) -> Option<u64> {
+        if let DelayRequest::Net { signal, .. } = request
+            && let Some(paths) = &self.paths
+            && store.path_destination(*signal)
+        {
+            return (from != to).then(|| paths.delay(store, *signal, (from, to), now));
+        }
+        store.transition_ticks(request, from, to)
     }
 
     /// The earliest pending update.
@@ -116,6 +140,40 @@ fn request_of(owner: PendingOwner, value: FourStateValue) -> DelayRequest {
 }
 
 impl DigitalHost {
+    /// Run every module path destination undelayed (`.options
+    /// hdl_path_delays=no`), before the design starts.
+    pub(crate) fn drop_path_delays(&mut self) {
+        if let Some(pending) = &mut self.pending
+            && pending.paths.take().is_some()
+        {
+            self.store.drop_path_delays();
+        }
+    }
+
+    /// Whether [`Self::drop_path_delays`] left the plan's module paths out,
+    /// which a fresh or restored host of the same run keeps.
+    pub(super) fn path_delays_dropped(&self) -> bool {
+        !self.plan.delays.paths.is_empty()
+            && self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.paths.is_none())
+    }
+
+    /// Note on each module path the changes of its source among `drained`,
+    /// the round's transitions at `tick`.
+    pub(super) fn note_path_changes(&mut self, drained: &[SignalTransition], tick: u64) {
+        if let Some(paths) = self
+            .pending
+            .as_mut()
+            .and_then(|pending| pending.paths.as_mut())
+        {
+            for transition in drained {
+                paths.note_change(transition, tick);
+            }
+        }
+    }
+
     /// Apply the inertial rule to every value the store held back at `tick`.
     pub(super) fn schedule_pending_drives(&mut self, tick: u64) -> Result<(), DigitalRunError> {
         if !self.store.has_delay_requests() {
@@ -129,9 +187,8 @@ impl DigitalHost {
         for request in requests {
             let (owner, value) = owner_of(&request);
             if let Some((_, waiting)) = pending.slots.get(&owner)
-                && self
-                    .store
-                    .transition_ticks(&request, waiting, value)
+                && pending
+                    .transition_ticks(&self.store, &request, (waiting, value), tick)
                     .is_none()
             {
                 continue;
@@ -141,7 +198,7 @@ impl DigitalHost {
                 .store
                 .delayed_current(&request)
                 .unwrap_or_else(|| FourStateValue::splat(value.width(), FourStateBit::Unknown));
-            match self.store.transition_ticks(&request, &current, value) {
+            match pending.transition_ticks(&self.store, &request, (&current, value), tick) {
                 None => {}
                 Some(0) => apply(&mut self.store, request),
                 // An update due past the last representable tick lands after
@@ -227,12 +284,7 @@ impl DigitalHost {
                     .drivers
                     .iter()
                     .any(|delay| delay.driver == driver),
-                PendingOwner::Net(signal) => self
-                    .plan
-                    .delays
-                    .nets
-                    .iter()
-                    .any(|delay| delay.signal == signal),
+                PendingOwner::Net(signal) => self.store.delays_net(signal),
             };
             let current = self
                 .store

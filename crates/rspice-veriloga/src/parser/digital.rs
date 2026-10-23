@@ -444,6 +444,19 @@ impl Parser<'_> {
         } else {
             None
         };
+        // `wire real r;` is a SystemVerilog real-valued net (IEEE 1800-2017
+        // section 6.7.1), which Verilog-AMS spells `wreal`.
+        if !trireg && self.check(TokenKind::Real) {
+            return Err(ParseError::new(
+                ParseErrorKind::UnsupportedConstruct {
+                    context: "net data type".to_string(),
+                    found: "`wire real`; declare a real-valued net as `wreal` (Verilog-AMS \
+                            LRM 2.4 Syntax 3-8)"
+                        .to_string(),
+                },
+                self.current_span(),
+            ));
+        }
         let discipline = self.parse_discrete_discipline(true)?;
         // IEEE 1364-2005 section 4.3.2: `vectored` and `scalared` say whether
         // a tool may expand a vector net into bits. Neither changes what the

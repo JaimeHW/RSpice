@@ -1050,19 +1050,70 @@ pub struct DigitalNetDelay {
     pub delay: DigitalTransitionDelay,
 }
 
-/// Every delayed driver and net. Empty for a design with no delay on a
-/// driver or a net, which is every design that existed before this table did.
+/// A module path delay (IEEE 1364-2005 section 14) from one source port to
+/// one destination net.
+///
+/// A change of the destination's resolved value is due its transition's
+/// delay after the source last changed, or at once when that is past: the
+/// larger of the path delay and the distributed delays already behind the
+/// value (section 14.4). Of several paths to one destination, those whose
+/// source changed last decide, and among them the least delay (as Icarus
+/// Verilog selects); a conditional path counts unless its condition net is
+/// 0 (an `x` or `z` condition is true, section 14.2.4.1), and an `ifnone`
+/// path only while no conditional path to its destination does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalModulePath {
+    pub source: DigitalSignalId,
+    pub destination: DigitalSignalId,
+    /// An edge-sensitive path counts only this edge of its source's least
+    /// significant bit (section 14.2.4.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edge: Option<DigitalEdge>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<DigitalSignalId>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ifnone: bool,
+    pub delay: DigitalPathDelay,
+}
+
+/// A module path's delay for each transition of its destination (IEEE
+/// 1364-2005 section 14.3, table 14-3), in the order 01, 10, 0z, z1, 1z, z0,
+/// 0x, x1, 1x, x0, xz, zx: ticks of `10^exponent` seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DigitalPathDelay {
+    pub transitions: [u64; 12],
+    pub exponent: i8,
+}
+
+impl DigitalPathDelay {
+    /// The twelve delays in ticks of `10^precision` seconds, or `None` when
+    /// one is not a whole number of them or does not fit.
+    pub fn ticks_at(self, precision: i8) -> Option<[u64; 12]> {
+        let finer = u32::try_from(i32::from(self.exponent) - i32::from(precision)).ok()?;
+        let scale = 10_u64.checked_pow(finer)?;
+        let mut ticks = [0; 12];
+        for (tick, delay) in ticks.iter_mut().zip(self.transitions) {
+            *tick = delay.checked_mul(scale)?;
+        }
+        Some(ticks)
+    }
+}
+
+/// Every delayed driver and net, and every module path. Empty for a design
+/// with none, which is every design that existed before this table did.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DigitalDelayPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drivers: Vec<DigitalDriverDelay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub nets: Vec<DigitalNetDelay>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<DigitalModulePath>,
 }
 
 impl DigitalDelayPlan {
     pub fn is_empty(&self) -> bool {
-        self.drivers.is_empty() && self.nets.is_empty()
+        self.drivers.is_empty() && self.nets.is_empty() && self.paths.is_empty()
     }
 }
 

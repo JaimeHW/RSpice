@@ -141,7 +141,7 @@ block_only_with_var_def	vlg	passed	L4	refused:hierarchical-reference	Semantic er
 bnot	vlg	passed	L1	pass	PASSED
 br1000	vlg	passed	L1	fail	run-time error: event network did not settle at tick 0 (0e0 s) within 10000 delta cycles; busiest drivers: always#0 (always, br1000.v:10) driving b, i fired 5001 times; always#...
 br1001	vlg	passed	L7	refused:feature	Semantic error: Unsupported feature: analog port 'a' of instance 'topmod.m1' connects discrete net 'x' without a connect module; this compiler inserts connect m...
-br1006	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br1006	vlg	passed	L6	pass	PASSED
 br1007	vlg	gold	-	excluded:flag-Wselect-range	
 br1008	vlg	gold	L1	fail	differs from the gold file at line 1 (1 lines against 1)
 br1015a	vlg	ce	-	excluded:systemverilog:^=	
@@ -222,7 +222,7 @@ br_gh14	vlg	passed	L1	pass	PASSED
 br_gh142	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'b'
 br_gh15	vlg	passed	L1	pass	PASSED
 br_gh152	vlg	ce	L1	pass	language error: Parse error: Expected ')', found 'n1'
-br_gh156	vlg	gold	L5	fail	compile error: Parse error: Expected ';', found 'tau'
+br_gh156	vlg	gold	L5	refused:wire-real	Parse error: Unsupported net data type: `wire real`; declare a real-valued net as `wreal` (Verilog-AMS LRM 2.4 Syntax 3-8)
 br_gh157	vlg	ce	L4	pass	language error: Semantic error: Invalid expression: `defparam dut.x` assigns `x`, a `localparam` of module `dut`; IEEE 1364-2005 section 12.2 lets no override reach a local par...
 br_gh162	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
 br_gh163	vlg	ce	L3	pass	language error: Parse error: Expected ';', found 'i'
@@ -248,14 +248,14 @@ br_gh283c	vlg	passed	L1	pass	PASSED
 br_gh30	vlg	passed	L1	racy	passes in reverse order only; no PASSED line (1 output lines)
 br_gh309	vlg	passed	L1	pass	PASSED
 br_gh315	vlg	passed	-	excluded:flag-g2005-sv	
-br_gh316a	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-br_gh316b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-br_gh316c	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh316a	vlg	passed	L6	pass	PASSED
+br_gh316b	vlg	passed	L6	pass	PASSED
+br_gh316c	vlg	passed	L6	pass	PASSED
 br_gh33	vlg	gold	L3	pass	matches the gold file
 br_gh330	vlg	passed	L3	fail	compile error: Parse error: Expression nesting exceeds the compiler's limit of 256 levels; every parenthesis, `?:` branch, unary operator and call argument is a level
 br_gh345	vlg	passed	L3	pass	PASSED
-br_gh356a	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-br_gh356b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh356a	vlg	passed	L6	pass	PASSED
+br_gh356b	vlg	passed	L6	pass	PASSED
 br_gh37	vlg	passed	L1	pass	PASSED
 br_gh435	vlg	passed	L1	fail	compile error: Parse error: Unexpected token: '$display'
 br_gh484	vlg	passed	L4	fail	compile error: line 6: Invalid include syntax: `MY_FILE(ivltests, br_gh484.vh)
@@ -276,7 +276,7 @@ br_gh632b	vlg	passed	-	excluded:flag-S
 br_gh632c	vlg	passed	L1	pass	PASSED
 br_gh674	vlg	passed	L3	refused:feature	Semantic error: Unsupported feature: parameter `av0`: an array declared inside a task or function has no executable form yet
 br_gh7	vlg	passed	L1	pass	PASSED
-br_gh732	vlg	gold	L6	fail	compile error: Parse error: Expected '(', found '='
+br_gh732	vlg	gold	L6	refused:feature	Semantic error: Unsupported feature: analog port 'Y' of instance 'dut.b1' connects discrete net 'n2' without a connect module; this compiler inserts connect mod...
 br_gh782c	vlg	passed	L4	pass	PASSED
 br_gh782d	vlg	passed	L4	pass	PASSED
 br_gh782e	vlg	passed	L4	pass	PASSED
@@ -423,9 +423,9 @@ defparam3.5	vlg	passed	L4	refused:structural-vector-port	Semantic error: Unsuppo
 defparam4	vlg	gold	L4	refused:if	Parse error: Unsupported module item: if
 delay	vlg	gold	L1	pass	matches the gold file
 delay2	vlg	passed	L6	pass	PASSED
-delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
-delay4	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
-delay5	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
+delay4	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
+delay5	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
 delay_assign_nb	vlg	passed	L1	pass	PASSED
 delay_assign_nb2	vlg	passed	L1	pass	PASSED
 delay_var	vlg	gold	-	excluded:systemverilog:int	
@@ -673,7 +673,7 @@ npmos	vlg	passed	L7	pass	PASSED
 npmos2	vlg	passed	L7	pass	PASSED
 onehot	vlg	passed	L5	pass	PASSED
 p_monta	vlg	passed	L3	pass	PASSED
-par_mismatch	vlg	ce	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+par_mismatch	vlg	ce	L6	pass	language error: Semantic error: Invalid expression: module path source `in` has 1 bit(s) and destination `out` 8; IEEE 1364-2005 section 14.2.5 joins a parallel connection (`=>...
 param-extend	vlg	passed	L1	pass	PASSED
 param_add	vlg	passed	L1	pass	PASSED
 param_and	vlg	passed	L1	pass	PASSED
@@ -775,7 +775,7 @@ pr1492075	vlg	gold	L1	pass	matches the gold file
 pr1508882	vlg	passed	L1	pass	PASSED
 pr1510724	vlg	passed	L4	pass	PASSED
 pr1515168	vlg	passed	L1	pass	PASSED
-pr1520314	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1520314	vlg	co	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setuphold`
 pr1522570	vlg	passed	L1	pass	PASSED
 pr1530426	vlg	passed	L1	pass	PASSED
 pr1561597	vlg	passed	L1	pass	PASSED
@@ -833,7 +833,7 @@ pr1693890	vlg	passed	L1	pass	PASSED
 pr1693921	vlg	passed	L1	pass	PASSED
 pr1694413	vlg	passed	L1	pass	PASSED
 pr1694427	vlg	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
-pr1695257	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1695257	vlg	co	L6	pass	compiled
 pr1695309	vlg	passed	L1	pass	PASSED
 pr1695322	vlg	passed	L1	pass	PASSED
 pr1695334	vlg	passed	L1	pass	PASSED
@@ -855,7 +855,7 @@ pr1703120	vlg	gold	L1	fail	differs from the gold file at line 2 (19 lines agains
 pr1703346	vlg	passed	L7	pass	PASSED
 pr1703959	vlg	passed	L7	pass	PASSED
 pr1704013	vlg	ce	L1	fail	compiled without error; ran to quiescence
-pr1704726a	vlg	ce	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1704726a	vlg	ce	L6	refused:generate-scope	Parse error: Unsupported generate scope: block name 'task_blk' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
 pr1704726b	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: `name_func` is not declared in the selected scope
 pr1704726c	vlg	ce	L3	refused:generate-scope	Parse error: Unsupported generate scope: block name 'name_gl' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
 pr1704726d	vlg	ce	L3	refused:generate-scope	Parse error: Unsupported generate scope: block name 'name6_sgl' conflicts with another declaration in this scope (VAMS-2023 6.6.2, 6.8)
@@ -924,19 +924,19 @@ pr1866215	vlg	gold	L1	refused:structural-vector-port	Semantic error: Unsupported
 pr1866215b	vlg	gold	L1	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'B0.CH' is declared with no net or variable of its own, in a module that declares no discrete-...
 pr1867161a	vlg	gold	L1	pass	matches the gold file
 pr1867161b	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 2 (5 lines against 6)
-pr1867332	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1867332	vlg	co	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setup`
 pr1868792	vlg	passed	L1	pass	PASSED
 pr1868991a	vlg	passed	L1	pass	PASSED
 pr1868991b	vlg	co	L1	pass	compiled
 pr1869769	vlg	passed	L1	pass	PASSED
 pr1869772	vlg	passed	L3	pass	PASSED
 pr1869781	vlg	passed	L1	pass	PASSED
-pr1873146	vlg	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr1873146	vlg	passed	L6	pass	PASSED
 pr1875866	vlg	passed	L1	pass	PASSED
 pr1875866b	vlg	passed	L1	pass	PASSED
 pr1876798	vlg	gold	L5	pass	matches the gold file
 pr1877740	vlg	passed	L1	pass	PASSED
-pr1877743	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+pr1877743	vlg	passed	L6	pass	PASSED
 pr1878909	vlg	passed	L4	refused:instance-array-connection	Semantic error: Unsupported feature: instance array connection: port 'in_0' of an array of instances is connected to an expression; IEEE 1364-2005 section 12.1....
 pr1879226	vlg	passed	L1	pass	PASSED
 pr1883052	vlg	passed	L6	pass	PASSED
@@ -1143,7 +1143,7 @@ pr2723712	vlg	passed	L1	pass	PASSED
 pr2725700a	vlg	passed	L7	pass	PASSED
 pr2725700b	vlg	passed	L7	pass	PASSED
 pr2725700c	vlg	passed	L7	pass	PASSED
-pr2728032	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+pr2728032	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
 pr2728547	vlg	passed	L5	pass	PASSED
 pr2728812a	vlg	passed	L1	pass	PASSED
 pr2728812b	vlg	ce	L1	pass	language error: Semantic error: Circular dependency in digital module hierarchy at instance 'sum.genblk1.s0.genblk1.s0.genblk1.s1': specialization repeats ancestor 'sum.genblk1...
@@ -1169,7 +1169,7 @@ pr2823414	vlg	ce	L1	pass	language error: Semantic error: Undeclared symbol: 'fai
 pr2823711	vlg	passed	L1	pass	PASSED
 pr2824189	vlg	passed	-	excluded:systemverilog:var	
 pr2829776	vlg	passed	L6	pass	PASSED
-pr2829776b	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+pr2829776b	vlg	passed	L6	pass	PASSED
 pr2832234	vlg	passed	L7	pass	PASSED
 pr2834340	vlg	passed	L6	pass	PASSED
 pr2834340b	vlg	passed	L6	pass	PASSED
@@ -1248,7 +1248,7 @@ pr3064375	vlg	gold	L1	racy	passes in source order only; differs from the gold fi
 pr3064511	vlg	passed	L1	pass	PASSED
 pr307	vlg	passed	L1	pass	PASSED
 pr3077640	vlg	passed	L1	pass	PASSED
-pr3078759	vlg	co	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+pr3078759	vlg	co	L6	pass	compiled
 pr307a	vlg	passed	L4	refused:hierarchical-reference	Semantic error: Unsupported feature: hierarchical reference: scope `r` is not declared in this module or its generated ancestors or enclosing instances
 pr3098439	vlg	passed	L5	pass	PASSED
 pr3098439a	vlg	passed	L5	pass	PASSED
@@ -1270,8 +1270,8 @@ pr3296466a	vlg	passed	L7	pass	PASSED
 pr3296466b	vlg	passed	L7	refused:module-item	Parse error: Unsupported module item: connect
 pr3296466c	vlg	passed	L7	pass	PASSED
 pr3296466d	vlg	passed	L7	pass	PASSED
-pr3306516	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-pr3309391	vlg	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+pr3306516	vlg	passed	L6	pass	PASSED
+pr3309391	vlg	passed	L6	pass	PASSED
 pr3368642	vlg	passed	L4	pass	PASSED
 pr338	vlg	co	L1	pass	compiled
 pr3409749	vlg	passed	L4	refused:for	Parse error: Unsupported module item: for
@@ -1438,7 +1438,7 @@ readmemh4	vlg	passed	L5	pass	PASSED
 readmemh5	vlg	ce	L5	refused:feature	Semantic error: Unsupported feature: slice of unpacked array `array` requires whole-array value lowering
 real	vlg	passed	L3	pass	PASSED
 real10	vlg	passed	L1	pass	PASSED
-real11	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+real11	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
 real2	vlg	passed	L3	pass	PASSED
 real3	vlg	passed	L1	pass	PASSED
 real5	vlg	gold	L3	pass	matches the gold file
@@ -1467,11 +1467,11 @@ repl_zero_wid_pass	vlg	passed	L1	pass	PASSED
 resetall	vlg	gold	-	excluded:flag-Wtimescale	
 resetall2	vlg	gold	-	excluded:flag-Wtimescale	
 resolv1	vlg	passed	L7	pass	PASSED
-rise_fall_decay1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
-rise_fall_decay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
-rise_fall_delay1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
-rise_fall_delay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
-rise_fall_delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+rise_fall_decay1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
+rise_fall_decay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
+rise_fall_delay1	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
+rise_fall_delay2	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
+rise_fall_delay3	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
 rl_pow	vlg	passed	L1	pass	PASSED
 rnpmos	vlg	passed	L7	pass	PASSED
 rnpmos2	vlg	passed	L7	pass	PASSED
@@ -1564,12 +1564,12 @@ signed_net_display	vlg	passed	L5	refused:for	Parse error: Unsupported module ite
 signed_part	vlg	passed	L4	pass	PASSED
 signed_pv	vlg	passed	L5	pass	testbench gap: no defines (__ICARUS__); PASSED
 sp2	vlg	gold	-	excluded:systemverilog-systf:$bits	
-specify1	vlg	co	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
-specify2	vlg	passed	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-specify3	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-specify4	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-specify5	vlg	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
-specify_01	vlg	passed	L6	refused:hdl.option.specify	testbench gap: no root selection (-s test); `specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+specify1	vlg	co	L6	pass	compiled
+specify2	vlg	passed	L6	pass	PASSED
+specify3	vlg	gold	L6	pass	matches the gold file
+specify4	vlg	gold	L6	racy	passes in reverse order only; differs from the gold file at line 1 (10 lines against 9)
+specify5	vlg	gold	L6	pass	matches the gold file
+specify_01	vlg	passed	L6	pass	testbench gap: no root selection (-s test); PASSED
 sqrt32	vlg	passed	-	excluded:systemverilog:bit	
 sscanf_u	vlg	passed	L5	pass	PASSED
 sscanf_z	vlg	passed	L5	pass	PASSED
@@ -1743,7 +1743,7 @@ varrshft1	vlg	passed	L1	pass	PASSED
 varrshft2	vlg	passed	L3	pass	PASSED
 vcd-dup	vlg	gold	L5	refused:$dumpvars	Semantic error: Unsupported feature: `$dumpvars` of a hierarchically named signal is not supported yet
 vector	vlg	gold	L1	pass	matches the gold file
-verify_two_var_delays	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's or a net's delay is fixed at elaboration (IEEE 1364-2005 section 6.1....
+verify_two_var_delays	vlg	passed	L6	refused:feature	Semantic error: Unsupported feature: a delay that is not a constant expression; a driver's, a net's or a module path's delay is fixed at elaboration (IEEE 1364-...
 vvp_scalar_value	vlg	passed	L7	pass	PASSED
 wait1	vlg	passed	L3	pass	PASSED
 wait2	vlg	passed	L3	pass	PASSED
@@ -1883,7 +1883,7 @@ br_gh1248	vvp	gold	-	excluded:flag-ginterconnect
 br_gh1256a	vvp	passed	-	excluded:flag-g2009	
 br_gh1256b	vvp	passed	-	excluded:flag-g2009	
 br_gh1258a	vvp	gold	-	excluded:flag-gno-specify	
-br_gh1258b	vvp	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+br_gh1258b	vvp	gold	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setup`
 br_gh1286	vvp	passed	-	excluded:flag-g2009	
 br_gh13a	vvp	gold	L1	pass	matches the gold file
 br_gh230	vvp	-	-	excluded:type-EF	
@@ -1902,7 +1902,7 @@ br_gh710b	vvp	gold	-	excluded:flag-g2009
 br_gh710c	vvp	gold	-	excluded:flag-g2009	
 br_gh939	vvp	ce	-	excluded:flag-g2005-sv	
 br_gh99c	vvp	passed	-	excluded:flag-gverilog-ams	
-ca_time_real	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'rtm'
+ca_time_real	vvp	gold	L1	refused:wire-real	Parse error: Unsupported net data type: `wire real`; declare a real-valued net as `wreal` (Verilog-AMS LRM 2.4 Syntax 3-8)
 case1	vvp	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
 case2	vvp	passed	L1	racy	passes in source order only; no PASSED line (1 output lines)
 case2-S	vvp	passed	-	excluded:flag-S	
@@ -1930,7 +1930,7 @@ decl_before_use3	vvp	ce	L3	pass	language error: Semantic error: Invalid expressi
 decl_before_use4	vvp	ce	L3	pass	language error: Semantic error: Invalid expression: the named event `e` is used before its declaration (IEEE 1364-2005 section 4.5 declares only nets implicitly)
 decl_before_use5	vvp	ce	L1	fail	compiled without error; ran to quiescence
 decl_before_use6	vvp	passed	L3	refused:task	Parse error: Unsupported task: a parameter declared inside a task or function; declare it in the module
-delayed_sfunc	vvp	gold	L6	refused:hdl.option.specify	`specify` timing is not supported yet: `specify` path delays and timing checks are not implemented
+delayed_sfunc	vvp	gold	L6	refused:wire-real	Parse error: Unsupported net data type: `wire real`; declare a real-valued net as `wreal` (Verilog-AMS LRM 2.4 Syntax 3-8)
 dffsynth	vvp	passed	L1	pass	PASSED
 dffsynth-S	vvp	-	-	excluded:type-NI	
 dffsynth10	vvp	passed	-	excluded:flag-S	
@@ -1998,9 +1998,9 @@ partsel_reversed_idx5	vvp	ce	L1	pass	language error: Semantic error: Invalid exp
 partsel_reversed_idx6	vvp	ce	L1	pass	language error: Parse error: Expected declared name, found '['
 pr1388974	vvp	passed	L1	pass	PASSED
 pr1701890	vvp	gold	L3	pass	matches the gold file
-pr1864110a	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'plus'
-pr1864110b	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'minus'
-pr1864115	vvp	gold	L1	fail	compile error: Parse error: Expected ';', found 'result'
+pr1864110a	vvp	gold	L1	refused:wire-real	Parse error: Unsupported net data type: `wire real`; declare a real-valued net as `wreal` (Verilog-AMS LRM 2.4 Syntax 3-8)
+pr1864110b	vvp	gold	L1	refused:wire-real	Parse error: Unsupported net data type: `wire real`; declare a real-valued net as `wreal` (Verilog-AMS LRM 2.4 Syntax 3-8)
+pr1864115	vvp	gold	L1	refused:wire-real	Parse error: Unsupported net data type: `wire real`; declare a real-valued net as `wreal` (Verilog-AMS LRM 2.4 Syntax 3-8)
 pr1916261a	vvp	ce	L1	refused:feature	Semantic error: Unsupported feature: a concatenation requires a positive bounded width and non-negative constant replication counts
 pr2509349a	vvp	gold	-	excluded:nonstandard-systf:$readmempath	
 pr2509349b	vvp	gold	-	excluded:nonstandard-systf:$readmempath	
@@ -2103,8 +2103,8 @@ task_return_fail1	vvp	ce	-	excluded:flag-g2005-sv
 task_return_fail2	vvp	ce	-	excluded:flag-g2005-sv	
 test_va_math	vvp	gold	-	excluded:flag-mva_math	
 test_vams_math	vvp	gold	-	excluded:flag-gverilog-ams	
-timing_check_delayed_signals	vvp	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
-timing_check_syntax	vvp	passed	L6	refused:specify	Parse error: Verilog-AMS digital construct not yet supported: `specify`
+timing_check_delayed_signals	vvp	passed	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setuphold`
+timing_check_syntax	vvp	passed	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setup`
 uwire_fail2	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: `w` is a `uwire` with more than one driver; IEEE 1364-2005 section 4.6.2 permits a `uwire` one driver of each bit, so decl...
 uwire_fail3	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: `w` is a `uwire` with more than one driver; IEEE 1364-2005 section 4.6.2 permits a `uwire` one driver of each bit, so decl...
 va_math	vvp	passed	-	excluded:nonstandard-systf:$abs	

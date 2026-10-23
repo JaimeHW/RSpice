@@ -490,7 +490,11 @@ use super::*;
 // which a version-167 record refused, and a record is keyed by the deck's
 // min:typ:max selection (`.options hdl_delay_select`), which the parser
 // applies.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 168;
+//
+// Version 170 follows the canonical IR's schema to 180, whose digital plan
+// carries the module path delays of `specify` blocks. A version-168 record
+// refused `specify`.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 170;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

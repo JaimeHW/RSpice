@@ -285,6 +285,9 @@ pub struct Module {
     /// section 6.1.3), by net name. A declaration assignment's delay is its
     /// driver's, on the continuous assignment it becomes, and not here.
     pub net_delays: Vec<NetDelay>,
+    /// The module path delays of its `specify` blocks (IEEE 1364-2005
+    /// section 14), in declaration order.
+    pub specify_paths: Vec<SpecifyPath>,
     /// Discrete-domain variable declarations (`reg`), in declaration order
     pub digital_variables: Vec<DigitalVariableDecl>,
     /// Continuous assignments (`assign`), in declaration order
@@ -427,6 +430,7 @@ impl Module {
             functions: Vec::new(),
             digital_nets: Vec::new(),
             net_delays: Vec::new(),
+            specify_paths: Vec::new(),
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
             gate_arrays: Vec::new(),
@@ -2498,6 +2502,45 @@ pub struct Delay3 {
 pub struct NetDelay {
     pub name: SmolStr,
     pub delay: Delay3,
+}
+
+/// A module path delay declared in a `specify` block (IEEE 1364-2005 section
+/// 14.2): `(a => y) = 2;`, `(posedge c => (q +: d)) = (3, 2);`,
+/// `if (s) (a *> y) = 4;` or `ifnone (a => y) = 5;`.
+///
+/// The parser reads a path's polarity and an edge-sensitive path's data
+/// source and keeps neither: neither changes when or how the destination
+/// changes. A select of a terminal names the whole port, whose least
+/// significant bit decides the transition (as Icarus Verilog does).
+#[derive(Debug, Clone)]
+pub struct SpecifyPath {
+    /// `posedge` or `negedge` before the sources: the path counts only that
+    /// edge of a source (section 14.2.4.2).
+    pub edge: Option<EdgeKind>,
+    /// A full connection (`*>`) rather than a parallel one (`=>`), which
+    /// joins a source and a destination of the same width (section 14.2.5).
+    pub full: bool,
+    /// The sources, each a module input or inout port.
+    pub sources: Vec<SpecifyTerminal>,
+    /// The destinations, each a module output or inout port.
+    pub destinations: Vec<SpecifyTerminal>,
+    /// The state-dependent path's condition, as the one-bit net the parser
+    /// declared for it and drives from the condition (section 14.2.4.3).
+    pub condition: Option<SmolStr>,
+    /// `ifnone`: the path applies when no conditional path to its
+    /// destination is active.
+    pub ifnone: bool,
+    /// One, two, three, six or twelve delays (section 14.3.1), in the order
+    /// written.
+    pub delays: Vec<Expression>,
+    pub span: Span,
+}
+
+/// A path's source or destination port.
+#[derive(Debug, Clone)]
+pub struct SpecifyTerminal {
+    pub name: SmolStr,
+    pub span: Span,
 }
 
 /// Stable identity of a process within its module.

@@ -303,6 +303,14 @@ impl Parser<'_> {
                     self.current_span(),
                 ));
             }
+            // IEEE 1364-2005 A.4.2: a generate block holds no `specify` block
+            // or `specparam`.
+            TokenKind::Specify => {
+                return Err(self.unsupported_current("generate block item"));
+            }
+            _ if self.check_identifier_text("specparam") => {
+                return Err(self.unsupported_current("generate block item"));
+            }
             _ => {
                 let mut items =
                     std::mem::replace(&mut block.items, Box::new(Module::new("", block.span)));

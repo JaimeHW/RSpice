@@ -233,7 +233,8 @@ pub(super) fn digital_dependencies<'a>(
         digital
             .signals
             .iter()
-            .flat_map(AnalyzedDigitalSignal::elaboration_expressions),
+            .flat_map(AnalyzedDigitalSignal::elaboration_expressions)
+            .chain(digital.paths.iter().flat_map(|path| &path.delays)),
     );
     let mut given = HashSet::new();
     for expression in shapes {

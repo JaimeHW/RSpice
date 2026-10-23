@@ -63,6 +63,9 @@ pub struct AnalyzedDigital {
     pub signal_references: std::collections::BTreeMap<SmolStr, DigitalSignalReference>,
     /// Continuous assignments, in declaration order.
     pub continuous_assigns: Vec<AnalyzedContinuousAssign>,
+    /// Module path delays (IEEE 1364-2005 section 14), one per source and
+    /// destination, in declaration order.
+    pub paths: Vec<AnalyzedSpecifyPath>,
     /// Instantiated child modules, elaborated flat into this module's scope.
     ///
     /// Empty as the analyzer leaves it — a module is analyzed on its own and
@@ -80,6 +83,23 @@ pub struct AnalyzedDigital {
     /// never with the parent's, which would be a wrong answer wearing a right
     /// one's clothes.
     pub constants: DigitalConstants,
+}
+
+/// One source-to-destination pair of a module path delay (IEEE 1364-2005
+/// section 14.2), in its module's own names.
+#[derive(Debug, Clone)]
+pub struct AnalyzedSpecifyPath {
+    /// An input or inout port of the module.
+    pub source: SmolStr,
+    /// An output or inout port of the module.
+    pub destination: SmolStr,
+    pub edge: Option<crate::ast::EdgeKind>,
+    /// The one-bit net that holds a state-dependent path's condition.
+    pub condition: Option<SmolStr>,
+    pub ifnone: bool,
+    /// One, two, three, six or twelve delays, in the order written.
+    pub delays: Vec<Expression>,
+    pub span: Span,
 }
 
 /// The target of a hierarchical reference to a discrete-domain signal.
@@ -616,6 +636,8 @@ pub struct ElaboratedDigitalInstance {
     /// something the author wrote.
     pub port_drivers: Vec<AnalyzedContinuousAssign>,
     pub bit_aliases: Vec<ElaboratedDigitalBitAlias>,
+    /// The instantiated module's path delays, in its own names.
+    pub paths: Vec<AnalyzedSpecifyPath>,
     /// The instantiated module's *own* integer parameters and localparams.
     ///
     /// Not the parent's, and not the parent's merged with the child's. A
@@ -807,6 +829,7 @@ impl SemanticAnalyzer {
             }
         }
         self.reject_drivers_on_input_ports(module, &continuous_assigns);
+        let paths = self.analyze_specify_paths(module, &signals);
 
         for process in &mut processes {
             super::digital_walk::rewrite_roots(&mut process.body, &mut |expression| {
@@ -890,6 +913,7 @@ impl SemanticAnalyzer {
                 })
                 .collect(),
             continuous_assigns,
+            paths,
             // A module is analyzed on its own, so it knows nothing yet about
             // what it instantiates; hierarchy elaboration fills this in on the
             // module it selects.
@@ -1614,6 +1638,103 @@ impl SemanticAnalyzer {
     /// `inout` is deliberately not here. Section 12.3.9.3 makes a bidirectional
     /// port drivable from both sides, which is the whole reason the direction
     /// exists.
+    /// Each source and destination pair of the module's path delays (IEEE
+    /// 1364-2005 section 14.2.1): a source is an input or inout port, and a
+    /// destination an output or inout port, of the module's discrete nets
+    /// and variables.
+    fn analyze_specify_paths(
+        &mut self,
+        module: &Module,
+        signals: &[AnalyzedDigitalSignal],
+    ) -> Vec<AnalyzedSpecifyPath> {
+        let direction = |name: &str| {
+            module
+                .port_declarations
+                .iter()
+                .find(|declaration| declaration.names.iter().any(|port| port == name))
+                .map(|declaration| declaration.direction)
+        };
+        let mut paths = Vec::new();
+        for path in &module.specify_paths {
+            let mut valid = true;
+            // A source may not be an output, nor a destination an input.
+            for (terminal, excluded, role, ports) in path
+                .sources
+                .iter()
+                .map(|terminal| {
+                    (
+                        terminal,
+                        PortDirection::Output,
+                        "source",
+                        "an input or inout",
+                    )
+                })
+                .chain(path.destinations.iter().map(|terminal| {
+                    (
+                        terminal,
+                        PortDirection::Input,
+                        "destination",
+                        "an output or inout",
+                    )
+                }))
+            {
+                let discrete = signals
+                    .iter()
+                    .any(|signal| signal.name == terminal.name && signal.width > 0);
+                let fits = direction(&terminal.name).is_some_and(|found| found != excluded);
+                if !discrete || !fits {
+                    self.record_error_at(
+                        SemanticErrorKind::InvalidExpression(format!(
+                            "module path {role} `{}` is not {ports} port of module `{}` with \
+                             discrete bits; IEEE 1364-2005 section 14.2.1 runs a path from an \
+                             input or inout port to an output or inout port",
+                            terminal.name, module.name
+                        )),
+                        terminal.span,
+                    );
+                    valid = false;
+                }
+            }
+            if !valid {
+                continue;
+            }
+            let width = |name: &str| {
+                signals
+                    .iter()
+                    .find(|signal| signal.name == name)
+                    .map_or(0, |signal| signal.width)
+            };
+            for source in &path.sources {
+                for destination in &path.destinations {
+                    let (from, to) = (width(&source.name), width(&destination.name));
+                    if !path.full && from != to {
+                        self.record_error_at(
+                            SemanticErrorKind::InvalidExpression(format!(
+                                "module path source `{}` has {from} bit(s) and destination \
+                                 `{}` {to}; IEEE 1364-2005 section 14.2.5 joins a parallel \
+                                 connection (`=>`) only between a source and a destination of \
+                                 the same width, so use a full connection (`*>`)",
+                                source.name, destination.name
+                            )),
+                            path.span,
+                        );
+                        continue;
+                    }
+                    paths.push(AnalyzedSpecifyPath {
+                        source: source.name.clone(),
+                        destination: destination.name.clone(),
+                        edge: path.edge,
+                        condition: path.condition.clone(),
+                        ifnone: path.ifnone,
+                        delays: path.delays.clone(),
+                        span: path.span,
+                    });
+                }
+            }
+        }
+        paths
+    }
+
     fn reject_drivers_on_input_ports(
         &mut self,
         module: &Module,

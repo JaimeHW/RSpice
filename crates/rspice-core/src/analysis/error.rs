@@ -1638,27 +1638,19 @@ mod tests {
     fn unlanded_hdl_option_refusals_stay_typed_when_widened() {
         use crate::config::{HdlRunConfig, SimulationConfig};
 
-        for config in [
-            HdlRunConfig {
-                path_delays: false,
-                ..HdlRunConfig::default()
-            },
-            HdlRunConfig {
+        let error = SimulationConfig {
+            hdl: HdlRunConfig {
                 timing_checks: false,
                 ..HdlRunConfig::default()
             },
-        ] {
-            let error = SimulationConfig {
-                hdl: config,
-                ..SimulationConfig::default()
-            }
-            .validate()
-            .expect_err("an unlanded option is refused");
-            assert!(matches!(
-                SimulationError::from(error),
-                SimulationError::UnsupportedCapability(_)
-            ));
+            ..SimulationConfig::default()
         }
+        .validate()
+        .expect_err("an unlanded option is refused");
+        assert!(matches!(
+            SimulationError::from(error),
+            SimulationError::UnsupportedCapability(_)
+        ));
     }
 
     #[test]

@@ -689,17 +689,19 @@ impl MixedDigitalCoordinator {
             .run_directory
             .as_deref()
             .or(config.deck_directory.as_deref());
-        self.digital
-            .make_mut()
-            .configure_effects(super::super::effects::HdlEffectsConfig {
-                plusargs: config.plusargs.clone(),
-                seed: config.seed,
-                files: HdlFileOptions::new(
-                    directory,
-                    config.unrestricted_io,
-                    Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
-                ),
-            });
+        let digital = self.digital.make_mut();
+        digital.configure_effects(super::super::effects::HdlEffectsConfig {
+            plusargs: config.plusargs.clone(),
+            seed: config.seed,
+            files: HdlFileOptions::new(
+                directory,
+                config.unrestricted_io,
+                Arc::new(HdlFileStore::new(HdlFileTarget::platform_default())),
+            ),
+        });
+        if !config.path_delays {
+            digital.drop_path_delays();
+        }
     }
 
     /// The `$finish`, `$stop` or `$fatal` the design executed, with the

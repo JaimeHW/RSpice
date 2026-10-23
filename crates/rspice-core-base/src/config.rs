@@ -433,16 +433,10 @@ impl HdlRunConfig {
     }
 
     /// The refusal for the first option set away from its default whose
-    /// behaviour has not landed: path delays and timing checks. The token
-    /// says which; the text names the feature.
+    /// behaviour has not landed: timing checks. The token says which; the
+    /// text names the feature.
     fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
-        let (capability, option, reason) = if !self.path_delays {
-            (
-                "hdl.option.path_delays",
-                "`.options hdl_path_delays=0`",
-                "`specify` path delays are not implemented",
-            )
-        } else if !self.timing_checks {
+        let (capability, option, reason) = if !self.timing_checks {
             (
                 "hdl.option.timing_checks",
                 "`.options hdl_timing_checks=0`",
@@ -1567,41 +1561,35 @@ mod timeint_config_tests {
         }
         .validate()
         .expect("a delay selection is valid");
-        for (config, token, feature) in [
-            (
-                HdlRunConfig {
-                    path_delays: false,
-                    ..HdlRunConfig::default()
-                },
-                "hdl.option.path_delays",
-                "`specify` path delays are not implemented",
-            ),
-            (
-                HdlRunConfig {
-                    timing_checks: false,
-                    ..HdlRunConfig::default()
-                },
-                "hdl.option.timing_checks",
-                "`specify` timing checks are not implemented",
-            ),
-        ] {
-            let error = SimulationConfig {
-                hdl: config,
-                ..SimulationConfig::default()
-            }
-            .validate()
-            .expect_err("an unlanded option is refused");
-            let SimulationConfigError::UnsupportedCapability(refusal) = &error else {
-                panic!("expected a typed capability refusal, got {error:?}");
-            };
-            assert_eq!(refusal.capability, token, "{error}");
-            let text = error.to_string();
-            assert!(text.contains("is not supported yet"), "{text}");
-            assert!(text.contains(feature), "{text}");
-            assert!(
-                !text.contains("lane") && !text.contains("P2"),
-                "no plan identifier reaches the text: {text}"
-            );
+        // And module path delays.
+        HdlRunConfig {
+            path_delays: false,
+            ..HdlRunConfig::default()
         }
+        .validate()
+        .expect("running without path delays is valid");
+        let error = SimulationConfig {
+            hdl: HdlRunConfig {
+                timing_checks: false,
+                ..HdlRunConfig::default()
+            },
+            ..SimulationConfig::default()
+        }
+        .validate()
+        .expect_err("an unlanded option is refused");
+        let SimulationConfigError::UnsupportedCapability(refusal) = &error else {
+            panic!("expected a typed capability refusal, got {error:?}");
+        };
+        assert_eq!(refusal.capability, "hdl.option.timing_checks", "{error}");
+        let text = error.to_string();
+        assert!(text.contains("is not supported yet"), "{text}");
+        assert!(
+            text.contains("`specify` timing checks are not implemented"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("lane") && !text.contains("P2"),
+            "no plan identifier reaches the text: {text}"
+        );
     }
 }

@@ -740,6 +740,7 @@ impl DigitalElaborator<'_> {
             continuous_assigns: child.digital.continuous_assigns.clone(),
             port_drivers,
             bit_aliases,
+            paths: child.digital.paths.clone(),
             constants: child.digital.constants.clone(),
             span: instance.span,
         });
