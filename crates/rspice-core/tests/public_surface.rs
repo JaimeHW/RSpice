@@ -8,7 +8,9 @@
 //! This is a source-level proxy, not a census of reachable exported names:
 //! it counts public item declarations and re-export statements at the start
 //! of a line after indentation. A grouped re-export counts once, and items
-//! inside private modules still count. Fields and restricted visibility do not.
+//! inside private modules still count. Fields and restricted visibility do not,
+//! and neither does a module the family moved into another of its crates and
+//! re-exports whole at its old path: that line is the module's declaration.
 //! Generated `veriloga_builtins` trees are excluded. The keyword list below
 //! defines the exact count; moving declarations can change it without adding API.
 //!
@@ -462,11 +464,36 @@ fn is_public_item(line: &str) -> bool {
         return false;
     };
     if rest.starts_with("use ") {
-        return true;
+        return family_module_reexport(line).is_none();
     }
     ITEM_KEYWORDS
         .iter()
         .any(|keyword| rest.starts_with(keyword))
+}
+
+/// The crate directory and module a `pub use rspice_core_<name>::<module>;`
+/// line names: a module of the family re-exported whole at the path it had
+/// before it moved into another crate of the family.
+///
+/// That statement is the module's declaration, as the `pub mod` it replaced
+/// was, and counts as `pub mod` does: not at all. The module's items are
+/// counted in the crate that writes them, so a move adds nothing here.
+/// [`every_family_module_reexport_names_a_module_of_that_crate`] holds each
+/// such line to a module that crate declares, so a function or type
+/// re-exported the same way cannot pass for one.
+fn family_module_reexport(line: &str) -> Option<(String, &str)> {
+    let path = line
+        .strip_prefix("pub use rspice_core_")?
+        .strip_suffix(';')?;
+    let (name, module) = path.split_once("::")?;
+    let snake = |word: &str| {
+        !word.is_empty()
+            && word
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    (snake(name) && snake(module))
+        .then(|| (format!("rspice-core-{}", name.replace('_', "-")), module))
 }
 
 /// Whether the item declared on `lines[index]` carries `#[doc(hidden)]`
@@ -621,6 +648,62 @@ fn restricted_visibility_does_not_count_as_public() {
     assert!(!is_public_item("fn private()"));
     assert!(!is_public_item("pub node_pos: Vec<NodeId>,"));
     assert!(!is_public_item("// pub fn commented_out()"));
+}
+
+#[test]
+fn a_moved_module_reexported_whole_counts_as_its_declaration_did() {
+    assert!(!is_public_item("pub use rspice_core_base::config;"));
+    assert!(!is_public_item(
+        "pub use rspice_core_base::family_features;"
+    ));
+    // Anything narrower or wider than one whole module still counts.
+    assert!(is_public_item(
+        "pub use rspice_core_base::config::SpiceDialect;"
+    ));
+    assert!(is_public_item(
+        "pub use rspice_core_base::{config, solver};"
+    ));
+    assert!(is_public_item("pub use rspice_core_base::Value;"));
+    assert!(is_public_item("pub use rspice_veriloga::ir;"));
+}
+
+#[test]
+fn every_family_module_reexport_names_a_module_of_that_crate() {
+    let roots = family_src_roots();
+    for root in &roots {
+        for path in rust_sources(root) {
+            let source = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            for line in source.lines().map(str::trim_start) {
+                let Some((crate_dir, module)) = family_module_reexport(line) else {
+                    continue;
+                };
+                let src = roots
+                    .iter()
+                    .find(|root| {
+                        root.parent()
+                            .and_then(Path::file_name)
+                            .and_then(|name| name.to_str())
+                            == Some(crate_dir.as_str())
+                    })
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{}: `{line}` names {crate_dir}, which is not a crate of the family",
+                            family_relative(&path)
+                        )
+                    });
+                let lib = fs::read_to_string(src.join("lib.rs"))
+                    .unwrap_or_else(|error| panic!("read {}: {error}", src.display()));
+                assert!(
+                    lib.lines()
+                        .any(|declared| declared.trim() == format!("pub mod {module};")),
+                    "{}: `{line}` is counted as the declaration of a module, but {crate_dir} \
+                     declares no `pub mod {module};`",
+                    family_relative(&path)
+                );
+            }
+        }
+    }
 }
 
 #[test]

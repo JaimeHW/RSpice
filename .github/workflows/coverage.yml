@@ -29,12 +29,12 @@ jobs:
       matrix:
         include:
           - group: core
-            packages: -p rspice-core
+            packages: -p rspice-core -p rspice-core-base
           - group: ui
             packages: -p rspice-app
           - group: libraries
             packages: >-
-              --workspace --exclude rspice-core --exclude rspice-app
+              --workspace --exclude rspice-core --exclude rspice-core-base --exclude rspice-app
               --exclude rspice-python --exclude rspice-wasm --exclude rspice-conformance
               --exclude 'rspice-veriloga-model*' --exclude 'rspice-*-catalog-dump'
     env:

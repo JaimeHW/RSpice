@@ -75,73 +75,73 @@
 pub mod analysis;
 /// Starter model cards embedded in the binary; a leaf with no dependencies so
 /// that library, netlist and engine can all share one copy.
-pub(crate) mod builtin_lib;
+pub(crate) use rspice_core_base::builtin_lib;
 /// The typed refusal of a well-formed construct this build does not execute.
 /// Below configuration and XSPICE, which raise one; published through
 /// `analysis::error` and the crate root.
-mod capability;
+use rspice_core_base::capability;
 pub mod circuit;
 /// Names of the XSPICE code models compiled in; a leaf so that both the parser
 /// that classifies a name and the subsystem that instantiates it read down.
-pub(crate) mod codemodels;
+pub(crate) use rspice_core_base::codemodels;
 /// Simulation configuration. Below everything that reads it, so a tolerance
 /// or dialect flag is a downward reference rather than a reach into `engine`.
-pub mod config;
-pub mod constants;
+pub use rspice_core_base::config;
+pub use rspice_core_base::constants;
 /// Shared vocabulary between the control-session machine and its engine host.
 mod control_protocol;
 pub mod device;
-pub mod diagnostics;
+pub use rspice_core_base::diagnostics;
 pub mod engine;
 /// The names an event-only net is refused and published under.
-mod event_net;
+use rspice_core_base::event_net;
 pub mod execution;
-pub mod expr;
+pub use rspice_core_base::expr;
 #[doc(hidden)]
-pub mod family_features;
+pub use rspice_core_base::family_features;
 /// Stable analysis and run-coordinate identities, named by both the engine's
 /// error taxonomy and the deck planner. A leaf, so neither has to reach for
 /// the other to say which analysis or sweep point a value belongs to.
-pub mod identity;
-pub mod io;
+pub use rspice_core_base::identity;
+pub use rspice_core_base::io;
 pub mod library;
 /// Which run a log record belongs to, carried onto the engine's worker threads.
 /// A leaf: the analyses that hand work to another thread read down into it.
-pub mod log_scope;
+pub use rspice_core_base::log_scope;
 /// SPICE naming rules: what a name means in a deck, independent of dialect.
 /// A leaf — everything else depends on it, so it depends on nothing.
-pub(crate) mod naming;
+pub(crate) use rspice_core_base::naming;
 pub mod netlist;
 /// What a run raised and went on to complete with, in a shape a reader can
 /// act on: the advisories the log states as prose.
-pub mod notice;
-pub mod numerics;
+pub use rspice_core_base::notice;
+pub use rspice_core_base::numerics;
 /// The vocabulary of labels a device operating-point report may carry. A leaf:
 /// the device families that emit one and the circuit store that assembles the
 /// report both read down into it.
-pub mod op_label;
+pub use rspice_core_base::op_label;
 /// Typed per-analysis scalars, carried by analysis results, control-script
 /// PRINT and result documents alike. Published under
 /// `execution::result_document`.
-mod result_scalar;
+use rspice_core_base::result_scalar;
 /// Physical units carried by result schemas and control-expression vectors.
-mod signal_unit;
-pub mod solver;
+use rspice_core_base::signal_unit;
+pub use rspice_core_base::solver;
 /// Where a line of deck text was written. A leaf, so a refusal raised below
 /// the parser can cite one; published through `netlist`.
-mod source_location;
-mod spice_number;
-pub mod time_compat;
-mod transient_observation;
+use rspice_core_base::source_location;
+use rspice_core_base::spice_number;
+pub use rspice_core_base::time_compat;
+use rspice_core_base::transient_observation;
 pub mod xspice;
 
 /// Abort signal for cancelling long-running simulations
-pub mod abort_signal;
-pub mod resource;
+pub use rspice_core_base::abort_signal;
+pub use rspice_core_base::resource;
 
 /// SIMD-accelerated operations (optional, requires `simd` feature)
 #[cfg(feature = "simd")]
-pub mod simd;
+pub use rspice_core_base::simd;
 
 // Re-export primary types for convenience
 pub use abort_signal::{
@@ -180,7 +180,7 @@ pub use transient_observation::{
 };
 pub use xspice::{CmContext, CodeModel, CodeModelRegistry, XspiceInstance};
 
-family_features!();
+family_features!(rspice_core_base);
 
 /// Error types for the simulation engine
 pub mod error {
@@ -206,3 +206,61 @@ pub use num_complex::Complex64;
 
 /// Type alias for complex values used in AC analysis
 pub type ComplexValue = Complex64;
+
+/// `family_features!` is defined, and tests its own table, in the family's
+/// lowest crate. These hold this crate's manifest and root to that table.
+#[cfg(test)]
+mod family_features_tests {
+    use std::collections::BTreeSet;
+
+    /// Every feature this crate's manifest declares, `default` and
+    /// `test-support` aside: neither is a flag.
+    fn manifest_features() -> BTreeSet<String> {
+        let mut in_features = false;
+        let mut features = BTreeSet::new();
+        for line in include_str!("../Cargo.toml").lines() {
+            if line.starts_with('[') {
+                in_features = line == "[features]";
+            } else if in_features && line.starts_with(|c: char| c.is_ascii_lowercase()) {
+                let (name, _) = line.split_once(" = ").expect("a feature definition");
+                features.insert(name.to_owned());
+            }
+        }
+        features.remove("default");
+        features.remove("test-support");
+        features
+    }
+
+    /// Every flag `FAMILY_FEATURES` states, spelled as the feature it reads.
+    fn stated_flags() -> BTreeSet<String> {
+        let stated = format!("{:?}", crate::FAMILY_FEATURES);
+        let fields = stated
+            .strip_prefix("FamilyFeatures { ")
+            .and_then(|fields| fields.strip_suffix(" }"))
+            .expect("the derived `Debug` form of `FamilyFeatures`");
+        fields
+            .split(", ")
+            .map(|field| field.split_once(": ").expect("a `flag: bool` field").0)
+            .map(|flag| flag.replace('_', "-"))
+            .collect()
+    }
+
+    #[test]
+    fn every_feature_of_the_manifest_has_one_flag_named_for_it() {
+        assert_eq!(stated_flags(), manifest_features());
+    }
+
+    #[test]
+    fn the_crate_root_states_the_features_of_this_build_as_base_does() {
+        let stated = crate::FAMILY_FEATURES;
+        assert_eq!(stated, rspice_core_base::FAMILY_FEATURES);
+        assert_eq!(stated.parallel, cfg!(feature = "parallel"));
+        assert_eq!(stated.simd, cfg!(feature = "simd"));
+        assert_eq!(stated.veriloga, cfg!(feature = "veriloga"));
+        assert_eq!(stated.veriloga_native, cfg!(feature = "veriloga-native"));
+        assert_eq!(
+            stated.veriloga_builtins,
+            cfg!(feature = "veriloga-builtins")
+        );
+    }
+}

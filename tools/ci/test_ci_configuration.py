@@ -481,6 +481,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-python",
             "rspice-wasm",
             "rspice-core",
+            "rspice-core-base",
             "rspice-publication-contract",
         )
         offenders = []
@@ -511,16 +512,24 @@ class CiConfigurationTests(unittest.TestCase):
         state survive real numerical regressions, because they never travel
         the path a user's deck takes.
         """
-        core_src = ROOT / "crates" / "rspice-core" / "src"
-        self.assertFalse(
-            (core_src / "testing").exists(),
-            "rspice-core/src/testing must not come back; suites belong in rspice-conformance",
+        # The engine is rspice-core and every rspice-core-<name> crate beside it.
+        family_src = sorted(
+            directory / "src"
+            for directory in (ROOT / "crates").iterdir()
+            if directory.name == "rspice-core" or directory.name.startswith("rspice-core-")
         )
-        self.assertNotIn(
-            "pub mod testing",
-            read_text("crates/rspice-core/src/lib.rs"),
-            "rspice-core must not re-declare a `testing` module",
-        )
+        self.assertIn(ROOT / "crates" / "rspice-core" / "src", family_src)
+        for src in family_src:
+            crate = src.parent.name
+            self.assertFalse(
+                (src / "testing").exists(),
+                f"{crate}/src/testing must not come back; suites belong in rspice-conformance",
+            )
+            self.assertNotIn(
+                "pub mod testing",
+                (src / "lib.rs").read_text(encoding="utf-8"),
+                f"{crate} must not re-declare a `testing` module",
+            )
         self.assertNotRegex(
             read_text("crates/rspice-core/Cargo.toml"),
             r"(?m)^conformance = ",
@@ -529,7 +538,8 @@ class CiConfigurationTests(unittest.TestCase):
 
         offenders = [
             path.relative_to(ROOT).as_posix()
-            for path in sorted(core_src.rglob("*.rs"))
+            for src in family_src
+            for path in sorted(src.rglob("*.rs"))
             if re.search(r"\b(xyce|ngspice)_runner\b", path.read_text(encoding="utf-8", errors="ignore"))
         ]
         self.assertEqual(offenders, [], "conformance runner code reappeared inside rspice-core")
@@ -542,7 +552,7 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("ref: ${{ github.sha }}", conformance_job)
         self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', conformance_job)
-        self.assertIn("-p rspice-core --lib --tests", conformance_job)
+        self.assertIn("-p rspice-core -p rspice-core-base --lib --tests", conformance_job)
         self.assertIn("-p rspice-engine-adapter", conformance_job)
         for target in (
             "ngspice_oracle_audit",
@@ -628,18 +638,29 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertNotIn("run: cargo clean", workflow)
         self.assertNotIn("--no-run", workflow)
         self.assertIn("CARGO_BUILD_JOBS: \"2\"", workflow)
-        for package, job in (("rspice-core", "test-linux"), ("rspice-app", "test-ui")):
+        # The engine's lane also runs the crates of its family below it.
+        for packages, job in (
+            ("-p rspice-core -p rspice-core-base", "test-linux"),
+            ("-p rspice-app", "test-ui"),
+        ):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
             # A complete package selection includes lib, bin, integration and doc
             # tests. Restricting it to --lib previously missed UI integration tests.
-            self.assertIn(f"run: cargo test --locked -p {package} --no-fail-fast\n", body)
+            self.assertIn(f"run: cargo test --locked {packages} --no-fail-fast\n", body)
 
         step = workflow.split("- name: Test remaining workspace crates\n", 1)[1]
         step = step.split("\n  test-ui:", 1)[0]
         command = shlex.split(step.split("run: >-", 1)[1])
         self.assertEqual(command[:4], ["cargo", "test", "--locked", "--workspace"])
         exclusions = [command[i + 1] for i, word in enumerate(command) if word == "--exclude"]
-        dedicated = {"rspice-core", "rspice-app", "rspice-python", "rspice-wasm", "rspice-conformance"}
+        dedicated = {
+            "rspice-core",
+            "rspice-core-base",
+            "rspice-app",
+            "rspice-python",
+            "rspice-wasm",
+            "rspice-conformance",
+        }
         generated = {name for name in workspace_member_names()
                      if name.startswith("rspice-veriloga-model") or name.endswith("-catalog-dump")}
         excluded = {name for name in workspace_member_names()
@@ -805,6 +826,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-cloud-client",
             "rspice-sheet-publisher",
             "rspice-core",
+            "rspice-core-base",
             "rspice-app",
         ):
             self.assertIn(package, covered)
@@ -978,6 +1000,7 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("fail-fast: false", job)
         for shard in (
             ("rspice-core", "--no-default-features\n"),
+            ("rspice-core-base", "--no-default-features\n"),
             (
                 "rspice-core",
                 "--no-default-features --features wasm,veriloga,veriloga-wasm-jit",
@@ -997,7 +1020,16 @@ class CiConfigurationTests(unittest.TestCase):
         ci_workflow = read_text(".github/workflows/ci.yml")
         nightly_workflow = read_text(".github/workflows/nightly.yml")
 
-        self.assertIn("cargo test --locked -p rspice-core --lib", ci_workflow)
+        # rspice-core's `[lib] test = false` leaves its unit tests, and those of
+        # the family crates below it, to one alias that names every one.
+        import tomllib
+
+        aliases = tomllib.loads(read_text(".cargo/config.toml"))["alias"]
+        self.assertEqual(
+            aliases["core-lib-test"],
+            ["test", "-p", "rspice-core", "-p", "rspice-core-base", "--lib"],
+        )
+        self.assertIn("run: cargo core-lib-test --locked\n", ci_workflow)
         self.assertIn("Full test suite (release)", nightly_workflow)
         self.assertIn("cargo test --locked --workspace", nightly_workflow)
         self.assertNotIn("--exclude rspice-core", nightly_workflow)
@@ -1455,7 +1487,7 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("RUSTFLAGS: -D warnings", step)
         self.assertIn(
-            "cargo check --locked -p rspice-core"
+            "cargo check --locked -p rspice-core -p rspice-core-base"
             " --features veriloga-builtins-base --all-targets",
             step,
         )
@@ -1467,7 +1499,8 @@ class CiConfigurationTests(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "cargo clippy --locked -p rspice-core --all-targets --all-features -- -D warnings",
+            "cargo clippy --locked -p rspice-core -p rspice-core-base"
+            " --all-targets --all-features -- -D warnings",
             read_text(".github/workflows/python.yml"),
         )
 
@@ -1746,7 +1779,11 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo llvm-cov --locked ${{ matrix.packages }}", coverage)
         for group in ("core", "ui", "libraries"):
             self.assertIn(f"group: {group}", coverage)
-        self.assertIn("--workspace --exclude rspice-core --exclude rspice-app", coverage)
+        self.assertIn("packages: -p rspice-core -p rspice-core-base\n", coverage)
+        self.assertIn(
+            "--workspace --exclude rspice-core --exclude rspice-core-base --exclude rspice-app",
+            coverage,
+        )
         self.assertIn("--exclude 'rspice-veriloga-model*'", coverage)
         self.assertNotIn("  push:", coverage)
         self.assertNotIn("  pull_request:", coverage)
@@ -1832,7 +1869,8 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("wheel smoke passed", workflow)
         self.assertIn("Python 3.10 abi3 smoke passed", workflow)
         self.assertIn(
-            "cargo clippy --locked -p rspice-core --all-targets --all-features -- -D warnings",
+            "cargo clippy --locked -p rspice-core -p rspice-core-base"
+            " --all-targets --all-features -- -D warnings",
             workflow,
         )
         self.assertIn(

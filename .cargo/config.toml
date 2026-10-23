@@ -1,3 +1,9 @@
+[alias]
+# The engine's unit tests. rspice-core declares `[lib] test = false`, so they
+# run only when named, and a module that moved into a crate of the family
+# below it takes its tests along: this is the one spelling of all of them.
+core-lib-test = ["test", "-p", "rspice-core", "-p", "rspice-core-base", "--lib"]
+
 [target.'cfg(all(target_os = "windows", target_env = "msvc", target_arch = "x86_64"))']
 # Large Windows/MSVC release test binaries in this workspace can trigger
 # link.exe LNK1328 while emitting PDB data. Disabling linker-generated debug

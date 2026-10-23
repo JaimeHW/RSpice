@@ -5519,6 +5519,7 @@ dependencies = [
  "portable-atomic",
  "proptest",
  "rayon",
+ "rspice-core-base",
  "rspice-matrix",
  "rspice-output",
  "rspice-units",
@@ -5535,6 +5536,23 @@ dependencies = [
  "wasm-bindgen-test",
  "wide",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-core-base"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "log",
+ "num-bigint 0.4.8",
+ "num-complex",
+ "rspice-matrix",
+ "rspice-veriloga-runtime",
+ "rustyhdf5",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "wide",
 ]
 
 [[package]]

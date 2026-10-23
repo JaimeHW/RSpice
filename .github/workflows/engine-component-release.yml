@@ -47,7 +47,7 @@ jobs:
             --env RSPICE_EXECUTION_DECK_TIMEOUT_MS=900000 \
             "$BUILDER_IMAGE" \
             bash -euo pipefail -c '
-              cargo test --locked --release -p rspice-core --lib --tests
+              cargo test --locked --release -p rspice-core -p rspice-core-base --lib --tests
               cargo test --locked --release -p rspice-engine-adapter
               cargo test --locked --release -p rspice-conformance --lib \
                 --test ngspice_oracle_audit --test y_device_policy
