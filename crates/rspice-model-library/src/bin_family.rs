@@ -85,8 +85,10 @@ impl<'a> BindableModel<'a> {
 }
 
 /// A bin card's window as the engine reads it.
-fn bin_geometry(model: &DeviceModel) -> rspice_core::engine::ModelBinCardGeometry {
-    use rspice_core::engine::{ModelBinAxisRange, ModelBinCardGeometry};
+fn bin_geometry(
+    model: &DeviceModel,
+) -> rspice_core_netlist::netlist::model_bin::ModelBinCardGeometry {
+    use rspice_core_netlist::netlist::model_bin::{ModelBinAxisRange, ModelBinCardGeometry};
     let parameter = |name: &str| model.parameters.get(name).copied();
     ModelBinCardGeometry {
         length: ModelBinAxisRange {

@@ -352,7 +352,7 @@ impl ModelCatalog {
             );
         }
 
-        let mut parser = rspice_core::library::LibParser::new(
+        let mut parser = rspice_core_netlist::library::LibParser::new(
             source_path.parent().unwrap_or_else(|| Path::new("/")),
         );
         let parsed = parser.parse_string(&new_source);
@@ -813,10 +813,11 @@ impl ModelCatalog {
             .validate_section_qualification_evidence(&retained_qualification, &current_source)?;
         let bytes = source.into_bytes();
 
-        let mut parser =
-            rspice_core::library::LibParser::new(root.parent().unwrap_or_else(|| Path::new("/")));
+        let mut parser = rspice_core_netlist::library::LibParser::new(
+            root.parent().unwrap_or_else(|| Path::new("/")),
+        );
         let parsed = parser.parse_string(
-            rspice_core::netlist::decode_source_bytes(&bytes)
+            rspice_core_netlist::netlist::decode_source_bytes(&bytes)
                 .map_err(|error| format!("Project model source cannot be decoded: {error}"))?
                 .as_str(),
         );

@@ -623,15 +623,15 @@ fn validate_vector_model_source(
             "retained candidate-model bytes do not match the bound source digest",
         ));
     }
-    let model_source =
-        rspice_core::netlist::decode_source_bytes(&vector.model_source).map_err(|error| {
+    let model_source = rspice_core_netlist::netlist::decode_source_bytes(&vector.model_source)
+        .map_err(|error| {
             QualificationValidationError::new(
                 QualificationErrorCode::InvalidExecutionDefinition,
                 format!("{path}.model_source"),
                 format!("retained candidate-model source cannot be decoded: {error}"),
             )
         })?;
-    let mut library_parser = rspice_core::library::LibParser::new(Path::new("."));
+    let mut library_parser = rspice_core_netlist::library::LibParser::new(Path::new("."));
     let parsed_library = library_parser.parse_string(&model_source);
     let model_names = parsed_library
         .top_level_models
@@ -671,7 +671,7 @@ fn validate_vector_model_source(
                     ),
                 )
             })?;
-    let execution_model_source = rspice_core::netlist::decode_source_bytes(
+    let execution_model_source = rspice_core_netlist::netlist::decode_source_bytes(
         &vector.execution_model_source,
     )
     .map_err(|error| {
@@ -703,13 +703,14 @@ fn validate_vector_model_source(
             format!("executable testbench is not UTF-8: {error}"),
         )
     })?;
-    let netlist = rspice_core::Netlist::parse_validated(executable).map_err(|error| {
-        QualificationValidationError::new(
-            QualificationErrorCode::InvalidExecutionDefinition,
-            format!("{path}.executable_input"),
-            format!("executable testbench is not a valid netlist: {error}"),
-        )
-    })?;
+    let netlist =
+        rspice_core_netlist::netlist::Netlist::parse_validated(executable).map_err(|error| {
+            QualificationValidationError::new(
+                QualificationErrorCode::InvalidExecutionDefinition,
+                format!("{path}.executable_input"),
+                format!("executable testbench is not a valid netlist: {error}"),
+            )
+        })?;
     let model_is_present = netlist
         .models
         .iter()
@@ -775,8 +776,8 @@ fn contains_exact_bytes(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
-fn element_kind_model_name(kind: &rspice_core::netlist::ElementKind) -> Option<&str> {
-    use rspice_core::netlist::ElementKind;
+fn element_kind_model_name(kind: &rspice_core_netlist::netlist::ElementKind) -> Option<&str> {
+    use rspice_core_netlist::netlist::ElementKind;
     match kind {
         ElementKind::Resistor {
             model: Some(model), ..

@@ -1375,7 +1375,7 @@ fn evaluate_temperature_equation(
     expression: &str,
     temperature_c: FiniteF64,
 ) -> Result<FiniteF64, DefinitionMetadataError> {
-    let mut context = rspice_core::netlist::expr::ParamContext::new();
+    let mut context = rspice_core_netlist::netlist::expr::ParamContext::new();
     for parameter in &metadata.parameters {
         if let ParameterValue::Numeric(value) = parameter.value {
             context.set(&parameter.name, value.get());
@@ -1389,16 +1389,15 @@ fn evaluate_temperature_equation(
     context.set("TEMPER", temperature_c.get());
     context.set("TREF", reference_k);
     context.set("TREF_C", law.reference_temperature_c.get());
-    let value =
-        rspice_core::netlist::expr::eval_expression(expression, &context).map_err(|error| {
-            DefinitionMetadataError::Invalid {
-                path: format!(
-                    "temperature_laws[{}].representation.expression",
-                    law.quantity
-                ),
-                message: format!("temperature equation cannot be evaluated: {error}"),
-            }
-        })?;
+    let value = rspice_core_netlist::netlist::expr::eval_expression(expression, &context).map_err(
+        |error| DefinitionMetadataError::Invalid {
+            path: format!(
+                "temperature_laws[{}].representation.expression",
+                law.quantity
+            ),
+            message: format!("temperature equation cannot be evaluated: {error}"),
+        },
+    )?;
     FiniteF64::new(value).map_err(|_| DefinitionMetadataError::Invalid {
         path: format!(
             "temperature_laws[{}].representation.expression",
@@ -1409,7 +1408,7 @@ fn evaluate_temperature_equation(
 }
 
 fn temperature_expression_dependencies(expression: &str) -> Result<BTreeSet<String>, String> {
-    let parsed = rspice_core::netlist::expr::parse_expression(expression)
+    let parsed = rspice_core_netlist::netlist::expr::parse_expression(expression)
         .map_err(|error| format!("temperature equation cannot be parsed: {error}"))?;
     let mut dependencies = BTreeSet::new();
     collect_expression_parameters(&parsed, &mut dependencies);
@@ -1419,10 +1418,10 @@ fn temperature_expression_dependencies(expression: &str) -> Result<BTreeSet<Stri
 }
 
 fn collect_expression_parameters(
-    expression: &rspice_core::netlist::expr::Expr,
+    expression: &rspice_core_netlist::netlist::expr::Expr,
     parameters: &mut BTreeSet<String>,
 ) {
-    use rspice_core::netlist::expr::Expr;
+    use rspice_core_netlist::netlist::expr::Expr;
     match expression {
         Expr::Param(name) => {
             parameters.insert(canonical_identifier(name));

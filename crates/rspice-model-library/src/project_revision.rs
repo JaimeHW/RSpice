@@ -519,7 +519,7 @@ impl ProjectModelRevisionDefinition {
         source: &str,
         prepared: &PreparedRevision,
     ) -> Result<(), ProjectModelRevisionError> {
-        let mut parser = rspice_core::library::LibParser::new("/");
+        let mut parser = rspice_core_netlist::library::LibParser::new("/");
         let parsed = parser.parse_string(source);
         if !parsed.is_ok() {
             return Err(ProjectModelRevisionError::Parse(
@@ -615,7 +615,7 @@ impl ProjectModelRevisionDefinition {
     fn verify_parsed_model(
         &self,
         scope: &str,
-        parsed: &rspice_core::library::ParsedModel,
+        parsed: &rspice_core_netlist::library::ParsedModel,
         expected: &EffectiveParameters,
     ) -> Result<(), ProjectModelRevisionError> {
         if parsed.name != self.base.name {
@@ -627,7 +627,8 @@ impl ProjectModelRevisionDefinition {
                 ),
             );
         }
-        let expected_type = rspice_core::library::ModelType::from_spice_type(&self.base.spice_type);
+        let expected_type =
+            rspice_core_netlist::library::ModelType::from_spice_type(&self.base.spice_type);
         if parsed.model_type != expected_type {
             return round_trip(
                 scope,
@@ -888,7 +889,7 @@ mod tests {
             .verify_source_round_trip(&source)
             .expect("canonical source round-trips");
 
-        let mut parser = rspice_core::library::LibParser::new("/");
+        let mut parser = rspice_core_netlist::library::LibParser::new("/");
         let parsed = parser.parse_string(&source);
         assert!(parsed.is_ok());
         assert_eq!(parsed.top_level_models.len(), 1);

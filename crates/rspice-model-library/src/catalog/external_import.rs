@@ -9,7 +9,7 @@ use crate::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
     first_unreachable_source,
 };
-use rspice_core::library::{LibParseResult, ResolvedLibDependency, ResolvedLibSource};
+use rspice_core_netlist::library::{LibParseResult, ResolvedLibDependency, ResolvedLibSource};
 use rspice_vocabulary::product::ContentDigest;
 use sha2::{Digest as _, Sha256};
 use std::collections::{BTreeSet, HashSet};
@@ -91,8 +91,8 @@ impl ModelCatalog {
             .collect::<Vec<_>>();
         source_contents.sort_by(|left, right| left.path.cmp(&right.path));
         for content in &source_contents {
-            let source =
-                rspice_core::netlist::decode_source_bytes(&content.bytes).map_err(|error| {
+            let source = rspice_core_netlist::netlist::decode_source_bytes(&content.bytes)
+                .map_err(|error| {
                     format!(
                         "Model source '{}' cannot be decoded for dialect validation: {error}",
                         content.path.display()
@@ -160,7 +160,7 @@ impl ModelCatalog {
     /// declarative Spectre model-library subset implemented by the core
     /// adapter. Unsupported native statements are errors, never discarded.
     pub fn validate_model_source_dialect(path: &Path, source: &str) -> Result<(), String> {
-        rspice_core::library::adapt_spectre_model_library(path, source)
+        rspice_core_netlist::library::adapt_spectre_model_library(path, source)
             .map(|_| ())
             .map_err(|error| {
                 format!(
@@ -179,21 +179,24 @@ fn extend_hdl_closure(
 ) -> Result<(), String> {
     let mut roots = BTreeSet::<PathBuf>::new();
     for resolved in &result.resolved_sources {
-        let projected =
-            rspice_core::library::adapt_spectre_model_library(&resolved.path, &resolved.content)
-                .map_err(|error| {
-                    format!(
-                        "{}:{} cannot authenticate AHDL dependencies: {}",
-                        resolved.path.display(),
-                        error.line,
-                        error.message
-                    )
-                })?;
+        let projected = rspice_core_netlist::library::adapt_spectre_model_library(
+            &resolved.path,
+            &resolved.content,
+        )
+        .map_err(|error| {
+            format!(
+                "{}:{} cannot authenticate AHDL dependencies: {}",
+                resolved.path.display(),
+                error.line,
+                error.message
+            )
+        })?;
         for line in projected.lines() {
-            let Some(include) = rspice_core::netlist::parse_veriloga_source_directive(line) else {
+            let Some(include) = rspice_core_netlist::netlist::parse_veriloga_source_directive(line)
+            else {
                 continue;
             };
-            let requested = rspice_core::netlist::normalize_source_path_literal(
+            let requested = rspice_core_netlist::netlist::normalize_source_path_literal(
                 &include.file_path.to_string_lossy(),
             )
             .map_err(|error| {
@@ -207,7 +210,7 @@ fn extend_hdl_closure(
                 .iter()
                 .filter(|dependency| {
                     dependency.owner == resolved.path
-                        && rspice_core::netlist::normalize_source_path_literal(
+                        && rspice_core_netlist::netlist::normalize_source_path_literal(
                             &dependency.requested_path,
                         )
                         .is_ok_and(|candidate| candidate == requested)

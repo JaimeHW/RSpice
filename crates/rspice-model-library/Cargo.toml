@@ -19,7 +19,11 @@ base64.workspace = true
 csv.workspace = true
 rspice-vocabulary.workspace = true
 rspice-design-model.workspace = true
-rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false }
+# The engine's netlist and library modules, named for rspice-core-netlist,
+# the crate of the family that holds them once rspice-core no longer does;
+# and the configuration vocabulary below them.
+rspice-core-netlist = { package = "rspice-core", path = "../rspice-core", version = "0.1.0", default-features = false }
+rspice-core-base.workspace = true
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true

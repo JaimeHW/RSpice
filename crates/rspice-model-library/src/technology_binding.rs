@@ -257,7 +257,7 @@ impl ProjectTechnologyBinding {
             if !paths.contains(&edge.owner) || !paths.contains(&edge.target) {
                 return Err(TechnologyBindingError::SourceEdgeOutsideClosure);
             }
-            rspice_core::netlist::normalize_source_path_literal(&edge.requested_path)
+            rspice_core_netlist::netlist::normalize_source_path_literal(&edge.requested_path)
                 .map_err(|_| TechnologyBindingError::InvalidSourceEdge)?;
         }
         if let Some(unreachable) = crate::first_unreachable_source(

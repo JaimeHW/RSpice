@@ -9,7 +9,7 @@ use std::{collections::HashMap, path::Path};
 impl DeviceModel {
     /// Project one parsed card with its exact file and optional section provenance.
     pub fn from_parsed(
-        model: &rspice_core::library::ParsedModel,
+        model: &rspice_core_netlist::library::ParsedModel,
         file_path: &Path,
         section: Option<&str>,
     ) -> DeviceModel {
@@ -136,7 +136,7 @@ impl ModelLevel {
 impl ModelSubcircuitInterface {
     /// Project the callable interface using the included source's own provenance.
     pub fn from_parsed(
-        subcircuit: &rspice_core::library::ParsedSubcircuit,
+        subcircuit: &rspice_core_netlist::library::ParsedSubcircuit,
         file_path: &Path,
         section: Option<&str>,
     ) -> Self {
@@ -168,7 +168,7 @@ impl ModelLibrary {
     /// executable-content validation succeeds; failed imports cannot publish it.
     pub fn with_parsed_catalog(
         mut self,
-        result: &rspice_core::library::LibParseResult,
+        result: &rspice_core_netlist::library::LibParseResult,
         root: &Path,
         section: Option<&str>,
         diagnostic_name: &str,
@@ -268,7 +268,7 @@ impl ModelLibrary {
 /// that path wins over the root being scanned.
 fn insert_parsed_subcircuits(
     library: &mut ModelLibrary,
-    parsed: &[rspice_core::library::ParsedSubcircuit],
+    parsed: &[rspice_core_netlist::library::ParsedSubcircuit],
     file_path: &Path,
     section: Option<&str>,
 ) -> Result<(), String> {
@@ -293,31 +293,36 @@ fn insert_parsed_subcircuits(
 /// Recognize HDL imports through the parser's captured resolution edges.
 /// A suffix or an unrelated uploaded HDL file is not a library declaration.
 fn has_authenticated_veriloga_sources(
-    result: &rspice_core::library::LibParseResult,
+    result: &rspice_core_netlist::library::LibParseResult,
 ) -> Result<bool, String> {
     for source in &result.resolved_sources {
-        let projected =
-            rspice_core::library::adapt_spectre_model_library(&source.path, &source.content)
-                .map_err(|error| {
-                    format!(
-                        "{}:{}: {}",
-                        source.path.display(),
-                        error.line,
-                        error.message
-                    )
-                })?;
+        let projected = rspice_core_netlist::library::adapt_spectre_model_library(
+            &source.path,
+            &source.content,
+        )
+        .map_err(|error| {
+            format!(
+                "{}:{}: {}",
+                source.path.display(),
+                error.line,
+                error.message
+            )
+        })?;
         for line in projected.lines() {
-            let Some(include) = rspice_core::netlist::parse_veriloga_source_directive(line) else {
+            let Some(include) = rspice_core_netlist::netlist::parse_veriloga_source_directive(line)
+            else {
                 continue;
             };
-            let requested = rspice_core::netlist::normalize_source_path_literal(
+            let requested = rspice_core_netlist::netlist::normalize_source_path_literal(
                 &include.file_path.to_string_lossy(),
             )
             .map_err(|error| error.to_string())?;
             if result.resolved_dependencies.iter().any(|edge| {
                 edge.owner == source.path
-                    && rspice_core::netlist::normalize_source_path_literal(&edge.requested_path)
-                        .is_ok_and(|path| path == requested)
+                    && rspice_core_netlist::netlist::normalize_source_path_literal(
+                        &edge.requested_path,
+                    )
+                    .is_ok_and(|path| path == requested)
                     && result
                         .resolved_sources
                         .iter()

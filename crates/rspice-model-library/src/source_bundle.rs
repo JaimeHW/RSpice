@@ -31,7 +31,7 @@ use sha2::{Digest as _, Sha256};
 use crate::{
     ModelLibrary, ModelSourceAuthority, ModelSourceContent, ModelSourceEdge, ModelSourcePin,
 };
-use rspice_core::library::{LibParser, ResolvedLibDependency};
+use rspice_core_netlist::library::{LibParser, ResolvedLibDependency};
 use rspice_vocabulary::product::ContentDigest;
 
 /// Bounds supplied by the importing project or host.
@@ -99,7 +99,7 @@ pub fn normalize_member_path(path: &str) -> Result<String, String> {
 }
 
 fn resolve_browser_bundle_dependency(owner: &str, requested_path: &str) -> Result<String, String> {
-    let requested = rspice_core::netlist::normalize_source_path_literal(requested_path)
+    let requested = rspice_core_netlist::netlist::normalize_source_path_literal(requested_path)
         .map_err(|error| error.to_string())?;
     if requested.starts_with('/') {
         return Err("absolute paths are not allowed".to_owned());
@@ -169,7 +169,7 @@ fn browser_bundle_direct_dependencies(
     owner: &str,
     bytes: &[u8],
 ) -> Result<Vec<(usize, String)>, String> {
-    let source = rspice_core::netlist::decode_source_bytes(bytes)
+    let source = rspice_core_netlist::netlist::decode_source_bytes(bytes)
         .map_err(|error| format!("Uploaded model source '{owner}' cannot be decoded: {error}"))?;
     if browser_bundle_veriloga_member(owner) {
         return Ok(source
@@ -181,24 +181,25 @@ fn browser_bundle_direct_dependencies(
             .collect());
     }
 
-    let projection = rspice_core::library::adapt_spectre_model_library(Path::new(owner), &source)
-        .map_err(|error| {
-        format!(
-            "{owner}:{} cannot be imported as an executable model library: {}",
-            error.line, error.message
-        )
-    })?;
+    let projection =
+        rspice_core_netlist::library::adapt_spectre_model_library(Path::new(owner), &source)
+            .map_err(|error| {
+                format!(
+                    "{owner}:{} cannot be imported as an executable model library: {}",
+                    error.line, error.message
+                )
+            })?;
     Ok(projection
         .lines()
         .enumerate()
         .filter_map(|(line, source)| {
-            rspice_core::netlist::parse_include_directive(source)
+            rspice_core_netlist::netlist::parse_include_directive(source)
                 .or_else(|| {
-                    rspice_core::netlist::parse_lib_directive(source)
+                    rspice_core_netlist::netlist::parse_lib_directive(source)
                         .and_then(|(path, section)| section.map(|_| path))
                 })
                 .or_else(|| {
-                    rspice_core::netlist::parse_veriloga_source_directive(source)
+                    rspice_core_netlist::netlist::parse_veriloga_source_directive(source)
                         .map(|include| include.file_path.to_string_lossy().into_owned())
                 })
                 .map(|path| (line + 1, path))
@@ -381,31 +382,33 @@ pub fn prepare<'a>(
     let mut decoded_members = BTreeMap::<String, String>::new();
     let mut veriloga_roots = BTreeSet::<String>::new();
     for (owner_name, bytes) in &members {
-        let source = rspice_core::netlist::decode_source_bytes(bytes).map_err(|error| {
+        let source = rspice_core_netlist::netlist::decode_source_bytes(bytes).map_err(|error| {
             format!("Uploaded model source '{owner_name}' cannot be decoded: {error}")
         })?;
-        let dependency_projection =
-            rspice_core::library::adapt_spectre_model_library(Path::new(owner_name), &source)
-                .map_err(|error| {
-                    format!(
-                        "{owner_name}:{} cannot be imported as an executable model library: {}",
-                        error.line, error.message
-                    )
-                })?;
+        let dependency_projection = rspice_core_netlist::library::adapt_spectre_model_library(
+            Path::new(owner_name),
+            &source,
+        )
+        .map_err(|error| {
+            format!(
+                "{owner_name}:{} cannot be imported as an executable model library: {}",
+                error.line, error.message
+            )
+        })?;
         decoded_members.insert(owner_name.clone(), source.clone());
         let owner = member_paths
             .get(owner_name)
             .expect("every source member has a virtual identity")
             .clone();
         for (line_index, line) in dependency_projection.lines().enumerate() {
-            let dependency = rspice_core::netlist::parse_include_directive(line)
+            let dependency = rspice_core_netlist::netlist::parse_include_directive(line)
                 .map(|path| (path, false))
                 .or_else(|| {
-                    rspice_core::netlist::parse_lib_directive(line)
+                    rspice_core_netlist::netlist::parse_lib_directive(line)
                         .and_then(|(path, section)| section.map(|_| (path, false)))
                 })
                 .or_else(|| {
-                    rspice_core::netlist::parse_veriloga_source_directive(line)
+                    rspice_core_netlist::netlist::parse_veriloga_source_directive(line)
                         .map(|include| (include.file_path.to_string_lossy().into_owned(), true))
                 });
             let Some((requested_path, is_veriloga)) = dependency else {

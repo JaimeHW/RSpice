@@ -22,12 +22,12 @@ use super::{DeviceModel, ModelLibrary};
 /// reads worse than asking the card.
 #[must_use]
 pub fn envelope_is_invalid(model: &DeviceModel) -> bool {
-    rspice_core::engine::ModelBinAxisRange {
+    rspice_core_netlist::netlist::model_bin::ModelBinAxisRange {
         min: model.l_min,
         max: model.l_max,
     }
     .is_reversed()
-        || rspice_core::engine::ModelBinAxisRange {
+        || rspice_core_netlist::netlist::model_bin::ModelBinAxisRange {
             min: model.w_min,
             max: model.w_max,
         }

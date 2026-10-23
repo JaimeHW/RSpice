@@ -4,7 +4,9 @@ use super::*;
 use crate::CapturedHdlSources;
 use crate::qualification::ModelQualificationState;
 use crate::source_bundle::ImportLimits;
-use rspice_core::library::{LibParseResult, LibParser, ResolvedLibDependency, ResolvedLibSource};
+use rspice_core_netlist::library::{
+    LibParseResult, LibParser, ResolvedLibDependency, ResolvedLibSource,
+};
 use std::{path::Path, sync::Arc};
 
 fn captured_parse(root: &Path, source: &str) -> LibParseResult {

@@ -164,7 +164,7 @@ fn materialized_definitions(binding_index: usize, cards: &str) -> Vec<Materializ
     // title. Prefix one title so the first actual model card is inspected.
     let prefix = "RSpice materialized provider\n";
     let wrapped = format!("{prefix}{cards}");
-    let map = rspice_core::netlist::source_map_for_editor(&wrapped);
+    let map = rspice_core_netlist::netlist::source_map_for_editor(&wrapped);
     map.model_defs
         .into_iter()
         .filter(|definition| definition.scope.is_none())

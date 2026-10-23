@@ -157,8 +157,8 @@ impl ModelCatalog {
     }
 
     pub fn load_builtin_models(&mut self) {
-        let parsed = rspice_core::library::LibParser::new(".")
-            .parse_string(rspice_core::library::foundation_library_source());
+        let parsed = rspice_core_netlist::library::LibParser::new(".")
+            .parse_string(rspice_core_netlist::library::foundation_library_source());
         let library = self
             .libraries
             .entry("RSpice Foundation".to_owned())

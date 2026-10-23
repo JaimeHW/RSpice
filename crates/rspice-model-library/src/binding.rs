@@ -48,16 +48,16 @@ impl CornerModelBinding {
             ));
         }
         for line in self.materialized_model_cards.lines() {
-            if rspice_core::netlist::is_spice_end_card(
+            if rspice_core_netlist::netlist::is_spice_end_card(
                 line,
-                rspice_core::config::ExpressionDialect::Ngspice,
+                rspice_core_base::config::ExpressionDialect::Ngspice,
             ) {
                 return Err(format!(
                     "Corner model binding '{label}' contains a terminal .end card"
                 ));
             }
-            if rspice_core::netlist::parse_include_directive(line).is_some()
-                || rspice_core::netlist::parse_lib_directive(line).is_some()
+            if rspice_core_netlist::netlist::parse_include_directive(line).is_some()
+                || rspice_core_netlist::netlist::parse_lib_directive(line).is_some()
             {
                 return Err(format!(
                     "Corner model binding '{label}' contains an unresolved include/library directive"

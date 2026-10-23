@@ -5696,6 +5696,7 @@ dependencies = [
  "csv",
  "ed25519-dalek",
  "rspice-core",
+ "rspice-core-base",
  "rspice-design-model",
  "rspice-vocabulary",
  "semver",
