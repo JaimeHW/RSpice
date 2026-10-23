@@ -874,11 +874,29 @@ fn generated_model_features_match_the_core_feature_catalog() {
         core_manifest.contains("\"rspice-veriloga-models/veriloga-builtins-noise\","),
         "rspice-core must expose generated noise as an independent feature"
     );
-    assert!(
-        core_manifest.contains(
-            "veriloga-builtins = [\"veriloga-builtins-models\", \"veriloga-builtins-noise\"]"
-        ),
+    // Entries naming an `rspice-core-*` crate forward the feature through the
+    // core family; tools/ci/core_family.py checks that forwarding is complete.
+    let (catalog, family): (Vec<&str>, Vec<&str>) = core_manifest
+        .lines()
+        .skip_while(|line| *line != "veriloga-builtins = [")
+        .skip(1)
+        .take_while(|line| *line != "]")
+        .map(str::trim)
+        .partition(|entry| !entry.starts_with("\"rspice-core-"));
+    assert_eq!(
+        catalog,
+        [
+            "\"veriloga-builtins-models\",",
+            "\"veriloga-builtins-noise\","
+        ],
         "the compatibility feature must enable the complete model catalog and noise"
+    );
+    assert!(
+        !family.is_empty()
+            && family
+                .iter()
+                .all(|entry| entry.ends_with("/veriloga-builtins\",")),
+        "the compatibility feature must forward only itself to the core family: {family:?}"
     );
 
     let mut device_modules = 0usize;
