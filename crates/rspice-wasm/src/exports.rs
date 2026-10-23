@@ -4007,8 +4007,11 @@ mod wasm_tests {
 
     #[wasm_bindgen_test]
     fn pss_preserves_rounded_period_boundaries_in_wasm() {
+        // The source clock one ulp below the 1e-4 PSS period, written as its
+        // shortest decimal: a deck's `100u` is now the double nearest 1e-4,
+        // the period itself, as in the native twin in `pss_shooting.rs`.
         let netlist = rspice_core::Netlist::parse(
-            "WASM rounded clock\nB1 in 0 V=spice_pulse(0,1,0,1n,1n,40u,100u)\nR1 in out 1k\nC1 out 0 15.9154943091895n\n.end\n",
+            "WASM rounded clock\nB1 in 0 V=spice_pulse(0,1,0,1n,1n,40u,9.999999999999999e-5)\nR1 in out 1k\nC1 out 0 15.9154943091895n\n.end\n",
         )
         .unwrap();
         let analysis = rspice_core::Engine::default()
