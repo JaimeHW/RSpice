@@ -1299,457 +1299,371 @@ fn xyce_level18_vdmos_cgdo_displacement_current_matches_xyce_gold() {
     }
 }
 
-#[test]
-fn xyce_level18_vdmos_cgbo_displacement_current_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_cgbo_displacement_deck()).expect("deck parses");
+/// A Xyce 7.10 LEVEL=18 transient oracle on the lead current of one source:
+/// each `(t, current)` row must match within `floor.max(rel * |current|)`.
+struct LeadCurrentOracle {
+    label: &'static str,
+    deck: &'static str,
+    tstop: f64,
+    tstep: f64,
+    branch: &'static str,
+    floor: f64,
+    rel: f64,
+    rows: &'static [(f64, f64)],
+}
+
+fn assert_lead_current(oracle: &LeadCurrentOracle) {
+    let label = oracle.label;
+    let netlist = Netlist::parse(oracle.deck).expect("deck parses");
     let result = Engine::new(SimulationConfig::default())
-        .run_tran(&netlist, 5.0e-7, 1.0e-9)
-        .expect("Xyce VDMOS gate-bulk displacement transient solves");
-
-    let i_vb = result
-        .try_branch_current_waveform_named("vb")
-        .unwrap_or_else(|| panic!("missing VB branch in {:?}", result.branch_names));
-
-    // Custom Xyce 7.10 LEVEL=18 oracle with VTO=100 forcing the channel off
-    // and TOX=1 making intrinsic Meyer Cgb negligible. Xyce source scales
-    // CGBO by effective channel length (`GateBulkOverlapCap = CGBO * L`), so
-    // CGBO=1e-5 and L=1um produce a 10 pF gate-bulk overlap capacitor.
-    for &(t, expected_current) in &[
-        (1.0e-9, 6.283_165_662_159e-5),
-        (5.0e-7, -6.283_197_707_149e-5),
-    ] {
-        let got_current = interpolate(&result.time, i_vb, t);
+        .run_tran(&netlist, oracle.tstop, oracle.tstep)
+        .unwrap_or_else(|error| panic!("{label} transient: {error:?}"));
+    let current = result
+        .try_branch_current_waveform_named(oracle.branch)
+        .unwrap_or_else(|| {
+            panic!(
+                "missing {} branch in {:?}",
+                oracle.branch, result.branch_names
+            )
+        });
+    for &(t, expected_current) in oracle.rows {
+        let got_current = interpolate(&result.time, current, t);
         let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-6_f64.max(expected_current.abs() * 0.08);
+        let tol = oracle.floor.max(expected_current.abs() * oracle.rel);
         assert!(
             abs <= tol,
-            "VDMOS CGBO displacement current mismatch at t={t:.12e}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+            "{label} mismatch at t={t:.12e}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+        );
+    }
+}
+
+/// The DC operating-point current through `VD` matches Xyce 7.10 within
+/// `floor.max(rel * |expected|)`.
+fn assert_op_vd_current(label: &str, deck: &str, expected_current: f64, floor: f64, rel: f64) {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|error| panic!("{label} operating point: {error:?}"));
+    let i_vd = result
+        .branch_current_named("vd")
+        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
+    let abs = (i_vd - expected_current).abs();
+    let tol = floor.max(expected_current.abs() * rel);
+    assert!(
+        abs <= tol,
+        "{label} mismatch: rspice={i_vd:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+    );
+}
+
+/// A DC sweep of `VD` over `(start, stop, step)` whose `(V(D), I(VD))` points
+/// match Xyce 7.10 rows, each current within `floor.max(rel * |current|)`.
+fn assert_vd_sweep(
+    label: &str,
+    deck: &str,
+    (start, stop, step): (f64, f64, f64),
+    floor: f64,
+    rel: f64,
+    rows: &[(f64, f64)],
+) {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let results = Engine::new(SimulationConfig::default())
+        .run_dc_sweep_with_abort(
+            &netlist,
+            "vd",
+            start,
+            stop,
+            step,
+            &rspice_core::abort_signal::NoAbort,
+        )
+        .unwrap_or_else(|error| panic!("{label} DC sweep: {error:?}"));
+    assert_eq!(results.len(), rows.len());
+
+    for ((got_vd, result), &(want_vd, expected_current)) in results.iter().zip(rows) {
+        assert!(
+            (got_vd - want_vd).abs() < 1.0e-12,
+            "{label} sweep point mismatch: rspice={got_vd:.12e} xyce={want_vd:.12e}"
+        );
+        let got_current = result
+            .branch_current_named("vd")
+            .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
+        let abs = (got_current - expected_current).abs();
+        let tol = floor.max(expected_current.abs() * rel);
+        assert!(
+            abs <= tol,
+            "{label} current mismatch at V(D)={want_vd:.3}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
         );
     }
 }
 
 #[test]
+fn xyce_level18_vdmos_cgbo_displacement_current_matches_xyce_gold() {
+    // Custom Xyce 7.10 LEVEL=18 oracle with VTO=100 forcing the channel off
+    // and TOX=1 making intrinsic Meyer Cgb negligible. Xyce source scales
+    // CGBO by effective channel length (`GateBulkOverlapCap = CGBO * L`), so
+    // CGBO=1e-5 and L=1um produce a 10 pF gate-bulk overlap capacitor.
+    assert_lead_current(&LeadCurrentOracle {
+        label: "VDMOS CGBO displacement current",
+        deck: xyce_vdmos_cgbo_displacement_deck(),
+        tstop: 5.0e-7,
+        tstep: 1.0e-9,
+        branch: "vb",
+        floor: 1.0e-6,
+        rel: 0.08,
+        rows: &[
+            (1.0e-9, 6.283_165_662_159e-5),
+            (5.0e-7, -6.283_197_707_149e-5),
+        ],
+    });
+}
+
+#[test]
 fn xyce_level18_vdmos_cbs_displacement_current_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_cbs_displacement_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_tran(&netlist, 5.0e-7, 1.0e-9)
-        .expect("Xyce VDMOS bulk-source displacement transient solves");
-
-    let i_vb = result
-        .try_branch_current_waveform_named("vb")
-        .unwrap_or_else(|| panic!("missing VB branch in {:?}", result.branch_names));
-
     // Custom Xyce 7.10 LEVEL=18 oracle. The explicit CBS branch is isolated by
     // forcing the channel and diode currents off. Xyce prints the transient
     // lead current after trapezoidal charge integration, so the first 1 ns
     // point is approximately 2*C*DeltaV/dt rather than the continuous sine
     // derivative.
-    for &(t, expected_current) in &[
-        (1.0e-9, 1.256_626_325_770e-3),
-        (5.0e-7, -1.256_632_568_559e-3),
-    ] {
-        let got_current = interpolate(&result.time, i_vb, t);
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-5_f64.max(expected_current.abs() * 0.08);
-        assert!(
-            abs <= tol,
-            "VDMOS CBS displacement current mismatch at t={t:.12e}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_lead_current(&LeadCurrentOracle {
+        label: "VDMOS CBS displacement current",
+        deck: xyce_vdmos_cbs_displacement_deck(),
+        tstop: 5.0e-7,
+        tstep: 1.0e-9,
+        branch: "vb",
+        floor: 1.0e-5,
+        rel: 0.08,
+        rows: &[
+            (1.0e-9, 1.256_626_325_770e-3),
+            (5.0e-7, -1.256_632_568_559e-3),
+        ],
+    });
 }
 
 #[test]
 fn xyce_level18_vdmos_cj_as_displacement_current_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_cj_as_displacement_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_tran(&netlist, 5.0e-7, 1.0e-9)
-        .expect("Xyce VDMOS CJ/AS displacement transient solves");
-
-    let i_vb = result
-        .try_branch_current_waveform_named("vb")
-        .unwrap_or_else(|| panic!("missing VB branch in {:?}", result.branch_names));
-
     // Custom Xyce 7.10 LEVEL=18 oracle. With CBS omitted, CJ=0.04/AS=2e-6
     // and CJSW=0.02/PS=1e-6 derive the same 100 nF zero-bias source-body
     // capacitance as the explicit-CBS oracle above.
-    for &(t, expected_current) in &[
-        (1.0e-9, 1.256_626_325_770e-3),
-        (5.0e-7, -1.256_632_568_559e-3),
-    ] {
-        let got_current = interpolate(&result.time, i_vb, t);
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-5_f64.max(expected_current.abs() * 0.08);
-        assert!(
-            abs <= tol,
-            "VDMOS CJ/AS displacement current mismatch at t={t:.12e}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_lead_current(&LeadCurrentOracle {
+        label: "VDMOS CJ/AS displacement current",
+        deck: xyce_vdmos_cj_as_displacement_deck(),
+        tstop: 5.0e-7,
+        tstep: 1.0e-9,
+        branch: "vb",
+        floor: 1.0e-5,
+        rel: 0.08,
+        rows: &[
+            (1.0e-9, 1.256_626_325_770e-3),
+            (5.0e-7, -1.256_632_568_559e-3),
+        ],
+    });
 }
 
 #[test]
 fn xyce_level18_vdmos_d1cjo_displacement_current_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1cjo_displacement_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_tran(&netlist, 5.0e-7, 1.0e-9)
-        .expect("Xyce VDMOS D1CJO displacement transient solves");
-
-    let i_vd = result
-        .try_branch_current_waveform_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // Custom Xyce 7.10 LEVEL=18 oracle. D1RS=0 aliases D1Prime to source,
     // so D1CJO is isolated as a two-terminal drain-source charge branch.
-    for &(t, expected_current) in &[
-        (1.0e-9, -6.283_134_096_119e-4),
-        (5.0e-7, 6.283_167_144_615e-4),
-    ] {
-        let got_current = interpolate(&result.time, i_vd, t);
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-6_f64.max(expected_current.abs() * 0.08);
-        assert!(
-            abs <= tol,
-            "VDMOS D1CJO displacement current mismatch at t={t:.12e}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_lead_current(&LeadCurrentOracle {
+        label: "VDMOS D1CJO displacement current",
+        deck: xyce_vdmos_d1cjo_displacement_deck(),
+        tstop: 5.0e-7,
+        tstep: 1.0e-9,
+        branch: "vd",
+        floor: 1.0e-6,
+        rel: 0.08,
+        rows: &[
+            (1.0e-9, -6.283_134_096_119e-4),
+            (5.0e-7, 6.283_167_144_615e-4),
+        ],
+    });
 }
 
 #[test]
 fn xyce_level18_vdmos_d1cjo_temperature_displacement_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1cjo_temp_displacement_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_tran(&netlist, 5.0e-7, 1.0e-9)
-        .expect("Xyce VDMOS D1CJO temperature transient solves");
-
-    let i_vd = result
-        .try_branch_current_waveform_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // XyceNF 7.10.0 LEVEL=18 oracle at `.OPTIONS TEMP=125`. The channel,
     // body junctions, D1 current, and D1 transit time are disabled; this
     // isolates the temperature-adjusted D1 junction capacitance.
-    for &(t, expected_current) in &[
-        (1.0e-9, -7.590_820_736_477e-4),
-        (5.0e-7, 7.590_869_215_081e-4),
-    ] {
-        let got_current = interpolate(&result.time, i_vd, t);
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-6_f64.max(expected_current.abs() * 0.08);
-        assert!(
-            abs <= tol,
-            "VDMOS D1CJO temperature displacement mismatch at t={t:.12e}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_lead_current(&LeadCurrentOracle {
+        label: "VDMOS D1CJO temperature displacement",
+        deck: xyce_vdmos_d1cjo_temp_displacement_deck(),
+        tstop: 5.0e-7,
+        tstep: 1.0e-9,
+        branch: "vd",
+        floor: 1.0e-6,
+        rel: 0.08,
+        rows: &[
+            (1.0e-9, -7.590_820_736_477e-4),
+            (5.0e-7, 7.590_869_215_081e-4),
+        ],
+    });
 }
 
 #[test]
 fn xyce_level18_vdmos_d1is_dc_current_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1is_dc_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_dc_op(&netlist)
-        .expect("Xyce VDMOS D1IS DC operating point solves");
-
-    let i_vd = result
-        .branch_current_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // Custom Xyce 7.10 LEVEL=18 oracle. The channel and bulk diodes are off;
     // D1IS/D1N supply the drain-source diode current at V(D)=-0.5 V.
-    let expected_current = 2.486_981_754_870e-4;
-    let abs = (i_vd - expected_current).abs();
-    let tol = 1.0e-7_f64.max(expected_current.abs() * 0.02);
-    assert!(
-        abs <= tol,
-        "VDMOS D1IS DC current mismatch: rspice={i_vd:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+    assert_op_vd_current(
+        "VDMOS D1IS DC current",
+        xyce_vdmos_d1is_dc_deck(),
+        2.486_981_754_870e-4,
+        1.0e-7,
+        0.02,
     );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1is_current_uses_external_drain_source_nodes_with_rd() {
-    let netlist = Netlist::parse(xyce_vdmos_d1is_external_rd_dc_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_dc_op(&netlist)
-        .expect("Xyce VDMOS D1IS external-node DC operating point solves");
-
-    let i_vd = result
-        .branch_current_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // Custom Xyce 7.10 LEVEL=18 oracle. With D1RS=0, D1Prime aliases the
     // source node and the D1 current is controlled by the external drain-source
     // voltage even when RD creates a separate channel drain node.
-    let expected_current = 2.486_981_754_870e-4;
-    let abs = (i_vd - expected_current).abs();
-    let tol = 1.0e-7_f64.max(expected_current.abs() * 0.02);
-    assert!(
-        abs <= tol,
-        "VDMOS D1IS external-node DC current mismatch: rspice={i_vd:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+    assert_op_vd_current(
+        "VDMOS D1IS external-node DC current",
+        xyce_vdmos_d1is_external_rd_dc_deck(),
+        2.486_981_754_870e-4,
+        1.0e-7,
+        0.02,
     );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1is_temperature_scaling_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1is_temp_dc_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_dc_op(&netlist)
-        .expect("Xyce VDMOS D1IS temperature DC operating point solves");
-
-    let i_vd = result
-        .branch_current_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // XyceNF 7.10.0 LEVEL=18 oracle at `.OPTIONS TEMP=75`. The channel,
     // body junctions, D1 capacitance, and D1 recombination are disabled; the
     // current increase comes from D1EG/D1XTI temperature scaling of D1IS.
-    let expected_current = 1.276_022_408_751e-5;
-    let abs = (i_vd - expected_current).abs();
-    let tol = 1.0e-8_f64.max(expected_current.abs() * 0.02);
-    assert!(
-        abs <= tol,
-        "VDMOS D1IS temperature DC current mismatch: rspice={i_vd:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+    assert_op_vd_current(
+        "VDMOS D1IS temperature DC current",
+        xyce_vdmos_d1is_temp_dc_deck(),
+        1.276_022_408_751e-5,
+        1.0e-8,
+        0.02,
     );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1tnom_is_ignored_like_xyce() {
-    let netlist =
-        Netlist::parse(xyce_vdmos_d1is_temp_ignores_d1tnom_dc_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_dc_op(&netlist)
-        .expect("Xyce VDMOS D1TNOM ignored temperature DC operating point solves");
-
-    let i_vd = result
-        .branch_current_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // XyceNF 7.10.0 parses D1TNOM but overwrites the D1 nominal temperature
     // with model/general TNOM during VDMOS temperature setup, so D1TNOM=500
     // gives the same result as the D1TNOM=300.15 oracle above.
-    let expected_current = 1.276_022_408_751e-5;
-    let abs = (i_vd - expected_current).abs();
-    let tol = 1.0e-8_f64.max(expected_current.abs() * 0.02);
-    assert!(
-        abs <= tol,
-        "VDMOS D1TNOM compatibility mismatch: rspice={i_vd:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+    assert_op_vd_current(
+        "VDMOS D1TNOM compatibility",
+        xyce_vdmos_d1is_temp_ignores_d1tnom_dc_deck(),
+        1.276_022_408_751e-5,
+        1.0e-8,
+        0.02,
     );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1tt_diffusion_charge_current_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1tt_displacement_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_tran(&netlist, 5.0e-7, 1.0e-9)
-        .expect("Xyce VDMOS D1TT transient solves");
-
-    let i_vd = result
-        .try_branch_current_waveform_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // Custom Xyce 7.10 LEVEL=18 oracle with D1CJO=0. The current comes from
     // D1TT * d(D1 diode current)/dt plus the D1 diode's own F-vector current.
-    for &(t, expected_current) in &[
-        (1.0e-9, -2.431_417_443_665e-7),
-        (5.0e-7, 2.429_284_656_863e-7),
-    ] {
-        let got_current = interpolate(&result.time, i_vd, t);
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-9_f64.max(expected_current.abs() * 0.08);
-        assert!(
-            abs <= tol,
-            "VDMOS D1TT diffusion-charge current mismatch at t={t:.12e}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_lead_current(&LeadCurrentOracle {
+        label: "VDMOS D1TT diffusion-charge current",
+        deck: xyce_vdmos_d1tt_displacement_deck(),
+        tstop: 5.0e-7,
+        tstep: 1.0e-9,
+        branch: "vd",
+        floor: 1.0e-9,
+        rel: 0.08,
+        rows: &[
+            (1.0e-9, -2.431_417_443_665e-7),
+            (5.0e-7, 2.429_284_656_863e-7),
+        ],
+    });
 }
 
 #[test]
 fn xyce_level18_vdmos_d1rs_series_resistance_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1rs_dc_deck()).expect("deck parses");
-    let result = Engine::new(SimulationConfig::default())
-        .run_dc_op(&netlist)
-        .expect("Xyce VDMOS D1RS DC operating point solves");
-
-    let i_vd = result
-        .branch_current_named("vd")
-        .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-
     // XyceNF 7.10.0, same deck with `.print dc I(VD)`: D1RS creates the
     // internal D1Prime node and the source-to-D1Prime series resistor.
-    let expected_current = 2.934_812_120_323e-3;
-    let abs = (i_vd - expected_current).abs();
-    let tol = 1.0e-7_f64.max(expected_current.abs() * 0.01);
-    assert!(
-        abs <= tol,
-        "VDMOS D1RS DC current mismatch: rspice={i_vd:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
+    assert_op_vd_current(
+        "VDMOS D1RS DC current",
+        xyce_vdmos_d1rs_dc_deck(),
+        2.934_812_120_323e-3,
+        1.0e-7,
+        0.01,
     );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1bv_breakdown_sweep_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1bv_dc_deck()).expect("deck parses");
-    let results = Engine::new(SimulationConfig::default())
-        .run_dc_sweep_with_abort(
-            &netlist,
-            "vd",
-            4.8,
-            5.2,
-            0.1,
-            &rspice_core::abort_signal::NoAbort,
-        )
-        .expect("Xyce VDMOS D1BV DC sweep solves");
-
     // XyceNF 7.10.0 LEVEL=18 oracle with the channel, body junctions, and D1
     // capacitance disabled. Positive V(D) reverse-biases the NMOS D1 diode and
     // exercises the D1BV/D1IBV breakdown branch.
-    let expected = [
-        (4.8, -4.382_590_423_942e-7),
-        (4.9, -2.093_463_558_774e-5),
-        (5.0, -9.999_998_284_057e-4),
-        (5.1, -4.776_771_263_204e-2),
-        (5.2, -2.281_754_761_633e0),
-    ];
-    assert_eq!(results.len(), expected.len());
-
-    for ((got_vd, result), (want_vd, expected_current)) in results.iter().zip(expected) {
-        assert!(
-            (got_vd - want_vd).abs() < 1.0e-12,
-            "VDMOS D1BV sweep point mismatch: rspice={got_vd:.12e} xyce={want_vd:.12e}"
-        );
-        let got_current = result
-            .branch_current_named("vd")
-            .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-8_f64.max(expected_current.abs() * 0.01);
-        assert!(
-            abs <= tol,
-            "VDMOS D1BV DC current mismatch at V(D)={want_vd:.3}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_vd_sweep(
+        "VDMOS D1BV",
+        xyce_vdmos_d1bv_dc_deck(),
+        (4.8, 5.2, 0.1),
+        1.0e-8,
+        0.01,
+        &[
+            (4.8, -4.382_590_423_942e-7),
+            (4.9, -2.093_463_558_774e-5),
+            (5.0, -9.999_998_284_057e-4),
+            (5.1, -4.776_771_263_204e-2),
+            (5.2, -2.281_754_761_633e0),
+        ],
+    );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1isr_recombination_sweep_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1isr_dc_deck()).expect("deck parses");
-    let results = Engine::new(SimulationConfig::default())
-        .run_dc_sweep_with_abort(
-            &netlist,
-            "vd",
-            -0.1,
-            -0.5,
-            -0.1,
-            &rspice_core::abort_signal::NoAbort,
-        )
-        .expect("Xyce VDMOS D1ISR DC sweep solves");
-
     // XyceNF 7.10.0 LEVEL=18 oracle. D1IS is effectively zero, so these
     // currents are produced by the D1ISR/D1NR recombination branch.
-    let expected = [
-        (-0.1, 5.609_795_121_782e-9),
-        (-0.2, 4.184_665_157_401e-8),
-        (-0.3, 2.755_209_847_088e-7),
-        (-0.4, 1.767_890_920_031e-6),
-        (-0.5, 1.116_161_891_449e-5),
-    ];
-    assert_eq!(results.len(), expected.len());
-
-    for ((got_vd, result), (want_vd, expected_current)) in results.iter().zip(expected) {
-        assert!(
-            (got_vd - want_vd).abs() < 1.0e-12,
-            "VDMOS D1ISR sweep point mismatch: rspice={got_vd:.12e} xyce={want_vd:.12e}"
-        );
-        let got_current = result
-            .branch_current_named("vd")
-            .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-10_f64.max(expected_current.abs() * 0.01);
-        assert!(
-            abs <= tol,
-            "VDMOS D1ISR DC current mismatch at V(D)={want_vd:.3}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_vd_sweep(
+        "VDMOS D1ISR",
+        xyce_vdmos_d1isr_dc_deck(),
+        (-0.1, -0.5, -0.1),
+        1.0e-10,
+        0.01,
+        &[
+            (-0.1, 5.609_795_121_782e-9),
+            (-0.2, 4.184_665_157_401e-8),
+            (-0.3, 2.755_209_847_088e-7),
+            (-0.4, 1.767_890_920_031e-6),
+            (-0.5, 1.116_161_891_449e-5),
+        ],
+    );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1isr_uses_temperature_adjusted_junction_potential() {
-    let netlist = Netlist::parse(xyce_vdmos_d1isr_temp_vj_dc_deck()).expect("deck parses");
-    let results = Engine::new(SimulationConfig::default())
-        .run_dc_sweep_with_abort(
-            &netlist,
-            "vd",
-            -0.2,
-            -0.6,
-            -0.1,
-            &rspice_core::abort_signal::NoAbort,
-        )
-        .expect("Xyce VDMOS D1ISR temperature sweep solves");
-
     // XyceNF 7.10.0 LEVEL=18 oracle at `.OPTIONS TEMP=125`. D1ISR itself is
     // not temperature-scaled; the change comes from Xyce's temperature-adjusted
     // D1 junction potential inside the recombination branch.
-    let expected = [
-        (-0.2, 1.190_738_301_889e-8),
-        (-0.3, 3.496_394_285_535e-8),
-        (-0.4, 9.409_914_786_095e-8),
-        (-0.5, 8.502_072_926_059e-7),
-        (-0.6, 4.883_260_151_444e-6),
-    ];
-    assert_eq!(results.len(), expected.len());
-
-    for ((got_vd, result), (want_vd, expected_current)) in results.iter().zip(expected) {
-        assert!(
-            (got_vd - want_vd).abs() < 1.0e-12,
-            "VDMOS D1ISR temperature sweep point mismatch: rspice={got_vd:.12e} xyce={want_vd:.12e}"
-        );
-        let got_current = result
-            .branch_current_named("vd")
-            .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-10_f64.max(expected_current.abs() * 0.01);
-        assert!(
-            abs <= tol,
-            "VDMOS D1ISR temperature current mismatch at V(D)={want_vd:.3}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_vd_sweep(
+        "VDMOS D1ISR temperature",
+        xyce_vdmos_d1isr_temp_vj_dc_deck(),
+        (-0.2, -0.6, -0.1),
+        1.0e-10,
+        0.01,
+        &[
+            (-0.2, 1.190_738_301_889e-8),
+            (-0.3, 3.496_394_285_535e-8),
+            (-0.4, 9.409_914_786_095e-8),
+            (-0.5, 8.502_072_926_059e-7),
+            (-0.6, 4.883_260_151_444e-6),
+        ],
+    );
 }
 
 #[test]
 fn xyce_level18_vdmos_d1ikf_high_injection_sweep_matches_xyce_gold() {
-    let netlist = Netlist::parse(xyce_vdmos_d1ikf_dc_deck()).expect("deck parses");
-    let results = Engine::new(SimulationConfig::default())
-        .run_dc_sweep_with_abort(
-            &netlist,
-            "vd",
-            -0.3,
-            -0.6,
-            -0.1,
-            &rspice_core::abort_signal::NoAbort,
-        )
-        .expect("Xyce VDMOS D1IKF DC sweep solves");
-
     // XyceNF 7.10.0 LEVEL=18 oracle. The channel, body junctions, and D1
     // recombination branch are disabled; D1IKF attenuates the forward D1 diode
     // current once it approaches the high-injection knee.
-    let expected = [
-        (-0.3, 1.084_040_785_745e-7),
-        (-0.4, 4.222_063_023_553e-6),
-        (-0.5, 4.889_629_084_493e-5),
-        (-0.6, 3.445_250_854_548e-4),
-    ];
-    assert_eq!(results.len(), expected.len());
-
-    for ((got_vd, result), (want_vd, expected_current)) in results.iter().zip(expected) {
-        assert!(
-            (got_vd - want_vd).abs() < 1.0e-12,
-            "VDMOS D1IKF sweep point mismatch: rspice={got_vd:.12e} xyce={want_vd:.12e}"
-        );
-        let got_current = result
-            .branch_current_named("vd")
-            .unwrap_or_else(|| panic!("missing VD branch in {:?}", result.branch_names));
-        let abs = (got_current - expected_current).abs();
-        let tol = 1.0e-10_f64.max(expected_current.abs() * 0.01);
-        assert!(
-            abs <= tol,
-            "VDMOS D1IKF DC current mismatch at V(D)={want_vd:.3}: rspice={got_current:.12e} xyce={expected_current:.12e} abs={abs:.3e} tol={tol:.3e}"
-        );
-    }
+    assert_vd_sweep(
+        "VDMOS D1IKF",
+        xyce_vdmos_d1ikf_dc_deck(),
+        (-0.3, -0.6, -0.1),
+        1.0e-10,
+        0.01,
+        &[
+            (-0.3, 1.084_040_785_745e-7),
+            (-0.4, 4.222_063_023_553e-6),
+            (-0.5, 4.889_629_084_493e-5),
+            (-0.6, 3.445_250_854_548e-4),
+        ],
+    );
 }
 
 #[test]
