@@ -402,14 +402,6 @@ impl PxfResult {
         self.points.len()
     }
 
-    /// Get magnitude curve (frequency, magnitude_db)
-    pub fn magnitude_curve(&self) -> Vec<(Value, Value)> {
-        self.points
-            .iter()
-            .map(|p| (p.freq_in, p.magnitude_db()))
-            .collect()
-    }
-
     /// Midpoint group-delay curve, with NaN gaps for unavailable intervals.
     /// Every interval is retained so a plot cannot bridge undefined phase.
     pub fn group_delay_curve(&self) -> Vec<(Value, Value)> {
