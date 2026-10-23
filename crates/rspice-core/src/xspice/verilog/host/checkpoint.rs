@@ -1286,6 +1286,55 @@ endmodule
         }
     }
 
+    /// IEEE 1364-2005 section 14.6.1: a path whose pulse limits are 0 passes
+    /// a pulse, so its destination holds both edges pending (`a` falls at 10
+    /// and rises at 14, due 19 and 21): the image's `pending_drives` section
+    /// names the destination twice, and the restored host fires both. An
+    /// image naming them out of order is refused.
+    #[test]
+    fn host_checkpoint_resumes_a_pulse_a_module_path_passes() {
+        const PULSE: &str = "`timescale 1ns/1ns\nmodule p(input a, output y);\n  \
+             assign y = a;\n  specify specparam PATHPULSE$ = (0); (a => y) = (7, 9); \
+             endspecify\nendmodule\n";
+        let mut original = host(PULSE);
+        original.start().unwrap();
+        force(&mut original, "a", 1, 1, 1);
+        original.advance_to(9).unwrap();
+        force(&mut original, "a", 1, 0, 10);
+        force(&mut original, "a", 1, 1, 14);
+        original.advance_to(15).unwrap();
+        let saved = transport(&image(&original));
+        let value = serde_json::to_value(&saved).unwrap();
+        let dues: Vec<_> = value["pending_drives"]["updates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|update| update["due"].as_u64().unwrap())
+            .collect();
+        assert_eq!(dues, [19, 21]);
+        let mut restored = host(PULSE);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            let y = |host: &DigitalHost| host.read(signal(host, "y")).unwrap().spelling();
+            assert_eq!(y(host), "1");
+            host.advance_to(19).unwrap();
+            assert_eq!(y(host), "0");
+            host.advance_to(21).unwrap();
+            assert_eq!(y(host), "1");
+        }
+        let mut swapped = value.clone();
+        let updates = swapped["pending_drives"]["updates"].as_array_mut().unwrap();
+        updates.swap(0, 1);
+        let bad: HostCheckpoint = serde_json::from_value(swapped).unwrap();
+        let error = host(PULSE)
+            .restore_checkpoint(&bad, HostCheckpointLimits::default())
+            .unwrap_err();
+        assert!(error.contains("out of order"), "{error}");
+    }
+
     /// Design P2 section 5.3: a rejected trial takes back the pending updates
     /// with the rest of the host. A trial in which a pulse shorter than the
     /// delay cancels a pending update, so that it stops being the next tick,

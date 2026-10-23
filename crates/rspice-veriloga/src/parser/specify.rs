@@ -3,7 +3,9 @@
 //! A specparam is a constant of its module and joins its localparams. A
 //! module path joins [`Module::specify_paths`]; a state-dependent path's
 //! condition becomes a one-bit net the module drives from it, so the path
-//! reads one net's value when its destination changes.
+//! reads one net's value when its destination changes. A `PATHPULSE$`
+//! specparam joins [`Module::specify_pulse_limits`] and a pulse style
+//! declaration [`Module::specify_pulse_styles`] (section 14.6).
 
 use super::Parser;
 use crate::ast::*;
@@ -39,6 +41,18 @@ impl Parser<'_> {
                 self.parse_specparam(module)?;
                 continue;
             }
+            let style = [
+                ("pulsestyle_onevent", PulseStyle::OnEvent),
+                ("pulsestyle_ondetect", PulseStyle::OnDetect),
+                ("showcancelled", PulseStyle::ShowCancelled),
+                ("noshowcancelled", PulseStyle::NoShowCancelled),
+            ]
+            .into_iter()
+            .find(|(keyword, _)| self.check_identifier_text(keyword));
+            if let Some((_, style)) = style {
+                self.parse_pulse_style(module, style)?;
+                continue;
+            }
             match self.current().kind {
                 TokenKind::LParen | TokenKind::If => self.parse_specify_path(module)?,
                 TokenKind::Identifier if self.check_identifier_text("ifnone") => {
@@ -58,6 +72,101 @@ impl Parser<'_> {
         Ok(())
     }
 
+    /// `pulsestyle_onevent`, `pulsestyle_ondetect`, `showcancelled` or
+    /// `noshowcancelled` and its outputs (section 14.6.4), at the keyword.
+    /// Each output's declaration comes before any module path to it.
+    fn parse_pulse_style(
+        &mut self,
+        module: &mut Module,
+        style: PulseStyle,
+    ) -> Result<(), ParseError> {
+        let keyword = self.current().text.clone().unwrap_or_default();
+        self.advance();
+        for output in self.parse_specify_terminals("pulse style output")? {
+            if module
+                .specify_paths
+                .iter()
+                .any(|path| path.destinations.iter().any(|to| to.name == output.name))
+            {
+                return Err(refusal(
+                    "`specify` pulse style",
+                    format!(
+                        "`{keyword} {}` after a module path to it; IEEE 1364-2005 section \
+                         14.6.4 declares an output's pulse style before its paths",
+                        output.name
+                    ),
+                    output.span,
+                ));
+            }
+            module.specify_pulse_styles.push(SpecifyPulseStyle {
+                output: output.name,
+                style,
+                span: output.span,
+            });
+        }
+        self.expect(TokenKind::Semicolon)?;
+        Ok(())
+    }
+
+    /// The rest of a `PATHPULSE$` specparam (section 14.6.1), after its
+    /// name: `= (reject [, error])`, or as Icarus Verilog also reads it,
+    /// `= reject`.
+    fn parse_pulse_limit(
+        &mut self,
+        module: &mut Module,
+        name: &str,
+        start: Span,
+    ) -> Result<(), ParseError> {
+        let terminals = match name.strip_prefix("PATHPULSE$") {
+            Some("") => None,
+            Some(rest) => match rest.split_once('$') {
+                Some((input, output))
+                    if !input.is_empty() && !output.is_empty() && !output.contains('$') =>
+                {
+                    Some((SmolStr::from(input), SmolStr::from(output)))
+                }
+                _ => {
+                    return Err(refusal(
+                        "`specify` pulse limit",
+                        format!(
+                            "`{name}`, which names no `PATHPULSE$input$output` path (IEEE \
+                             1364-2005 section 14.6.1)"
+                        ),
+                        start,
+                    ));
+                }
+            },
+            None => unreachable!("the caller saw the prefix"),
+        };
+        if self.check(TokenKind::LBracket) {
+            return Err(refusal(
+                "`specify` pulse limit",
+                format!("`{name}` with a select of its terminal"),
+                self.current_span(),
+            ));
+        }
+        self.expect(TokenKind::Assign_)?;
+        let (reject, error) = if self.match_token(TokenKind::LParen) {
+            let reject = self.parse_mintypmax_expression()?;
+            let error = if self.match_token(TokenKind::Comma) {
+                Some(self.parse_mintypmax_expression()?)
+            } else {
+                None
+            };
+            self.expect(TokenKind::RParen)?;
+            (reject, error)
+        } else {
+            (self.parse_mintypmax_expression()?, None)
+        };
+        module.specify_pulse_limits.push(SpecifyPulseLimit {
+            terminals,
+            reject,
+            error,
+            span: start.extend(self.previous_span()),
+        });
+        Ok(())
+    }
+
     /// `specparam [range] name = value, ...;` (section 14.2.4.1 and A.2.2.1),
     /// in a `specify` block or as a module item.
     pub(super) fn parse_specparam(&mut self, module: &mut Module) -> Result<(), ParseError> {
@@ -67,11 +176,11 @@ impl Parser<'_> {
             let item_start = self.current_span();
             let name = self.expect_identifier("specparam name")?;
             if name.starts_with("PATHPULSE$") {
-                return Err(refusal(
-                    "`specify` pulse limit",
-                    format!("`{name}`"),
-                    item_start,
-                ));
+                self.parse_pulse_limit(module, &name, item_start)?;
+                if !self.match_token(TokenKind::Comma) {
+                    break;
+                }
+                continue;
             }
             self.expect(TokenKind::Assign_)?;
             let value = self.parse_mintypmax_expression()?;

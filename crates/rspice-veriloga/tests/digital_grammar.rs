@@ -4613,6 +4613,57 @@ fn a_malformed_config_is_a_parse_error() {
     );
 }
 
+/// IEEE 1364-2005 section 14.6: a path's own `PATHPULSE$input$output` sets
+/// its pulse limits over the module's `PATHPULSE$`, a path with several
+/// terminals takes its first input's and first output's, one limit is both,
+/// and an error limit under the reject limit is the reject limit (as SDF
+/// reads it); a pulse style marks every path to its output, the last of
+/// each pair deciding.
+#[test]
+fn specify_pulse_limits_and_styles_lower_onto_each_path() {
+    let plan = plan(
+        "`timescale 1ns/1ns\n\
+         module leaf(input a, input b, input c, output y, output z);\n\
+         \x20 assign y = a & b;\n\
+         \x20 assign z = c;\n\
+         \x20 specify\n\
+         \x20   pulsestyle_ondetect y;\n\
+         \x20   showcancelled y, z;\n\
+         \x20   noshowcancelled z;\n\
+         \x20   specparam PATHPULSE$ = (1, 4), PATHPULSE$a$y = 2, PATHPULSE$c$z = (3, 1);\n\
+         \x20   (a, b *> y) = 5;\n\
+         \x20   (c => z) = 5;\n\
+         \x20 endspecify\n\
+         endmodule\n\
+         module other(input a, output y);\n\
+         \x20 assign y = a;\n\
+         \x20 specify (a => y) = 5; endspecify\n\
+         endmodule\n\
+         module top;\n\
+         \x20 reg a, b, c;\n\
+         \x20 wire y, z, w;\n\
+         \x20 leaf u(a, b, c, y, z);\n\
+         \x20 other v(a, w);\n\
+         endmodule\n",
+        "top",
+    );
+    let pulses: Vec<_> = plan
+        .delays
+        .paths
+        .iter()
+        .map(|path| (path.pulse_limits, path.on_detect, path.show_cancelled))
+        .collect();
+    assert_eq!(
+        pulses,
+        [
+            (Some([2, 2]), true, true),
+            (Some([2, 2]), true, true),
+            (Some([3, 3]), false, false),
+            (None, false, false),
+        ]
+    );
+}
+
 /// A SystemVerilog real-valued net (`wire real`, IEEE 1800-2017 section
 /// 6.7.1) is refused by name, pointing at the Verilog-AMS `wreal`.
 #[test]
@@ -4703,10 +4754,12 @@ fn specify_paths_lower_one_path_per_source_and_destination() {
 }
 
 /// What `specify` does not run yet is refused by name: timing checks
-/// (section 15), pulse limits and pulse styles (section 14.6). A path runs
-/// from an input or inout port to an output or inout port (section 14.2.1)
-/// and takes one, two, three, six or twelve delays (section 14.3.1), and a
-/// generate block holds no `specify` block (A.4.2).
+/// (section 15). A path runs from an input or inout port to an output or
+/// inout port (section 14.2.1) and takes one, two, three, six or twelve
+/// delays (section 14.3.1); a `PATHPULSE$` name splits into one input and
+/// one output (section 14.6.1); an output's pulse style comes before its
+/// paths (section 14.6.4); and a generate block holds no `specify` block
+/// (A.4.2).
 #[test]
 fn specify_items_outside_paths_are_refused() {
     for (item, expected) in [
@@ -4714,15 +4767,15 @@ fn specify_items_outside_paths_are_refused() {
             "$setup(a, posedge c, 2);",
             "Unsupported `specify` timing check: `$setup`",
         ),
-        (
-            "specparam PATHPULSE$ = 1;",
-            "Unsupported `specify` pulse limit: `PATHPULSE$`",
-        ),
-        (
-            "pulsestyle_onevent y;",
-            "Unsupported `specify` item: pulsestyle_onevent",
-        ),
         ("(a => y) = (1, 2, 3, 4);", "4 delays"),
+        (
+            "specparam PATHPULSE$a = 1;",
+            "`PATHPULSE$a`, which names no `PATHPULSE$input$output` path",
+        ),
+        (
+            "(a => y) = 1; showcancelled y;",
+            "`showcancelled y` after a module path to it",
+        ),
     ] {
         let source = format!(
             "module m(input a, input c, output y);\n  assign y = a;\n  specify {item} \

@@ -288,6 +288,11 @@ pub struct Module {
     /// The module path delays of its `specify` blocks (IEEE 1364-2005
     /// section 14), in declaration order.
     pub specify_paths: Vec<SpecifyPath>,
+    /// The `PATHPULSE$` specparams (section 14.6.1), in declaration order.
+    pub specify_pulse_limits: Vec<SpecifyPulseLimit>,
+    /// The pulse style declarations of module path outputs (section
+    /// 14.6.4), in declaration order.
+    pub specify_pulse_styles: Vec<SpecifyPulseStyle>,
     /// Discrete-domain variable declarations (`reg`), in declaration order
     pub digital_variables: Vec<DigitalVariableDecl>,
     /// Continuous assignments (`assign`), in declaration order
@@ -431,6 +436,8 @@ impl Module {
             digital_nets: Vec::new(),
             net_delays: Vec::new(),
             specify_paths: Vec::new(),
+            specify_pulse_limits: Vec::new(),
+            specify_pulse_styles: Vec::new(),
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
             gate_arrays: Vec::new(),
@@ -2540,6 +2547,44 @@ pub struct SpecifyPath {
 #[derive(Debug, Clone)]
 pub struct SpecifyTerminal {
     pub name: SmolStr,
+    pub span: Span,
+}
+
+/// A `PATHPULSE$` specparam (IEEE 1364-2005 section 14.6.1): the pulse
+/// limits of the module paths from `input` to `output`, or with no
+/// terminals, of every path of the module without limits of its own.
+#[derive(Debug, Clone)]
+pub struct SpecifyPulseLimit {
+    /// `PATHPULSE$input$output`'s input and output.
+    pub terminals: Option<(SmolStr, SmolStr)>,
+    /// A pulse narrower than this is rejected.
+    pub reject: Expression,
+    /// A pulse narrower than this, and not rejected, shows `x`; the reject
+    /// limit when absent.
+    pub error: Option<Expression>,
+    pub span: Span,
+}
+
+/// How a module path output shows a pulse (IEEE 1364-2005 section 14.6.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PulseStyle {
+    /// `pulsestyle_onevent`: a pulse shown as `x` starts at its leading
+    /// edge's due time (the default).
+    OnEvent,
+    /// `pulsestyle_ondetect`: it starts when the pulse is detected.
+    OnDetect,
+    /// `showcancelled`: a trailing edge due before its leading edge shows
+    /// `x` between them.
+    ShowCancelled,
+    /// `noshowcancelled`: such a pulse vanishes (the default).
+    NoShowCancelled,
+}
+
+/// One output of a pulse style declaration.
+#[derive(Debug, Clone)]
+pub struct SpecifyPulseStyle {
+    pub output: SmolStr,
+    pub style: PulseStyle,
     pub span: Span,
 }
 

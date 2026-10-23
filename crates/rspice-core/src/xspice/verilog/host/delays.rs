@@ -14,6 +14,21 @@
 //! wakeup identity kept at the earliest due tick, so a cancelled update
 //! simply stops being the next tick, and an analog stepper reading the next
 //! tick never steps to it.
+//!
+//! A module path destination's change made while one is pending is a pulse
+//! (IEEE 1364-2005 section 14.6) as wide as the time from the pending
+//! update's due tick to the new one's:
+//!
+//! - narrower than the path's `PATHPULSE$` reject limit (by default its
+//!   delay, so every pulse) it is rejected, as above;
+//! - narrower than the error limit it shows `x`, from the leading edge's
+//!   due tick or, `pulsestyle_ondetect`, from now, to the trailing edge's;
+//! - otherwise both edges arrive;
+//! - a trailing edge due before the leading one cancels both, or under
+//!   `showcancelled` shows `x` from the trailing edge's due tick (or now)
+//!   to the leading edge's, then takes the new value.
+//!
+//! So such a destination may hold several pending updates, in due order.
 
 use super::super::store::DelayRequest;
 use super::*;
@@ -33,7 +48,9 @@ pub(super) enum PendingOwner {
 pub(super) struct PendingDrives {
     pub(super) target: TargetId,
     due: BTreeMap<u64, BTreeSet<PendingOwner>>,
-    slots: BTreeMap<PendingOwner, (u64, FourStateValue)>,
+    /// Each owner's pending updates in due order, at most one per tick: one
+    /// at most but for a module path destination's pulse.
+    slots: BTreeMap<PendingOwner, Vec<(u64, FourStateValue)>>,
     /// `None` for a plan with no module path, or a run that leaves them out
     /// (`.options hdl_path_delays=no`).
     pub(super) paths: Option<super::paths::PathDelays>,
@@ -68,44 +85,147 @@ impl PendingDrives {
         })
     }
 
-    /// How long `request`'s driver or net takes to go from `from` to `to`,
-    /// or `None` when that is no change: a module path destination's delay
-    /// from its paths, counted from `now`, and any other's from the store.
-    fn transition_ticks(
-        &self,
-        store: &DigitalSignalStore,
-        request: &DelayRequest,
-        (from, to): (&FourStateValue, &FourStateValue),
-        now: u64,
-    ) -> Option<u64> {
-        if let DelayRequest::Net { signal, .. } = request
-            && let Some(paths) = &self.paths
-            && store.path_destination(*signal)
-        {
-            return (from != to).then(|| paths.delay(store, *signal, (from, to), now));
-        }
-        store.transition_ticks(request, from, to)
-    }
-
     /// The earliest pending update.
     pub(super) fn next(&self) -> Option<u64> {
         self.due.first_key_value().map(|(tick, _)| *tick)
     }
 
-    fn insert(&mut self, due: u64, owner: PendingOwner, value: FourStateValue) {
-        self.cancel(owner);
-        self.due.entry(due).or_default().insert(owner);
-        self.slots.insert(owner, (due, value));
+    /// The owner's last pending update.
+    fn last(&self, owner: PendingOwner) -> Option<&(u64, FourStateValue)> {
+        self.slots.get(&owner).and_then(|queue| queue.last())
+    }
+
+    /// Queue an update after the owner's others, cancelling any due later
+    /// than it; one due at the tick of the last replaces it. An update due
+    /// past the last representable tick lands after the run ends.
+    fn push(&mut self, due: u64, owner: PendingOwner, value: FourStateValue) {
+        if due > TimeResolution::MAX_EXACT_TICKS {
+            return;
+        }
+        while self.last(owner).is_some_and(|(at, _)| *at > due) {
+            self.pop(owner);
+        }
+        let queue = self.slots.entry(owner).or_default();
+        match queue.last_mut() {
+            Some(last) if last.0 == due => last.1 = value,
+            _ => {
+                queue.push((due, value));
+                self.due.entry(due).or_default().insert(owner);
+            }
+        }
+    }
+
+    /// Take back the owner's last pending update.
+    fn pop(&mut self, owner: PendingOwner) -> Option<(u64, FourStateValue)> {
+        let queue = self.slots.get_mut(&owner)?;
+        let last = queue.pop()?;
+        if queue.is_empty() {
+            self.slots.remove(&owner);
+        }
+        self.unindex(last.0, owner);
+        Some(last)
     }
 
     fn cancel(&mut self, owner: PendingOwner) {
-        let Some((due, _)) = self.slots.remove(&owner) else {
-            return;
-        };
+        for (due, _) in self.slots.remove(&owner).unwrap_or_default() {
+            self.unindex(due, owner);
+        }
+    }
+
+    fn unindex(&mut self, due: u64, owner: PendingOwner) {
         if let Some(bucket) = self.due.get_mut(&due) {
             bucket.remove(&owner);
             if bucket.is_empty() {
                 self.due.remove(&due);
+            }
+        }
+    }
+
+    /// Schedule a module path destination's change to `value` at `tick`
+    /// (sections 14.4 and 14.6), as the module documentation describes;
+    /// `current` is what it has now.
+    fn schedule_path(
+        &mut self,
+        store: &mut DigitalSignalStore,
+        (signal, value): (DigitalSignalId, FourStateValue),
+        current: FourStateValue,
+        tick: u64,
+    ) {
+        let owner = PendingOwner::Net(signal);
+        let Some(style) = self.paths.as_ref().map(|paths| paths.style(signal)) else {
+            return;
+        };
+        loop {
+            let queue = self.slots.get(&owner).map_or(&[][..], Vec::as_slice);
+            let lead = queue.last().cloned();
+            let before = match queue {
+                [.., (_, before), _] => before.clone(),
+                _ => current.clone(),
+            };
+            let from = lead.as_ref().map_or(&before, |(_, value)| value);
+            if *from == value {
+                // The pending update, or what the destination has, stands.
+                return;
+            }
+            let Some(paths) = &self.paths else {
+                return;
+            };
+            let delay = paths.delay(store, signal, (from, &value), tick);
+            let due = tick.saturating_add(delay.ticks);
+            let Some((lead_due, lead_value)) = lead else {
+                if due == tick {
+                    apply(store, DelayRequest::Net { signal, value });
+                } else {
+                    self.push(due, owner, value);
+                }
+                return;
+            };
+            let shown = shown_as_x(&before, &lead_value);
+            let width = due.checked_sub(lead_due);
+            match (width, delay.limits) {
+                // Section 14.6.4.2: a trailing edge due first.
+                (None, _) if style.show_cancelled => {
+                    if style.on_detect {
+                        self.cancel(owner);
+                        apply(
+                            store,
+                            DelayRequest::Net {
+                                signal,
+                                value: shown,
+                            },
+                        );
+                    } else {
+                        self.pop(owner);
+                        self.push(due, owner, shown);
+                    }
+                    self.push(lead_due, owner, value);
+                    return;
+                }
+                (Some(width), Some([reject, error])) if width >= reject => {
+                    if width < error {
+                        // Section 14.6.4.1: the pulse shows `x`.
+                        if style.on_detect {
+                            self.cancel(owner);
+                            apply(
+                                store,
+                                DelayRequest::Net {
+                                    signal,
+                                    value: shown,
+                                },
+                            );
+                        } else {
+                            self.pop(owner);
+                            self.push(lead_due, owner, shown);
+                        }
+                    }
+                    self.push(due, owner, value);
+                    return;
+                }
+                // Rejected: the change is measured again from the value
+                // before the leading edge.
+                _ => {
+                    self.pop(owner);
+                }
             }
         }
     }
@@ -115,14 +235,32 @@ impl PendingDrives {
         self.due
             .iter()
             .flat_map(|(due, owners)| {
-                owners.iter().map(|owner| PendingDriveImage {
-                    due: *due,
-                    owner: *owner,
-                    value: self.slots[owner].1.clone(),
+                owners.iter().filter_map(move |owner| {
+                    let (_, value) = self.slots.get(owner)?.iter().find(|(at, _)| at == due)?;
+                    Some(PendingDriveImage {
+                        due: *due,
+                        owner: *owner,
+                        value: value.clone(),
+                    })
                 })
             })
             .collect()
     }
+}
+
+/// A pulse shown as `x` (section 14.6): the leading edge's value with each
+/// bit it changes made `x`.
+fn shown_as_x(before: &FourStateValue, lead: &FourStateValue) -> FourStateValue {
+    if before.width() != lead.width() {
+        return FourStateValue::splat(lead.width(), FourStateBit::Unknown);
+    }
+    let mut shown = lead.clone();
+    for bit in 0..lead.width() {
+        if before.bit(bit) != lead.bit(bit) {
+            shown.set_bit(bit, FourStateBit::Unknown);
+        }
+    }
+    shown
 }
 
 fn owner_of(request: &DelayRequest) -> (PendingOwner, &FourStateValue) {
@@ -186,31 +324,31 @@ impl DigitalHost {
         let before = pending.next();
         for request in requests {
             let (owner, value) = owner_of(&request);
-            if let Some((_, waiting)) = pending.slots.get(&owner)
-                && pending
-                    .transition_ticks(&self.store, &request, (waiting, value), tick)
+            let current = self
+                .store
+                .delayed_current(&request)
+                .unwrap_or_else(|| FourStateValue::splat(value.width(), FourStateBit::Unknown));
+            if let DelayRequest::Net { signal, .. } = &request
+                && pending.paths.is_some()
+                && self.store.path_destination(*signal)
+            {
+                let target = (*signal, value.clone());
+                pending.schedule_path(&mut self.store, target, current, tick);
+                continue;
+            }
+            if let Some((_, waiting)) = pending.last(owner)
+                && self
+                    .store
+                    .transition_ticks(&request, waiting, value)
                     .is_none()
             {
                 continue;
             }
             pending.cancel(owner);
-            let current = self
-                .store
-                .delayed_current(&request)
-                .unwrap_or_else(|| FourStateValue::splat(value.width(), FourStateBit::Unknown));
-            match pending.transition_ticks(&self.store, &request, (&current, value), tick) {
+            match self.store.transition_ticks(&request, &current, value) {
                 None => {}
                 Some(0) => apply(&mut self.store, request),
-                // An update due past the last representable tick lands after
-                // the run ends.
-                Some(delay) => {
-                    if let Some(due) = tick
-                        .checked_add(delay)
-                        .filter(|due| *due <= TimeResolution::MAX_EXACT_TICKS)
-                    {
-                        pending.insert(due, owner, value.clone());
-                    }
-                }
+                Some(delay) => pending.push(tick.saturating_add(delay), owner, value.clone()),
             }
         }
         self.pending = Some(pending);
@@ -229,7 +367,14 @@ impl DigitalHost {
             && *entry.key() <= tick
         {
             for owner in entry.remove() {
-                if let Some((_, value)) = pending.slots.remove(&owner) {
+                // The owner's first update is the one due now.
+                if let Some(queue) = pending.slots.get_mut(&owner)
+                    && !queue.is_empty()
+                {
+                    let (_, value) = queue.remove(0);
+                    if queue.is_empty() {
+                        pending.slots.remove(&owner);
+                    }
                     due.push(request_of(owner, value));
                 }
             }
@@ -263,8 +408,8 @@ impl DigitalHost {
     }
 
     /// Install the updates a host image's `pending_drives` section names.
-    /// Each must belong to a delayed driver or net, at most once, in due
-    /// order.
+    /// Each must belong to a delayed driver or net, in due order, and only
+    /// a module path destination may have more than one.
     pub(super) fn restore_pending_drives(
         &mut self,
         image: &[PendingDriveImage],
@@ -289,15 +434,19 @@ impl DigitalHost {
             let current = self
                 .store
                 .delayed_current(&request_of(update.owner, update.value.clone()));
+            let queues = matches!(update.owner, PendingOwner::Net(signal)
+                if pending.paths.is_some() && self.store.path_destination(signal));
             if !delayed
                 || update.due < previous
-                || pending.slots.contains_key(&update.owner)
+                || pending
+                    .last(update.owner)
+                    .is_some_and(|(due, _)| !queues || *due >= update.due)
                 || current.is_none_or(|current| current.width() != update.value.width())
             {
                 return Err("pending drive names an undelayed owner, twice or out of order".into());
             }
             self.instant_of(update.due).map_err(|e| e.to_string())?;
-            pending.insert(update.due, update.owner, update.value.clone());
+            pending.push(update.due, update.owner, update.value.clone());
             previous = update.due;
         }
         self.pending = Some(pending);

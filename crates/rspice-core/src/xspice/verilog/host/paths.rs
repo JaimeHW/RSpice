@@ -18,27 +18,51 @@
 //!   when that is already past (section 14.4: the larger of the path delay
 //!   and the distributed delays already behind the value);
 //! - the transition is the least significant bit's (table 14-3), and no
-//!   path at all delays nothing.
+//!   path at all delays nothing;
+//! - the path that gives the delay gives the pulse limits, and the
+//!   destination its pulse style, that decide what becomes of a pulse
+//!   (section 14.6, in `delays.rs`).
 
 use super::*;
 use rspice_veriloga::canonical_ir::digital::DigitalEdge;
 use rspice_veriloga::four_state::FourStateBit;
 
-/// One module path, its delays in the plan's ticks.
+/// One module path, its delays and pulse limits in the plan's ticks.
 #[derive(Debug)]
 struct Path {
     edge: Option<DigitalEdge>,
     condition: Option<DigitalSignalId>,
     ifnone: bool,
     ticks: [u64; 12],
+    limits: Option<[u64; 2]>,
 }
 
-/// The paths by source and by destination.
+/// The paths by source and by destination, and each destination's pulse
+/// style.
 #[derive(Debug)]
 struct PathTables {
     paths: Vec<Path>,
     by_source: BTreeMap<DigitalSignalId, Vec<usize>>,
     by_destination: BTreeMap<DigitalSignalId, Vec<usize>>,
+    styles: BTreeMap<DigitalSignalId, PulseStyle>,
+}
+
+/// How a destination shows a pulse (IEEE 1364-2005 section 14.6.4); the
+/// default is on-event and `noshowcancelled`.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct PulseStyle {
+    /// `pulsestyle_ondetect`.
+    pub(super) on_detect: bool,
+    /// `showcancelled`.
+    pub(super) show_cancelled: bool,
+}
+
+/// The delay of a destination's change, and the pulse limits of the path
+/// that gives it: `None` for the default, which rejects every pulse.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PathDelay {
+    pub(super) ticks: u64,
+    pub(super) limits: Option<[u64; 2]>,
 }
 
 /// The module paths and the tick each one's source last changed.
@@ -59,8 +83,12 @@ impl PathDelays {
             paths: Vec::with_capacity(plan.delays.paths.len()),
             by_source: BTreeMap::new(),
             by_destination: BTreeMap::new(),
+            styles: BTreeMap::new(),
         };
         for (index, path) in plan.delays.paths.iter().enumerate() {
+            let scale = u32::try_from(i32::from(path.delay.exponent) - i32::from(precision))
+                .ok()
+                .and_then(|finer| 10_u64.checked_pow(finer));
             tables.paths.push(Path {
                 edge: path.edge,
                 condition: path.condition,
@@ -68,7 +96,23 @@ impl PathDelays {
                 // A delay the design's precision cannot count is past any
                 // run's end.
                 ticks: path.delay.ticks_at(precision).unwrap_or([u64::MAX; 12]),
+                limits: path.pulse_limits.map(|limits| {
+                    limits.map(|limit| {
+                        scale
+                            .and_then(|scale| limit.checked_mul(scale))
+                            .unwrap_or(u64::MAX)
+                    })
+                }),
             });
+            if path.on_detect || path.show_cancelled {
+                tables.styles.insert(
+                    path.destination,
+                    PulseStyle {
+                        on_detect: path.on_detect,
+                        show_cancelled: path.show_cancelled,
+                    },
+                );
+            }
             tables.by_source.entry(path.source).or_default().push(index);
             tables
                 .by_destination
@@ -109,16 +153,30 @@ impl PathDelays {
         }
     }
 
-    /// The delay, from `now`, of `destination`'s change from `from` to `to`.
+    /// How `destination` shows a pulse.
+    pub(super) fn style(&self, destination: DigitalSignalId) -> PulseStyle {
+        self.tables
+            .styles
+            .get(&destination)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    /// The delay, from `now`, of `destination`'s change from `from` to `to`,
+    /// and the pulse limits of the path it follows.
     pub(super) fn delay(
         &self,
         store: &DigitalSignalStore,
         destination: DigitalSignalId,
         (from, to): (&FourStateValue, &FourStateValue),
         now: u64,
-    ) -> u64 {
+    ) -> PathDelay {
+        let undelayed = PathDelay {
+            ticks: 0,
+            limits: None,
+        };
         let Some(paths) = self.tables.by_destination.get(&destination) else {
-            return 0;
+            return undelayed;
         };
         // Section 14.2.4.1: a condition that is `x` or `z` is true; its net
         // already holds just the least significant bit of a vector's.
@@ -166,9 +224,14 @@ impl PathDelays {
         let transition = transition_index(from.bit(0), to.bit(0));
         chosen
             .iter()
-            .map(|index| self.tables.paths[*index].ticks[transition])
-            .min()
-            .map_or(0, |delay| latest.saturating_add(delay).saturating_sub(now))
+            .map(|index| &self.tables.paths[*index])
+            .min_by_key(|path| path.ticks[transition])
+            .map_or(undelayed, |path| PathDelay {
+                ticks: latest
+                    .saturating_add(path.ticks[transition])
+                    .saturating_sub(now),
+                limits: path.limits,
+            })
     }
 
     /// Each path's last counted change, in plan order, as the host image's

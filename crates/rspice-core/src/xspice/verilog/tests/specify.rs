@@ -3,7 +3,8 @@
 //!
 //! Expected text is what Icarus Verilog 13.0 printed for the same source
 //! (`iverilog -gspecify`, `vvp -n`) in an RSpice-authored probe, and without
-//! `-gspecify` for the run that leaves path delays out.
+//! `-gspecify` for the run that leaves path delays out, except where a test
+//! says its values are the LRM's closed form.
 
 use super::*;
 
@@ -428,6 +429,114 @@ endmodule
 345 v=1z y=1z
 360 v=00 y=1z
 365 v=00 y=00
+"
+    );
+}
+
+/// Section 14.6: pulse control. A pulse is the time between a pending
+/// update's due tick and the next one's: `a` falls at 10 (due 19, the fall
+/// delay 9) and rises at 14 (due 21, the rise delay 7), a pulse of 2; `b`
+/// falls at 10 (due 16) and rises at 11 (due 15), a trailing edge due
+/// before its leading one.
+///
+/// - `PATHPULSE$ = (1, 5)` shows the pulse as `x` from 19 to 21 (`y1`), or
+///   under `pulsestyle_ondetect` from its detection at 14 (`y2`);
+/// - a path's own `PATHPULSE$a$y = (0)` passes it over the module's (`y3`);
+/// - `PATHPULSE$a$y = 3`, one limit for both, rejects it (`y4`);
+/// - `showcancelled` shows the cancelled pulse as `x` from 15 to 16 (`y5`),
+///   or from 11 with `pulsestyle_ondetect` (`y6`); without it the pulse
+///   vanishes (`y7`).
+///
+/// Expected values are the LRM's closed form: Icarus Verilog (`-gspecify`)
+/// reads past `PATHPULSE$` and the pulse styles and rejects every pulse,
+/// agreeing here only through 10.
+#[test]
+fn pulse_limits_and_styles_reject_show_or_pass_a_pulse() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module lim(output y, input a);
+  assign y = a;
+  specify
+    specparam PATHPULSE$ = (1, 5);
+    (a => y) = (7, 9);
+  endspecify
+endmodule
+module det(output y, input a);
+  assign y = a;
+  specify
+    pulsestyle_ondetect y;
+    specparam PATHPULSE$ = (1, 5);
+    (a => y) = (7, 9);
+  endspecify
+endmodule
+module pas(output y, input a);
+  assign y = a;
+  specify
+    specparam PATHPULSE$ = (3, 5), PATHPULSE$a$y = (0);
+    (a => y) = (7, 9);
+  endspecify
+endmodule
+module rej(output y, input a);
+  assign y = a;
+  specify
+    specparam PATHPULSE$a$y = 3;
+    (a => y) = (7, 9);
+  endspecify
+endmodule
+module can(output y, input b);
+  assign y = b;
+  specify
+    showcancelled y;
+    (b => y) = (4, 6);
+  endspecify
+endmodule
+module cdet(output y, input b);
+  assign y = b;
+  specify
+    showcancelled y;
+    pulsestyle_ondetect y;
+    (b => y) = (4, 6);
+  endspecify
+endmodule
+module nocan(output y, input b);
+  assign y = b;
+  specify (b => y) = (4, 6); endspecify
+endmodule
+module t;
+  reg a, b;
+  wire y1, y2, y3, y4, y5, y6, y7;
+  lim u1(y1, a);
+  det u2(y2, a);
+  pas u3(y3, a);
+  rej u4(y4, a);
+  can u5(y5, b);
+  cdet u6(y6, b);
+  nocan u7(y7, b);
+  initial begin
+    $monitor("%0t a=%b b=%b y=%b%b%b%b %b%b%b", $time, a, b, y1, y2, y3, y4, y5, y6, y7);
+    a = 1; b = 1;
+    #10 a = 0; b = 0;
+    #1 b = 1;
+    #3 a = 1;
+    #30 $finish;
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "\
+0 a=1 b=1 y=xxxx xxx
+4 a=1 b=1 y=xxxx 111
+7 a=1 b=1 y=1111 111
+10 a=0 b=0 y=1111 111
+11 a=0 b=1 y=1111 1x1
+14 a=1 b=1 y=1x11 1x1
+15 a=1 b=1 y=1x11 xx1
+16 a=1 b=1 y=1x11 111
+19 a=1 b=1 y=xx01 111
+21 a=1 b=1 y=1111 111
 "
     );
 }

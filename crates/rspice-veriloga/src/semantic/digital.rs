@@ -99,6 +99,13 @@ pub struct AnalyzedSpecifyPath {
     pub ifnone: bool,
     /// One, two, three, six or twelve delays, in the order written.
     pub delays: Vec<Expression>,
+    /// The `PATHPULSE$` reject and error limits that apply to the path
+    /// (section 14.6.1); `None` for the default, both the path's delay.
+    pub pulse_limits: Option<(Expression, Expression)>,
+    /// `pulsestyle_ondetect` on the destination (section 14.6.4.1).
+    pub on_detect: bool,
+    /// `showcancelled` on the destination (section 14.6.4.2).
+    pub show_cancelled: bool,
     pub span: Span,
 }
 
@@ -1654,6 +1661,25 @@ impl SemanticAnalyzer {
                 .find(|declaration| declaration.names.iter().any(|port| port == name))
                 .map(|declaration| declaration.direction)
         };
+        // Section 14.6.4: a pulse style names module path outputs.
+        for style in &module.specify_pulse_styles {
+            let discrete = signals
+                .iter()
+                .any(|signal| signal.name == style.output && signal.width > 0);
+            if !discrete
+                || !direction(&style.output).is_some_and(|found| found != PortDirection::Input)
+            {
+                self.record_error_at(
+                    SemanticErrorKind::InvalidExpression(format!(
+                        "pulse style output `{}` is not an output or inout port of module `{}` \
+                         with discrete bits; IEEE 1364-2005 section 14.6.4 styles module \
+                         path outputs",
+                        style.output, module.name
+                    )),
+                    style.span,
+                );
+            }
+        }
         let mut paths = Vec::new();
         for path in &module.specify_paths {
             let mut valid = true;
@@ -1704,8 +1730,45 @@ impl SemanticAnalyzer {
                     .find(|signal| signal.name == name)
                     .map_or(0, |signal| signal.width)
             };
+            // Section 14.6.1: a path's own `PATHPULSE$input$output`, which
+            // a path declared with several terminals takes from its first
+            // input and first output, else the module's `PATHPULSE$`.
+            let limits_for = |input: &str, output: &str| {
+                module.specify_pulse_limits.iter().rev().find(|limit| {
+                    limit
+                        .terminals
+                        .as_ref()
+                        .is_some_and(|(from, to)| from == input && to == output)
+                })
+            };
+            let (first_source, first_destination) = (&path.sources[0], &path.destinations[0]);
+            // Section 14.6.4: the last declaration of each pair names the
+            // output's style.
+            let styled = |output: &str, styles: [PulseStyle; 2]| {
+                module
+                    .specify_pulse_styles
+                    .iter()
+                    .rev()
+                    .find(|style| style.output == output && styles.contains(&style.style))
+                    .is_some_and(|style| style.style == styles[1])
+            };
             for source in &path.sources {
                 for destination in &path.destinations {
+                    let pulse_limits = limits_for(&source.name, &destination.name)
+                        .or_else(|| limits_for(&first_source.name, &first_destination.name))
+                        .or_else(|| {
+                            module
+                                .specify_pulse_limits
+                                .iter()
+                                .rev()
+                                .find(|limit| limit.terminals.is_none())
+                        })
+                        .map(|limit| {
+                            (
+                                limit.reject.clone(),
+                                limit.error.clone().unwrap_or_else(|| limit.reject.clone()),
+                            )
+                        });
                     let (from, to) = (width(&source.name), width(&destination.name));
                     if !path.full && from != to {
                         self.record_error_at(
@@ -1727,6 +1790,15 @@ impl SemanticAnalyzer {
                         condition: path.condition.clone(),
                         ifnone: path.ifnone,
                         delays: path.delays.clone(),
+                        pulse_limits,
+                        on_detect: styled(
+                            &destination.name,
+                            [PulseStyle::OnEvent, PulseStyle::OnDetect],
+                        ),
+                        show_cancelled: styled(
+                            &destination.name,
+                            [PulseStyle::NoShowCancelled, PulseStyle::ShowCancelled],
+                        ),
                         span: path.span,
                     });
                 }

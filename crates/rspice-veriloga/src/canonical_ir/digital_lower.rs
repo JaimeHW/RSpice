@@ -1712,6 +1712,21 @@ fn lower_paths(
             condition,
             ifnone: path.ifnone,
             delay: path_delay((&path.delays, path.span), constants, precision)?,
+            pulse_limits: path
+                .pulse_limits
+                .as_ref()
+                .map(|(reject, error)| {
+                    let limit = |value: &Expression| {
+                        delay_value_ticks(value, constants, precision, "14.6.1")
+                    };
+                    let reject = limit(reject)?;
+                    // An error limit under the reject limit is the reject
+                    // limit, as SDF's PATHPULSE reads it (OVI SDF 3.0).
+                    Ok::<_, DigitalLoweringDiagnostic>([reject, limit(error)?.max(reject)])
+                })
+                .transpose()?,
+            on_detect: path.on_detect,
+            show_cancelled: path.show_cancelled,
         });
     }
     Ok(())

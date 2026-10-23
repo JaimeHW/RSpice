@@ -1860,6 +1860,14 @@ impl CanonicalDigitalPlan {
                     "digital module path delay is off the design's time grid",
                 ));
             }
+            if path
+                .pulse_limits
+                .is_some_and(|[reject, shown]| reject > shown)
+            {
+                return Err(error(
+                    "digital module path rejects pulses wider than it shows as x",
+                ));
+            }
         }
         Ok(())
     }

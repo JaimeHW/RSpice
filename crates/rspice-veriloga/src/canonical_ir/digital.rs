@@ -1074,6 +1074,22 @@ pub struct DigitalModulePath {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ifnone: bool,
     pub delay: DigitalPathDelay,
+    /// `PATHPULSE$` (section 14.6.1): a pulse on the destination narrower
+    /// than the first limit is rejected, and one narrower than the second
+    /// shows `x`, in the delay's ticks. `None` for the default, both the
+    /// delay, which rejects every pulse narrower than it (inertial).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pulse_limits: Option<[u64; 2]>,
+    /// `pulsestyle_ondetect` on the destination (section 14.6.4.1): a
+    /// pulse shown as `x` starts when it is detected, not at its leading
+    /// edge's due time.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_detect: bool,
+    /// `showcancelled` on the destination (section 14.6.4.2): a trailing
+    /// edge due before its leading edge shows `x` between them rather than
+    /// cancelling both.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub show_cancelled: bool,
 }
 
 /// A module path's delay for each transition of its destination (IEEE
