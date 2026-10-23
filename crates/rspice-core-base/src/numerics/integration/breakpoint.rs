@@ -1110,16 +1110,18 @@ mod breakpoint_manager_tests {
         );
     }
 
-    #[test]
-    fn limit_step_direct_hit_lands_on_breakpoint() {
+    /// `limit_step(now, proposed)` toward a lone breakpoint at 10.0: the step,
+    /// whether it lands on the breakpoint, and whether a minimal step follows.
+    fn limit_toward_ten(now: Value, proposed: Value) -> (Value, bool, bool) {
         let mut breakpoints = BreakpointManager::new();
         breakpoints.add(10.0);
+        let (dt, lands) = breakpoints.limit_step(now, proposed);
+        (dt, lands, breakpoints.should_use_minimal_step())
+    }
 
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
-
-        assert_eq!(dt, 6.0);
-        assert!(lands_on_breakpoint);
-        assert!(!breakpoints.should_use_minimal_step());
+    #[test]
+    fn limit_step_direct_hit_lands_on_breakpoint() {
+        assert_eq!(limit_toward_ten(4.0, 6.0), (6.0, true, false));
     }
 
     /// Lands a 6.0 step from 4.0 on the breakpoint at 10.0 and returns the
@@ -1432,26 +1434,12 @@ mod breakpoint_manager_tests {
 
     #[test]
     fn limit_step_equalizes_last_two_steps_without_marking_breakpoint_hit() {
-        let mut breakpoints = BreakpointManager::new();
-        breakpoints.add(10.0);
-
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(0.0, 6.0);
-
-        assert_eq!(dt, 5.0);
-        assert!(!lands_on_breakpoint);
-        assert!(!breakpoints.should_use_minimal_step());
+        assert_eq!(limit_toward_ten(0.0, 6.0), (5.0, false, false));
     }
 
     #[test]
     fn limit_step_keeps_ordinary_step_before_equalization_window() {
-        let mut breakpoints = BreakpointManager::new();
-        breakpoints.add(10.0);
-
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(0.0, 5.0);
-
-        assert_eq!(dt, 5.0);
-        assert!(!lands_on_breakpoint);
-        assert!(!breakpoints.should_use_minimal_step());
+        assert_eq!(limit_toward_ten(0.0, 5.0), (5.0, false, false));
     }
 
     #[test]
