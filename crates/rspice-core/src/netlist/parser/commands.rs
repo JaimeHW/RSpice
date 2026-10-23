@@ -2405,7 +2405,9 @@ fn parse_nonlinear_continuation_option(
 /// `.ESAVE all | none | <net> ...`: ngspice's `esave` (`evtprint.c`
 /// `EVTsave`). A lone `all` or `none` selects every or no event net; any other
 /// list, including one that merely contains those words, names the nets to
-/// record. Each command replaces the previous selection.
+/// record. Each command replaces the previous selection. Nets keep the deck's
+/// spelling, so a refusal quotes the name the author wrote; every consumer
+/// matches them without regard to case.
 fn parse_esave_command(
     stream: &mut TokenStream,
     line_num: usize,
@@ -2416,7 +2418,7 @@ fn parse_esave_command(
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
             break;
         }
-        let net = expect_node(stream, line_num)?;
+        let net = expect_authored_node(stream, line_num)?;
         if !net.trim().is_empty() {
             nets.push(net);
         }

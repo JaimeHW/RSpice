@@ -1807,9 +1807,28 @@ fn is_xyce_dev_name_char(character: char) -> bool {
 }
 
 pub(super) fn expect_node(stream: &mut TokenStream, line_num: usize) -> Result<String, ParseError> {
+    expect_node_spelled(stream, line_num, node_label_piece)
+}
+
+/// A node name as the deck spells it. `expect_node` folds identifiers to
+/// upper case, the spelling every node table matches on; a name kept to be
+/// quoted back to the author keeps theirs, and whoever matches it against a
+/// node table folds case itself.
+pub(super) fn expect_authored_node(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<String, ParseError> {
+    expect_node_spelled(stream, line_num, authored_node_label_piece)
+}
+
+fn expect_node_spelled(
+    stream: &mut TokenStream,
+    line_num: usize,
+    piece: fn(&crate::netlist::lexer::Token) -> Option<String>,
+) -> Result<String, ParseError> {
     skip_commas(stream);
 
-    if let Some(node) = consume_node_label(stream) {
+    if let Some(node) = consume_node_label(stream, piece) {
         return Ok(node);
     }
 
@@ -1837,7 +1856,7 @@ pub(super) fn expect_model_name(
 ) -> Result<String, ParseError> {
     skip_commas(stream);
 
-    if let Some(name) = consume_node_label(stream) {
+    if let Some(name) = consume_node_label(stream, node_label_piece) {
         return Ok(name);
     }
 
@@ -1867,13 +1886,16 @@ pub(super) fn expect_node_before_rbracket(
     })
 }
 
-fn consume_node_label(stream: &mut TokenStream) -> Option<String> {
-    let mut node = node_label_piece(stream.peek())?;
+fn consume_node_label(
+    stream: &mut TokenStream,
+    label_piece: fn(&crate::netlist::lexer::Token) -> Option<String>,
+) -> Option<String> {
+    let mut node = label_piece(stream.peek())?;
     let mut end = stream.peek().span.end;
     stream.advance();
 
     while stream.peek().span.start == end {
-        let Some(piece) = node_label_piece(stream.peek()) else {
+        let Some(piece) = label_piece(stream.peek()) else {
             break;
         };
         node.push_str(&piece);
@@ -1914,6 +1936,13 @@ fn node_label_piece(token: &crate::netlist::lexer::Token) -> Option<String> {
             token.lexeme.clone()
         }),
         _ => punctuation_node_name(token),
+    }
+}
+
+fn authored_node_label_piece(token: &crate::netlist::lexer::Token) -> Option<String> {
+    match &token.kind {
+        TokenKind::Ident(_) if !token.lexeme.is_empty() => Some(token.lexeme.clone()),
+        _ => node_label_piece(token),
     }
 }
 

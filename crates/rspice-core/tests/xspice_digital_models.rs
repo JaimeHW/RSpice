@@ -2047,23 +2047,21 @@ fn esave_alone_limits_event_nets_and_save_does_not() {
     assert!(event_nets(&run(".esave none")).is_empty());
     assert_eq!(event_nets(&run(".esave all")), ["d", "dn"]);
     assert_eq!(event_nets(&run(".esave dn")), ["dn"]);
+    assert_eq!(event_nets(&run(".esave Dn")), ["dn"]);
     assert_eq!(event_nets(&run(".control\nesave d\n.endc")), ["d"]);
 
     let dir = unique_temp_dir("rspice-esave-unknown");
     fs::create_dir_all(&dir).expect("create esave fixture dir");
     fs::write(dir.join("stim.stim"), "0 0s\n1n 1s\n").expect("write stimulus");
     let deck_path = dir.join("deck.cir");
-    fs::write(&deck_path, deck(".esave dn out")).expect("write deck");
+    fs::write(&deck_path, deck(".esave dn Out")).expect("write deck");
     let error = Engine::default()
         .run_tran(&parse_file(&deck_path), 2.0e-9, 100.0e-12)
         .expect_err("an analog node is not an event node");
     let _ = fs::remove_dir_all(dir);
     assert!(
-        error
-            .to_string()
-            .to_ascii_lowercase()
-            .contains("'out' is not an event node"),
-        "{error}"
+        error.to_string().contains("'Out' is not an event node"),
+        "the refusal quotes the deck's spelling: {error}"
     );
 }
 
