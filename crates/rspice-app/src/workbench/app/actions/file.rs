@@ -41,11 +41,7 @@ impl RSpiceApp {
         self.state.workbench.confirmation_dialog.close();
 
         match response {
-            ConfirmationResponse::Cancel => {
-                if pending == Some(ConfirmationAction::CloseProject) {
-                    self.state.project.cancel_project_close();
-                }
-            }
+            ConfirmationResponse::Cancel => {}
             ConfirmationResponse::No => {
                 // Discard changes and proceed
                 if let Some(action) = pending {
@@ -54,7 +50,7 @@ impl RSpiceApp {
                         ConfirmationAction::ProjectNew
                             | ConfirmationAction::ProjectOpen
                             | ConfirmationAction::OpenNetlistProject
-                            | ConfirmationAction::CloseProject
+                            | ConfirmationAction::CloseProject(_)
                             | ConfirmationAction::Exit
                     ) {
                         self.state.models.clear_project_model_editor();
@@ -80,7 +76,7 @@ impl RSpiceApp {
                             | ConfirmationAction::ProjectOpen
                             | ConfirmationAction::OpenNetlistProject
                             | ConfirmationAction::ImportNetlist
-                            | ConfirmationAction::CloseProject
+                            | ConfirmationAction::CloseProject(_)
                             | ConfirmationAction::Exit
                     )
                 ) || matches!(
@@ -224,7 +220,10 @@ impl RSpiceApp {
         }
     }
 
-    pub(in crate::workbench) fn begin_close_project_after_save(&mut self) {
+    pub(in crate::workbench) fn begin_close_project_after_save(
+        &mut self,
+        destination: crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
+    ) {
         if self.state.models.model_editor_has_unsaved_changes()
             && let Err(error) = crate::workbench::documents::model_editor::save_open_candidate(self)
         {
@@ -240,7 +239,10 @@ impl RSpiceApp {
         match crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state) {
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                 self.state.workbench.project_review_dialog.close();
-                crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
+                crate::workbench::workflows::project_workflow::close_project_discard(
+                    &mut self.state,
+                    destination,
+                );
             }
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
                 transaction,
@@ -248,7 +250,7 @@ impl RSpiceApp {
                 self.state.workbench.project_review_dialog.close();
                 self.state.workbench.confirmation_dialog.await_canonical_save(
                     transaction,
-                    ConfirmationAction::CloseProject,
+                    ConfirmationAction::CloseProject(destination),
                     None,
                     None,
                     None,
@@ -312,9 +314,10 @@ impl RSpiceApp {
                     &mut self.state,
                 );
             }
-            ConfirmationAction::CloseProject => {
+            ConfirmationAction::CloseProject(destination) => {
                 crate::workbench::workflows::project_workflow::close_project_discard(
                     &mut self.state,
+                    destination,
                 );
             }
             ConfirmationAction::FileOpen => self.do_file_open(),
@@ -885,17 +888,22 @@ mod tests {
         assert!(crate::workbench::workflows::project_workflow::request_close_project(&mut state));
         assert!(matches!(
             state.workbench.project_review_dialog.request.as_ref(),
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
+            Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
         ));
 
         let project_id = state.model.workspace.content.project.id();
         state.model.simulation.execution.is_running = true;
-        assert!(!crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
+        assert!(
+            !crate::workbench::workflows::project_workflow::close_project_discard(
+                &mut state,
+                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+            )
+        );
         assert!(state.platform.project_lifecycle.is_open());
         assert_eq!(state.model.workspace.content.project.id(), project_id);
         assert!(matches!(
             state.workbench.project_review_dialog.request.as_ref(),
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
+            Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
         ));
 
         // Cancel closes only the review; every project-owned draft remains.
@@ -971,7 +979,9 @@ mod tests {
             },
         );
 
-        app.begin_close_project_after_save();
+        app.begin_close_project_after_save(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        );
 
         assert!(!app.state.platform.project_lifecycle.is_open());
         // Saving first changes nothing about where the close lands.
@@ -1040,13 +1050,15 @@ mod tests {
             },
         );
 
-        app.begin_close_project_after_save();
+        app.begin_close_project_after_save(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        );
 
         assert!(app.state.platform.project_lifecycle.is_open());
         assert_eq!(app.state.model.schematic.document().components.len(), 1);
         assert!(matches!(
             app.state.workbench.project_review_dialog.request.as_ref(),
-            Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
+            Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
         ));
         assert!(crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state));
         remove_project_artifacts(&path);

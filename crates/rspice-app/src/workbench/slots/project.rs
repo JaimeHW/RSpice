@@ -1,7 +1,7 @@
 //! The project feature's dialogs: the library, cell and view transactions, a
 //! new project's identity, and the project's save, history, technology and
-//! recovery workflows; the Project Launcher, the Examples dialog, a pending
-//! close's destination, and the Project workspace's pages and filters.
+//! recovery workflows; the Project Launcher, the Examples dialog, and the
+//! Project workspace's pages and filters.
 
 use crate::workbench::app::{DesignManagementDialogState, ProjectRevisionHistoryDialogState};
 
@@ -149,10 +149,6 @@ pub(crate) struct ProjectState {
     pub project_launcher_page: crate::workbench::state::ProjectLauncherPage,
     /// The Examples dialog, while it is open: the example chosen in it.
     pub(crate) examples_selection: Option<usize>,
-    /// Destination owned by an in-flight close-project review. It survives an
-    /// asynchronous canonical-save continuation but is never persisted.
-    pub(crate) project_close_destination:
-        crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
     /// Focus is requested only on the frame in which the launcher opens.
     pub focus_project_launcher_search: bool,
     pub project_page: crate::workbench::state::ProjectPage,
@@ -173,23 +169,5 @@ impl ProjectState {
     /// Open the Examples dialog on its first circuit.
     pub(crate) fn open_examples(&mut self) {
         self.examples_selection = Some(0);
-    }
-
-    pub(crate) fn begin_project_close(
-        &mut self,
-        destination: crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
-    ) {
-        self.project_close_destination = destination;
-    }
-
-    pub(crate) fn cancel_project_close(&mut self) {
-        self.project_close_destination =
-            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench;
-    }
-
-    pub(crate) fn take_project_close_destination(
-        &mut self,
-    ) -> crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination {
-        std::mem::take(&mut self.project_close_destination)
     }
 }

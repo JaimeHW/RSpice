@@ -17,6 +17,7 @@ use crate::workbench::app::dialogs::selection::commands::floating::{
 };
 use crate::workbench::app::dialogs::window_session::WindowSessionPage;
 use crate::workbench::docks::RunDetailsDialogState;
+use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::menu_bar::DatasetExportPicker;
 use rspice_schematic_editor::object_properties::ObjectPropertiesDraft;
 
@@ -164,7 +165,12 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
         });
     });
     assert_blocks_shortcuts(|dialogs| dialogs.workbench.confirmation_dialog.visible = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.workbench.project_review_dialog.show_close_project());
+    assert_blocks_shortcuts(|dialogs| {
+        dialogs
+            .workbench
+            .project_review_dialog
+            .show_close_project(ProjectCloseDestination::EmptyWorkbench);
+    });
 }
 
 fn open_drawing_sheet_presets_alone(dialogs: &mut AppState) {
@@ -478,7 +484,10 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs.workbench.confirmation_dialog.visible = true;
     }),
     ("project_review_dialog", |dialogs| {
-        dialogs.workbench.project_review_dialog.show_close_project();
+        dialogs
+            .workbench
+            .project_review_dialog
+            .show_close_project(ProjectCloseDestination::EmptyWorkbench);
     }),
 ];
 

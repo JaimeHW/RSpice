@@ -11,7 +11,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
 use crate::workbench::app::{ConfirmationResponse, ProjectReviewRequest, RSpiceApp};
 use crate::workbench::design_system::WorkbenchIcon;
-use crate::workbench::lifecycle::project_lifecycle::ProjectDocumentId;
+use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, ProjectDocumentId};
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_confirmation_dialog(&mut self, ctx: &Context) {
@@ -144,7 +144,9 @@ impl RSpiceApp {
                     DialogChoice::Secondary | DialogChoice::None => {}
                 }
             }
-            ProjectReviewRequest::CloseProject => self.render_close_project_review(ctx),
+            ProjectReviewRequest::CloseProject(destination) => {
+                self.render_close_project_review(ctx, destination);
+            }
         }
     }
 
@@ -153,7 +155,7 @@ impl RSpiceApp {
     /// question. A clean, idle project never opens it, and one that turns
     /// clean and idle while it is open, because its run ended with nothing
     /// unsaved, closes without asking again.
-    fn render_close_project_review(&mut self, ctx: &Context) {
+    fn render_close_project_review(&mut self, ctx: &Context, destination: ProjectCloseDestination) {
         let documents =
             crate::workbench::lifecycle::project_lifecycle::dirty_documents(&self.state);
         // A never-saved project has no baseline to compare against, so all of
@@ -185,9 +187,12 @@ impl RSpiceApp {
             self.render_close_blocked_by_run(ctx, &unsaved);
         } else if documents.is_empty() && unsaved.is_empty() {
             self.state.workbench.project_review_dialog.close();
-            crate::workbench::workflows::project_workflow::close_project_discard(&mut self.state);
+            crate::workbench::workflows::project_workflow::close_project_discard(
+                &mut self.state,
+                destination,
+            );
         } else {
-            self.render_close_save_prompt(ctx, never_saved, &unsaved);
+            self.render_close_save_prompt(ctx, never_saved, &unsaved, destination);
         }
     }
 
@@ -196,6 +201,7 @@ impl RSpiceApp {
         ctx: &Context,
         never_saved: bool,
         unsaved: &[(WorkbenchIcon, String)],
+        destination: ProjectCloseDestination,
     ) {
         let project = self.state.model.workspace.content.project.name().trim();
         let title = if project.is_empty() {
@@ -226,16 +232,16 @@ impl RSpiceApp {
             unsaved_list(ui, unsaved);
         });
         match choice {
-            DialogChoice::Primary => self.begin_close_project_after_save(),
+            DialogChoice::Primary => self.begin_close_project_after_save(destination),
             DialogChoice::Secondary => {
                 self.state.workbench.project_review_dialog.close();
                 crate::workbench::workflows::project_workflow::close_project_discard(
                     &mut self.state,
+                    destination,
                 );
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.workbench.project_review_dialog.close();
-                self.state.project.cancel_project_close();
             }
             DialogChoice::None => {}
         }
@@ -276,7 +282,6 @@ impl RSpiceApp {
             }
             DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
                 self.state.workbench.project_review_dialog.close();
-                self.state.project.cancel_project_close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
@@ -444,7 +449,7 @@ mod tests {
         app.state
             .workbench
             .project_review_dialog
-            .show_close_project();
+            .show_close_project(ProjectCloseDestination::EmptyWorkbench);
         app
     }
 

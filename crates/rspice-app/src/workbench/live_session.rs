@@ -413,13 +413,18 @@ impl LiveSessionEngine {
             return;
         }
         if state.platform.project_lifecycle.is_open() {
-            state.project.begin_project_close(
-                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror,
-            );
+            let destination =
+                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror;
             if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
-                state.workbench.project_review_dialog.show_close_project();
-            } else if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
-                state.project.cancel_project_close();
+                state
+                    .workbench
+                    .project_review_dialog
+                    .show_close_project(destination);
+            } else {
+                crate::workbench::workflows::project_workflow::close_project_discard(
+                    state,
+                    destination,
+                );
             }
         } else {
             state.cloud.request_live_mirror_entry();
@@ -518,10 +523,10 @@ impl LiveSessionEngine {
         if !self.mirror_discard_pending || state.model.simulation.execution.has_active_execution() {
             return;
         }
-        state.project.begin_project_close(
+        if crate::workbench::workflows::project_workflow::close_project_discard(
+            state,
             crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
-        );
-        if crate::workbench::workflows::project_workflow::close_project_discard(state) {
+        ) {
             self.mirror_discard_pending = false;
         }
     }
@@ -644,10 +649,10 @@ impl LiveSessionEngine {
             self.mirror_discard_pending = true;
             return;
         }
-        state.project.begin_project_close(
+        if !crate::workbench::workflows::project_workflow::close_project_discard(
+            state,
             crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
-        );
-        if !crate::workbench::workflows::project_workflow::close_project_discard(state) {
+        ) {
             self.mirror_discard_pending = true;
         }
     }
@@ -1818,10 +1823,12 @@ mod tests {
     #[test]
     fn a_mirror_entry_that_outlives_its_session_stays_on_the_no_project_landing() {
         let mut state = AppState::default();
-        state.project.begin_project_close(
-            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror,
+        assert!(
+            crate::workbench::workflows::project_workflow::close_project_discard(
+                &mut state,
+                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::LiveMirror,
+            )
         );
-        assert!(crate::workbench::workflows::project_workflow::close_project_discard(&mut state));
 
         LiveSessionEngine::default().pump(&mut state, &mut CloudAccountService::unconfigured());
 

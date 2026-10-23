@@ -1003,13 +1003,14 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
         );
         return false;
     }
-    state
-        .project
-        .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
+    let destination = ProjectCloseDestination::EmptyWorkbench;
     if closing_loses_nothing(state) {
-        return close_project_discard(state);
+        return close_project_discard(state, destination);
     }
-    state.workbench.project_review_dialog.show_close_project();
+    state
+        .workbench
+        .project_review_dialog
+        .show_close_project(destination);
     true
 }
 
@@ -1043,7 +1044,7 @@ fn apply_startup_project_choice(state: &mut AppState) {
         return;
     }
     if closing_loses_nothing(state) {
-        close_project_discard(state);
+        close_project_discard(state, ProjectCloseDestination::EmptyWorkbench);
     } else if state.platform.project_lifecycle.accepted().is_some() {
         state.record(
             LogSeverity::Info,
@@ -1053,7 +1054,12 @@ fn apply_startup_project_choice(state: &mut AppState) {
     }
 }
 
-pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
+/// Close the open project without saving it, leaving the reader at
+/// `destination`.
+pub(crate) fn close_project_discard(
+    state: &mut AppState,
+    destination: ProjectCloseDestination,
+) -> bool {
     if state.model.simulation.execution.has_active_execution() {
         lifecycle_error(
             state,
@@ -1094,7 +1100,6 @@ pub(crate) fn close_project_discard(state: &mut AppState) -> bool {
     state.platform.browser_project_save_name = None;
     crate::workbench::lifecycle::project_lifecycle::mark_project_closed(state);
     emit_session_model_restore_errors(state, "project close", model_restore_errors);
-    let destination = state.project.take_project_close_destination();
     state.project.project_launcher_open = false;
     state
         .workbench

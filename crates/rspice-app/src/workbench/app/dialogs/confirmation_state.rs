@@ -2,6 +2,8 @@
 //!
 //! Typed confirmation requests and responses shared by application workflows.
 
+use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
+
 /// Actions that can trigger a save confirmation dialog
 ///
 /// Commercial EDA tools like Cadence Virtuoso always prompt the user before
@@ -15,8 +17,9 @@ pub enum ConfirmationAction {
     ProjectOpen,
     /// Open a bare SPICE deck as a new netlist-first project.
     OpenNetlistProject,
-    /// Close the current project while leaving RSpice running.
-    CloseProject,
+    /// Close the current project while leaving RSpice running, landing where
+    /// the close was asked to.
+    CloseProject(ProjectCloseDestination),
     /// Open another schematic (discard current)
     FileOpen,
     /// Open a file from the recent-files list (path stored alongside the
@@ -36,7 +39,7 @@ impl ConfirmationAction {
             ConfirmationAction::ProjectNew
             | ConfirmationAction::ProjectOpen
             | ConfirmationAction::OpenNetlistProject
-            | ConfirmationAction::CloseProject => {
+            | ConfirmationAction::CloseProject(_) => {
                 if project.is_empty() {
                     "Save changes to this project?".to_owned()
                 } else {
@@ -65,7 +68,7 @@ impl ConfirmationAction {
             ConfirmationAction::ProjectNew
             | ConfirmationAction::ProjectOpen
             | ConfirmationAction::OpenNetlistProject
-            | ConfirmationAction::CloseProject
+            | ConfirmationAction::CloseProject(_)
             | ConfirmationAction::FileOpen
             | ConfirmationAction::OpenRecent => "Your changes will be lost if you don't save them.",
         }
@@ -208,7 +211,7 @@ pub(crate) struct ProjectReviewDialogState {
 #[derive(Debug, Clone)]
 pub(crate) enum ProjectReviewRequest {
     RevertActive(crate::workbench::lifecycle::project_lifecycle::RevertReviewToken),
-    CloseProject,
+    CloseProject(ProjectCloseDestination),
 }
 
 impl ProjectReviewDialogState {
@@ -219,8 +222,8 @@ impl ProjectReviewDialogState {
         self.request = Some(ProjectReviewRequest::RevertActive(token));
     }
 
-    pub(crate) fn show_close_project(&mut self) {
-        self.request = Some(ProjectReviewRequest::CloseProject);
+    pub(crate) fn show_close_project(&mut self, destination: ProjectCloseDestination) {
+        self.request = Some(ProjectReviewRequest::CloseProject(destination));
     }
 
     pub(crate) fn close(&mut self) {
@@ -236,7 +239,8 @@ mod tests {
     #[test]
     fn async_canonical_save_continuation_is_transaction_bound_for_all_destructive_actions() {
         for action in [
-            ConfirmationAction::CloseProject,
+            ConfirmationAction::CloseProject(ProjectCloseDestination::EmptyWorkbench),
+            ConfirmationAction::CloseProject(ProjectCloseDestination::LiveMirror),
             ConfirmationAction::ProjectOpen,
             ConfirmationAction::OpenNetlistProject,
             ConfirmationAction::ImportNetlist,
@@ -262,7 +266,7 @@ mod tests {
     #[test]
     fn cancel_external_change_and_failure_drop_continuation_without_proceeding() {
         for action in [
-            ConfirmationAction::CloseProject,
+            ConfirmationAction::CloseProject(ProjectCloseDestination::EmptyWorkbench),
             ConfirmationAction::ProjectOpen,
             ConfirmationAction::OpenNetlistProject,
             ConfirmationAction::ImportNetlist,
@@ -283,7 +287,7 @@ mod tests {
         let mut state = ConfirmationDialogState::default();
         state.await_canonical_save(
             transaction,
-            ConfirmationAction::CloseProject,
+            ConfirmationAction::CloseProject(ProjectCloseDestination::EmptyWorkbench),
             None,
             None,
             None,

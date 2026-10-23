@@ -85,11 +85,11 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
         .set_choice(ChoicePreference::SchematicGrid, 2)
         .unwrap();
     state.design.schematic_snap.grid_size = 777;
-    state
-        .project
-        .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
 
-    assert!(close_project_discard(&mut state));
+    assert!(close_project_discard(
+        &mut state,
+        ProjectCloseDestination::EmptyWorkbench
+    ));
     assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Metric);
     assert_eq!(
         state.model.schematic.session.editor.snap_engine.snap_radius,
@@ -168,11 +168,14 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     assert!(request_close_project(&mut state));
     assert!(matches!(
         state.workbench.project_review_dialog.request,
-        Some(crate::workbench::app::ProjectReviewRequest::CloseProject)
+        Some(crate::workbench::app::ProjectReviewRequest::CloseProject(_))
     ));
 
     state.workbench.project_review_dialog.close();
-    assert!(close_project_discard(&mut state));
+    assert!(close_project_discard(
+        &mut state,
+        ProjectCloseDestination::EmptyWorkbench
+    ));
     assert!(!state.platform.project_lifecycle.is_open());
     state.assert_project_open_fact();
     assert!(!state.project.project_launcher_open);
@@ -261,10 +264,10 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
     use crate::workbench::ChoicePreference;
 
     let mut state = AppState::default();
-    state
-        .project
-        .begin_project_close(ProjectCloseDestination::EmptyWorkbench);
-    assert!(close_project_discard(&mut state));
+    assert!(close_project_discard(
+        &mut state,
+        ProjectCloseDestination::EmptyWorkbench
+    ));
     let session = ron::to_string(&state).expect("the session serializes");
 
     for choice in [0, 1] {
@@ -391,7 +394,10 @@ fn closing_a_project_as_an_edit_settles_checks_nothing() {
         "the edit settles"
     );
 
-    assert!(close_project_discard(&mut state));
+    assert!(close_project_discard(
+        &mut state,
+        ProjectCloseDestination::EmptyWorkbench
+    ));
     assert_eq!(state.refresh_live_checks(start), None);
     assert!(
         state
@@ -414,11 +420,11 @@ fn closing_a_project_as_an_edit_settles_checks_nothing() {
 #[test]
 fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
     let mut state = AppState::default();
-    state
-        .project
-        .begin_project_close(ProjectCloseDestination::LiveMirror);
 
-    assert!(close_project_discard(&mut state));
+    assert!(close_project_discard(
+        &mut state,
+        ProjectCloseDestination::LiveMirror
+    ));
     assert!(!state.platform.project_lifecycle.is_open());
     assert!(!state.project.project_launcher_open);
     assert_eq!(
@@ -843,7 +849,10 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
         .model_library_manager
         .add_library(ModelLibrary::new("closing_project_only"));
     state.open_project_session();
-    assert!(close_project_discard(&mut state));
+    assert!(close_project_discard(
+        &mut state,
+        ProjectCloseDestination::EmptyWorkbench
+    ));
     assert!(
         state
             .model

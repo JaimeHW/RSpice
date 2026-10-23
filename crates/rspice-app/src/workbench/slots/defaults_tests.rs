@@ -8,7 +8,6 @@
 //! new session shows.
 
 use super::*;
-use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::state::{
     DesignPanel, LibraryCellviewPage, ProjectLauncherFilter, ProjectLauncherPage,
     ProjectLauncherSort, ProjectPage, SimulationPage, VerificationPage,
@@ -29,10 +28,6 @@ fn moved_workbench_fields_keep_the_defaults_the_workbench_gave_them() {
     );
     assert_eq!(project.project_launcher_filter, ProjectLauncherFilter::All);
     assert_eq!(project.project_launcher_page, ProjectLauncherPage::Projects);
-    assert_eq!(
-        project.project_close_destination,
-        ProjectCloseDestination::EmptyWorkbench
-    );
     assert_eq!(project.project_page, ProjectPage::Overview);
     assert_eq!(
         project.library_cellview_page,

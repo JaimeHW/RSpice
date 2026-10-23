@@ -2172,7 +2172,10 @@ fn closing_or_replacing_the_project_forgets_the_reading_position() {
 
     let mut state = AppState::default();
     read_narrowly(&mut state);
-    assert!(close_project_discard(&mut state));
+    assert!(close_project_discard(
+        &mut state,
+        crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+    ));
     assert_eq!(state.problems_view, ProblemsView::default());
 
     read_narrowly(&mut state);

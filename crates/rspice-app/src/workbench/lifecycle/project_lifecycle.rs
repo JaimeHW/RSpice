@@ -69,13 +69,13 @@ struct BrowserConflict {
 
 /// Where the validated close-project transaction should leave the user.
 ///
-/// This is runtime-only intent. Keeping it beside the launcher state lets a
-/// browser canonical-save continuation complete the exact originally requested
-/// transition without inferring intent from whichever surface is visible later.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+/// This is runtime-only intent. It travels with the close itself, through the
+/// review dialog's request and a browser canonical-save continuation, so the
+/// close completes the exact originally requested transition without
+/// inferring intent from whichever surface is visible later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectCloseDestination {
     /// The no-project landing: `Workspace::Project` with nothing open.
-    #[default]
     EmptyWorkbench,
     /// Joining a live session: the same landing, where this install then
     /// waits for the session host's project snapshot.
