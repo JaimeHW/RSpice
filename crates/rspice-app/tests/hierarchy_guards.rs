@@ -643,6 +643,13 @@ const COMMAND_ROUTE_FILES: &[(&str, &str)] = &[
     ("workbench/menu_bar.rs", "menu"),
     ("workbench/menu_bar/", "menu"),
     ("workbench/chrome/toolbar.rs", "toolbar"),
+    ("workbench/chrome/toolbar/code.rs", "toolbar"),
+    ("workbench/chrome/toolbar/design.rs", "toolbar"),
+    ("workbench/chrome/toolbar/hardcopy.rs", "toolbar"),
+    ("workbench/chrome/toolbar/models.rs", "toolbar"),
+    ("workbench/chrome/toolbar/project.rs", "toolbar"),
+    ("workbench/chrome/toolbar/results.rs", "toolbar"),
+    ("workbench/chrome/toolbar/simulate.rs", "toolbar"),
     ("schematic/view/context_menu.rs", "schematic context menu"),
 ];
 
