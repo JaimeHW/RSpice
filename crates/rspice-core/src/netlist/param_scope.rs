@@ -137,21 +137,12 @@ pub struct ParamResolver {
     /// Global parameters (top-level .PARAM)
     global_params: HashMap<String, Value>,
 
-    /// Library-level parameters organized by library name
-    library_params: HashMap<String, HashMap<String, Value>>,
-
     /// Subcircuit default parameters (name -> params)
     subcircuit_defaults: HashMap<String, HashMap<String, Value>>,
 
     /// Complete real-valued snapshots captured by hierarchy expansion. An absent
     /// name in a snapshot must not fall back to an outer, shadowed binding.
     resolved_scopes: HashMap<Vec<String>, HashMap<String, Value>>,
-
-    /// Local/occurrence-level overrides (most specific)
-    local_overrides: HashMap<String, HashMap<String, Value>>,
-
-    /// Active library context for library parameter lookup
-    active_library: Option<String>,
 }
 
 impl ParamResolver {
@@ -200,7 +191,6 @@ impl ParamResolver {
     /// Clear data belonging to the previous expansion, retaining definitions.
     pub(crate) fn clear_expansion(&mut self) {
         self.global_params.clear();
-        self.local_overrides.clear();
         self.resolved_scopes.clear();
     }
 
@@ -213,27 +203,15 @@ impl ParamResolver {
     /// Returns the value from the highest-precedence scope that defines
     /// this parameter. Returns None if parameter is not defined.
     ///
-    /// Resolution order (highest to lowest precedence):
-    /// 1. Local override at exact path
-    /// 2. Captured effective scope at path or nearest ancestor
-    /// 3. Library parameter (if active library set)
-    /// 4. Global parameter
+    /// The captured effective scope at the path or its nearest ancestor wins;
+    /// a path with no captured scope falls back to the global parameters.
     ///
     /// Captured scopes include resolved subcircuit defaults and local parameters.
     /// They contain only materialized real values; symbolic, string and complex
     /// bindings return None and still shadow outer parameters.
     pub fn resolve(&self, name: &str, path: &HierarchyPath) -> Option<Value> {
         let name_upper = name.to_uppercase();
-        let path_str = path.to_string().to_uppercase();
 
-        // 1. Check local override (exact path)
-        if let Some(params) = self.local_overrides.get(&path_str)
-            && let Some(&value) = params.get(&name_upper)
-        {
-            return Some(value);
-        }
-
-        // 2. Check captured scopes (path and ancestors)
         let mut current = Some(path.clone());
         while let Some(p) = current {
             let key: Vec<_> = p.segments().iter().map(|s| s.to_uppercase()).collect();
@@ -243,15 +221,6 @@ impl ParamResolver {
             current = p.parent();
         }
 
-        // 3. Library parameters (if active library set)
-        if let Some(lib) = &self.active_library
-            && let Some(params) = self.library_params.get(lib)
-            && let Some(&value) = params.get(&name_upper)
-        {
-            return Some(value);
-        }
-
-        // 4. Global parameters
         self.global_params.get(&name_upper).copied()
     }
 
@@ -267,19 +236,15 @@ impl ParamResolver {
     /// Clear all parameters
     pub fn clear(&mut self) {
         self.clear_expansion();
-        self.library_params.clear();
         self.subcircuit_defaults.clear();
-        self.active_library = None;
     }
 
     /// Get count of defined parameters at all scopes
     pub fn param_count(&self) -> usize {
         let global = self.global_params.len();
-        let library: usize = self.library_params.values().map(|m| m.len()).sum();
         let subckt: usize = self.subcircuit_defaults.values().map(|m| m.len()).sum();
-        let local: usize = self.local_overrides.values().map(|m| m.len()).sum();
         let resolved: usize = self.resolved_scopes.values().map(|m| m.len()).sum();
-        global + library + subckt + local + resolved
+        global + subckt + resolved
     }
 }
 
