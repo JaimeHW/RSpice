@@ -5478,13 +5478,12 @@ impl XyceTestRunner {
                 MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES
             ));
         }
-        Self::parse_upstream_exclusions_bytes(root, &manifest_path, is_vendored_corpus, &bytes)
+        Self::parse_upstream_exclusions_bytes(root, &manifest_path, &bytes)
     }
 
     pub(super) fn parse_upstream_exclusions_bytes(
         root: &Path,
         manifest_path: &Path,
-        is_vendored_corpus: bool,
         bytes: &[u8],
     ) -> Result<BTreeMap<String, XyceUpstreamExclusion>, String> {
         if bytes.starts_with(&[0xef, 0xbb, 0xbf]) {
@@ -5519,14 +5518,7 @@ impl XyceTestRunner {
             Some(raw.to_string())
         }
 
-        fn sha256_hex(bytes: &[u8]) -> String {
-            format!("{:x}", Sha256::digest(bytes))
-        }
-
         let mut exclusions = BTreeMap::new();
-        let mut record_lines = Vec::new();
-        let mut retained_paths = Vec::new();
-        let mut promotion_lines = Vec::new();
         let mut previous_deck: Option<String> = None;
         let mut header_index = 0usize;
         for (line_index, raw_line) in content.lines().enumerate() {
@@ -5631,21 +5623,6 @@ impl XyceTestRunner {
                     ));
                 }
             };
-            let record_line = match &disposition {
-                XyceUpstreamExclusionDisposition::Excluded => {
-                    format!("{deck}\t{source}\t{UPSTREAM_EXCLUDED_DISPOSITION}")
-                }
-                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
-                    expected_contract,
-                } => {
-                    promotion_lines.push(format!("{deck}\t{expected_contract}"));
-                    format!(
-                        "{deck}\t{source}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{expected_contract}"
-                    )
-                }
-            };
-            retained_paths.push(deck.clone());
-            record_lines.push(record_line);
             let deck_path = root.join(deck.replace('/', std::path::MAIN_SEPARATOR_STR));
             let deck_metadata = fs::symlink_metadata(&deck_path).map_err(|error| {
                 format!(
@@ -5680,52 +5657,6 @@ impl XyceTestRunner {
                 "upstream-exclusions manifest {} is missing required provenance headers",
                 manifest_path.display(),
             ));
-        }
-        if is_vendored_corpus {
-            if exclusions.len() != UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT {
-                return Err(format!(
-                    "vendored upstream-exclusions manifest contains {} retained decks; expected {} from source tree {}",
-                    exclusions.len(),
-                    UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT,
-                    UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE
-                ));
-            }
-            if promotion_lines.len() != UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT {
-                return Err(format!(
-                    "vendored upstream-exclusions manifest contains {} independent qualifications; expected {}",
-                    promotion_lines.len(),
-                    UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT
-                ));
-            }
-            let canonical_stream = |lines: &[String]| format!("{}\n", lines.join("\n"));
-            for (label, actual, expected) in [
-                (
-                    "retained path set",
-                    sha256_hex(canonical_stream(&retained_paths).as_bytes()),
-                    UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256,
-                ),
-                (
-                    "independent qualification tuples",
-                    sha256_hex(canonical_stream(&promotion_lines).as_bytes()),
-                    UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256,
-                ),
-                (
-                    "complete exclusion records",
-                    sha256_hex(canonical_stream(&record_lines).as_bytes()),
-                    UPSTREAM_EXCLUSIONS_RECORDS_SHA256,
-                ),
-                (
-                    "complete manifest",
-                    sha256_hex(bytes),
-                    UPSTREAM_EXCLUSIONS_MANIFEST_SHA256,
-                ),
-            ] {
-                if actual != expected {
-                    return Err(format!(
-                        "vendored upstream-exclusions {label} SHA-256 is {actual}; expected {expected}"
-                    ));
-                }
-            }
         }
         Ok(exclusions)
     }

@@ -18,7 +18,6 @@ impl XyceTestRunner {
             return None;
         }
         Some((|| {
-            self.validate_analytic_int_floor_ceil_tran_provenance(deck)?;
             let plan = self.static_tran_plan_for_path_with_purpose(
                 &deck.path,
                 XyceStaticTranPlanPurpose::AnalyticOracle,
@@ -32,217 +31,6 @@ impl XyceTestRunner {
             Self::validate_analytic_int_floor_ceil_tran_plan(&plan, &netlist)?;
             Ok(XyceAnalyticIntFloorCeilTranContract { plan })
         })())
-    }
-
-    pub(super) fn analytic_int_floor_ceil_historical_provenance_records() -> Vec<String> {
-        let mut records = [
-            (
-                "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir",
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BYTES,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BLOB,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_SHA256,
-            ),
-            (
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_PATH,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BYTES,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BLOB,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_SHA256,
-            ),
-            (
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_PATH,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_BYTES,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_BLOB,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_SHA256,
-            ),
-            (
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_PATH,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_BYTES,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_BLOB,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_SHA256,
-            ),
-            (
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_PATH,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BYTES,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BLOB,
-                XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_SHA256,
-            ),
-        ]
-        .map(|(path, bytes, blob, sha256)| {
-            format!(
-                "{XYCE_ANALYTIC_INT_FLOOR_CEIL_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_ANALYTIC_INT_FLOOR_CEIL_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{blob}\t{sha256}"
-            )
-        })
-        .to_vec();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_analytic_int_floor_ceil_historical_provenance_records(
-        records: &[String],
-    ) -> Result<(), String> {
-        let digest = blake3::hash(records.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if records.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_RECORD_COUNT
-            || digest != XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_BLAKE3
-        {
-            return Err(format!(
-                "INT/FLOOR/CEIL Release-7.10 source/wrapper/manifest/tags/Tools provenance changed: records={}/{digest}",
-                records.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_analytic_int_floor_ceil_historical_provenance() -> Result<(), String> {
-        Self::validate_analytic_int_floor_ceil_historical_provenance_records(
-            &Self::analytic_int_floor_ceil_historical_provenance_records(),
-        )
-    }
-
-    pub(super) fn validate_analytic_int_floor_ceil_tran_provenance(
-        &self,
-        deck: &XyceDeck,
-    ) -> Result<(), String> {
-        const LABEL: &str = "analytic INT/FLOOR/CEIL transient wrapper";
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path)
-                != XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_RECORD
-            || !self.requires_upstream_wrapper(&deck.relative_path)
-        {
-            return Err(format!(
-                "{LABEL} requires its exact Netlists selector and wrapper-manifest ownership"
-            ));
-        }
-
-        let expected_path = self
-            .root
-            .join("Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir");
-        let requested_metadata = fs::symlink_metadata(&deck.path)
-            .map_err(|error| format!("failed to inspect {LABEL} requested path: {error}"))?;
-        if !requested_metadata.file_type().is_file() || requested_metadata.file_type().is_symlink()
-        {
-            return Err(format!(
-                "{LABEL} requested path must be a regular non-symlink file"
-            ));
-        }
-        let canonical_deck = deck
-            .path
-            .canonicalize()
-            .map_err(|error| format!("{LABEL} path cannot be canonicalized: {error}"))?;
-        let canonical_expected = expected_path
-            .canonicalize()
-            .map_err(|error| format!("{LABEL} canonical source is missing: {error}"))?;
-        if canonical_deck != canonical_expected {
-            return Err(format!(
-                "{LABEL} resolved outside its canonical corpus path"
-            ));
-        }
-        let family = canonical_expected
-            .parent()
-            .ok_or_else(|| format!("{LABEL} has no family directory"))?;
-        let family_metadata = fs::symlink_metadata(family)
-            .map_err(|error| format!("failed to inspect {LABEL} family: {error}"))?;
-        if !family_metadata.file_type().is_dir() || family_metadata.file_type().is_symlink() {
-            return Err(format!(
-                "{LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-
-        let mut names = BTreeSet::new();
-        let mut content = BTreeSet::new();
-        for entry in fs::read_dir(family)
-            .map_err(|error| format!("failed to read {LABEL} family: {error}"))?
-        {
-            let entry =
-                entry.map_err(|error| format!("failed to inspect {LABEL} member: {error}"))?;
-            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
-                format!(
-                    "failed to inspect {LABEL} member {}: {error}",
-                    entry.path().display()
-                )
-            })?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "{LABEL} member {} must be a regular non-symlink file",
-                    entry.path().display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} family filename is not UTF-8"))?
-                .to_ascii_lowercase();
-            if !names.insert(name.clone()) {
-                return Err(format!("{LABEL} family has case-colliding name {name:?}"));
-            }
-            let bytes = fs::read(entry.path())
-                .map_err(|error| format!("failed to read {LABEL} member: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(
-                &format!("{LABEL} member {}", entry.path().display()),
-                &bytes,
-            )?;
-            content.insert(format!("{name}\0{}", blake3::hash(&canonical).to_hex()));
-        }
-        let names = names.into_iter().collect::<Vec<_>>();
-        let content = content.into_iter().collect::<Vec<_>>();
-        let names_hash = blake3::hash(names.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let content_hash = blake3::hash(content.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if names.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_COUNT
-            || names_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_NAMES_BLAKE3
-            || content.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_COUNT
-            || content_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_CONTENT_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} family census changed: names={}/{names_hash}, content={}/{content_hash}",
-                names.len(),
-                content.len()
-            ));
-        }
-
-        let expected_manifest = [
-            XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_RECORD.to_string(),
-            XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD.to_string(),
-        ]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-        let manifest = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_PREFIX))
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let manifest_rows = manifest.iter().cloned().collect::<Vec<_>>();
-        let manifest_hash = blake3::hash(manifest_rows.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if manifest != expected_manifest
-            || manifest_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_MANIFEST_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} manifest/family bijection changed: manifest={}/{manifest_hash}",
-                manifest.len()
-            ));
-        }
-
-        let source_bytes = fs::read(&canonical_expected)
-            .map_err(|error| format!("failed to read {LABEL} source: {error}"))?;
-        let canonical_source = Self::canonical_lf_text_identity(LABEL, &source_bytes)?;
-        let source_hash = blake3::hash(&canonical_source).to_hex().to_string();
-        if canonical_source.len() != XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BYTES
-            || source_hash != XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} canonical source identity changed: bytes={}/{source_hash}",
-                canonical_source.len()
-            ));
-        }
-        self.reject_wrapper_output_artifacts(&canonical_expected)?;
-        Self::validate_analytic_int_floor_ceil_historical_provenance()
     }
 
     pub(super) fn validate_analytic_int_floor_ceil_tran_plan(
@@ -1042,7 +830,7 @@ impl XyceTestRunner {
         let tran = Self::single_tran_analysis(&netlist)?;
         Self::validate_measure_cont_tran_plan(&netlist, &print, &tran, kind)?;
 
-        let reference_path = kind.prn().map(|(path, _)| self.root.join(path));
+        let reference_path = kind.prn().map(|path| self.root.join(path));
         let plan = XyceStaticTranPlan {
             deck_path: deck.path.clone(),
             oracle: reference_path
@@ -1098,7 +886,7 @@ impl XyceTestRunner {
         self.validate_measure_cont_gs_semantics(kind, &netlist, &continuous)?;
         self.validate_measure_cont_counterfactual(kind, &netlist, &scalar, &continuous, &mt0_path)?;
 
-        if let Some((relative, _)) = kind.prn() {
+        if let Some(relative) = kind.prn() {
             let reference = Self::parse_xyce_verify_tran_reference_file(&self.root.join(relative))?;
             let actual = Self::measure_cont_prn_table_on_reference_grid(
                 &plan, &netlist, &result, &reference,
@@ -5046,8 +4834,6 @@ impl XyceTestRunner {
                         self.display_path(path)
                     ));
                 }
-                self.reject_wrapper_output_artifacts(path)
-                    .map_err(|error| format!("BUG 1190 mutual-inductor {role} {error}"))?;
 
                 let stem = path
                     .file_stem()

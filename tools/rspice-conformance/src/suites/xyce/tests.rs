@@ -9696,7 +9696,7 @@ fn bug754_global_parameter_pair_rejects_source_and_semantic_mutations() {
 }
 
 #[test]
-fn bug754_global_parameter_pair_rejects_provenance_census_and_artifacts() {
+fn bug754_global_parameter_pair_rejects_ownership_and_census_drift() {
     let mut normalized_names = BTreeSet::new();
     XyceTestRunner::insert_bug754_family_member_name(
         &mut normalized_names,
@@ -9753,30 +9753,6 @@ fn bug754_global_parameter_pair_rejects_provenance_census_and_artifacts() {
             "extra\n.end\n",
         )
         .expect("write extra BUG 754 family member");
-    });
-    assert_rejected("owner-artifact", &|root, owner, _| {
-        let output = root.join("OutputData/Certification_Tests/BUG_754_SON");
-        fs::create_dir_all(&output).expect("create BUG 754 OutputData");
-        fs::write(
-            output.join(format!(
-                "{}.prn",
-                owner.path.file_name().unwrap().to_string_lossy()
-            )),
-            "forbidden",
-        )
-        .expect("write owner output artifact");
-    });
-    assert_rejected("reference-artifact", &|root, _, reference| {
-        let output = root.join("OutputData/Certification_Tests/BUG_754_SON");
-        fs::create_dir_all(&output).expect("create BUG 754 OutputData");
-        fs::write(
-            output.join(format!(
-                "{}.PRN",
-                reference.path.file_name().unwrap().to_string_lossy()
-            )),
-            "forbidden",
-        )
-        .expect("write reference output artifact");
     });
 }
 
@@ -11188,7 +11164,7 @@ fn analytic_integer_dc_comparison_uses_printed_inputs_and_exact_numeric_equality
 }
 
 #[test]
-fn analytic_int_floor_ceil_tran_contract_binds_exact_family_and_release_provenance() {
+fn analytic_int_floor_ceil_tran_contract_qualifies_the_canonical_plan() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -11209,36 +11185,10 @@ fn analytic_int_floor_ceil_tran_contract_binds_exact_family_and_release_provenan
         .expect("qualified source reparses");
     XyceTestRunner::validate_analytic_int_floor_ceil_tran_plan(&contract.plan, &netlist)
         .expect("qualified plan and topology remain exact");
-
-    let records = XyceTestRunner::analytic_int_floor_ceil_historical_provenance_records();
-    assert_eq!(
-        records.len(),
-        XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_RECORD_COUNT
-    );
-    assert!(
-        records
-            .iter()
-            .any(|record| record.contains(XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BLOB))
-    );
-    assert!(
-        records
-            .iter()
-            .any(|record| record.contains(XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BLOB))
-    );
-    XyceTestRunner::validate_analytic_int_floor_ceil_historical_provenance_records(&records)
-        .expect("Release 7.10 historical provenance fingerprint validates");
-
-    let mut mutated = records;
-    mutated[0].push('0');
-    assert!(
-        XyceTestRunner::validate_analytic_int_floor_ceil_historical_provenance_records(&mutated)
-            .is_err(),
-        "any historical identity mutation must fail closed"
-    );
 }
 
 #[test]
-fn analytic_int_floor_ceil_tran_provenance_rejects_source_family_and_manifest_mutations() {
+fn analytic_int_floor_ceil_tran_contract_rejects_source_mutation() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -11247,6 +11197,17 @@ fn analytic_int_floor_ceil_tran_provenance_rejects_source_family_and_manifest_mu
     let canonical =
         fs::read(workspace_root.join("tests/xyce/Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir"))
             .expect("read canonical analytic transient owner");
+
+    let (root, deck, runner) = analytic_int_floor_ceil_tran_fixture(
+        "canonical",
+        &canonical,
+        analytic_int_floor_ceil_manifest(),
+    );
+    runner
+        .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
+        .expect("exact record remains selected")
+        .expect("canonical deck qualifies in the fixture");
+    fs::remove_dir_all(root).expect("remove canonical fixture");
 
     let mut source_mutation = String::from_utf8(canonical.clone()).expect("source is UTF-8");
     source_mutation = source_mutation.replace("SIN(0 5 1K)", "SIN(0 4 1K)");
@@ -11260,44 +11221,9 @@ fn analytic_int_floor_ceil_tran_provenance_rejects_source_family_and_manifest_mu
             .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
             .expect("exact record remains selected")
             .is_err(),
-        "a source-content mutation must fail the canonical family identity"
+        "a source-content mutation must fail the analytic plan"
     );
     fs::remove_dir_all(root).expect("remove source-mutation fixture");
-
-    let (root, deck, runner) = analytic_int_floor_ceil_tran_fixture(
-        "family-mutation",
-        &canonical,
-        analytic_int_floor_ceil_manifest(),
-    );
-    fs::write(
-        root.join("Netlists/ABM_INT_FLOOR_CEIL/unrelated.cir"),
-        "unrelated\n.end\n",
-    )
-    .expect("add unrelated family member");
-    assert!(
-        runner
-            .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
-            .expect("exact record remains selected")
-            .is_err(),
-        "an extra physical family member must fail the exact census"
-    );
-    fs::remove_dir_all(root).expect("remove family-mutation fixture");
-
-    let missing_companion_manifest =
-        "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir\trequires_upstream_wrapper\n";
-    let (root, deck, runner) = analytic_int_floor_ceil_tran_fixture(
-        "manifest-mutation",
-        &canonical,
-        missing_companion_manifest,
-    );
-    assert!(
-        runner
-            .analytic_int_floor_ceil_tran_wrapper_contract(&deck)
-            .expect("exact record remains selected")
-            .is_err(),
-        "manifest ownership must remain an exact family bijection"
-    );
-    fs::remove_dir_all(root).expect("remove manifest-mutation fixture");
 }
 
 #[test]

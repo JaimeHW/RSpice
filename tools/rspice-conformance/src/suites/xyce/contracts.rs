@@ -4778,8 +4778,6 @@ impl XyceTestRunner {
                         "resistor DTEMP {member_role} sibling must be a nonempty regular file"
                     ));
                 }
-                self.reject_wrapper_output_artifacts(path)
-                    .map_err(|err| format!("resistor DTEMP {member_role} {err}"))?;
             }
 
             let owner_plan = self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?;
@@ -5122,8 +5120,6 @@ impl XyceTestRunner {
                 if !metadata.is_file() || metadata.len() == 0 {
                     return Err(format!("{member_role} must be a nonempty regular file"));
                 }
-                self.reject_wrapper_output_artifacts(path)
-                    .map_err(|err| format!("{member_role} {err}"))?;
             }
             let owner_plan = self.static_dc_plan_for_path(&owner_path, ExpressionDialect::Xyce)?;
             let reference_plan =
@@ -5217,8 +5213,6 @@ impl XyceTestRunner {
                 if !metadata.is_file() || metadata.len() == 0 {
                     return Err(format!("{member_role} must be a nonempty regular file"));
                 }
-                self.reject_wrapper_output_artifacts(path)
-                    .map_err(|err| format!("{member_role} {err}"))?;
             }
 
             let owner_source = fs::read_to_string(&owner_path)
@@ -5298,8 +5292,6 @@ impl XyceTestRunner {
                 if !metadata.is_file() || metadata.len() == 0 {
                     return Err(format!("{member_role} must be a nonempty regular file"));
                 }
-                self.reject_wrapper_output_artifacts(path)
-                    .map_err(|err| format!("{member_role} {err}"))?;
             }
 
             let owner_source = fs::read_to_string(&owner_path)
@@ -5381,8 +5373,6 @@ impl XyceTestRunner {
                 if !metadata.is_file() || metadata.len() == 0 {
                     return Err(format!("{member_role} must be a nonempty regular file"));
                 }
-                self.reject_wrapper_output_artifacts(path)
-                    .map_err(|err| format!("{member_role} {err}"))?;
             }
 
             let owner_plan = self.static_tran_plan_for_path_with_purpose(

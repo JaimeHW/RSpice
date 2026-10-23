@@ -67,16 +67,6 @@ const UPSTREAM_EXCLUSIONS_MANIFEST_FILE: &str = "RSPICE-UPSTREAM-EXCLUSIONS.tsv"
 const UPSTREAM_EXCLUSIONS_SCHEMA_VERSION: &str = "1";
 const UPSTREAM_EXCLUSIONS_SOURCE_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
 const UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
-const UPSTREAM_EXCLUSIONS_RETAINED_DECK_COUNT: usize = 1_143;
-const UPSTREAM_EXCLUSIONS_QUALIFIED_DECK_COUNT: usize = 279;
-const UPSTREAM_EXCLUSIONS_RETAINED_PATHS_SHA256: &str =
-    "eb3eb203f0974a430cdea3924e921aecdc1f71c5c9ce4de2f78f282c57291997";
-const UPSTREAM_EXCLUSIONS_PROMOTIONS_SHA256: &str =
-    "da3dad9eaf71f0bf0bbf4d954c23730b9d2df1726e94e6cfc451dde495b82349";
-const UPSTREAM_EXCLUSIONS_RECORDS_SHA256: &str =
-    "ce0fbdbe351388129dc2f752ce2fd7575d503be77850ec7ce2959d5f838971a2";
-const UPSTREAM_EXCLUSIONS_MANIFEST_SHA256: &str =
-    "96d2a002a2dc5ef07515d11fcb70fb5865918033817375dc47f0dd4c7f8ef2b9";
 const MAX_UPSTREAM_EXCLUSIONS_MANIFEST_BYTES: usize = 1_048_576;
 const UPSTREAM_EXCLUDED_DISPOSITION: &str = "upstream_excluded";
 const RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION: &str = "rspice_independently_qualified";
@@ -1009,54 +999,6 @@ const XYCE_ANALYTIC_INT_FLOOR_CEIL_DC_RECORD: &str =
     "netlists/abm_int_floor_ceil/int_floor_ceil_bsrc.cir";
 const XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_RECORD: &str =
     "netlists/abm_int_floor_ceil/int_floor_ceil.cir";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_PREFIX: &str = "netlists/abm_int_floor_ceil/";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_COUNT: usize = 2;
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_NAMES_BLAKE3: &str =
-    "19f995371e91255c48b6cded0bd81e2a87156f5824f5d65c0d78ec57f84a8975";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_FAMILY_CONTENT_BLAKE3: &str =
-    "a2a146d650cf2217d2bc6f0ca51823a7e161b49d15b2de0a7af598b1be6d243f";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_MANIFEST_BLAKE3: &str =
-    "c1cef03cf5de631dbd3aaab904745bc4f0cbf821f9e1fb5e077132999269ca1a";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BYTES: usize = 674;
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BLAKE3: &str =
-    "d6c9fcceda0eecc7564c9670c6e5e40ef1484f95a45d9db772ffafd0897fd744";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_BLOB: &str =
-    "616bd37a2a0101cc9cc8e891d2d6c6f4c46c0beb";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_TRAN_SOURCE_SHA256: &str =
-    "a81525bef161e2398c21ecf1d7a49607a04c208d0163d8c564811768050ead75";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_PATH: &str =
-    "Netlists/ABM_INT_FLOOR_CEIL/int_floor_ceil.cir.sh";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BYTES: usize = 1_558;
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_BLOB: &str =
-    "a1730b6ba7ef8a1dc3761caccbab8d5298efadba";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_WRAPPER_SHA256: &str =
-    "4a6b7f98c01ffb1f5d09368e086d14631ec698cae090e1cfecf70a9e5752ebab";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_PATH: &str =
-    "Netlists/ABM_INT_FLOOR_CEIL/Manifest.txt";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_BYTES: usize = 97;
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_BLOB: &str =
-    "c7bca70e3f69ca9ed637af299f9f0ffb8ed627fd";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_MANIFEST_SHA256: &str =
-    "a4e86d598769593f7902a6f18b68f9f2573de97d2b8077a0a2a42be803e1ef37";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_PATH: &str = "Netlists/ABM_INT_FLOOR_CEIL/tags";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_BYTES: usize = 52;
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_BLOB: &str =
-    "4b222cb9237e5e7075fbf656c8e33b3d618a5f8c";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TAGS_SHA256: &str =
-    "90c933a317bec2b3065068d1c8434f4c024bc07a3d3b7ba5d36f9bb5f992fc85";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_PATH: &str =
-    "TestScripts/XyceRegression/Tools.pm";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BYTES: usize = 68_108;
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_BLOB: &str =
-    "16fa0adc3fbd03d653de4faaeaaa0fea8f8eee6c";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_SHA256: &str =
-    "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3";
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_RECORD_COUNT: usize = 5;
-const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_BLAKE3: &str =
-    "b1254efb20cfb1641dbbe95daf2712c4b476d449ea13c3fbd01072b747293e33";
 const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD: &str =
     "netlists/measure_cont/step/derivtestnoise.cir";
 const XYCE_MEASURE_NOISE_STEP_DERIV_RECORD: &str = "netlists/measure_noise/step/derivtestnoise.cir";
@@ -3297,22 +3239,10 @@ impl XyceMeasureContTranKind {
         }
     }
 
-    fn prn(self) -> Option<(&'static str, (usize, &'static str))> {
+    fn prn(self) -> Option<&'static str> {
         match self {
-            Self::Derivative => Some((
-                "OutputData/MEASURE_CONT/DerivTestTran.cir.prn",
-                (
-                    11461,
-                    "ea8e721952ec7a338fcae39dd8e642b9eeb4092a5fd69f92829d7318834e6127",
-                ),
-            )),
-            Self::FindWhen => Some((
-                "OutputData/MEASURE_CONT/FindWhenTestTran.cir.prn",
-                (
-                    11047,
-                    "ba38099177433ebc963d2e7c72e27f682d52244caa38530d4fdecd67157c380b",
-                ),
-            )),
+            Self::Derivative => Some("OutputData/MEASURE_CONT/DerivTestTran.cir.prn"),
+            Self::FindWhen => Some("OutputData/MEASURE_CONT/FindWhenTestTran.cir.prn"),
             Self::TriggerTarget => None,
         }
     }

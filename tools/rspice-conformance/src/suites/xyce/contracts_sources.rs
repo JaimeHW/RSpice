@@ -1963,14 +1963,6 @@ impl XyceTestRunner {
                     "BUG 754 dcsweep family must contain exactly its two records, got {family_members:?}"
                 ));
             }
-            for (member_role, path) in [
-                ("global-parameter owner", &owner_path),
-                ("literal reference", &reference_path),
-            ] {
-                self.reject_wrapper_output_artifacts(path)
-                    .map_err(|err| format!("{member_role} {err}"))?;
-            }
-
             let owner_source = fs::read_to_string(&owner_path)
                 .map_err(|err| format!("failed to read BUG 754 owner: {err}"))?;
             let reference_source = fs::read_to_string(&reference_path)

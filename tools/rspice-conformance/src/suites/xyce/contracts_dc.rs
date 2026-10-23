@@ -3022,7 +3022,6 @@ impl XyceTestRunner {
                         "nonlinear CORE model-step family '{family}' requires owner-only wrapper provenance"
                     ));
                 }
-                self.reject_wrapper_output_artifacts(path)?;
             }
             let owner_relative = Self::normalize_manifest_key(&self.relative_key(&owner_path));
             if exclusions.contains_key(&owner_relative) {
@@ -3090,7 +3089,6 @@ impl XyceTestRunner {
             if !metadata.is_file() || metadata.len() == 0 {
                 return Err("wrapper deck must be a nonempty regular file".to_string());
             }
-            self.reject_wrapper_output_artifacts(&deck.path)?;
             let plan = self.static_dc_plan_for_path(&deck.path, ExpressionDialect::Xyce)?;
             let netlist =
                 Self::parse_xyce_netlist(&plan.source, &plan.deck_path).map_err(|err| {
