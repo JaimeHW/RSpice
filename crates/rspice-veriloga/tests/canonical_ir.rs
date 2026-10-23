@@ -747,24 +747,6 @@ fn assert_validation_message(hir: &HirModel, expected_substring: &str) {
     );
 }
 
-fn mir_validation_messages(mir: &MirModel) -> Vec<String> {
-    mir.validate()
-        .expect_err("malformed MIR must fail validation")
-        .into_iter()
-        .map(|diagnostic| diagnostic.message)
-        .collect()
-}
-
-fn assert_mir_validation_message(mir: &MirModel, expected_substring: &str) {
-    let messages = mir_validation_messages(mir);
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains(expected_substring)),
-        "expected diagnostic containing {expected_substring:?}, got {messages:?}"
-    );
-}
-
 /// A malformed-IR case: its name, the valid model it starts from, the one
 /// corruption applied to it, and every diagnostic substring validation must
 /// report.
@@ -918,6 +900,31 @@ fn contribution_branch_access_id(hir: &HirModel) -> ExprId {
     };
 
     *left
+}
+
+fn lower_fixture_hir(source: &str, module_name: &str) -> HirModel {
+    let analyzed = analyze_fixture(source, module_name).expect("analyze fixture");
+    let metadata = CanonicalMetadata::for_source("fixture", source);
+    HirModel::from_analyzed_module(&metadata, &analyzed)
+}
+
+fn tiny_resistor_hir() -> HirModel {
+    lower_fixture_hir(tiny_resistor_source(), "tiny_res")
+}
+
+fn dynamic_array_hir() -> HirModel {
+    lower_fixture_hir(dynamic_array_source(), "dyn_array")
+}
+
+fn named_branch_hir() -> HirModel {
+    lower_fixture_hir(named_branch_potential_source(), "branch_potential")
+}
+
+fn array_access_index(hir: &HirModel) -> usize {
+    hir.expressions
+        .iter()
+        .position(|expression| matches!(expression.kind, HirExprKind::ArrayAccess { .. }))
+        .expect("dynamic array expression")
 }
 
 fn named_branch_mir() -> MirModel {
@@ -2246,22 +2253,6 @@ fn canonical_parameter_array_contract_rejects_numeric_payload_tampering() {
 }
 
 #[test]
-fn standalone_hir_validation_rejects_stale_schema() {
-    let (_, mut hir, _) = lower_tiny_resistor_parts();
-    hir.schema_version -= 1;
-
-    let diagnostics = hir
-        .validate()
-        .expect_err("standalone HIR must enforce the canonical schema boundary");
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic
-            .message
-            .contains("unsupported HIR schema version")),
-        "unexpected diagnostics: {diagnostics:#?}"
-    );
-}
-
-#[test]
 #[cfg(feature = "wasm-jit")]
 fn shared_wasm_plan_gate_rejects_parameter_arrays_before_scalar_model_lowering() {
     let compiler = VerilogACompiler::default();
@@ -3132,7 +3123,7 @@ fn mir_validation_rejects_malformed_models() {
             (
                 "alias identifier expression",
                 || {
-                    let (_, mut hir, _) = lower_tiny_resistor_parts();
+                    let mut hir = tiny_resistor_hir();
                     hir.parameters[0].aliases.push("res".into());
                     MirModel::from_hir(&hir).expect("lower alias MIR")
                 },
@@ -3151,6 +3142,14 @@ fn mir_validation_rejects_malformed_models() {
                     *name = "res".into();
                 },
                 &["unknown identifier 'res'"],
+            ),
+            (
+                "parameter dimension bound ref out of range",
+                || parameter_array_artifact().mir,
+                |mir| {
+                    mir.parameters[1].dimensions[1].right.id = ExprId::from(mir.expressions.len())
+                },
+                &["parameter 'coefficients' dimension 1 right bound"],
             ),
         ],
     );
@@ -3197,27 +3196,6 @@ fn mir_lowering_preserves_parameter_semantics() {
         hir.parameters[0].default_expr
     );
     assert_eq!(mir.parameters[0].range, hir.parameters[0].range);
-}
-
-#[test]
-fn hir_and_mir_validation_reject_parameter_dimension_refs_out_of_range() {
-    let artifact = VerilogACompiler::default()
-        .compile_canonical_ir(parameter_array_source())
-        .expect("parameter-array canonical IR");
-    let mut hir = artifact.hir;
-    hir.parameters[1].dimensions[0].left.id = ExprId::from(hir.expressions.len());
-    let hir_diagnostics = hir
-        .validate()
-        .expect_err("invalid HIR parameter dimension reference");
-    assert!(hir_diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("parameter 'coefficients' dimension 0 left bound")
-    }));
-
-    let mut mir = artifact.mir;
-    mir.parameters[1].dimensions[1].right.id = ExprId::from(mir.expressions.len());
-    assert_mir_validation_message(&mir, "parameter 'coefficients' dimension 1 right bound");
 }
 
 #[test]
@@ -3466,287 +3444,356 @@ fn hir_lowering_preserves_dynamic_array_assignment_target_and_index() {
 }
 
 #[test]
-fn hir_validation_rejects_invalid_contribution_references() {
-    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let mut missing_branch = hir.clone();
-    missing_branch.contributions[0].branch = "missing".into();
-    let diagnostics = missing_branch
-        .validate()
-        .expect_err("missing branch must fail validation");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("unknown contribution branch 'missing'")
-    }));
-
-    let mut missing_node = hir;
-    missing_node.contributions[0].branch = "p,missing".into();
-    let diagnostics = missing_node
-        .validate()
-        .expect_err("missing node pair must fail validation");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("unknown contribution branch 'p,missing'")
-    }));
-}
-
-#[test]
-fn hir_validation_rejects_expression_arena_invariants() {
-    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let dangling_id = ExprId::from(hir.expressions.len());
-
-    let mut dangling_contribution_ref = hir.clone();
-    dangling_contribution_ref.contributions[0].expression.id = dangling_id;
-    assert_validation_message(
-        &dangling_contribution_ref,
-        "expression ref contribution 0 expression id ExprId",
+fn hir_validation_rejects_malformed_models() {
+    assert_rejections(
+        HirModel::validate,
+        &[
+            (
+                "stale schema",
+                tiny_resistor_hir,
+                |hir| hir.schema_version -= 1,
+                &["unsupported HIR schema version"],
+            ),
+            (
+                "parameter dimension bound ref out of range",
+                || parameter_array_artifact().hir,
+                |hir| hir.parameters[1].dimensions[0].left.id = ExprId::from(hir.expressions.len()),
+                &["parameter 'coefficients' dimension 0 left bound"],
+            ),
+            (
+                "missing contribution branch",
+                tiny_resistor_hir,
+                |hir| hir.contributions[0].branch = "missing".into(),
+                &["unknown contribution branch 'missing'"],
+            ),
+            (
+                "missing contribution node",
+                tiny_resistor_hir,
+                |hir| hir.contributions[0].branch = "p,missing".into(),
+                &["unknown contribution branch 'p,missing'"],
+            ),
+            (
+                "dangling contribution expression ref",
+                tiny_resistor_hir,
+                |hir| hir.contributions[0].expression.id = ExprId::from(hir.expressions.len()),
+                &["expression ref contribution 0 expression id ExprId"],
+            ),
+            (
+                "mismatched contribution expression ref kind",
+                tiny_resistor_hir,
+                |hir| hir.contributions[0].expression.kind = "identifier".into(),
+                &[
+                    "expression ref contribution 0 expression kind 'identifier' does not match 'binary'",
+                ],
+            ),
+            (
+                "dangling binary child",
+                tiny_resistor_hir,
+                |hir| {
+                    let dangling_id = ExprId::from(hir.expressions.len());
+                    let root_id = hir.contributions[0].expression.id;
+                    let HirExprKind::Binary { left, .. } =
+                        &mut hir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected contribution expression to be binary");
+                    };
+                    *left = dangling_id;
+                },
+                &["child left ExprId"],
+            ),
+            (
+                "non-postorder binary child",
+                tiny_resistor_hir,
+                |hir| {
+                    let root_id = hir.contributions[0].expression.id;
+                    let HirExprKind::Binary { left, .. } =
+                        &mut hir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected contribution expression to be binary");
+                    };
+                    *left = root_id;
+                },
+                &["violates expression postorder"],
+            ),
+            (
+                "unknown identifier expression",
+                tiny_resistor_hir,
+                |hir| {
+                    let root_id = hir.contributions[0].expression.id;
+                    let HirExprKind::Binary { right, .. } =
+                        hir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected contribution expression to be binary");
+                    };
+                    let HirExprKind::Identifier { name } =
+                        &mut hir.expressions[usize::from(right)].kind
+                    else {
+                        panic!("expected binary rhs to be an identifier");
+                    };
+                    *name = "__missing".into();
+                },
+                &["unknown identifier '__missing'"],
+            ),
+            (
+                "alias identifier expression",
+                tiny_resistor_hir,
+                |hir| {
+                    hir.parameters[0].aliases.push("res".into());
+                    let root_id = hir.contributions[0].expression.id;
+                    let HirExprKind::Binary { right, .. } =
+                        hir.expressions[usize::from(root_id)].kind
+                    else {
+                        panic!("expected contribution expression to be binary");
+                    };
+                    let HirExprKind::Identifier { name } =
+                        &mut hir.expressions[usize::from(right)].kind
+                    else {
+                        panic!("expected binary rhs to be an identifier");
+                    };
+                    *name = "res".into();
+                },
+                &["unknown identifier 'res'"],
+            ),
+            (
+                "dangling assignment index expression ref",
+                dynamic_array_hir,
+                |hir| {
+                    let dangling_id = ExprId::from(hir.expressions.len());
+                    let HirStatement::Assignment(assignment) = &mut hir.statements[0] else {
+                        panic!("expected dynamic array assignment");
+                    };
+                    assignment.index.as_mut().expect("assignment index").id = dangling_id;
+                },
+                &["expression ref assignment 'xs' index id ExprId"],
+            ),
+            (
+                "unknown branch access pos node",
+                tiny_resistor_hir,
+                |hir| {
+                    let branch_access_id = contribution_branch_access_id(hir);
+                    let HirExprKind::BranchAccess { pos, .. } =
+                        &mut hir.expressions[usize::from(branch_access_id)].kind
+                    else {
+                        panic!("expected branch access expression");
+                    };
+                    *pos = "missing".into();
+                },
+                &["unknown branch access node 'missing'"],
+            ),
+            (
+                "unknown branch access neg node",
+                tiny_resistor_hir,
+                |hir| {
+                    let branch_access_id = contribution_branch_access_id(hir);
+                    let HirExprKind::BranchAccess { neg, .. } =
+                        &mut hir.expressions[usize::from(branch_access_id)].kind
+                    else {
+                        panic!("expected branch access expression");
+                    };
+                    *neg = Some("missing".into());
+                },
+                &["unknown branch access node 'missing'"],
+            ),
+            (
+                "unknown named branch access",
+                named_branch_hir,
+                |hir| {
+                    let root_id = hir.contributions[0].expression.id;
+                    hir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
+                        access: "V".into(),
+                        kind: rspice_veriloga::ast::AccessKind::Potential,
+                        name: "missing".into(),
+                    };
+                    hir.contributions[0].expression.kind = "branch_access".into();
+                },
+                &["unknown named branch access 'missing'"],
+            ),
+            (
+                "empty branch name",
+                named_branch_hir,
+                |hir| hir.branches[0].name = "".into(),
+                &["branch name must not be empty"],
+            ),
+            (
+                "duplicate branch name",
+                named_branch_hir,
+                |hir| {
+                    let mut duplicate_branch = hir.branches[0].clone();
+                    duplicate_branch.id = BranchId::new(1);
+                    hir.branches.push(duplicate_branch);
+                },
+                &["duplicate branch name 'res'"],
+            ),
+            (
+                "unknown branch pos_node",
+                named_branch_hir,
+                |hir| hir.branches[0].pos_node = "missing".into(),
+                &["branch 'res' pos_node 'missing' is unknown"],
+            ),
+            (
+                "unknown branch neg_node",
+                named_branch_hir,
+                |hir| hir.branches[0].neg_node = "missing".into(),
+                &["branch 'res' neg_node 'missing' is unknown"],
+            ),
+            (
+                "empty parameter alias",
+                tiny_resistor_hir,
+                |hir| hir.parameters[0].aliases.push("".into()),
+                &["parameter alias for 'r' must not be empty"],
+            ),
+            (
+                "parameter alias collides with its name",
+                tiny_resistor_hir,
+                |hir| hir.parameters[0].aliases.push("r".into()),
+                &["parameter alias 'r' collides with parameter name"],
+            ),
+            (
+                "duplicate parameter name",
+                tiny_resistor_hir,
+                |hir| {
+                    let mut duplicate = hir.parameters[0].clone();
+                    duplicate.id = ParamId::new(1);
+                    duplicate.aliases.clear();
+                    hir.parameters.push(duplicate);
+                },
+                &["duplicate parameter name 'r'"],
+            ),
+            (
+                "scalar assignment target name and index",
+                || lower_fixture_hir(scalar_assignment_source(), "scalar_assign"),
+                |hir| {
+                    let HirStatement::Assignment(scalar_assignment) = &mut hir.statements[0] else {
+                        panic!("expected scalar assignment");
+                    };
+                    scalar_assignment.target_name = "not_x".into();
+                    scalar_assignment.index = Some(scalar_assignment.expr.clone());
+                },
+                &[
+                    "target name 'not_x' does not match variable 'x'",
+                    "scalar assignment 'not_x' must not have an index",
+                ],
+            ),
+            (
+                "indexed assignment target name",
+                dynamic_array_hir,
+                |hir| {
+                    let HirStatement::Assignment(array_assignment) = &mut hir.statements[0] else {
+                        panic!("expected array assignment");
+                    };
+                    array_assignment.target_name = "xs[0]".into();
+                },
+                &["indexed assignment target name 'xs[0]' does not match array 'xs'"],
+            ),
+            (
+                "array assignment without index",
+                dynamic_array_hir,
+                |hir| {
+                    let HirStatement::Assignment(array_assignment) = &mut hir.statements[0] else {
+                        panic!("expected array assignment");
+                    };
+                    array_assignment.index = None;
+                },
+                &["array assignment 'xs' must include an index"],
+            ),
+            (
+                "malformed structure",
+                || lower_fixture_hir(hir_validation_surface_source(), "validation_surface"),
+                |hir| {
+                    hir.ports[1].id = PortId::new(7);
+                    hir.parameters[0].aliases.push("shared".into());
+                    hir.parameters.push(hir.parameters[0].clone());
+                    hir.parameters[1].id = ParamId::new(1);
+                    hir.parameters[1].aliases.push("shared".into());
+                    hir.branches[0].id = BranchId::new(7);
+                    hir.contributions[0].id = ContributionId::new(9);
+                    hir.internal_nodes[0].id = NodeId::new(11);
+                    hir.internal_nodes[0].index = 17;
+                },
+                &[
+                    "port IDs must be dense",
+                    "duplicate parameter alias 'shared'",
+                    "branch IDs must be dense",
+                    "contribution IDs must be dense",
+                    "internal node IDs must be dense",
+                    "internal node index 17 does not match id NodeId(11)",
+                ],
+            ),
+            (
+                "zero-length array",
+                dynamic_array_hir,
+                |hir| hir.arrays[0].len = 0,
+                &["array 'xs' must not have zero length"],
+            ),
+            (
+                "duplicate array",
+                dynamic_array_hir,
+                |hir| {
+                    let mut duplicate_array = hir.arrays[0].clone();
+                    duplicate_array.id = rspice_veriloga::canonical_ir::ArrayId::new(1);
+                    hir.arrays.push(duplicate_array);
+                },
+                &["duplicate array name 'xs'", "overlaps array 'xs'"],
+            ),
+            (
+                "overlapping arrays",
+                dynamic_array_hir,
+                |hir| {
+                    let mut overlapping_array = hir.arrays[0].clone();
+                    overlapping_array.id = rspice_veriloga::canonical_ir::ArrayId::new(1);
+                    overlapping_array.name = "ys".into();
+                    overlapping_array.base = VariableId::new(1);
+                    overlapping_array.len = 3;
+                    hir.arrays.push(overlapping_array);
+                },
+                &["array 'ys' storage range [1:4) overlaps array 'xs'"],
+            ),
+            (
+                "mixed array element types",
+                dynamic_array_hir,
+                |hir| hir.variables[1].value_type = CanonicalValueType::Integer,
+                &["array 'xs' mixes element type Real"],
+            ),
+            (
+                "unknown array access target",
+                dynamic_array_hir,
+                |hir| {
+                    let access_index = array_access_index(hir);
+                    let HirExprKind::ArrayAccess { array, .. } =
+                        &mut hir.expressions[access_index].kind
+                    else {
+                        unreachable!("located array access");
+                    };
+                    *array = "missing".into();
+                },
+                &["unknown array access target 'missing'"],
+            ),
+            (
+                "indexed scalar symbol",
+                dynamic_array_hir,
+                |hir| {
+                    let access_index = array_access_index(hir);
+                    let HirExprKind::ArrayAccess { array, .. } =
+                        &mut hir.expressions[access_index].kind
+                    else {
+                        unreachable!("located array access");
+                    };
+                    *array = "scale".into();
+                },
+                &["scalar symbol 'scale' must not be indexed"],
+            ),
+            (
+                "unindexed array identifier",
+                dynamic_array_hir,
+                |hir| {
+                    let access_index = array_access_index(hir);
+                    hir.expressions[access_index].kind =
+                        HirExprKind::Identifier { name: "xs".into() };
+                },
+                &["array identifier 'xs' requires an index"],
+            ),
+        ],
     );
-
-    let mut mismatched_ref_kind = hir.clone();
-    mismatched_ref_kind.contributions[0].expression.kind = "identifier".into();
-    assert_validation_message(
-        &mismatched_ref_kind,
-        "expression ref contribution 0 expression kind 'identifier' does not match 'binary'",
-    );
-
-    let mut dangling_binary_child = hir.clone();
-    let root_id = dangling_binary_child.contributions[0].expression.id;
-    let HirExprKind::Binary { left, .. } =
-        &mut dangling_binary_child.expressions[usize::from(root_id)].kind
-    else {
-        panic!("expected contribution expression to be binary");
-    };
-    *left = dangling_id;
-    assert_validation_message(&dangling_binary_child, "child left ExprId");
-
-    let mut non_postorder_child = hir;
-    let root_id = non_postorder_child.contributions[0].expression.id;
-    let HirExprKind::Binary { left, .. } =
-        &mut non_postorder_child.expressions[usize::from(root_id)].kind
-    else {
-        panic!("expected contribution expression to be binary");
-    };
-    *left = root_id;
-    assert_validation_message(&non_postorder_child, "violates expression postorder");
-}
-
-#[test]
-fn hir_validation_rejects_unknown_identifier_expression() {
-    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
-    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let root_id = hir.contributions[0].expression.id;
-    let HirExprKind::Binary { right, .. } = hir.expressions[usize::from(root_id)].kind else {
-        panic!("expected contribution expression to be binary");
-    };
-    let HirExprKind::Identifier { name } = &mut hir.expressions[usize::from(right)].kind else {
-        panic!("expected binary rhs to be an identifier");
-    };
-    *name = "__missing".into();
-
-    assert_validation_message(&hir, "unknown identifier '__missing'");
-}
-
-#[test]
-fn hir_validation_rejects_alias_identifier_expression() {
-    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
-    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    hir.parameters[0].aliases.push("res".into());
-    let root_id = hir.contributions[0].expression.id;
-    let HirExprKind::Binary { right, .. } = hir.expressions[usize::from(root_id)].kind else {
-        panic!("expected contribution expression to be binary");
-    };
-    let HirExprKind::Identifier { name } = &mut hir.expressions[usize::from(right)].kind else {
-        panic!("expected binary rhs to be an identifier");
-    };
-    *name = "res".into();
-
-    assert_validation_message(&hir, "unknown identifier 'res'");
-}
-
-#[test]
-fn hir_validation_rejects_dangling_assignment_index_expression_ref() {
-    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
-    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let dangling_id = ExprId::from(hir.expressions.len());
-
-    let HirStatement::Assignment(assignment) = &mut hir.statements[0] else {
-        panic!("expected dynamic array assignment");
-    };
-    assignment.index.as_mut().expect("assignment index").id = dangling_id;
-
-    assert_validation_message(&hir, "expression ref assignment 'xs' index id ExprId");
-}
-
-#[test]
-fn hir_validation_rejects_unknown_branch_access_nodes() {
-    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let mut missing_pos = hir.clone();
-    let branch_access_id = contribution_branch_access_id(&missing_pos);
-    let HirExprKind::BranchAccess { pos, .. } =
-        &mut missing_pos.expressions[usize::from(branch_access_id)].kind
-    else {
-        panic!("expected branch access expression");
-    };
-    *pos = "missing".into();
-    assert_validation_message(&missing_pos, "unknown branch access node 'missing'");
-
-    let mut missing_neg = hir;
-    let branch_access_id = contribution_branch_access_id(&missing_neg);
-    let HirExprKind::BranchAccess { neg, .. } =
-        &mut missing_neg.expressions[usize::from(branch_access_id)].kind
-    else {
-        panic!("expected branch access expression");
-    };
-    *neg = Some("missing".into());
-    assert_validation_message(&missing_neg, "unknown branch access node 'missing'");
-}
-
-#[test]
-fn hir_validation_rejects_unknown_named_branch_access() {
-    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
-        .expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
-    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let root_id = hir.contributions[0].expression.id;
-
-    hir.expressions[usize::from(root_id)].kind = HirExprKind::NamedBranchAccess {
-        access: "V".into(),
-        kind: rspice_veriloga::ast::AccessKind::Potential,
-        name: "missing".into(),
-    };
-    hir.contributions[0].expression.kind = "branch_access".into();
-
-    assert_validation_message(&hir, "unknown named branch access 'missing'");
-}
-
-#[test]
-fn hir_validation_rejects_malformed_branch_declarations() {
-    let analyzed = analyze_fixture(named_branch_potential_source(), "branch_potential")
-        .expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", named_branch_potential_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let mut empty_name = hir.clone();
-    empty_name.branches[0].name = "".into();
-    assert_validation_message(&empty_name, "branch name must not be empty");
-
-    let mut duplicate_name = hir.clone();
-    let mut duplicate_branch = duplicate_name.branches[0].clone();
-    duplicate_branch.id = BranchId::new(1);
-    duplicate_name.branches.push(duplicate_branch);
-    assert_validation_message(&duplicate_name, "duplicate branch name 'res'");
-
-    let mut unknown_pos = hir.clone();
-    unknown_pos.branches[0].pos_node = "missing".into();
-    assert_validation_message(&unknown_pos, "branch 'res' pos_node 'missing' is unknown");
-
-    let mut unknown_neg = hir;
-    unknown_neg.branches[0].neg_node = "missing".into();
-    assert_validation_message(&unknown_neg, "branch 'res' neg_node 'missing' is unknown");
-}
-
-#[test]
-fn hir_validation_rejects_parameter_alias_namespace_violations() {
-    let analyzed = analyze_fixture(tiny_resistor_source(), "tiny_res").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", tiny_resistor_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let mut empty_alias = hir.clone();
-    empty_alias.parameters[0].aliases.push("".into());
-    assert_validation_message(&empty_alias, "parameter alias for 'r' must not be empty");
-
-    let mut alias_name_collision = hir.clone();
-    alias_name_collision.parameters[0].aliases.push("r".into());
-    assert_validation_message(
-        &alias_name_collision,
-        "parameter alias 'r' collides with parameter name",
-    );
-
-    let mut duplicate_parameter_name = hir;
-    let mut duplicate = duplicate_parameter_name.parameters[0].clone();
-    duplicate.id = ParamId::new(1);
-    duplicate.aliases.clear();
-    duplicate_parameter_name.parameters.push(duplicate);
-    assert_validation_message(&duplicate_parameter_name, "duplicate parameter name 'r'");
-}
-
-#[test]
-fn hir_validation_rejects_assignment_target_name_and_shape_mismatches() {
-    let analyzed =
-        analyze_fixture(scalar_assignment_source(), "scalar_assign").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", scalar_assignment_source());
-    let mut scalar_hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let HirStatement::Assignment(scalar_assignment) = &mut scalar_hir.statements[0] else {
-        panic!("expected scalar assignment");
-    };
-    scalar_assignment.target_name = "not_x".into();
-    scalar_assignment.index = Some(scalar_assignment.expr.clone());
-
-    let diagnostics = scalar_hir
-        .validate()
-        .expect_err("scalar assignment mismatches must fail validation");
-    let messages: Vec<_> = diagnostics
-        .iter()
-        .map(|diagnostic| diagnostic.message.as_str())
-        .collect();
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("target name 'not_x' does not match variable 'x'"))
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("scalar assignment 'not_x' must not have an index"))
-    );
-
-    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
-    let mut array_hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let HirStatement::Assignment(array_assignment) = &mut array_hir.statements[0] else {
-        panic!("expected array assignment");
-    };
-    array_assignment.target_name = "xs[0]".into();
-
-    let diagnostics = array_hir
-        .validate()
-        .expect_err("array assignment name mismatch must fail validation");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("indexed assignment target name 'xs[0]' does not match array 'xs'")
-    }));
-
-    let mut missing_index_hir = HirModel::from_analyzed_module(
-        &CanonicalMetadata::for_source("fixture", dynamic_array_source()),
-        &analyzed,
-    );
-    let HirStatement::Assignment(array_assignment) = &mut missing_index_hir.statements[0] else {
-        panic!("expected array assignment");
-    };
-    array_assignment.index = None;
-
-    let diagnostics = missing_index_hir
-        .validate()
-        .expect_err("array assignment without index must fail validation");
-    assert!(diagnostics.iter().any(|diagnostic| {
-        diagnostic
-            .message
-            .contains("array assignment 'xs' must include an index")
-    }));
 }
 
 #[test]
@@ -3844,61 +3891,6 @@ fn hir_lowering_preserves_angle_bracket_terminal_current_accesses() {
 }
 
 #[test]
-fn hir_validation_rejects_malformed_structure() {
-    let analyzed = analyze_fixture(hir_validation_surface_source(), "validation_surface")
-        .expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", hir_validation_surface_source());
-    let mut hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    hir.ports[1].id = PortId::new(7);
-    hir.parameters[0].aliases.push("shared".into());
-    hir.parameters.push(hir.parameters[0].clone());
-    hir.parameters[1].id = ParamId::new(1);
-    hir.parameters[1].aliases.push("shared".into());
-    hir.branches[0].id = BranchId::new(7);
-    hir.contributions[0].id = ContributionId::new(9);
-    hir.internal_nodes[0].id = NodeId::new(11);
-    hir.internal_nodes[0].index = 17;
-
-    let diagnostics = hir.validate().expect_err("malformed HIR must fail");
-    let messages: Vec<_> = diagnostics
-        .iter()
-        .map(|diagnostic| diagnostic.message.as_str())
-        .collect();
-
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("port IDs must be dense"))
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("duplicate parameter alias 'shared'"))
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("branch IDs must be dense"))
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("contribution IDs must be dense"))
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("internal node IDs must be dense"))
-    );
-    assert!(
-        messages
-            .iter()
-            .any(|message| message.contains("internal node index 17 does not match id NodeId(11)"))
-    );
-}
-
-#[test]
 fn hir_validation_rejects_malformed_array_contribution_and_statement_paths() {
     let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
     let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
@@ -3952,70 +3944,6 @@ fn hir_validation_rejects_malformed_array_contribution_and_statement_paths() {
         "assignment target VariableId({})",
         variable_count + 1
     ))));
-}
-
-#[test]
-fn hir_validation_rejects_zero_duplicate_overlapping_and_mixed_array_layouts() {
-    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-
-    let mut zero = hir.clone();
-    zero.arrays[0].len = 0;
-    assert_validation_message(&zero, "array 'xs' must not have zero length");
-
-    let mut duplicate = hir.clone();
-    let mut duplicate_array = duplicate.arrays[0].clone();
-    duplicate_array.id = rspice_veriloga::canonical_ir::ArrayId::new(1);
-    duplicate.arrays.push(duplicate_array);
-    assert_validation_message(&duplicate, "duplicate array name 'xs'");
-    assert_validation_message(&duplicate, "overlaps array 'xs'");
-
-    let mut overlap = hir.clone();
-    let mut overlapping_array = overlap.arrays[0].clone();
-    overlapping_array.id = rspice_veriloga::canonical_ir::ArrayId::new(1);
-    overlapping_array.name = "ys".into();
-    overlapping_array.base = VariableId::new(1);
-    overlapping_array.len = 3;
-    overlap.arrays.push(overlapping_array);
-    assert_validation_message(
-        &overlap,
-        "array 'ys' storage range [1:4) overlaps array 'xs'",
-    );
-
-    let mut mixed = hir;
-    mixed.variables[1].value_type = CanonicalValueType::Integer;
-    assert_validation_message(&mixed, "array 'xs' mixes element type Real");
-}
-
-#[test]
-fn hir_validation_binds_array_accesses_to_array_symbols() {
-    let analyzed = analyze_fixture(dynamic_array_source(), "dyn_array").expect("analyze fixture");
-    let metadata = CanonicalMetadata::for_source("fixture", dynamic_array_source());
-    let hir = HirModel::from_analyzed_module(&metadata, &analyzed);
-    let access_index = hir
-        .expressions
-        .iter()
-        .position(|expression| matches!(expression.kind, HirExprKind::ArrayAccess { .. }))
-        .expect("dynamic array expression");
-
-    let mut unknown = hir.clone();
-    let HirExprKind::ArrayAccess { array, .. } = &mut unknown.expressions[access_index].kind else {
-        unreachable!("located array access");
-    };
-    *array = "missing".into();
-    assert_validation_message(&unknown, "unknown array access target 'missing'");
-
-    let mut scalar = hir.clone();
-    let HirExprKind::ArrayAccess { array, .. } = &mut scalar.expressions[access_index].kind else {
-        unreachable!("located array access");
-    };
-    *array = "scale".into();
-    assert_validation_message(&scalar, "scalar symbol 'scale' must not be indexed");
-
-    let mut unindexed = hir;
-    unindexed.expressions[access_index].kind = HirExprKind::Identifier { name: "xs".into() };
-    assert_validation_message(&unindexed, "array identifier 'xs' requires an index");
 }
 
 /// The flat statement list and the equations are one program, not two views of
