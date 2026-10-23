@@ -22,6 +22,7 @@ pub(in crate::workbench) mod interaction_state;
 #[cfg(test)]
 mod modal_gate_tests;
 mod model;
+mod model_access;
 pub(in crate::workbench) mod problems_view;
 mod rule_deck;
 pub(in crate::workbench) mod run_identity;
@@ -54,7 +55,7 @@ pub(crate) use design_history::{
 pub(crate) use diagnostic_store::DiagnosticStore;
 pub(crate) use interaction_state::SchematicKeyboardFocus;
 pub use interaction_state::{ContextTarget, DragType, InteractionState};
-pub(crate) use model::Model;
+pub(crate) use model::{Model, SlotFacts};
 pub use rspice_simulation_contract::plan_catalog::SimulationPlanImportDocument;
 pub(crate) use session::shortcuts::{
     accessibility_shortcut_summary, report_engineering_canvas_focus, runtime_command_platform,
@@ -1011,7 +1012,7 @@ impl AppState {
         source: crate::diagnostics::LogSource,
         text: impl Into<String>,
     ) -> u64 {
-        self.model.log_buffer.log(severity, source, text)
+        self.model.record(severity, source, text)
     }
 
     /// [`Self::record`], with a place the Console row jumps to.

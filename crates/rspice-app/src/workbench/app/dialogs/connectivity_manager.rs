@@ -345,7 +345,9 @@ fn check_projected_open_view(
     let subject = projected_open_view(state, projection)?;
     let hierarchy =
         HierarchySource::from_design_projection(state.model.library_manager.catalog(), projection);
-    let mut config = state.design_check_config(&state.model.workspace.content.active_view);
+    let mut config = state
+        .model
+        .design_check_config(&state.model.workspace.content.active_view);
     config.connectivity = policy.clone();
     Ok(run_check_of_cellview(
         subject,

@@ -25,3 +25,32 @@ pub(crate) struct CodeState {
     /// hiding it behind a preference nobody set.
     pub netlist_outline_collapsed: std::collections::BTreeSet<crate::state::OutlineSectionKind>,
 }
+
+impl CodeState {
+    /// The netlist and code editors' findings, as the diagnostics store
+    /// reads them where the editors keep them.
+    pub(in crate::workbench) fn diagnostic_sources(
+        &self,
+    ) -> crate::workbench::app_state::diagnostic_store::SourceCollections<'_> {
+        let code = &self.code_workspace;
+        let veriloga = code.veriloga.receipt.as_ref();
+        crate::workbench::app_state::diagnostic_store::SourceCollections {
+            netlist: &self.netlist.diagnostics,
+            netlist_revision: self.netlist.revision,
+            netlist_validated: self.netlist.validated_revision(),
+            veriloga: veriloga.map(|receipt| &receipt.diagnostics),
+            veriloga_token: veriloga.map(|receipt| receipt.compilation.token()),
+            veriloga_failure: &code.veriloga.last_failure,
+            veriloga_failure_token: code.veriloga.last_failure_token.as_ref(),
+            automation: &code.automation.diagnostics,
+            automation_validated: code.automation.receipt.is_some(),
+            automation_token: code
+                .automation
+                .receipt
+                .as_ref()
+                .map(|receipt| &receipt.token)
+                .or(code.automation.diagnostic_token.as_ref())
+                .map(|token| (token.project_id, token.revision)),
+        }
+    }
+}

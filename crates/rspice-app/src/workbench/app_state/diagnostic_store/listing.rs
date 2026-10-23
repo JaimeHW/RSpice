@@ -20,10 +20,24 @@ use rspice_vocabulary::diagnostics::{
     CanonicalQuickFix, DiagnosticCurrentness, DiagnosticRelatedLocation, DiagnosticSuppression,
 };
 
-use super::{BatchStanding, DiagnosticBatch, DiagnosticLevel, DiagnosticRoute};
+use super::{BatchStanding, DiagnosticBatch, DiagnosticLevel, DiagnosticRoute, SourceCollections};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{Model, SlotFacts};
+
+/// What the list is assembled from: the model, the source editors'
+/// findings, and the facts of the features' state the digests read.
+pub(in crate::workbench) struct ListingInputs<'a> {
+    pub(in crate::workbench) model: &'a Model,
+    pub(in crate::workbench) sources: SourceCollections<'a>,
+    pub(in crate::workbench) facts: SlotFacts,
+}
+
+/// A holder of everything the list is assembled from: the application state,
+/// so a reader holding it asks for the list with it.
+pub(in crate::workbench) trait ListingSource {
+    fn listing_inputs(&self) -> ListingInputs<'_>;
+}
 
 /// Where one finding stands against the design in front of the reader.
 ///
@@ -618,14 +632,18 @@ fn netlist_location(diagnostic: &crate::state::netlist_diagnostics::Diagnostic) 
 /// Every batch's standing is decided here, from the live design, through the
 /// store's digest memo. A surface drawn every frame reads
 /// [`listing_in_pass`] instead, which decides them once per pass.
-pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
-    if !state.model.project_open.is_open() {
+pub(in crate::workbench) fn listing(source: &impl ListingSource) -> DiagnosticListing<'_> {
+    listing_of(source.listing_inputs())
+}
+
+fn listing_of(inputs: ListingInputs<'_>) -> DiagnosticListing<'_> {
+    if !inputs.model.project_open.is_open() {
         return closed_listing();
     }
     // One scope for the whole list, so the configured hierarchy two owners'
     // digests read is walked once rather than once per batch.
-    let scope = super::DigestScope::new(state);
-    let segments = segments(state, |batch| super::batch_standing(batch, &scope));
+    let scope = super::DigestScope::new(inputs.model, inputs.facts);
+    let segments = segments(&inputs, |batch| super::batch_standing(batch, &scope));
     let (counts, empty_reason) = tally(&segments);
     DiagnosticListing {
         segments,
@@ -652,17 +670,22 @@ pub(in crate::workbench) fn listing(state: &AppState) -> DiagnosticListing<'_> {
 /// what it buys. Across passes each batch's digest is reused from the
 /// store's [digest memo](super::digest_memo) while the stamps and revisions
 /// it read stand, so a pass in which nothing was edited digests nothing.
-pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> DiagnosticListing<'_> {
-    if !state.model.project_open.is_open() {
+pub(in crate::workbench) fn listing_in_pass(
+    source: &impl ListingSource,
+    pass: u64,
+) -> DiagnosticListing<'_> {
+    let inputs = source.listing_inputs();
+    let model = inputs.model;
+    if !model.project_open.is_open() {
         return closed_listing();
     }
-    let generation = state.model.diagnostics.generation();
-    if let Some(memo) = state.model.diagnostics.pass_memo(pass, generation) {
-        let segments = segments(state, |batch| {
+    let generation = model.diagnostics.generation();
+    if let Some(memo) = model.diagnostics.pass_memo(pass, generation) {
+        let segments = segments(&inputs, |batch| {
             memo.standings
                 .get(&batch.inputs.key())
                 .cloned()
-                .unwrap_or_else(|| state.diagnostic_batch_standing(batch))
+                .unwrap_or_else(|| model.diagnostic_batch_standing(batch, inputs.facts))
         });
         return DiagnosticListing {
             segments,
@@ -670,8 +693,8 @@ pub(in crate::workbench) fn listing_in_pass(state: &AppState, pass: u64) -> Diag
             empty_reason: memo.empty_reason,
         };
     }
-    let listed = listing(state);
-    state.model.diagnostics.remember_pass(PassMemo {
+    let listed = listing(source);
+    model.diagnostics.remember_pass(PassMemo {
         pass,
         generation,
         standings: listed
@@ -710,11 +733,11 @@ fn closed_listing<'a>() -> DiagnosticListing<'a> {
 /// Every segment of the list, with each stored batch's standing as
 /// `standing_of` decides it.
 fn segments<'a>(
-    state: &'a AppState,
+    inputs: &ListingInputs<'a>,
     mut standing_of: impl FnMut(&DiagnosticBatch) -> BatchStanding,
 ) -> Vec<Segment<'a>> {
     let mut segments = Vec::new();
-    let mut stored: Vec<&DiagnosticBatch> = state.model.diagnostics.batches().collect();
+    let mut stored: Vec<&DiagnosticBatch> = inputs.model.diagnostics.batches().collect();
     stored.sort_by_key(|batch| batch.inputs.owner());
     for batch in stored {
         let standing = standing_of(batch);
@@ -726,16 +749,16 @@ fn segments<'a>(
     // segment, so the page says "No findings" rather than "Nothing has been
     // checked" — or, once the buffer has moved past it, that the finding of
     // nothing is out of date.
-    let netlist = state.code.netlist.diagnostics.as_ref();
-    let validated = state.code.netlist.validated_revision();
+    let netlist = inputs.sources.netlist.as_ref();
+    let validated = inputs.sources.netlist_validated;
     if !netlist.is_empty() || validated.is_some() {
         segments.push(Segment::Netlist {
             collection: netlist,
-            revision: state.code.netlist.revision,
+            revision: inputs.sources.netlist_revision,
             validated,
         });
     }
-    for (bundle, collection, source_current) in code_collections(state) {
+    for (bundle, collection, source_current) in code_collections(inputs) {
         segments.push(Segment::Code {
             bundle,
             collection,
@@ -816,16 +839,17 @@ fn tally(segments: &[Segment<'_>]) -> (DiagnosticCounts, EmptyReason) {
 /// bundle's revision. The page voids a collection when the source moves, but
 /// an edit made where the page did not see it would otherwise leave a clean
 /// compile of older source standing as evidence about this one.
-fn code_collections(
-    state: &AppState,
+fn code_collections<'a>(
+    inputs: &ListingInputs<'a>,
 ) -> Vec<(
     Option<crate::state::ProjectSourceId>,
-    &CodeDiagnosticCollection,
+    &'a CodeDiagnosticCollection,
     bool,
 )> {
-    let code = &state.code.code_workspace;
-    let project = state.model.workspace.content.project.id();
-    let sources = &state.model.workspace.content.project_sources;
+    let code = &inputs.sources;
+    let model = inputs.model;
+    let project = model.workspace.content.project.id();
+    let sources = &model.workspace.content.project_sources;
     let veriloga_current =
         |token: &rspice_simulation::project_veriloga::VerilogASourceOperationToken| {
             token.project_id == project
@@ -835,39 +859,33 @@ fn code_collections(
         };
     let mut collections: Vec<(Option<crate::state::ProjectSourceId>, _, bool)> =
         Vec::with_capacity(3);
-    if let Some(receipt) = code.veriloga.receipt.as_ref() {
-        let token = receipt.compilation.token();
+    if let (Some(diagnostics), Some(token)) = (code.veriloga, code.veriloga_token.as_ref()) {
         collections.push((
             Some(token.bundle_id),
-            receipt.diagnostics.as_ref(),
-            veriloga_current(&token),
+            diagnostics.as_ref(),
+            veriloga_current(token),
         ));
     }
-    if !code.veriloga.last_failure.is_empty() {
-        let token = code.veriloga.last_failure_token.as_ref();
+    if !code.veriloga_failure.is_empty() {
+        let token = code.veriloga_failure_token;
         collections.push((
             token.map(|token| token.bundle_id),
-            code.veriloga.last_failure.as_ref(),
+            code.veriloga_failure.as_ref(),
             token.is_some_and(veriloga_current),
         ));
     }
-    if !code.automation.diagnostics.is_empty() || code.automation.receipt.is_some() {
-        let bundle = state
-            .model
+    if !code.automation.is_empty() || code.automation_validated {
+        let bundle = model
             .workspace
             .active_source_bundle(crate::state::ProjectSourceLanguage::RSpiceAutomation);
-        let token = code
-            .automation
-            .receipt
-            .as_ref()
-            .map(|receipt| &receipt.token)
-            .or(code.automation.diagnostic_token.as_ref());
-        let current = token.zip(bundle).is_some_and(|(token, bundle)| {
-            token.project_id == project && token.revision == bundle.revision().get()
-        });
+        let current = code.automation_token.zip(bundle).is_some_and(
+            |((token_project, token_revision), bundle)| {
+                token_project == project && token_revision == bundle.revision().get()
+            },
+        );
         collections.push((
             bundle.map(crate::state::ProjectSourceBundle::id),
-            code.automation.diagnostics.as_ref(),
+            code.automation.as_ref(),
             current,
         ));
     }
@@ -877,6 +895,7 @@ fn code_collections(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
     use crate::workbench::app_state::diagnostic_store::{
         DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticSubject,
     };

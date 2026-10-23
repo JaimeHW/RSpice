@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use crate::product::{ContentDigest, ObjectRevision, ProjectId, SimulationPlanId};
 use crate::state::workspace::DesignProjectionKey;
 
-use super::{AppState, DiagnosticInputs};
+use super::{DiagnosticInputs, Model, SlotFacts};
 
 /// What one batch's digest was taken from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,88 +68,70 @@ impl DigestKey {
     /// The key of what `inputs` reads, or `None` where it cannot be stated
     /// cheaply and exactly, which recomputes the digest every time: a design
     /// whose authorities cannot be serialized has no projection key.
-    pub(super) fn of(state: &AppState, inputs: &DiagnosticInputs) -> Option<Self> {
-        let project = state.model.workspace.content.project.id();
+    pub(super) fn of(model: &Model, facts: SlotFacts, inputs: &DiagnosticInputs) -> Option<Self> {
+        let project = model.workspace.content.project.id();
         let design = || {
-            state.model.workspace.design_projection_key(
-                &state.model.library_manager,
-                &state.model.workspace.content.active_view,
-                &state.model.schematic,
+            model.workspace.design_projection_key(
+                &model.library_manager,
+                &model.workspace.content.active_view,
+                &model.schematic,
             )
         };
         match inputs {
             DiagnosticInputs::DesignCheck { .. } | DiagnosticInputs::LiveCheck { .. } => {
                 Some(Self::DesignCheck {
                     design: design()?,
-                    deck: state.model.workspace.content.design_rules.stamp(),
+                    deck: model.workspace.content.design_rules.stamp(),
                     project,
                 })
             }
             DiagnosticInputs::SymbolPins { subject } => Some(Self::SymbolPins {
-                library: state.model.library_manager.revision(),
-                contract: state.symbol_contract_stamp(subject),
+                library: model.library_manager.revision(),
+                contract: model.symbol_contract_stamp(subject),
                 project,
             }),
             DiagnosticInputs::Dispatch => Some(Self::Dispatch {
                 design: design()?,
-                root_topology: state
-                    .model
+                root_topology: model
                     .workspace
                     .simulation_root_schematic(
-                        &state.model.workspace.content.active_view,
-                        &state.model.schematic,
+                        &model.workspace.content.active_view,
+                        &model.schematic,
                     )
                     .map(|source| source.design.topology_version()),
-                plan: state.active_plan_revision(),
-                preflight: state.runs.preflight.report.is_some(),
+                plan: model.active_plan_revision(),
+                preflight: facts.preflight_report_retained,
                 project,
             }),
             DiagnosticInputs::Run { run_sequence } => Some(Self::Run {
                 design: design()?,
-                retained: state
-                    .model
+                retained: model
                     .simulation
                     .retained
                     .runs
                     .iter()
                     .any(|run| run.id == *run_sequence),
-                plan: state.active_plan_revision(),
-                options: state.model.sim_setup.options.to_spice_options(),
-                process: format!("{:?}", state.model.sim_setup.reference_pvt.process),
-                temperature: state
-                    .model
-                    .sim_setup
-                    .reference_pvt
-                    .temperature_celsius
-                    .to_bits(),
-                models: state
-                    .model
-                    .model_library_manager
-                    .design_inspection_catalog_key(),
+                plan: model.active_plan_revision(),
+                options: model.sim_setup.options.to_spice_options(),
+                process: format!("{:?}", model.sim_setup.reference_pvt.process),
+                temperature: model.sim_setup.reference_pvt.temperature_celsius.to_bits(),
+                models: model.model_library_manager.design_inspection_catalog_key(),
                 project,
             }),
             DiagnosticInputs::CampaignMember { .. } => Some(Self::Run {
                 design: design()?,
                 retained: false,
-                plan: state.active_plan_revision(),
-                options: state.model.sim_setup.options.to_spice_options(),
-                process: format!("{:?}", state.model.sim_setup.reference_pvt.process),
-                temperature: state
-                    .model
-                    .sim_setup
-                    .reference_pvt
-                    .temperature_celsius
-                    .to_bits(),
-                models: state
-                    .model
-                    .model_library_manager
-                    .design_inspection_catalog_key(),
+                plan: model.active_plan_revision(),
+                options: model.sim_setup.options.to_spice_options(),
+                process: format!("{:?}", model.sim_setup.reference_pvt.process),
+                temperature: model.sim_setup.reference_pvt.temperature_celsius.to_bits(),
+                models: model.model_library_manager.design_inspection_catalog_key(),
                 project,
             }),
             DiagnosticInputs::RuleDeck => Some(Self::RuleDeck {
-                deck: state.model.workspace.content.design_rules.stamp(),
+                deck: model.workspace.content.design_rules.stamp(),
                 project,
-                label: super::super::rule_deck::project_file_label(state),
+                label: super::super::rule_deck::project_file_label(model),
             }),
         }
     }

@@ -34,7 +34,7 @@ use crate::workbench::state::{ProjectPage, SimulationPage, Workspace};
 /// deleted — takes its outcome with it here, and a source editor that
 /// revalidated under the current finding has it followed to its new identity.
 pub(crate) fn apply_pending(ctx: &Context, app: &mut RSpiceApp) {
-    app.state.withdraw_retired_run_diagnostics();
+    app.state.model.withdraw_retired_run_diagnostics();
     app.state.reconcile_current_finding();
     let Some(route) = app.state.model.diagnostics.take_pending_route() else {
         return;

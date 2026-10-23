@@ -39,7 +39,9 @@ use crate::product::{ContentDigest, ProjectId};
 use crate::state::PreflightRemediation;
 use crate::state::{CanonicalCellViewOwnerKey, CellViewRef};
 
-use super::{AppState, design_checks};
+pub(in crate::workbench) use current::SourceCollections;
+
+use super::{Model, SlotFacts, design_checks};
 
 const DIAGNOSTIC_INPUT_DIGEST_DOMAIN: &[u8] = b"rspice-diagnostic-inputs/v1\0";
 
@@ -665,24 +667,23 @@ impl DiagnosticInputs {
     fn digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
         #[cfg(test)]
         digest_memo::count_computed();
-        let state = scope.state;
+        let model = scope.model;
         match self {
             Self::DesignCheck { subject } => {
-                super::design_checks::live_input_digest(state, subject)
+                super::design_checks::live_input_digest(model, subject)
             }
-            Self::LiveCheck { subject } => super::design_checks::live_check_digest(state, subject),
+            Self::LiveCheck { subject } => super::design_checks::live_check_digest(model, subject),
             // The artwork and the contract, through the one accessor the
             // checks themselves read them through: a digest taken over
             // anything else would be a second notion of staleness.
             Self::SymbolPins { subject } => digest_of(&(
-                state.model.workspace.content.project.id(),
+                model.workspace.content.project.id(),
                 subject,
-                state.symbol_pin_check_inputs(subject)?,
+                model.symbol_pin_check_inputs(subject)?,
             )),
-            Self::Dispatch => dispatch_digest(scope, state.runs.preflight.report.is_some()),
+            Self::Dispatch => dispatch_digest(scope, scope.facts.preflight_report_retained),
             Self::Run { run_sequence } => {
-                let retained = state
-                    .model
+                let retained = model
                     .simulation
                     .retained
                     .runs
@@ -696,23 +697,22 @@ impl DiagnosticInputs {
                 campaign,
                 member_index,
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
-            Self::RuleDeck => super::rule_deck::live_input_digest(state),
+            Self::RuleDeck => super::rule_deck::live_input_digest(model),
         }
     }
 
     /// [`Self::digest`], read from the memo while nothing it reads has moved.
     fn live_digest(&self, scope: &DigestScope<'_>) -> Result<ContentDigest, String> {
-        let state = scope.state;
-        let Some(key) = digest_memo::DigestKey::of(state, self) else {
+        let model = scope.model;
+        let Some(key) = digest_memo::DigestKey::of(model, scope.facts, self) else {
             return self.digest(scope);
         };
         let slot = self.key();
-        if let Some(remembered) = state.model.diagnostics.digests.get(&slot, &key) {
+        if let Some(remembered) = model.diagnostics.digests.get(&slot, &key) {
             return remembered;
         }
         let digest = self.digest(scope);
-        state
-            .model
+        model
             .diagnostics
             .digests
             .remember(slot, key, digest.clone());
@@ -726,15 +726,15 @@ fn dispatch_digest(
     scope: &DigestScope<'_>,
     report_retained: bool,
 ) -> Result<ContentDigest, String> {
-    let state = scope.state;
+    let model = scope.model;
     let (root, revision, closure) = scope.configured_topology();
     digest_of(&(
-        state.model.workspace.content.project.id(),
-        state.model.workspace.content.project.revision().get(),
+        model.workspace.content.project.id(),
+        model.workspace.content.project.revision().get(),
         root,
         revision,
         closure,
-        state.active_plan_revision(),
+        model.active_plan_revision(),
         // The report these findings were published from. Every edit to a
         // simulation input — plan, models, technology, bindings, solver
         // options — invalidates it at its own commit boundary, and so does
@@ -744,7 +744,7 @@ fn dispatch_digest(
     ))
 }
 
-impl AppState {
+impl Model {
     /// The digest a pass started now publishes its findings against, taken
     /// before the engine builds its decks.
     ///
@@ -753,8 +753,11 @@ impl AppState {
     /// Decided against the live inputs instead, a finding about an edited
     /// design would read as current. The report is counted as retained, as
     /// it will be when they are published.
-    pub(in crate::workbench) fn dispatch_inputs_at_press(&self) -> Result<ContentDigest, String> {
-        dispatch_digest(&DigestScope::new(self), true)
+    pub(in crate::workbench) fn dispatch_inputs_at_press(
+        &self,
+        facts: SlotFacts,
+    ) -> Result<ContentDigest, String> {
+        dispatch_digest(&DigestScope::new(self, facts), true)
     }
 }
 
@@ -772,30 +775,17 @@ fn dispatched_setup_digest(
     scope: &DigestScope<'_>,
     identity: &impl serde::Serialize,
 ) -> Result<ContentDigest, String> {
-    let state = scope.state;
+    let model = scope.model;
     digest_of(&(
-        state.model.workspace.content.project.id(),
+        model.workspace.content.project.id(),
         identity,
-        state
-            .model
-            .workspace
-            .content
-            .simulation_root_reference()
-            .key(),
+        model.workspace.content.simulation_root_reference().key(),
         scope.configured_content()?,
-        state.active_plan_revision(),
-        state.model.sim_setup.options.to_spice_options(),
-        format!("{:?}", state.model.sim_setup.reference_pvt.process),
-        state
-            .model
-            .sim_setup
-            .reference_pvt
-            .temperature_celsius
-            .to_bits(),
-        state
-            .model
-            .model_library_manager
-            .design_inspection_catalog_key(),
+        model.active_plan_revision(),
+        model.sim_setup.options.to_spice_options(),
+        format!("{:?}", model.sim_setup.reference_pvt.process),
+        model.sim_setup.reference_pvt.temperature_celsius.to_bits(),
+        model.model_library_manager.design_inspection_catalog_key(),
     ))
 }
 
@@ -813,17 +803,19 @@ type ConfiguredContent = Result<Vec<(String, ContentDigest)>, String>;
 /// every run batch reads the design's content — a campaign stands one batch
 /// per member — so each reading is taken once per scope and shared, never
 /// across scopes: a scope lives for one reading of the store and sees one
-/// state.
+/// state: the model, and the facts of the features' state it reads.
 struct DigestScope<'a> {
-    state: &'a AppState,
+    model: &'a Model,
+    facts: SlotFacts,
     topology: std::cell::OnceCell<ConfiguredTopology>,
     content: std::cell::OnceCell<ConfiguredContent>,
 }
 
 impl<'a> DigestScope<'a> {
-    fn new(state: &'a AppState) -> Self {
+    fn new(model: &'a Model, facts: SlotFacts) -> Self {
         Self {
-            state,
+            model,
+            facts,
             topology: std::cell::OnceCell::new(),
             content: std::cell::OnceCell::new(),
         }
@@ -831,12 +823,12 @@ impl<'a> DigestScope<'a> {
 
     fn configured_topology(&self) -> &ConfiguredTopology {
         self.topology
-            .get_or_init(|| self.state.configured_topology_revision())
+            .get_or_init(|| self.model.configured_topology_revision())
     }
 
     fn configured_content(&self) -> Result<&[(String, ContentDigest)], String> {
         self.content
-            .get_or_init(|| self.state.configured_design_content())
+            .get_or_init(|| self.model.configured_design_content())
             .as_deref()
             .map_err(Clone::clone)
     }
@@ -1342,7 +1334,7 @@ impl DiagnosticStore {
     }
 }
 
-impl AppState {
+impl Model {
     /// Publish everything one producer found in one pass.
     ///
     /// The digest is taken here, from the live state, which is what makes the
@@ -1352,9 +1344,10 @@ impl AppState {
         &mut self,
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
+        facts: SlotFacts,
     ) -> Result<(), String> {
-        let digest = inputs.live_digest(&DigestScope::new(self))?;
-        self.model.diagnostics.insert(digest, inputs, records, None)
+        let digest = inputs.live_digest(&DigestScope::new(self, facts))?;
+        self.diagnostics.insert(digest, inputs, records, None)
     }
 
     /// Publish a design-rule pass that takes over every finding an earlier
@@ -1364,17 +1357,17 @@ impl AppState {
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
         coverage: &design_checks::RuleCoverage,
+        facts: SlotFacts,
     ) -> Result<(), String> {
-        let digest = inputs.live_digest(&DigestScope::new(self))?;
-        self.model
-            .diagnostics
+        let digest = inputs.live_digest(&DigestScope::new(self, facts))?;
+        self.diagnostics
             .insert(digest, inputs, records, Some(coverage))
     }
 
     /// Withdraw a batch, for a producer whose evidence no longer exists at
     /// all — a closed project, a retired run, a cell view that was deleted.
     pub(in crate::workbench) fn withdraw_diagnostics(&mut self, inputs: &DiagnosticInputs) {
-        self.model.diagnostics.remove(inputs);
+        self.diagnostics.remove(inputs);
     }
 
     /// Withdraw the run outcomes a newly dispatched run supersedes.
@@ -1412,7 +1405,6 @@ impl AppState {
         campaign: Option<crate::product::SimulationCampaignId>,
     ) {
         let superseded: Vec<DiagnosticInputs> = self
-            .model
             .diagnostics
             .batches()
             .filter(|batch| match batch.inputs {
@@ -1448,12 +1440,10 @@ impl AppState {
     /// measurement supersedes it.
     pub(crate) fn withdraw_retired_run_diagnostics(&mut self) {
         let retired: Vec<DiagnosticInputs> = self
-            .model
             .diagnostics
             .batches()
             .filter(|batch| match batch.inputs {
                 DiagnosticInputs::Run { run_sequence } => self
-                    .model
                     .simulation
                     .retained
                     .runs
@@ -1475,8 +1465,7 @@ impl AppState {
 
     /// The campaign a retained run belongs to, if it belongs to one.
     fn run_campaign(&self, run_sequence: u64) -> Option<crate::product::SimulationCampaignId> {
-        self.model
-            .simulation
+        self.simulation
             .retained
             .run_by_sequence(run_sequence)
             .and_then(|run| run.campaign_membership())
@@ -1487,16 +1476,18 @@ impl AppState {
     pub(in crate::workbench) fn diagnostic_batch_standing(
         &self,
         batch: &DiagnosticBatch,
+        facts: SlotFacts,
     ) -> BatchStanding {
-        batch_standing(batch, &DigestScope::new(self))
+        batch_standing(batch, &DigestScope::new(self, facts))
     }
 
     /// The live digest of `inputs`, as the store decides currency by.
     pub(in crate::workbench) fn diagnostic_live_digest(
         &self,
         inputs: &DiagnosticInputs,
+        facts: SlotFacts,
     ) -> Result<ContentDigest, String> {
-        inputs.live_digest(&DigestScope::new(self))
+        inputs.live_digest(&DigestScope::new(self, facts))
     }
 }
 
@@ -1513,6 +1504,7 @@ fn batch_standing(batch: &DiagnosticBatch, scope: &DigestScope<'_>) -> BatchStan
 mod tests {
     use super::*;
     use crate::state::CampaignMemberRefusal;
+    use crate::workbench::app_state::AppState;
 
     /// A symbol view whose pins the checks can read: `work/amp/symbol`, with
     /// one pin, beside a schematic that declares the matching port.
@@ -1721,7 +1713,7 @@ mod tests {
             .expect("the failure is published");
         state.model.diagnostics.set_current_finding(Some(failed));
 
-        state.supersede_run_diagnostics(2);
+        state.model.supersede_run_diagnostics(2);
         assert!(
             run_batches(&state).is_empty(),
             "the earlier run's failure stops standing when the next run is dispatched"
@@ -1748,11 +1740,11 @@ mod tests {
         let mut state = AppState::default();
         state.model.simulation.retained.runs = vec![crate::state::SimulationRun::new(4)].into();
         state.publish_run_failure("Transient", "Analysis failed: tran", None, 4);
-        state.withdraw_retired_run_diagnostics();
+        state.model.withdraw_retired_run_diagnostics();
         assert_eq!(run_batches(&state), [4], "a retained run's failure stands");
 
         state.model.simulation.clear_runs();
-        state.withdraw_retired_run_diagnostics();
+        state.model.withdraw_retired_run_diagnostics();
         assert!(run_batches(&state).is_empty());
     }
 
@@ -1813,7 +1805,7 @@ mod tests {
         assert!(state.diagnostic_batch_standing(&refusal).is_current());
 
         // The campaign's next member is dispatched beside it.
-        state.supersede_run_diagnostics(5);
+        state.model.supersede_run_diagnostics(5);
         assert_eq!(
             state.model.diagnostics.published_member_refusals().len(),
             1,
@@ -1831,7 +1823,7 @@ mod tests {
         );
 
         // The next run outside the campaign is a new measurement.
-        state.supersede_run_diagnostics(6);
+        state.model.supersede_run_diagnostics(6);
         assert!(
             state
                 .model
@@ -2013,7 +2005,7 @@ mod tests {
         ]
         .into();
         state.publish_run_failure("Transient", "Analysis failed: tran", None, 9);
-        state.supersede_run_diagnostics(10);
+        state.model.supersede_run_diagnostics(10);
         state.open_run_outcome(10);
         state.publish_run_failure("Transient", "Analysis failed: tran", None, 10);
         assert_eq!(run_batches(&state), [10]);

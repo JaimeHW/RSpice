@@ -13,7 +13,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     AppState, CellViewCheckReceipt, CheckScope, DESIGN_CHECK_DIGEST_DOMAIN, DiagnosticInputs,
-    RuleCoverage, StoredWaivers, check_coverage, design_rule_records, owner_key, projected_buffer,
+    Model, RuleCoverage, StoredWaivers, check_coverage, design_rule_records, owner_key,
+    projected_buffer,
 };
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::product::ContentDigest;
@@ -226,7 +227,8 @@ impl AppState {
             .collect::<Vec<_>>();
         self.model.design_checks.drawing = DrawingState::default();
         for subject in subjects {
-            self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck { subject });
+            self.model
+                .withdraw_diagnostics(&DiagnosticInputs::LiveCheck { subject });
         }
         self.restate_design_checks();
         self.refresh_active_design_check_projection();
@@ -241,19 +243,18 @@ impl AppState {
 /// Narrower than a check of the cellview's, which reads the whole walk below
 /// it: an edit two levels down changes nothing a live finding says.
 pub(in crate::workbench) fn live_check_digest(
-    state: &AppState,
+    model: &Model,
     subject: &CellViewRef,
 ) -> Result<ContentDigest, String> {
-    if let Some(error) = state.model.workspace.annotation_restoration_error() {
+    if let Some(error) = model.workspace.annotation_restoration_error() {
         return Err(format!("reference annotation restoration failed: {error}"));
     }
-    let projection = state
-        .model
+    let projection = model
         .workspace
         .design_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let digest_of = |key: &str| -> Result<Option<ContentDigest>, String> {
@@ -275,7 +276,7 @@ pub(in crate::workbench) fn live_check_digest(
         .map(|key| Ok((digest_of(&key)?, key)))
         .collect::<Result<Vec<_>, String>>()?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &projection,
     );
     let mut globals = hierarchy
@@ -284,8 +285,7 @@ pub(in crate::workbench) fn live_check_digest(
         .map(|name| name.to_ascii_lowercase())
         .collect::<Vec<_>>();
     globals.sort();
-    let mut overrides = state
-        .model
+    let mut overrides = model
         .workspace
         .content
         .design_rules
@@ -296,12 +296,12 @@ pub(in crate::workbench) fn live_check_digest(
     overrides.sort();
     let material = serde_json::to_vec(&(
         "live",
-        state.model.workspace.content.project.id(),
+        model.workspace.content.project.id(),
         owner_key(subject).to_string(),
         drawing,
         masters,
         globals,
-        state.model.library_manager.revision(),
+        model.library_manager.revision(),
         projection.connectivity(),
         overrides,
     ))

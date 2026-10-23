@@ -12,10 +12,44 @@
 
 use std::sync::Arc;
 
+use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
+
 use super::FindingKey;
+use crate::product::ProjectId;
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
+
+/// The source editors' findings, as the store reads them where the editors
+/// keep them: the netlist editor's, and the Code & Automation page's.
+///
+/// Taken from the code feature's state by whoever holds it, since the model
+/// does not reach up into a feature for them.
+pub(in crate::workbench) struct SourceCollections<'a> {
+    /// The netlist editor's findings.
+    pub(in crate::workbench) netlist: &'a Arc<NetlistDiagnosticCollection>,
+    /// The netlist buffer's revision, which moves on every edit.
+    pub(in crate::workbench) netlist_revision: u64,
+    /// The buffer revision the netlist editor last validated, if it did.
+    pub(in crate::workbench) netlist_validated: Option<u64>,
+    /// The diagnostics of the last Verilog-A compile that produced a
+    /// receipt.
+    pub(in crate::workbench) veriloga: Option<&'a Arc<CodeDiagnosticCollection>>,
+    /// The token that compile was authorized under, where there is one.
+    pub(in crate::workbench) veriloga_token: Option<VerilogASourceOperationToken>,
+    /// The diagnostics of the last Verilog-A compile that failed before it
+    /// could produce a receipt.
+    pub(in crate::workbench) veriloga_failure: &'a Arc<CodeDiagnosticCollection>,
+    /// The token that failed compile was authorized under.
+    pub(in crate::workbench) veriloga_failure_token: Option<&'a VerilogASourceOperationToken>,
+    /// The Automation validation's diagnostics.
+    pub(in crate::workbench) automation: &'a Arc<CodeDiagnosticCollection>,
+    /// Whether an Automation validation is on record as having run.
+    pub(in crate::workbench) automation_validated: bool,
+    /// The project and source revision the Automation diagnostics were
+    /// produced under: the receipt's token, or the diagnostics' own.
+    pub(in crate::workbench) automation_token: Option<(ProjectId, u64)>,
+}
 
 /// One source editor's collection of findings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,42 +162,33 @@ impl Records<'_> {
     }
 }
 
-fn records(state: &AppState, segment: SourceSegment) -> Option<Records<'_>> {
-    let code = &state.code.code_workspace;
+fn records<'a>(sources: &SourceCollections<'a>, segment: SourceSegment) -> Option<Records<'a>> {
     match segment {
-        SourceSegment::Netlist => Some(Records::Netlist(state.code.netlist.diagnostics.as_ref())),
-        SourceSegment::VerilogA => code
+        SourceSegment::Netlist => Some(Records::Netlist(sources.netlist.as_ref())),
+        SourceSegment::VerilogA => sources
             .veriloga
-            .receipt
-            .as_ref()
-            .map(|receipt| Records::Code(receipt.diagnostics.as_ref())),
-        SourceSegment::VerilogAFailure => Some(Records::Code(code.veriloga.last_failure.as_ref())),
-        SourceSegment::Automation => Some(Records::Code(code.automation.diagnostics.as_ref())),
+            .map(|diagnostics| Records::Code(diagnostics.as_ref())),
+        SourceSegment::VerilogAFailure => Some(Records::Code(sources.veriloga_failure.as_ref())),
+        SourceSegment::Automation => Some(Records::Code(sources.automation.as_ref())),
     }
 }
 
-fn fingerprint(state: &AppState) -> SourceFingerprint {
-    let code = &state.code.code_workspace;
+fn fingerprint(sources: &SourceCollections<'_>) -> SourceFingerprint {
     let address = |collection: Option<&Arc<CodeDiagnosticCollection>>| {
         collection.map_or(0, |collection| Arc::as_ptr(collection) as usize)
     };
     SourceFingerprint {
         collections: [
-            Arc::as_ptr(&state.code.netlist.diagnostics) as usize,
-            address(
-                code.veriloga
-                    .receipt
-                    .as_ref()
-                    .map(|receipt| &receipt.diagnostics),
-            ),
-            address(Some(&code.veriloga.last_failure)),
-            address(Some(&code.automation.diagnostics)),
+            Arc::as_ptr(sources.netlist) as usize,
+            address(sources.veriloga),
+            address(Some(sources.veriloga_failure)),
+            address(Some(sources.automation)),
         ],
-        netlist_revision: state.code.netlist.revision,
+        netlist_revision: sources.netlist_revision,
     }
 }
 
-impl AppState {
+impl Model {
     /// Keep the shared current finding on its finding after a source editor
     /// revalidated.
     ///
@@ -171,73 +196,72 @@ impl AppState {
     /// one lookup; once it does not, the source collections are searched for
     /// it, then for the finding about the same thing, and a search that finds
     /// neither is not repeated until a collection changes.
-    pub(in crate::workbench) fn reconcile_current_finding(&mut self) {
-        let Some(current) = self.model.diagnostics.current else {
+    pub(in crate::workbench) fn reconcile_current_finding(
+        &mut self,
+        sources: &SourceCollections<'_>,
+    ) {
+        let Some(current) = self.diagnostics.current else {
             return;
         };
         // A store record is re-anchored by the store as it republishes.
-        if self.model.diagnostics.owners.contains_key(&current) {
+        if self.diagnostics.owners.contains_key(&current) {
             return;
         }
-        if let Some(anchor) = self.model.diagnostics.source_anchor.as_ref()
-            && records(self, anchor.segment).and_then(|records| records.id(anchor.index))
+        if let Some(anchor) = self.diagnostics.source_anchor.as_ref()
+            && records(sources, anchor.segment).and_then(|records| records.id(anchor.index))
                 == Some(current)
         {
             return;
         }
-        let fingerprint = fingerprint(self);
-        if self.model.diagnostics.unresolved == Some((current, fingerprint)) {
+        let fingerprint = fingerprint(sources);
+        if self.diagnostics.unresolved == Some((current, fingerprint)) {
             return;
         }
 
-        let found = find(self, |records, index| records.id(index) == Some(current));
+        let found = find(sources, |records, index| records.id(index) == Some(current));
         if let Some((segment, index)) = found {
-            self.model.diagnostics.source_anchor = records(self, segment)
+            self.diagnostics.source_anchor = records(sources, segment)
                 .and_then(|records| records.key(index))
                 .map(|key| SourceAnchor {
                     segment,
                     index,
                     key,
                 });
-            self.model.diagnostics.unresolved = None;
+            self.diagnostics.unresolved = None;
             return;
         }
 
-        let reanchored = self
-            .model
-            .diagnostics
-            .source_anchor
-            .as_ref()
-            .and_then(|anchor| {
-                find(self, |records, index| records.matches(index, &anchor.key)).and_then(
-                    |(segment, index)| {
-                        let id = records(self, segment)?.id(index)?;
-                        Some((segment, index, id, anchor.key.clone()))
-                    },
-                )
-            });
+        let reanchored = self.diagnostics.source_anchor.as_ref().and_then(|anchor| {
+            find(sources, |records, index| {
+                records.matches(index, &anchor.key)
+            })
+            .and_then(|(segment, index)| {
+                let id = records(sources, segment)?.id(index)?;
+                Some((segment, index, id, anchor.key.clone()))
+            })
+        });
         match reanchored {
             Some((segment, index, id, key)) => {
-                self.model.diagnostics.current = Some(id);
-                self.model.diagnostics.source_anchor = Some(SourceAnchor {
+                self.diagnostics.current = Some(id);
+                self.diagnostics.source_anchor = Some(SourceAnchor {
                     segment,
                     index,
                     key,
                 });
-                self.model.diagnostics.unresolved = None;
+                self.diagnostics.unresolved = None;
             }
-            None => self.model.diagnostics.unresolved = Some((current, fingerprint)),
+            None => self.diagnostics.unresolved = Some((current, fingerprint)),
         }
     }
 }
 
 /// The first source finding `wanted` accepts, by collection and position.
 fn find(
-    state: &AppState,
+    sources: &SourceCollections<'_>,
     wanted: impl Fn(&Records<'_>, usize) -> bool,
 ) -> Option<(SourceSegment, usize)> {
     SourceSegment::ALL.into_iter().find_map(|segment| {
-        let records = records(state, segment)?;
+        let records = records(sources, segment)?;
         (0..records.len())
             .find(|&index| wanted(&records, index))
             .map(|index| (segment, index))
@@ -248,6 +272,7 @@ fn find(
 mod tests {
     use super::*;
     use crate::state::netlist_diagnostics::Diagnostic;
+    use crate::workbench::app_state::AppState;
 
     fn collection(diagnostics: Vec<Diagnostic>) -> Arc<NetlistDiagnosticCollection> {
         Arc::new(

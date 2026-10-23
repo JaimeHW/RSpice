@@ -158,29 +158,6 @@ impl AppState {
         self.model.symbol_ports(reference)
     }
 
-    /// The [stamp](rspice_design::stamped) of the drawing [`Self::symbol_ports`]
-    /// reads the contract from first, or `None` where it reads only the
-    /// library, whose revision covers the rest.
-    ///
-    /// Beside [`Self::symbol_ports`] because it must take the same branches:
-    /// a stamp of any other drawing would let an edit to the contract leave
-    /// the pin findings reading current.
-    pub(in crate::workbench) fn symbol_contract_stamp(
-        &self,
-        reference: &CellViewRef,
-    ) -> Option<u64> {
-        let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
-        if self.model.workspace.content.active_view == schematic_ref {
-            return Some(self.model.schematic.content_stamp());
-        }
-        self.model
-            .workspace
-            .content
-            .schematic_buffers
-            .get(&schematic_ref.key())
-            .map(|schematic| schematic.content_stamp())
-    }
-
     pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
         self.model.load_active_symbol_document()
     }
@@ -207,16 +184,7 @@ impl AppState {
         reference: &CellViewRef,
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
-        let Some(view) = self
-            .model
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-        else {
-            return Err(format!("View '{}' not found", reference.display_path()));
-        };
-        SymbolEditorMetadata::load_from_view(view, document)
+        self.model.load_symbol_editor_metadata(reference, document)
     }
 
     fn active_symbol_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
@@ -767,6 +735,17 @@ impl AppState {
         &self,
         reference: &CellViewRef,
     ) -> Result<SymbolPinCheckInputs, String> {
+        self.model.symbol_pin_check_inputs(reference)
+    }
+}
+
+impl Model {
+    /// Everything the symbol pin checks read for one symbol view: see
+    /// [`AppState::symbol_pin_check_inputs`].
+    pub(in crate::workbench) fn symbol_pin_check_inputs(
+        &self,
+        reference: &CellViewRef,
+    ) -> Result<SymbolPinCheckInputs, String> {
         let document = self.load_symbol_document(reference)?;
         let revision = self
             .load_symbol_editor_metadata(reference, &document)?
@@ -778,7 +757,9 @@ impl AppState {
             ports,
         })
     }
+}
 
+impl AppState {
     /// Publish what the symbol pin checks found, as canonical records.
     ///
     /// Its own entry point with its own guard rather than a loosened
@@ -824,7 +805,8 @@ impl AppState {
     /// Withdraw the active symbol view's pin findings.
     pub(in crate::workbench) fn clear_active_symbol_pin_checks(&mut self) {
         let subject = self.model.workspace.content.active_view.clone();
-        self.withdraw_diagnostics(&DiagnosticInputs::SymbolPins { subject });
+        self.model
+            .withdraw_diagnostics(&DiagnosticInputs::SymbolPins { subject });
     }
 
     fn active_symbol_pin_records(&self) -> Option<&[DiagnosticRecord]> {
@@ -1001,6 +983,46 @@ impl Model {
             return Ok(SymbolDocument::generated_from_ports(&ports));
         }
         Ok(document)
+    }
+
+    /// The [stamp](rspice_design::stamped) of the drawing [`Self::symbol_ports`]
+    /// reads the contract from first, or `None` where it reads only the
+    /// library, whose revision covers the rest.
+    ///
+    /// Beside [`Self::symbol_ports`] because it must take the same branches:
+    /// a stamp of any other drawing would let an edit to the contract leave
+    /// the pin findings reading current.
+    pub(in crate::workbench) fn symbol_contract_stamp(
+        &self,
+        reference: &CellViewRef,
+    ) -> Option<u64> {
+        let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
+        if self.workspace.content.active_view == schematic_ref {
+            return Some(self.schematic.content_stamp());
+        }
+        self.workspace
+            .content
+            .schematic_buffers
+            .get(&schematic_ref.key())
+            .map(|schematic| schematic.content_stamp())
+    }
+
+    /// One cell's symbol authoring metadata, which is where its published
+    /// revision is recorded.
+    pub(crate) fn load_symbol_editor_metadata(
+        &self,
+        reference: &CellViewRef,
+        document: &SymbolDocument,
+    ) -> Result<SymbolEditorMetadata, String> {
+        let Some(view) = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        SymbolEditorMetadata::load_from_view(view, document)
     }
 }
 

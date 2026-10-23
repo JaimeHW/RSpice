@@ -21,12 +21,13 @@ use rspice_core::notice::{
     BoundarySupplyKind, EngineNotice, ParameterReplacement, ParameterScope, RecordedNotice,
 };
 use rspice_results::convergence_quality::TransientConvergenceEvidence;
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 use crate::quantity::engineering::{EngineeringPrecision, format_engineering_display_with};
 use crate::state::PreflightRemediation;
 use crate::state::{CellViewRef, InstancePath};
 
-use super::super::AppState;
+use super::super::{Model, SlotFacts};
 use super::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
     FindingKey, mint_canonical,
@@ -196,7 +197,7 @@ impl Named<u64> {
     }
 }
 
-impl AppState {
+impl Model {
     /// Record what one analysis of a run raised and went on past.
     ///
     /// Called for every analysis the run reports, completed or failed: a
@@ -219,6 +220,7 @@ impl AppState {
         transient: Option<(&TransientConvergenceEvidence, Option<usize>)>,
         failed_measurements: &[rspice_core::MeasureResult],
         run_sequence: u64,
+        facts: SlotFacts,
     ) {
         let raised: Vec<(RunNotice, Option<usize>)> = notices
             .into_iter()
@@ -239,13 +241,11 @@ impl AppState {
         if raised.is_empty() {
             return;
         }
-        let retained = &self.model.simulation.retained.runs;
-        self.model
-            .diagnostics
+        let retained = &self.simulation.retained.runs;
+        self.diagnostics
             .run_notices
             .retain(|run, _| *run == run_sequence || retained.iter().any(|kept| kept.id == *run));
-        self.model
-            .diagnostics
+        self.diagnostics
             .run_notices
             .entry(run_sequence)
             .or_default()
@@ -254,11 +254,11 @@ impl AppState {
                 notice,
                 line,
             }));
-        self.republish_run_notices(run_sequence);
+        self.republish_run_notices(run_sequence, facts);
     }
 
-    fn republish_run_notices(&mut self, run_sequence: u64) {
-        let Some(facts) = self.model.diagnostics.run_notices.get(&run_sequence) else {
+    fn republish_run_notices(&mut self, run_sequence: u64, slot_facts: SlotFacts) {
+        let Some(facts) = self.diagnostics.run_notices.get(&run_sequence) else {
             return;
         };
         let scope = super::producers::run_scope(self, run_sequence);
@@ -270,7 +270,6 @@ impl AppState {
         let canonicals =
             mint_canonical(&keys, run_sequence, &format!("run:{run_sequence}:notices"));
         let manual_deck = self
-            .model
             .simulation
             .retained
             .run_by_sequence(run_sequence)
@@ -279,29 +278,31 @@ impl AppState {
                 receipt.source_domain()
                     == rspice_results::provenance::AnalysisResultSourceDomain::ManualDeck
             });
-        let project = self.model.workspace.content.project.id();
+        let project = self.workspace.content.project.id();
         let notice_records: Vec<DiagnosticRecord> = gathered
             .iter()
             .zip(canonicals)
             .map(|(condition, canonical)| {
-                self.notice_record(project, condition, canonical, manual_deck)
-                    .with_log_place(
-                        condition
-                            .line
-                            .map(|line| super::RunLogPlace { run_sequence, line }),
-                    )
+                self.notice_record(
+                    project,
+                    condition,
+                    canonical,
+                    manual_deck,
+                    slot_facts.review_markers,
+                )
+                .with_log_place(
+                    condition
+                        .line
+                        .map(|line| super::RunLogPlace { run_sequence, line }),
+                )
             })
             .collect();
 
         let inputs = DiagnosticInputs::Run { run_sequence };
-        let opened = self.model.diagnostics.batch(&inputs);
-        let dispatched = opened.map(|batch| batch.input_digest).or_else(|| {
-            self.model
-                .diagnostics
-                .run_baselines
-                .get(&run_sequence)
-                .copied()
-        });
+        let opened = self.diagnostics.batch(&inputs);
+        let dispatched = opened
+            .map(|batch| batch.input_digest)
+            .or_else(|| self.diagnostics.run_baselines.get(&run_sequence).copied());
         // The run's failures stand as they were reported; only the notices
         // are rebuilt.
         let mut records: Vec<DiagnosticRecord> = opened
@@ -316,8 +317,8 @@ impl AppState {
             .unwrap_or_default();
         records.extend(notice_records);
         let published = match dispatched {
-            Some(digest) => self.model.diagnostics.insert(digest, inputs, records, None),
-            None => self.publish_diagnostics(inputs, records),
+            Some(digest) => self.diagnostics.insert(digest, inputs, records, None),
+            None => self.publish_diagnostics(inputs, records, slot_facts),
         };
         if let Err(error) = published {
             self.record(
@@ -334,6 +335,7 @@ impl AppState {
         condition: &Gathered<'_>,
         canonical: rspice_vocabulary::diagnostics::CanonicalDiagnosticMetadata,
         manual_deck: bool,
+        review_markers: SchematicReviewMarkerVisibility,
     ) -> DiagnosticRecord {
         // A manual deck is not the drawing, so nothing it names is looked
         // for there; its notices are repaired in the deck.
@@ -454,8 +456,9 @@ impl AppState {
         // route is, so a part on a later sheet brings that sheet forward.
         let route = located
             .and_then(|drawn| {
-                crate::schematic::view::violations::location_anchor_in(
+                crate::schematic::view::violations::model_location_anchor(
                     self,
+                    review_markers,
                     &drawn.cell_view,
                     &rspice_design::drc::DrcLocation::Component {
                         id: drawn.component,
@@ -486,12 +489,11 @@ impl AppState {
         let scope = rspice_vocabulary::hierarchy_path::ProbeTarget::parse(element)
             .map_or_else(|_| InstancePath::root(), |target| target.scope);
         let projection = self
-            .model
             .workspace
             .design_projection(
-                &self.model.library_manager,
-                &self.model.workspace.content.active_view,
-                &self.model.schematic,
+                &self.library_manager,
+                &self.workspace.content.active_view,
+                &self.schematic,
             )
             .ok()?;
         let plan = projection.plan();
@@ -749,6 +751,7 @@ mod tests {
         Cell, Component, ComponentType, Library, LibraryCellInstance, Point, SchematicState, View,
         ViewType,
     };
+    use crate::workbench::app_state::AppState;
     use crate::workbench::app_state::diagnostic_store::{BatchStanding, listing};
 
     fn open_state(runs: &[u64]) -> AppState {
@@ -832,7 +835,7 @@ mod tests {
         );
         assert_eq!(notices(&state).len(), 1);
 
-        state.supersede_run_diagnostics(2);
+        state.model.supersede_run_diagnostics(2);
         state.open_run_outcome(2);
         state.publish_run_notices(
             "Transient",
@@ -1201,6 +1204,7 @@ mod tests {
         let amp = CellViewRef::new("work", "amp", "schematic");
 
         let located = state
+            .model
             .locate_engine_element("xamp.m1")
             .expect("XAMP.M1 is the M1 that /amp draws");
         assert_eq!(located.occurrence.to_string(), "/amp");
@@ -1209,11 +1213,16 @@ mod tests {
         assert_eq!(located.name, "M1");
         assert_eq!(
             state
+                .model
                 .locate_engine_element("XAMP2.M1")
                 .map(|located| (located.occurrence.to_string(), located.component)),
             Some(("/amp2".to_owned(), 10))
         );
-        assert_eq!(state.locate_engine_element("m1"), None, "no M1 at the root");
+        assert_eq!(
+            state.model.locate_engine_element("m1"),
+            None,
+            "no M1 at the root"
+        );
 
         state.open_run_outcome(1);
         state.publish_run_notices(
@@ -1266,16 +1275,18 @@ mod tests {
         let state = hierarchical_design();
         assert_eq!(
             state
+                .model
                 .locate_engine_element("YMEMRISTOR!MR1")
                 .map(|located| located.component),
             Some(2)
         );
         assert_eq!(
             state
+                .model
                 .locate_engine_element("xamp.ymemristor!mr1")
                 .map(|located| located.component),
             Some(11)
         );
-        assert_eq!(state.locate_engine_element("MR1"), None);
+        assert_eq!(state.model.locate_engine_element("MR1"), None);
     }
 }

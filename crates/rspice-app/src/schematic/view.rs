@@ -91,22 +91,28 @@ pub(crate) fn shelf_drag_over_schematic_canvas(ctx: &egui::Context) -> bool {
 pub(super) fn schematic_design_view(
     state: &AppState,
 ) -> rspice_schematic_editor::view::design_view::DesignView<'_> {
-    let key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    model_design_view(
+        &state.model,
+        state.design.schematic_visibility.review_markers,
+    )
+}
+
+/// [`schematic_design_view`], from the model and the review markers the
+/// drawing shows.
+pub(super) fn model_design_view(
+    model: &crate::workbench::app_state::Model,
+    review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
+) -> rspice_schematic_editor::view::design_view::DesignView<'_> {
+    let key = model.workspace.content.active_schematic_reference().key();
     rspice_schematic_editor::view::design_view::DesignView {
-        document: state.model.schematic.document(),
-        canvas_cache: state.model.schematic.canvas_cache(),
-        sheet_catalog: state
-            .model
+        document: model.schematic.document(),
+        canvas_cache: model.schematic.canvas_cache(),
+        sheet_catalog: model
             .workspace
             .content
             .design_management
             .sheet_catalog(&key),
-        review_markers: state.design.schematic_visibility.review_markers,
+        review_markers,
     }
 }
 

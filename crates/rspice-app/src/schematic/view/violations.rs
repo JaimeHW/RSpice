@@ -159,6 +159,22 @@ pub(crate) fn location_anchor_in(
     cell_view: &crate::state::CellViewRef,
     location: &DrcLocation,
 ) -> Option<crate::diagnostics::LogAnchor> {
+    model_location_anchor(
+        &state.model,
+        state.design.schematic_visibility.review_markers,
+        cell_view,
+        location,
+    )
+}
+
+/// [`location_anchor_in`], from the model and the review markers the
+/// drawing shows.
+pub(crate) fn model_location_anchor(
+    model: &crate::workbench::app_state::Model,
+    review_markers: rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
+    cell_view: &crate::state::CellViewRef,
+    location: &DrcLocation,
+) -> Option<crate::diagnostics::LogAnchor> {
     if let DrcLocation::SymbolPin {
         reference,
         pin_name,
@@ -173,36 +189,28 @@ pub(crate) fn location_anchor_in(
     }
 
     let key = cell_view.key();
-    let placed = if key.eq_ignore_ascii_case(
-        &state
-            .model
-            .workspace
-            .content
-            .active_schematic_reference()
-            .key(),
-    ) {
-        markers::placement(&super::schematic_design_view(state), location)?
-    } else {
-        let (_, schematic) = state
-            .model
-            .workspace
-            .content
-            .schematic_buffers
-            .iter()
-            .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?;
-        let view = rspice_schematic_editor::view::design_view::DesignView {
-            document: schematic.document(),
-            canvas_cache: None,
-            sheet_catalog: state
-                .model
+    let placed =
+        if key.eq_ignore_ascii_case(&model.workspace.content.active_schematic_reference().key()) {
+            markers::placement(&super::model_design_view(model, review_markers), location)?
+        } else {
+            let (_, schematic) = model
                 .workspace
                 .content
-                .design_management
-                .sheet_catalog(&key),
-            review_markers: state.design.schematic_visibility.review_markers,
+                .schematic_buffers
+                .iter()
+                .find(|(buffer, _)| buffer.eq_ignore_ascii_case(&key))?;
+            let view = rspice_schematic_editor::view::design_view::DesignView {
+                document: schematic.document(),
+                canvas_cache: None,
+                sheet_catalog: model
+                    .workspace
+                    .content
+                    .design_management
+                    .sheet_catalog(&key),
+                review_markers,
+            };
+            markers::placement(&view, location)?
         };
-        markers::placement(&view, location)?
-    };
     let (component, wire) = match location {
         DrcLocation::Component { id, .. } => (Some(*id), None),
         DrcLocation::Wire { id } => (None, Some(*id)),

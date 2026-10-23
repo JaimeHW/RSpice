@@ -75,3 +75,33 @@ pub(crate) struct Model {
     /// the live-session engine every frame it is attached.
     pub live_write_locks: crate::state::write_policy::LiveWriteLocks,
 }
+
+impl Model {
+    /// Record an event in the Console and return its log id, as
+    /// [`AppState::record`](super::AppState::record) states it.
+    pub fn record(
+        &mut self,
+        severity: crate::diagnostics::LogSeverity,
+        source: crate::diagnostics::LogSource,
+        text: impl Into<String>,
+    ) -> u64 {
+        self.log_buffer.log(severity, source, text)
+    }
+}
+
+/// What model code reads of the features' state.
+///
+/// The model never reaches up into a feature's slot for these. The caller
+/// holding the whole application state reads them and hands them down with
+/// the operation, read when the operation starts, which is when the model
+/// read them before.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SlotFacts {
+    /// Whether the run gate's report is retained: the dispatch findings are
+    /// about that report, and read stale once it is dropped.
+    pub(crate) preflight_report_retained: bool,
+    /// Which review markers the drawing shows, part of the view a finding's
+    /// place is read through.
+    pub(crate) review_markers:
+        rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility,
+}

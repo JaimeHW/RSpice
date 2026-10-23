@@ -16,7 +16,7 @@ use crate::state::{
     PreflightRemediation, PreflightReport,
 };
 
-use super::super::AppState;
+use super::super::{Model, SlotFacts};
 use super::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
     FindingKey, mint_canonical,
@@ -42,7 +42,7 @@ const NETLIST_PRODUCER: &str = "rspice.netlist.generator";
 /// The engine's own build of a dispatched deck, for what it refuses there.
 const ENGINE_PRODUCER: &str = "rspice.engine.elaboration";
 
-impl AppState {
+impl Model {
     /// One record for a failed analysis, attributed to the objects the engine
     /// named where it named any.
     ///
@@ -56,6 +56,7 @@ impl AppState {
         message: &str,
         attribution: Option<&ConvergenceAttribution>,
         run_sequence: u64,
+        facts: SlotFacts,
     ) {
         let attribution = attribution.filter(|attribution| attribution.describes(message));
         let code = attribution.map_or_else(
@@ -77,14 +78,10 @@ impl AppState {
         // failed is its own record with its own identity; a later failure in
         // the same run is added to the batch rather than replacing it. Both
         // are decided against the design as it was dispatched.
-        let opened = self.model.diagnostics.batch(&inputs);
-        let dispatched = opened.map(|batch| batch.input_digest).or_else(|| {
-            self.model
-                .diagnostics
-                .run_baselines
-                .get(&run_sequence)
-                .copied()
-        });
+        let opened = self.diagnostics.batch(&inputs);
+        let dispatched = opened
+            .map(|batch| batch.input_digest)
+            .or_else(|| self.diagnostics.run_baselines.get(&run_sequence).copied());
         let mut records: Vec<DiagnosticRecord> = opened
             .map(|batch| batch.records.clone())
             .unwrap_or_default();
@@ -109,7 +106,7 @@ impl AppState {
             canonical,
             DiagnosticLevel::Error,
             DiagnosticSubject::new(
-                self.model.workspace.content.project.id(),
+                self.workspace.content.project.id(),
                 format!("{analysis} · run {run_sequence}"),
             ),
             message,
@@ -119,8 +116,8 @@ impl AppState {
         .with_route(route);
         records.push(record);
         let published = match dispatched {
-            Some(digest) => self.model.diagnostics.insert(digest, inputs, records, None),
-            None => self.publish_diagnostics(inputs, records),
+            Some(digest) => self.diagnostics.insert(digest, inputs, records, None),
+            None => self.publish_diagnostics(inputs, records, facts),
         };
         self.state_refusal(published);
     }
@@ -144,6 +141,7 @@ impl AppState {
         member: &str,
         refusal: CampaignMemberRefusal,
         error: &str,
+        facts: SlotFacts,
     ) {
         let (code, message) = match refusal {
             CampaignMemberRefusal::Authorization => (
@@ -156,7 +154,7 @@ impl AppState {
             ),
         };
         let key = FindingKey::new(RUN_PRODUCER, code, member_scope(member_index), member);
-        let revision = self.model.workspace.content.project.revision().get();
+        let revision = self.workspace.content.project.revision().get();
         let Some(canonical) = mint_canonical(
             std::slice::from_ref(&key),
             revision,
@@ -169,7 +167,7 @@ impl AppState {
             canonical,
             DiagnosticLevel::Error,
             DiagnosticSubject::new(
-                self.model.workspace.content.project.id(),
+                self.workspace.content.project.id(),
                 format!("{member} · campaign member {member_index}"),
             ),
             message,
@@ -182,6 +180,7 @@ impl AppState {
                 member_index,
             },
             vec![record],
+            facts,
         );
     }
 
@@ -193,18 +192,15 @@ impl AppState {
     /// dispatched read as current against an edit made after it. Nothing is
     /// published: a run that fails nothing has nothing to list, and an empty
     /// batch would tell the page that checks had run.
-    pub(crate) fn open_run_outcome(&mut self, run_sequence: u64) {
-        match (DiagnosticInputs::Run { run_sequence }).digest(&super::DigestScope::new(self)) {
+    pub(crate) fn open_run_outcome(&mut self, run_sequence: u64, facts: SlotFacts) {
+        match (DiagnosticInputs::Run { run_sequence }).digest(&super::DigestScope::new(self, facts))
+        {
             Ok(digest) => {
-                let retained = &self.model.simulation.retained.runs;
-                self.model
-                    .diagnostics
+                let retained = &self.simulation.retained.runs;
+                self.diagnostics
                     .run_baselines
                     .retain(|run, _| retained.iter().any(|kept| kept.id == *run));
-                self.model
-                    .diagnostics
-                    .run_baselines
-                    .insert(run_sequence, digest);
+                self.diagnostics.run_baselines.insert(run_sequence, digest);
             }
             Err(error) => self.state_refusal(Err(error)),
         }
@@ -217,9 +213,13 @@ impl AppState {
     /// from one report, so both expire together when the design, the plan or
     /// the bindings move — which is exactly what the report's own currency
     /// rule already said and what no surface but the report could state.
-    pub(in crate::workbench) fn publish_dispatch_diagnostics(&mut self, report: &PreflightReport) {
+    pub(in crate::workbench) fn publish_dispatch_diagnostics(
+        &mut self,
+        report: &PreflightReport,
+        facts: SlotFacts,
+    ) {
         let records = self.dispatch_records(report);
-        self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records);
+        self.publish_or_state_refusal(DiagnosticInputs::Dispatch, records, facts);
     }
 
     /// The same records, decided against the dispatch inputs as they stood
@@ -231,17 +231,14 @@ impl AppState {
         inputs_at_press: crate::product::ContentDigest,
     ) {
         let records = self.dispatch_records(report);
-        let published = self.model.diagnostics.insert(
-            inputs_at_press,
-            DiagnosticInputs::Dispatch,
-            records,
-            None,
-        );
+        let published =
+            self.diagnostics
+                .insert(inputs_at_press, DiagnosticInputs::Dispatch, records, None);
         self.state_refusal(published);
     }
 
     fn dispatch_records(&self, report: &PreflightReport) -> Vec<DiagnosticRecord> {
-        let project = self.model.workspace.content.project.id();
+        let project = self.workspace.content.project.id();
         let revision = report.project_revision;
         // A blocker is keyed by what it names as the thing to change, which
         // is the nearest a dispatch check comes to an object; two blockers
@@ -300,8 +297,9 @@ impl AppState {
         &mut self,
         inputs: DiagnosticInputs,
         records: Vec<DiagnosticRecord>,
+        facts: SlotFacts,
     ) {
-        let published = self.publish_diagnostics(inputs, records);
+        let published = self.publish_diagnostics(inputs, records, facts);
         self.state_refusal(published);
     }
 
@@ -322,9 +320,8 @@ impl AppState {
 /// A campaign's members are dispatched one after another and their outcomes
 /// stand together, so each member is its own place; a plain run's outcome is
 /// superseded by the next run's, so every plain run is the same place.
-pub(super) fn run_scope(state: &AppState, run_sequence: u64) -> String {
-    state
-        .model
+pub(super) fn run_scope(model: &Model, run_sequence: u64) -> String {
+    model
         .simulation
         .retained
         .run_by_sequence(run_sequence)
@@ -506,6 +503,7 @@ fn screaming_code(family: &str, label: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
     use crate::workbench::app_state::diagnostic_store::listing;
 
     fn open_state() -> AppState {

@@ -614,7 +614,7 @@ impl SimulationController {
         }
         // The new run supersedes the outcomes earlier runs reported, and the
         // pruning above may have retired a run whose failure still stood.
-        state.supersede_run_diagnostics(run_id);
+        state.model.supersede_run_diagnostics(run_id);
         state.open_run_outcome(run_id);
         self.current_run_id = Some(run_id);
         state.model.simulation.execution.active_execution = Some(execution_identity);

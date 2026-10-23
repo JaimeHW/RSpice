@@ -17,12 +17,12 @@ use crate::state::{
 };
 use rspice_design::drc::{CheckReach, DrcConfig, DrcLocation, DrcResult, DrcViolationType};
 
-use super::AppState;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject, FindingKey,
     RelatedPlace, mint_canonical,
 };
 use super::waivers;
+use super::{AppState, Model};
 
 mod live;
 pub(in crate::workbench) use live::live_check_digest;
@@ -347,7 +347,7 @@ impl AppState {
         {
             self.sync_active_schematic_to_workspace();
         }
-        let config = self.design_check_config(&subject);
+        let config = self.model.design_check_config(&subject);
         // Checks run over the design as configured, not over the editor
         // buffer. That is what makes two sheets with coincident authored
         // coordinates two nets: the projection namespaces the pages apart
@@ -401,7 +401,7 @@ impl AppState {
             );
         }
         let subject = self.model.workspace.content.active_schematic_reference();
-        let config = self.design_check_config(&subject);
+        let config = self.model.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result, CheckScope::Hierarchy)
     }
 
@@ -410,7 +410,8 @@ impl AppState {
     /// that cell view, so a pass run by either is the same evidence, and the
     /// one the run gate judges the root under.
     pub(crate) fn configured_root_design_check_config(&self) -> DrcConfig {
-        self.design_check_config(&self.model.workspace.content.simulation_root_reference())
+        self.model
+            .design_check_config(&self.model.workspace.content.simulation_root_reference())
     }
 
     /// Publish `result` as Check Design's findings about the configured
@@ -421,7 +422,7 @@ impl AppState {
         result: DrcResult,
     ) -> Result<(), String> {
         let subject = self.model.workspace.content.simulation_root_reference();
-        let config = self.design_check_config(&subject);
+        let config = self.model.design_check_config(&subject);
         self.publish_design_check_result(subject, config, result, CheckScope::Design)
     }
 
@@ -627,10 +628,12 @@ impl AppState {
         }
         let subject = self.model.workspace.content.active_schematic_reference();
         self.model.design_checks.clear_subject(&subject);
-        self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck {
-            subject: subject.clone(),
-        });
-        self.withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
+        self.model
+            .withdraw_diagnostics(&DiagnosticInputs::LiveCheck {
+                subject: subject.clone(),
+            });
+        self.model
+            .withdraw_diagnostics(&DiagnosticInputs::DesignCheck { subject });
         // What the cleared passes had taken over from the checks still
         // standing is theirs again.
         self.restate_design_checks();
@@ -681,7 +684,7 @@ impl AppState {
             };
             let result = receipt.result.clone();
             let scope = receipt.scope;
-            let config = self.design_check_config(&subject);
+            let config = self.model.design_check_config(&subject);
             if let Err(error) = self.publish_design_check_result(subject, config, result, scope) {
                 self.record(
                     crate::diagnostics::LogSeverity::Warning,
@@ -709,7 +712,7 @@ impl AppState {
             .collect();
         self.model.design_checks.clear();
         for inputs in &published {
-            self.withdraw_diagnostics(inputs);
+            self.model.withdraw_diagnostics(inputs);
         }
     }
 
@@ -1035,7 +1038,7 @@ fn owner_key(subject: &CellViewRef) -> CanonicalCellViewOwnerKey {
     canonical_cell_view_owner_key(&subject.library, &subject.cell, &subject.view)
 }
 
-impl AppState {
+impl Model {
     /// The configuration `subject` is checked under in this project.
     ///
     /// The one authority for it. The Check command, the digest that decides
@@ -1055,14 +1058,9 @@ impl AppState {
     pub(crate) fn design_check_config(&self, subject: &CellViewRef) -> DrcConfig {
         DrcConfig {
             check_missing_ground: asks_for_ground(self, subject),
-            severity_overrides: self
-                .model
-                .workspace
-                .content
-                .design_rules
-                .severity_overrides(),
-            connectivity: self.model.workspace.content.connectivity.policy.clone(),
-            waivers: self.model.check_waivers(subject),
+            severity_overrides: self.workspace.content.design_rules.severity_overrides(),
+            connectivity: self.workspace.content.connectivity.policy.clone(),
+            waivers: self.check_waivers(subject),
             ..DrcConfig::default()
         }
     }
@@ -1078,32 +1076,30 @@ impl AppState {
 ///
 /// Read cheapest first: the common subject, a cell with ports, is decided
 /// without resolving the configured hierarchy.
-fn asks_for_ground(state: &AppState, subject: &CellViewRef) -> bool {
+fn asks_for_ground(model: &Model, subject: &CellViewRef) -> bool {
     let subject_key = owner_key(subject);
-    if subject_key == owner_key(&state.model.workspace.content.simulation_root_reference()) {
+    if subject_key == owner_key(&model.workspace.content.simulation_root_reference()) {
         return true;
     }
-    let testbench = state
-        .model
+    let testbench = model
         .library_manager
         .catalog()
         .get_library(&subject.library)
         .and_then(|library| library.get_cell(&subject.cell))
         .and_then(|cell| cell.get_view(&subject.view))
         .is_some_and(|view| view.view_type == ViewType::Testbench);
-    if !testbench && subject_has_interface(state, subject) {
+    if !testbench && subject_has_interface(model, subject) {
         return false;
     }
     // A hierarchy that does not resolve places nothing that can be found, so
     // the subject is asked: the stricter answer, where the looser one would
     // pass a design nobody could tell was grounded.
-    let placed = state
-        .model
+    let placed = model
         .workspace
         .inspect_design_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .is_ok_and(|projection| {
             projection
@@ -1119,20 +1115,18 @@ fn asks_for_ground(state: &AppState, subject: &CellViewRef) -> bool {
 
 /// Whether the drawing behind `subject` declares any port, read from the live
 /// editor where the subject is the view in front of the reader.
-fn subject_has_interface(state: &AppState, subject: &CellViewRef) -> bool {
+fn subject_has_interface(model: &Model, subject: &CellViewRef) -> bool {
     let key = subject.key();
-    if state
-        .model
+    if model
         .workspace
         .content
         .active_view
         .key()
         .eq_ignore_ascii_case(&key)
     {
-        return state.model.schematic.document().has_interface();
+        return model.schematic.document().has_interface();
     }
-    state
-        .model
+    model
         .workspace
         .content
         .schematic_buffers
@@ -1149,11 +1143,11 @@ fn subject_has_interface(state: &AppState, subject: &CellViewRef) -> bool {
 /// computing "the same" digest is how a receipt and the Problems page come to
 /// disagree about whether the same findings are current.
 pub(in crate::workbench) fn live_input_digest(
-    state: &AppState,
+    model: &Model,
     subject: &CellViewRef,
 ) -> Result<ContentDigest, String> {
-    let config = state.design_check_config(subject);
-    design_check_input_digest(state, subject, &config)
+    let config = model.design_check_config(subject);
+    design_check_input_digest(model, subject, &config)
 }
 
 /// The digest of exactly what a check of `subject` reads.
@@ -1169,20 +1163,19 @@ pub(in crate::workbench) fn live_input_digest(
 /// It used to digest every schematic buffer in the project, so drawing in one
 /// cellview staled the findings of every other.
 fn design_check_input_digest(
-    state: &AppState,
+    model: &Model,
     subject: &CellViewRef,
     config: &DrcConfig,
 ) -> Result<ContentDigest, String> {
-    if let Some(error) = state.model.workspace.annotation_restoration_error() {
+    if let Some(error) = model.workspace.annotation_restoration_error() {
         return Err(format!("reference annotation restoration failed: {error}"));
     }
-    let projection = state
-        .model
+    let projection = model
         .workspace
         .design_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let buffer = |key: &str| {
@@ -1199,7 +1192,7 @@ fn design_check_input_digest(
         )
     })?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &projection,
     );
     let reads = rspice_design::drc::check_reads(checked, subject, &hierarchy);
@@ -1240,12 +1233,12 @@ fn design_check_input_digest(
     // single schematic, and only the cellviews read carry theirs in. The
     // configuration enters through the bindings it decided.
     let material = serde_json::to_vec(&(
-        state.model.workspace.content.project.id(),
+        model.workspace.content.project.id(),
         owner_key(subject).to_string(),
         cellviews,
         &reads.bindings,
         &reads.globals,
-        state.model.library_manager.revision(),
+        model.library_manager.revision(),
         projection.connectivity(),
         profile,
     ))

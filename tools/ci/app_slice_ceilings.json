@@ -61,7 +61,7 @@
     "framework->shell": 211,
     "framework->simulate": 5,
     "model->design": 2,
-    "model->session": 156,
+    "model->session": 123,
     "run->code": 6,
     "run->session": 123,
     "services->project": 15,
@@ -72,7 +72,7 @@
   "whole-app": {
     "&RSpiceApp params outside shell": 323,
     "&mut RSpiceApp params outside shell": 668,
-    "impl AppState methods outside session": 331,
+    "impl AppState methods outside session": 303,
     "impl RSpiceApp methods outside shell": 224
   }
 }

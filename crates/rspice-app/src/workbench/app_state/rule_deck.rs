@@ -10,27 +10,27 @@ use std::sync::Arc;
 
 use rspice_design::drc::DeckIssue;
 
-use super::AppState;
 use super::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
     FindingKey, mint_canonical,
 };
 use crate::product::ContentDigest;
 use crate::state::PreflightRemediation;
+use crate::workbench::app_state::{Model, SlotFacts};
 
 /// Producer identity every rule-deck record carries.
 const RULE_DECK_PRODUCER: &str = "rspice.design.rule-deck";
 
-impl AppState {
+impl Model {
     /// Publish what the stored deck could not apply, replacing what was
     /// published for it before. Asked when a project is opened and whenever
     /// the deck is edited.
-    pub(crate) fn publish_rule_deck_issues(&mut self) {
+    pub(crate) fn publish_rule_deck_issues(&mut self, facts: SlotFacts) {
         let records = rule_deck_records(self);
         // One record per kept code and at most one for the whole deck, so the
         // batch never mints one identity twice; the digest is over the deck
         // alone. Neither refusal the store has can occur.
-        if let Err(error) = self.publish_diagnostics(DiagnosticInputs::RuleDeck, records) {
+        if let Err(error) = self.publish_diagnostics(DiagnosticInputs::RuleDeck, records, facts) {
             debug_assert!(false, "the rule deck's records were refused: {error}");
         }
     }
@@ -41,9 +41,8 @@ impl AppState {
 /// Over the issues rather than the deck: deciding a rule this build reads
 /// does not change what it could not read, and must not stale the records
 /// saying so.
-pub(super) fn live_input_digest(state: &AppState) -> Result<ContentDigest, String> {
-    let issues = state
-        .model
+pub(super) fn live_input_digest(model: &Model) -> Result<ContentDigest, String> {
+    let issues = model
         .workspace
         .content
         .design_rules
@@ -52,15 +51,15 @@ pub(super) fn live_input_digest(state: &AppState) -> Result<ContentDigest, Strin
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     super::diagnostic_store::digest_of(&(
-        state.model.workspace.content.project.id(),
-        project_file_label(state),
+        model.workspace.content.project.id(),
+        project_file_label(model),
         issues,
     ))
 }
 
 /// The project file the deck is stored in, as a reader finds it on disk.
-pub(super) fn project_file_label(state: &AppState) -> String {
-    let project = &state.model.workspace.content.project;
+pub(super) fn project_file_label(model: &Model) -> String {
+    let project = &model.workspace.content.project;
     project
         .path
         .as_deref()
@@ -71,11 +70,11 @@ pub(super) fn project_file_label(state: &AppState) -> String {
         )
 }
 
-fn rule_deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
-    let issues = state.model.workspace.content.design_rules.issues();
-    let project = state.model.workspace.content.project.id();
-    let revision = state.model.workspace.content.project.revision().get();
-    let file = project_file_label(state);
+fn rule_deck_records(model: &Model) -> Vec<DiagnosticRecord> {
+    let issues = model.workspace.content.design_rules.issues();
+    let project = model.workspace.content.project.id();
+    let revision = model.workspace.content.project.revision().get();
+    let file = project_file_label(model);
     let document: Arc<str> = Arc::from(file.as_str());
     let keys = issues
         .iter()
@@ -156,6 +155,7 @@ const fn issue_level(issue: &DeckIssue) -> DiagnosticLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
 
     fn deck_records(state: &AppState) -> Vec<DiagnosticRecord> {
         state

@@ -305,7 +305,9 @@ fn conclude_stale(
 ) {
     report.prepared = None;
     if let Some(inputs_at_press) = inputs_at_press {
-        state.publish_dispatch_diagnostics_against(&report, inputs_at_press);
+        state
+            .model
+            .publish_dispatch_diagnostics_against(&report, inputs_at_press);
     }
     state.record(
         LogSeverity::Warning,
@@ -373,9 +375,9 @@ fn conclude(
     // digest is taken over.
     state.runs.preflight.report = Some(report.clone());
     match inputs_at_press {
-        Some(inputs_at_press) => {
-            state.publish_dispatch_diagnostics_against(&report, inputs_at_press)
-        }
+        Some(inputs_at_press) => state
+            .model
+            .publish_dispatch_diagnostics_against(&report, inputs_at_press),
         None => state.publish_dispatch_diagnostics(&report),
     }
     // An event, at the severity of the pass rather than of its findings: the

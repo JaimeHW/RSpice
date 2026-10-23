@@ -828,7 +828,9 @@ fn commit_create_hierarchy(state: &mut AppState) -> Result<(), String> {
         // Both sides under the configuration the parent is checked under
         // everywhere else. A ground the extraction moves into the child is
         // still reached through the instance that places it.
-        state.design_check_config(&state.model.workspace.content.active_view),
+        state
+            .model
+            .design_check_config(&state.model.workspace.content.active_view),
     )?;
     candidate
         .validate_connectivity(
