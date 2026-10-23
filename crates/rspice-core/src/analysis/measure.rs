@@ -4255,16 +4255,27 @@ mod tests {
         }
     }
 
+    /// MAX of `signal` over `axis`, with `data` stored under `V(out)`.
+    fn max_of_v_out(signal: &str, axis: &[Value], data: &[Value]) -> MeasureResult {
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(out)".to_string(), data);
+        engine_with(max_statement(signal))
+            .evaluate(axis, &signals)
+            .remove(0)
+    }
+
+    /// The measurement failed without a value, with an error containing `needle`.
+    fn assert_failed_with(result: &MeasureResult, needle: &str) {
+        assert_eq!(result.value, None);
+        let error = result.error.as_deref().unwrap_or("");
+        assert!(error.contains(needle), "{error}");
+    }
+
     #[test]
     fn lookup_is_case_insensitive() {
-        let time = [0.0, 1.0, 2.0];
-        let data = [0.0, 3.0, 1.0];
-        let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        signals.insert("V(out)".to_string(), &data);
-
-        let results = engine_with(max_statement("v(OUT)")).evaluate(&time, &signals);
-        assert_eq!(results[0].value, Some(3.0));
-        assert_eq!(results[0].event_axis, Some(1.0));
+        let result = max_of_v_out("v(OUT)", &[0.0, 1.0, 2.0], &[0.0, 3.0, 1.0]);
+        assert_eq!(result.value, Some(3.0));
+        assert_eq!(result.event_axis, Some(1.0));
     }
 
     #[test]
@@ -4282,85 +4293,34 @@ mod tests {
 
     #[test]
     fn missing_signal_reports_failure() {
-        let time = [0.0, 1.0];
-        let data = [0.0, 1.0];
-        let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        signals.insert("V(out)".to_string(), &data);
-
-        let results = engine_with(max_statement("V(nope)")).evaluate(&time, &signals);
-        assert_eq!(results[0].value, None);
-        assert!(results[0].error.as_deref().unwrap_or("").contains("nope"));
+        let result = max_of_v_out("V(nope)", &[0.0, 1.0], &[0.0, 1.0]);
+        assert_failed_with(&result, "nope");
     }
 
     #[test]
     fn empty_axis_reports_failed_measurement_without_panicking() {
-        let data: [Value; 0] = [];
-        let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        signals.insert("V(out)".to_string(), &data);
-
-        let results = engine_with(max_statement("V(out)")).evaluate(&[], &signals);
-
-        assert_eq!(results[0].value, None);
-        assert!(
-            results[0]
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("axis is empty")
-        );
+        assert_failed_with(&max_of_v_out("V(out)", &[], &[]), "axis is empty");
     }
 
     #[test]
     fn mismatched_signal_length_reports_failed_measurement_without_panicking() {
-        let time = [0.0, 1.0, 2.0];
-        let data = [0.0, 1.0];
-        let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        signals.insert("V(out)".to_string(), &data);
-
-        let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
-
-        assert_eq!(results[0].value, None);
-        assert!(
-            results[0]
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("measurement axis has 3")
-        );
+        let result = max_of_v_out("V(out)", &[0.0, 1.0, 2.0], &[0.0, 1.0]);
+        assert_failed_with(&result, "measurement axis has 3");
     }
 
     #[test]
     fn non_finite_axis_reports_failed_measurement_without_passing_specs() {
-        let time = [0.0, f64::NAN, 2.0];
-        let data = [0.0, 1.0, 2.0];
-        let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        signals.insert("V(out)".to_string(), &data);
-
-        let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
-
-        assert!(!results[0].passed);
-        assert_eq!(results[0].value, None);
-        assert!(
-            results[0]
-                .error
-                .as_deref()
-                .unwrap_or("")
-                .contains("axis contains non-finite")
-        );
+        let result = max_of_v_out("V(out)", &[0.0, f64::NAN, 2.0], &[0.0, 1.0, 2.0]);
+        assert!(!result.passed);
+        assert_failed_with(&result, "axis contains non-finite");
     }
 
     #[test]
     fn nan_in_an_unreferenced_sample_does_not_fail_other_measurement_state() {
-        let time = [0.0, 1.0, 2.0];
-        let data = [0.0, f64::NAN, 2.0];
-        let mut signals: HashMap<String, &[Value]> = HashMap::new();
-        signals.insert("V(out)".to_string(), &data);
-
-        let results = engine_with(max_statement("V(out)")).evaluate(&time, &signals);
-
-        assert!(results[0].passed);
-        assert_eq!(results[0].value, Some(2.0));
-        assert_eq!(results[0].error, None);
+        let result = max_of_v_out("V(out)", &[0.0, 1.0, 2.0], &[0.0, f64::NAN, 2.0]);
+        assert!(result.passed);
+        assert_eq!(result.value, Some(2.0));
+        assert_eq!(result.error, None);
     }
 
     #[test]
