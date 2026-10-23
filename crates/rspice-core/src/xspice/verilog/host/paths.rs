@@ -73,19 +73,23 @@ pub(super) struct PathDelays {
 }
 
 impl PathDelays {
-    /// The plan's paths; `None` for a plan with none.
-    pub(super) fn for_plan(plan: &CanonicalDigitalPlan) -> Option<Self> {
-        if plan.delays.paths.is_empty() {
+    /// The plan's paths that `keep` keeps; `None` when that is none.
+    pub(super) fn for_plan(
+        plan: &CanonicalDigitalPlan,
+        keep: impl Fn(&rspice_veriloga::canonical_ir::digital::DigitalModulePath) -> bool,
+    ) -> Option<Self> {
+        let kept: Vec<_> = plan.delays.paths.iter().filter(|path| keep(path)).collect();
+        if kept.is_empty() {
             return None;
         }
         let precision = plan.timing.precision_exponent;
         let mut tables = PathTables {
-            paths: Vec::with_capacity(plan.delays.paths.len()),
+            paths: Vec::with_capacity(kept.len()),
             by_source: BTreeMap::new(),
             by_destination: BTreeMap::new(),
             styles: BTreeMap::new(),
         };
-        for (index, path) in plan.delays.paths.iter().enumerate() {
+        for (index, path) in kept.into_iter().enumerate() {
             let scale = u32::try_from(i32::from(path.delay.exponent) - i32::from(precision))
                 .ok()
                 .and_then(|finer| 10_u64.checked_pow(finer));
@@ -254,7 +258,7 @@ impl PathDelays {
 /// A transition's place in a path's twelve delays (table 14-3), as Icarus
 /// Verilog reads a bit that did not change: `0` to `0` as a rise, `1` to
 /// `1` as a fall, `x` to `x` as `x` to `0` and `z` to `z` as `z` to `0`.
-fn transition_index(from: FourStateBit, to: FourStateBit) -> usize {
+pub(super) fn transition_index(from: FourStateBit, to: FourStateBit) -> usize {
     use FourStateBit::{HighImpedance as Z, One, Unknown as X, Zero};
     match (from, to) {
         (Zero, Zero | One) => 0,

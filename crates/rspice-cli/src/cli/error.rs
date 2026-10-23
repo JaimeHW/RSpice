@@ -795,17 +795,7 @@ impl From<rspice_core::SimulationError> for CliError {
 
 impl From<rspice_core::SimulationConfigError> for CliError {
     fn from(err: rspice_core::SimulationConfigError) -> Self {
-        match err {
-            // A setting this build declines (an HDL option of a P2 lane that
-            // has not landed) is a capability gap, reported with its token.
-            rspice_core::SimulationConfigError::UnsupportedCapability(refusal) => {
-                CliError::CoreSimulationError {
-                    source: rspice_core::SimulationError::UnsupportedCapability(refusal),
-                    analysis: None,
-                }
-            }
-            err => CliError::CoreConfigError { source: err },
-        }
+        CliError::CoreConfigError { source: err }
     }
 }
 

@@ -60,6 +60,7 @@
 mod analog_sample_tests;
 mod charge;
 pub(crate) mod checkpoint;
+mod checks;
 mod coupled;
 mod delays;
 mod image;
@@ -501,6 +502,11 @@ pub(crate) struct DigitalHost {
     /// Pending updates of delayed drivers and nets under their own stable
     /// wakeup; `None` for a design with no delay on either.
     pending: Option<delays::PendingDrives>,
+    /// The timing checks (IEEE 1364-2005 section 15); `None` for a design
+    /// with none, or a run that leaves them out.
+    checks: Option<checks::TimingChecks>,
+    /// What the run leaves out of the design's `specify` blocks.
+    drops: delays::Drops,
     external_targets: Vec<TargetId>,
     external_real_targets: Vec<TargetId>,
     elaboration_closed: bool,
@@ -709,11 +715,14 @@ impl DigitalHost {
         });
         let charge = charge::ChargeTimers::for_plan(&plan, &mut scheduler);
         let pending = delays::PendingDrives::for_plan(&plan, &mut scheduler);
+        let checks = checks::TimingChecks::for_plan(&plan);
         Self {
             checkpoint_failed: false,
             nba_target,
             charge,
             pending,
+            checks,
+            drops: delays::Drops::default(),
             external_targets: Vec::new(),
             external_real_targets: Vec::new(),
             elaboration_closed: false,
@@ -859,8 +868,9 @@ impl DigitalHost {
                 .external_real_targets
                 .push(fresh.scheduler.intern_target(target.clone()));
         }
-        if self.path_delays_dropped() {
-            fresh.drop_path_delays();
+        if self.drops != delays::Drops::default() {
+            fresh.drops = self.drops;
+            fresh.apply_drops();
         }
         fresh
     }
@@ -984,6 +994,11 @@ impl DigitalHost {
 
     pub(crate) fn prepare_start(&mut self) -> Result<(), DigitalRunError> {
         self.elaboration_closed = true;
+        if self.checks.is_some() {
+            for warning in checks::TimingChecks::start_warnings(&self.plan) {
+                self.effects.warn_unsited(None, &warning);
+            }
+        }
         let order: Vec<usize> = if self.reverse_active {
             (0..self.slots.len()).rev().collect()
         } else {
@@ -1744,6 +1759,8 @@ impl DigitalHost {
             }
             // A module path's source changing (IEEE 1364-2005 section 14).
             self.note_path_changes(drained, tick);
+            // A timing check's events (IEEE 1364-2005 section 15).
+            self.note_timing_checks(drained, tick);
             let observed = self.effects.observes_changes();
             for transition in drained.iter() {
                 // IEEE 1364-2005 sections 17.1.3, 17.2.2 and 18.1: a change of

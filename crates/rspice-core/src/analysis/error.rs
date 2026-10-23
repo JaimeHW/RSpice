@@ -932,8 +932,6 @@ pub enum SimulationError {
     /// `Engine::run_with_outcome` translates this into successful normal finish.
     #[error("{0}")]
     ModelFinished(Box<crate::ModelFinish>),
-    /// Never holds [`crate::config::SimulationConfigError::UnsupportedCapability`]:
-    /// the conversion moves that to [`Self::UnsupportedCapability`].
     #[error("Invalid simulation configuration: {0}")]
     Configuration(#[source] crate::config::SimulationConfigError),
 
@@ -1100,16 +1098,9 @@ impl From<ContinuationFailure> for SimulationError {
     }
 }
 
-/// A configuration the build deliberately refuses stays a typed capability
-/// refusal; every other configuration error is a configuration error.
 impl From<crate::config::SimulationConfigError> for SimulationError {
     fn from(error: crate::config::SimulationConfigError) -> Self {
-        match error {
-            crate::config::SimulationConfigError::UnsupportedCapability(refusal) => {
-                Self::UnsupportedCapability(refusal)
-            }
-            other => Self::Configuration(other),
-        }
+        Self::Configuration(error)
     }
 }
 
@@ -1630,27 +1621,6 @@ mod tests {
             "unsupported capability [analysis.pss.device] in pss-001: detail"
         );
         assert_eq!(carded.instance_name(), None);
-    }
-
-    /// A run option refused during configuration validation keeps its typed
-    /// refusal when it widens to the engine's error.
-    #[test]
-    fn unlanded_hdl_option_refusals_stay_typed_when_widened() {
-        use crate::config::{HdlRunConfig, SimulationConfig};
-
-        let error = SimulationConfig {
-            hdl: HdlRunConfig {
-                timing_checks: false,
-                ..HdlRunConfig::default()
-            },
-            ..SimulationConfig::default()
-        }
-        .validate()
-        .expect_err("an unlanded option is refused");
-        assert!(matches!(
-            SimulationError::from(error),
-            SimulationError::UnsupportedCapability(_)
-        ));
     }
 
     #[test]

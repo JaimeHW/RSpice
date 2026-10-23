@@ -393,7 +393,9 @@ impl HdlEffects {
         });
     }
 
-    fn warn_unsited(&mut self, clock: Option<DigitalClock>, message: &str) {
+    /// A warning record no call site wrote: the dump's own failures, and
+    /// timing check violations (IEEE 1364-2005 section 15).
+    pub(crate) fn warn_unsited(&mut self, clock: Option<DigitalClock>, message: &str) {
         self.severities.warnings += 1;
         self.record_unsited(
             clock,

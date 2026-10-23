@@ -1869,6 +1869,33 @@ impl CanonicalDigitalPlan {
                 ));
             }
         }
+        for check in &self.delays.checks {
+            let four_state = |signal| {
+                self.signal(signal)
+                    .is_some_and(|signal: &DigitalSignal| !signal.kind.is_real())
+            };
+            if !std::iter::once(&check.reference)
+                .chain(&check.data)
+                .all(|event| {
+                    four_state(event.signal)
+                        && event.condition.is_none_or(|condition| {
+                            self.signal(condition.signal)
+                                .is_some_and(|signal| !signal.kind.is_real() && signal.width == 1)
+                        })
+                })
+                || check.notifier.is_some_and(|notifier| {
+                    !self.signal(notifier).is_some_and(|signal| {
+                        !signal.kind.is_real() && signal.procedurally_assignable
+                    })
+                })
+                || check.exponent < precision
+            {
+                return Err(error(
+                    "digital timing check names an undeclared or real signal, a notifier that \
+                     is no variable, or limits finer than the design's time grid",
+                ));
+            }
+        }
         Ok(())
     }
 

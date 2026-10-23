@@ -66,6 +66,9 @@ pub struct AnalyzedDigital {
     /// Module path delays (IEEE 1364-2005 section 14), one per source and
     /// destination, in declaration order.
     pub paths: Vec<AnalyzedSpecifyPath>,
+    /// Timing checks (section 15), in declaration order, in the module's
+    /// own names.
+    pub timing_checks: Vec<SpecifyTimingCheck>,
     /// Instantiated child modules, elaborated flat into this module's scope.
     ///
     /// Empty as the analyzer leaves it — a module is analyzed on its own and
@@ -645,6 +648,8 @@ pub struct ElaboratedDigitalInstance {
     pub bit_aliases: Vec<ElaboratedDigitalBitAlias>,
     /// The instantiated module's path delays, in its own names.
     pub paths: Vec<AnalyzedSpecifyPath>,
+    /// The instantiated module's timing checks, in its own names.
+    pub timing_checks: Vec<SpecifyTimingCheck>,
     /// The instantiated module's *own* integer parameters and localparams.
     ///
     /// Not the parent's, and not the parent's merged with the child's. A
@@ -837,6 +842,7 @@ impl SemanticAnalyzer {
         }
         self.reject_drivers_on_input_ports(module, &continuous_assigns);
         let paths = self.analyze_specify_paths(module, &signals);
+        let timing_checks = self.analyze_timing_checks(module, &signals);
 
         for process in &mut processes {
             super::digital_walk::rewrite_roots(&mut process.body, &mut |expression| {
@@ -921,6 +927,7 @@ impl SemanticAnalyzer {
                 .collect(),
             continuous_assigns,
             paths,
+            timing_checks,
             // A module is analyzed on its own, so it knows nothing yet about
             // what it instantiates; hierarchy elaboration fills this in on the
             // module it selects.
@@ -1805,6 +1812,94 @@ impl SemanticAnalyzer {
             }
         }
         paths
+    }
+
+    /// The module's timing checks (IEEE 1364-2005 section 15), each event's
+    /// terminal a discrete signal of the module, its notifier a `reg`
+    /// (section 15.5), and each delayed signal a net as wide as the signal
+    /// it copies (section 15.8).
+    fn analyze_timing_checks(
+        &mut self,
+        module: &Module,
+        signals: &[AnalyzedDigitalSignal],
+    ) -> Vec<SpecifyTimingCheck> {
+        let signal = |name: &str| {
+            signals
+                .iter()
+                .find(|signal| signal.name == name && signal.width > 0)
+        };
+        let mut checks = Vec::new();
+        for check in &module.timing_checks {
+            let name = check.kind.name();
+            let mut problems = Vec::new();
+            for event in std::iter::once(&check.reference).chain(&check.data) {
+                if signal(&event.terminal.name).is_none() {
+                    problems.push((
+                        format!(
+                            "`{name}` event terminal `{}` is no discrete signal of module `{}`",
+                            event.terminal.name, module.name
+                        ),
+                        event.terminal.span,
+                    ));
+                }
+                if let Some(condition) = &event.condition
+                    && signal(&condition.signal.name).is_none_or(|found| found.width != 1)
+                {
+                    problems.push((
+                        format!(
+                            "`{name}` condition signal `{}` is no scalar signal of module `{}`; \
+                             IEEE 1364-2005 section 15.6 conditions a check on a scalar",
+                            condition.signal.name, module.name
+                        ),
+                        condition.signal.span,
+                    ));
+                }
+            }
+            if let Some(notifier) = &check.notifier
+                && !signal(&notifier.name)
+                    .is_some_and(|found| matches!(found.class, DigitalSignalClass::Variable(_)))
+            {
+                problems.push((
+                    format!(
+                        "`{name}` notifier `{}` is not a `reg` of module `{}`; IEEE 1364-2005 \
+                         section 15.5 toggles a reg",
+                        notifier.name, module.name
+                    ),
+                    notifier.span,
+                ));
+            }
+            for (delayed, source) in [
+                (&check.delayed_reference, Some(&check.reference)),
+                (&check.delayed_data, check.data.as_ref()),
+            ] {
+                let (Some(delayed), Some(source)) = (delayed, source) else {
+                    continue;
+                };
+                let fits = signal(&delayed.name).is_some_and(|found| {
+                    matches!(found.class, DigitalSignalClass::Net(_))
+                        && signal(&source.terminal.name)
+                            .is_some_and(|source| source.width == found.width)
+                });
+                if !fits {
+                    problems.push((
+                        format!(
+                            "`{name}` delayed signal `{}` is not a net of module `{}` as wide \
+                             as `{}`; IEEE 1364-2005 section 15.8 drives it with a delayed \
+                             copy",
+                            delayed.name, module.name, source.terminal.name
+                        ),
+                        delayed.span,
+                    ));
+                }
+            }
+            if problems.is_empty() {
+                checks.push(check.clone());
+            }
+            for (message, span) in problems {
+                self.record_error_at(SemanticErrorKind::InvalidExpression(message), span);
+            }
+        }
+        checks
     }
 
     fn reject_drivers_on_input_ports(

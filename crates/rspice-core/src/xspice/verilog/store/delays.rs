@@ -136,16 +136,23 @@ impl DigitalSignalStore {
         self.delays.path(signal)
     }
 
-    /// Run every module path destination undelayed (`.options
-    /// hdl_path_delays=no`), before the design starts.
-    pub(crate) fn drop_path_delays(&mut self) {
+    /// Run each module path destination that `unreached` names undelayed,
+    /// for a run that leaves out every path to it (`.options
+    /// hdl_path_delays=no`, or `hdl_timing_checks=no` for a timing check's
+    /// delayed signal), before the design starts.
+    pub(crate) fn drop_path_stages(&mut self, unreached: impl Fn(DigitalSignalId) -> bool) {
         let staged: Vec<usize> = (0..self.delays.tables.paths.len())
-            .filter(|index| self.delays.tables.paths[*index])
+            .filter(|index| {
+                self.delays.tables.paths[*index] && unreached(DigitalSignalId::from(*index))
+            })
             .collect();
         if staged.is_empty() {
             return;
         }
-        Arc::make_mut(&mut self.delays.tables).paths.fill(false);
+        let tables = Arc::make_mut(&mut self.delays.tables);
+        for index in &staged {
+            tables.paths[*index] = false;
+        }
         // A destination started `x` only for its stage's sake; it resolves
         // its drivers as any net does.
         for index in staged {
@@ -159,8 +166,26 @@ impl DigitalSignalStore {
         self.take_charge_changes();
     }
 
+    /// Toggle a timing check's notifier (IEEE 1364-2005 section 15.5): each
+    /// bit `x` to 0, 0 to 1 and 1 to 0, and `z` stays `z`.
+    pub(crate) fn toggle_notifier(&mut self, signal: DigitalSignalId) {
+        use rspice_veriloga::four_state::FourStateBit;
+        let Some(mut value) = self.values.get(usize::from(signal)).cloned() else {
+            return;
+        };
+        for index in 0..value.width() {
+            let toggled = match value.bit(index) {
+                FourStateBit::Zero => FourStateBit::One,
+                FourStateBit::One | FourStateBit::Unknown => FourStateBit::Zero,
+                FourStateBit::HighImpedance => FourStateBit::HighImpedance,
+            };
+            value.set_bit(index, toggled);
+        }
+        self.publish(signal, value);
+    }
+
     /// Stage the module path destinations `other` stages, for a store
-    /// restored in its place: [`Self::drop_path_delays`] holds for the run.
+    /// restored in its place: [`Self::drop_path_stages`] holds for the run.
     pub(super) fn inherit_path_stages(&mut self, other: &Self) {
         self.delays.tables = Arc::clone(&other.delays.tables);
     }

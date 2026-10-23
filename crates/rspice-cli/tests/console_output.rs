@@ -318,37 +318,71 @@ fn hdl_text_moves_to_stderr_when_stdout_is_a_payload() {
     );
 }
 
-/// HDL options whose behaviour has not landed are refused, saying plainly what
-/// is not supported, rather than accepted and ignored; a stray positional is
-/// not a plusarg.
+/// A stray positional is not a plusarg.
 #[test]
-fn unsupported_hdl_options_are_refused_as_not_supported_yet() {
-    let directory = common::test_dir("hdl_unlanded");
+fn a_stray_positional_is_not_a_plusarg() {
+    let directory = common::test_dir("hdl_stray_positional");
     hdl_console_deck(&directory, "");
-    // A typed capability refusal: exit 69, its token in the JSON error, and
-    // text that says what is not supported, never a plan lane.
-    let refused = |args: &[&str], token: &str, feature: &str| {
-        let mut command = vec!["--quiet", "--error-format", "json", "run", "talker.cir"];
-        command.extend(args);
-        let output = rspice_in(&directory, &command);
-        assert_eq!(output.status.code(), Some(69), "{output:?}");
-        let error: serde_json::Value = serde_json::from_slice(&output.stderr)
-            .unwrap_or_else(|error| panic!("a JSON error: {error}: {output:?}"));
-        assert_eq!(error["error"]["category"], "capability", "{error}");
-        assert_eq!(error["error"]["capability"], token, "{error}");
-        let message = error["error"]["message"].as_str().unwrap();
-        assert!(message.contains("is not supported yet"), "{message}");
-        assert!(message.contains(feature), "{message}");
-        assert!(!message.contains("lane"), "no plan identifier: {message}");
-    };
-    hdl_console_deck(&directory, ".options hdl_timing_checks=0\n");
-    refused(
-        &[],
-        "hdl.option.timing_checks",
-        "`specify` timing checks are not implemented",
-    );
     let output = rspice_in(&directory, &["--quiet", "run", "talker.cir", "N=4"]);
     assert_eq!(output.status.code(), Some(2), "{output:?}");
+}
+
+/// IEEE 1364-2005 section 15: `--hdl-timing-checks` and `.options
+/// hdl_timing_checks` run a deck's HDL timing checks or leave them out. `d`
+/// changes 1 before `c` rises at 2, inside the setup limit of 3, so the
+/// check's notifier goes from `x` to 0 at 2 (section 15.5); left out, it
+/// never changes. The values are the LRM's closed form.
+#[test]
+fn hdl_timing_checks_runs_or_leaves_out_timing_checks() {
+    let directory = common::test_dir("hdl_timing_checks");
+    std::fs::write(
+        directory.join("stamp.va"),
+        "`timescale 1ns/1ns\n\
+         module chk(input d, input c);\n\
+         \x20 reg ntf;\n\
+         \x20 specify $setup(d, posedge c, 3, ntf); endspecify\n\
+         \x20 always @(ntf) $display(\"ntf=%b t=%0t\", ntf, $time);\n\
+         endmodule\n\
+         module stamp(p, n);\n\
+         \x20 inout p, n;\n\
+         \x20 electrical p, n;\n\
+         \x20 reg d, c;\n\
+         \x20 chk u(d, c);\n\
+         \x20 initial begin d = 0; c = 0; #1 d = 1; #1 c = 1; end\n\
+         \x20 analog I(p, n) <+ V(p, n) / 1000.0;\n\
+         endmodule\n",
+    )
+    .unwrap();
+    let deck = |options: &str| {
+        std::fs::write(
+            directory.join("stamp.cir"),
+            format!(
+                "* timing checks\nx1 p 0 stamp\nrp p 0 1k\n.va \"stamp.va\" module=stamp\n{options}.tran 1n 6n\n.end\n"
+            ),
+        )
+        .unwrap();
+    };
+    for (options, args, checked) in [
+        ("", &[][..], true),
+        ("", &["--hdl-timing-checks", "no"][..], false),
+        (".options hdl_timing_checks=0\n", &[][..], false),
+    ] {
+        deck(options);
+        let mut command = vec!["--quiet", "run", "stamp.cir"];
+        command.extend(args);
+        let output = rspice_in(&directory, &command);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{options}{args:?}: {output:?}"
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.contains("ntf=0 t=2\n"),
+            checked,
+            "{options}{args:?}: {stdout}"
+        );
+    }
 }
 
 /// IEEE 1364-2005 section 5.3: `--hdl-delay-select` and `.options

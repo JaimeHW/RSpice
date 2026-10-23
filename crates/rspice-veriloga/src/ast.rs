@@ -293,6 +293,9 @@ pub struct Module {
     /// The pulse style declarations of module path outputs (section
     /// 14.6.4), in declaration order.
     pub specify_pulse_styles: Vec<SpecifyPulseStyle>,
+    /// The timing checks of its `specify` blocks (section 15), in
+    /// declaration order.
+    pub timing_checks: Vec<SpecifyTimingCheck>,
     /// Discrete-domain variable declarations (`reg`), in declaration order
     pub digital_variables: Vec<DigitalVariableDecl>,
     /// Continuous assignments (`assign`), in declaration order
@@ -397,9 +400,10 @@ impl Module {
     }
 
     /// Whether the module declares anything from the discrete half of
-    /// Verilog-AMS.
+    /// Verilog-AMS, a timing check among it.
     pub fn has_digital_content(&self) -> bool {
-        !self.digital_nets.is_empty()
+        !self.timing_checks.is_empty()
+            || !self.digital_nets.is_empty()
             || !self.digital_variables.is_empty()
             || !self.continuous_assigns.is_empty()
             || !self.digital_processes.is_empty()
@@ -438,6 +442,7 @@ impl Module {
             specify_paths: Vec::new(),
             specify_pulse_limits: Vec::new(),
             specify_pulse_styles: Vec::new(),
+            timing_checks: Vec::new(),
             digital_variables: Vec::new(),
             continuous_assigns: Vec::new(),
             gate_arrays: Vec::new(),
@@ -2578,6 +2583,98 @@ pub enum PulseStyle {
     ShowCancelled,
     /// `noshowcancelled`: such a pulse vanishes (the default).
     NoShowCancelled,
+}
+
+/// A timing check of a `specify` block (IEEE 1364-2005 section 15).
+#[derive(Debug, Clone)]
+pub struct SpecifyTimingCheck {
+    pub kind: TimingCheckKind,
+    pub reference: TimingCheckEvent,
+    /// The data event; `$period` and `$width` have none (`$width`'s is the
+    /// reference's opposite edge).
+    pub data: Option<TimingCheckEvent>,
+    /// The limits in argument order: `$setuphold`'s setup and hold,
+    /// `$recrem`'s recovery and removal, `$nochange`'s start and end edge
+    /// offsets, `$width`'s limit and threshold, or the one limit.
+    pub limits: Vec<Expression>,
+    /// The `reg` the check toggles on a violation (section 15.5).
+    pub notifier: Option<SpecifyTerminal>,
+    /// `$setuphold`'s and `$recrem`'s delayed reference and data nets
+    /// (section 15.8), each driven by a delayed copy of its signal.
+    pub delayed_reference: Option<SpecifyTerminal>,
+    pub delayed_data: Option<SpecifyTerminal>,
+    pub span: Span,
+}
+
+/// Which timing check (IEEE 1364-2005 sections 15.2 and 15.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimingCheckKind {
+    Setup,
+    Hold,
+    SetupHold,
+    Recovery,
+    Removal,
+    RecRem,
+    Skew,
+    Period,
+    Width,
+    NoChange,
+}
+
+impl TimingCheckKind {
+    /// The system task name.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Setup => "$setup",
+            Self::Hold => "$hold",
+            Self::SetupHold => "$setuphold",
+            Self::Recovery => "$recovery",
+            Self::Removal => "$removal",
+            Self::RecRem => "$recrem",
+            Self::Skew => "$skew",
+            Self::Period => "$period",
+            Self::Width => "$width",
+            Self::NoChange => "$nochange",
+        }
+    }
+}
+
+/// A timing check's reference or data event (section 15.1): a terminal, the
+/// transitions of it that count, and an `&&&` condition.
+#[derive(Debug, Clone)]
+pub struct TimingCheckEvent {
+    /// The transitions of the terminal's least significant bit that count,
+    /// one bit per transition in table 14-3's order (01, 10, 0z, z1, 1z, z0,
+    /// 0x, x1, 1x, x0, xz, zx); `None` counts every change of the terminal.
+    pub edges: Option<u16>,
+    /// `posedge`, `negedge` or `edge[...]` as written, for messages.
+    pub edge_text: Option<SmolStr>,
+    pub terminal: SpecifyTerminal,
+    /// The `&&&` condition (section 15.6).
+    pub condition: Option<TimingCheckCondition>,
+}
+
+/// A timing check event's `&&&` condition (IEEE 1364-2005 section 15.6): a
+/// scalar signal, `~` it, or it compared with a scalar constant.
+#[derive(Debug, Clone)]
+pub struct TimingCheckCondition {
+    /// The conditioning signal, which must be scalar.
+    pub signal: SpecifyTerminal,
+    /// The value of the signal that enables the check.
+    pub enabling: bool,
+    /// Whether `x` or `z` on the signal enables the check: so for the
+    /// nondeterministic `==` and `!=`, but not for a bare signal, `~`, `===`
+    /// or `!==` (OVI Verilog LRM 1.0 B.9.10).
+    pub unknown_enables: bool,
+    /// The condition as a violation's message writes it: `en === 1'b1`.
+    pub text: SmolStr,
+}
+
+impl TimingCheckEvent {
+    /// `posedge` (section 9.7.2, table 9-2): 01, 0z, z1, 0x and x1.
+    pub const POSEDGE: u16 = 0b0000_1100_1101;
+    /// `negedge`: 10, 1z, z0, 1x and x0.
+    pub const NEGEDGE: u16 = 0b0011_0011_0010;
 }
 
 /// One output of a pulse style declaration.

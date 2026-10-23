@@ -1449,6 +1449,7 @@ fn repeat_controls_count_each_transition_and_retain_all_expression_baselines() {
 
 use crate::config::{HdlSeverity, HdlStream};
 
+mod checks;
 mod defparam;
 mod delays;
 mod files;

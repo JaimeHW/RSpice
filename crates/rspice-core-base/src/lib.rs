@@ -87,7 +87,6 @@ family_features!();
 pub(crate) use abort_signal::{AbortReason, AbortSignal};
 #[cfg(test)]
 pub(crate) use abort_signal::{AtomicAbort, NoAbort};
-pub(crate) use capability::UnsupportedCapabilityError;
 pub(crate) use num_complex::Complex64;
 #[cfg(test)]
 pub(crate) use resource::ResourceLimits;

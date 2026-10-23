@@ -69,19 +69,25 @@ pub(crate) struct HostCheckpoint {
     /// sections 6.1.3 and 7.14); absent when none is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pending_drives: Option<PendingDrivesSection>,
-    /// The `specify` state (IEEE 1364-2005 section 14): when each module
-    /// path's source last changed; absent for a design with no path.
+    /// The `specify` state (IEEE 1364-2005 sections 14 and 15): when each
+    /// module path's source last changed, and each timing check's last
+    /// events; absent for a design with neither a path nor a check the run
+    /// keeps.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     specify: Option<SpecifySection>,
 }
 
 /// The specify section, tagged with its own version: each module path's
-/// last counted source change, in plan order.
+/// last counted source change, and each timing check's last reference,
+/// data and trailing edge ticks, in plan order.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SpecifySection {
     version: u32,
-    path_changes: Vec<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path_changes: Option<Vec<u64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    checks: Option<Vec<super::checks::CheckState>>,
 }
 
 const SPECIFY_SECTION_VERSION: u32 = 1;
@@ -365,14 +371,19 @@ impl DigitalHost {
                     version: PENDING_DRIVES_SECTION_VERSION,
                     updates,
                 }),
-            specify: self
-                .pending
-                .as_ref()
-                .and_then(|pending| pending.paths.as_ref())
-                .map(|paths| SpecifySection {
+            specify: {
+                let path_changes = self
+                    .pending
+                    .as_ref()
+                    .and_then(|pending| pending.paths.as_ref())
+                    .map(|paths| paths.image().to_vec());
+                let checks = self.checks.as_ref().map(|checks| checks.image().to_vec());
+                (path_changes.is_some() || checks.is_some()).then_some(SpecifySection {
                     version: SPECIFY_SECTION_VERSION,
-                    path_changes: paths.image().to_vec(),
-                }),
+                    path_changes,
+                    checks,
+                })
+            },
             delayed: self
                 .delayed_updates
                 .iter()
@@ -562,13 +573,24 @@ impl DigitalHost {
             .pending
             .as_mut()
             .and_then(|pending| pending.paths.as_mut());
-        match (&image.specify, paths) {
-            (Some(section), _) if section.version != SPECIFY_SECTION_VERSION => {
-                return Err("host specify section version differs".into());
-            }
-            (Some(section), Some(paths)) => paths.restore(&section.path_changes)?,
+        let empty = SpecifySection {
+            version: SPECIFY_SECTION_VERSION,
+            path_changes: None,
+            checks: None,
+        };
+        let section = image.specify.as_ref().unwrap_or(&empty);
+        if section.version != SPECIFY_SECTION_VERSION {
+            return Err("host specify section version differs".into());
+        }
+        match (&section.path_changes, paths) {
+            (Some(changes), Some(paths)) => paths.restore(changes)?,
             (None, None) => {}
             _ => return Err("host specify section and the design's module paths disagree".into()),
+        }
+        match (&section.checks, restored.checks.as_mut()) {
+            (Some(states), Some(checks)) => checks.restore(states)?,
+            (None, None) => {}
+            _ => return Err("host specify section and the design's timing checks disagree".into()),
         }
         restored.elaboration_closed = true;
         if let Some(section) = &image.effects {
@@ -1211,6 +1233,8 @@ endmodule
     /// restored host still counts the path delay from it: `y` follows `a` 4
     /// after `a` changes at 10, not at once when the 3 of the assignment
     /// ends. An image whose section disagrees with the design is refused.
+    /// The section of a design without timing checks is exactly the one a
+    /// build before them wrote, so such an image resumes unchanged.
     #[test]
     fn host_checkpoint_resumes_a_module_path_from_its_source_change() {
         const PATH: &str = "`timescale 1ns/1ns\nmodule p(input a, output y);\n  \
@@ -1255,6 +1279,74 @@ endmodule
         }
     }
 
+    /// IEEE 1364-2005 section 15: an image taken in the middle of two
+    /// timing checks carries each one's last event ticks in its `specify`
+    /// section, and the restored host completes both as the original does.
+    /// `$width` measures the high phase from 10 to 15, under its limit of 6.
+    /// `$setup` sees `d` change 9 before the edge at 10, which is legal, and
+    /// 3 before the edge at 16, under its limit of 5, so its notifier goes
+    /// from `x` to 0 (section 15.5). The values are
+    /// the LRM's closed form. An image whose section disagrees with the
+    /// design's checks is refused.
+    #[test]
+    fn host_checkpoint_resumes_timing_checks_mid_check() {
+        const CHECKS: &str = "`timescale 1ns/1ns\nmodule c(input d, input k);\n  reg ntf;\n  \
+             specify $setup(d, posedge k, 5, ntf); $width(posedge k, 6); endspecify\n\
+             endmodule\n";
+        let mut original = host(CHECKS);
+        original.start().unwrap();
+        force(&mut original, "k", 1, 0, 1);
+        force(&mut original, "d", 1, 0, 1);
+        force(&mut original, "k", 1, 1, 10);
+        force(&mut original, "d", 1, 1, 13);
+        original.advance_to(14).unwrap();
+        assert!(original.drain_hdl_output().is_empty());
+        let saved = transport(&image(&original));
+        let section = serde_json::to_value(&saved).unwrap()["specify"].clone();
+        assert_eq!(
+            section,
+            json!({"version": 1, "checks": [
+                {"reference": 10, "data": 13},
+                {"reference": 10, "data": 1},
+            ]})
+        );
+        let mut restored = host(CHECKS);
+        restored
+            .restore_checkpoint(&saved, HostCheckpointLimits::default())
+            .unwrap();
+        assert_eq!(image(&restored), saved);
+        for host in [&mut original, &mut restored] {
+            force(host, "k", 1, 0, 15);
+            force(host, "k", 1, 1, 16);
+            let warnings: Vec<String> = host
+                .drain_hdl_output()
+                .into_iter()
+                .map(|record| record.text)
+                .collect();
+            assert_eq!(
+                warnings,
+                [
+                    "$width(posedge k, 6) violated at 15 ns",
+                    "$setup(d, posedge k, 5) violated at 16 ns",
+                ]
+            );
+            assert_eq!(host.read(signal(host, "ntf")).unwrap().spelling(), "0");
+        }
+        let base = serde_json::to_value(&saved).unwrap();
+        for edit in [
+            |value: &mut Value| value["specify"] = Value::Null,
+            |value: &mut Value| value["specify"]["checks"] = json!([{}]),
+        ] {
+            let mut value = base.clone();
+            edit(&mut value);
+            let bad: HostCheckpoint = serde_json::from_value(value).unwrap();
+            let error = host(CHECKS)
+                .restore_checkpoint(&bad, HostCheckpointLimits::default())
+                .unwrap_err();
+            assert!(error.contains("specify"), "{error}");
+        }
+    }
+
     /// `hdl_path_delays=no`: a host that leaves its module paths out writes
     /// no `specify` section, and a host restored from its image, like one
     /// started anew from it, leaves them out as well: `y` follows `a` 3
@@ -1265,7 +1357,7 @@ endmodule
              assign #3 y = a;\n  specify (a => y) = (4, 6); endspecify\nendmodule\n";
         let mut original = host(PATH);
         original.drop_path_delays();
-        assert!(original.fresh().path_delays_dropped());
+        assert!(original.fresh().drops.paths);
         original.start().unwrap();
         force(&mut original, "a", 1, 0, 1);
         original.advance_to(7).unwrap();

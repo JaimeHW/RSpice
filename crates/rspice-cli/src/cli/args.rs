@@ -675,6 +675,10 @@ pub struct RunArgs {
     /// Delay the destinations of HDL `specify` module paths (default: yes)
     #[arg(long, value_name = "yes|no", value_parser = clap::builder::BoolishValueParser::new())]
     pub hdl_path_delays: Option<bool>,
+
+    /// Run the timing checks of HDL `specify` blocks (default: yes)
+    #[arg(long, value_name = "yes|no", value_parser = clap::builder::BoolishValueParser::new())]
+    pub hdl_timing_checks: Option<bool>,
 }
 
 /// `--hdl-delay-select`.

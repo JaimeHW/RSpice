@@ -550,6 +550,7 @@ fn build_sim_config(args: &RunArgs, config: &Config, netlist: &Netlist) -> Simul
             .map(crate::cli::HdlDelaySelectArg::core)
             .unwrap_or_default(),
         path_delays: args.hdl_path_delays.unwrap_or(true),
+        timing_checks: args.hdl_timing_checks.unwrap_or(true),
         ..base.hdl
     };
 

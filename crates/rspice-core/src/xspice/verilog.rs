@@ -743,6 +743,9 @@ pub struct HdlTestbenchOptions {
     /// Delay module path destinations (`hdl_path_delays`, IEEE 1364-2005
     /// section 14). On by default.
     pub path_delays: bool,
+    /// Run `specify` timing checks (`hdl_timing_checks`, IEEE 1364-2005
+    /// section 15). On by default.
+    pub timing_checks: bool,
     /// `` `include `` search directories.
     pub include_dirs: Vec<std::path::PathBuf>,
     pub schedule: HdlSchedule,
@@ -761,6 +764,7 @@ impl Default for HdlTestbenchOptions {
             seed: 0,
             delay_select: crate::config::HdlDelaySelect::default(),
             path_delays: true,
+            timing_checks: true,
             include_dirs: Vec::new(),
             schedule: HdlSchedule::default(),
             tick_ceiling: None,
@@ -994,6 +998,9 @@ pub fn run_digital_testbench(
     });
     if !options.path_delays {
         host.drop_path_delays();
+    }
+    if !options.timing_checks {
+        host.drop_timing_checks();
     }
     host.set_reverse_active(options.schedule == HdlSchedule::ReverseActive);
     host.start()?;

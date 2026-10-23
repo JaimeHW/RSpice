@@ -741,6 +741,7 @@ impl DigitalElaborator<'_> {
             port_drivers,
             bit_aliases,
             paths: child.digital.paths.clone(),
+            timing_checks: child.digital.timing_checks.clone(),
             constants: child.digital.constants.clone(),
             span: instance.span,
         });

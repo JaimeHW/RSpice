@@ -224,6 +224,7 @@ fn execute_end(spec: &CaseSpec) -> RunEnd {
         delay_select,
         // Icarus runs `specify` only under `-gspecify`.
         path_delays: spec.specify,
+        timing_checks: spec.specify,
         include_dirs: vec![spec.root.clone()],
         schedule: match spec.schedule {
             Schedule::Source => HdlSchedule::Source,

@@ -1090,6 +1090,10 @@ pub struct DigitalModulePath {
     /// cancelling both.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub show_cancelled: bool,
+    /// The path that delays a timing check's delayed signal (section
+    /// 15.8): it runs with timing checks, not with module path delays.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub delayed_signal: bool,
 }
 
 /// A module path's delay for each transition of its destination (IEEE
@@ -1115,8 +1119,9 @@ impl DigitalPathDelay {
     }
 }
 
-/// Every delayed driver and net, and every module path. Empty for a design
-/// with none, which is every design that existed before this table did.
+/// Every delayed driver and net, every module path and every timing check.
+/// Empty for a design with none, which is every design that existed before
+/// this table did.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DigitalDelayPlan {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1125,12 +1130,82 @@ pub struct DigitalDelayPlan {
     pub nets: Vec<DigitalNetDelay>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<DigitalModulePath>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<DigitalTimingCheck>,
 }
 
 impl DigitalDelayPlan {
+    /// Whether no driver, net or module path is delayed; timing checks
+    /// delay nothing.
     pub fn is_empty(&self) -> bool {
         self.drivers.is_empty() && self.nets.is_empty() && self.paths.is_empty()
     }
+}
+
+/// A timing check (IEEE 1364-2005 section 15) on discrete signals, its
+/// limits in ticks of `10^exponent` seconds. A negative limit of
+/// `$setuphold`, `$recrem` or `$nochange` narrows its window from that side
+/// (section 15.8).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalTimingCheck {
+    pub kind: DigitalTimingCheckKind,
+    pub reference: DigitalCheckEvent,
+    /// The data event; `$period` and `$width` have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<DigitalCheckEvent>,
+    /// The limit, or `$setuphold`'s setup and hold, `$recrem`'s recovery
+    /// and removal, `$nochange`'s start and end edge offsets, `$width`'s
+    /// limit and threshold; 0 where a check has no second.
+    pub limits: [i64; 2],
+    pub exponent: i8,
+    /// Whether a negative limit was taken as 0 because the two limits
+    /// summed to no more than 0, which the host warns of.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub limit_zeroed: bool,
+    /// The `reg` toggled on each violation (section 15.5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifier: Option<DigitalSignalId>,
+    /// The check as a violation names it: `u1: $setup(d, posedge c, 2)`.
+    pub label: String,
+}
+
+/// Which timing check (IEEE 1364-2005 sections 15.2 and 15.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DigitalTimingCheckKind {
+    Setup,
+    Hold,
+    SetupHold,
+    Recovery,
+    Removal,
+    RecRem,
+    Skew,
+    Period,
+    Width,
+    NoChange,
+}
+
+/// A timing check's reference or data event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalCheckEvent {
+    pub signal: DigitalSignalId,
+    /// The transitions of the signal's least significant bit that count,
+    /// one bit each in table 14-3's order; `None` counts every change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edges: Option<u16>,
+    /// The `&&&` condition: the event counts only while it holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub condition: Option<DigitalCheckCondition>,
+}
+
+/// A timing check event's `&&&` condition (IEEE 1364-2005 section 15.6) on
+/// a one-bit signal: it holds while the signal is `enabling`, and while it
+/// is `x` or `z` only if `unknown_enables` (OVI Verilog LRM 1.0 B.9.10: the
+/// nondeterministic `==` and `!=` only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DigitalCheckCondition {
+    pub signal: DigitalSignalId,
+    pub enabling: bool,
+    pub unknown_enables: bool,
 }
 
 /// A `%v` operand that names a whole net, so its strengths can be printed.

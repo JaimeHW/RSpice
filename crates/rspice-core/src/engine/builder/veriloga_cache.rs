@@ -494,7 +494,10 @@ use super::*;
 // Version 170 follows the canonical IR's schema to 180, whose digital plan
 // carries the module path delays of `specify` blocks. A version-168 record
 // refused `specify`.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 170;
+//
+// Version 171 follows the schema to 181, whose digital plan carries the
+// timing checks of `specify` blocks. A version-170 record refused them.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 171;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

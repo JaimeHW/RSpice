@@ -547,7 +547,9 @@ fn resolve_hdl_options(hdl: &mut crate::config::HdlRunConfig, options: &NetlistS
     {
         hdl.path_delays = enabled;
     }
-    if let Some(enabled) = options.hdl_timing_checks {
+    if hdl.timing_checks
+        && let Some(enabled) = options.hdl_timing_checks
+    {
         hdl.timing_checks = enabled;
     }
     if let Some(map) = &options.hdl_libmap {

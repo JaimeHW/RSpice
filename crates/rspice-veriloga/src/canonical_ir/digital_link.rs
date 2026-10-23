@@ -546,6 +546,26 @@ pub fn link_digital_plans(
                 ..*path
             });
         }
+        for check in &source.delays.checks {
+            let signal = |id: DigitalSignalId| layout.map.signals[usize::from(id)];
+            let event =
+                |event: &super::digital::DigitalCheckEvent| super::digital::DigitalCheckEvent {
+                    signal: signal(event.signal),
+                    condition: event.condition.map(|condition| {
+                        super::digital::DigitalCheckCondition {
+                            signal: signal(condition.signal),
+                            ..condition
+                        }
+                    }),
+                    ..*event
+                };
+            plan.delays.checks.push(super::digital::DigitalTimingCheck {
+                reference: event(&check.reference),
+                data: check.data.as_ref().map(event),
+                notifier: check.notifier.map(signal),
+                ..check.clone()
+            });
+        }
         for process in &source.processes {
             check_cancel(control)?;
             let mut process = process.clone();

@@ -129,14 +129,6 @@ pub enum SimulationConfigError {
         /// Preceding time value.
         previous: Value,
     },
-    /// A well-formed setting this build deliberately refuses: an HDL run
-    /// option whose behaviour a later P2 lane implements, set away from its
-    /// default. Converting into `SimulationError` yields
-    /// `SimulationError::UnsupportedCapability`, so the refusal stays
-    /// typed rather than reading as an invalid configuration. The token names
-    /// the option; the text names the feature, never the lane.
-    #[error("{0}")]
-    UnsupportedCapability(Box<crate::UnsupportedCapabilityError>),
 }
 
 // ============================================================================
@@ -415,40 +407,6 @@ impl Default for HdlRunConfig {
             timing_checks: true,
             library_map: None,
         }
-    }
-}
-
-impl HdlRunConfig {
-    /// Refuse an option set away from its default before the behaviour it
-    /// selects exists (design P2 section 7, L1 row), as a typed capability
-    /// refusal whose token names the option. [`SimulationConfig::validate`]
-    /// runs it.
-    pub(crate) fn validate(&self) -> Result<(), SimulationConfigError> {
-        match self.unlanded_option() {
-            Some(refusal) => Err(SimulationConfigError::UnsupportedCapability(Box::new(
-                refusal,
-            ))),
-            None => Ok(()),
-        }
-    }
-
-    /// The refusal for the first option set away from its default whose
-    /// behaviour has not landed: timing checks. The token says which; the
-    /// text names the feature.
-    fn unlanded_option(&self) -> Option<crate::UnsupportedCapabilityError> {
-        let (capability, option, reason) = if !self.timing_checks {
-            (
-                "hdl.option.timing_checks",
-                "`.options hdl_timing_checks=0`",
-                "`specify` timing checks are not implemented",
-            )
-        } else {
-            return None;
-        };
-        Some(crate::UnsupportedCapabilityError::new(
-            capability,
-            format!("{option} is not supported yet: {reason}"),
-        ))
     }
 }
 
@@ -745,7 +703,6 @@ impl SimulationConfig {
     /// should call this directly or construct the engine with
     /// `Engine::try_new` before starting simulation work.
     pub fn validate(&self) -> Result<(), SimulationConfigError> {
-        self.hdl.validate()?;
         validate_positive("tolerance", self.tolerance)?;
         validate_count("max_iterations", self.max_iterations)?;
         validate_count("transient_max_iterations", self.transient_max_iterations)?;
@@ -1527,69 +1484,6 @@ mod timeint_config_tests {
         assert_eq!(
             records[0].text,
             "1 further error past the HDL output bound was dropped"
-        );
-    }
-
-    /// Design P2 section 7, L1: every P2 run option exists now, and a value
-    /// other than the default is refused, saying plainly what is not
-    /// supported — never which plan lane brings it.
-    #[test]
-    fn unlanded_hdl_options_are_refused_as_not_supported_yet() {
-        HdlRunConfig::default()
-            .validate()
-            .expect("the defaults are valid");
-        // HDL file I/O has landed: its run directory and confinement are
-        // ordinary options now.
-        HdlRunConfig {
-            run_directory: Some("out".into()),
-            unrestricted_io: true,
-            ..HdlRunConfig::default()
-        }
-        .validate()
-        .expect("the file I/O options are valid");
-        // Library maps and configurations have landed too.
-        HdlRunConfig {
-            library_map: Some("lib.map".into()),
-            ..HdlRunConfig::default()
-        }
-        .validate()
-        .expect("a library map is valid");
-        // And min:typ:max selection.
-        HdlRunConfig {
-            delay_select: HdlDelaySelect::Min,
-            ..HdlRunConfig::default()
-        }
-        .validate()
-        .expect("a delay selection is valid");
-        // And module path delays.
-        HdlRunConfig {
-            path_delays: false,
-            ..HdlRunConfig::default()
-        }
-        .validate()
-        .expect("running without path delays is valid");
-        let error = SimulationConfig {
-            hdl: HdlRunConfig {
-                timing_checks: false,
-                ..HdlRunConfig::default()
-            },
-            ..SimulationConfig::default()
-        }
-        .validate()
-        .expect_err("an unlanded option is refused");
-        let SimulationConfigError::UnsupportedCapability(refusal) = &error else {
-            panic!("expected a typed capability refusal, got {error:?}");
-        };
-        assert_eq!(refusal.capability, "hdl.option.timing_checks", "{error}");
-        let text = error.to_string();
-        assert!(text.contains("is not supported yet"), "{text}");
-        assert!(
-            text.contains("`specify` timing checks are not implemented"),
-            "{text}"
-        );
-        assert!(
-            !text.contains("lane") && !text.contains("P2"),
-            "no plan identifier reaches the text: {text}"
         );
     }
 }

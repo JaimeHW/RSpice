@@ -4764,8 +4764,28 @@ fn specify_paths_lower_one_path_per_source_and_destination() {
 fn specify_items_outside_paths_are_refused() {
     for (item, expected) in [
         (
-            "$setup(a, posedge c, 2);",
-            "Unsupported `specify` timing check: `$setup`",
+            "$timeskew(posedge c, a, 2);",
+            "Unsupported `specify` timing check: `$timeskew`",
+        ),
+        (
+            "$fullskew(posedge c, negedge a, 2, 3);",
+            "Unsupported `specify` timing check: `$fullskew`",
+        ),
+        (
+            "$setuphold(posedge c, a, 1, 1, , c);",
+            "`$setuphold` with a timestamp condition",
+        ),
+        (
+            "$recrem(posedge c, a, 1, 1, , , c);",
+            "`$recrem` with a timecheck condition",
+        ),
+        (
+            "$hold(posedge c &&& (a & c), a, 1);",
+            "a condition other than a scalar signal",
+        ),
+        (
+            "$width(c, 2);",
+            "`$width` takes an edge-controlled reference event",
         ),
         ("(a => y) = (1, 2, 3, 4);", "4 delays"),
         (
@@ -4816,4 +4836,45 @@ fn specify_items_outside_paths_are_refused() {
         "{error}"
     );
     analyze(&source("*>"));
+}
+
+/// Section 15: a timing check's `&&&` condition reads a scalar (15.6), its
+/// notifier is a `reg` (15.5), and only `$setuphold`, `$recrem` and
+/// `$nochange` take a negative limit (15.8). A negative `$nochange` end
+/// offset is refused too: its window would close before the trailing edge
+/// it ends at is known.
+#[test]
+fn timing_check_operands_follow_section_15() {
+    let module = |items: &str| {
+        format!(
+            "module m(input a, input c, input [1:0] v);\n  reg n;\n  specify {items} \
+             endspecify\nendmodule\n"
+        )
+    };
+    for (items, expected) in [
+        (
+            "$hold(posedge c &&& v, a, 1);",
+            "condition signal `v` is no scalar",
+        ),
+        ("$setup(a, posedge c, 1, a);", "notifier `a` is not a `reg`"),
+    ] {
+        let error = analyze_error(&module(items));
+        assert!(error.contains(expected), "{items}: {error}");
+    }
+    for (items, expected) in [
+        (
+            "$setup(a, posedge c, -1);",
+            "a negative limit of a timing check that takes none",
+        ),
+        (
+            "$nochange(posedge c, a, 1, -1);",
+            "a `$nochange` with a negative end edge offset",
+        ),
+    ] {
+        let error = lowering_error(&module(items));
+        assert!(error.contains(expected), "{items}: {error}");
+    }
+    analyze(&module(
+        "$setuphold(posedge c &&& n === 1'b1, a, -1, 2, n); $nochange(posedge c, a, -1, 1);",
+    ));
 }

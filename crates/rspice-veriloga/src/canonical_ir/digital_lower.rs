@@ -88,6 +88,7 @@
 //! two sets of drivers a resolver can tell apart, rather than one body lowered
 //! twice.
 
+mod checks;
 mod connection_shapes;
 mod constant_functions;
 mod constants;
@@ -772,8 +773,9 @@ fn lower_with_analog_variables(
     // Module path delays (IEEE 1364-2005 section 14), each frame's against
     // its own scope and constants.
     let mut paths = Vec::new();
+    let mut timing_checks = Vec::new();
     let frames = std::iter::once((
-        &digital.paths,
+        (&digital.paths, &digital.timing_checks, ""),
         &module_scope,
         &[][..],
         (&module_constants, digital.time_scale),
@@ -786,14 +788,18 @@ fn lower_with_analog_variables(
             .zip(&instance_constants)
             .map(|((instance, scope), constants)| {
                 (
-                    &instance.paths,
+                    (
+                        &instance.paths,
+                        &instance.timing_checks,
+                        instance.path.as_str(),
+                    ),
                     scope,
                     &instance.port_drivers[..],
                     (constants, instance.time_scale),
                 )
             }),
     );
-    for (frame_paths, scope, port_drivers, constants) in frames {
+    for ((frame_paths, frame_checks, instance), scope, port_drivers, constants) in frames {
         lower_paths(
             frame_paths,
             scope,
@@ -802,6 +808,14 @@ fn lower_with_analog_variables(
             (&signals, &elaborated_scope),
             timing.precision_exponent,
             &mut paths,
+        )
+        .map_err(|diagnostic| vec![diagnostic])?;
+        checks::lower_timing_checks(
+            frame_checks,
+            (scope, instance),
+            constants,
+            timing.precision_exponent,
+            (&mut timing_checks, &mut paths),
         )
         .map_err(|diagnostic| vec![diagnostic])?;
     }
@@ -1445,6 +1459,7 @@ fn lower_with_analog_variables(
             drivers: driver_delays.delays,
             nets: net_delays,
             paths,
+            checks: timing_checks,
         },
     }
     .seal()
@@ -1727,6 +1742,7 @@ fn lower_paths(
                 .transpose()?,
             on_detect: path.on_detect,
             show_cancelled: path.show_cancelled,
+            delayed_signal: false,
         });
     }
     Ok(())

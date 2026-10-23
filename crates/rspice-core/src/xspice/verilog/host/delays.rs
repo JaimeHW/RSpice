@@ -35,6 +35,16 @@ use super::*;
 use rspice_veriloga::four_state::FourStateBit;
 use serde::{Deserialize, Serialize};
 
+/// What a run leaves out of a design's `specify` blocks, before it starts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct Drops {
+    /// The module paths (`.options hdl_path_delays=no`).
+    pub(super) paths: bool,
+    /// The timing checks, and the delays of their delayed signals
+    /// (`.options hdl_timing_checks=no`).
+    pub(super) checks: bool,
+}
+
 /// A pending slot's owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub(super) enum PendingOwner {
@@ -81,7 +91,7 @@ impl PendingDrives {
             }),
             due: BTreeMap::new(),
             slots: BTreeMap::new(),
-            paths: super::paths::PathDelays::for_plan(plan),
+            paths: super::paths::PathDelays::for_plan(plan, |_| true),
         })
     }
 
@@ -279,23 +289,48 @@ fn request_of(owner: PendingOwner, value: FourStateValue) -> DelayRequest {
 
 impl DigitalHost {
     /// Run every module path destination undelayed (`.options
-    /// hdl_path_delays=no`), before the design starts.
+    /// hdl_path_delays=no`), before the design starts; a timing check's
+    /// delayed signal keeps its delay.
     pub(crate) fn drop_path_delays(&mut self) {
-        if let Some(pending) = &mut self.pending
-            && pending.paths.take().is_some()
-        {
-            self.store.drop_path_delays();
-        }
+        self.drops.paths = true;
+        self.apply_drops();
     }
 
-    /// Whether [`Self::drop_path_delays`] left the plan's module paths out,
-    /// which a fresh or restored host of the same run keeps.
-    pub(super) fn path_delays_dropped(&self) -> bool {
-        !self.plan.delays.paths.is_empty()
-            && self
-                .pending
-                .as_ref()
-                .is_some_and(|pending| pending.paths.is_none())
+    /// Run no timing check (`.options hdl_timing_checks=no`), before the
+    /// design starts: each delayed signal becomes an undelayed copy.
+    pub(crate) fn drop_timing_checks(&mut self) {
+        self.drops.checks = true;
+        self.apply_drops();
+    }
+
+    /// Leave out what the host's drops name: the module paths of each kind
+    /// they drop, with them the stage of every destination no path left
+    /// reaches, and the timing checks.
+    pub(super) fn apply_drops(&mut self) {
+        let drops = self.drops;
+        let keep = |path: &rspice_veriloga::canonical_ir::digital::DigitalModulePath| {
+            if path.delayed_signal {
+                !drops.checks
+            } else {
+                !drops.paths
+            }
+        };
+        if let Some(pending) = &mut self.pending {
+            pending.paths = super::paths::PathDelays::for_plan(&self.plan, keep);
+        }
+        let reached: BTreeSet<DigitalSignalId> = self
+            .plan
+            .delays
+            .paths
+            .iter()
+            .filter(|path| keep(path))
+            .map(|path| path.destination)
+            .collect();
+        self.store
+            .drop_path_stages(|signal| !reached.contains(&signal));
+        if drops.checks {
+            self.checks = None;
+        }
     }
 
     /// Note on each module path the changes of its source among `drained`,
@@ -308,6 +343,29 @@ impl DigitalHost {
         {
             for transition in drained {
                 paths.note_change(transition, tick);
+            }
+        }
+    }
+
+    /// Take the timing check events among `drained`, the round's
+    /// transitions at `tick`: each violation writes a warning record and
+    /// toggles its check's notifier (IEEE 1364-2005 section 15.5), which
+    /// the next round takes as any change.
+    pub(super) fn note_timing_checks(&mut self, drained: &[SignalTransition], tick: u64) {
+        let Some(checks) = &mut self.checks else {
+            return;
+        };
+        let violations = checks.note(
+            &self.store,
+            drained,
+            tick,
+            self.plan.timing.precision_exponent,
+        );
+        for violation in violations {
+            let clock = DigitalEnvironment::read_clock(&self.store);
+            self.effects.warn_unsited(clock, &violation.message);
+            if let Some(notifier) = violation.notifier {
+                self.store.toggle_notifier(notifier);
             }
         }
     }

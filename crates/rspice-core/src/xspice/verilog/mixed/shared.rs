@@ -702,6 +702,9 @@ impl MixedDigitalCoordinator {
         if !config.path_delays {
             digital.drop_path_delays();
         }
+        if !config.timing_checks {
+            digital.drop_timing_checks();
+        }
     }
 
     /// The `$finish`, `$stop` or `$fatal` the design executed, with the

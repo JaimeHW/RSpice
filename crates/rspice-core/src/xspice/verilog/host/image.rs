@@ -24,6 +24,8 @@ impl Clone for DigitalHost {
             nba_target,
             charge,
             pending,
+            checks,
+            drops,
             external_targets,
             external_real_targets,
             elaboration_closed,
@@ -60,6 +62,8 @@ impl Clone for DigitalHost {
             nba_target: *nba_target,
             charge: charge.clone(),
             pending: pending.clone(),
+            checks: checks.clone(),
+            drops: *drops,
             external_targets: external_targets.clone(),
             external_real_targets: external_real_targets.clone(),
             elaboration_closed: *elaboration_closed,
@@ -108,6 +112,8 @@ impl Clone for DigitalHost {
             nba_target,
             charge,
             pending,
+            checks,
+            drops,
             external_targets,
             external_real_targets,
             elaboration_closed,
@@ -144,6 +150,8 @@ impl Clone for DigitalHost {
             nba_target: source_nba_target,
             charge: source_charge,
             pending: source_pending,
+            checks: source_checks,
+            drops: source_drops,
             external_targets: source_external_targets,
             external_real_targets: source_external_real_targets,
             elaboration_closed: source_elaboration_closed,
@@ -179,6 +187,8 @@ impl Clone for DigitalHost {
         *nba_target = *source_nba_target;
         charge.clone_from(source_charge);
         pending.clone_from(source_pending);
+        checks.clone_from(source_checks);
+        *drops = *source_drops;
         external_targets.clone_from(source_external_targets);
         external_real_targets.clone_from(source_external_real_targets);
         *elaboration_closed = *source_elaboration_closed;
