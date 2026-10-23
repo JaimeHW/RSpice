@@ -517,6 +517,70 @@ fn a_sealed_vcd_dump_travels_with_the_request_and_replays_in_the_worker() {
     assert!(failure.contains("clk.vcd"), "{unsealed}");
 }
 
+/// A `.VEC` card's vector file travels the same way: sealed in the request,
+/// it drives its input and checks its expected output in the worker. Input a
+/// rises over 10..11 ns and output b follows it, so the row at 15 ns that
+/// expects b high holds only if the input drove; the row at 18 ns (line 11)
+/// expects b low and is the one violation.
+#[wasm_bindgen_test]
+fn a_sealed_vector_file_drives_and_checks_in_the_worker() {
+    const VEC: &str = "radix 1 1\nvname a b\nio i o\ntunit ns\nvih 1.8\nvil 0\ntrise 1\n\
+                       0 0 0\n10 1 0\n15 1 1\n18 1 0\n";
+    let mut request = worker_request_json(
+        11,
+        serde_json::json!({"Transient": {
+            "stop_time": 2e-8, "step_time": 2e-10, "start_time": 0.0,
+            "max_timestep": 2e-10, "uic": false
+        }}),
+        "Worker VEC\nR1 a b 1\nR2 b 0 1meg\n.vec 'drive.vec'\n.end\n",
+    );
+    request["request"]["request"]["data_files"] = serde_json::json!({"files": [{
+        "path": "drive.vec",
+        "contents": VEC,
+        "digest": rspice_vocabulary::canonical::content_digest(
+            "rspice.code-model-data-file/v1",
+            VEC.as_bytes(),
+        ),
+    }]});
+    let run = |request: &serde_json::Value| {
+        let response = rspice_worker::run_rspice_ui_worker_request(
+            js_sys::JSON::parse(&request.to_string()).unwrap(),
+        )
+        .expect("a well-formed request is answered");
+        let response = structured_clone(&response);
+        serde_wasm_bindgen::from_value::<serde_json::Value>(
+            js_sys::Reflect::get(&response, &"response".into()).unwrap(),
+        )
+        .unwrap()
+    };
+
+    let checked = run(&request);
+    let reports = checked["outcome"]["Success"]["Transient"]["checks"]["assertions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{checked}"));
+    let [report] = reports.as_slice() else {
+        panic!("one report, the mismatch: {checked}");
+    };
+    assert_eq!(report["name"], "drive.vec");
+    assert_eq!(report["target"], "V(b)");
+    assert_eq!(report["line"].as_u64(), Some(11));
+    let [violation] = report["violations"].as_array().unwrap().as_slice() else {
+        panic!("one violation: {report}");
+    };
+    assert_eq!(
+        violation["start"].as_f64().map(f64::to_bits),
+        Some(18e-9f64.to_bits())
+    );
+
+    request["request"]["request"]
+        .as_object_mut()
+        .unwrap()
+        .remove("data_files");
+    let unsealed = run(&request);
+    let failure = unsealed["outcome"]["Failure"].to_string();
+    assert!(failure.contains("drive.vec"), "{unsealed}");
+}
+
 /// A transient's `.ASSERT` report crosses the worker exactly: the report the
 /// core run publishes in this runtime, field for field and bit for bit. RC,
 /// τ = 1 µs: `V(out)` rises through 0.5 V at τ·ln 2 and stays above it.
