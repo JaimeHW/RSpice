@@ -1851,9 +1851,10 @@ fn the_design_rule_blocker_opens_the_findings_without_re_running_them() {
     app.settle_preflight();
     let worst = app
         .state
+        .model
         .worst_design_rule_finding(&root)
         .expect("the root's findings are published");
-    let published = app.state.design_rule_finding_identities(&root);
+    let published = app.state.model.design_rule_finding_identities(&root);
     let entries_before = app.state.model.log_buffer.entries().count();
 
     apply_remediation(&mut app, PreflightRemediation::DesignChecks);
@@ -1864,7 +1865,7 @@ fn the_design_rule_blocker_opens_the_findings_without_re_running_them() {
     assert_eq!(app.state.workbench.console_page, ConsolePage::Problems);
     assert_eq!(app.state.model.diagnostics.current_finding(), Some(worst));
     assert_eq!(
-        app.state.design_rule_finding_identities(&root),
+        app.state.model.design_rule_finding_identities(&root),
         published,
         "following a finding leaves the evidence it was following in place"
     );

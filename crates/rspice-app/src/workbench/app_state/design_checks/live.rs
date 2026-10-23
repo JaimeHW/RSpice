@@ -12,8 +12,8 @@ use std::time::Duration;
 use sha2::{Digest, Sha256};
 
 use super::{
-    AppState, CellViewCheckReceipt, CheckScope, DESIGN_CHECK_DIGEST_DOMAIN, DiagnosticInputs,
-    Model, RuleCoverage, StoredWaivers, check_coverage, design_rule_records, owner_key,
+    CellViewCheckReceipt, CheckScope, DESIGN_CHECK_DIGEST_DOMAIN, DiagnosticInputs, Model,
+    RuleCoverage, SlotFacts, StoredWaivers, check_coverage, design_rule_records, owner_key,
     projected_buffer,
 };
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -39,7 +39,7 @@ pub(super) struct DrawingState {
     failed: Option<String>,
 }
 
-impl AppState {
+impl Model {
     /// Keep the live findings of the drawing in front of the reader current.
     ///
     /// Asked every frame. A frame with no edit costs one comparison of
@@ -47,29 +47,28 @@ impl AppState {
     /// [`SETTLE`], and while it waits this says how long until it should be
     /// asked again. Opening a cellview is not an edit and checks nothing.
     /// Leaving one with an edit still settling checks it on the way out.
-    pub(in crate::workbench) fn refresh_live_checks(&mut self, now: Instant) -> Option<Duration> {
+    pub(in crate::workbench) fn refresh_live_checks(
+        &mut self,
+        now: Instant,
+        facts: SlotFacts,
+    ) -> Option<Duration> {
         if !self
-            .model
             .preferences
             .toggle(TogglePreference::IncrementalConnectivityChecks)
         {
-            self.withdraw_live_checks();
+            self.withdraw_live_checks(facts);
             return None;
         }
-        let drawing = (self.model.project_open.is_open()
+        let drawing = (self.project_open.is_open()
             && matches!(
-                self.model.workspace.content.active_view_type(),
+                self.workspace.content.active_view_type(),
                 ViewType::Schematic | ViewType::Testbench
             ))
         .then(|| {
-            let subject = self.model.workspace.content.active_schematic_reference();
-            (
-                owner_key(&subject),
-                self.model.schematic.content_stamp(),
-                subject,
-            )
+            let subject = self.workspace.content.active_schematic_reference();
+            (owner_key(&subject), self.schematic.content_stamp(), subject)
         });
-        let state = &mut self.model.design_checks.drawing;
+        let state = &mut self.design_checks.drawing;
         let seen = drawing
             .as_ref()
             .map(|(key, stamp, _)| (key.clone(), *stamp));
@@ -89,21 +88,21 @@ impl AppState {
         if still_in_front && waited < SETTLE {
             return Some(SETTLE - waited);
         }
-        self.model.design_checks.drawing.pending = None;
+        self.design_checks.drawing.pending = None;
         // A failed background job is an Error, and the Console lifts it into
         // a notice. A drawing that cannot be checked — a configuration that
         // does not resolve under it — fails the same way at every edit, so
         // it is recorded when the reason changes, not each time.
-        match self.run_live_check(subject) {
-            Ok(_) => self.model.design_checks.drawing.failed = None,
-            Err(error) if self.model.design_checks.drawing.failed.as_ref() == Some(&error) => {}
+        match self.run_live_check(subject, facts) {
+            Ok(_) => self.design_checks.drawing.failed = None,
+            Err(error) if self.design_checks.drawing.failed.as_ref() == Some(&error) => {}
             Err(error) => {
                 self.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!("Live checks could not run: {error}"),
                 );
-                self.model.design_checks.drawing.failed = Some(error);
+                self.design_checks.drawing.failed = Some(error);
             }
         }
         None
@@ -113,24 +112,24 @@ impl AppState {
     pub(in crate::workbench) fn run_live_check(
         &mut self,
         subject: CellViewRef,
+        facts: SlotFacts,
     ) -> Result<DrcResult, String> {
         let config = self.live_check_config(&subject);
         let projection = self
-            .model
             .workspace
             .design_projection(
-                &self.model.library_manager,
-                &self.model.workspace.content.active_view,
-                &self.model.schematic,
+                &self.library_manager,
+                &self.workspace.content.active_view,
+                &self.schematic,
             )
             .map_err(|error| error.to_string())?;
         let checked = projected_buffer(&projection, &subject)?;
         let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-            self.model.library_manager.catalog(),
+            self.library_manager.catalog(),
             &projection,
         );
         let result = rspice_design::drc::run_live_check(checked, &subject, &hierarchy, &config);
-        self.publish_live_check_result(subject, &config, result.clone())?;
+        self.publish_live_check_result(subject, &config, result.clone(), facts)?;
         Ok(result)
     }
 
@@ -139,14 +138,9 @@ impl AppState {
     /// reach a ground is not asked, because no live rule asks it.
     fn live_check_config(&self, subject: &CellViewRef) -> DrcConfig {
         DrcConfig {
-            severity_overrides: self
-                .model
-                .workspace
-                .content
-                .design_rules
-                .severity_overrides(),
-            connectivity: self.model.workspace.content.connectivity.policy.clone(),
-            waivers: self.model.check_waivers(subject),
+            severity_overrides: self.workspace.content.design_rules.severity_overrides(),
+            connectivity: self.workspace.content.connectivity.policy.clone(),
+            waivers: self.check_waivers(subject),
             ..DrcConfig::default()
         }
     }
@@ -156,19 +150,26 @@ impl AppState {
         subject: CellViewRef,
         config: &DrcConfig,
         mut result: DrcResult,
+        facts: SlotFacts,
     ) -> Result<(), String> {
         config.waivers.apply(&mut result);
         let inputs = DiagnosticInputs::LiveCheck {
             subject: subject.clone(),
         };
-        let input_digest = self.diagnostic_live_digest(&inputs)?;
-        let records = design_rule_records(self, &subject, &result, StoredWaivers::Left);
+        let input_digest = self.diagnostic_live_digest(&inputs, facts)?;
+        let records = design_rule_records(
+            self,
+            facts.review_markers,
+            &subject,
+            &result,
+            StoredWaivers::Left,
+        );
         let coverage: RuleCoverage = check_coverage(self, &subject, CheckScope::Live, &result)?;
-        self.publish_superseding(inputs, records, &coverage)?;
-        let is_active_subject = owner_key(&subject)
-            == owner_key(&self.model.workspace.content.active_schematic_reference());
-        self.model.design_checks.insert_live(CellViewCheckReceipt {
-            project_id: self.model.workspace.content.project.id(),
+        self.publish_superseding(inputs, records, &coverage, facts)?;
+        let is_active_subject =
+            owner_key(&subject) == owner_key(&self.workspace.content.active_schematic_reference());
+        self.design_checks.insert_live(CellViewCheckReceipt {
+            project_id: self.workspace.content.project.id(),
             subject,
             input_digest,
             result,
@@ -176,35 +177,39 @@ impl AppState {
             sequence: 0,
         });
         if is_active_subject {
-            self.refresh_active_design_check_projection();
+            self.refresh_active_design_check_projection(facts);
         }
         Ok(())
     }
 
     /// The live pass of `subject`, while it still describes the drawing.
-    pub(super) fn current_live_receipt(
+    pub(in crate::workbench::app_state) fn current_live_receipt(
         &self,
         subject: &CellViewRef,
+        facts: SlotFacts,
     ) -> Option<&CellViewCheckReceipt> {
-        let receipt = self.model.design_checks.live.get(&owner_key(subject))?;
-        let current = receipt.project_id == self.model.workspace.content.project.id()
+        let receipt = self.design_checks.live.get(&owner_key(subject))?;
+        let current = receipt.project_id == self.workspace.content.project.id()
             && self
-                .diagnostic_live_digest(&DiagnosticInputs::LiveCheck {
-                    subject: subject.clone(),
-                })
+                .diagnostic_live_digest(
+                    &DiagnosticInputs::LiveCheck {
+                        subject: subject.clone(),
+                    },
+                    facts,
+                )
                 .is_ok_and(|digest| digest == receipt.input_digest);
         current.then_some(receipt)
     }
 
     /// State a live pass again against the waivers as they now stand, where
     /// it still describes the drawing.
-    pub(super) fn restate_live_check(&mut self, subject: CellViewRef) {
-        let Some(receipt) = self.current_live_receipt(&subject) else {
+    pub(super) fn restate_live_check(&mut self, subject: CellViewRef, facts: SlotFacts) {
+        let Some(receipt) = self.current_live_receipt(&subject, facts) else {
             return;
         };
         let result = receipt.result.clone();
         let config = self.live_check_config(&subject);
-        if let Err(error) = self.publish_live_check_result(subject, &config, result) {
+        if let Err(error) = self.publish_live_check_result(subject, &config, result, facts) {
             self.record(
                 LogSeverity::Warning,
                 LogSource::Studio,
@@ -217,21 +222,20 @@ impl AppState {
     /// would otherwise stand on the list with nothing keeping them current.
     /// What each had taken over from an explicit check that still describes
     /// the design is that check's again.
-    fn withdraw_live_checks(&mut self) {
-        if self.model.design_checks.live.is_empty() {
+    fn withdraw_live_checks(&mut self, facts: SlotFacts) {
+        if self.design_checks.live.is_empty() {
             return;
         }
-        let subjects = std::mem::take(&mut self.model.design_checks.live)
+        let subjects = std::mem::take(&mut self.design_checks.live)
             .into_values()
             .map(|receipt| receipt.subject)
             .collect::<Vec<_>>();
-        self.model.design_checks.drawing = DrawingState::default();
+        self.design_checks.drawing = DrawingState::default();
         for subject in subjects {
-            self.model
-                .withdraw_diagnostics(&DiagnosticInputs::LiveCheck { subject });
+            self.withdraw_diagnostics(&DiagnosticInputs::LiveCheck { subject });
         }
-        self.restate_design_checks();
-        self.refresh_active_design_check_projection();
+        self.restate_design_checks(facts);
+        self.refresh_active_design_check_projection(facts);
     }
 }
 

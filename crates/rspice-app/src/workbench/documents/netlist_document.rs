@@ -1903,7 +1903,7 @@ pub(crate) fn install_active_top_deck(
         // The bootstrap schematic is an implementation detail, not a second
         // design authority. Retaining its DRC receipt would leak stale
         // schematic findings into a project now owned by an authored deck.
-        state.clear_all_design_checks();
+        state.model.clear_all_design_checks();
         state.model.design_checks.drc_results = None;
         state.model.design_checks.drc_checked_version = 0;
     }

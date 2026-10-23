@@ -1359,7 +1359,7 @@ fn report_design_checks_after_save(state: &mut AppState) {
     };
     // The rule Check Design states its outcome by, so a check reads the same
     // whether the reader ran it or a save did.
-    state.record_check_outcome(&result, line);
+    state.model.record_check_outcome(&result, line);
 }
 
 #[cfg(target_arch = "wasm32")]

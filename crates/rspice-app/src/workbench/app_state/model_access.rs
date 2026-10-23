@@ -6,10 +6,19 @@
 //! findings — when it starts, as the model read them before, and hands them
 //! down.
 
+use std::time::Duration;
+
+use rspice_design::drc::{DrcLocation, DrcResult, DrcSeverity};
+
+use super::design_checks::{CheckScope, DesignCheckStatus};
 use super::diagnostic_store::listing::{ListingInputs, ListingSource};
-use super::diagnostic_store::{BatchStanding, DiagnosticBatch, DiagnosticInputs, DiagnosticRecord};
-use super::{AppState, SlotFacts, design_checks};
+#[cfg(test)]
+use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
+use super::diagnostic_store::{DiagnosticInputs, DiagnosticRecord};
+use super::{AppState, SlotFacts};
 use crate::product::ContentDigest;
+use crate::state::CellViewRef;
+use crate::time_compat::Instant;
 
 impl AppState {
     /// What model code reads of the features' state, as it stands now.
@@ -30,31 +39,13 @@ impl AppState {
         self.model.publish_diagnostics(inputs, records, facts)
     }
 
-    // Application half of a model operation; it becomes a request.
-    pub(in crate::workbench) fn publish_superseding(
-        &mut self,
-        inputs: DiagnosticInputs,
-        records: Vec<DiagnosticRecord>,
-        coverage: &design_checks::RuleCoverage,
-    ) -> Result<(), String> {
-        let facts = self.slot_facts();
-        self.model
-            .publish_superseding(inputs, records, coverage, facts)
-    }
-
+    #[cfg(test)]
     pub(in crate::workbench) fn diagnostic_batch_standing(
         &self,
         batch: &DiagnosticBatch,
     ) -> BatchStanding {
         self.model
             .diagnostic_batch_standing(batch, self.slot_facts())
-    }
-
-    pub(in crate::workbench) fn diagnostic_live_digest(
-        &self,
-        inputs: &DiagnosticInputs,
-    ) -> Result<ContentDigest, String> {
-        self.model.diagnostic_live_digest(inputs, self.slot_facts())
     }
 
     pub(in crate::workbench) fn dispatch_inputs_at_press(&self) -> Result<ContentDigest, String> {
@@ -142,6 +133,98 @@ impl AppState {
     pub(crate) fn publish_rule_deck_issues(&mut self) {
         let facts = self.slot_facts();
         self.model.publish_rule_deck_issues(facts);
+    }
+
+    pub(crate) fn design_check_status(&self, subject: &CellViewRef) -> DesignCheckStatus<'_> {
+        self.model.design_check_status(subject, self.slot_facts())
+    }
+
+    pub(crate) fn active_design_check_status(&self) -> DesignCheckStatus<'_> {
+        self.model.active_design_check_status(self.slot_facts())
+    }
+
+    pub(crate) fn simulation_root_design_check_status(&self) -> DesignCheckStatus<'_> {
+        self.model
+            .simulation_root_design_check_status(self.slot_facts())
+    }
+
+    pub(in crate::workbench) fn current_design_check(
+        &self,
+        subject: &CellViewRef,
+        scope: CheckScope,
+    ) -> Option<&DrcResult> {
+        self.model
+            .current_design_check(subject, scope, self.slot_facts())
+    }
+
+    pub(crate) fn current_finding_related_marks(
+        &self,
+        cell_view: &CellViewRef,
+    ) -> Option<(DrcSeverity, Vec<DrcLocation>)> {
+        self.model
+            .current_finding_related_marks(cell_view, self.slot_facts())
+    }
+
+    // Application half of a model operation; it becomes a request.
+    pub(crate) fn publish_active_design_check_result(
+        &mut self,
+        result: DrcResult,
+    ) -> Result<(), String> {
+        let facts = self.slot_facts();
+        self.model.publish_active_design_check_result(result, facts)
+    }
+
+    // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
+    pub(in crate::workbench) fn publish_configured_root_design_check_result(
+        &mut self,
+        result: DrcResult,
+    ) -> Result<(), String> {
+        let facts = self.slot_facts();
+        self.model
+            .publish_configured_root_design_check_result(result, facts)
+    }
+
+    // Application half of a model operation; it becomes a request.
+    pub(crate) fn clear_active_design_check(&mut self) {
+        let facts = self.slot_facts();
+        self.model.clear_active_design_check(facts);
+    }
+
+    // Application half of a model operation; it becomes a request.
+    pub(in crate::workbench) fn restate_design_checks(&mut self) {
+        let facts = self.slot_facts();
+        self.model.restate_design_checks(facts);
+    }
+
+    // Application half of a model operation; it becomes a request.
+    pub(crate) fn refresh_active_design_check_projection(&mut self) {
+        let facts = self.slot_facts();
+        self.model.refresh_active_design_check_projection(facts);
+    }
+
+    // Application half of a model operation; it becomes a request.
+    pub(in crate::workbench) fn refresh_live_checks(&mut self, now: Instant) -> Option<Duration> {
+        let facts = self.slot_facts();
+        self.model.refresh_live_checks(now, facts)
+    }
+
+    // Application half of a model operation; it becomes a request.
+    #[cfg(test)]
+    pub(in crate::workbench) fn run_live_check(
+        &mut self,
+        subject: CellViewRef,
+    ) -> Result<DrcResult, String> {
+        let facts = self.slot_facts();
+        self.model.run_live_check(subject, facts)
+    }
+
+    #[cfg(test)]
+    pub(in crate::workbench) fn current_live_receipt(
+        &self,
+        subject: &CellViewRef,
+    ) -> Option<&super::design_checks::CellViewCheckReceipt> {
+        self.model.current_live_receipt(subject, self.slot_facts())
     }
 }
 

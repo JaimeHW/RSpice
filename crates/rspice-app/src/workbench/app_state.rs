@@ -1041,6 +1041,17 @@ impl AppState {
         self.report(NoticeKind::Warning, title.into(), detail.into());
     }
 
+    /// Bring the reader to the findings a pass or a check just filed: the
+    /// Problems page, listing them. A filter left from earlier reading could
+    /// hide the very findings that stopped a run, or that a check the reader
+    /// asked for found, so the filters are cleared.
+    // A workbench write the checks ask for; it becomes a request.
+    pub(crate) fn show_problem_findings(&mut self) {
+        self.workbench.console_visible = true;
+        self.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
+        self.problems_view.clear_filters();
+    }
+
     /// The line is written first, so its identity is the one the toast offers;
     /// the toast itself is raised by the shell's next [`Self::drain_notices`].
     fn report(&mut self, kind: NoticeKind, title: String, detail: String) {

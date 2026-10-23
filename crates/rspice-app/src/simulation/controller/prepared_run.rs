@@ -116,7 +116,7 @@ fn run_preparation_inputs_reading<'a>(
             .receipt
             .as_ref()
             .map(|receipt| &receipt.compilation),
-        design_checks: state.configured_root_design_check_config(),
+        design_checks: state.model.configured_root_design_check_config(),
     }
 }
 
@@ -259,7 +259,7 @@ impl FrozenRunPreparation {
                     .receipt
                     .as_ref()
                     .map(|receipt| receipt.compilation.clone()),
-                design_checks: state.configured_root_design_check_config(),
+                design_checks: state.model.configured_root_design_check_config(),
                 source_files: Default::default(),
             },
         })

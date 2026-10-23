@@ -1029,7 +1029,7 @@ fn design_checks_on_save_are_off_by_default_and_never_refuse_the_save() {
     );
     let subject = state.model.workspace.content.active_schematic_reference();
     assert_eq!(
-        state.design_rule_finding_identities(&subject).len(),
+        state.model.design_rule_finding_identities(&subject).len(),
         checked.violations().len(),
         "every finding the save's checks raised is a published record"
     );

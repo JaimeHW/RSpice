@@ -34,7 +34,7 @@ fn report(state: &mut AppState, check: &str, checked: Result<DrcResult, String>)
     let summary = result.summary();
     let errors = summary.critical + summary.errors;
     let advisories = summary.warnings + summary.info;
-    state.record_check_outcome(
+    state.model.record_check_outcome(
         &result,
         format!(
             "{check}: {errors} error{}, {advisories} advisor{}. See Problems.",

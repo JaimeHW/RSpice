@@ -130,7 +130,7 @@ fn repeated_violation_navigation_keeps_advancing_after_jump_to_design() {
         .workspace
         .content
         .active_schematic_reference();
-    let identities = app.state.design_rule_finding_identities(&subject);
+    let identities = app.state.model.design_rule_finding_identities(&subject);
     assert_eq!(identities.len(), 2, "both findings were published");
     for expected in identities {
         Command::NextViolation.execute(&mut app);

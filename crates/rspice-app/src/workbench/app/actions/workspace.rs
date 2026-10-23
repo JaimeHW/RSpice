@@ -5,6 +5,7 @@
 //! rather than on one selected object, and they are the actions that a
 //! read-only schematic refuses.
 
+mod design_checks;
 mod libraries;
 pub(in crate::workbench) mod symbol_document;
 pub(in crate::workbench) mod symbol_in_place;

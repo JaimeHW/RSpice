@@ -792,7 +792,7 @@ mod shortcut_ownership_tests {
             .workspace
             .content
             .active_schematic_reference();
-        let identities = app.state.design_rule_finding_identities(&subject);
+        let identities = app.state.model.design_rule_finding_identities(&subject);
         assert_eq!(identities.len(), 2, "both findings were published");
 
         app.execute_shortcut_command(ShortcutCommand::NextViolation);

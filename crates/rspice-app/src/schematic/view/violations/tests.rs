@@ -93,7 +93,7 @@ pub(crate) fn loop_finding(state: &AppState, subject: &CellViewRef) -> uuid::Uui
         .result
         .violations()
         .iter()
-        .zip(state.design_rule_finding_identities(subject))
+        .zip(state.model.design_rule_finding_identities(subject))
         .find_map(|(finding, identity)| {
             (finding.violation_type == DrcViolationType::SourceToSource).then_some(identity)
         })

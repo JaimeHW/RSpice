@@ -172,7 +172,7 @@ pub(in crate::workbench) fn apply_remediation(
                 .simulation_root_reference();
             app.state.open_workspace_view(root.clone());
             Command::OpenWorkspace(Workspace::Design).execute(app);
-            if let Some(worst) = app.state.worst_design_rule_finding(&root) {
+            if let Some(worst) = app.state.model.worst_design_rule_finding(&root) {
                 app.state.model.diagnostics.set_current_finding(Some(worst));
             }
             Command::OpenProblems.execute(app);

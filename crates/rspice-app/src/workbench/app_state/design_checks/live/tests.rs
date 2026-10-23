@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::state::{ComponentType, Point};
+use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::listing;
 use crate::workbench::app_state::waivers::WaiverAction;
 

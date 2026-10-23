@@ -140,7 +140,7 @@ impl AppState {
         self.results.specification_editor_route_pending = false;
         self.model.design_checks.drc_results = None;
         self.model.design_checks.drc_checked_version = 0;
-        self.clear_all_design_checks();
+        self.model.clear_all_design_checks();
         // Problems and debugger evidence are project-scoped under the
         // source-workspace contract. Clear them in the same transaction as
         // documents and results so a replacement can never render one frame

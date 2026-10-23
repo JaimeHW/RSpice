@@ -49,7 +49,7 @@ pub(crate) fn cycle_violation(state: &mut AppState, step: isize) {
     // What the published findings are called, in the order the result holds
     // them. Read rather than derived here: the store is where a finding's
     // identity is minted, and a second derivation of it is a second identity.
-    let identities = state.canvas_finding_identities();
+    let identities = state.model.canvas_finding_identities();
     // Owned snapshot of the anchored findings so the borrows drop before
     // the selection/viewport mutations below.
     let mut anchored: Vec<AnchoredFinding> = result
