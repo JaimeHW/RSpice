@@ -197,7 +197,7 @@ fn assert_op_vds(deck: &str, label: &str, i_vds: Value) -> (SimulationResult, De
 
 /// The device kind the OP report gives Z1.
 fn z1_kind(report: &DeviceOpReport) -> &str {
-    &report
+    report
         .entries
         .iter()
         .find(|entry| entry.name.eq_ignore_ascii_case("z1"))
