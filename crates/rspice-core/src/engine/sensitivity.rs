@@ -4301,6 +4301,22 @@ R2 2 0 1k
     /// Analytic dV(2)/drval for the divider at rval=1k: -10*1k/(1k+1k)^2.
     const EXPECTED_DIVIDER_SENSITIVITY: f64 = -2.5e-3;
 
+    /// `run` on [`PARAMETRIC_DIVIDER`] must fail with an error containing every needle.
+    fn assert_divider_rejects<T: std::fmt::Debug>(
+        run: impl FnOnce(&Engine, &Netlist) -> Result<T, super::SimulationError>,
+        why: &str,
+        needles: &[&str],
+    ) {
+        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
+        let msg = run(&Engine::default(), &netlist)
+            .expect_err(why)
+            .to_string();
+        assert!(
+            needles.iter().all(|needle| msg.contains(needle)),
+            "unexpected error: {msg}"
+        );
+    }
+
     const AC_DIVIDER: &str = "\
 AC sensitivity divider
 V1 in 0 DC 0 AC 1 0
@@ -4598,14 +4614,10 @@ R2 out 0 1k\n\
     /// silently returned a sensitivity of 0.0 instead of erroring.
     #[test]
     fn sensitivity_rejects_element_name_lookalike() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_sensitivity(&netlist, 2, "R1", 1000.0, None)
-            .expect_err("element name must not count as a parameter binding");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("'R1'") && msg.contains("is not bound to any netlist expression"),
-            "unexpected error: {msg}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_sensitivity(netlist, 2, "R1", 1000.0, None),
+            "element name must not count as a parameter binding",
+            &["'R1'", "is not bound to any netlist expression"],
         );
     }
 
@@ -4650,27 +4662,19 @@ R2 out 0 1k\n\
 
     #[test]
     fn sensitivity_rejects_invalid_output_node_without_panicking() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_sensitivity(&netlist, 999, "rval", 1000.0, None)
-            .expect_err("out-of-range sensitivity output node must raise");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Sensitivity output node") && msg.contains("999"),
-            "unexpected error: {msg}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_sensitivity(netlist, 999, "rval", 1000.0, None),
+            "out-of-range sensitivity output node must raise",
+            &["Sensitivity output node", "999"],
         );
     }
 
     #[test]
     fn linearized_sensitivity_rejects_invalid_output_node_without_panicking() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_sensitivity_linearized(&netlist, 999, None)
-            .expect_err("out-of-range linearized sensitivity output node must raise");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Sensitivity output node") && msg.contains("999"),
-            "unexpected error: {msg}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_sensitivity_linearized(netlist, 999, None),
+            "out-of-range linearized sensitivity output node must raise",
+            &["Sensitivity output node", "999"],
         );
     }
 
@@ -4714,14 +4718,10 @@ R2 out 0 1k\n\
 
     #[test]
     fn ac_sensitivity_rejects_invalid_output_node_without_silent_zero() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_sensitivity_ac(&netlist, 999, "rval", 1000.0, &[1e3], None)
-            .expect_err("out-of-range AC sensitivity output node must raise");
-        let msg = err.to_string();
-        assert!(
-            msg.contains("Sensitivity output node") && msg.contains("999"),
-            "unexpected error: {msg}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_sensitivity_ac(netlist, 999, "rval", 1000.0, &[1e3], None),
+            "out-of-range AC sensitivity output node must raise",
+            &["Sensitivity output node", "999"],
         );
     }
 
@@ -4767,51 +4767,37 @@ R2 out 0 1k\n\
 
     #[test]
     fn ac_sensitivity_rejects_element_name_lookalike() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_sensitivity_ac(&netlist, 2, "R1", 1000.0, &[1e3], None)
-            .expect_err("element name must not count as a parameter binding");
-        assert!(
-            err.to_string()
-                .contains("is not bound to any netlist expression"),
-            "unexpected error: {err}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_sensitivity_ac(netlist, 2, "R1", 1000.0, &[1e3], None),
+            "element name must not count as a parameter binding",
+            &["is not bound to any netlist expression"],
         );
     }
 
     #[test]
     fn step_rejects_element_name_lookalike() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_step(&netlist, "R1", &[500.0, 2000.0])
-            .expect_err("element name must not count as a parameter binding");
-        assert!(
-            err.to_string()
-                .contains("is not bound to any netlist expression"),
-            "unexpected error: {err}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_step(netlist, "R1", &[500.0, 2000.0]),
+            "element name must not count as a parameter binding",
+            &["is not bound to any netlist expression"],
         );
     }
 
     #[test]
     fn step_rejects_empty_value_list() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_step(&netlist, "rval", &[])
-            .expect_err("empty step sweep must not report success");
-        assert!(
-            err.to_string().contains("no sweep values"),
-            "unexpected error: {err}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_step(netlist, "rval", &[]),
+            "empty step sweep must not report success",
+            &["no sweep values"],
         );
     }
 
     #[test]
     fn step_rejects_non_finite_value_list() {
-        let netlist = Netlist::parse(PARAMETRIC_DIVIDER).expect("deck parses");
-        let err = Engine::default()
-            .run_step(&netlist, "rval", &[1000.0, f64::NAN])
-            .expect_err("non-finite step sweep values must not enter the solver");
-        assert!(
-            err.to_string().contains("finite"),
-            "unexpected error: {err}"
+        assert_divider_rejects(
+            |engine, netlist| engine.run_step(netlist, "rval", &[1000.0, f64::NAN]),
+            "non-finite step sweep values must not enter the solver",
+            &["finite"],
         );
     }
 
