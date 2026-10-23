@@ -263,36 +263,41 @@ fn scan_temperature_option_line(line: &str, line_num: usize, hints: &mut ParserT
 mod tests {
     use super::*;
 
+    /// Parses `source` once per poll budget in `limits`: every run either
+    /// aborts without polling again or completes, and the first completion,
+    /// which must have needed more than 20 polls, is returned.
+    fn parse_after_every_cancellation_boundary(
+        source: &str,
+        limits: std::ops::Range<usize>,
+    ) -> Netlist {
+        for limit in limits {
+            let abort = crate::abort_signal::CountingAbort::new(limit);
+            let result = super::super::parse_netlist_with_options_and_abort(
+                source,
+                NetlistParseOptions::default(),
+                &abort,
+            );
+            assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
+            match result {
+                Err(ParseWithAbortError::Aborted) => {}
+                Ok(netlist) => {
+                    assert!(limit > 20, "both discovery and replay must be exercised");
+                    return netlist;
+                }
+                error => panic!("unexpected result at poll limit {limit}: {error:?}"),
+            }
+        }
+        panic!("cancellation coverage never reached successful completion: {source}");
+    }
+
     #[test]
     fn startup_discovery_stops_at_every_cancellation_boundary() {
         for card in [".IC V(out)", ".NODESET V(out)", ".INITCOND C1 IC"] {
             let source = format!(
                 "Startup abort\n.options seed=37\nR1 out 0 1k\nC1 out 0 1u\n{card}={{58/(TEMP-27)+aunif(0,1)}}\n.temp {{ambient}}\n.param ambient=85\n.end\n"
             );
-            let mut completed = false;
-            for limit in 0..1024 {
-                let abort = crate::abort_signal::CountingAbort::new(limit);
-                let result = super::super::parse_netlist_with_options_and_abort(
-                    &source,
-                    NetlistParseOptions::default(),
-                    &abort,
-                );
-                assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
-                match result {
-                    Err(ParseWithAbortError::Aborted) => {}
-                    Ok(netlist) => {
-                        assert!(limit > 20);
-                        assert_eq!(netlist.options.temp, Some(85.0));
-                        completed = true;
-                        break;
-                    }
-                    error => panic!("unexpected result at poll limit {limit}: {error:?}"),
-                }
-            }
-            assert!(
-                completed,
-                "cancellation coverage never completed for {card}"
-            );
+            let netlist = parse_after_every_cancellation_boundary(&source, 0..1024);
+            assert_eq!(netlist.options.temp, Some(85.0));
         }
     }
 
@@ -318,25 +323,8 @@ mod tests {
     #[test]
     fn header_discovery_stops_at_every_cancellation_boundary() {
         let source = "Header abort\n.options seed=37\n.subckt cell p params: derived={2*gain} gain={aunif(1,.1)+58/(TEMP-27)}\nV1 p 0 {derived}\n.ends\n.temp {ambient}\n.param ambient=85\n.end\n";
-        for limit in 0..1024 {
-            let abort = crate::abort_signal::CountingAbort::new(limit);
-            let result = super::super::parse_netlist_with_options_and_abort(
-                source,
-                NetlistParseOptions::default(),
-                &abort,
-            );
-            assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
-            match result {
-                Err(ParseWithAbortError::Aborted) => {}
-                Ok(netlist) => {
-                    assert!(limit > 20);
-                    assert_eq!(netlist.options.temp, Some(85.0));
-                    return;
-                }
-                error => panic!("unexpected result at poll limit {limit}: {error:?}"),
-            }
-        }
-        panic!("header cancellation coverage never reached successful completion");
+        let netlist = parse_after_every_cancellation_boundary(source, 0..1024);
+        assert_eq!(netlist.options.temp, Some(85.0));
     }
 
     #[test]
@@ -363,27 +351,8 @@ mod tests {
             "Sampled conditional abort\n.options seed=37\n.if 0\n.elseif (1/(TEMP-27)+aunif(0,1)>0)\n.param selected=1\n.endif\n.options temp={ambient}\n.param ambient=85\n.end\n",
             "Scoped conditional abort\n.subckt parent p\n.if (1/(TEMP-27))\nR1 p 0 1k\n.endif\n.ends\n.temp 85\n.end\n",
         ] {
-            let mut completed = false;
-            for limit in 0..1024 {
-                let abort = crate::abort_signal::CountingAbort::new(limit);
-                let result = super::super::parse_netlist_with_options_and_abort(
-                    source,
-                    NetlistParseOptions::default(),
-                    &abort,
-                );
-                assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
-                match result {
-                    Err(ParseWithAbortError::Aborted) => {}
-                    Ok(netlist) => {
-                        assert!(limit > 20);
-                        assert_eq!(netlist.options.temp, Some(85.0));
-                        completed = true;
-                        break;
-                    }
-                    error => panic!("unexpected result at poll limit {limit}: {error:?}"),
-                }
-            }
-            assert!(completed, "cancellation coverage never completed: {source}");
+            let netlist = parse_after_every_cancellation_boundary(source, 0..1024);
+            assert_eq!(netlist.options.temp, Some(85.0));
         }
     }
 
@@ -402,50 +371,16 @@ mod tests {
     #[test]
     fn eager_parameter_recovery_stops_at_every_cancellation_boundary() {
         let source = "Cancellation during discovery\n.param scale={1/(TEMP-27)}\n.temp {ambient}\n.param ambient=85\n.end\n";
-        for limit in 0..512 {
-            let abort = crate::abort_signal::CountingAbort::new(limit);
-            let result = super::super::parse_netlist_with_options_and_abort(
-                source,
-                NetlistParseOptions::default(),
-                &abort,
-            );
-            assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
-            match result {
-                Err(ParseWithAbortError::Aborted) => {}
-                Ok(netlist) => {
-                    assert!(limit > 20, "both discovery and replay must be exercised");
-                    assert_eq!(netlist.params.get("scale"), Some(1.0 / 58.0));
-                    return;
-                }
-                error => panic!("unexpected result at poll limit {limit}: {error:?}"),
-            }
-        }
-        panic!("cancellation coverage never reached successful completion");
+        let netlist = parse_after_every_cancellation_boundary(source, 0..512);
+        assert_eq!(netlist.params.get("scale"), Some(1.0 / 58.0));
     }
 
     #[test]
     fn option_recovery_stops_at_every_cancellation_boundary() {
         let source = "Option cancellation\n.options OUTPUT INITIAL_INTERVAL={1/(TEMP-27)} 10 2 SNAPSHOTS=1 DEVICE TEMP={ambient}\n.param ambient=85\n.end\n";
-        for limit in 0..512 {
-            let abort = crate::abort_signal::CountingAbort::new(limit);
-            let result = super::super::parse_netlist_with_options_and_abort(
-                source,
-                NetlistParseOptions::default(),
-                &abort,
-            );
-            assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
-            match result {
-                Err(ParseWithAbortError::Aborted) => {}
-                Ok(netlist) => {
-                    assert!(limit > 20);
-                    assert_eq!(netlist.options.temp, Some(85.0));
-                    assert_eq!(netlist.options.output_snapshots, Some(true));
-                    return;
-                }
-                error => panic!("unexpected result at poll limit {limit}: {error:?}"),
-            }
-        }
-        panic!("cancellation coverage never reached successful completion");
+        let netlist = parse_after_every_cancellation_boundary(source, 0..512);
+        assert_eq!(netlist.options.temp, Some(85.0));
+        assert_eq!(netlist.options.output_snapshots, Some(true));
     }
 
     #[test]
@@ -478,31 +413,13 @@ mod tests {
                 &completion_abort,
             )
             .expect("the reference parse completes");
-            let mut completed = false;
             // Expression parsing and evaluation have their own polling. Use
             // the complete run's count so every boundary remains covered when
             // cancellation reaches an additional part of a replayed group.
-            for limit in 0..=completion_abort.count() {
-                let abort = crate::abort_signal::CountingAbort::new(limit);
-                let result = super::super::parse_netlist_with_options_and_abort(
-                    source,
-                    NetlistParseOptions::default(),
-                    &abort,
-                );
-                assert_eq!(abort.polls_after_abort(), 0, "poll limit {limit}");
-                match result {
-                    Err(ParseWithAbortError::Aborted) => {}
-                    Ok(netlist) => {
-                        assert!(limit > 20);
-                        assert_eq!(netlist.options.temp, Some(expected_temp));
-                        assert_eq!(netlist.options.tnom, Some(expected_tnom));
-                        completed = true;
-                        break;
-                    }
-                    error => panic!("unexpected result at poll limit {limit}: {error:?}"),
-                }
-            }
-            assert!(completed, "cancellation coverage never completed: {source}");
+            let netlist =
+                parse_after_every_cancellation_boundary(source, 0..completion_abort.count() + 1);
+            assert_eq!(netlist.options.temp, Some(expected_temp));
+            assert_eq!(netlist.options.tnom, Some(expected_tnom));
         }
     }
 
