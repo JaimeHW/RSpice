@@ -74,7 +74,9 @@ struct Window {
 }
 
 impl Window {
-    fn of(kind: Kind, [first, second]: [i64; 2]) -> Option<Self> {
+    /// The window of a check with `limits`, its delayed reference and data
+    /// delayed by `delays`.
+    fn of(kind: Kind, [first, second]: [i64; 2], [reference, data]: [i64; 2]) -> Option<Self> {
         // Which side of the pair closes the window at the junction: `$hold`
         // counts a simultaneous event, `$setup` does not; `$removal` counts
         // one, `$recovery` does not.
@@ -87,10 +89,11 @@ impl Window {
             Kind::RecRem => (second, first, false),
             _ => return None,
         };
-        // Section 15.8: delaying the reference by a negative `before`, or
-        // the data by a negative `after`, makes both limits non-negative.
-        // The two delayed events meet at `junction`.
-        let junction = before.saturating_neg().max(0) - after.saturating_neg().max(0);
+        // Sections 15.5.1 and 15.8: the delayed signals' delays leave both
+        // limits non-negative between them, and the two delayed events meet
+        // at `junction`. A delay another check sharing the signal sets can
+        // move it inside the window, which then is open at both ends.
+        let junction = reference.saturating_sub(data);
         let closed = if after_closes {
             after.saturating_sub(junction) > 0
         } else {
@@ -196,12 +199,13 @@ impl TimingChecks {
                 }
             }
             let limits = check.limits.map(|limit| limit.saturating_mul(scale));
+            let delays = check.delays.map(|delay| delay.saturating_mul(scale));
             tables.checks.push(Check {
                 kind: check.kind,
                 reference: check.reference,
                 data,
                 trailing: (check.kind == Kind::NoChange).then(|| opposite(check.reference)),
-                window: Window::of(check.kind, limits),
+                window: Window::of(check.kind, limits, delays),
                 limits,
                 notifier: check.notifier,
                 label: check.label.clone(),
@@ -214,20 +218,27 @@ impl TimingChecks {
     }
 
     /// The warnings a run starts with: each check whose negative limit the
-    /// plan took as 0 (section 15.8).
+    /// plan took as 0 (sections 15.5.1 and 15.8).
     pub(super) fn start_warnings(plan: &CanonicalDigitalPlan) -> Vec<String> {
-        plan.delays
-            .checks
-            .iter()
-            .filter(|check| check.limit_zeroed)
-            .map(|check| {
-                format!(
+        let mut warnings = Vec::new();
+        for check in &plan.delays.checks {
+            if check.limit_zeroed {
+                warnings.push(format!(
                     "{}: its limits sum to no more than 0, so its negative limit is taken as 0 \
                      (IEEE 1364-2005 section 15.8)",
                     check.label
-                )
-            })
-            .collect()
+                ));
+            }
+            if check.limits_inconsistent {
+                warnings.push(format!(
+                    "{}: no delays of its delayed signals satisfy its limits and those of the \
+                     checks sharing them, so the smallest negative limit among them is taken as \
+                     0 (IEEE 1364-2005 section 15.5.1)",
+                    check.label
+                ));
+            }
+        }
+        warnings
     }
 
     /// Take a round's transitions at `tick`, and return the violations they

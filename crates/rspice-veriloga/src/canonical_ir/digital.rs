@@ -1179,11 +1179,27 @@ pub struct DigitalTimingCheck {
     /// summed to no more than 0, which the host warns of.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub limit_zeroed: bool,
+    /// `$setuphold`'s and `$recrem`'s delayed reference and data delays,
+    /// in the limits' ticks (section 15.5.1): the least that leave every
+    /// check naming the same delayed signals both limits non-negative. The
+    /// delayed signals meet where the data event follows the reference
+    /// event by `delays[0] - delays[1]`. Zero for every other check.
+    #[serde(default, skip_serializing_if = "no_delays")]
+    pub delays: [i64; 2],
+    /// Whether a negative limit was taken as 0 because no delays satisfied
+    /// it and the limits of the checks sharing its delayed signals (section
+    /// 15.5.1), which the host warns of.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub limits_inconsistent: bool,
     /// The `reg` toggled on each violation (section 15.5).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifier: Option<DigitalSignalId>,
     /// The check as a violation names it: `u1: $setup(d, posedge c, 2)`.
     pub label: String,
+}
+
+fn no_delays(delays: &[i64; 2]) -> bool {
+    *delays == [0, 0]
 }
 
 /// Which timing check (IEEE 1364-2005 sections 15.2 and 15.3).

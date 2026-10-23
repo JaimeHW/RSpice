@@ -539,7 +539,9 @@ impl Parser<'_> {
         self.expect(TokenKind::Semicolon)?;
         let span = start.extend(self.previous_span());
         // Each delayed net is driven by a copy of its signal, which a module
-        // path delays (section 15.8).
+        // path delays (section 15.8). A net several checks name for one
+        // signal is driven once; its delay comes from all of them (section
+        // 15.5.1).
         for (delayed, source) in [
             (&delayed_reference, Some(&reference)),
             (&delayed_data, data.as_ref()),
@@ -547,21 +549,22 @@ impl Parser<'_> {
             let (Some(delayed), Some(source)) = (delayed, source) else {
                 continue;
             };
-            let driven = module.timing_checks.iter().any(|check| {
-                [&check.delayed_reference, &check.delayed_data]
-                    .into_iter()
-                    .flatten()
-                    .any(|other| other.name == delayed.name)
+            let copied = module.timing_checks.iter().any(|check| {
+                [
+                    (&check.delayed_reference, Some(&check.reference)),
+                    (&check.delayed_data, check.data.as_ref()),
+                ]
+                .into_iter()
+                .any(|(other, other_source)| {
+                    other
+                        .as_ref()
+                        .is_some_and(|other| other.name == delayed.name)
+                        && other_source
+                            .is_some_and(|other| other.terminal.name == source.terminal.name)
+                })
             });
-            if driven {
-                return Err(refusal(
-                    "`specify` timing check",
-                    format!(
-                        "delayed signal `{}` named by a second timing check",
-                        delayed.name
-                    ),
-                    delayed.span,
-                ));
+            if copied {
+                continue;
             }
             module.continuous_assigns.push(ContinuousAssign {
                 target: DigitalLValue::Identifier {

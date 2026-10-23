@@ -397,6 +397,93 @@ fn a_negative_limit_delays_the_signals_a_model_reads() {
     );
 }
 
+const SHARED: &str = r#"`timescale 1ns/1ns
+module ff(output reg q, input d, input e, input clk);
+  wire dclk, dd, de;
+  specify
+    $setuphold(posedge clk, d, -2, 20, , , , dclk, dd);
+    $setuphold(posedge clk, e, -10, 20, , , , dclk, de);
+  endspecify
+  always @(posedge dclk) q <= dd;
+endmodule
+module t;
+  reg d, e, clk;
+  wire q;
+  ff u(q, d, e, clk);
+  initial begin
+    $monitor("%0t q=%b", $time, q);
+    d = 0; e = 0; clk = 0;
+    #10 clk = 1;
+    #1 d = 1;
+    #4 d = 0;
+    #3 e = 1;
+    #2 e = 0;
+    #20 $finish;
+  end
+endmodule
+"#;
+
+/// Section 15.5.1: both checks name `dclk`, so its delay satisfies both. The
+/// least delays with `r - d` at least 2 (the first check's setup of -2) and
+/// at least 10 (the second's) delay `dclk` by 10 and neither data copy: the
+/// second check's limit sets the delay. The flop therefore samples `d` at 20,
+/// 10 after the edge at 10, and takes 0, not the 1 it held at 12.
+///
+/// The first check's window stays (2, 20) after the edge, but its delayed
+/// signals meet at 10, inside it, so it is open at 2: `d` at 11 (rel 1) is
+/// legal and `d` at 15 (rel 5) violates. The second's meet at 10, its closed
+/// end: `e` at 18 (rel 8) is legal and `e` at 20 (rel 10) violates.
+#[test]
+fn a_shared_delayed_signal_takes_the_delay_every_check_needs() {
+    let report = bench(SHARED, &[]);
+    assert_eq!(stdout(&report), "0 q=x\n20 q=0\n");
+    let mut expected = violations("$setuphold(posedge clk, d, -2, 20)", &[15]);
+    expected.extend(violations("$setuphold(posedge clk, e, -10, 20)", &[20]));
+    assert_eq!(warnings(&report), expected);
+}
+
+/// Section 15.5.1: no delays satisfy both checks, whose delayed signals
+/// meet at least 10 and at most -3 after the edge. The smallest negative
+/// limit, the first check's -10, is taken as 0; still none do, so the next,
+/// the second check's -3, is too. The windows are then [0, 20) and (-5, 0)
+/// after the edge at 10, both checks warned of at the start: `d` at 7 (rel
+/// -3) violates the second at the edge, and `d` at 12 (rel 2) the first.
+#[test]
+fn inconsistent_negative_limits_are_taken_as_zero_smallest_first() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module inc(input d, input clk);
+  wire dclk, dd;
+  specify
+    $setuphold(posedge clk, d, -10, 20, , , , dclk, dd);
+    $setuphold(posedge clk, d, 5, -3, , , , dclk, dd);
+  endspecify
+endmodule
+module t;
+  reg d, clk;
+  inc u(d, clk);
+  initial begin d = 0; clk = 0; #7 d = 1; #3 clk = 1; #2 d = 0; #5 $finish; end
+endmodule
+"#,
+        &[],
+    );
+    let first = "$setuphold(posedge clk, d, -10, 20)";
+    let second = "$setuphold(posedge clk, d, 5, -3)";
+    let mut expected: Vec<String> = [first, second]
+        .iter()
+        .map(|check| {
+            format!(
+                "u: {check}: no delays of its delayed signals satisfy its limits and those of \
+                 the checks sharing them, so the smallest negative limit among them is taken as \
+                 0 (IEEE 1364-2005 section 15.5.1)"
+            )
+        })
+        .collect();
+    expected.extend(violations(second, &[10]));
+    expected.extend(violations(first, &[12]));
+    assert_eq!(warnings(&report), expected);
+}
+
 /// A negative limit whose window is empty (setup -3 with hold 2) is taken as
 /// 0, as the commercial simulators take it, and the run warns of it at its
 /// start. The window is then [0, 2): `d` 1 after the edge at 10 violates.

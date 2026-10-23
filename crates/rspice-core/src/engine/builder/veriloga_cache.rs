@@ -510,7 +510,11 @@ use super::*;
 // Version 174 follows the schema to 183, whose digital plan records where
 // each signal was declared. A version-173 record would replay a plan whose
 // signals a waveform cannot place.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 174;
+//
+// Version 175 follows the schema to 184, whose timing checks carry their
+// delayed signals' delays computed across the checks sharing them. A
+// version-174 record refused a delayed net two checks name.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 175;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

@@ -14,6 +14,12 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 184 computes a `$setuphold`'s and `$recrem`'s delayed signal
+/// delays across every check naming the same delayed nets
+/// (`DigitalTimingCheck::delays`, `limits_inconsistent`). Earlier artifacts
+/// refused a delayed net named twice and left the host to derive one check's
+/// delays from its own limits.
+///
 /// Version 183 records where each digital signal was declared
 /// (`DigitalSignal::origin`), as version 172 did for processes: the file and
 /// line behind an `` `include ``, and on a replay the line the artifact's own
@@ -240,7 +246,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 183;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 184;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

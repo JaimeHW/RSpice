@@ -1899,6 +1899,30 @@ impl CanonicalDigitalPlan {
                      is no variable, or limits finer than the design's time grid",
                 ));
             }
+            // Section 15.5.1: delays that leave both limits non-negative
+            // between the delayed signals, and none for other checks.
+            let [first, second] = check.limits;
+            let window = match check.kind {
+                super::digital::DigitalTimingCheckKind::SetupHold => Some((first, second)),
+                super::digital::DigitalTimingCheckKind::RecRem => Some((second, first)),
+                _ => None,
+            };
+            let [reference, data] = check.delays;
+            let fits = match window {
+                Some((before, after)) => {
+                    reference >= 0
+                        && data >= 0
+                        && (before.saturating_neg()..=after)
+                            .contains(&reference.saturating_sub(data))
+                }
+                None => check.delays == [0, 0],
+            };
+            if !fits {
+                return Err(error(
+                    "digital timing check delays its delayed signals by a negative amount, or so \
+                     that a limit stays negative between them",
+                ));
+            }
         }
         Ok(())
     }
