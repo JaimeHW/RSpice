@@ -420,5 +420,7 @@ fn discover(
     })
 }
 
-#[cfg(test)]
+// Each test writes its deck and data files to a host directory and prepares
+// it through the native resolver, which a browser build does not have.
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

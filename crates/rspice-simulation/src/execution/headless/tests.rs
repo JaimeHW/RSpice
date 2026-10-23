@@ -138,7 +138,11 @@ fn sealed_include_closure_reaches_the_worker_and_authenticates_unused_library_by
     assert!((voltage(&execute(first)[0]) - 0.5).abs() < 1e-10);
 }
 
+/// A host directory for a deck the native resolver reads, which a browser
+/// build does not have.
+#[cfg(not(target_arch = "wasm32"))]
 struct NativeFixture(PathBuf);
+#[cfg(not(target_arch = "wasm32"))]
 impl NativeFixture {
     fn new() -> Self {
         let directory =
@@ -147,6 +151,7 @@ impl NativeFixture {
         Self(directory)
     }
 }
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for NativeFixture {
     fn drop(&mut self) {
         for name in ["circuit.cir", "divider.inc"] {
@@ -157,6 +162,7 @@ impl Drop for NativeFixture {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn native_dependencies_are_captured_once_and_sealed_resolution_has_no_host_fallback() {
     let fixture = NativeFixture::new();
     let path = fixture.0.join("circuit.cir");
@@ -368,6 +374,7 @@ fn captured_includes_use_the_expanded_budget_after_root_admission() {
 }
 
 #[test]
+#[cfg(not(target_arch = "wasm32"))]
 fn captured_include_errors_keep_the_authored_file_and_line() {
     let fixture = NativeFixture::new();
     let path = fixture.0.join("circuit.cir");

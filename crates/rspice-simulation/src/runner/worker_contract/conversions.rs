@@ -554,8 +554,7 @@ pub fn cancel_prepared_wasm_jit_request_value(
     })
 }
 
-#[cfg(target_arch = "wasm32")]
-#[cfg(any(feature = "browser-worker", test))]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(super) fn worker_request_from_value(
     value: wasm_bindgen::JsValue,
 ) -> Result<WorkerRequest, wasm_bindgen::JsValue> {
@@ -671,14 +670,12 @@ pub(super) fn worker_request_from_value(
     .map_err(|error| JsValue::from_str(&error))
 }
 
-#[cfg(target_arch = "wasm32")]
-#[cfg(any(feature = "browser-worker", test))]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(super) fn worker_request_js_error(error: wasm_bindgen::JsValue) -> wasm_bindgen::JsValue {
     wasm_bindgen::JsValue::from_str(&worker_js_error(error).to_string())
 }
 
-#[cfg(target_arch = "wasm32")]
-#[cfg(any(feature = "browser-worker", test))]
+#[cfg(all(target_arch = "wasm32", feature = "browser-worker"))]
 pub(crate) fn worker_response_transport_value(
     response: WorkerResponse,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {

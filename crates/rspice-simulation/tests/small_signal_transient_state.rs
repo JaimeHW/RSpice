@@ -9,6 +9,10 @@
 //! Every small-signal kind runs headless, and each one's result equals what
 //! `rspice run` computes for the same deck: the engine's state entry, which
 //! the command line calls with the deck's own engine.
+//!
+//! Every study here writes its circuit to a host directory and prepares it
+//! through the native resolver, which a browser build does not have.
+#![cfg(not(target_arch = "wasm32"))]
 
 use rspice_core::NoAbort;
 use rspice_core::engine::SmallSignalCardResult;
