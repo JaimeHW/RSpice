@@ -775,7 +775,7 @@ pr1492075	vlg	gold	L1	pass	matches the gold file
 pr1508882	vlg	passed	L1	pass	PASSED
 pr1510724	vlg	passed	L4	pass	PASSED
 pr1515168	vlg	passed	L1	pass	PASSED
-pr1520314	vlg	co	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setuphold`
+pr1520314	vlg	co	L6	refused:specify	Parse error: Unsupported `specify` timing check: delayed signal `D` named by a second timing check
 pr1522570	vlg	passed	L1	pass	PASSED
 pr1530426	vlg	passed	L1	pass	PASSED
 pr1561597	vlg	passed	L1	pass	PASSED
@@ -924,7 +924,7 @@ pr1866215	vlg	gold	L1	refused:structural-vector-port	Semantic error: Unsupported
 pr1866215b	vlg	gold	L1	refused:structural-vector-port	Semantic error: Unsupported feature: structural vector port: port 'B0.CH' is declared with no net or variable of its own, in a module that declares no discrete-...
 pr1867161a	vlg	gold	L1	pass	matches the gold file
 pr1867161b	vlg	gold	L1	racy	passes in source order only; differs from the gold file at line 2 (5 lines against 6)
-pr1867332	vlg	co	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setup`
+pr1867332	vlg	co	L6	pass	compiled
 pr1868792	vlg	passed	L1	pass	PASSED
 pr1868991a	vlg	passed	L1	pass	PASSED
 pr1868991b	vlg	co	L1	pass	compiled
@@ -1883,7 +1883,7 @@ br_gh1248	vvp	gold	-	excluded:flag-ginterconnect
 br_gh1256a	vvp	passed	-	excluded:flag-g2009	
 br_gh1256b	vvp	passed	-	excluded:flag-g2009	
 br_gh1258a	vvp	gold	-	excluded:flag-gno-specify	
-br_gh1258b	vvp	gold	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setup`
+br_gh1258b	vvp	gold	L6	pass	matches the gold file
 br_gh1286	vvp	passed	-	excluded:flag-g2009	
 br_gh13a	vvp	gold	L1	pass	matches the gold file
 br_gh230	vvp	-	-	excluded:type-EF	
@@ -2103,8 +2103,8 @@ task_return_fail1	vvp	ce	-	excluded:flag-g2005-sv
 task_return_fail2	vvp	ce	-	excluded:flag-g2005-sv	
 test_va_math	vvp	gold	-	excluded:flag-mva_math	
 test_vams_math	vvp	gold	-	excluded:flag-gverilog-ams	
-timing_check_delayed_signals	vvp	passed	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setuphold`
-timing_check_syntax	vvp	passed	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setup`
+timing_check_delayed_signals	vvp	passed	L6	refused:specify	Parse error: Unsupported `specify` timing check: `$setuphold` with a timestamp condition (IEEE 1364-2005 section 15.5.2)
+timing_check_syntax	vvp	passed	L6	refused:specify	Parse error: Unsupported `specify` timing check: a condition other than a scalar signal, `~` one, or one compared with a scalar constant (IEEE 1364-2005 section...
 uwire_fail2	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: `w` is a `uwire` with more than one driver; IEEE 1364-2005 section 4.6.2 permits a `uwire` one driver of each bit, so decl...
 uwire_fail3	vvp	ce	L1	pass	language error: Semantic error: Invalid contribution: `w` is a `uwire` with more than one driver; IEEE 1364-2005 section 4.6.2 permits a `uwire` one driver of each bit, so decl...
 va_math	vvp	passed	-	excluded:nonstandard-systf:$abs	
