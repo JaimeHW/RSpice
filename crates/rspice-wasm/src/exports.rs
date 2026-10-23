@@ -363,29 +363,50 @@ mod wasm_tests {
             rspice_core::Engine::default().build_circuit_with_abort(&underflow, &NoAbort),
             Err(rspice_core::SimulationError::Circuit(_))
         ));
-        for (prefix, model, finite_invalid) in [("C", "C(C=1n)", -1.0), ("L", "L(L=1m)", 0.0)] {
-            for invalid in [finite_invalid, f64::INFINITY, f64::NEG_INFINITY] {
+        // An authored value is the value and never the model's default: a
+        // negative capacitance, and a zero (a short) or negative inductance,
+        // are valid elements (ngspice 46, Spectre). Only a non-finite value
+        // fails, and not as a parameter-domain error.
+        for (prefix, model, authored) in [
+            ("C", "C(C=1n)", -1.0),
+            ("L", "L(L=1m)", 0.0),
+            ("L", "L(L=1m)", -1.0e-3),
+        ] {
+            for value in [authored, f64::INFINITY, f64::NEG_INFINITY] {
                 let mut netlist = rspice_core::Netlist::parse(&format!(
                     "SDK value\nV1 in 0 1\n{prefix}1 in 0 MOD\n.model MOD {model}\n.end\n"
                 ))
                 .unwrap();
                 for element in &mut netlist.elements {
                     match &mut element.kind {
-                        rspice_core::netlist::ElementKind::Capacitor { value, .. }
-                        | rspice_core::netlist::ElementKind::Inductor { value, .. } => {
-                            *value = invalid
+                        rspice_core::netlist::ElementKind::Capacitor { value: slot, .. }
+                        | rspice_core::netlist::ElementKind::Inductor { value: slot, .. } => {
+                            *slot = value
                         }
                         _ => {}
                     }
                 }
-                let error = rspice_core::Engine::default()
-                    .build_circuit_with_abort(&netlist, &NoAbort)
-                    .expect_err("invalid explicit value");
-                assert_eq!(
-                    matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
-                    invalid.is_finite(),
-                    "{prefix}1={invalid}: {error}"
-                );
+                let built =
+                    rspice_core::Engine::default().build_circuit_with_abort(&netlist, &NoAbort);
+                if value.is_finite() {
+                    let circuit =
+                        built.unwrap_or_else(|error| panic!("{prefix}1={value}: {error}"));
+                    let resolved = if prefix == "C" {
+                        circuit.capacitor_storage().capacitances[0]
+                    } else {
+                        circuit.inductor_storage().inductances[0]
+                    };
+                    assert_eq!(
+                        resolved, value,
+                        "{prefix}1: the authored value is the resolved one"
+                    );
+                } else {
+                    let error = built.expect_err("a non-finite explicit value");
+                    assert!(
+                        !matches!(error, rspice_core::SimulationError::ParameterDomain(_)),
+                        "{prefix}1={value}: {error}"
+                    );
+                }
             }
         }
     }
