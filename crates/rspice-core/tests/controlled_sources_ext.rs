@@ -5,6 +5,10 @@
 //! same mathematics, plus closed-form operating-point checks for the
 //! voltage-output forms where signs are unambiguous.
 
+#[path = "common/op_point.rs"]
+mod op_point;
+
+use op_point::op_voltage;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{ElementKind, Netlist, flatten_netlist};
 
@@ -60,18 +64,6 @@ fn native_vccs_transient_current_is_selectable_without_physical_events() {
             assert!((voltage - 2.0 * control).abs() < 1e-9);
         }
     }
-}
-
-fn op_voltage(deck: &str, node: &str) -> f64 {
-    let netlist = Netlist::parse(deck).expect("deck parses");
-    let engine = Engine::new(SimulationConfig::default());
-    let op = engine.run_dc_op(&netlist).expect("operating point solves");
-    let idx = op
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(node))
-        .unwrap_or_else(|| panic!("node {node} missing from OP result"));
-    op.node_voltages[idx]
 }
 
 #[test]

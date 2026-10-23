@@ -3,23 +3,15 @@
 //! response. The parse-time state-space realization must behave exactly
 //! like the transfer function it encodes.
 
+#[path = "common/op_point.rs"]
+mod op_point;
+
+use op_point::op_voltage;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
 const FC: f64 = 1000.0; // 1 kHz corner for the first-order tests
 const WC: f64 = 2.0 * std::f64::consts::PI * FC;
-
-fn op_voltage(deck: &str, node: &str) -> f64 {
-    let netlist = Netlist::parse(deck).expect("deck parses");
-    let engine = Engine::new(SimulationConfig::default());
-    let op = engine.run_dc_op(&netlist).expect("operating point solves");
-    let idx = op
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(node))
-        .unwrap_or_else(|| panic!("node {node} missing from OP result"));
-    op.node_voltages[idx]
-}
 
 fn ac_magnitude(deck: &str, node: &str, freq: f64) -> f64 {
     let netlist = Netlist::parse(deck).expect("deck parses");

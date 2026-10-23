@@ -5,21 +5,13 @@
 //! parallel. Every test below checks that property (or composition of the
 //! factor through subcircuit hierarchy) at the operating point.
 
+#[path = "common/op_point.rs"]
+mod op_point;
+
+use op_point::op_voltage;
 use rspice_core::config::{ExpressionDialect, SpiceDialect};
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::{ElementKind, Netlist, NetlistParseOptions, flatten_netlist};
-
-fn op_voltage(deck: &str, node: &str) -> f64 {
-    let netlist = Netlist::parse(deck).expect("deck parses");
-    let engine = Engine::new(SimulationConfig::default());
-    let op = engine.run_dc_op(&netlist).expect("operating point solves");
-    let idx = op
-        .node_names
-        .iter()
-        .position(|name| name.eq_ignore_ascii_case(node))
-        .unwrap_or_else(|| panic!("node {node} missing from OP result"));
-    op.node_voltages[idx]
-}
 
 fn xyce_netlist(deck: &str) -> Netlist {
     Netlist::parse_with_options(
