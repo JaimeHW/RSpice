@@ -2653,16 +2653,9 @@ mod tests {
         let amplitude = 0.4_f64.sqrt();
         let period = 1.0 / 2.3e9;
 
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, None),
-            amplitude,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, period / 2.0, None),
-            -amplitude,
-        );
-        let quarter =
-            VoltageSources::evaluate_source_at_time_with_context(&spec, period / 4.0, None);
+        assert_close(source_at(&spec, 0.0, None), amplitude);
+        assert_close(source_at(&spec, period / 2.0, None), -amplitude);
+        let quarter = source_at(&spec, period / 4.0, None);
         assert!(
             quarter.abs() < 1.0e-6,
             "quarter period should cross zero, got {quarter}"
@@ -2675,14 +2668,14 @@ mod tests {
     fn a_port_drive_fills_the_unnamed_half_from_the_defaults() {
         let spec = rf_port(None, Some(2.0e9), None);
         assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, None),
+            source_at(&spec, 0.0, None),
             (4.0 * 1.0e-3 * 100.0_f64).sqrt(),
         );
 
         let spec = rf_port(Some(0.001), None, None);
         let default_period = 1.0 / 1.0e9;
         assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, default_period / 2.0, None),
+            source_at(&spec, default_period / 2.0, None),
             -0.4_f64.sqrt(),
         );
     }
@@ -2693,10 +2686,7 @@ mod tests {
     #[test]
     fn a_port_with_no_declared_drive_injects_nothing() {
         let spec = rf_port(None, None, None);
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0e-10, None),
-            0.0,
-        );
+        assert_close(source_at(&spec, 1.0e-10, None), 0.0);
     }
 
     /// ngspice stores the phase and never applies it. A port started at 90
@@ -2704,15 +2694,12 @@ mod tests {
     #[test]
     fn a_port_drive_starts_at_its_declared_phase() {
         let spec = rf_port(Some(0.001), Some(2.3e9), Some(90.0));
-        let start = VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, None);
+        let start = source_at(&spec, 0.0, None);
         assert!(
             start.abs() < 1.0e-12,
             "90 degrees should start at zero, got {start}"
         );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0 / (4.0 * 2.3e9), None),
-            -0.4_f64.sqrt(),
-        );
+        assert_close(source_at(&spec, 1.0 / (4.0 * 2.3e9), None), -0.4_f64.sqrt());
     }
 
     #[test]
@@ -2804,6 +2791,27 @@ mod tests {
             xyce_breakpoint_tolerance: Some(0.0),
             resource_limits: crate::resource::ResourceLimits::default(),
         })
+    }
+
+    /// The value `spec` takes at `time` under `context`.
+    fn source_at(spec: &SourceSpec, time: Value, context: Option<TransientSourceContext>) -> Value {
+        VoltageSources::evaluate_source_at_time_with_context(spec, time, context)
+    }
+
+    /// `PULSE(V1 V2 TD TR TF PW PER NP)` in card order, with an authored PW.
+    fn pulse(card: [Value; 8]) -> SourceSpec {
+        let [v1, v2, delay, rise, fall, width, period, pulse_count] = card;
+        SourceSpec::Pulse {
+            v1,
+            v2,
+            delay,
+            rise,
+            fall,
+            width,
+            period,
+            pulse_count,
+            width_defaults_to_zero: false,
+        }
     }
 
     #[test]
@@ -3087,17 +3095,9 @@ mod tests {
                 dc_value: 0.0,
                 ac_magnitude: 0.0,
                 ac_phase: 0.0,
-                source_spec: Some(SourceSpec::Pulse {
-                    v1: 0.0,
-                    v2: 1.0,
-                    delay: 10.0e-9,
-                    rise: 1.0e-9,
-                    fall: 1.0e-9,
-                    width: 10.0e-9,
-                    period: 30.0e-9,
-                    pulse_count: 0.0,
-                    width_defaults_to_zero: false,
-                }),
+                source_spec: Some(pulse([
+                    0.0, 1.0, 10.0e-9, 1.0e-9, 1.0e-9, 10.0e-9, 30.0e-9, 0.0,
+                ])),
             },
         );
         sources.set_transient_context_with_dialect(
@@ -3130,17 +3130,9 @@ mod tests {
                 dc_value: 0.0,
                 ac_magnitude: 0.0,
                 ac_phase: 0.0,
-                source_spec: Some(SourceSpec::Pulse {
-                    v1: 0.0,
-                    v2: 1.0,
-                    delay: 10.0e-9,
-                    rise: 1.0e-9,
-                    fall: 1.0e-9,
-                    width: 10.0e-9,
-                    period: 30.0e-9,
-                    pulse_count: 0.0,
-                    width_defaults_to_zero: false,
-                }),
+                source_spec: Some(pulse([
+                    0.0, 1.0, 10.0e-9, 1.0e-9, 1.0e-9, 10.0e-9, 30.0e-9, 0.0,
+                ])),
             },
         );
 
@@ -3224,11 +3216,7 @@ mod tests {
             phase: 0.0,
         };
 
-        let value = VoltageSources::evaluate_source_at_time_with_context(
-            &spec,
-            2.5e-9,
-            transient_context(1.0e-9, 10.0e-9),
-        );
+        let value = source_at(&spec, 2.5e-9, transient_context(1.0e-9, 10.0e-9));
 
         assert_close(value, 1.0);
     }
@@ -3244,11 +3232,7 @@ mod tests {
             phase: 0.0,
         };
 
-        let value = VoltageSources::evaluate_source_at_time_with_context(
-            &spec,
-            2.5e-9,
-            transient_context(1.0e-9, 10.0e-9),
-        );
+        let value = source_at(&spec, 2.5e-9, transient_context(1.0e-9, 10.0e-9));
 
         assert_close(value, 1.0);
     }
@@ -3267,15 +3251,15 @@ mod tests {
         let ctx = transient_context(1.0e-9, 10.0e-9);
 
         // Holds V1 through TD1.
-        let early = VoltageSources::evaluate_source_at_time_with_context(&spec, 0.5e-9, ctx);
+        let early = source_at(&spec, 0.5e-9, ctx);
         assert_close(early, 0.0);
 
         // Rising region: V1 + (V2-V1)*(1 - exp(-(t-TD1)/TAU1)).
-        let rising = VoltageSources::evaluate_source_at_time_with_context(&spec, 1.5e-9, ctx);
+        let rising = source_at(&spec, 1.5e-9, ctx);
         assert_close(rising, 1.0 - (-0.5f64).exp());
 
         // Decaying region adds the TD2 term.
-        let decaying = VoltageSources::evaluate_source_at_time_with_context(&spec, 3.0e-9, ctx);
+        let decaying = source_at(&spec, 3.0e-9, ctx);
         assert_close(decaying, (1.0 - (-2.0f64).exp()) - (1.0 - (-1.0f64).exp()));
     }
 
@@ -3292,7 +3276,7 @@ mod tests {
             tau2: 0.0,
         };
         let ctx = transient_context(1.0e-9, 10.0e-9);
-        let rising = VoltageSources::evaluate_source_at_time_with_context(&spec, 1.5e-9, ctx);
+        let rising = source_at(&spec, 1.5e-9, ctx);
         assert_close(rising, 1.0 - (-0.5f64).exp());
     }
 
@@ -3306,11 +3290,7 @@ mod tests {
             td2: 1.0,
             tau2: 1.0,
         };
-        let value = VoltageSources::evaluate_source_at_time_with_context(
-            &spec,
-            0.5e-9,
-            xyce_transient_context(1.0e-9, 10.0e-9),
-        );
+        let value = source_at(&spec, 0.5e-9, xyce_transient_context(1.0e-9, 10.0e-9));
         assert_close(value, 1.0 - (-0.5f64).exp());
     }
 
@@ -3325,11 +3305,7 @@ mod tests {
             damping: 0.0,
             phase: std::f64::consts::FRAC_PI_2,
         };
-        let value = VoltageSources::evaluate_source_at_time_with_context(
-            &spec,
-            1.0e-9,
-            transient_context(1.0e-9, 10.0e-9),
-        );
+        let value = source_at(&spec, 1.0e-9, transient_context(1.0e-9, 10.0e-9));
         assert_close(value, 3.0);
     }
 
@@ -3347,34 +3323,16 @@ mod tests {
             width_defaults_to_zero: true,
         };
 
-        let value = VoltageSources::evaluate_source_at_time_with_context(
-            &spec,
-            3.5e-9,
-            transient_context(0.5e-9, 20.0e-9),
-        );
+        let value = source_at(&spec, 3.5e-9, transient_context(0.5e-9, 20.0e-9));
 
         assert_close(value, 5.0 / 6.0);
     }
 
     #[test]
     fn pulse_omitted_period_repeats_after_waveform_duration_by_default() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 10.0e-6,
-            rise: 1.0e-6,
-            fall: 1.0e-6,
-            width: 100.0e-3,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]);
 
-        let value = VoltageSources::evaluate_source_at_time_with_context(
-            &spec,
-            100.01208e-3,
-            transient_context(0.5e-6, 400.0e-3),
-        );
+        let value = source_at(&spec, 100.01208e-3, transient_context(0.5e-6, 400.0e-3));
 
         assert_close(value, 0.08);
     }
@@ -3390,58 +3348,31 @@ mod tests {
     /// second cycle begins at TD + PER = 100.012 ms and the source is already
     /// climbing 0.08 us later.
     fn ngspice_pulse_omitted_period_repeats_after_the_waveform_duration() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 10.0e-6,
-            rise: 1.0e-6,
-            fall: 1.0e-6,
-            width: 100.0e-3,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]);
 
         let ctx = ngspice_transient_context(0.5e-6, 400.0e-3);
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 100.0115e-3, ctx),
-            0.5,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
-            0.08,
-        );
+        assert_close(source_at(&spec, 100.0115e-3, ctx), 0.5);
+        assert_close(source_at(&spec, 100.01208e-3, ctx), 0.08);
         // Second and third cycles land where ngspice put them.
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 150.0e-3, ctx),
-            1.0,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 250.0e-3, ctx),
-            1.0,
-        );
+        assert_close(source_at(&spec, 150.0e-3, ctx), 1.0);
+        assert_close(source_at(&spec, 250.0e-3, ctx), 1.0);
     }
 
     #[test]
     fn ngspice_two_level_pulse_omitted_width_defaults_to_stop_time() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 0.0,
-            rise: Value::NAN,
-            fall: Value::NAN,
-            width: Value::NAN,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([
+            0.0,
+            1.0,
+            0.0,
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            0.0,
+        ]);
 
         assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(
-                &spec,
-                7.0,
-                ngspice_transient_context(0.1, 7.0),
-            ),
+            source_at(&spec, 7.0, ngspice_transient_context(0.1, 7.0)),
             1.0,
         );
     }
@@ -3458,50 +3389,30 @@ mod tests {
     /// `BestAvailable` run before this rule stopped being dialect-gated.
     #[test]
     fn two_level_pulse_omitted_width_holds_to_stop_under_the_default_dialect() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 1.0e-4,
-            rise: 1.0e-6,
-            fall: Value::NAN,
-            width: Value::NAN,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([
+            0.0,
+            1.0,
+            1.0e-4,
+            1.0e-6,
+            Value::NAN,
+            Value::NAN,
+            Value::NAN,
+            0.0,
+        ]);
 
         let ctx = transient_context(1.0e-5, 1.0e-3);
         for time in [1.5e-4, 5.0e-4, 1.0e-3] {
-            assert_close(
-                VoltageSources::evaluate_source_at_time_with_context(&spec, time, ctx),
-                1.0,
-            );
+            assert_close(source_at(&spec, time, ctx), 1.0);
         }
     }
 
     #[test]
     fn xyce_pulse_omitted_period_defaults_to_transient_stop_time() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 1.0,
-            delay: 10.0e-6,
-            rise: 1.0e-6,
-            fall: 1.0e-6,
-            width: 100.0e-3,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([0.0, 1.0, 10.0e-6, 1.0e-6, 1.0e-6, 100.0e-3, Value::NAN, 0.0]);
 
         let ctx = xyce_transient_context(0.5e-6, 400.0e-3);
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 100.0115e-3, ctx),
-            0.5,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 100.01208e-3, ctx),
-            0.0,
-        );
+        assert_close(source_at(&spec, 100.0115e-3, ctx), 0.5);
+        assert_close(source_at(&spec, 100.01208e-3, ctx), 0.0);
     }
 
     #[test]
@@ -3551,34 +3462,17 @@ mod tests {
 
     #[test]
     fn xyce_explicit_zero_pulse_edges_are_instantaneous() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 20.0,
-            delay: 0.0,
-            rise: 0.0,
-            fall: 0.0,
-            width: 0.2,
-            period: 0.4,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([0.0, 20.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0]);
         let context = xyce_transient_context(0.02, 0.8);
 
+        assert_eq!(source_at(&spec, 0.0, context).to_bits(), 0.0_f64.to_bits());
         assert_eq!(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.0, context).to_bits(),
-            0.0_f64.to_bits()
-        );
-        assert_eq!(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0e-12, context).to_bits(),
+            source_at(&spec, 1.0e-12, context).to_bits(),
             20.0_f64.to_bits()
         );
+        assert_eq!(source_at(&spec, 0.2, context).to_bits(), 20.0_f64.to_bits());
         assert_eq!(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.2, context).to_bits(),
-            20.0_f64.to_bits()
-        );
-        assert_eq!(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.2 + 1.0e-12, context,)
-                .to_bits(),
+            source_at(&spec, 0.2 + 1.0e-12, context).to_bits(),
             0.0_f64.to_bits()
         );
     }
@@ -3586,17 +3480,7 @@ mod tests {
     #[test]
     fn xyce_pulse_exact_rise_endpoint_is_bounded_with_zero_tolerance() {
         for rise in [1e-15_f64, 1e-9, 0.25] {
-            let spec = SourceSpec::Pulse {
-                v1: 0.0,
-                v2: -2.0,
-                delay: 0.0,
-                rise,
-                fall: rise,
-                width: 10.0,
-                period: 20.0,
-                pulse_count: 0.0,
-                width_defaults_to_zero: false,
-            };
+            let spec = pulse([0.0, -2.0, 0.0, rise, rise, 10.0, 20.0, 0.0]);
             let mut context = xyce_transient_context(rise, 20.0);
             context.as_mut().unwrap().xyce_breakpoint_tolerance = Some(0.0);
             for time in [
@@ -3604,8 +3488,7 @@ mod tests {
                 rise,
                 f64::from_bits(rise.to_bits() + 1),
             ] {
-                let actual =
-                    VoltageSources::evaluate_source_at_time_with_context(&spec, time, context);
+                let actual = source_at(&spec, time, context);
                 assert!(
                     (actual + 2.0).abs() < 1e-14,
                     "rise={rise}, time={time}, value={actual}"
@@ -3616,17 +3499,7 @@ mod tests {
 
     #[test]
     fn xyce_pulse_boundaries_use_accepted_state_breakpoint_tolerance() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 20.0,
-            delay: 0.0,
-            rise: 0.0,
-            fall: 0.0,
-            width: 0.2,
-            period: 0.4,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([0.0, 20.0, 0.0, 0.0, 0.0, 0.2, 0.4, 0.0]);
         let mut context = xyce_transient_context(0.02, 0.8);
         let tolerance = 1.0e-9;
         context
@@ -3635,44 +3508,23 @@ mod tests {
             .xyce_breakpoint_tolerance = Some(tolerance);
 
         assert_eq!(
-            VoltageSources::evaluate_source_at_time_with_context(
-                &spec,
-                0.2 + tolerance * 0.5,
-                context,
-            )
-            .to_bits(),
+            source_at(&spec, 0.2 + tolerance * 0.5, context).to_bits(),
             20.0_f64.to_bits()
         );
         assert_eq!(
-            VoltageSources::evaluate_source_at_time_with_context(
-                &spec,
-                0.2 + tolerance * 2.0,
-                context,
-            )
-            .to_bits(),
+            source_at(&spec, 0.2 + tolerance * 2.0, context).to_bits(),
             0.0_f64.to_bits()
         );
     }
 
     #[test]
     fn xyce_negative_pulse_period_matches_nonzero_period_wrapping() {
-        let spec = SourceSpec::Pulse {
-            v1: -2.0,
-            v2: 5.0,
-            delay: 0.0,
-            rise: 0.0,
-            fall: 0.0,
-            width: 0.2,
-            period: -0.4,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([-2.0, 5.0, 0.0, 0.0, 0.0, 0.2, -0.4, 0.0]);
         let context = xyce_transient_context(0.02, 0.8);
 
         for time in [0.0, 1.0e-12, 0.1, 0.4, 1.0] {
             assert_eq!(
-                VoltageSources::evaluate_source_at_time_with_context(&spec, time, context)
-                    .to_bits(),
+                source_at(&spec, time, context).to_bits(),
                 (-2.0_f64).to_bits(),
                 "time={time:.17e}"
             );
@@ -3686,17 +3538,7 @@ mod tests {
     /// far past this deck's 2 ms stop time.
     #[test]
     fn eighth_pulse_argument_counts_periods_rather_than_shifting_phase() {
-        let spec = SourceSpec::Pulse {
-            v1: -1.0,
-            v2: 1.0,
-            delay: 0.0,
-            rise: 1.0e-5,
-            fall: 1.0e-5,
-            width: 5.0e-4,
-            period: 1.0e-3,
-            pulse_count: 45.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([-1.0, 1.0, 0.0, 1.0e-5, 1.0e-5, 5.0e-4, 1.0e-3, 45.0]);
 
         let ctx = transient_context(2.0e-5, 2.0e-3);
         for (time, expected) in [
@@ -3705,17 +3547,11 @@ mod tests {
             (4.0e-7, -0.92),
             (1.6e-6, -0.68),
         ] {
-            assert_close(
-                VoltageSources::evaluate_source_at_time_with_context(&spec, time, ctx),
-                expected,
-            );
+            assert_close(source_at(&spec, time, ctx), expected);
         }
 
         // Past 45 periods the train has ended and the source holds V1.
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 4.52e-2, ctx),
-            -1.0,
-        );
+        assert_close(source_at(&spec, 4.52e-2, ctx), -1.0);
     }
 
     /// `pulse(0 1 2e-8 1e-9 1e-9)` from
@@ -3749,10 +3585,7 @@ mod tests {
             (2.2168e-8, 0.0),
             (5.0e-8, 0.0),
         ] {
-            assert_close(
-                VoltageSources::evaluate_source_at_time_with_context(&spec, time, ctx),
-                expected,
-            );
+            assert_close(source_at(&spec, time, ctx), expected);
         }
     }
 
@@ -3760,25 +3593,12 @@ mod tests {
     /// what `tests/ngspice/general/rtlinv.cir` measures.
     #[test]
     fn pulse_with_authored_width_still_repeats_on_its_derived_period() {
-        let spec = SourceSpec::Pulse {
-            v1: 0.0,
-            v2: 5.0,
-            delay: 2.0e-9,
-            rise: 2.0e-9,
-            fall: 2.0e-9,
-            width: 8.0e-8,
-            period: Value::NAN,
-            pulse_count: 0.0,
-            width_defaults_to_zero: false,
-        };
+        let spec = pulse([0.0, 5.0, 2.0e-9, 2.0e-9, 2.0e-9, 8.0e-8, Value::NAN, 0.0]);
 
         let ctx = ngspice_transient_context(2.0e-9, 2.0e-7);
         // Period is TR + PW + TF = 84 ns, so the second rise starts at
         // 2 ns + 84 ns and reaches V2 two nanoseconds later.
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 8.8e-8, ctx),
-            5.0,
-        );
+        assert_close(source_at(&spec, 8.8e-8, ctx), 5.0);
     }
 
     #[test]
@@ -3789,26 +3609,11 @@ mod tests {
             repeat_from: Some(2.0),
         };
 
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 0.5, None),
-            0.0,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 1.0, None),
-            2.0,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 3.5, None),
-            3.0,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 5.5, None),
-            3.0,
-        );
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&spec, 7.0, None),
-            0.0,
-        );
+        assert_close(source_at(&spec, 0.5, None), 0.0);
+        assert_close(source_at(&spec, 1.0, None), 2.0);
+        assert_close(source_at(&spec, 3.5, None), 3.0);
+        assert_close(source_at(&spec, 5.5, None), 3.0);
+        assert_close(source_at(&spec, 7.0, None), 0.0);
     }
 
     #[test]
@@ -3901,19 +3706,13 @@ mod tests {
             } else {
                 ((2.0 * PI * 1.0e6 * t) + (-10.0) * (2.0 * PI * -1.0e5 * t).sin()).sin()
             };
-            assert_close(
-                VoltageSources::evaluate_source_at_time_with_context(&limited, t, ctx),
-                expected,
-            );
+            assert_close(source_at(&limited, t, ctx), expected);
         }
 
         // MDI=-25 sits below the ratio, so the MDI<0 floor zeroes it and only
         // the carrier remains.
         let floored = sffm(-25.0);
         let t = 3.7e-7;
-        assert_close(
-            VoltageSources::evaluate_source_at_time_with_context(&floored, t, ctx),
-            (2.0 * PI * 1.0e6 * t).sin(),
-        );
+        assert_close(source_at(&floored, t, ctx), (2.0 * PI * 1.0e6 * t).sin());
     }
 }
