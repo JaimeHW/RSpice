@@ -59,7 +59,10 @@ use std::path::PathBuf;
 /// holds `regress-vlg.list`, `ivltests/` and `gold/`.
 pub const IVTEST_DIR_ENV: &str = "RSPICE_IVTEST_DIR";
 
-/// Where the checkout is, or why it is absent.
+/// Where the checkout is, or why it is absent. Its `work/` directory, where
+/// tests write their output files, is created when missing: a fresh
+/// checkout has none, and both Icarus Verilog and RSpice run the tests from
+/// the checkout.
 pub fn ivtest_dir() -> Result<PathBuf, String> {
     let Some(value) = std::env::var_os(IVTEST_DIR_ENV).filter(|value| !value.is_empty()) else {
         return Err(format!(
@@ -76,6 +79,9 @@ pub fn ivtest_dir() -> Result<PathBuf, String> {
             list::SourceList::Vlg.file_name()
         ));
     }
+    let work = dir.join("work");
+    std::fs::create_dir_all(&work)
+        .map_err(|error| format!("ivtest oracle: cannot create {}: {error}", work.display()))?;
     Ok(dir)
 }
 

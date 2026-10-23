@@ -433,6 +433,8 @@ jobs:
       # Every selected test through RSpice against the manifest; a regressed
       # outcome, or an improved one not re-recorded, fails the step.
       - name: ivtest selection through RSpice (release)
+        # A red self-check must not hide RSpice's outcomes.
+        if: ${{ !cancelled() }}
         run: >-
           cargo test --locked -p rspice-conformance --release
           --test verilog_ivtest -- --nocapture
