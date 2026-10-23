@@ -497,6 +497,14 @@ mod tests {
         }
     }
 
+    fn accepted(test: u8, return_code: i32) -> XyceDampedDecision {
+        XyceDampedDecision::Accepted { test, return_code }
+    }
+
+    fn failed(test: u8, return_code: i32) -> XyceDampedDecision {
+        XyceDampedDecision::Failed { test, return_code }
+    }
+
     #[test]
     fn first_zero_predictor_uses_uniform_weights() {
         let weights = xyce_damped_transient_weights(
@@ -531,10 +539,7 @@ mod tests {
         let mut status = XyceTransientDampedStatus::new(20);
         assert_eq!(
             status.evaluate(sample(1, 1.0e-2, 1.0, 0.33), 0.33, 1.0e-2),
-            XyceDampedDecision::Accepted {
-                test: 2,
-                return_code: 2,
-            }
+            accepted(2, 2)
         );
     }
 
@@ -548,18 +553,12 @@ mod tests {
             );
             assert_eq!(
                 status.evaluate(sample(2, residual, residual, 0.1), 0.33, 1e-320),
-                XyceDampedDecision::Accepted {
-                    test: 1,
-                    return_code: 1
-                }
+                accepted(1, 1)
             );
         }
         assert_eq!(
             XyceTransientDampedStatus::new(20).evaluate(sample(1, 0.0, 0.0, 1.0), 0.33, 1e-320),
-            XyceDampedDecision::Accepted {
-                test: 1,
-                return_code: 1,
-            }
+            accepted(1, 1)
         );
     }
 
@@ -568,10 +567,7 @@ mod tests {
         let mut status = XyceTransientDampedStatus::new(20);
         assert_eq!(
             status.evaluate(sample(1, 1.0, 1.0, 1.0e-6), 0.33, 1.0e-2),
-            XyceDampedDecision::Accepted {
-                test: 4,
-                return_code: 4,
-            }
+            accepted(4, 4)
         );
     }
 
@@ -584,10 +580,7 @@ mod tests {
         );
         assert_eq!(
             status.evaluate(sample(2, 1.0, 0.8, 1.0), 0.33, 1.0e-2),
-            XyceDampedDecision::Failed {
-                test: 3,
-                return_code: -3,
-            }
+            failed(3, -3)
         );
     }
 
@@ -603,10 +596,7 @@ mod tests {
         let _ = status.evaluate(sample(1, 1.0, 1.0, 1.0), 0.33, 1.0e-2);
         assert_eq!(
             status.evaluate(sample(2, 1.0, 0.8, 1.0), 0.33, 1.0e-2),
-            XyceDampedDecision::Accepted {
-                test: 3,
-                return_code: 3,
-            }
+            accepted(3, 3)
         );
     }
 
@@ -616,10 +606,7 @@ mod tests {
         let _ = status.evaluate(sample(1, 1.0, 1.0, 1.0), 0.33, 1.0e-2);
         assert_eq!(
             status.evaluate(sample(2, 1.0, 1.0, 1.0), 0.33, 1.0e-2),
-            XyceDampedDecision::Failed {
-                test: 5,
-                return_code: -1,
-            }
+            failed(5, -1)
         );
     }
 
@@ -639,10 +626,7 @@ mod tests {
         norm *= 1.0005;
         assert_eq!(
             status.evaluate(sample(7, 1.0, norm, 1.0), 0.33, 1.0e-2),
-            XyceDampedDecision::Failed {
-                test: 7,
-                return_code: -3,
-            }
+            failed(7, -3)
         );
     }
 
@@ -651,13 +635,7 @@ mod tests {
         let mut status = XyceTransientDampedStatus::new(2);
         let mut candidate = sample(2, 1.0, 1.0, 1.0);
         candidate.device_converged = false;
-        assert_eq!(
-            status.evaluate(candidate, 0.33, 1.0e-2),
-            XyceDampedDecision::Failed {
-                test: 8,
-                return_code: -1,
-            }
-        );
+        assert_eq!(status.evaluate(candidate, 0.33, 1.0e-2), failed(8, -1));
     }
 
     #[test]
@@ -666,13 +644,7 @@ mod tests {
         let mut candidate = sample(2, 1.0, 1.0, 1.0);
         candidate.device_converged = false;
         candidate.inner_device_converged = false;
-        assert_eq!(
-            status.evaluate(candidate, 0.33, 1.0e-2),
-            XyceDampedDecision::Failed {
-                test: 8,
-                return_code: -1,
-            }
-        );
+        assert_eq!(status.evaluate(candidate, 0.33, 1.0e-2), failed(8, -1));
     }
 
     #[test]
@@ -685,10 +657,7 @@ mod tests {
         // finite candidate does not inherit the previous solve's 80/100 rate.
         assert_eq!(
             status.evaluate(sample(1, 1.0e-2, 2.0, 0.33), 0.33, 1.0e-2),
-            XyceDampedDecision::Accepted {
-                test: 2,
-                return_code: 2,
-            }
+            accepted(2, 2)
         );
     }
 
@@ -702,10 +671,7 @@ mod tests {
         );
         assert_eq!(
             status.evaluate(sample(2, 1.0, 80.0, 1.0), 0.33, 1.0e-2),
-            XyceDampedDecision::Failed {
-                test: 3,
-                return_code: -3,
-            }
+            failed(3, -3)
         );
     }
 
