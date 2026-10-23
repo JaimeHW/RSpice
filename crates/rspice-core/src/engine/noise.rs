@@ -5590,50 +5590,15 @@ D1 A 0 DM M=3
     /// the official binary, including the m-folding at AF != 1.
     #[test]
     fn diode_flicker_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(DIODE_FLICKER_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("a").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            5,
-            10.0,
-            1e5,
+        assert_onoise_matches(
+            DIODE_FLICKER_DECK,
+            DIODE_FLICKER_ORACLE,
+            "a",
+            "V1",
+            DEC5_10_100K,
+            5e-3,
+            "diode flicker",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "V1", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = DIODE_FLICKER_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "frequency grids must match");
-
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            assert!(
-                (result.frequency - freq_ref).abs() <= 1e-6 * freq_ref,
-                "sweep grid diverged from the oracle at {:e}",
-                freq_ref,
-            );
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 5e-3,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     /// onoise tables of [`MOS_FLICKER_DECK`] (default NLEV) and its NLEV=0
@@ -5667,44 +5632,7 @@ M1 D G 0 0 NM W=20u L=2u M=2
 ";
 
     fn assert_noise_matches_oracle(deck: &str, oracle_table: &str, label: &str) {
-        let netlist = Netlist::parse(deck).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("d").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            5,
-            10.0,
-            1e5,
-        );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = oracle_table
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "{label}: grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 5e-3,
-                "{label}: onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
+        assert_onoise_matches(deck, oracle_table, "d", "VIN", DEC5_10_100K, 5e-3, label);
     }
 
     /// onoise table of [`GP_RCRE_NOISE_DECK`] from the official ngspice-46
@@ -5808,88 +5736,30 @@ M1 D G 0 0 NM W=20u L=2u
             "M1 D G 0 0 NM W=20u L=2u DTEMP=150",
         );
         assert_ne!(deck, MOS_RDRS_NOISE_DECK);
-        let netlist = Netlist::parse(&deck).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("d").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            2,
-            1e3,
-            1e5,
+        assert_onoise_matches(
+            &deck,
+            MOS_DTEMP_NOISE_ORACLE,
+            "d",
+            "VIN",
+            DEC2_1K_100K,
+            5e-3,
+            "MOS DTEMP",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = MOS_DTEMP_NOISE_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 5e-3,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     /// The externalized MOS drain/source resistances must reproduce the
     /// official binary's operating point and noise.
     #[test]
     fn mos_rdrs_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(MOS_RDRS_NOISE_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("d").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            2,
-            1e3,
-            1e5,
+        assert_onoise_matches(
+            MOS_RDRS_NOISE_DECK,
+            MOS_RDRS_NOISE_ORACLE,
+            "d",
+            "VIN",
+            DEC2_1K_100K,
+            5e-3,
+            "MOS RD/RS",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = MOS_RDRS_NOISE_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 5e-3,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     /// onoise table of [`DIODE_DTEMP_NOISE_DECK`] from the official
@@ -5922,44 +5792,15 @@ D1 A 0 DM DTEMP=150
     /// by the instance DTEMP exactly as the official binary does.
     #[test]
     fn diode_dtemp_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(DIODE_DTEMP_NOISE_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("a").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            2,
-            1e3,
-            1e5,
+        assert_onoise_matches(
+            DIODE_DTEMP_NOISE_DECK,
+            DIODE_DTEMP_NOISE_ORACLE,
+            "a",
+            "V1",
+            DEC2_1K_100K,
+            5e-3,
+            "diode DTEMP",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "V1", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = DIODE_DTEMP_NOISE_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 5e-3,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     /// onoise table of [`RES_DTEMP_NOISE_DECK`] from the official ngspice-46
@@ -5989,44 +5830,15 @@ R2 OUT 0 10k DTEMP=150
     /// the official binary does.
     #[test]
     fn resistor_dtemp_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(RES_DTEMP_NOISE_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("out").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            2,
-            1e3,
-            1e5,
+        assert_onoise_matches(
+            RES_DTEMP_NOISE_DECK,
+            RES_DTEMP_NOISE_ORACLE,
+            "out",
+            "V1",
+            DEC2_1K_100K,
+            2e-3,
+            "resistor DTEMP",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "V1", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = RES_DTEMP_NOISE_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 2e-3,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     /// onoise table of [`GP_RB_NOISE_DECK`] from the official ngspice-46
@@ -6071,44 +5883,19 @@ Q1 C B 0 QN
     /// junction.
     #[test]
     fn gp_rb_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(GP_RB_NOISE_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("c").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            2,
-            1e5,
-            1e7,
+        assert_onoise_matches(
+            GP_RB_NOISE_DECK,
+            GP_RB_NOISE_ORACLE,
+            "c",
+            "VIN",
+            NoiseSweepGrid {
+                points_per_decade: 2,
+                fstart: 1e5,
+                fstop: 1e7,
+            },
+            1e-2,
+            "Gummel-Poon RB",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = GP_RB_NOISE_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 1e-2,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     #[test]
@@ -6153,6 +5940,20 @@ Q1 C B 0 QN
         fstart: f64,
         fstop: f64,
     }
+
+    /// `DEC 5 10 100k`, the flicker decks' sweep.
+    const DEC5_10_100K: NoiseSweepGrid = NoiseSweepGrid {
+        points_per_decade: 5,
+        fstart: 10.0,
+        fstop: 1e5,
+    };
+
+    /// `DEC 2 1k 100k`, the DTEMP and RD/RS decks' sweep.
+    const DEC2_1K_100K: NoiseSweepGrid = NoiseSweepGrid {
+        points_per_decade: 2,
+        fstart: 1e3,
+        fstop: 1e5,
+    };
 
     fn assert_onoise_matches(
         deck: &str,
@@ -6803,44 +6604,19 @@ Q1 C B 0 QN
     /// official binary's noise on a deck they dominate.
     #[test]
     fn gp_rcre_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(GP_RCRE_NOISE_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("c").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            5,
-            1e4,
-            1e8,
+        assert_onoise_matches(
+            GP_RCRE_NOISE_DECK,
+            GP_RCRE_NOISE_ORACLE,
+            "c",
+            "VIN",
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 1e4,
+                fstop: 1e8,
+            },
+            1e-2,
+            "Gummel-Poon RC/RE",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = GP_RCRE_NOISE_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 1e-2,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     /// onoise table of [`JFET_FLICKER_DECK`] from the official ngspice-46
@@ -6967,44 +6743,15 @@ R2 OUT 0 1k
     /// model's folded-beta representation.
     #[test]
     fn jfet_flicker_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(JFET_FLICKER_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("d").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            5,
-            10.0,
-            1e5,
+        assert_onoise_matches(
+            JFET_FLICKER_DECK,
+            JFET_FLICKER_ORACLE,
+            "d",
+            "VIN",
+            DEC5_10_100K,
+            5e-3,
+            "JFET flicker",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = JFET_FLICKER_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "grids must match");
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 5e-3,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     /// Qualify the legacy equations using actual DC branch currents and a
@@ -7748,50 +7495,19 @@ M1 D G S B N W=10u L=1u AS=0 AD=0 PS=0 PD=0
 
     #[test]
     fn vbic_parasitic_resistance_noise_matches_the_ngspice46_oracle() {
-        let netlist = Netlist::parse(RB_NOISE_DECK).expect("deck parses");
-        let engine = Engine::default().resolved_for_netlist(&netlist);
-        let circuit = engine.build_circuit(&netlist).expect("circuit builds");
-        let output = circuit.get_node_by_name("c").expect("output node");
-        let frequencies = crate::analysis::ac::ac_sweep_frequencies(
-            crate::netlist::FreqVariation::Dec,
-            5,
-            1e5,
-            1e7,
+        assert_onoise_matches(
+            RB_NOISE_DECK,
+            RB_NOISE_ORACLE,
+            "c",
+            "VIN",
+            NoiseSweepGrid {
+                points_per_decade: 5,
+                fstart: 1e5,
+                fstop: 1e7,
+            },
+            5e-3,
+            "VBIC parasitic resistance",
         );
-        let results = engine
-            .run_noise_with_input_source(&netlist, output, None, "VIN", &frequencies, 300.15)
-            .expect("noise analysis runs");
-
-        let oracle: Vec<(f64, f64)> = RB_NOISE_ORACLE
-            .lines()
-            .filter(|line| !line.trim_start().starts_with('#') && !line.trim().is_empty())
-            .map(|line| {
-                let mut fields = line.split_whitespace();
-                (
-                    fields.next().unwrap().parse().unwrap(),
-                    fields.next().unwrap().parse().unwrap(),
-                )
-            })
-            .collect();
-        assert_eq!(results.len(), oracle.len(), "frequency grids must match");
-
-        for (result, (freq_ref, onoise_ref)) in results.iter().zip(&oracle) {
-            assert!(
-                (result.frequency - freq_ref).abs() <= 1e-6 * freq_ref,
-                "sweep grid diverged from the oracle at {:e}",
-                freq_ref,
-            );
-            let onoise = result.output_noise_rms();
-            let relative = (onoise - onoise_ref).abs() / onoise_ref;
-            assert!(
-                relative <= 5e-3,
-                "onoise at {:e} Hz: ours {:.6e} vs ngspice-46 {:.6e} (rel {:.3e})",
-                freq_ref,
-                onoise,
-                onoise_ref,
-                relative,
-            );
-        }
     }
 
     #[test]
