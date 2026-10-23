@@ -1015,69 +1015,6 @@ fn the_result_inspector_routes_through_the_workspace_memos() {
     );
 }
 
-/// The Design and Verilog-A inspectors state problems with a mark and say
-/// nothing about success: no colored status text, no status dots, no success
-/// or neutral marks.
-///
-/// The editor strip is scanned with them. `veriloga_compile_status` used to be
-/// carved out of this scan because the strip painted its five tones and an
-/// always-on dot; it now returns neutral text and an `Option<Problem>`, so the
-/// carve-out is gone and the surface that paints it is in the list.
-#[test]
-fn the_design_and_veriloga_inspectors_paint_no_status_color() {
-    // The token path, not one binding's spelling of it. These were
-    // `t.color.ok` and `t.color.info`, which let `tokens.color.info` through
-    // in `inspector.rs` — the file this scan is named after and did not read.
-    const BANNED: &[&str] = &[
-        "colored_label",
-        "status_dot(",
-        "StatusMark::Success",
-        "StatusMark::Neutral",
-        ".color.ok",
-        ".color.info",
-    ];
-    let files = [
-        (
-            "inspector.rs",
-            crate::source_guard::without_test_items(include_str!("../inspector.rs")),
-        ),
-        (
-            "design.rs",
-            crate::source_guard::without_test_items(include_str!("design.rs")),
-        ),
-        (
-            "design/component.rs",
-            crate::source_guard::without_test_items(include_str!("design/component.rs")),
-        ),
-        (
-            "design/inline_instance.rs",
-            crate::source_guard::without_test_items(include_str!("design/inline_instance.rs")),
-        ),
-        (
-            "veriloga_inspector.rs",
-            crate::source_guard::without_test_items(include_str!(
-                "../../documents/code_workspace/veriloga_inspector.rs"
-            )),
-        ),
-        (
-            "surfaces/veriloga.rs",
-            crate::source_guard::without_test_items(include_str!("../../surfaces/veriloga.rs")),
-        ),
-    ];
-    for (file, source) in files {
-        for (number, line) in source.lines().enumerate() {
-            for pattern in BANNED {
-                assert!(
-                    !line.contains(pattern),
-                    "{file}:{} paints status with `{pattern}`: {}",
-                    number + 1,
-                    line.trim()
-                );
-            }
-        }
-    }
-}
-
 /// A finished 1 ms transient on the Waves sheet, the way James had it open:
 /// `V(out)` swinging inside 4…6 V with its pane active, the trace selected,
 /// and the solver's convergence evidence retained with no forced points.

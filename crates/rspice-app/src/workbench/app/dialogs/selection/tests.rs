@@ -44,29 +44,6 @@ fn slice() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Colour on these surfaces is reserved for a problem's own mark. Status has
-/// no tone of its own, and nothing on them is green.
-#[test]
-fn no_selection_surface_paints_status_in_colour() {
-    for (name, source) in slice() {
-        for pattern in [
-            "colored_label",
-            "status_dot(",
-            "StatusMark::Success",
-            "StatusMark::Neutral",
-            ".color(t.color.ok",
-            ".color(t.color.info",
-            ".color(t.color.warn",
-            "color.ok)",
-        ] {
-            assert!(
-                !source.contains(pattern),
-                "{name} paints status with {pattern}"
-            );
-        }
-    }
-}
-
 /// Headers and labels are sentence case; nothing here shouts.
 #[test]
 fn no_selection_surface_upper_cases_a_label() {

@@ -2322,34 +2322,6 @@ fn verify_slice() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Colour on a Verify page is a problem, never a state.
-///
-/// A pass is the absence of one, so nothing here paints success: no status
-/// dot, no `Success`/`Neutral` mark, no `ok` or `info` tone. A page that wants
-/// to say a run is fine says it in the toolbar's words, in the text colour.
-/// What colour is left is the failure and near-limit ink in a verdict cell,
-/// the selected row's wash, and the one trace colour a candidate waveform is
-/// drawn in.
-#[test]
-fn no_verify_page_paints_a_state_it_could_state_in_words() {
-    for (path, source) in verify_slice() {
-        let shipped = crate::source_guard::without_test_items(source);
-        for banned in [
-            "colored_label",
-            "status_dot",
-            "StatusMark::Success",
-            "StatusMark::Neutral",
-            "color.ok",
-            "color.info",
-        ] {
-            assert!(
-                !shipped.contains(banned),
-                "{path} names `{banned}`: a Verify page colours a problem, not a state"
-            );
-        }
-    }
-}
-
 /// The pages James called a generic dashboard do not come back.
 ///
 /// Each page is its toolbar, one dense table and the detail of a selected

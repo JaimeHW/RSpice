@@ -1455,71 +1455,220 @@ mod tests {
         );
     }
 
-    /// Nothing the studio paints reports success, and nothing states a status
-    /// in a colour of its own.
+    /// What paints a status in colour, banned on every slice below.
     ///
-    /// Four spellings, each the trace of one habit this surface was written
-    /// with: a `colored_label`, a `status_dot`, a `StatusMark` for a state
-    /// that is not a problem, and the two token colours that exist to say
-    /// "good" and "informational". Success is the absence of a problem, so it
-    /// is said by saying nothing; a warning or a failure is a `Problem` mark,
-    /// which owns its own colour.
-    ///
-    /// `Tone::Fail` is the one exception and it is a verdict, not a status:
-    /// the Specifications page's Result column paints a failing measurement in
-    /// the error colour with no mark, because a column of marks beside a
-    /// column of numbers reads as two verdicts. Every other page states a
-    /// problem with its mark.
-    #[test]
-    fn the_studio_states_no_success_and_tones_no_status() {
-        const BANNED: [&str; 6] = [
-            "colored_label",
-            "status_dot(",
-            "StatusMark::Success",
-            "StatusMark::Neutral",
-            "color.ok",
-            "color.info",
-        ];
-        /// The one file whose verdict column is allowed to paint `Tone::Fail`.
-        const VERDICT_COLUMN: &str = "page_specs.rs";
+    /// Success is the absence of a problem, so it has no styling at all: no
+    /// success or information tone, no status dot, and neither of the two
+    /// `StatusMark` variants that are not problems. A warning or a failure is
+    /// a `Problem` mark in front of neutral text, which owns its own colour.
+    const STATUS_IN_COLOUR: [&str; 6] = [
+        "colored_label",
+        "status_dot(",
+        "StatusMark::Success",
+        "StatusMark::Neutral",
+        "color.ok",
+        "color.info",
+    ];
 
-        let sources = studio_sources();
-        assert!(
-            sources.len() >= 20,
-            "the studio scan found only {} files; the walk has stopped reaching them",
-            sources.len()
-        );
-        /// Whether `line` names `token` rather than merely containing it:
-        /// `PlanDetailTone::Failed` is not a `Tone::Fail`.
+    /// The surfaces held to [`STATUS_IN_COLOUR`]: each one's shipped files
+    /// under `src/workbench`, and the spellings it bans on top, each the trace
+    /// of a habit that surface was written with. The studio is the walked
+    /// [`studio_sources`] instead of a list.
+    const STATUS_IN_COLOUR_SLICES: [(&str, &[&str], &[&str]); 8] = [
+        (
+            "dialog content",
+            &[
+                "app/dialogs/check_and_save.rs",
+                "app/dialogs/check_and_save_validation.rs",
+                "app/dialogs/operation_primitives.rs",
+                "app/dialogs/review_primitives.rs",
+                "app/dialogs/live_session.rs",
+                "app/dialogs/publish_web.rs",
+                "app/dialogs/unpublish_web.rs",
+                "app/dialogs/source_document.rs",
+                "app/dialogs/source_find.rs",
+                "app/dialogs/source_language_tools.rs",
+                "app/dialogs/design_management.rs",
+                "app/dialogs/design_management/manager.rs",
+                "app/dialogs/design_management/subflows.rs",
+                "app/dialogs/design_management/widgets.rs",
+                "app/dialogs/design_management/operations.rs",
+                "app/dialogs/design_management/controller.rs",
+                "app/dialogs/preferences/shortcut_preferences.rs",
+                "app/dialogs/preferences/shortcut_portability_dialogs.rs",
+                "app/dialogs/preferences/preference_pages.rs",
+                "app/dialogs/preferences/preferences_shell.rs",
+            ],
+            &[],
+        ),
+        (
+            "selection commands",
+            &[
+                "app/dialogs/selection/array.rs",
+                "app/dialogs/selection/bulk_edit.rs",
+                "app/dialogs/selection/commands.rs",
+                "app/dialogs/selection/move_selection.rs",
+                "app/dialogs/selection/rename.rs",
+                "app/dialogs/selection/stretch.rs",
+                "app/dialogs/object_properties.rs",
+                "surfaces/design/tool_options.rs",
+            ],
+            &[".color(t.color.warn"],
+        ),
+        (
+            "Design and Verilog-A inspectors",
+            &[
+                "docks/inspector.rs",
+                "docks/inspector/design.rs",
+                "docks/inspector/design/component.rs",
+                "docks/inspector/design/inline_instance.rs",
+                "documents/code_workspace/veriloga_inspector.rs",
+                "surfaces/veriloga.rs",
+            ],
+            &[],
+        ),
+        (
+            // Colour here belongs to the comparison plot's two series; the dot
+            // that led a state line is banned as the literal it was painted
+            // from, so comments recording why it went still read.
+            "model correlation",
+            &[
+                "surfaces/model_correlation.rs",
+                "surfaces/model_correlation/sections.rs",
+                "surfaces/model_correlation/dialogs.rs",
+            ],
+            &["Tone::Good", "\"●\""],
+        ),
+        (
+            "model editor",
+            &[
+                "surfaces/model_editor.rs",
+                "surfaces/model_editor/promotion.rs",
+                "surfaces/model_editor/qualification.rs",
+                "surfaces/model_editor/schema_editors.rs",
+                "surfaces/model_editor/workflows.rs",
+            ],
+            &["MetricTone::Good"],
+        ),
+        (
+            "Models and PDK",
+            &[
+                "surfaces/models/manager.rs",
+                "surfaces/models/manager/adoption.rs",
+                "surfaces/models/manager/bindings.rs",
+                "surfaces/models/manager/bins.rs",
+                "surfaces/models/manager/corners.rs",
+                "surfaces/models/manager/corpus.rs",
+                "surfaces/models/manager/detail.rs",
+                "surfaces/models/manager/dialogs.rs",
+                "surfaces/models/manager/drift.rs",
+                "surfaces/models/manager/hub.rs",
+                "surfaces/models/manager/held_catalog.rs",
+                "surfaces/models/manager/include.rs",
+                "surfaces/models/manager/paint.rs",
+                "surfaces/models/manager/qualification_page.rs",
+                "surfaces/models/manager/shelf.rs",
+                "surfaces/models/manager/symbols.rs",
+                "surfaces/pdk_technology_admin.rs",
+            ],
+            &[],
+        ),
+        (
+            // No data identity and no verdict table: no severity tone at all,
+            // and no shouted label.
+            "Project and navigator",
+            &[
+                "surfaces/project.rs",
+                "surfaces/project/configuration.rs",
+                "surfaces/project/dependencies.rs",
+                "surfaces/project/landing.rs",
+                "surfaces/project/library.rs",
+                "surfaces/project/library_publication.rs",
+                "surfaces/project/overview.rs",
+                "surfaces/project/page.rs",
+                "surfaces/project/recovery.rs",
+                "docks/navigator.rs",
+            ],
+            &["color.warn", "color.err", "to_ascii_uppercase"],
+        ),
+        (
+            "Verify",
+            &[
+                "surfaces/verify.rs",
+                "surfaces/verify/corners.rs",
+                "surfaces/verify/histogram.rs",
+                "surfaces/verify/optimization.rs",
+                "surfaces/verify/regression_contract.rs",
+                "surfaces/verify/regression_panel.rs",
+                "surfaces/verify/safety.rs",
+                "surfaces/verify/table.rs",
+                "surfaces/verify/toolbar.rs",
+                "surfaces/verify/tuning.rs",
+                "surfaces/verify/yield_page.rs",
+            ],
+            &["status_dot"],
+        ),
+    ];
+
+    /// No surface states a status in a colour of its own.
+    ///
+    /// In the studio `Tone::Fail` is banned too, except on the Specifications
+    /// page: its Result column paints a failing measurement in the error
+    /// colour with no mark, a verdict rather than a status, because a column
+    /// of marks beside a column of numbers reads as two verdicts.
+    #[test]
+    fn no_surface_paints_a_status_in_colour() {
+        /// Whether `line` names `token` rather than sitting inside a longer
+        /// identifier: `PlanDetailTone::Failed` is not a `Tone::Fail`.
         fn names(line: &str, token: &str) -> bool {
-            const fn is_ident(byte: u8) -> bool {
-                byte.is_ascii_alphanumeric() || byte == b'_'
-            }
+            let ident = |byte: Option<&u8>| {
+                byte.is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            };
             let bytes = line.as_bytes();
             line.match_indices(token).any(|(index, _)| {
-                let after = index + token.len();
-                (index == 0 || !is_ident(bytes[index - 1]))
-                    && (after >= bytes.len() || !is_ident(bytes[after]))
+                let before = index.checked_sub(1).and_then(|before| bytes.get(before));
+                !ident(before) || !ident(bytes.get(index + token.len()))
             })
         }
-
-        let mut sites = Vec::new();
-        for (path, source) in &sources {
-            let name = path.file_name().unwrap_or_default().to_string_lossy();
+        fn scan(name: &str, source: &str, also: &[&str], sites: &mut Vec<String>) {
             for (index, line) in source.lines().enumerate() {
-                for banned in BANNED {
-                    if names(line, banned) {
-                        sites.push(format!("{name}:{}: {banned}", index + 1));
+                for token in STATUS_IN_COLOUR.iter().chain(also) {
+                    if names(line, token) {
+                        sites.push(format!("{name}:{}: {token}", index + 1));
                     }
                 }
-                if names(line, "Tone::Fail") && name != VERDICT_COLUMN {
-                    sites.push(format!("{name}:{}: Tone::Fail", index + 1));
-                }
             }
+        }
+
+        let workbench = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench");
+        let mut sites = Vec::new();
+        for (surface, files, also) in STATUS_IN_COLOUR_SLICES {
+            for file in files {
+                let path = workbench.join(file);
+                let source = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("{surface}: read {}: {error}", path.display()));
+                let shipped = crate::source_guard::without_test_items(&source);
+                scan(file, &shipped, also, &mut sites);
+            }
+        }
+        let studio = studio_sources();
+        assert!(
+            studio.len() >= 20,
+            "the studio scan found only {} files; the walk has stopped reaching them",
+            studio.len()
+        );
+        for (path, source) in &studio {
+            let also: &[&str] = if path.ends_with("page_specs.rs") {
+                &[]
+            } else {
+                &["Tone::Fail"]
+            };
+            let name = path.strip_prefix(&workbench).unwrap_or(path).display();
+            scan(&name.to_string(), source, also, &mut sites);
         }
         assert!(
             sites.is_empty(),
-            "the studio reports success or tones a status here:\n  {}",
+            "these paint a status in colour:\n  {}",
             sites.join("\n  ")
         );
     }
