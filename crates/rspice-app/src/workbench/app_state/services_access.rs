@@ -10,15 +10,22 @@ use rspice_design::drc::DrcResult;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
+use crate::services::session::SessionKept;
 use crate::state::result_presentation::ResultPresentation;
 use crate::state::{CellViewRef, LibraryManager, SimulationState};
 use crate::workbench::app_state::AppState;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::app_state::session::autosave::{self, AutosaveRestore};
+use crate::workbench::app_state::session::serialization::WithoutRuns;
+use crate::workbench::app_state::session::session_store::{Offer, offer, settle};
 use crate::workbench::lifecycle::project_lifecycle::{
     self, CellViewRevert, LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut,
     LifecycleView, PersistenceBinding, ProjectDocumentId, ProjectLifecycleError,
     ResultPresentationSource, RevertFollowUp, RevertReviewToken,
 };
 use crate::workbench::lifecycle::recovery::{self, RecoveryCandidate};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::workflows::file_workflow::{self, FileWorkflowIo};
 
 impl ResultPresentationSource for crate::workbench::documents::result_document::ResultsState {
     fn project_presentation(&self, simulation: &SimulationState) -> ResultPresentation {
@@ -257,4 +264,72 @@ fn restore_project_structure_preserving_documents(state: &mut AppState, baseline
         .model
         .workspace
         .ensure_library_model(&mut state.model.library_manager);
+}
+
+impl AppState {
+    /// Save the session under eframe's application key.
+    pub(crate) fn store_session(&mut self, storage: &mut dyn eframe::Storage) {
+        // Only the browser's store refuses without saying so. A desktop store
+        // holds what it is given until it writes its file.
+        self.store_session_checked(storage, cfg!(target_arch = "wasm32"));
+    }
+
+    pub(super) fn store_session_checked(
+        &mut self,
+        storage: &mut dyn eframe::Storage,
+        read_back: bool,
+    ) {
+        let history = self.model.simulation.retained.runs.revision();
+        if self.platform.session_kept != SessionKept::WithoutRuns(history.clone()) {
+            match offer(storage, ron::ser::to_string(&*self), read_back) {
+                Offer::Kept => {
+                    settle(&mut self.model, &mut self.platform, SessionKept::Whole);
+                    return;
+                }
+                Offer::Refused => {}
+                Offer::NotEncoded => return,
+            }
+        }
+        let kept = match offer(storage, ron::ser::to_string(&WithoutRuns(self)), read_back) {
+            Offer::Kept => SessionKept::WithoutRuns(history),
+            Offer::Refused => SessionKept::Nothing,
+            Offer::NotEncoded => return,
+        };
+        settle(&mut self.model, &mut self.platform, kept);
+    }
+}
+
+/// The restore decision an open deferred: Restore loads the checkpoint as
+/// unsaved changes over the file's identity; Discard deletes it and opens the
+/// file; Esc opens the file and keeps the checkpoint.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn process_autosave_restore_dialog(
+    state: &mut AppState,
+    io: &dyn FileWorkflowIo,
+    ctx: &egui::Context,
+) {
+    let Some(choice) = autosave::restore_dialog(&mut state.model, &state.platform, ctx) else {
+        return;
+    };
+    match choice {
+        AutosaveRestore::Checkpoint {
+            path,
+            schematic,
+            note,
+        } => {
+            file_workflow::apply_loaded_schematic(
+                state,
+                *schematic,
+                file_workflow::SchematicLoadOrigin::PersistentPath(&path),
+            );
+            state.record(LogSeverity::Info, LogSource::Studio, note);
+        }
+        AutosaveRestore::SavedFile { path, note } => {
+            file_workflow::load_schematic_bypassing_autosave(state, &path, io);
+            if let Some(note) = note {
+                state.record(LogSeverity::Info, LogSource::Studio, note);
+            }
+        }
+    }
+    state.platform.pending_autosave_restore = None;
 }

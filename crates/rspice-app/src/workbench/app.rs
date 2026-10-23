@@ -989,7 +989,11 @@ impl RSpiceApp {
         self.process_plan_removal_review_dialog(ctx);
         self.process_plan_removal_refusal_dialog(ctx);
         #[cfg(not(target_arch = "wasm32"))]
-        self.process_autosave_restore_dialog(ctx);
+        crate::workbench::app_state::services_access::process_autosave_restore_dialog(
+            &mut self.state,
+            self.file_workflow_io.as_ref(),
+            ctx,
+        );
         self.process_pending_library_deletions();
         self.process_exit_request(ctx);
         crate::workbench::show_route_overlays(ctx, self);
@@ -1147,7 +1151,12 @@ impl eframe::App for RSpiceApp {
             |_, crate::workbench::framework::requests::ClipboardText(text)| ctx.copy_text(text),
         );
         #[cfg(not(target_arch = "wasm32"))]
-        self.autosave_tick(&ctx);
+        crate::workbench::app_state::session::autosave::autosave_tick(
+            &mut self.state.platform,
+            &mut self.state.model,
+            &mut self.autosave_last,
+            &ctx,
+        );
         self.render_frame_chrome(ui);
         self.render_secondary_application_windows(&ctx);
         self.refresh_live_checks(&ctx);

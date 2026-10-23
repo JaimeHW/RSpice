@@ -12,74 +12,43 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::session::SessionKept;
-use crate::workbench::app_state::AppState;
-
-use super::serialization::WithoutRuns;
+use crate::workbench::app_state::{Model, PlatformState};
 
 /// What the store did with one encoding of the session.
-enum Offer {
+pub(crate) enum Offer {
     Kept,
     Refused,
     NotEncoded,
 }
 
-impl AppState {
-    /// Save the session under eframe's application key.
-    pub(crate) fn store_session(&mut self, storage: &mut dyn eframe::Storage) {
-        // Only the browser's store refuses without saying so. A desktop store
-        // holds what it is given until it writes its file.
-        self.store_session_checked(storage, cfg!(target_arch = "wasm32"));
-    }
-
-    fn store_session_checked(&mut self, storage: &mut dyn eframe::Storage, read_back: bool) {
-        let history = self.model.simulation.retained.runs.revision();
-        if self.platform.session_kept != SessionKept::WithoutRuns(history.clone()) {
-            match offer(storage, ron::ser::to_string(&*self), read_back) {
-                Offer::Kept => {
-                    self.settle(SessionKept::Whole);
-                    return;
-                }
-                Offer::Refused => {}
-                Offer::NotEncoded => return,
-            }
+/// Remember what this save kept, and say so when that changes.
+pub(crate) fn settle(model: &mut Model, platform: &mut PlatformState, kept: SessionKept) {
+    let before = std::mem::replace(&mut platform.session_kept, kept);
+    match (&before, &platform.session_kept) {
+        (SessionKept::Whole, SessionKept::Whole)
+        | (SessionKept::WithoutRuns(_), SessionKept::WithoutRuns(_))
+        | (SessionKept::Nothing, SessionKept::Nothing) => {}
+        (_, SessionKept::Whole) => {
+            model.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                "This browser keeps the whole session again, run results included.",
+            );
         }
-        let kept = match offer(storage, ron::ser::to_string(&WithoutRuns(self)), read_back) {
-            Offer::Kept => SessionKept::WithoutRuns(history),
-            Offer::Refused => SessionKept::Nothing,
-            Offer::NotEncoded => return,
-        };
-        self.settle(kept);
-    }
-
-    /// Remember what this save kept, and say so when that changes.
-    fn settle(&mut self, kept: SessionKept) {
-        let before = std::mem::replace(&mut self.platform.session_kept, kept);
-        match (&before, &self.platform.session_kept) {
-            (SessionKept::Whole, SessionKept::Whole)
-            | (SessionKept::WithoutRuns(_), SessionKept::WithoutRuns(_))
-            | (SessionKept::Nothing, SessionKept::Nothing) => {}
-            (_, SessionKept::Whole) => {
-                self.record(
-                    LogSeverity::Info,
-                    LogSource::Studio,
-                    "This browser keeps the whole session again, run results included.",
-                );
-            }
-            (_, SessionKept::WithoutRuns(_)) => self.report_warning(
-                "Run results are not kept for the next session",
-                "They are more than this browser's storage holds, so a reload brings back the \
-                 project without them. Save the project to keep them.",
-            ),
-            (_, SessionKept::Nothing) => self.report_failure(
-                "The session could not be kept",
-                "This browser's storage refused it, so a reload returns to the last session it \
-                 kept.",
-            ),
-        }
+        (_, SessionKept::WithoutRuns(_)) => model.report_warning(
+            "Run results are not kept for the next session",
+            "They are more than this browser's storage holds, so a reload brings back the \
+             project without them. Save the project to keep them.",
+        ),
+        (_, SessionKept::Nothing) => model.report_failure(
+            "The session could not be kept",
+            "This browser's storage refused it, so a reload returns to the last session it \
+             kept.",
+        ),
     }
 }
 
-fn offer(
+pub(crate) fn offer(
     storage: &mut dyn eframe::Storage,
     encoded: ron::Result<String>,
     read_back: bool,
@@ -117,6 +86,8 @@ fn fingerprint(text: &str) -> (usize, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
+    use crate::workbench::app_state::session::serialization::WithoutRuns;
 
     /// A store that, like a browser's local storage, keeps its old value when
     /// a new one is over its limit.

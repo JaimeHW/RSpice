@@ -97,7 +97,9 @@ impl serde::Serialize for AppState {
 /// The session with its runs left out, for a store that refused the whole
 /// session: a browser's storage holds a few megabytes, and one long run's
 /// waveforms are more than that.
-pub(super) struct WithoutRuns<'a>(pub(super) &'a AppState);
+pub(in crate::workbench::app_state) struct WithoutRuns<'a>(
+    pub(in crate::workbench::app_state) &'a AppState,
+);
 
 impl serde::Serialize for WithoutRuns<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
