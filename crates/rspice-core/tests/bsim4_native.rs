@@ -16,6 +16,7 @@
 
 #![allow(clippy::excessive_precision)]
 
+use rspice_core::Complex64;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
 
@@ -1180,6 +1181,82 @@ fn ring_oscillator_period_matches_ngspice() {
     );
 }
 
+/// The 10 fF-loaded inverter biased mid-transition (VIN = 0.45 V, AC 1), with
+/// `option` appended to the n45 NMOS card.
+fn inverter_ac_deck(title: &str, option: Option<&str>) -> String {
+    let models = match option {
+        Some(option) => models45().replace(
+            ".model n45 nmos level=54 version=4.8",
+            &format!(".model n45 nmos level=54 version=4.8 {option}"),
+        ),
+        None => models45(),
+    };
+    format!(
+        "* {title}\n\
+         vdd vdd 0 dc 1.1\n\
+         vin in 0 dc 0.45 ac 1\n\
+         {}\
+         cl out 0 10f\n\
+         {models}\n\
+         .end\n",
+        inverter_pair("1", "in", "out"),
+    )
+}
+
+/// `v(out)` of `deck` at the frequency of each reference row.
+fn inverter_ac_out(deck: &str, reference: &[(f64, f64, f64)]) -> Vec<Complex64> {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
+    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
+    results
+        .iter()
+        .map(|result| {
+            let idx = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case("out"))
+                .expect("out in ac result");
+            result.voltages[idx]
+        })
+        .collect()
+}
+
+/// ngspice-46 rows `(freq, dB, phase rad)`, each matched within 1e-3.
+fn assert_inverter_ac_matches_ngspice(label: &str, deck: &str, reference: &[(f64, f64, f64)]) {
+    for (&(freq, db_ref, ph_ref), v) in reference.iter().zip(inverter_ac_out(deck, reference)) {
+        let db = 20.0 * v.norm().log10();
+        let ph = v.arg();
+        assert!(
+            (db - db_ref).abs() < 1e-3,
+            "{label} AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
+        );
+        assert!(
+            (ph - ph_ref).abs() < 1e-3,
+            "{label} AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
+        );
+    }
+}
+
+/// Xyce 7.10 rows `(freq, |v|, phase deg)`: magnitude within 1e-3 relative and
+/// phase within 0.05 degree.
+fn assert_inverter_ac_matches_xyce(label: &str, deck: &str, reference: &[(f64, f64, f64)]) {
+    for (&(freq, mag_ref, phase_deg_ref), v) in
+        reference.iter().zip(inverter_ac_out(deck, reference))
+    {
+        let mag = v.norm();
+        let phase_deg = v.arg().to_degrees();
+        let mag_rel = (mag - mag_ref).abs() / mag_ref;
+        assert!(
+            mag_rel < 1e-3,
+            "{label} AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
+        );
+        assert!(
+            (phase_deg - phase_deg_ref).abs() < 5e-2,
+            "{label} AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
+        );
+    }
+}
+
 #[test]
 fn inverter_ac_response_matches_ngspice() {
     // Small-signal check of the AC path: DC linearization (gm/gds/gmbs +
@@ -1187,49 +1264,20 @@ fn inverter_ac_response_matches_ngspice() {
     // BSIM4 capacitance matrix (intrinsic CAPMOD=2 + overlaps +
     // capbd/capbs) on the imaginary axis. The inverter is biased
     // mid-transition with a 10 fF load so the pole sits inside the sweep.
-    let deck = format!(
-        "* bsim4 inverter ac\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-        models45()
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
     // ngspice-46 reference: `ac dec 2 1e6 1e11` on this deck with
     // `.option reltol=1e-6`, run 2026-06-12 (vdb(out), ph(out)).
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 2.18108888e+01, 3.14106759e+00),
-        (1.000000e7, 2.18107735e+01, 3.13634209e+00),
-        (1.000000e8, 2.17992505e+01, 3.08913285e+00),
-        (1.000000e9, 2.07784764e+01, 2.65660742e+00),
-        (1.000000e10, 7.38496114e+00, 1.69188063e+00),
-        (1.000000e11, -1.07592260e+01, 9.81387293e-01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, db_ref, ph_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let ph = v.arg();
-        println!("AC f={freq:.3e}: engine ({db:.5} dB, {ph:.5} rad) ngspice ({db_ref}, {ph_ref})");
-        assert!(
-            (db - db_ref).abs() < 1e-3,
-            "AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
-        );
-        assert!(
-            (ph - ph_ref).abs() < 1e-3,
-            "AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
-        );
-    }
+    assert_inverter_ac_matches_ngspice(
+        "default n45",
+        &inverter_ac_deck("bsim4 inverter ac", None),
+        &[
+            (1.000000e6, 2.18108888e+01, 3.14106759e+00),
+            (1.000000e7, 2.18107735e+01, 3.13634209e+00),
+            (1.000000e8, 2.17992505e+01, 3.08913285e+00),
+            (1.000000e9, 2.07784764e+01, 2.65660742e+00),
+            (1.000000e10, 7.38496114e+00, 1.69188063e+00),
+            (1.000000e11, -1.07592260e+01, 9.81387293e-01),
+        ],
+    );
 }
 
 #[test]
@@ -1237,49 +1285,18 @@ fn inverter_ac_response_with_cvchargemod1_matches_ngspice() {
     // Same inverter as the default BSIM4 AC oracle, but with the n45 model's
     // CAPMOD=2 charge path using CVCHARGEMOD=1. ngspice-46 reference from a
     // local `ngspice_con.exe -b` run on this deck with `.option reltol=1e-6`.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 cvchargemod=1",
+    assert_inverter_ac_matches_ngspice(
+        "CVCHARGEMOD=1",
+        &inverter_ac_deck("bsim4 cvchargemod1 inverter ac", Some("cvchargemod=1")),
+        &[
+            (1.000000e6, 2.18108888e+01, 3.14106762e+00),
+            (1.000000e7, 2.18107733e+01, 3.13634232e+00),
+            (1.000000e8, 2.17992373e+01, 3.08913520e+00),
+            (1.000000e9, 2.07774344e+01, 2.65669123e+00),
+            (1.000000e10, 7.37846671e+00, 1.69487478e+00),
+            (1.000000e11, -1.08898361e+01, 1.00262907e+00),
+        ],
     );
-    let deck = format!(
-        "* bsim4 cvchargemod1 inverter ac\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 2.18108888e+01, 3.14106762e+00),
-        (1.000000e7, 2.18107733e+01, 3.13634232e+00),
-        (1.000000e8, 2.17992373e+01, 3.08913520e+00),
-        (1.000000e9, 2.07774344e+01, 2.65669123e+00),
-        (1.000000e10, 7.37846671e+00, 1.69487478e+00),
-        (1.000000e11, -1.08898361e+01, 1.00262907e+00),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, db_ref, ph_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let ph = v.arg();
-        assert!(
-            (db - db_ref).abs() < 1e-3,
-            "CVCHARGEMOD=1 AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
-        );
-        assert!(
-            (ph - ph_ref).abs() < 1e-3,
-            "CVCHARGEMOD=1 AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
-        );
-    }
 }
 
 #[test]
@@ -1287,67 +1304,26 @@ fn inverter_ac_response_with_cvchargemod2_matches_ngspice_nonzero_path() {
     // ngspice-46 stores CVCHARGEMOD as an integer selector but BSIM4load
     // branches only on == 0; selector 2 therefore uses the same nonzero
     // capacitance path as selector 1.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 cvchargemod=2",
+    assert_inverter_ac_matches_ngspice(
+        "CVCHARGEMOD=2",
+        &inverter_ac_deck("bsim4 cvchargemod2 inverter ac", Some("cvchargemod=2")),
+        &[
+            (1.000000e6, 2.18108888e+01, 3.14106762e+00),
+            (1.000000e7, 2.18107733e+01, 3.13634232e+00),
+            (1.000000e8, 2.17992373e+01, 3.08913520e+00),
+            (1.000000e9, 2.07774344e+01, 2.65669123e+00),
+            (1.000000e10, 7.37846671e+00, 1.69487478e+00),
+            (1.000000e11, -1.08898361e+01, 1.00262907e+00),
+        ],
     );
-    let deck = format!(
-        "* bsim4 cvchargemod2 inverter ac\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 2.18108888e+01, 3.14106762e+00),
-        (1.000000e7, 2.18107733e+01, 3.13634232e+00),
-        (1.000000e8, 2.17992373e+01, 3.08913520e+00),
-        (1.000000e9, 2.07774344e+01, 2.65669123e+00),
-        (1.000000e10, 7.37846671e+00, 1.69487478e+00),
-        (1.000000e11, -1.08898361e+01, 1.00262907e+00),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, db_ref, ph_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let ph = v.arg();
-        assert!(
-            (db - db_ref).abs() < 1e-3,
-            "CVCHARGEMOD=2 AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
-        );
-        assert!(
-            (ph - ph_ref).abs() < 1e-3,
-            "CVCHARGEMOD=2 AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
-        );
-    }
 }
 
 #[test]
 fn cvchargemod_outside_supported_integer_set_is_rejected_for_ac() {
     let selector = "2.5";
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        &format!(".model n45 nmos level=54 version=4.8 cvchargemod={selector}"),
-    );
-    let deck = format!(
-        "* bsim4 unsupported cvchargemod ac\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
+    let deck = inverter_ac_deck(
+        "bsim4 unsupported cvchargemod ac",
+        Some(&format!("cvchargemod={selector}")),
     );
     let netlist = Netlist::parse(&deck).expect("deck parses");
     let err = engine()
@@ -1366,50 +1342,18 @@ fn inverter_ac_response_with_cvchargemod1_matches_xyce710() {
     // BSIM4 front accepts the deck as LEVEL=14/54 and maps VERSION=4.8 to
     // its supported 4.8.2 implementation; these pins keep that compatibility
     // explicit without making Verilog-A the default path.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 cvchargemod=1",
+    assert_inverter_ac_matches_xyce(
+        "CVCHARGEMOD=1",
+        &inverter_ac_deck("bsim4 cvchargemod1 inverter ac xyce", Some("cvchargemod=1")),
+        &[
+            (1.000000e6, 1.23181203e+01, 1.79969933e+02),
+            (1.000000e7, 1.23179567e+01, 1.79699333e+02),
+            (1.000000e8, 1.23016247e+01, 1.76995951e+02),
+            (1.000000e9, 1.09375381e+01, 1.52229378e+02),
+            (1.000000e10, 2.33959817e+00, 9.71147197e+01),
+            (1.000000e11, 2.85584192e-01, 5.74469892e+01),
+        ],
     );
-    let deck = format!(
-        "* bsim4 cvchargemod1 inverter ac xyce\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 1.23181203e+01, 1.79969933e+02),
-        (1.000000e7, 1.23179567e+01, 1.79699333e+02),
-        (1.000000e8, 1.23016247e+01, 1.76995951e+02),
-        (1.000000e9, 1.09375381e+01, 1.52229378e+02),
-        (1.000000e10, 2.33959817e+00, 9.71147197e+01),
-        (1.000000e11, 2.85584192e-01, 5.74469892e+01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let mag = v.norm();
-        let phase_deg = v.arg().to_degrees();
-        let mag_rel = (mag - mag_ref).abs() / mag_ref;
-        assert!(
-            mag_rel < 1e-3,
-            "CVCHARGEMOD=1 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
-        );
-        assert!(
-            (phase_deg - phase_deg_ref).abs() < 5e-2,
-            "CVCHARGEMOD=1 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
-        );
-    }
 }
 
 #[test]
@@ -1417,100 +1361,36 @@ fn inverter_ac_response_with_cvchargemod2_matches_xyce710_nonzero_path() {
     // Xyce 7.10's BSIM4 v4.8.2 source mirrors ngspice here: CVCHARGEMOD=0
     // takes the voffcv/noff branch, while every nonzero selector takes the
     // alternate branch. These pins keep selector 2 native and Xyce-compatible.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 cvchargemod=2",
+    assert_inverter_ac_matches_xyce(
+        "CVCHARGEMOD=2",
+        &inverter_ac_deck("bsim4 cvchargemod2 inverter ac xyce", Some("cvchargemod=2")),
+        &[
+            (1.000000e6, 1.23181203e+01, 1.79969933e+02),
+            (1.000000e7, 1.23179567e+01, 1.79699333e+02),
+            (1.000000e8, 1.23016247e+01, 1.76995951e+02),
+            (1.000000e9, 1.09375381e+01, 1.52229378e+02),
+            (1.000000e10, 2.33959817e+00, 9.71147197e+01),
+            (1.000000e11, 2.85584192e-01, 5.74469892e+01),
+        ],
     );
-    let deck = format!(
-        "* bsim4 cvchargemod2 inverter ac xyce\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 1.23181203e+01, 1.79969933e+02),
-        (1.000000e7, 1.23179567e+01, 1.79699333e+02),
-        (1.000000e8, 1.23016247e+01, 1.76995951e+02),
-        (1.000000e9, 1.09375381e+01, 1.52229378e+02),
-        (1.000000e10, 2.33959817e+00, 9.71147197e+01),
-        (1.000000e11, 2.85584192e-01, 5.74469892e+01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let mag = v.norm();
-        let phase_deg = v.arg().to_degrees();
-        let mag_rel = (mag - mag_ref).abs() / mag_ref;
-        assert!(
-            mag_rel < 1e-3,
-            "CVCHARGEMOD=2 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
-        );
-        assert!(
-            (phase_deg - phase_deg_ref).abs() < 5e-2,
-            "CVCHARGEMOD=2 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
-        );
-    }
 }
 
 #[test]
 fn inverter_ac_response_with_cvchargemod3_matches_xyce710_nonzero_path() {
     // Xyce 7.10 accepts integer CVCHARGEMOD=3 and evaluates it through the
     // same nonzero charge branch as selectors 1 and 2.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 cvchargemod=3",
+    assert_inverter_ac_matches_xyce(
+        "CVCHARGEMOD=3",
+        &inverter_ac_deck("bsim4 cvchargemod3 inverter ac xyce", Some("cvchargemod=3")),
+        &[
+            (1.000000e6, 1.23181203e+01, 1.79969933e+02),
+            (1.000000e7, 1.23179567e+01, 1.79699333e+02),
+            (1.000000e8, 1.23016247e+01, 1.76995951e+02),
+            (1.000000e9, 1.09375381e+01, 1.52229378e+02),
+            (1.000000e10, 2.33959817e+00, 9.71147197e+01),
+            (1.000000e11, 2.85584192e-01, 5.74469892e+01),
+        ],
     );
-    let deck = format!(
-        "* bsim4 cvchargemod3 inverter ac xyce\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 1.23181203e+01, 1.79969933e+02),
-        (1.000000e7, 1.23179567e+01, 1.79699333e+02),
-        (1.000000e8, 1.23016247e+01, 1.76995951e+02),
-        (1.000000e9, 1.09375381e+01, 1.52229378e+02),
-        (1.000000e10, 2.33959817e+00, 9.71147197e+01),
-        (1.000000e11, 2.85584192e-01, 5.74469892e+01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let mag = v.norm();
-        let phase_deg = v.arg().to_degrees();
-        let mag_rel = (mag - mag_ref).abs() / mag_ref;
-        assert!(
-            mag_rel < 1e-3,
-            "CVCHARGEMOD=3 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
-        );
-        assert!(
-            (phase_deg - phase_deg_ref).abs() < 5e-2,
-            "CVCHARGEMOD=3 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
-        );
-    }
 }
 
 #[test]
@@ -2985,49 +2865,18 @@ fn inverter_ac_response_with_capmod1_matches_ngspice() {
     // Same inverter as the default BSIM4 AC oracle, but with the n45 model's
     // CAPMOD=1 intrinsic charge model. ngspice-46 reference from a local
     // `ngspice_con.exe -b` run on this deck with `.option reltol=1e-6`.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 capmod=1",
+    assert_inverter_ac_matches_ngspice(
+        "CAPMOD=1",
+        &inverter_ac_deck("bsim4 capmod1 inverter ac", Some("capmod=1")),
+        &[
+            (1.000000e6, 2.18108888e+01, 3.14106759e+00),
+            (1.000000e7, 2.18107735e+01, 3.13634209e+00),
+            (1.000000e8, 2.17992504e+01, 3.08913284e+00),
+            (1.000000e9, 2.07784702e+01, 2.65660771e+00),
+            (1.000000e10, 7.38492361e+00, 1.69189634e+00),
+            (1.000000e11, -1.07599229e+01, 9.81497621e-01),
+        ],
     );
-    let deck = format!(
-        "* bsim4 capmod1 inverter ac\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 2.18108888e+01, 3.14106759e+00),
-        (1.000000e7, 2.18107735e+01, 3.13634209e+00),
-        (1.000000e8, 2.17992504e+01, 3.08913284e+00),
-        (1.000000e9, 2.07784702e+01, 2.65660771e+00),
-        (1.000000e10, 7.38492361e+00, 1.69189634e+00),
-        (1.000000e11, -1.07599229e+01, 9.81497621e-01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, db_ref, ph_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let ph = v.arg();
-        assert!(
-            (db - db_ref).abs() < 1e-3,
-            "CAPMOD=1 AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
-        );
-        assert!(
-            (ph - ph_ref).abs() < 1e-3,
-            "CAPMOD=1 AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
-        );
-    }
 }
 
 #[test]
@@ -3035,50 +2884,18 @@ fn inverter_ac_response_with_capmod1_matches_xyce710() {
     // Same CAPMOD=1 AC deck as the ngspice oracle above. Xyce 7.10 maps
     // VERSION=4.8 to its 4.8.2 implementation and ignores ngspice-only KETAC,
     // so this is a compatibility pin with production-grade tolerance.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 capmod=1",
+    assert_inverter_ac_matches_xyce(
+        "CAPMOD=1",
+        &inverter_ac_deck("bsim4 capmod1 inverter ac xyce", Some("capmod=1")),
+        &[
+            (1.000000e6, 1.23181203e+01, 1.79969932e+02),
+            (1.000000e7, 1.23179569e+01, 1.79699319e+02),
+            (1.000000e8, 1.23016432e+01, 1.76995815e+02),
+            (1.000000e9, 1.09388421e+01, 1.52224596e+02),
+            (1.000000e10, 2.34133862e+00, 9.69440735e+01),
+            (1.000000e11, 2.89887807e-01, 5.62362472e+01),
+        ],
     );
-    let deck = format!(
-        "* bsim4 capmod1 inverter ac xyce\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 1.23181203e+01, 1.79969932e+02),
-        (1.000000e7, 1.23179569e+01, 1.79699319e+02),
-        (1.000000e8, 1.23016432e+01, 1.76995815e+02),
-        (1.000000e9, 1.09388421e+01, 1.52224596e+02),
-        (1.000000e10, 2.34133862e+00, 9.69440735e+01),
-        (1.000000e11, 2.89887807e-01, 5.62362472e+01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let mag = v.norm();
-        let phase_deg = v.arg().to_degrees();
-        let mag_rel = (mag - mag_ref).abs() / mag_ref;
-        assert!(
-            mag_rel < 1e-3,
-            "CAPMOD=1 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
-        );
-        assert!(
-            (phase_deg - phase_deg_ref).abs() < 5e-2,
-            "CAPMOD=1 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
-        );
-    }
 }
 
 #[test]
@@ -3086,49 +2903,18 @@ fn inverter_ac_response_with_capmod0_matches_ngspice() {
     // Same inverter as the default BSIM4 AC oracle, but with the n45 model's
     // CAPMOD=0 compatibility charge model. ngspice-46 reference from a local
     // `ngspice_con.exe -b` run on this deck with `.option reltol=1e-6`.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 capmod=0",
+    assert_inverter_ac_matches_ngspice(
+        "CAPMOD=0",
+        &inverter_ac_deck("bsim4 capmod0 inverter ac", Some("capmod=0")),
+        &[
+            (1.000000e6, 2.18108889e+01, 3.14107213e+00),
+            (1.000000e7, 2.18107754e+01, 3.13638750e+00),
+            (1.000000e8, 2.17994422e+01, 3.08958584e+00),
+            (1.000000e9, 2.07936534e+01, 2.66024638e+00),
+            (1.000000e10, 7.45313279e+00, 1.69591336e+00),
+            (1.000000e11, -1.07878067e+01, 9.98505133e-01),
+        ],
     );
-    let deck = format!(
-        "* bsim4 capmod0 inverter ac\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 2.18108889e+01, 3.14107213e+00),
-        (1.000000e7, 2.18107754e+01, 3.13638750e+00),
-        (1.000000e8, 2.17994422e+01, 3.08958584e+00),
-        (1.000000e9, 2.07936534e+01, 2.66024638e+00),
-        (1.000000e10, 7.45313279e+00, 1.69591336e+00),
-        (1.000000e11, -1.07878067e+01, 9.98505133e-01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, db_ref, ph_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let db = 20.0 * v.norm().log10();
-        let ph = v.arg();
-        assert!(
-            (db - db_ref).abs() < 1e-3,
-            "CAPMOD=0 AC magnitude at {freq:.3e} Hz: engine={db:.5} dB ngspice={db_ref} dB"
-        );
-        assert!(
-            (ph - ph_ref).abs() < 1e-3,
-            "CAPMOD=0 AC phase at {freq:.3e} Hz: engine={ph:.5} ngspice={ph_ref}"
-        );
-    }
 }
 
 #[test]
@@ -3136,50 +2922,18 @@ fn inverter_ac_response_with_capmod0_matches_xyce710() {
     // Same CAPMOD=0 AC deck as the ngspice oracle above. Xyce 7.10 maps
     // VERSION=4.8 to its 4.8.2 implementation and ignores ngspice-only KETAC,
     // so this is a compatibility pin with production-grade tolerance.
-    let models = models45().replace(
-        ".model n45 nmos level=54 version=4.8",
-        ".model n45 nmos level=54 version=4.8 capmod=0",
+    assert_inverter_ac_matches_xyce(
+        "CAPMOD=0",
+        &inverter_ac_deck("bsim4 capmod0 inverter ac xyce", Some("capmod=0")),
+        &[
+            (1.000000e6, 1.23181204e+01, 1.79970192e+02),
+            (1.000000e7, 1.23179596e+01, 1.79701921e+02),
+            (1.000000e8, 1.23019146e+01, 1.77021771e+02),
+            (1.000000e9, 1.09579744e+01, 1.52433119e+02),
+            (1.000000e10, 2.35980642e+00, 9.71743215e+01),
+            (1.000000e11, 2.88959944e-01, 5.72107155e+01),
+        ],
     );
-    let deck = format!(
-        "* bsim4 capmod0 inverter ac xyce\n\
-         vdd vdd 0 dc 1.1\n\
-         vin in 0 dc 0.45 ac 1\n\
-         {}\
-         cl out 0 10f\n\
-         {models}\n\
-         .end\n",
-        inverter_pair("1", "in", "out"),
-    );
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let reference: &[(f64, f64, f64)] = &[
-        (1.000000e6, 1.23181204e+01, 1.79970192e+02),
-        (1.000000e7, 1.23179596e+01, 1.79701921e+02),
-        (1.000000e8, 1.23019146e+01, 1.77021771e+02),
-        (1.000000e9, 1.09579744e+01, 1.52433119e+02),
-        (1.000000e10, 2.35980642e+00, 9.71743215e+01),
-        (1.000000e11, 2.88959944e-01, 5.72107155e+01),
-    ];
-    let freqs: Vec<f64> = reference.iter().map(|&(f, _, _)| f).collect();
-    let results = engine().run_ac(&netlist, &freqs).expect("ac runs");
-    for ((freq, mag_ref, phase_deg_ref), result) in reference.iter().zip(&results) {
-        let idx = result
-            .node_names
-            .iter()
-            .position(|n| n.eq_ignore_ascii_case("out"))
-            .expect("out in ac result");
-        let v = result.voltages[idx];
-        let mag = v.norm();
-        let phase_deg = v.arg().to_degrees();
-        let mag_rel = (mag - mag_ref).abs() / mag_ref;
-        assert!(
-            mag_rel < 1e-3,
-            "CAPMOD=0 AC magnitude vs Xyce at {freq:.3e} Hz: engine={mag:.9e} xyce={mag_ref:.9e} rel={mag_rel:.3e}"
-        );
-        assert!(
-            (phase_deg - phase_deg_ref).abs() < 5e-2,
-            "CAPMOD=0 AC phase vs Xyce at {freq:.3e} Hz: engine={phase_deg:.6} deg xyce={phase_deg_ref:.6} deg"
-        );
-    }
 }
 
 #[test]
