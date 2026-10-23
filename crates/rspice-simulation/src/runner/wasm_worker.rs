@@ -323,17 +323,31 @@ mod browser {
         }
     }
 
+    /// The progress record, abort flag and queues one worker request reports
+    /// through.
+    pub(crate) struct WorkerRequestChannels {
+        pub(crate) progress: Arc<Mutex<SimulationProgress>>,
+        pub(crate) abort_flag: Arc<AtomicBool>,
+        pub(crate) transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
+        pub(crate) engine_log: Arc<Mutex<EngineLogQueue>>,
+        pub(crate) checkpoint: CheckpointQueue,
+        pub(crate) transient_checkpoint: CheckpointQueue,
+    }
+
     pub(crate) fn start_worker_request(
         handle: &mut WorkerHandle,
         request: SimulationRequest,
         input: NetlistInput,
-        progress: Arc<Mutex<SimulationProgress>>,
-        abort_flag: Arc<AtomicBool>,
-        transient_samples: Option<Arc<Mutex<LiveTransientQueue>>>,
-        engine_log: Arc<Mutex<EngineLogQueue>>,
-        checkpoint: CheckpointQueue,
-        transient_checkpoint: CheckpointQueue,
+        channels: WorkerRequestChannels,
     ) -> Result<(), SimulationError> {
+        let WorkerRequestChannels {
+            progress,
+            abort_flag,
+            transient_samples,
+            engine_log,
+            checkpoint,
+            transient_checkpoint,
+        } = channels;
         if handle.is_running() || handle.has_unpolled_result() {
             return Err(SimulationError::AlreadyRunning);
         }
@@ -1085,7 +1099,7 @@ mod browser {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) use browser::{WorkerHandle, start_worker_request};
+pub(crate) use browser::{WorkerHandle, WorkerRequestChannels, start_worker_request};
 
 #[cfg(test)]
 mod tests {

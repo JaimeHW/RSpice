@@ -540,12 +540,14 @@ impl SimulationRunner {
                 &mut self.worker_handle,
                 request,
                 input,
-                progress,
-                abort_flag,
-                transient_samples,
-                Arc::clone(&self.engine_log),
-                Arc::clone(&self.monte_carlo_checkpoint),
-                Arc::clone(&self.transient_checkpoint),
+                wasm_worker::WorkerRequestChannels {
+                    progress,
+                    abort_flag,
+                    transient_samples,
+                    engine_log: Arc::clone(&self.engine_log),
+                    checkpoint: Arc::clone(&self.monte_carlo_checkpoint),
+                    transient_checkpoint: Arc::clone(&self.transient_checkpoint),
+                },
             )?;
         }
         Ok(())
