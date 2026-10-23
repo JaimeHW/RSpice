@@ -1691,7 +1691,6 @@ fn budgeted_lines(source: &str) -> usize {
 /// is held exact by its own `assert_eq!`. A ceiling equal to its measurement
 /// is the state this file wants; only the ones above it were doing nothing.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    ("workbench/docks/navigator.rs", 6_668),
     // 2026-09-06, +100 (6_418 -> 6_518): three viewer sheets joined the
     // workspace. Every line is a single-owner table this file exists to own —
     // the `ResultViewer` variants and their tab order, the two directions of

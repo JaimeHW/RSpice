@@ -1,5 +1,6 @@
 //! Verification-flow summaries and status rendering for the navigator footer.
 
+use super::verify::VerificationFlowPresentation;
 use super::*;
 
 #[cfg(test)]

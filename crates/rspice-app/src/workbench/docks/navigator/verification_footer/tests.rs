@@ -5,12 +5,18 @@
 //! execution at all. The remaining cases hold the mock's grid and spacing, and
 //! the density switch between desktop and touch.
 
+use super::super::results_actions::{
+    select_result_analysis, select_result_dataset, select_result_signal,
+};
+use super::super::results_rows::{
+    EXPRESSION_HEADER_HEIGHT, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT,
+    responsive_result_control_height,
+};
+use super::super::simulate::{NAV_PROPERTY_COLUMN_GAP, NAV_PROPERTY_PADDING_X, simulate_nav_meta};
+use super::super::verify::{verification_coverage, verification_flow_label};
 use super::{
-    EXPRESSION_HEADER_HEIGHT, FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP,
-    NAV_PROPERTY_COLUMN_GAP, NAV_PROPERTY_PADDING_X, SIGNAL_ROW_HEIGHT, TOUCH_TARGET_HEIGHT,
-    active_mc_sample_trail, flow_row_geometry, header, panel_search, panel_search_field_width,
-    responsive_result_control_height, select_result_analysis, select_result_dataset,
-    select_result_signal, simulate_nav_meta, verification_coverage, verification_flow_label,
+    FLOW_DETAIL_TOP, FLOW_LABEL_TOP, FLOW_ROW_HEIGHT, FLOW_STATUS_TOP, active_mc_sample_trail,
+    flow_row_geometry, header, panel_search, panel_search_field_width,
     verification_navigator_requires_scroll,
 };
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
@@ -672,7 +678,8 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.model.simulation.view.active_run_idx = Some(0);
 
-    let flow = super::verification_flow_presentation(&app, VerificationPage::DeviceSafety);
+    let flow =
+        super::super::verify::verification_flow_presentation(&app, VerificationPage::DeviceSafety);
     assert_eq!(flow.status, "9.1% margin");
 }
 
@@ -868,7 +875,7 @@ fn quantity_metadata_names_the_kind_under_derived_projections() {
         ("onoise", "V^2/Hz", "Noise PSD"),
     ] {
         assert_eq!(
-            super::result_quantity_kind_label(name, unit),
+            super::super::results_rows::result_quantity_kind_label(name, unit),
             kind,
             "{name}"
         );
@@ -890,14 +897,20 @@ fn analysis_groups_default_to_disclosing_only_the_active_analysis() {
         .remove(0);
     let first = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
     let second = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[1]);
-    assert!(super::result_browser_group_expanded(&ctx, first, true));
-    assert!(!super::result_browser_group_expanded(&ctx, second, false));
+    assert!(super::super::results::result_browser_group_expanded(
+        &ctx, first, true
+    ));
+    assert!(!super::super::results::result_browser_group_expanded(
+        &ctx, second, false
+    ));
 
-    super::set_result_browser_group_expanded(&ctx, second, true);
-    super::set_result_browser_group_expanded(&ctx, first, false);
-    assert!(super::result_browser_group_expanded(&ctx, second, false));
+    super::super::results::set_result_browser_group_expanded(&ctx, second, true);
+    super::super::results::set_result_browser_group_expanded(&ctx, first, false);
+    assert!(super::super::results::result_browser_group_expanded(
+        &ctx, second, false
+    ));
     assert!(
-        !super::result_browser_group_expanded(&ctx, first, true),
+        !super::super::results::result_browser_group_expanded(&ctx, first, true),
         "closing the active analysis must outrank the default"
     );
 }
@@ -924,7 +937,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
     let source_default = run.analyses[0].waveforms[0].visible;
     let untouched_default = run.analyses[1].waveforms[0].visible;
 
-    super::set_checked_signal_visibility(&mut app, &checked, false);
+    super::super::results_actions::set_checked_signal_visibility(&mut app, &checked, false);
     assert!(
         !app.state
             .results
@@ -948,7 +961,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         "browser presentation never mutates immutable retained evidence"
     );
 
-    super::set_checked_signal_visibility(&mut app, &checked, true);
+    super::super::results_actions::set_checked_signal_visibility(&mut app, &checked, true);
     assert!(
         app.state
             .results
@@ -958,7 +971,7 @@ fn batch_plot_action_moves_only_the_checked_quantities() {
         "the same act returns it"
     );
     // Idempotent: repeating the request cannot toggle it back off.
-    super::set_checked_signal_visibility(&mut app, &checked, true);
+    super::super::results_actions::set_checked_signal_visibility(&mut app, &checked, true);
     assert!(
         app.state
             .results
@@ -981,11 +994,11 @@ fn sample_counts_group_thousands_for_reading_as_magnitudes() {
 fn browser_rows_keep_the_mockup_two_register_metrics() {
     // Touch stages still promote both to the full target height.
     assert_eq!(
-        super::responsive_result_control_height(
-            super::RESULT_QUANTITY_ROW_HEIGHT,
-            super::TOUCH_TARGET_HEIGHT
+        super::super::results_rows::responsive_result_control_height(
+            super::super::results_rows::RESULT_QUANTITY_ROW_HEIGHT,
+            super::super::results_rows::TOUCH_TARGET_HEIGHT
         ),
-        super::TOUCH_TARGET_HEIGHT
+        super::super::results_rows::TOUCH_TARGET_HEIGHT
     );
 }
 
@@ -998,17 +1011,19 @@ fn browser_facets_stay_paired_across_the_whole_dock_range() {
     // The dock clamps to 220..=440 px; the toolbar insets take 16 of those.
     for dock_width in [220.0_f32, 255.0, 300.0, 440.0] {
         assert!(
-            !super::result_browser_facets_stack(dock_width - super::PANEL_SEARCH_MARGIN_X * 2.0),
+            !super::super::results::result_browser_facets_stack(
+                dock_width - super::PANEL_SEARCH_MARGIN_X * 2.0
+            ),
             "the pair must stay side by side at a {dock_width} px dock"
         );
     }
-    assert!(super::result_browser_facets_stack(
-        super::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH - 1.0
+    assert!(super::super::results::result_browser_facets_stack(
+        super::super::results::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH - 1.0
     ));
-    assert!(!super::result_browser_facets_stack(
-        super::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
+    assert!(!super::super::results::result_browser_facets_stack(
+        super::super::results::RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
     ));
-    assert!(!super::result_browser_facets_stack(420.0));
+    assert!(!super::super::results::result_browser_facets_stack(420.0));
 }
 
 #[test]
@@ -1019,8 +1034,11 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let tsv = super::exact_result_signal_tsv(&key, &app.state.model.simulation.retained.runs)
-        .expect("exact source waveform resolves");
+    let tsv = crate::workbench::documents::result_document::exact_result_signal_tsv(
+        &key,
+        &app.state.model.simulation.retained.runs,
+    )
+    .expect("exact source waveform resolves");
     assert!(tsv.contains(&format!("# dataset\t{}", run.dataset_id)));
     assert!(tsv.contains("# analysis\tTRAN"));
     assert!(tsv.contains("# quantity\tV(out)"));
@@ -1035,7 +1053,7 @@ fn exact_browser_copy_uses_round_trip_values_and_source_provenance() {
             copied_value_format,
             ..QuantityPresentationPolicy::default()
         };
-        super::exact_result_signal_last_sample(
+        crate::workbench::documents::result_document::exact_result_signal_last_sample(
             &key,
             &app.state.model.simulation.retained.runs,
             policy,
@@ -1061,8 +1079,11 @@ fn exact_browser_copy_fails_closed_on_incoherent_vectors() {
         AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]),
         "V(out)",
     );
-    let error = super::exact_result_signal_tsv(&key, &app.state.model.simulation.retained.runs)
-        .expect_err("mismatched exact vectors must not be truncated");
+    let error = crate::workbench::documents::result_document::exact_result_signal_tsv(
+        &key,
+        &app.state.model.simulation.retained.runs,
+    )
+    .expect_err("mismatched exact vectors must not be truncated");
     assert!(
         error.contains("retained waveform 'V(out)' has 2 coordinates but 1 values"),
         "{error}"
@@ -1104,7 +1125,7 @@ fn browser_range_selection_uses_stable_filtered_order() {
 /// used to ask.
 #[test]
 fn browser_kind_facet_admits_only_its_declared_inventory_classes() {
-    use super::{ResultArtifactKind, ResultsBrowserKind};
+    use super::super::results::{ResultArtifactKind, ResultsBrowserKind};
 
     assert!(ResultsBrowserKind::Voltage.admits("V"));
     assert!(!ResultsBrowserKind::Voltage.admits("V^2/Hz"));
@@ -1132,7 +1153,8 @@ fn browser_kind_facet_admits_only_its_declared_inventory_classes() {
 /// read integrity and completeness as two verdicts on the same evidence check.
 #[test]
 fn analysis_data_state_merges_one_reading_worst_first() {
-    use super::{ResultCompletenessClass, result_analysis_data_state};
+    use super::super::results::result_analysis_data_state;
+    use super::super::results_rows::ResultCompletenessClass;
     use crate::workbench::documents::result_document::operational_state::ResultCurrentness;
 
     let word =
@@ -1219,12 +1241,20 @@ fn dataset_disclosure_is_bound_to_immutable_dataset_identity() {
     let first = crate::product::DatasetId::new();
     let second = crate::product::DatasetId::new();
 
-    assert!(super::result_browser_dataset_expanded(&ctx, first, true));
-    assert!(!super::result_browser_dataset_expanded(&ctx, second, false));
-    super::set_result_browser_dataset_expanded(&ctx, first, false);
-    super::set_result_browser_dataset_expanded(&ctx, second, true);
-    assert!(!super::result_browser_dataset_expanded(&ctx, first, true));
-    assert!(super::result_browser_dataset_expanded(&ctx, second, false));
+    assert!(super::super::results::result_browser_dataset_expanded(
+        &ctx, first, true
+    ));
+    assert!(!super::super::results::result_browser_dataset_expanded(
+        &ctx, second, false
+    ));
+    super::super::results::set_result_browser_dataset_expanded(&ctx, first, false);
+    super::super::results::set_result_browser_dataset_expanded(&ctx, second, true);
+    assert!(!super::super::results::result_browser_dataset_expanded(
+        &ctx, first, true
+    ));
+    assert!(super::super::results::result_browser_dataset_expanded(
+        &ctx, second, false
+    ));
 }
 
 #[test]
@@ -1236,16 +1266,23 @@ fn typed_scalar_payload_is_a_stable_exact_browser_artifact() {
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
     let presentation = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-    let artifacts = super::retained_result_artifacts(&run.analyses[0], presentation);
+    let artifacts =
+        super::super::results_rows::retained_result_artifacts(&run.analyses[0], presentation);
     let artifact = artifacts
         .iter()
         .find(|artifact| artifact.identity.canonical_name() == "payload/scalar-measurements")
         .expect("scalar payload is inventoried");
-    assert_eq!(artifact.kind, super::ResultArtifactKind::Scalar);
+    assert_eq!(
+        artifact.kind,
+        super::super::results::ResultArtifactKind::Scalar
+    );
 
     let key = ResultArtifactPresentationKey::new(presentation, "payload/scalar-measurements");
-    let exact = super::exact_result_artifact_text(&key, std::slice::from_ref(&run))
-        .expect("typed scalar exact adapter resolves");
+    let exact = crate::workbench::documents::result_document::exact_result_artifact_text(
+        &key,
+        std::slice::from_ref(&run),
+    )
+    .expect("typed scalar exact adapter resolves");
     assert!(exact.contains("# rspice-result-artifact-v1"));
     assert!(exact.contains("analysis-result-payload-v1"));
     assert!(exact.contains("settling_time"));
@@ -1290,14 +1327,18 @@ fn periodic_payload_artifacts_report_their_counts_and_verdicts() {
         let mut run = SimulationRun::new(1);
         run.add_analysis(analysis);
         let presentation = AnalysisPresentationKey::new(run.dataset_id, &run.analyses[0]);
-        let artifacts = super::retained_result_artifacts(&run.analyses[0], presentation);
+        let artifacts =
+            super::super::results_rows::retained_result_artifacts(&run.analyses[0], presentation);
         let artifact = artifacts
             .iter()
             .find(|artifact| artifact.identity.canonical_name() == canonical)
             .expect("periodic payload is inventoried");
 
         assert_eq!(artifact.name, expected_name);
-        assert_eq!(artifact.kind, super::ResultArtifactKind::Array);
+        assert_eq!(
+            artifact.kind,
+            super::super::results::ResultArtifactKind::Array
+        );
         assert_eq!(artifact.meta, "0 values");
         assert_eq!(artifact.viewer, crate::workbench::ResultViewer::Table);
         let value = artifact.value.as_deref().unwrap();

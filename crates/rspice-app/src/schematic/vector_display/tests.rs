@@ -166,7 +166,7 @@ fn every_results_surface_paints_through_this_boundary() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     for (path, site) in [
         (
-            "workbench/docks/navigator.rs",
+            "workbench/docks/navigator/results_rows.rs",
             "notations.display(&signal.name)",
         ),
         (
