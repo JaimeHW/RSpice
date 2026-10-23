@@ -868,7 +868,6 @@ impl Instance {
 		P::model("ktvbisb", Some(0.0)),
 		P::model("ktvbidb", Some(0.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 40;
 	pub const NODE_COUNT: usize = 45;
 	pub const INTERNAL_NODE_NAMES: [&str; 40] = ["trap1", "trap2", "di", "si", "gi", "gin", "n1", "nt", "n2", "ntg", "fp1", "fp2", "fp3", "fp4", "fp1s", "fp2s", "fp3s", "fp4s", "__flow_state0", "__flow_state1", "__flow_state2", "__flow_state3", "__flow_state4", "__flow_state5", "__flow_state6", "__flow_state7", "__flow_state8", "__flow_state9", "__flow_state10", "__flow_state11", "__flow_state12", "__flow_state13", "__flow_state14", "__flow_state15", "__flow_state16", "__flow_state17", "__flow_state18", "__flow_state19", "__flow_state20", "__flow_state21"];
 
@@ -1500,8 +1499,6 @@ impl Instance {
 pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 	#[inline]
 pub fn transient_timer_event_time(&self) -> Option<f64> { None }
-#[inline]
-pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
 	/// Restore a trajectory under resolved context without executing initializers.
 	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {
 		if ctx.evaluation_failed() { return Err("analysis continuation context has a pending evaluation error".into()); }

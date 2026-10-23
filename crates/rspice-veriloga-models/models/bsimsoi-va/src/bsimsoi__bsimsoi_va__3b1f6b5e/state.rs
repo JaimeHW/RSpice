@@ -2212,7 +2212,6 @@ impl Instance {
 		P::model("BGBC2P", Some(745670000000.0)),
 		P::model("VTM00", Some(0.026)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 18;
 	pub const NODE_COUNT: usize = 22;
 	pub const INTERNAL_NODE_NAMES: [&str; 18] = ["p", "b", "t", "di", "si", "gi", "gm", "sb", "db", "__flow_state0", "__flow_state1", "__flow_state2", "__flow_state3", "__flow_state4", "__flow_state5", "__flow_state6", "__flow_state7", "__flow_state8"];
 
@@ -3930,8 +3929,6 @@ impl Instance {
 pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 	#[inline]
 pub fn transient_timer_event_time(&self) -> Option<f64> { None }
-#[inline]
-pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
 	/// Restore a trajectory under resolved context without executing initializers.
 	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {
 		if ctx.evaluation_failed() { return Err("analysis continuation context has a pending evaluation error".into()); }

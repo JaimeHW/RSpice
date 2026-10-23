@@ -1953,7 +1953,6 @@ impl Instance {
 		P::model("PCISBKS", None),
 		P::model("PVDIFFJS", None),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 26;
 	pub const NODE_COUNT: usize = 30;
 	pub const INTERNAL_NODE_NAMES: [&str; 26] = ["temp", "dp", "gp", "sp", "bp", "db", "sb", "qi", "qb", "qbd", "n", "charge_A", "charge_K", "depl_A", "__flow_state0", "__flow_state1", "__flow_state2", "__flow_state3", "__flow_state4", "__flow_state5", "__flow_state6", "__flow_state7", "__flow_state8", "__flow_state9", "__flow_state10", "__flow_state11"];
 
@@ -3589,8 +3588,6 @@ impl Instance {
 pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 	#[inline]
 pub fn transient_timer_event_time(&self) -> Option<f64> { None }
-#[inline]
-pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
 	/// Restore a trajectory under resolved context without executing initializers.
 	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {
 		if ctx.evaluation_failed() { return Err("analysis continuation context has a pending evaluation error".into()); }

@@ -490,7 +490,6 @@ impl Instance {
 		P::model("cthbb", Some(1e-8)).minimum(B::inclusive(0.0)),
 		P::model("cdelay", Some(0.0)).minimum(B::inclusive(0.0)).maximum(B::inclusive(1.0)),
 	];
-	pub const INTERNAL_NODE_COUNT: usize = 11;
 	pub const NODE_COUNT: usize = 15;
 	pub const INTERNAL_NODE_NAMES: [&str; 11] = ["ci", "bi", "ei", "dt1", "tt", "tbb", "__flow_state0", "__flow_state1", "__flow_state2", "__flow_state3", "__flow_state4"];
 
@@ -1090,8 +1089,6 @@ impl Instance {
 pub fn transient_event_refinement_time(&self) -> Option<f64> { None }
 	#[inline]
 pub fn transient_timer_event_time(&self) -> Option<f64> { None }
-#[inline]
-pub fn transient_timer_step_bound(&self) -> Option<f64> { None }
 	/// Restore a trajectory under resolved context without executing initializers.
 	pub fn restore_analysis_continuation_state(&mut self, state: &GeneratedVerilogAPersistentState, ctx: &GeneratedEvalContext<'_>) -> Result<(), String> {
 		if ctx.evaluation_failed() { return Err("analysis continuation context has a pending evaluation error".into()); }
