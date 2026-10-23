@@ -383,6 +383,17 @@ impl TracedVariables {
         }
     }
 
+    /// The same variables, with nothing yet published: what a host that
+    /// starts an analysis afresh traces.
+    pub(crate) fn fresh(&self) -> Self {
+        Self {
+            vars: Arc::clone(&self.vars),
+            by_signal: Arc::clone(&self.by_signal),
+            dirty: BTreeSet::new(),
+            journal: Vec::new(),
+        }
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.vars.is_empty()
     }

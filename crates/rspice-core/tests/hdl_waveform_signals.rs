@@ -139,3 +139,87 @@ fn esave_refuses_a_name_no_instance_declares() {
         "{error}"
     );
 }
+
+/// A counter whose register and real advance every 20 ns, behind the
+/// built-in connect modules, so that every converter in the run can be
+/// checkpointed. Its `.ESAVE` list names the two variables.
+fn counter_deck(directory: &std::path::Path) -> Netlist {
+    use rspice_veriloga::connect::library::BUILTIN_CONNECT_MODULES;
+    let mut source = String::from(
+        "`include \"disciplines.vams\"\n\
+         `timescale 1ns/1ps\n\
+         module cnt(o);\n  output o; reg o;\n  reg [3:0] q;\n  real r;\n\
+         \x20 initial begin o = 1'b0; q = 4'd0; r = 0.0; end\n\
+         \x20 always #20 begin q = q + 4'd1; r = r + 0.25; o = q[0]; end\nendmodule\n",
+    );
+    for (_, module) in BUILTIN_CONNECT_MODULES {
+        source.push_str(module);
+    }
+    source.push_str("connectrules deck;\n    connect a2d;\n    connect d2a;\nendconnectrules\n");
+    let path = directory.join("cnt.vams");
+    std::fs::write(&path, source).expect("the module writes");
+    let path = path.display().to_string().replace('\\', "/");
+    Netlist::parse(&format!(
+        "* counter\n.hdl \"{path}\" module=cnt\n.options connectrules=deck\n\
+         x1 out cnt\nr1 out 0 1k\n.esave x1.q x1.r\n.end\n"
+    ))
+    .expect("the deck parses")
+}
+
+/// A run resumed from a checkpoint taken between two counts continues the
+/// variables' traces exactly: its first point is each variable's value at
+/// the seam, and every later point is the uninterrupted run's, bit for bit.
+#[test]
+fn a_resumed_run_continues_the_esave_traces_exactly() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("the clock follows the Unix epoch")
+        .as_nanos();
+    let directory =
+        std::env::temp_dir().join(format!("rspice-esave-{}-{nonce}", std::process::id()));
+    std::fs::create_dir(&directory).expect("a test directory");
+    let netlist = counter_deck(&directory);
+    let (stop, step, seam) = (400e-9, 1e-9, 130e-9);
+    let engine = Engine::default();
+    let whole = engine
+        .run_tran(&netlist, stop, step)
+        .expect("the whole run");
+    let (_, checkpoint) = engine
+        .run_tran_checkpointed(&netlist, seam, step)
+        .expect("the first part checkpoints");
+    let (resumed, _) = engine
+        .run_tran_resume(&netlist, &checkpoint, stop, step)
+        .expect("the rest resumes");
+    let _ = std::fs::remove_dir_all(&directory);
+    let start = resumed.time[0];
+    assert!((start - seam).abs() <= 1e-15, "resumed at {start:e}");
+
+    let whole_r = real(&whole, "x1.r");
+    assert!(
+        whole_r.len() >= 20,
+        "0 and a count every 20 ns: {whole_r:?}"
+    );
+    assert_eq!(whole_r[6].1, 1.5);
+    assert!((whole_r[6].0 - 120e-9).abs() <= 1e-15, "{whole_r:?}");
+    let mut expected = vec![(start, 1.5)];
+    expected.extend(whole_r.iter().filter(|(time, _)| *time > start));
+    let bits = |trace: &[(f64, f64)]| -> Vec<(u64, u64)> {
+        trace
+            .iter()
+            .map(|(time, value)| (time.to_bits(), value.to_bits()))
+            .collect()
+    };
+    assert_eq!(bits(&real(&resumed, "x1.r")), bits(&expected));
+
+    for bit in 0..4 {
+        let name = format!("x1.q[{bit}]");
+        let whole_q = logic(&whole, &name);
+        let mut expected = vec![(start, level_at(&whole_q, start))];
+        expected.extend(whole_q.iter().filter(|(time, _)| *time > start));
+        assert_eq!(logic(&resumed, &name), expected, "{name}");
+    }
+    assert_eq!(
+        level_at(&logic(&resumed, "x1.q[1]"), 150e-9),
+        DigitalState::One
+    );
+}

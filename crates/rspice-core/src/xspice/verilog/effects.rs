@@ -187,6 +187,14 @@ impl HdlEffects {
         }
     }
 
+    /// Effects for a host starting an analysis afresh: nothing has run, but
+    /// the variables a run traces stay traced.
+    pub(crate) fn fresh(plan: &CanonicalDigitalPlan, from: &Self) -> Self {
+        let mut fresh = Self::with_config(plan, Arc::clone(&from.config));
+        fresh.traced = from.traced.fresh();
+        fresh
+    }
+
     /// Publish these variables as traces from now on.
     pub(crate) fn trace_variables(&mut self, vars: Vec<dump::TracedVariable>) {
         self.traced = dump::TracedVariables::new(vars);
@@ -208,10 +216,6 @@ impl HdlEffects {
     pub(crate) fn configure(&mut self, config: HdlEffectsConfig) {
         self.random_seed = config.seed as i32;
         self.config = Arc::new(config);
-    }
-
-    pub(crate) fn config(&self) -> &Arc<HdlEffectsConfig> {
-        &self.config
     }
 
     /// The finish request the design made, if it made one.

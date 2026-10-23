@@ -855,7 +855,7 @@ impl DigitalHost {
             self.resolution,
             self.scheduler.limits(),
         );
-        fresh.effects = HdlEffects::with_config(&self.plan, Arc::clone(self.effects.config()));
+        fresh.effects = HdlEffects::fresh(&self.plan, &self.effects);
         fresh.store.inherit_bit_connections(&self.store);
         fresh.store.inherit_analog_variable_inputs(&self.store);
         for (_, target) in fresh.store.external_sources() {
