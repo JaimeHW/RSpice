@@ -1691,13 +1691,6 @@ fn budgeted_lines(source: &str) -> usize {
 /// is held exact by its own `assert_eq!`. A ceiling equal to its measurement
 /// is the state this file wants; only the ones above it were doing nothing.
 const OVERSIZED_FILES: &[(&str, usize)] = &[
-    // 2026-09-05, +9 (3,455 -> 3,464): the `stimulus_library` project field,
-    // its doc comment, its wrapped serde attribute and its `Default`
-    // initializer. The field cannot live anywhere else — a stimulus definition
-    // is project state, and a sidecar file would spend from the durable-path
-    // budget every save already hangs sidecars off — and this file was standing
-    // exactly on its ceiling, so the ceiling moves to the new measurement
-    // rather than the field being refused a home.
     ("workbench/docks/navigator.rs", 6_668),
     // 2026-09-06, +100 (6_418 -> 6_518): three viewer sheets joined the
     // workspace. Every line is a single-owner table this file exists to own —
