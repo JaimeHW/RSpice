@@ -2364,6 +2364,14 @@ fn strip_comment_with_abort<'a>(
 mod tests {
     use super::*;
 
+    /// Parsing `source` must keep polling past `polls` and then report the abort.
+    fn assert_parse_aborts(source: &str, polls: usize, why: &str) {
+        let abort = crate::abort_signal::CountingAbort::new(polls);
+        let result = SpefFile::parse_with_abort(source, &abort);
+        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
+        assert!(abort.count() > polls, "{why}");
+    }
+
     #[test]
     fn spef_parser_aborts_after_multiple_mid_document_polls() {
         let mut source =
@@ -2372,12 +2380,7 @@ mod tests {
             source.push_str(&format!("{} data:{} 1\n", index + 1, index + 1));
         }
         source.push_str("*END\n");
-        let abort = crate::abort_signal::CountingAbort::new(20);
-
-        let result = SpefFile::parse_with_abort(&source, &abort);
-
-        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
-        assert!(abort.count() > 20, "SPEF parsing must poll during work");
+        assert_parse_aborts(&source, 20, "SPEF parsing must poll during work");
     }
 
     #[test]
@@ -2387,14 +2390,10 @@ mod tests {
             source.push_str(&format!(" field{index}"));
         }
         source.push('\n');
-        let abort = crate::abort_signal::CountingAbort::new(12);
-
-        let result = SpefFile::parse_with_abort(&source, &abort);
-
-        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
-        assert!(
-            abort.count() > 12,
-            "single-record tokenization must remain cancellable"
+        assert_parse_aborts(
+            &source,
+            12,
+            "single-record tokenization must remain cancellable",
         );
     }
 
@@ -2472,12 +2471,7 @@ mod tests {
             source.push_str(&format!("*RC R{index}:1 1\n"));
         }
         source.push_str("*END\n");
-        let abort = crate::abort_signal::CountingAbort::new(80);
-
-        let result = SpefFile::parse_with_abort(&source, &abort);
-
-        assert!(matches!(result, Err(ParseWithAbortError::Aborted)));
-        assert!(abort.count() > 80, "reduced parsing must poll during work");
+        assert_parse_aborts(&source, 80, "reduced parsing must poll during work");
     }
 
     #[test]
