@@ -563,22 +563,6 @@ pub(super) fn source_admission_error(
         .into()
 }
 
-/// On-disk Verilog-A cache statistics.
-#[cfg(feature = "veriloga")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerilogACacheStats {
-    /// Cache root directory.
-    pub root: PathBuf,
-    /// Number of persisted records.
-    pub entry_count: usize,
-    /// Total persisted bytes.
-    pub total_bytes: u64,
-    /// Active maximum entry budget.
-    pub max_entries: usize,
-    /// Active maximum byte budget.
-    pub max_bytes: u64,
-}
-
 /// Process-lifetime telemetry for runtime Verilog-A cache lookups and compiles.
 ///
 /// Counters are monotonic and lock-free. Take two snapshots to measure an
@@ -672,18 +656,6 @@ pub fn veriloga_cache_telemetry() -> VerilogACacheTelemetry {
             .load(Relaxed),
         persistence_failures: VERILOGA_CACHE_TELEMETRY.persistence_failures.load(Relaxed),
     }
-}
-
-/// Result of a cache prune/clear operation.
-#[cfg(feature = "veriloga")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerilogACachePruneReport {
-    /// Number of removed records.
-    pub removed_entries: usize,
-    /// Total bytes reclaimed.
-    pub reclaimed_bytes: u64,
-    /// Final cache stats after pruning.
-    pub stats: VerilogACacheStats,
 }
 
 #[cfg(feature = "veriloga")]
@@ -1678,9 +1650,7 @@ pub(super) fn remove_cache_file(path: &Path) {
 }
 
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
-pub(super) fn prune_veriloga_cache_locked(
-    cache_root: &Path,
-) -> Result<VerilogACachePruneReport, String> {
+pub(super) fn prune_veriloga_cache_locked(cache_root: &Path) -> Result<(), String> {
     let (max_entries, max_bytes) = veriloga_cache_limits();
     let mut files = list_cache_files(cache_root)?;
     files.sort_by(|a, b| {
@@ -1694,8 +1664,6 @@ pub(super) fn prune_veriloga_cache_locked(
         .iter()
         .map(|file| file.size_bytes)
         .fold(0_u64, u64::saturating_add);
-    let mut removed_entries = 0_usize;
-    let mut reclaimed_bytes = 0_u64;
 
     for file in files {
         if entry_count <= max_entries && total_bytes <= max_bytes {
@@ -1706,8 +1674,6 @@ pub(super) fn prune_veriloga_cache_locked(
             Ok(()) => {
                 entry_count = entry_count.saturating_sub(1);
                 total_bytes = total_bytes.saturating_sub(file.size_bytes);
-                removed_entries += 1;
-                reclaimed_bytes = reclaimed_bytes.saturating_add(file.size_bytes);
             }
             Err(err) => {
                 log::warn!(
@@ -1719,19 +1685,7 @@ pub(super) fn prune_veriloga_cache_locked(
         }
     }
 
-    let stats = VerilogACacheStats {
-        root: cache_root.to_path_buf(),
-        entry_count,
-        total_bytes,
-        max_entries,
-        max_bytes,
-    };
-
-    Ok(VerilogACachePruneReport {
-        removed_entries,
-        reclaimed_bytes,
-        stats,
-    })
+    Ok(())
 }
 
 #[cfg(feature = "veriloga")]

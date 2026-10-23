@@ -163,8 +163,7 @@ pub use engine::{
 #[cfg(feature = "veriloga")]
 pub use engine::{
     HeldVerilogASources, ProjectVerilogAConnectionLibraryRegistration,
-    ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration,
-    VerilogACachePruneReport, VerilogACacheStats, VerilogACacheTelemetry,
+    ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, VerilogACacheTelemetry,
     hold_project_veriloga_sources_for_session, register_precompiled_veriloga_model,
     register_precompiled_veriloga_model_with_dependencies,
     register_precompiled_veriloga_runtime_with_dependencies, veriloga_cache_telemetry,

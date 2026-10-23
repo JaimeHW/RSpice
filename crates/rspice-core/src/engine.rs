@@ -127,8 +127,7 @@ pub use crate::resource::{ResourceKind, ResourceLimitError, ResourceLimits};
 #[cfg(feature = "veriloga")]
 pub use builder::{
     HeldVerilogASources, ProjectVerilogAConnectionLibraryRegistration,
-    ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration,
-    VerilogACachePruneReport, VerilogACacheStats, VerilogACacheTelemetry,
+    ProjectVerilogARuntimeRegistration, ProjectVerilogASourceRegistration, VerilogACacheTelemetry,
     hdl_spice_leaves::{hdl_delay_select, hdl_external_cells},
     hold_project_veriloga_sources_for_session, register_precompiled_veriloga_model,
     register_precompiled_veriloga_model_with_dependencies,

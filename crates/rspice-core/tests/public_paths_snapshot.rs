@@ -2549,8 +2549,6 @@ mod veriloga {
     use rspice_core::ProjectVerilogAConnectionLibraryRegistration as _;
     use rspice_core::ProjectVerilogARuntimeRegistration as _;
     use rspice_core::ProjectVerilogASourceRegistration as _;
-    use rspice_core::VerilogACachePruneReport as _;
-    use rspice_core::VerilogACacheStats as _;
     use rspice_core::VerilogACacheTelemetry as _;
     use rspice_core::device::veriloga::CompileError as _;
     use rspice_core::device::veriloga::CompileResult as _;
@@ -2572,8 +2570,6 @@ mod veriloga {
     use rspice_core::engine::ProjectVerilogAConnectionLibraryRegistration as _;
     use rspice_core::engine::ProjectVerilogARuntimeRegistration as _;
     use rspice_core::engine::ProjectVerilogASourceRegistration as _;
-    use rspice_core::engine::VerilogACachePruneReport as _;
-    use rspice_core::engine::VerilogACacheStats as _;
     use rspice_core::engine::VerilogACacheTelemetry as _;
     use rspice_core::engine::hold_project_veriloga_sources_for_session as _;
     use rspice_core::engine::register_precompiled_veriloga_model as _;
