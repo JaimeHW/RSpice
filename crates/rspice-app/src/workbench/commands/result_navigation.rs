@@ -164,7 +164,7 @@ pub(crate) fn producing_run(
         .map(|run| run.id)
 }
 
-fn open_console_page(workbench: &mut crate::workbench::state::WorkbenchState) {
+fn open_console_page(workbench: &mut crate::workbench::state::WorkbenchSession) {
     // Opening the dock alone shows whichever page was last shown.
     workbench.open_console();
     workbench.console_page = crate::workbench::state::ConsolePage::Console;

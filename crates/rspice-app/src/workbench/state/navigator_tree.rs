@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::state::InstancePath;
 
-use super::{WorkbenchState, Workspace};
+use super::{WorkbenchSession, Workspace};
 
 /// One node a navigator tree can unfold.
 ///
@@ -118,7 +118,7 @@ impl NavigatorTrees {
     }
 }
 
-impl WorkbenchState {
+impl WorkbenchSession {
     /// What the navigator is filtering by in the workspace now showing.
     #[must_use]
     pub(crate) fn navigator_filter(&self) -> &str {

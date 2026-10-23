@@ -88,7 +88,7 @@ pub use routing::navigation::{RouteTransition, RouteTransitionSource, SurfaceNav
 pub use routing::surface_catalog::{SurfaceArchetype, SurfaceId};
 pub use routing::surface_route::SurfaceRoute;
 pub use rspice_design::symbol::edit::{SymbolCommitIntent, SymbolDocumentSnapshot};
-pub use state::WorkbenchState;
+pub use state::WorkbenchSession;
 
 pub use app::RSpiceApp;
 pub use app_state::AppState;

@@ -6,7 +6,7 @@ use crate::state::{AnalysisResult, AnalysisType, Point, SimulationRun};
 use crate::workbench::AppState;
 use crate::workbench::app_state::diagnostic_store::DiagnosticOwner;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
-use crate::workbench::state::WorkbenchState;
+use crate::workbench::state::WorkbenchSession;
 use rspice_design::drc::DrcResult;
 
 /// Every producer the store holds evidence for puts a real finding on the
@@ -649,7 +649,7 @@ fn a_run_channel_has_no_clear_and_the_command_leaves_the_session_alone() {
         .console_view
         .open(crate::workbench::state::ConsoleChannel::Run(3));
 
-    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
     assert!(!clear_is_offered(
         desktop,
         app.state.workbench.console_view.channel
@@ -960,12 +960,13 @@ fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
 #[test]
 fn console_tab_lane_reserves_every_visible_trailing_action() {
     // Maximize and collapse.
-    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
     assert_eq!(console_trailing_actions_width(desktop, false), 60.0);
     // Collapse alone, at the touch target.
-    let phone = LayoutSpec::resolve_with_pointer(390.0, 844.0, true, &WorkbenchState::default());
+    let phone = LayoutSpec::resolve_with_pointer(390.0, 844.0, true, &WorkbenchSession::default());
     assert_eq!(console_trailing_actions_width(phone, true), 47.0);
-    let tablet = LayoutSpec::resolve_with_pointer(1_024.0, 768.0, true, &WorkbenchState::default());
+    let tablet =
+        LayoutSpec::resolve_with_pointer(1_024.0, 768.0, true, &WorkbenchSession::default());
     assert_eq!(console_trailing_actions_width(tablet, true), 47.0);
 }
 

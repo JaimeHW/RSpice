@@ -36,7 +36,7 @@ use crate::time_compat::Instant;
 use crate::ui::Theme;
 use crate::workbench::app_state::AppState;
 use crate::workbench::slots::PlatformState;
-use crate::workbench::{UserPreferences, WorkbenchState};
+use crate::workbench::{UserPreferences, WorkbenchSession};
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;
@@ -114,7 +114,7 @@ struct Values<'a> {
 
 impl<'a> Values<'a> {
     fn of(
-        workbench: &WorkbenchState,
+        workbench: &WorkbenchSession,
         platform: &PlatformState,
         browser_spoken_feedback: bool,
         preferences: &'a UserPreferences,
@@ -332,7 +332,7 @@ fn input_can_change_a_setting(events: &[egui::Event]) -> bool {
 /// not in the file, and its own store owns its durability, so it is swapped
 /// out for the duration rather than serialized every time.
 fn fingerprint(
-    workbench: &WorkbenchState,
+    workbench: &WorkbenchSession,
     platform: &PlatformState,
     browser_spoken_feedback: bool,
     preferences: &mut UserPreferences,

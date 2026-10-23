@@ -754,7 +754,7 @@ impl SpecificationEvidenceFilter {
 /// field it keeps; one-frame requests and open drawers are intentionally
 /// transient.
 #[derive(Debug, Clone)]
-pub struct WorkbenchState {
+pub struct WorkbenchSession {
     pub workspace: Workspace,
     /// Device-local application-window presentations and their exclusive
     /// document ownership. Engineering documents remain owned by their
@@ -920,7 +920,7 @@ pub(in crate::workbench) const fn default_analysis_index() -> usize {
     crate::workbench::simulation_analysis_tabs::TAB_TRANSIENT
 }
 
-impl Default for WorkbenchState {
+impl Default for WorkbenchSession {
     fn default() -> Self {
         Self {
             workspace: Workspace::Design,
@@ -977,7 +977,7 @@ impl Default for WorkbenchState {
     }
 }
 
-impl WorkbenchState {
+impl WorkbenchSession {
     /// Replace the platform-provided locale used by interactive UI quantity
     /// fields. Portable project and SPICE parsers never read this value.
     pub fn set_number_locale(&mut self, locale: crate::quantity::UiNumberLocale) {
@@ -998,7 +998,7 @@ impl WorkbenchState {
     }
 }
 
-impl WorkbenchState {
+impl WorkbenchSession {
     /// Show the bottom dock, at its own height and out of focus mode, on
     /// whichever page it last showed.
     pub(crate) fn open_console(&mut self) {

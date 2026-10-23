@@ -119,7 +119,7 @@ fn nothing_in_the_dock_is_cut_at_any_height() {
         .diagnostics
         .set_current_finding(Some(missing));
     let width = 1280.0;
-    let default = crate::workbench::state::WorkbenchState::default().console_height;
+    let default = crate::workbench::state::WorkbenchSession::default().console_height;
     let pages = [
         ConsolePage::Problems,
         ConsolePage::Console,

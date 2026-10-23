@@ -183,7 +183,7 @@ mod tests {
     use super::super::{TOOLBAR_CONTEXT_GAP, trailing_controls_width};
     use super::*;
     use crate::workbench::layout::LayoutSpec;
-    use crate::workbench::state::{WorkbenchState, Workspace};
+    use crate::workbench::state::{WorkbenchSession, Workspace};
 
     /// The chip is the product's global entry to the plan manager, so the plan
     /// it names has to be the plan that is active — not the name the fixture
@@ -255,7 +255,7 @@ mod tests {
         );
         assert_eq!(run_config_chip_width(90.0, 100.0), 153.0);
 
-        let wide = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+        let wide = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
         assert!(wide.show_run_config_selector);
         let mut without_chip = wide;
         without_chip.show_run_config_selector = false;

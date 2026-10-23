@@ -1663,7 +1663,7 @@ mod tests {
 
     #[test]
     fn drawer_state_is_transient_navigation_not_a_workspace() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.toggle_drawer(Drawer::Navigator);
         assert_eq!(state.workspace, Workspace::Design);
         assert_eq!(state.drawer, Some(Drawer::Navigator));

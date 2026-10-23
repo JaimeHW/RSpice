@@ -1,6 +1,6 @@
 //! Responsive workbench composition policy.
 
-use super::state::{WidthClass, WorkbenchState};
+use super::state::{WidthClass, WorkbenchSession};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutSpec {
@@ -48,7 +48,7 @@ pub struct LayoutSpec {
 
 impl LayoutSpec {
     #[cfg(test)]
-    pub fn resolve(viewport_width: f32, viewport_height: f32, state: &WorkbenchState) -> Self {
+    pub fn resolve(viewport_width: f32, viewport_height: f32, state: &WorkbenchSession) -> Self {
         Self::resolve_with_pointer(viewport_width, viewport_height, false, state)
     }
 
@@ -57,7 +57,7 @@ impl LayoutSpec {
         viewport_width: f32,
         viewport_height: f32,
         coarse_pointer: bool,
-        state: &WorkbenchState,
+        state: &WorkbenchSession,
     ) -> Self {
         Self::resolve_with_pointer_and_document_strip(
             viewport_width,
@@ -74,7 +74,7 @@ impl LayoutSpec {
         viewport_height: f32,
         coarse_pointer: bool,
         document_strip_visible: bool,
-        state: &WorkbenchState,
+        state: &WorkbenchSession,
     ) -> Self {
         Self::resolve_for_shell(
             viewport_width,
@@ -96,7 +96,7 @@ impl LayoutSpec {
         sheet_strip_visible: bool,
         project_open: bool,
         context_docks_enabled: bool,
-        state: &WorkbenchState,
+        state: &WorkbenchSession,
     ) -> Self {
         let width_class = WidthClass::for_width(viewport_width);
         let short_landscape = viewport_width <= 900.0 && viewport_height <= 500.0;
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn phone_uses_drawers_five_item_navigation_and_exact_chrome() {
-        let spec = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
 
         assert!(!spec.show_navigator_dock);
         assert!(!spec.show_inspector_dock);
@@ -433,7 +433,7 @@ mod tests {
             false,
             false,
             true,
-            &WorkbenchState::default(),
+            &WorkbenchSession::default(),
         );
 
         assert!(spec.show_activity_rail);
@@ -454,7 +454,7 @@ mod tests {
             false,
             true,
             false,
-            &WorkbenchState::default(),
+            &WorkbenchSession::default(),
         );
 
         assert!(spec.show_activity_rail);
@@ -468,7 +468,7 @@ mod tests {
 
     #[test]
     fn tablet_width_uses_two_drawers_and_all_workspace_items() {
-        let spec = LayoutSpec::resolve(768.0, 1024.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve(768.0, 1024.0, &WorkbenchSession::default());
 
         assert!(!spec.show_activity_rail);
         assert!(spec.navigator_uses_drawer);
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn intermediate_desktop_docks_left_and_draws_right() {
-        let spec = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchSession::default());
 
         assert!(spec.show_activity_rail);
         assert!(spec.show_navigator_dock);
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn desktop_docks_resize_inside_the_narrower_class_clamp() {
-        let spec = LayoutSpec::resolve(1_000.0, 900.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve(1_000.0, 900.0, &WorkbenchSession::default());
 
         assert!(spec.navigator_resizable);
         assert!(spec.inspector_resizable);
@@ -511,7 +511,7 @@ mod tests {
         assert_eq!(spec.inspector_reset_width, 278.0);
         assert_eq!(spec.inspector_width, 278.0);
 
-        let mut resized = WorkbenchState::default();
+        let mut resized = WorkbenchSession::default();
         resized.navigator_width = 300.0;
         resized.navigator_width_custom = true;
         resized.inspector_width = 300.0;
@@ -524,7 +524,7 @@ mod tests {
 
     #[test]
     fn a_wide_dock_width_survives_a_spell_in_a_desktop_window() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.navigator_width = 440.0;
         state.navigator_width_custom = true;
         state.inspector_width = 440.0;
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn wide_desktop_keeps_both_context_docks() {
-        let spec = LayoutSpec::resolve(1280.0, 900.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve(1280.0, 900.0, &WorkbenchSession::default());
 
         assert!(spec.show_navigator_dock);
         assert!(spec.show_inspector_dock);
@@ -568,7 +568,7 @@ mod tests {
 
     #[test]
     fn responsive_dock_defaults_follow_a_1440_to_1280_viewport_change() {
-        let state = WorkbenchState::default();
+        let state = WorkbenchSession::default();
         let at_1440 = LayoutSpec::resolve(1_440.0, 900.0, &state);
         let at_1280 = LayoutSpec::resolve(1_280.0, 900.0, &state);
 
@@ -582,7 +582,7 @@ mod tests {
 
     #[test]
     fn explicit_dock_resizes_override_responsive_defaults() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.navigator_width = 340.0;
         state.navigator_width_custom = true;
         state.inspector_width = 390.0;
@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn reset_layout_restores_responsive_docks_and_collapsed_console() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.navigator_width = 340.0;
         state.navigator_width_custom = true;
         state.inspector_width = 390.0;
@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn desktop_console_uses_the_mockup_resize_range() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_visible = true;
         state.console_height = 900.0;
 
@@ -631,7 +631,7 @@ mod tests {
 
     #[test]
     fn maximized_console_consumes_the_complete_center_stack() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_maximized = true;
 
         let spec = LayoutSpec::resolve(1_440.0, 900.0, &state);
@@ -645,7 +645,7 @@ mod tests {
 
     #[test]
     fn maximized_console_recovers_hidden_single_document_strip_height() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_maximized = true;
 
         let spec = LayoutSpec::resolve_with_pointer_and_document_strip(
@@ -661,7 +661,7 @@ mod tests {
 
     #[test]
     fn focus_mode_collapses_console_and_removes_context_docks() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.focus_mode = true;
         state.console_visible = true;
         let spec = LayoutSpec::resolve(1728.0, 1117.0, &state);
@@ -674,7 +674,7 @@ mod tests {
 
     #[test]
     fn coarse_tablet_uses_touch_metrics_and_bounded_console() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_height = 640.0;
         state.console_visible = true;
 
@@ -691,7 +691,7 @@ mod tests {
 
     #[test]
     fn tablet_console_uses_exact_42dvh_cap_without_desktop_resize_state() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_visible = true;
 
         let spec = LayoutSpec::resolve_with_pointer(768.0, 1_024.0, true, &state);
@@ -703,7 +703,7 @@ mod tests {
 
     #[test]
     fn phone_console_uses_exact_uncapped_42dvh_height() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_visible = true;
 
         let spec = LayoutSpec::resolve_with_pointer(430.0, 600.0, true, &state);
@@ -716,7 +716,7 @@ mod tests {
     #[test]
     fn wide_coarse_pointer_keeps_the_mockup_touch_target_contract() {
         let spec =
-            LayoutSpec::resolve_with_pointer(1_440.0, 900.0, true, &WorkbenchState::default());
+            LayoutSpec::resolve_with_pointer(1_440.0, 900.0, true, &WorkbenchSession::default());
 
         assert_eq!(spec.title_bar_height, 44.0);
         assert_eq!(spec.toolbar_height, 48.0);
@@ -729,7 +729,7 @@ mod tests {
 
     #[test]
     fn short_landscape_uses_the_mockup_compact_override() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_visible = true;
         state.console_height = 640.0;
 
@@ -755,7 +755,7 @@ mod tests {
 
     #[test]
     fn short_landscape_console_uses_exact_45dvh_height_by_default() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.console_visible = true;
 
         let spec = LayoutSpec::resolve(844.0, 390.0, &state);
@@ -767,7 +767,8 @@ mod tests {
 
     #[test]
     fn collapsed_phone_landscape_removes_the_console_row() {
-        let spec = LayoutSpec::resolve_with_pointer(844.0, 390.0, true, &WorkbenchState::default());
+        let spec =
+            LayoutSpec::resolve_with_pointer(844.0, 390.0, true, &WorkbenchSession::default());
 
         assert!(spec.compact_shell);
         assert!(!spec.show_console_body);
@@ -778,7 +779,7 @@ mod tests {
 
     #[test]
     fn narrow_fine_pointer_landscape_keeps_compact_rows_and_accessible_targets() {
-        let spec = LayoutSpec::resolve(800.0, 390.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve(800.0, 390.0, &WorkbenchSession::default());
 
         assert!(spec.compact_shell);
         assert_eq!(spec.toolbar_control_height, 44.0);
@@ -787,7 +788,7 @@ mod tests {
 
     #[test]
     fn fine_pointer_short_landscape_retains_the_collapsed_console_strip() {
-        let spec = LayoutSpec::resolve(844.0, 390.0, &WorkbenchState::default());
+        let spec = LayoutSpec::resolve(844.0, 390.0, &WorkbenchSession::default());
 
         assert!(spec.compact_shell);
         assert!(!spec.show_console_body);
@@ -797,7 +798,7 @@ mod tests {
 
     #[test]
     fn the_sheet_strip_is_a_shorter_row_that_the_centre_stack_pays_for() {
-        let state = WorkbenchState::default();
+        let state = WorkbenchSession::default();
         assert_eq!(
             LayoutSpec::resolve(1_440.0, 900.0, &state).sheet_strip_height,
             30.0
@@ -812,7 +813,7 @@ mod tests {
             "a coarse pointer has no step shorter than the touch target"
         );
 
-        let mut maximized = WorkbenchState::default();
+        let mut maximized = WorkbenchSession::default();
         maximized.console_maximized = true;
         let without = LayoutSpec::resolve_for_shell(
             1_440.0, 900.0, false, true, false, true, true, &maximized,
@@ -825,15 +826,16 @@ mod tests {
 
     #[test]
     fn pvt_selector_follows_the_mockup_width_cutoff() {
-        assert!(!LayoutSpec::resolve(820.0, 900.0, &WorkbenchState::default()).show_pvt_selector);
-        assert!(LayoutSpec::resolve(821.0, 900.0, &WorkbenchState::default()).show_pvt_selector);
-        assert!(!LayoutSpec::resolve(844.0, 390.0, &WorkbenchState::default()).show_pvt_selector);
+        assert!(!LayoutSpec::resolve(820.0, 900.0, &WorkbenchSession::default()).show_pvt_selector);
+        assert!(LayoutSpec::resolve(821.0, 900.0, &WorkbenchSession::default()).show_pvt_selector);
+        assert!(!LayoutSpec::resolve(844.0, 390.0, &WorkbenchSession::default()).show_pvt_selector);
         assert!(
-            !LayoutSpec::resolve(1260.0, 900.0, &WorkbenchState::default())
+            !LayoutSpec::resolve(1260.0, 900.0, &WorkbenchSession::default())
                 .show_run_config_selector
         );
         assert!(
-            LayoutSpec::resolve(1261.0, 900.0, &WorkbenchState::default()).show_run_config_selector
+            LayoutSpec::resolve(1261.0, 900.0, &WorkbenchSession::default())
+                .show_run_config_selector
         );
     }
 }

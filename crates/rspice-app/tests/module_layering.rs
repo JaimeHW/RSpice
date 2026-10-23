@@ -836,7 +836,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("surfaces", "preflight", 1),
     // The shell's own persisted state reaching up into routing, presentation,
     // and the document engines. This is the same inversion the top-level
-    // `state -> *` entries describe, one layer down: `WorkbenchState` stores
+    // `state -> *` entries describe, one layer down: `WorkbenchSession` stores
     // what a surface is showing instead of the surface deriving it.
     ("state", "routing/availability", 4),
     ("state", "lifecycle/window_session", 2),

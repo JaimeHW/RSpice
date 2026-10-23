@@ -28,7 +28,7 @@ const CONSOLE_PANEL_ID: &str = "workbench.console";
 /// solely by a viewport or breakpoint change. Responsive defaults and Reset
 /// Layout must therefore clear a stale cached rectangle before the panel is
 /// constructed. A genuinely dragged splitter is copied back to
-/// [`WorkbenchState`](super::state::WorkbenchState) after painting and will
+/// [`WorkbenchSession`](super::state::WorkbenchSession) after painting and will
 /// match the cache on the next frame.
 pub(super) fn synchronize_panel_memory(ctx: &Context, app: &RSpiceApp, layout: LayoutSpec) {
     synchronize_panel_size(
@@ -367,7 +367,7 @@ pub fn show_drawers(root: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
 #[cfg(test)]
 mod tests {
     use super::{LayoutSpec, SplitterKeyboardAction, apply_splitter_step, panel_cache_is_stale};
-    use crate::workbench::state::WorkbenchState;
+    use crate::workbench::state::WorkbenchSession;
 
     #[test]
     fn responsive_and_reset_layouts_discard_egui_panel_memory() {
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn splitter_keys_move_the_dock_the_width_class_actually_shows() {
-        let mut state = WorkbenchState::default();
+        let mut state = WorkbenchSession::default();
         state.navigator_width = 440.0;
         state.navigator_width_custom = true;
         let layout = LayoutSpec::resolve(1_000.0, 900.0, &state);

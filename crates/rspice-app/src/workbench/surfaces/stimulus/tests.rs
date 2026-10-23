@@ -21,9 +21,9 @@ const VIEWPORTS: [(&str, f32, f32); 2] = [("1024x640", 1024.0, 640.0), ("1440x90
 fn stage_size(width: f32, height: f32) -> egui::Vec2 {
     use crate::workbench::design_system::ACTIVITY_RAIL_W;
     use crate::workbench::layout::LayoutSpec;
-    use crate::workbench::state::WorkbenchState;
+    use crate::workbench::state::WorkbenchSession;
 
-    let mut workbench = WorkbenchState::default();
+    let mut workbench = WorkbenchSession::default();
     workbench.workspace = crate::workbench::state::Workspace::Stimulus;
     let layout = LayoutSpec::resolve(width, height, &workbench);
     let columns = width

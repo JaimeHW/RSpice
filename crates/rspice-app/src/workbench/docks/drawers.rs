@@ -792,7 +792,7 @@ fn drawer_close_geometry(layout: LayoutSpec) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::state::WorkbenchState;
+    use crate::workbench::state::WorkbenchSession;
 
     #[derive(Clone, Copy)]
     struct ModalFocusFixtureIds {
@@ -960,20 +960,20 @@ mod tests {
 
     #[test]
     fn drawer_close_targets_follow_pointer_and_breakpoint_cascade() {
-        let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
+        let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
         assert_eq!(drawer_close_geometry(compact), (44.0, 5.0));
 
-        let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &WorkbenchState::default());
+        let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &WorkbenchSession::default());
         assert_eq!(drawer_close_geometry(intermediate), (34.0, 5.0));
 
         let coarse =
-            LayoutSpec::resolve_with_pointer(834.0, 1_112.0, true, &WorkbenchState::default());
+            LayoutSpec::resolve_with_pointer(834.0, 1_112.0, true, &WorkbenchSession::default());
         assert_eq!(drawer_close_geometry(coarse), (44.0, 0.0));
     }
 
     #[test]
     fn intermediate_inspector_drawer_uses_only_its_inner_edge() {
-        let state = WorkbenchState::default();
+        let state = WorkbenchSession::default();
         let compact = LayoutSpec::resolve(390.0, 844.0, &state);
         let intermediate = LayoutSpec::resolve(834.0, 1_112.0, &state);
 

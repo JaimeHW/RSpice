@@ -45,7 +45,7 @@ FEATURES = (
     "project", "design", "simulate", "results", "models",
     "code", "sheets", "hardcopy", "cloud", "settings",
 )
-SESSION = "session"  # the AppState/WorkbenchState aggregate
+SESSION = "session"  # the AppState/WorkbenchSession aggregate
 SHELL = "shell"
 SLICES = (*LOWER, SESSION, *FEATURES, SHELL)
 GROUPS = ("feature->feature", "lower->upper", "whole-app")

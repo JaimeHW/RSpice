@@ -7,7 +7,7 @@ use crate::state::{
     AnalysisResultSourceDomain, PreparedRunReceipt, PreparedRunTaskReceipt,
     PreparedSourceCheckReceipt, SimulationRun, SimulationRunLifecycle, SimulationRunProvenance,
 };
-use crate::workbench::state::WorkbenchState;
+use crate::workbench::state::WorkbenchSession;
 
 fn digest(byte: u8) -> ContentDigest {
     ContentDigest::from_bytes([byte; 32])
@@ -136,7 +136,7 @@ fn long_toolbar_labels_remain_bounded() {
 #[test]
 fn run_control_label_tracks_stable_execution_and_cancellation_lifecycle() {
     let mut app = RSpiceApp::test_instance();
-    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
     assert_eq!(run_control_label(&app, desktop), "Run plan");
 
     let identity = app
@@ -248,7 +248,7 @@ fn direct_schematic_toolbar_selection_tracks_every_armed_tool() {
 
 #[test]
 fn responsive_toolbar_reserves_fixed_trailing_controls() {
-    let tablet = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchState::default());
+    let tablet = LayoutSpec::resolve(834.0, 1112.0, &WorkbenchSession::default());
     let available_after_navigator = 780.0;
     assert_eq!(
         trailing_controls_width(tablet, 5.0, true, 117.0, 96.0),
@@ -267,7 +267,7 @@ fn responsive_toolbar_reserves_fixed_trailing_controls() {
         520.0
     );
 
-    let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
+    let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
     assert_eq!(
         trailing_controls_width(phone, 2.0, true, 136.0, 106.0),
         185.0
@@ -291,18 +291,18 @@ fn toolbar_padding_and_group_gaps_match_every_mockup_breakpoint() {
 
 #[test]
 fn toolbar_icon_and_panel_toggle_boxes_match_the_mockup_classes() {
-    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchState::default());
+    let desktop = LayoutSpec::resolve(1_280.0, 900.0, &WorkbenchSession::default());
     assert_eq!(toolbar_icon_button_size(desktop), Vec2::new(30.0, 29.0));
     assert_eq!(panel_toggle_size(desktop), Vec2::new(28.0, 27.0));
 
-    let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
+    let phone = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
     assert_eq!(toolbar_icon_button_size(phone), Vec2::splat(44.0));
     assert_eq!(panel_toggle_size(phone), Vec2::splat(44.0));
 }
 
 #[test]
 fn compact_toolbar_projects_the_mockup_button_limit_for_every_workspace() {
-    let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchState::default());
+    let compact = LayoutSpec::resolve(390.0, 844.0, &WorkbenchSession::default());
     assert_eq!(compact.toolbar_tool_limit, Some(2));
 }
 

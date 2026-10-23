@@ -1,7 +1,7 @@
 //! What a session keeps of the workbench and of the document engines'
 //! session state.
 //!
-//! [`WorkbenchState`] and the feature slots hold runtime state beside what a
+//! [`WorkbenchSession`] and the feature slots hold runtime state beside what a
 //! session keeps. The kept part of each is declared here, field for field,
 //! with the names, serde attributes and order sessions have always been
 //! written with. A saved session is read back by those names, so a field that
@@ -34,7 +34,7 @@ use crate::workbench::slots::{
 use crate::workbench::state::{
     ConsolePage, DesignPanel, LibraryCellviewPage, ModelsWorkbenchViewState,
     PdkTechnologyAuthoringRecovery, ProjectPage, SimulationPage, SpecialistToolBrowserState,
-    VerificationPage, VerificationSessionState, WorkbenchState, Workspace, WorkspaceDocumentId,
+    VerificationPage, VerificationSessionState, WorkbenchSession, Workspace, WorkspaceDocumentId,
     WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
     default_console_height, default_inspector_width, default_navigator_width,
 };
@@ -114,7 +114,7 @@ impl Default for UiSessionWire {
     /// owner at its default.
     fn default() -> Self {
         Self::capture_owners(
-            &WorkbenchState::default(),
+            &WorkbenchSession::default(),
             &PlatformState::default(),
             &SettingsState::default(),
             &DesignState::default(),
@@ -160,7 +160,7 @@ impl UiSessionWire {
     }
 
     fn capture_owners(
-        workbench: &WorkbenchState,
+        workbench: &WorkbenchSession,
         platform: &PlatformState,
         settings: &SettingsState,
         design: &DesignState,
@@ -257,10 +257,10 @@ impl UiSessionWire {
     }
 }
 
-/// What a session keeps of [`WorkbenchState`], as it is read back.
+/// What a session keeps of [`WorkbenchSession`], as it is read back.
 ///
 /// Each field's attribute says what a session without it restores. A session
-/// with no workbench at all restores the defaults of [`WorkbenchState`] and
+/// with no workbench at all restores the defaults of [`WorkbenchSession`] and
 /// of the slots that own the rest of what it keeps, which is what
 /// [`Self::default`] holds.
 #[derive(Deserialize)]
@@ -362,7 +362,7 @@ pub(in crate::workbench) struct WorkbenchWire {
     pdk_technology_authoring: PdkTechnologyAuthoringRecovery,
 }
 
-/// What a session keeps of [`WorkbenchState`], as it is written: borrowed, so
+/// What a session keeps of [`WorkbenchSession`], as it is written: borrowed, so
 /// saving the session copies nothing.
 ///
 /// Declared exactly as [`WorkbenchWire`] is. The one difference is the
@@ -485,7 +485,7 @@ impl<'a> WorkbenchWireRef<'a> {
     /// own the rest of what it keeps. The slots' fields are read by name; the
     /// session round trip of a populated session is what guards them.
     fn capture_parts(
-        workbench: &'a WorkbenchState,
+        workbench: &'a WorkbenchSession,
         design: &'a DesignState,
         code: &'a CodeState,
         project: &'a ProjectState,
@@ -493,9 +493,9 @@ impl<'a> WorkbenchWireRef<'a> {
         models: &'a ModelsState,
         hardcopy: &'a HardcopyState,
     ) -> Self {
-        // No `..`: a field added to `WorkbenchState` does not compile until it
+        // No `..`: a field added to `WorkbenchSession` does not compile until it
         // is either kept here or named as runtime-only.
-        let WorkbenchState {
+        let WorkbenchSession {
             workspace,
             window_session,
             navigation_schema_version,
@@ -713,7 +713,7 @@ impl Default for WorkbenchWire {
     /// them. Each owner is boxed so the frame holds none of them inline.
     fn default() -> Self {
         WorkbenchWireRef::capture_parts(
-            &Box::<WorkbenchState>::default(),
+            &Box::<WorkbenchSession>::default(),
             &Box::<DesignState>::default(),
             &Box::<CodeState>::default(),
             &Box::<ProjectState>::default(),
@@ -733,9 +733,9 @@ impl WorkbenchWire {
     /// scatters onto the defaults, whose runtime-only fields hold their
     /// types' defaults.
     pub(in crate::workbench) fn scatter(self, state: &mut AppState) {
-        // No `..`: a field added to `WorkbenchState` does not compile until it
+        // No `..`: a field added to `WorkbenchSession` does not compile until it
         // is either restored here or named as runtime-only.
-        let WorkbenchState {
+        let WorkbenchSession {
             workspace,
             window_session,
             navigation_schema_version,

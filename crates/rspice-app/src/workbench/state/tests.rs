@@ -215,7 +215,7 @@ fn responsive_width_classes_match_every_mockup_boundary() {
 
 #[test]
 fn workspace_activation_updates_canonical_route_and_recent_history() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.activate(Workspace::Results);
     state.activate(Workspace::Design);
 
@@ -231,9 +231,9 @@ fn workspace_activation_updates_canonical_route_and_recent_history() {
 
 #[test]
 fn results_split_is_limited_to_the_three_mockup_primary_stages() {
-    let mut state = WorkbenchState {
+    let mut state = WorkbenchSession {
         split_with_results: true,
-        ..WorkbenchState::default()
+        ..WorkbenchSession::default()
     };
 
     for workspace in [Workspace::Design, Workspace::Netlist, Workspace::Simulate] {
@@ -256,9 +256,9 @@ fn results_split_is_limited_to_the_three_mockup_primary_stages() {
 
 #[test]
 fn remembered_split_never_projects_without_project_and_retained_evidence() {
-    let state = WorkbenchState {
+    let state = WorkbenchSession {
         split_with_results: true,
-        ..WorkbenchState::default()
+        ..WorkbenchSession::default()
     };
 
     assert!(!state.results_split_visible(false, true));
@@ -268,7 +268,7 @@ fn remembered_split_never_projects_without_project_and_retained_evidence() {
 
 #[test]
 fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state
         .navigate(
             SurfaceRoute::surface(SurfaceId::Results),
@@ -313,7 +313,7 @@ fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
 
 #[test]
 fn manager_history_roundtrips_back_and_forward_to_its_source() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     let jobs = SurfaceRoute::surface(SurfaceId::JobsManager);
     let tools = SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser);
     for route in [jobs, tools] {
@@ -341,7 +341,7 @@ fn manager_history_roundtrips_back_and_forward_to_its_source() {
 
 #[test]
 fn legacy_shell_geometry_migrates_to_redesigned_responsive_docks() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.layout_schema_version = 0;
     state.navigator_width = 232.0;
     state.navigator_width_custom = true;
@@ -377,7 +377,7 @@ fn legacy_shell_geometry_migrates_to_redesigned_responsive_docks() {
 
 #[test]
 fn current_canonical_route_is_the_primary_workspace_source_of_truth() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.workspace = Workspace::Project;
     state.navigation.replace(
         SurfaceRoute::surface(SurfaceId::Results),
@@ -399,7 +399,7 @@ fn a_session_saved_on_the_removed_drc_page_restores_to_the_first_page() {
 
 #[test]
 fn toggling_the_active_drawer_closes_it_deterministically() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
 
     state.toggle_drawer(Drawer::Navigator);
     assert_eq!(state.drawer, Some(Drawer::Navigator));
@@ -427,7 +427,7 @@ fn toggling_the_active_drawer_closes_it_deterministically() {
 
 #[test]
 fn mixed_dock_composition_keeps_only_the_supported_drawer() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.toggle_drawer(Drawer::Navigator);
     state.reconcile_drawer_mode(false, true, false);
     assert_eq!(state.drawer, None);
@@ -443,7 +443,7 @@ fn mixed_dock_composition_keeps_only_the_supported_drawer() {
 
 #[test]
 fn fresh_browser_session_keeps_route_but_drops_restored_traversal() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.activate(Workspace::Results);
     assert!(state.previous_route().is_some());
     assert!(state.has_pending_browser_history_effects());
@@ -461,7 +461,7 @@ fn fresh_browser_session_keeps_route_but_drops_restored_traversal() {
 
 #[test]
 fn restored_route_reconciliation_is_idempotent_across_two_passes() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.navigation = serde_json::from_str(
         r#"{
                 "current":"?view=design",
@@ -487,7 +487,7 @@ fn restored_route_reconciliation_is_idempotent_across_two_passes() {
 
 #[test]
 fn unavailable_history_removal_is_reported_once_without_malformed_flag() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.navigation = serde_json::from_str(
         r#"{
                 "current":"?view=design",
@@ -511,7 +511,7 @@ fn unavailable_history_removal_is_reported_once_without_malformed_flag() {
 
 #[test]
 fn browser_effect_overflow_reaches_the_workbench_recovery_gate() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     for index in 0..65 {
         state.activate(if index % 2 == 0 {
             Workspace::Results
@@ -557,7 +557,7 @@ fn removed_tuning_sandbox_fields_migrate_without_restoring_fake_state() {
 
 #[test]
 fn workspace_presets_apply_to_the_live_layout_owner() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
 
     state.apply_workspace_preset(WorkspacePreset::Canvas);
     assert!(state.focus_mode);
@@ -571,7 +571,7 @@ fn workspace_presets_apply_to_the_live_layout_owner() {
 
 #[test]
 fn an_unvisited_workspace_opens_from_the_preset_not_the_shipped_default() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.set_workspace_preset(WorkspacePreset::Diagnostics);
 
     // Nothing has arranged Results yet, so it has no snapshot of its own and
@@ -586,7 +586,7 @@ fn an_unvisited_workspace_opens_from_the_preset_not_the_shipped_default() {
 
 #[test]
 fn choosing_a_preset_leaves_an_arranged_workspace_alone() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.activate(Workspace::Results);
     state.console_visible = false;
     state.console_height = 180.0;
@@ -604,7 +604,7 @@ fn choosing_a_preset_leaves_an_arranged_workspace_alone() {
 
 #[test]
 fn workspace_switches_restore_independent_dock_compositions() {
-    let mut state = WorkbenchState::default();
+    let mut state = WorkbenchSession::default();
     state.navigator_width = 340.0;
     state.navigator_width_custom = true;
     state.console_visible = false;
@@ -650,7 +650,7 @@ fn a_session_left_on_the_retired_interactive_page_restores_onto_the_console() {
 
 #[test]
 fn full_screen_request_is_consumed_exactly_once() {
-    let mut session = WorkbenchState::default();
+    let mut session = WorkbenchSession::default();
     session.request_full_screen(true);
 
     assert_eq!(session.take_full_screen_request(), Some(true));
@@ -659,7 +659,7 @@ fn full_screen_request_is_consumed_exactly_once() {
 
 #[test]
 fn newest_full_screen_request_supersedes_an_unapplied_request() {
-    let mut session = WorkbenchState::default();
+    let mut session = WorkbenchSession::default();
     session.request_full_screen(true);
     session.request_full_screen(false);
 

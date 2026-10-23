@@ -14,7 +14,7 @@
 //! Application state is managed in a centralized `AppState` struct:
 //! - SchematicState: circuit topology, components, wires
 //! - SimulationState: simulation results, waveforms, run history
-//! - WorkbenchState: canonical workspace navigation, responsive layout, theme
+//! - WorkbenchSession: canonical workspace navigation, responsive layout, theme
 //!   and locale
 //! - Feature slots: each feature's dialogs and document-engine interaction
 //!   state

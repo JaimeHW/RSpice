@@ -11,7 +11,7 @@ use crate::workbench::RSpiceApp;
 
 use super::super::design_system::WorkbenchIcon;
 use super::super::layout::LayoutSpec;
-use super::super::state::{VerificationPage, WorkbenchState, Workspace};
+use super::super::state::{VerificationPage, WorkbenchSession, Workspace};
 use crate::state::ModelsPage;
 use crate::workbench::commands::{CommandAvailability, vocabulary::Command};
 
@@ -1023,7 +1023,7 @@ pub(in crate::workbench) fn notification_window_id() -> egui::Id {
 }
 
 /// Whether the open panel hangs from the bell of the window `ctx` is drawing.
-fn panel_hangs_here(ctx: &egui::Context, workbench: &WorkbenchState) -> bool {
+fn panel_hangs_here(ctx: &egui::Context, workbench: &WorkbenchSession) -> bool {
     let here = ctx.viewport_id();
     workbench.notification_center_showing()
         && ctx.data(|data| data.get_temp::<egui::ViewportId>(notification_window_id()))
@@ -1033,7 +1033,7 @@ fn panel_hangs_here(ctx: &egui::Context, workbench: &WorkbenchState) -> bool {
 /// The bell of the window `ctx` is drawing was pressed. The panel opens under
 /// it, comes to it from another window's bell, or, hanging here already, goes
 /// away.
-pub(in crate::workbench) fn press_bell(ctx: &egui::Context, workbench: &mut WorkbenchState) {
+pub(in crate::workbench) fn press_bell(ctx: &egui::Context, workbench: &mut WorkbenchSession) {
     let here = ctx.viewport_id();
     if !workbench.notification_center_showing() || panel_hangs_here(ctx, workbench) {
         workbench.toggle_notification_center();

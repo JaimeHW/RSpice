@@ -100,7 +100,7 @@ pub struct AppState {
     /// What watching the simulations in flight keeps between frames.
     pub(crate) runs: Box<RunsState>,
     /// Canonical workbench navigation and responsive layout state.
-    pub(crate) workbench: Box<crate::workbench::WorkbenchState>,
+    pub(crate) workbench: Box<crate::workbench::WorkbenchSession>,
     /// Runtime-only chord/prefix authority. Partial sequences are never
     /// serialized or restored across application sessions.
     pub(crate) shortcut_resolver: session::shortcuts::ShortcutResolverState,
