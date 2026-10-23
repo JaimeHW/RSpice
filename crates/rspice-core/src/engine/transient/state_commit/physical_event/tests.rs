@@ -41,14 +41,18 @@ fn assert_flat_mutual_flux(circuit: &crate::CircuitData, solution: &[Value]) {
         for state in [circuit, &restored] {
             let mut residual = vec![0.0; state.matrix_size()];
             for pair in &state.coupled_inductor_pairs {
-                pair.device.add_transient_mutual_correction_rhs(
-                    state.num_nodes() + pair.branch1_ordinal,
-                    state.num_nodes() + pair.branch2_ordinal,
-                    &mut residual,
-                    solution,
-                    0.2,
-                    &coefficients,
-                );
+                pair.device
+                    .add_transient_mutual_correction_rhs_with_current_map(
+                        [
+                            state.num_nodes() + pair.branch1_ordinal,
+                            state.num_nodes() + pair.branch2_ordinal,
+                        ],
+                        &mut residual,
+                        solution,
+                        0.2,
+                        &coefficients,
+                        |_, currents| currents,
+                    );
             }
             assert!(
                 residual.iter().all(|value| value.abs() < 1e-14),

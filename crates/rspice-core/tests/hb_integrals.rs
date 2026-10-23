@@ -880,7 +880,7 @@ fn hb_integral_port_scattering_matches_filter_transfer() {
             .prepare_psp_from_hb_with_abort(&netlist, sweep(1e3), &hb.operating_point, &NoAbort)
             .unwrap(),
         engine
-            .prepare_psp_from_pss_with_abort(&netlist, sweep(1e3), &pss, &NoAbort)
+            .prepare_psp_from_pss_with_noise_and_abort(&netlist, sweep(1e3), &pss, false, &NoAbort)
             .unwrap(),
     ] {
         let result = prepared.run_with_abort(&NoAbort).unwrap();

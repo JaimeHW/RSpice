@@ -2832,20 +2832,6 @@ impl GenericSwitch {
         self.current_conductance = snapshot[3];
     }
 
-    /// Stamp the switch conductance for a given analysis time.
-    pub fn stamp_time_dependent(&mut self, time: Value, matrix: &mut impl MatrixStamper) {
-        if self.initial_load_pending {
-            self.initial_load_pending = false;
-            self.stamp_conductance(self.current_conductance, matrix);
-            return;
-        }
-        self.refresh_expression_inputs(&[]);
-        let control = self.evaluate_control(time);
-        let (g, _) = self.conductance_sensitivity_for_control(control);
-        self.current_conductance = g;
-        self.stamp_conductance(g, matrix);
-    }
-
     /// Stamp the switch using the current Newton solution. Solution-dependent
     /// CONTROL expressions are linearized into the same nodal/branch columns
     /// as behavioral sources; time-only controls naturally reduce to the

@@ -917,8 +917,8 @@ pub(super) mod source_events;
 use companion_stamps::{
     BreakpointLanding, CompactTwoTerminalStampSlots, LandingClock, TwoTerminalStampSlots,
 };
-mod charge_stamper;
 mod charge_event;
+mod charge_stamper;
 mod periodic_endpoint;
 pub(in crate::engine) use charge_stamper::StaticMatrixChargeStamper;
 mod damped_status;
@@ -12916,27 +12916,6 @@ impl Engine {
 
     /// Run a checkpointed transient and independently compress its published
     /// analog result without altering the exact continuation state.
-    pub fn run_tran_checkpointed_compressed_with_abort(
-        &self,
-        netlist: &Netlist,
-        tstop: Value,
-        max_step: Value,
-        compression: CompressionConfig,
-        abort: &dyn AbortSignal,
-    ) -> Result<(TransientResultCompressed, TransientCheckpoint), SimulationError> {
-        let startup_mode = Self::inferred_transient_startup_mode(netlist)?;
-        self.run_tran_checkpointed_compressed_with_startup_mode_and_abort(
-            netlist,
-            tstop,
-            max_step,
-            startup_mode,
-            compression,
-            abort,
-        )
-    }
-
-    /// Explicit-startup form of
-    /// [`Engine::run_tran_checkpointed_compressed_with_abort`].
     ///
     /// The checkpoint is captured from the complete accepted solver state.
     /// Compression runs only after that capture and therefore cannot perturb
@@ -16951,10 +16930,11 @@ D1 D 0 DMOD
             .run_tran_checkpointed(&netlist, 500.0e-6, 2.0e-6)
             .expect("ordinary first segment solves");
         let (first_compressed, compressed_checkpoint) = engine
-            .run_tran_checkpointed_compressed_with_abort(
+            .run_tran_checkpointed_compressed_with_startup_mode_and_abort(
                 &netlist,
                 500.0e-6,
                 2.0e-6,
+                Engine::inferred_transient_startup_mode(&netlist).unwrap(),
                 compression.clone(),
                 &NoAbort,
             )

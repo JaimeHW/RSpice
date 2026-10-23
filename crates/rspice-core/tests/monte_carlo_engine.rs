@@ -152,20 +152,26 @@ fn authored_numeric_node_names_take_precedence_over_internal_indices() {
 #[test]
 fn aggregation_counts_attempts_and_preserves_all_failed_evidence() {
     let engine = Engine::default();
-    let trial = (vec![0.0, 2.0], vec!["0".to_owned(), "OUT".to_owned()]);
+    let trial = (
+        vec![0.0, 2.0],
+        vec!["0".to_owned(), "OUT".to_owned()],
+        Vec::new(),
+    );
     let result = engine
-        .monte_carlo_result_from_trials([trial.clone()], 4)
+        .monte_carlo_result_from_observed_trials([trial.clone()], 4)
         .unwrap();
     assert_eq!((result.num_runs, result.num_failures), (4, 3));
     assert!(!result.all_converged);
     assert_eq!(result.variables["V(OUT)"].samples.len(), 1);
-    let failed = engine.monte_carlo_result_from_trials([], 4).unwrap();
+    let failed = engine
+        .monte_carlo_result_from_observed_trials([], 4)
+        .unwrap();
     assert_eq!((failed.num_runs, failed.num_failures), (4, 4));
     assert!(!failed.all_converged);
     assert!(failed.variables.is_empty());
     assert!(
         engine
-            .monte_carlo_result_from_trials([trial.clone(), trial], 1)
+            .monte_carlo_result_from_observed_trials([trial.clone(), trial], 1)
             .is_err()
     );
 }
@@ -176,7 +182,7 @@ fn aggregation_checks_the_batch_limit_before_reading_trials() {
     config.resource_limits.max_batch_runs = 2;
     let trials = std::iter::from_fn(|| panic!("over-limit input must not be read"));
     let error = Engine::new(config)
-        .monte_carlo_result_from_trials(trials, usize::MAX)
+        .monte_carlo_result_from_observed_trials(trials, usize::MAX)
         .unwrap_err();
     assert!(matches!(
         error,

@@ -771,22 +771,10 @@ impl Engine {
     ///
     /// `requested_runs` is the number of trials asked for, which is what makes
     /// the failure count and the all-converged flag answerable here.
-    pub fn monte_carlo_result_from_trials(
-        &self,
-        trials: impl IntoIterator<Item = (Vec<Value>, Vec<String>)>,
-        requested_runs: usize,
-    ) -> Result<MonteCarloResult, SimulationError> {
-        self.monte_carlo_result_from_observed_trials(
-            trials
-                .into_iter()
-                .map(|(values, names)| (values, names, Vec::new())),
-            requested_runs,
-        )
-    }
-
-    /// Aggregate solved trials while excluding event-domain placeholder rows.
-    /// The third tuple member contains original MNA node indices with no analog
-    /// voltage. Keeping the full basis preserves numeric aliases of analog nodes.
+    ///
+    /// Event-domain placeholder rows are excluded: the third tuple member
+    /// contains original MNA node indices with no analog voltage. Keeping the
+    /// full basis preserves numeric aliases of analog nodes.
     pub fn monte_carlo_result_from_observed_trials(
         &self,
         trials: impl IntoIterator<Item = (Vec<Value>, Vec<String>, Vec<usize>)>,

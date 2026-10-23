@@ -482,24 +482,6 @@ impl Engine {
         })
     }
 
-    /// Materialize an already checked `.STEP` plan with cooperative cancellation.
-    pub fn materialize_step_plan_with_abort(
-        &self,
-        plan: &StepPlan<'_>,
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<MaterializedStepRun>, SimulationError> {
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        self.ensure_batch_runs(plan.total_runs)?;
-
-        let mut runs = Vec::with_capacity(plan.total_runs);
-        for run_index in 0..plan.total_runs {
-            runs.push(self.materialize_step_run_with_abort(plan, run_index, abort)?);
-        }
-        Ok(runs)
-    }
-
     fn materialize_step_bindings(
         &self,
         base_netlist: &Netlist,

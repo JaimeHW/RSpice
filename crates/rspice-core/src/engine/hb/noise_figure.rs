@@ -50,22 +50,7 @@ impl Engine {
     /// Evaluate an authenticated HB noise spectrum and a resistor-referenced
     /// SSB noise figure. Changing the reference temperature only rescales the
     /// source's thermal noise; it does not change device bias or resistance.
-    pub fn run_hb_noise_figure_with_abort(
-        &self,
-        netlist: &Netlist,
-        request: &HbNoiseFigureRequest,
-        operating_point: &HbOperatingPoint,
-        abort: &dyn AbortSignal,
-    ) -> Result<PeriodicNoiseFigureResult, SimulationError> {
-        self.run_hb_noise_figure_at_sidebands_with_abort(
-            netlist,
-            request,
-            PeriodicNoiseSidebands::default(),
-            operating_point,
-            abort,
-        )
-    }
-
+    ///
     /// Calculate SSB noise figure for explicitly selected signal channels.
     /// All source image noise remains in the numerator regardless of which
     /// input channel supplies the signal-gain reference.
@@ -340,7 +325,13 @@ mod tests {
         let hb = engine
             .run_hb(&netlist, HbConfig::new(1e6).with_harmonics(8))
             .unwrap();
-        engine.run_hb_noise_figure_with_abort(&netlist, request, &hb.operating_point, &NoAbort)
+        engine.run_hb_noise_figure_at_sidebands_with_abort(
+            &netlist,
+            request,
+            PeriodicNoiseSidebands::default(),
+            &hb.operating_point,
+            &NoAbort,
+        )
     }
 
     #[test]

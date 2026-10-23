@@ -12785,7 +12785,11 @@ mod tests {
             .expect("scoped generic-switch circuit builds");
         assert_eq!(circuit.generic_switches.len(), 1);
 
-        circuit.generic_switches[0].stamp_time_dependent(0.0, &mut DiscardingStamper);
+        circuit.generic_switches[0].stamp_time_dependent_with_solution(
+            0.0,
+            &[],
+            &mut DiscardingStamper,
+        );
         assert_eq!(
             circuit.generic_switches[0].conductance(),
             0.5,

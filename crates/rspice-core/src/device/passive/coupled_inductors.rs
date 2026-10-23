@@ -268,27 +268,8 @@ impl CoupledInductorPair {
     }
 
     /// Add the mutual-inductance part of a cancellation-resistant Newton
-    /// correction residual to two already-stabilized standalone branch rows.
-    pub fn add_transient_mutual_correction_rhs(
-        &self,
-        branch1: NodeId,
-        branch2: NodeId,
-        correction_rhs: &mut [Value],
-        iterate: &[Value],
-        dt: Value,
-        coeff: &CompanionCoefficients,
-    ) {
-        self.add_transient_mutual_correction_rhs_with_current_map(
-            [branch1, branch2],
-            correction_rhs,
-            iterate,
-            dt,
-            coeff,
-            |_, currents| currents,
-        );
-    }
-
-    /// Use the same current-coordinate map as the standalone flux residual.
+    /// correction residual to two already-stabilized standalone branch rows,
+    /// using the same current-coordinate map as the standalone flux residual.
     #[doc(hidden)]
     pub fn add_transient_mutual_correction_rhs_with_current_map(
         &self,
@@ -1006,13 +987,13 @@ mod correction_tests {
             CompanionCoefficients::gear2_variable_step(dt, 0.25),
         ] {
             let mut correction_rhs = [0.0; 4];
-            pair.add_transient_mutual_correction_rhs(
-                3,
-                4,
+            pair.add_transient_mutual_correction_rhs_with_current_map(
+                [3, 4],
                 &mut correction_rhs,
                 &iterate,
                 dt,
                 &coeff,
+                |_, currents| currents,
             );
             let (mutual_resistance, history1, history2) = pair.mutual_companion_values(dt, &coeff);
             let expected1 = mutual_resistance * iterate[3] - history1;

@@ -551,9 +551,13 @@ R2 out 0 {3*r}\n\
     let plan = engine
         .plan_step_commands(&netlist, &steps, StepPlanLimits::new(16, 8, 64, 4096))
         .expect("the Cartesian plan is valid");
-    let runs = engine
-        .materialize_step_plan_with_abort(&plan, &NoAbort)
-        .expect("every run materializes");
+    let runs: Vec<_> = (0..plan.total_runs())
+        .map(|run_index| {
+            engine
+                .materialize_step_run_with_abort(&plan, run_index, &NoAbort)
+                .expect("every run materializes")
+        })
+        .collect();
     assert_eq!(runs.len(), 4, "two values on each of two variables");
 
     let mut seen = Vec::new();

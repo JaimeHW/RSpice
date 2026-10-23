@@ -54,27 +54,9 @@ pub struct PreparedPsp {
 }
 
 impl Engine {
-    /// Prepare PSP from a retained shooting orbit. The PAC configuration
-    /// supplies sweep/sideband settings; input/output selectors and amplitude
-    /// do not select or scale the port scattering matrix.
-    pub fn prepare_psp_from_pss_with_abort(
-        &self,
-        netlist: &Netlist,
-        config: PacConfig,
-        point: &super::super::PssOperatingPoint,
-        abort: &dyn AbortSignal,
-    ) -> Result<PreparedPsp, SimulationError> {
-        self.resolved_for_netlist(netlist).prepare_psp(
-            netlist,
-            config,
-            PacOperatingPoint::Shooting(point),
-            false,
-            abort,
-        )
-    }
-
     /// Prepare HBSP directly from a retained harmonic-balance state.
-    /// See [`Self::prepare_psp_from_pss_with_abort`] for the sweep contract.
+    /// See [`Self::prepare_psp_from_pss_with_noise_and_abort`] for the sweep
+    /// contract.
     pub fn prepare_psp_from_hb_with_abort(
         &self,
         netlist: &Netlist,
@@ -91,7 +73,10 @@ impl Engine {
         )
     }
 
-    /// Prepare shooting PSP with optional intrinsic correlated noise waves.
+    /// Prepare PSP from a retained shooting orbit, with optional intrinsic
+    /// correlated noise waves. The PAC configuration supplies sweep/sideband
+    /// settings; input/output selectors and amplitude do not select or scale
+    /// the port scattering matrix.
     pub fn prepare_psp_from_pss_with_noise_and_abort(
         &self,
         netlist: &Netlist,
