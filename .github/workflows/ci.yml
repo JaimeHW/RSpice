@@ -228,6 +228,7 @@ jobs:
           --test diode_native
           --test expression_stack_safety
           --test hdl_external_paths
+          --test hdl_waveform_signals
           --test measure_event_operands
           --test mixed_bit_aliases
           --test mixed_dc_sweep_state
@@ -425,6 +426,7 @@ jobs:
           --test device_engine_roundtrip
           --test diode_native
           --test hdl_external_paths
+          --test hdl_waveform_signals
           --test measure_event_operands
           --test mixed_bit_aliases
           --test mixed_dc_sweep_state
