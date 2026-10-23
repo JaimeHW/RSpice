@@ -7,13 +7,28 @@ use rspice_design::project_sources::{
     ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceRegistry,
 };
 use rspice_design::projection::ConfigurationExecutionProjection;
+use rspice_veriloga::ExternalCell;
 use rspice_vocabulary::product::ProjectId;
 use std::collections::HashMap;
 
+/// The cells the deck `source` offers its HDL designs as leaves: its
+/// `.subckt`s and model cards, read as the engine reads them from the deck
+/// it builds ([`rspice_core::engine::hdl_external_cells`]). A deck that does
+/// not parse offers none; its run is refused where it is built.
+pub fn deck_external_cells(source: &str) -> Vec<ExternalCell> {
+    rspice_core::Netlist::parse(source).map_or_else(
+        |_| Vec::new(),
+        |netlist| rspice_core::engine::hdl_external_cells(&netlist),
+    )
+}
+
+/// The runtimes of the configured Verilog-A cell views, each compiled
+/// against `cells`, those of the deck it runs in.
 pub fn prepared_configuration_veriloga_runtimes(
     project_id: ProjectId,
     sources: &ProjectSourceRegistry,
     projection: &ConfigurationExecutionProjection,
+    cells: &[ExternalCell],
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let mut prepared = HashMap::<String, crate::veriloga::PreparedVerilogARuntime>::new();
     for execution in projection.plan().bindings() {
@@ -45,6 +60,7 @@ pub fn prepared_configuration_veriloga_runtimes(
             project_id,
             bundle,
             binding.selected_module(),
+            Some(cells),
         )
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
         if runtime.source_key() != binding.source_key()
@@ -118,13 +134,14 @@ pub fn prepared_configuration_veriloga_runtimes(
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
 }
 
-/// The runtime of one project Verilog-A bundle a deck names, from the
-/// retained compile receipt when it is this bundle's current one, else rebuilt
-/// from the validated bytes.
+/// The runtime of one project Verilog-A bundle a deck offering `cells` names,
+/// from the retained compile receipt when it is this bundle's current one and
+/// builds for those cells, else rebuilt from the validated bytes against them.
 fn prepared_project_veriloga_runtime(
     project_id: ProjectId,
     bundle: &ProjectSourceBundle,
     retained: Option<&ProjectCompileReceipt>,
+    cells: &[ExternalCell],
 ) -> Result<crate::veriloga::PreparedVerilogARuntime, PreparationError> {
     let document = bundle.root();
     if let Some(receipt) = retained
@@ -132,6 +149,7 @@ fn prepared_project_veriloga_runtime(
         && receipt.token().bundle_id == bundle.id()
         && receipt.token().revision == bundle.revision().get()
         && receipt.token().closure_digest == bundle.closure_digest()
+        && receipt.builds_for(cells)
     {
         return receipt
             .prepare_runtime(project_id, bundle)
@@ -149,21 +167,25 @@ fn prepared_project_veriloga_runtime(
     // Persisted validation authenticates only the exact source bytes. Rebuild
     // transient executable artifacts rather than trusting serialized code or
     // requiring a redundant manual compile after project/session restore.
-    let (receipt, _) =
-        crate::project_veriloga::receipt::compile_project_bundle_receipt(project_id, bundle, None)
-            .map_err(|diagnostics| {
-                let detail = diagnostics
-                    .first()
-                    .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
-                    .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
-                PreparationError::new(
-                    PreparationStage::ModelBindings,
-                    format!(
-                        "Could not rebuild validated Verilog-A source '{}': {detail}",
-                        document.file_name()
-                    ),
-                )
-            })?;
+    let (receipt, _) = crate::project_veriloga::receipt::compile_project_bundle_receipt_against(
+        project_id,
+        bundle,
+        None,
+        Some(cells),
+    )
+    .map_err(|diagnostics| {
+        let detail = diagnostics
+            .first()
+            .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
+            .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
+        PreparationError::new(
+            PreparationStage::ModelBindings,
+            format!(
+                "Could not rebuild validated Verilog-A source '{}': {detail}",
+                document.file_name()
+            ),
+        )
+    })?;
     receipt
         .prepare_runtime(project_id, bundle)
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))
@@ -278,6 +300,8 @@ pub fn project_veriloga_runtimes_referenced_by(
 ) -> Result<crate::veriloga::PreparedVerilogARuntimeSet, PreparationError> {
     let lines = executable_logical_lines(source);
     let mut runtimes = Vec::new();
+    // The deck's cells, read once a bundle it names needs them.
+    let mut cells = None;
     for bundle in sources
         .iter_bundles()
         .filter(|bundle| bundle.language() == ProjectSourceLanguage::VerilogA)
@@ -296,7 +320,8 @@ pub fn project_veriloga_runtimes_referenced_by(
         if !references_bundle {
             continue;
         }
-        let runtime = prepared_project_veriloga_runtime(project_id, bundle, retained)?;
+        let cells = cells.get_or_insert_with(|| deck_external_cells(source));
+        let runtime = prepared_project_veriloga_runtime(project_id, bundle, retained, cells)?;
         let exact_reference = lines.iter().any(|(_, line)| {
             project_veriloga_directive_matches_exact_identity(
                 line,
@@ -400,3 +425,6 @@ pub(crate) fn project_veriloga_directive_matches_exact_identity(
             && model_name.is_some_and(|model| model.eq_ignore_ascii_case(module_name))
     })
 }
+
+#[cfg(test)]
+mod tests;

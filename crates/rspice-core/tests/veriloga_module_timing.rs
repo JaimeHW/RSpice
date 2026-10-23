@@ -62,6 +62,7 @@ endmodule
                 aliases: vec!["timing_queries".into()],
                 model: runtime.model,
                 canonical_ir: runtime.canonical_ir,
+                external_cells: None,
             },
         )],
         ResourceLimits::default(),
@@ -121,6 +122,7 @@ fn module_timescales_drive_exact_mixed_breakpoints_from_file_and_sealed_sources(
                     &serde_json::to_vec(&runtime.canonical_ir).unwrap(),
                 )
                 .unwrap(),
+                external_cells: None,
             },
         )],
         ResourceLimits::default(),
@@ -199,6 +201,7 @@ endmodule
                 aliases: vec!["delayed_drive".into()],
                 model: runtime.model,
                 canonical_ir: runtime.canonical_ir,
+                external_cells: None,
             },
         )],
         ResourceLimits::default(),

@@ -1375,8 +1375,12 @@ pub(crate) fn compile_project_bundle_virtual_for_provenance(
     bundle: &ProjectSourceBundle,
     selected_module: &str,
 ) -> Result<VirtualRuntimeCompilation, String> {
-    rspice_simulation::project_veriloga::compile_project_virtual_runtime(bundle, selected_module)
-        .map_err(|error| error.to_string())
+    rspice_simulation::project_veriloga::compile_project_virtual_runtime(
+        bundle,
+        selected_module,
+        None,
+    )
+    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn compile_project_bundle_receipt(

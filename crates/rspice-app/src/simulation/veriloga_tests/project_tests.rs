@@ -98,7 +98,8 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
             .is_empty()
     );
     let configured =
-        compile_project_source_bundle_runtime(project_id, &bundle, "project_controlled").unwrap();
+        compile_project_source_bundle_runtime(project_id, &bundle, "project_controlled", None)
+            .unwrap();
     let editor = super::prepare_project_runtime(
         project_id,
         &bundle,
@@ -106,6 +107,7 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
         "project_controlled",
         receipt.compilation.report(),
         configured.netlist_alias(),
+        None,
     )
     .unwrap();
     assert_eq!(
@@ -115,9 +117,10 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
     assert_eq!(configured.terminal_names().unwrap(), ["p", "n"]);
     assert_controlled_conductance(&configured, 500.0);
 
-    let error = compile_project_source_bundle_runtime(project_id, &bundle, "PROJECT_CONTROLLED")
-        .unwrap_err()
-        .to_string();
+    let error =
+        compile_project_source_bundle_runtime(project_id, &bundle, "PROJECT_CONTROLLED", None)
+            .unwrap_err()
+            .to_string();
     assert!(
         error.contains("not declared by the Verilog-A build profile"),
         "{error}"
@@ -129,9 +132,10 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
     profile.targets.generated_rust = true;
     profile.targets.fallback = build_profile::VerilogAFallbackPolicy::Reject;
     let required = project_bundle(&profile);
-    let error = compile_project_source_bundle_runtime(project_id, &required, "project_controlled")
-        .unwrap_err()
-        .to_string();
+    let error =
+        compile_project_source_bundle_runtime(project_id, &required, "project_controlled", None)
+            .unwrap_err()
+            .to_string();
     assert!(error.contains("digital process execution"), "{error}");
     let error = compile_project_bundle_receipt(project_id, &required, Some("project_controlled"))
         .unwrap_err();
@@ -142,10 +146,14 @@ fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements(
         .cell_bindings
         .insert("missing".to_owned(), "project_controlled".to_owned());
     let invalid_binding = project_bundle(&profile);
-    let error =
-        compile_project_source_bundle_runtime(project_id, &invalid_binding, "project_controlled")
-            .unwrap_err()
-            .to_string();
+    let error = compile_project_source_bundle_runtime(
+        project_id,
+        &invalid_binding,
+        "project_controlled",
+        None,
+    )
+    .unwrap_err()
+    .to_string();
     assert!(
         error.contains("not present in the elaboration graph"),
         "{error}"

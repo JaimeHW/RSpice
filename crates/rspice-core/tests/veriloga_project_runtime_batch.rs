@@ -43,6 +43,7 @@ fn registration(
         aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
         model: compiled.model,
         canonical_ir: compiled.canonical_ir,
+        external_cells: None,
     }
 }
 

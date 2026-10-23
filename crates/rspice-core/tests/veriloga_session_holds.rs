@@ -49,6 +49,7 @@ fn conductance(name: &str, siemens: f64) -> (PathBuf, ProjectVerilogASourceRegis
             aliases: vec![name.to_ascii_uppercase()],
             model: report.model,
             canonical_ir: report.canonical_ir,
+            external_cells: None,
         }),
     )
 }

@@ -314,7 +314,7 @@ fn seal_hdl(
         .and_then(|expanded| rspice_core::Netlist::parse(&expanded).ok())
         .map(|netlist| rspice_core::engine::hdl_external_cells(&netlist));
     let compiler = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
-        external_cells,
+        external_cells: external_cells.clone(),
         ..rspice_simulation::compilation::unified_runtime_compiler_options()
     });
     let mut lines: Vec<String> = circuit.lines().map(str::to_owned).collect();
@@ -415,11 +415,14 @@ fn seal_hdl(
             .map_err(|error| compile_refusal(&module, &path, error.to_string()))?;
         let alias = directive.alias.clone().unwrap_or_else(|| module.clone());
         let source_key = sealed_source_key(design_slug, &module, &file_name);
-        let runtime = PreparedVerilogARuntime::try_from_virtual_compilation(
+        // Sealed with the deck's table it was compiled against, which a
+        // design with a leaf carries in its identity and install key.
+        let runtime = PreparedVerilogARuntime::try_from_virtual_compilation_against(
             source_key.clone(),
             digest,
             alias.clone(),
             &compilation,
+            external_cells.as_deref(),
         )
         .map_err(|error| compile_refusal(&module, &path, error.to_string()))?;
         runtimes.push(runtime);

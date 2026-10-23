@@ -346,6 +346,7 @@ pub(super) fn configured_deck(app: &RSpiceApp) -> Result<String, String> {
         state.model.workspace.content.project.id(),
         &state.model.workspace.content.project_sources,
         &projection,
+        &[],
     )
     .map_err(|error| error.message().to_owned())?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(

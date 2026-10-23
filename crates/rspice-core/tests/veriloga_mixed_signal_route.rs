@@ -4402,6 +4402,7 @@ fn sealed_runtimes_serve_a_wreal_resolution_that_changes_none_of_their_nets() {
             aliases: vec![name.to_ascii_uppercase()],
             model: runtime.model,
             canonical_ir: runtime.canonical_ir,
+            external_cells: None,
         })
     };
     let _installed = hold_project_veriloga_sources_for_session(
@@ -4469,6 +4470,7 @@ fn sealed_runtimes_refuse_a_min_typ_max_selection_they_were_not_compiled_under()
                 aliases: vec!["HELD".into()],
                 model: runtime.model,
                 canonical_ir: runtime.canonical_ir,
+                external_cells: None,
             },
         )],
         ResourceLimits::default(),

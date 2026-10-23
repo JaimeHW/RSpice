@@ -166,6 +166,7 @@ fn virtual_models_share_active_included_connection_rules_after_transport_and_cac
             aliases: vec![name.to_owned()],
             model: compiled.runtime.model,
             canonical_ir,
+            external_cells: None,
         });
         keys.push(source_key);
     }
@@ -287,6 +288,7 @@ fn named_configuration_changes_file_cached_and_transported_virtual_boundaries() 
         aliases: vec!["DRIVER".to_owned()],
         model: compiled.runtime.model,
         canonical_ir,
+        external_cells: None,
     }]);
     for path in [&file, &virtual_key] {
         let deck_text = format!(
@@ -413,6 +415,7 @@ fn source_qualified_configuration_resolves_duplicate_names_after_virtual_remappi
             aliases: vec![name.to_owned()],
             model: compiled.runtime.model,
             canonical_ir,
+            external_cells: None,
         });
         virtual_keys.push(source_key);
     }
@@ -509,6 +512,7 @@ fn standalone_virtual_connections_register_atomically_with_devices() {
         aliases: vec!["DRIVER".to_owned()],
         model: runtime.model,
         canonical_ir: runtime.canonical_ir,
+        external_cells: None,
     };
     let library = ProjectVerilogAConnectionLibraryRegistration {
         source_key: library_key.clone(),

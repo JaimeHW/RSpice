@@ -79,6 +79,12 @@ pub struct PreparedVerilogARuntime {
     netlist_alias: String,
     model_json: String,
     canonical_ir_json: String,
+    /// The cell table the artifact was compiled against, when its design
+    /// instantiates SPICE cells as leaves: part of its identity, and of the
+    /// key the engine installs it under, so it builds only for a deck that
+    /// offers the same cells.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    external_cells: Option<Vec<rspice_veriloga::ExternalCell>>,
 }
 
 impl PreparedVerilogARuntime {
@@ -106,9 +112,72 @@ impl PreparedVerilogARuntime {
         report: &rspice_veriloga::RuntimeCompileReport,
         netlist_alias: impl Into<String>,
     ) -> Result<Self, PreparedRuntimeError> {
-        let netlist_alias = netlist_alias.into();
+        Self::seal(
+            source_key,
+            source_digest,
+            module_name,
+            netlist_alias.into(),
+            report,
+            None,
+        )
+    }
+
+    pub fn try_from_virtual_compilation(
+        source_key: String,
+        source_digest: rspice_vocabulary::product::ContentDigest,
+        netlist_alias: String,
+        compilation: &rspice_veriloga::VirtualRuntimeCompilation,
+    ) -> Result<Self, PreparedRuntimeError> {
+        Self::try_from_virtual_compilation_against(
+            source_key,
+            source_digest,
+            netlist_alias,
+            compilation,
+            None,
+        )
+    }
+
+    /// [`Self::try_from_virtual_compilation`] for a compile given `cells`
+    /// (`rspice_veriloga::CompilerOptions::external_cells`).
+    pub fn try_from_virtual_compilation_against(
+        source_key: String,
+        source_digest: rspice_vocabulary::product::ContentDigest,
+        netlist_alias: String,
+        compilation: &rspice_veriloga::VirtualRuntimeCompilation,
+        cells: Option<&[rspice_veriloga::ExternalCell]>,
+    ) -> Result<Self, PreparedRuntimeError> {
+        compilation.validate_integrity().map_err(|error| {
+            PreparedRuntimeError::Integrity(format!(
+                "Compiled Verilog-A bundle is invalid: {error}"
+            ))
+        })?;
+        Self::seal(
+            source_key,
+            source_digest,
+            &compilation.selected_module,
+            netlist_alias,
+            &compilation.runtime,
+            cells,
+        )
+    }
+
+    /// Seal a report compiled given `cells`. The table is the artifact's
+    /// only when a leaf of its design was built from it: a design with no
+    /// leaf compiles the same against any table, and is sealed as one
+    /// compiled against none.
+    pub(crate) fn seal(
+        source_key: String,
+        source_digest: rspice_vocabulary::product::ContentDigest,
+        module_name: &str,
+        netlist_alias: String,
+        report: &rspice_veriloga::RuntimeCompileReport,
+        cells: Option<&[rspice_veriloga::ExternalCell]>,
+    ) -> Result<Self, PreparedRuntimeError> {
         let model_json = seal_compiled_model(&report.model)?;
         let canonical_ir_json = seal_canonical_ir(&report.canonical_ir)?;
+        let external_cells = cells
+            .filter(|_| !report.canonical_ir.hir.external_leaves.is_empty())
+            .map(<[_]>::to_vec);
         let artifact_digest = runtime_artifact_digest(
             &source_key,
             source_digest,
@@ -116,6 +185,7 @@ impl PreparedVerilogARuntime {
             &netlist_alias,
             &model_json,
             &canonical_ir_json,
+            external_cells.as_deref(),
         );
         let runtime = Self {
             source_key,
@@ -125,42 +195,7 @@ impl PreparedVerilogARuntime {
             netlist_alias,
             model_json,
             canonical_ir_json,
-        };
-        runtime
-            .validate()
-            .map_err(PreparedRuntimeError::Integrity)?;
-        Ok(runtime)
-    }
-
-    pub fn try_from_virtual_compilation(
-        source_key: String,
-        source_digest: rspice_vocabulary::product::ContentDigest,
-        netlist_alias: String,
-        compilation: &rspice_veriloga::VirtualRuntimeCompilation,
-    ) -> Result<Self, PreparedRuntimeError> {
-        compilation.validate_integrity().map_err(|error| {
-            PreparedRuntimeError::Integrity(format!(
-                "Compiled Verilog-A bundle is invalid: {error}"
-            ))
-        })?;
-        let model_json = seal_compiled_model(&compilation.runtime.model)?;
-        let canonical_ir_json = seal_canonical_ir(&compilation.runtime.canonical_ir)?;
-        let artifact_digest = runtime_artifact_digest(
-            &source_key,
-            source_digest,
-            &compilation.selected_module,
-            &netlist_alias,
-            &model_json,
-            &canonical_ir_json,
-        );
-        let runtime = Self {
-            source_key,
-            source_digest,
-            artifact_digest,
-            module_name: compilation.selected_module.clone(),
-            netlist_alias,
-            model_json,
-            canonical_ir_json,
+            external_cells,
         };
         runtime
             .validate()
@@ -201,6 +236,7 @@ impl PreparedVerilogARuntime {
             aliases: vec![self.netlist_alias.clone()],
             model,
             canonical_ir,
+            external_cells: self.external_cells.clone(),
         })
     }
 
@@ -221,6 +257,7 @@ impl PreparedVerilogARuntime {
             &self.netlist_alias,
             &self.model_json,
             &self.canonical_ir_json,
+            self.external_cells.as_deref(),
         );
         if expected != self.artifact_digest {
             return Err("Verilog-A runtime artifact digest does not match its payload".to_owned());
@@ -824,9 +861,14 @@ fn runtime_artifact_digest(
     netlist_alias: &str,
     model_json: &str,
     canonical_ir_json: &str,
+    external_cells: Option<&[rspice_veriloga::ExternalCell]>,
 ) -> rspice_vocabulary::product::ContentDigest {
     let mut hasher = Sha256::new();
     hasher.update(b"rspice.project-veriloga-runtime/v2\0");
+    let mut field = |bytes: &[u8]| {
+        hasher.update((bytes.len() as u64).to_le_bytes());
+        hasher.update(bytes);
+    };
     for bytes in [
         source_key.as_bytes(),
         source_digest.as_bytes(),
@@ -835,8 +877,19 @@ fn runtime_artifact_digest(
         model_json.as_bytes(),
         canonical_ir_json.as_bytes(),
     ] {
-        hasher.update((bytes.len() as u64).to_le_bytes());
-        hasher.update(bytes);
+        field(bytes);
+    }
+    // An artifact with no leaf keeps the identity it always had.
+    if let Some(cells) = external_cells {
+        field(b"external-cells");
+        field(&(cells.len() as u64).to_le_bytes());
+        for cell in cells {
+            field(cell.name.as_bytes());
+            for names in [&cell.ports, &cell.parameters] {
+                field(&(names.len() as u64).to_le_bytes());
+                names.iter().for_each(|name| field(name.as_bytes()));
+            }
+        }
     }
     rspice_vocabulary::product::ContentDigest::from_bytes(hasher.finalize().into())
 }

@@ -5,12 +5,12 @@ use super::diagnostics::{
     project_compile_outcome, specialist_diagnostics,
 };
 use super::{
-    VerilogASourceOperationToken, build_profile, compile_project_bundle_source,
+    VerilogASourceOperationToken, build_profile, compile_project_bundle_source_against,
     prepare_project_runtime,
 };
 use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime};
 use rspice_design::project_sources::ProjectSourceBundle;
-use rspice_veriloga::RuntimeCompileReport;
+use rspice_veriloga::{ExternalCell, RuntimeCompileReport};
 use rspice_vocabulary::diagnostics::{insert_diagnostic_id, validate_diagnostic_count};
 use rspice_vocabulary::product::ProjectId;
 use std::collections::HashSet;
@@ -20,6 +20,8 @@ use std::sync::Arc;
 pub struct ProjectCompileReceipt {
     token: VerilogASourceOperationToken,
     report: Arc<RuntimeCompileReport>,
+    /// The cells the report was compiled against, if any.
+    cells: Option<Arc<[ExternalCell]>>,
 }
 
 impl ProjectCompileReceipt {
@@ -47,6 +49,7 @@ impl ProjectCompileReceipt {
             Self {
                 token,
                 report: Arc::new(report.clone()),
+                cells: None,
             },
             diagnostics,
         ))
@@ -57,6 +60,14 @@ impl ProjectCompileReceipt {
     }
     pub fn report(&self) -> &Arc<RuntimeCompileReport> {
         &self.report
+    }
+
+    /// Whether a deck offering `cells` builds this report's design as it
+    /// was compiled: always for a design with no leaf, else only for the
+    /// cells it was compiled against.
+    pub fn builds_for(&self, cells: &[ExternalCell]) -> bool {
+        self.report.canonical_ir.hir.external_leaves.is_empty()
+            || self.cells.as_deref() == Some(cells)
     }
 
     pub fn prepare_runtime(
@@ -80,6 +91,7 @@ impl ProjectCompileReceipt {
             self.report.abi.module_name.as_str(),
             &self.report,
             netlist_alias,
+            self.cells.as_deref(),
         )
     }
 }
@@ -89,13 +101,34 @@ pub fn compile_project_bundle_receipt(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
 ) -> Result<(ProjectCompileReceipt, Vec<ProjectCompileDiagnostic>), Vec<ProjectCompileDiagnostic>> {
+    compile_project_bundle_receipt_against(project_id, bundle, selected_module, None)
+}
+
+/// [`compile_project_bundle_receipt`] offering the design `cells` as leaves.
+pub fn compile_project_bundle_receipt_against(
+    project_id: ProjectId,
+    bundle: &ProjectSourceBundle,
+    selected_module: Option<&str>,
+    cells: Option<&[ExternalCell]>,
+) -> Result<(ProjectCompileReceipt, Vec<ProjectCompileDiagnostic>), Vec<ProjectCompileDiagnostic>> {
     let token = VerilogASourceOperationToken::capture(project_id, bundle, selected_module);
     match project_compile_outcome(
         bundle,
-        compile_project_bundle_source(bundle, selected_module),
+        compile_project_bundle_source_against(bundle, selected_module, cells),
     ) {
         Ok(report) => {
-            ProjectCompileReceipt::from_report(token, &report, Some(bundle)).map_err(|detail| {
+            let receipt = ProjectCompileReceipt::from_report(token, &report, Some(bundle)).map(
+                |(receipt, diagnostics)| {
+                    (
+                        ProjectCompileReceipt {
+                            cells: cells.map(Arc::from),
+                            ..receipt
+                        },
+                        diagnostics,
+                    )
+                },
+            );
+            receipt.map_err(|detail| {
                 vec![ProjectCompileDiagnostic::new(
                     "rspice.diagnostics",
                     "DIAGNOSTIC-CAPACITY",

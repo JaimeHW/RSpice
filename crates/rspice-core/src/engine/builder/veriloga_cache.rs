@@ -2341,11 +2341,17 @@ fn registered_at_default_resolution(
     {
         return Ok(None);
     }
+    // One compiled against the deck's own cells, then one with no leaf,
+    // which the deck's cells build as any other deck's do.
     let registered = canonical.clone().under(&DeckHdl::default());
-    let entry = veriloga_source_cache()
-        .read()
-        .ok()
-        .and_then(|cache| cache.get_cloned(&registered));
+    let mut against_deck_cells = registered.clone();
+    against_deck_cells.external_cells = canonical.external_cells;
+    let entry = veriloga_source_cache().read().ok().and_then(|cache| {
+        [&against_deck_cells, &registered]
+            .into_iter()
+            .filter(|key| *key != canonical)
+            .find_map(|key| cache.get_cloned(key))
+    });
     let Some(CachedVerilogASource::Runtime(entry)) = entry else {
         return Ok(None);
     };
@@ -2999,6 +3005,13 @@ pub struct ProjectVerilogARuntimeRegistration {
     pub model: rspice_veriloga::CompiledModel,
     /// Canonical IR paired with `model` for the native runtime.
     pub canonical_ir: rspice_veriloga::canonical_ir::CanonicalIrArtifact,
+    /// The cell table the artifact was compiled against
+    /// (`rspice_veriloga::CompilerOptions::external_cells`), when its design
+    /// instantiates SPICE cells as leaves. The table is part of the
+    /// artifact's key: only a deck that offers the same cells
+    /// ([`crate::engine::hdl_external_cells`]) builds it. `None` for an
+    /// artifact with no leaf, which every deck builds alike.
+    pub external_cells: Option<Vec<rspice_veriloga::ExternalCell>>,
 }
 
 /// Standalone connection declarations under an exact sealed source key.
@@ -3033,7 +3046,20 @@ struct PreparedProjectVerilogARegistration {
     authority_scope: String,
     aliases: BTreeSet<String>,
     artifact_fingerprint: [u8; 32],
+    /// The identity of the cell table the artifact was compiled against.
+    cells: Option<[u8; 32]>,
     entry: CachedVerilogASource,
+}
+
+#[cfg(feature = "veriloga")]
+impl PreparedProjectVerilogARegistration {
+    /// The cache key the source is installed under: its sealed path, with
+    /// the cells it was compiled against.
+    fn cache_key(&self) -> VerilogASourceKey {
+        let mut key = VerilogASourceKey::new(&self.key, None);
+        key.external_cells = self.cells;
+        key
+    }
 }
 
 #[cfg(feature = "veriloga")]
@@ -3123,6 +3149,20 @@ fn prepare_project_veriloga_registration(
     let (key, folded_key, authority_scope) =
         validate_sealed_runtime_source_key(&registration.source_key)?;
     validate_runtime_artifact_pair(&registration.model, Some(&registration.canonical_ir))?;
+    let cells = DeckHdl {
+        external_cells: registration.external_cells.map(std::sync::Arc::new),
+        ..DeckHdl::default()
+    }
+    .cells_identity();
+    // A leaf is built from the deck's cell of that name, so an artifact
+    // that has one is good only for a deck that offers the cells it was
+    // compiled against.
+    if cells.is_none() && !registration.canonical_ir.hir.external_leaves.is_empty() {
+        return Err(format!(
+            "sealed Verilog-A runtime '{}' instantiates SPICE cells as leaves but names no cell table it was compiled against",
+            key.display()
+        ));
+    }
 
     let mut aliases = BTreeSet::new();
     aliases.insert(validate_project_runtime_alias(
@@ -3139,6 +3179,7 @@ fn prepare_project_veriloga_registration(
         authority_scope,
         aliases,
         artifact_fingerprint,
+        cells,
         entry: CachedVerilogASource::Runtime(CachedVerilogAModel {
             dependencies: Vec::new(),
             model: std::sync::Arc::new(registration.model),
@@ -3235,12 +3276,15 @@ fn install_project_veriloga_sources(
                     authority_scope,
                     aliases,
                     artifact_fingerprint: *library.artifact.identity(),
+                    cells: None,
                     entry: CachedVerilogASource::Connections(std::sync::Arc::new(library.artifact)),
                 }
             }
         };
         if let Some(existing) = prepared_by_key.get_mut(&prepared.key) {
-            if existing.artifact_fingerprint != prepared.artifact_fingerprint {
+            if existing.artifact_fingerprint != prepared.artifact_fingerprint
+                || existing.cells != prepared.cells
+            {
                 return Err(format!(
                     "sealed Verilog-A runtime key '{}' is claimed by differing artifacts",
                     prepared.key.display()
@@ -3284,12 +3328,7 @@ fn install_project_veriloga_sources(
 
     let incoming_bytes = prepared
         .iter()
-        .map(|runtime| {
-            veriloga_source_cache_entry_bytes(
-                &VerilogASourceKey::new(&runtime.key, None),
-                &runtime.entry,
-            )
-        })
+        .map(|runtime| veriloga_source_cache_entry_bytes(&runtime.cache_key(), &runtime.entry))
         .collect::<Result<Vec<_>, _>>()?;
     let aggregate_incoming_bytes = incoming_bytes
         .iter()
@@ -3308,6 +3347,7 @@ fn install_project_veriloga_sources(
 
     // Compare the whole candidate set against the live registry while holding
     // the one cache lock. Nothing can change between validation and commit.
+    // The same source compiled against another cell table is another key.
     for (cached_key, cached_entry) in cache.iter() {
         if !is_sealed_veriloga_virtual_path(&cached_key.source_path) {
             continue;
@@ -3317,6 +3357,7 @@ fn install_project_veriloga_sources(
         let cached_fingerprint = cached_entry.artifact_fingerprint()?;
         for runtime in &prepared {
             if cached_folded_key == runtime.folded_key
+                && cached_key.external_cells == runtime.cells
                 && cached_fingerprint != runtime.artifact_fingerprint
             {
                 return Err(format!(
@@ -3329,8 +3370,8 @@ fn install_project_veriloga_sources(
 
     let mut replacements = Vec::with_capacity(prepared.len());
     for runtime in prepared {
-        let entry = if let Some(installed) = cache.get(&VerilogASourceKey::new(&runtime.key, None))
-        {
+        let key = runtime.cache_key();
+        let entry = if let Some(installed) = cache.get(&key) {
             let installed_fingerprint = installed.artifact_fingerprint()?;
             if installed_fingerprint != runtime.artifact_fingerprint {
                 return Err(format!(
@@ -3342,9 +3383,8 @@ fn install_project_veriloga_sources(
         } else {
             runtime.entry
         };
-        let retained_bytes =
-            veriloga_source_cache_entry_bytes(&VerilogASourceKey::new(&runtime.key, None), &entry)?;
-        replacements.push((VerilogASourceKey::from(runtime.key), entry, retained_bytes));
+        let retained_bytes = veriloga_source_cache_entry_bytes(&key, &entry)?;
+        replacements.push((key, entry, retained_bytes));
     }
 
     let replacement_bytes = replacements
@@ -3595,6 +3635,7 @@ endmodule
             aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
             model: report.model,
             canonical_ir: report.canonical_ir,
+            external_cells: None,
         }
     }
 
@@ -3632,6 +3673,7 @@ endmodule
             aliases: Vec::new(),
             model,
             canonical_ir,
+            external_cells: None,
         }])
     }
 

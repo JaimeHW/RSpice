@@ -1,7 +1,7 @@
 //! Project source compilation with typed failures for host diagnostic adapters.
 
 use rspice_design::project_sources::{ProjectSourceBundle, ProjectSourceRole};
-use rspice_veriloga::{RuntimeCompileReport, VerilogACompiler};
+use rspice_veriloga::{ExternalCell, RuntimeCompileReport, VerilogACompiler};
 use sha2::{Digest as _, Sha256};
 
 use crate::veriloga::{PreparedRuntimeError, PreparedVerilogARuntime, PreparedVerilogARuntimeSet};
@@ -28,9 +28,23 @@ pub fn compile_project_bundle_source(
     bundle: &ProjectSourceBundle,
     selected_module: Option<&str>,
 ) -> Result<Box<RuntimeCompileReport>, ProjectVerilogACompileError> {
+    compile_project_bundle_source_against(bundle, selected_module, None)
+}
+
+/// [`compile_project_bundle_source`] offering the design `cells` as leaves
+/// (`rspice_veriloga::CompilerOptions::external_cells`): the cells of the
+/// deck that runs it.
+pub fn compile_project_bundle_source_against(
+    bundle: &ProjectSourceBundle,
+    selected_module: Option<&str>,
+    cells: Option<&[ExternalCell]>,
+) -> Result<Box<RuntimeCompileReport>, ProjectVerilogACompileError> {
     let resolved = build_profile::resolve_veriloga_build_profile(bundle)
         .map_err(ProjectVerilogACompileError::BuildProfile)?;
-    let compiler = VerilogACompiler::new(resolved.profile.compiler_options());
+    let compiler = VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        external_cells: cells.map(<[_]>::to_vec),
+        ..resolved.profile.compiler_options()
+    });
     let qualifications = resolved.profile.qualification_options();
     let source = bundle.root().content();
     let selected_module = selected_module.or(match resolved.profile.entry_modules.as_slice() {
@@ -76,9 +90,11 @@ fn successful_compile_outcome(
     Ok(Box::new(report))
 }
 
+/// Compile `module_name` of `bundle`, offering the design `cells` as leaves.
 pub fn compile_project_virtual_runtime(
     bundle: &rspice_design::project_sources::ProjectSourceBundle,
     module_name: &str,
+    cells: Option<&[ExternalCell]>,
 ) -> Result<rspice_veriloga::VirtualRuntimeCompilation, PreparedRuntimeError> {
     let resolved = build_profile::resolve_veriloga_build_profile(bundle)
         .map_err(PreparedRuntimeError::SourceIdentity)?;
@@ -89,22 +105,33 @@ pub fn compile_project_virtual_runtime(
     let virtual_bundle =
         build_profile::project_bundle_as_virtual_with_profile(bundle, &resolved.profile)
             .map_err(PreparedRuntimeError::SourceBundle)?;
-    let compilation = rspice_veriloga::VerilogACompiler::new(resolved.profile.compiler_options())
-        .compile_virtual_runtime_diagnosed_with_qualifications(
-            &virtual_bundle, module_name, project_virtual_compile_limits(), resolved.profile.qualification_options(),
-        )
-        .map_err(|error| PreparedRuntimeError::Compile(format!(
-            "Could not compile Verilog-A module '{module_name}' from project bundle {}: {error}", bundle.id(),
-        )))?;
+    let compilation = rspice_veriloga::VerilogACompiler::new(rspice_veriloga::CompilerOptions {
+        external_cells: cells.map(<[_]>::to_vec),
+        ..resolved.profile.compiler_options()
+    })
+    .compile_virtual_runtime_diagnosed_with_qualifications(
+        &virtual_bundle,
+        module_name,
+        project_virtual_compile_limits(),
+        resolved.profile.qualification_options(),
+    )
+    .map_err(|error| {
+        PreparedRuntimeError::Compile(format!(
+            "Could not compile Verilog-A module '{module_name}' from project bundle {}: {error}",
+            bundle.id(),
+        ))
+    })?;
     build_profile::validate_profile_cell_bindings(&compilation.runtime, &resolved.profile)
         .map_err(PreparedRuntimeError::SourceIdentity)?;
     Ok(compilation)
 }
 
+/// Compile and seal `module_name` of `bundle` for a deck offering `cells`.
 pub fn compile_project_source_bundle_runtime(
     project_id: rspice_vocabulary::product::ProjectId,
     bundle: &rspice_design::project_sources::ProjectSourceBundle,
     module_name: &str,
+    cells: Option<&[ExternalCell]>,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
     if bundle.language() != rspice_design::project_sources::ProjectSourceLanguage::VerilogA {
         return Err(PreparedRuntimeError::SourceIdentity(format!(
@@ -122,12 +149,13 @@ pub fn compile_project_source_bundle_runtime(
     let netlist_alias =
         rspice_design::project_sources::project_veriloga_bundle_alias(bundle, module_name)
             .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
-    let compilation = compile_project_virtual_runtime(bundle, module_name)?;
-    PreparedVerilogARuntime::try_from_virtual_compilation(
+    let compilation = compile_project_virtual_runtime(bundle, module_name, cells)?;
+    PreparedVerilogARuntime::try_from_virtual_compilation_against(
         source_key,
         bundle.closure_digest(),
         netlist_alias,
         &compilation,
+        cells,
     )
 }
 
@@ -188,6 +216,8 @@ pub fn prepare_project_runtime(
     module_name: &str,
     report: &rspice_veriloga::RuntimeCompileReport,
     netlist_alias: impl Into<String>,
+    // The cells `report` was compiled against.
+    cells: Option<&[ExternalCell]>,
 ) -> Result<PreparedVerilogARuntime, PreparedRuntimeError> {
     if token.project_id != project_id
         || token.bundle_id != bundle.id()
@@ -208,12 +238,13 @@ pub fn prepare_project_runtime(
         module_name,
     )
     .map_err(|error| PreparedRuntimeError::SourceIdentity(error.to_string()))?;
-    PreparedVerilogARuntime::try_from_runtime_report(
+    PreparedVerilogARuntime::seal(
         source_key,
         bundle.closure_digest(),
         module_name,
+        netlist_alias.into(),
         report,
-        netlist_alias,
+        cells,
     )
 }
 

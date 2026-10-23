@@ -27,9 +27,10 @@ use crate::output_contract::selection::{effective_plan_capture, projection_occur
 use crate::preparation::{QueuedAnalysis, validate_prepared_periodic_sources};
 use crate::project_technology::ProjectTechnologyInputs;
 use crate::project_veriloga::preparation::{
-    prepared_configuration_veriloga_runtimes, prepared_corner_veriloga_runtimes,
-    prepared_model_library_veriloga_runtimes, prepared_signed_pdk_veriloga_runtimes,
-    project_veriloga_runtimes_referenced_by, rebind_project_veriloga_source_keys,
+    deck_external_cells, prepared_configuration_veriloga_runtimes,
+    prepared_corner_veriloga_runtimes, prepared_model_library_veriloga_runtimes,
+    prepared_signed_pdk_veriloga_runtimes, project_veriloga_runtimes_referenced_by,
+    rebind_project_veriloga_source_keys,
 };
 use crate::sealed_source::{generated_executable_source_digest, manual_executable_source_digest};
 use rspice_simulation_contract::analysis_spec::AnalysisSpec;
@@ -369,11 +370,6 @@ where
         .iter()
         .map(rspice_simulation_contract::plan_model::FrozenAnalysisInstance::id)
         .collect::<Vec<_>>();
-    let project_veriloga_runtimes = prepared_configuration_veriloga_runtimes(
-        inputs.technology.project.id(),
-        inputs.project_sources,
-        &execution_projection,
-    )?;
     let reference_process = inputs.analysis.sim_setup.reference_pvt.process;
     let model_library_veriloga_runtimes =
         prepared_model_library_veriloga_runtimes(&sealed_models, reference_process)?;
@@ -385,9 +381,6 @@ where
     )?;
     let external_veriloga_runtimes = prepared_signed_pdk_veriloga_runtimes(&sealed_models)?
         .try_merge(model_library_veriloga_runtimes)
-        .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
-    let project_veriloga_runtimes = project_veriloga_runtimes
-        .try_merge(external_veriloga_runtimes.clone())
         .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let generated = crate::netlist_gen::generate_netlist_hierarchical_with_variables(
         root_schematic,
@@ -448,6 +441,16 @@ where
             .map(|instance| (instance.id(), instance.draft()))
             .collect(),
     )?;
+    // A configured design is compiled against the cells of the deck it runs
+    // in, which a design may instantiate as leaves.
+    let project_veriloga_runtimes = prepared_configuration_veriloga_runtimes(
+        inputs.technology.project.id(),
+        inputs.project_sources,
+        &execution_projection,
+        &deck_external_cells(&netlist),
+    )?
+    .try_merge(external_veriloga_runtimes.clone())
+    .map_err(|error| PreparationError::new(PreparationStage::ModelBindings, error))?;
     let measurement_references =
         crate::measurement_references::PreparedMeasurementReferences::capture(
             &netlist,
