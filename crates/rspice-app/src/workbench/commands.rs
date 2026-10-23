@@ -55,7 +55,7 @@ pub(crate) mod dispatch_probe {
         REACHED.with(|reached| reached.borrow_mut().take().unwrap_or_default())
     }
 
-    pub(super) fn intercept(command: Command) -> bool {
+    pub(in crate::workbench) fn intercept(command: Command) -> bool {
         REACHED.with(|reached| {
             reached
                 .borrow_mut()
@@ -743,43 +743,15 @@ impl Command {
         }
     }
 
+    /// Run this command through the shell's dispatcher, as every route does.
     pub fn execute(self, app: &mut RSpiceApp) {
-        #[cfg(test)]
-        if dispatch_probe::intercept(self) {
-            return;
-        }
-        // Both guards are also `is_enabled`'s, so the command is drawn
-        // disabled and a shortcut for it is silent, as in any desktop app.
-        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(
-            &app.state.platform,
-        ) && self.blocked_by_project_operation()
-        {
-            return;
-        }
-        if self.requires_open_project() && !app.state.platform.project_lifecycle.is_open() {
-            return;
-        }
-        if let Some(request) = self.source_editor_request()
-            && let Some(editor) = app.state.workbench.active_source_editor
-        {
-            if editor.editable || !request.mutates_source() {
-                app.state.workbench.outbox.push(request);
-            }
-            return;
-        }
-        if active_schematic_editor(app)
-            && command_edits_schematic(self)
-            && app.state.schematic_edit_read_only()
-        {
-            app.state.deny_read_only_edit();
-            return;
-        }
-        if self.commits_inspector_edit() && !app.state.commit_pending_inspector_edit() {
-            return;
-        }
-        if self.repeatable() && self.is_enabled(app) {
-            app.state.workbench.last_repeatable_command = Some(self.stable_id().to_owned());
-        }
+        self.dispatch(app);
+    }
+
+    /// The shell's legacy table: what each command does once the
+    /// dispatcher's prologue has let it through. [`Command::dispatch`] is
+    /// its one caller, so no command skips the prologue.
+    pub(super) fn run_legacy_arm(self, app: &mut RSpiceApp) {
         match self {
             Self::OpenWorkspace(workspace) => {
                 if workspace_available(app.state.platform.project_lifecycle.is_open(), workspace) {
@@ -1953,6 +1925,7 @@ impl Command {
 
 mod command_helpers;
 
+pub(in crate::workbench) use command_helpers::active_schematic_editor;
 pub(crate) use command_helpers::reset_active_view;
 use command_helpers::*;
 

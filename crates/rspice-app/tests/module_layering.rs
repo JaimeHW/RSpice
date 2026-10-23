@@ -695,6 +695,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "workflows/file_actions",
     // Command dispatch.
     "commands",
+    // The one dispatcher every command runs through: its prologue, then the
+    // legacy table the commands module keeps.
+    "dispatch",
     // Following a finding to the object it is about. It reads a route a page
     // recorded and opens its destination, which takes the command vocabulary
     // and the document engines — so it sits above dispatch and below every

@@ -153,6 +153,7 @@ SLICE_RULES = [
     (W + r"commands\.rs$", "shell"),
     (W + r"commands/tests", "shell"),
     (W + r"commands", "framework"),
+    (W + r"dispatch\.rs$", "shell"),
     (W + r"menu_bar/export_actions", "hardcopy"),
     (W + r"menu_bar/waveform_export", "results"),
     (W + r"menu_bar/netlist_compat", "code"),

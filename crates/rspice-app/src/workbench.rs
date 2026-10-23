@@ -40,6 +40,7 @@ pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
+mod dispatch;
 mod docks;
 pub(crate) mod documents;
 // The bundled circuits Help's Examples dialog opens as projects, which the

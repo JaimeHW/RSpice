@@ -74,7 +74,7 @@ pub(super) fn cycle_canvas_grid(app: &mut RSpiceApp) {
     app.state.design.cycle_grid_style();
 }
 
-pub(super) fn active_schematic_editor(app: &RSpiceApp) -> bool {
+pub(in crate::workbench) fn active_schematic_editor(app: &RSpiceApp) -> bool {
     app.state.workbench.workspace == Workspace::Design
         && matches!(
             app.state.model.workspace.content.active_view_type(),
