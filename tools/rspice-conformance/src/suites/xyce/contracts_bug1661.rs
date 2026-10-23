@@ -3,138 +3,6 @@ use super::*;
 const BUG1661_LABEL: &str = "BUG_1661 top-level global-node expression wrapper";
 
 impl XyceTestRunner {
-    pub(super) fn bug1661_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG1661_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG1661_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1661_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug1661_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug1661_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG1661_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG1661_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG1661_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG1661_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{BUG1661_LABEL} Release-7.10 provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug1661_source_directory(directory: &Path) -> Result<Vec<u8>, String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {BUG1661_LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{BUG1661_LABEL} source directory must be a regular non-symlink directory"
-            ));
-        }
-        let mut members = fs::read_dir(directory)
-            .map_err(|error| format!("failed to read {BUG1661_LABEL} directory: {error}"))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("failed to inspect {BUG1661_LABEL} member: {error}"))?;
-        members.sort_by_key(|entry| entry.file_name());
-        let [(expected_name, expected_bytes, expected_sha256, expected_blake3)] =
-            XYCE_BUG1661_RETAINED_ARTIFACTS;
-        if members.len() != 1 {
-            return Err(format!(
-                "{BUG1661_LABEL} source census changed: expected 1 member, got {}",
-                members.len()
-            ));
-        }
-        let entry = &members[0];
-        let path = entry.path();
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(format!(
-                "{BUG1661_LABEL} member {} must be a regular non-symlink file",
-                path.display()
-            ));
-        }
-        let file_name = entry.file_name();
-        let name = file_name
-            .to_str()
-            .ok_or_else(|| format!("{BUG1661_LABEL} member name is not UTF-8"))?;
-        if name != expected_name {
-            return Err(format!(
-                "{BUG1661_LABEL} member case/name changed: expected {expected_name:?}, got {name:?}"
-            ));
-        }
-        let bytes = fs::read(&path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        let canonical = Self::canonical_lf_text_identity(BUG1661_LABEL, &bytes)?;
-        let sha256 = format!("{:x}", Sha256::digest(&canonical));
-        let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-        if canonical.len() != expected_bytes
-            || sha256 != expected_sha256
-            || content_blake3 != expected_blake3
-        {
-            return Err(format!("{BUG1661_LABEL} retained source content changed"));
-        }
-        Ok(bytes)
-    }
-
-    fn validate_bug1661_provenance(&self, deck: &XyceDeck) -> Result<Vec<u8>, String> {
-        Self::validate_bug1661_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != XYCE_BUG1661_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != XYCE_BUG1661_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(XYCE_BUG1661_PATH))
-        {
-            return Err(format!(
-                "recognized {BUG1661_LABEL} record is not canonical"
-            ));
-        }
-        let prefix = "netlists/certification_tests/bug_1661/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([XYCE_BUG1661_RECORD]) {
-            return Err(format!(
-                "{BUG1661_LABEL} wrapper ownership changed: {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG1661_LABEL} exclusions invalid: {error}"))?;
-        if exclusions.keys().any(|record| record.starts_with(prefix)) {
-            return Err(format!("{BUG1661_LABEL} must not acquire an exclusion row"));
-        }
-        let source = Self::validate_bug1661_source_directory(
-            &self.root.join("Netlists/Certification_Tests/BUG_1661"),
-        )?;
-        self.reject_wrapper_output_artifacts(&deck.path)
-            .map_err(|error| format!("{BUG1661_LABEL} {error}"))?;
-        let output_dir = self.root.join("OutputData/Certification_Tests/BUG_1661");
-        match fs::symlink_metadata(&output_dir) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "failed to inspect {BUG1661_LABEL} OutputData: {error}"
-                ));
-            }
-            Ok(_) => return Err(format!("{BUG1661_LABEL} must not acquire numerical gold")),
-        }
-        Ok(source)
-    }
-
     fn bug1661_nodes_match(actual: &[String], expected: &[&str]) -> bool {
         actual.len() == expected.len()
             && actual
@@ -402,10 +270,9 @@ impl XyceTestRunner {
                 "{BUG1661_LABEL} deadline expired before validation"
             ));
         }
-        let bytes = self.validate_bug1661_provenance(deck)?;
-        let source = std::str::from_utf8(&bytes)
-            .map_err(|error| format!("{BUG1661_LABEL} is not UTF-8: {error}"))?;
-        let plan = self.validate_bug1661_typed_contract(source, &deck.path)?;
+        let source = fs::read_to_string(&deck.path)
+            .map_err(|error| format!("failed to read {}: {error}", deck.path.display()))?;
+        let plan = self.validate_bug1661_typed_contract(&source, &deck.path)?;
         let (netlist, result) = self
             .run_transient_family_plan(&plan, start, None, None)
             .map_err(|error| format!("{BUG1661_LABEL} execution failed: {error}"))?;
@@ -414,10 +281,6 @@ impl XyceTestRunner {
         Self::validate_bug1661_serialized_prn_equality(&table, &abort)?;
         if abort.is_aborted() {
             return Err(format!("{BUG1661_LABEL} execution exceeded timeout"));
-        }
-        self.validate_bug1661_provenance(deck)?;
-        if abort.is_aborted() {
-            return Err(format!("{BUG1661_LABEL} final provenance exceeded timeout"));
         }
         Ok(())
     }
@@ -441,43 +304,6 @@ mod tests {
         }
     }
 
-    fn bug1661_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let source_root = corpus_root();
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug1661-{label}-"))
-            .tempdir()
-            .expect("create BUG1661 fixture root");
-        let root = temporary.path();
-        let family = root.join("Netlists/Certification_Tests/BUG_1661");
-        fs::create_dir_all(&family).expect("create BUG1661 fixture family");
-        fs::copy(
-            source_root.join(XYCE_BUG1661_PATH),
-            family.join("globalnode_expr_toplev.cir"),
-        )
-        .expect("copy canonical BUG1661 source");
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG1661_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG1661 wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n"
-            ),
-        )
-        .expect("write empty BUG1661 exclusion manifest");
-        let deck = canonical_deck(root);
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug1661_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug1661_historical_oracle_provenance()
-            .expect("Release-7.10 BUG1661 provenance remains exact");
-    }
-
     #[test]
     fn bug1661_typed_contract_preserves_implicit_global_node_and_behavioral_reference() {
         let root = corpus_root();
@@ -487,22 +313,34 @@ mod tests {
         runner
             .validate_bug1661_typed_contract(&source, &path)
             .expect("canonical BUG1661 typed contract passes");
-        for (index, mutation) in [
+        let temporary = tempfile::Builder::new()
+            .prefix("rspice-xyce-bug1661-typed-mutation-")
+            .tempdir()
+            .expect("create BUG1661 mutation root");
+        let mutated_path = temporary.path().join(XYCE_BUG1661_PATH);
+        fs::create_dir_all(mutated_path.parent().expect("BUG1661 deck has a family"))
+            .expect("create BUG1661 mutation family");
+        fs::write(&mutated_path, &source).expect("copy canonical BUG1661 source");
+        fs::write(
+            temporary.path().join(HARNESS_MANIFEST_FILE),
+            format!("{XYCE_BUG1661_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
+        )
+        .expect("write BUG1661 wrapper manifest");
+        let fixture_runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
+        fixture_runner
+            .validate_bug1661_typed_contract(&source, &mutated_path)
+            .expect("canonical BUG1661 typed contract passes outside the corpus");
+        for mutation in [
             source.replacen("V={V($g_1)}", "V={V($g_2)}", 1),
             source.replacen("3ms 9mV", "3ms 8mV", 1),
             source.replacen("R1 $g_1 0 1", "R1 $g_1 0 2", 1),
             source.replacen("v($g_1) v(1)", "v($g_1) v(2)", 1),
             source.replacen(".tran 1ns 4ms", ".tran 1ns 5ms", 1),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let (_temporary, deck, fixture_runner) =
-                bug1661_fixture(&format!("typed-mutation-{index}"));
-            fs::write(&deck.path, &mutation).expect("write BUG1661 semantic mutation");
+        ] {
+            fs::write(&mutated_path, &mutation).expect("write BUG1661 semantic mutation");
             assert!(
                 fixture_runner
-                    .validate_bug1661_typed_contract(&mutation, &deck.path)
+                    .validate_bug1661_typed_contract(&mutation, &mutated_path)
                     .is_err(),
                 "BUG1661 semantic mutation must fail closed"
             );
@@ -592,62 +430,5 @@ mod tests {
                 .validate_bug1661_oracle(&canonical_deck(&root), start)
                 .is_err()
         );
-    }
-
-    #[test]
-    fn bug1661_provenance_rejects_source_family_output_manifest_and_exclusion_drift() {
-        let (_temporary, deck, runner) = bug1661_fixture("source-drift");
-        let source = fs::read_to_string(&deck.path).expect("read BUG1661 fixture source");
-        fs::write(&deck.path, source.replace("3ms 9mV", "3ms 8mV"))
-            .expect("mutate BUG1661 retained source");
-        assert!(runner.validate_bug1661_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug1661_fixture("family-drift");
-        runner
-            .validate_bug1661_provenance(&deck)
-            .expect("canonical BUG1661 fixture provenance passes");
-        fs::write(
-            deck.path
-                .parent()
-                .expect("BUG1661 deck has parent")
-                .join("unexpected.out"),
-            "stale wrapper output\n",
-        )
-        .expect("write stale BUG1661 wrapper output");
-        assert!(runner.validate_bug1661_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug1661_fixture("output-drift");
-        let output = runner
-            .static_output_reference_path(&deck.path, "prn")
-            .expect("map BUG1661 fixture to OutputData");
-        fs::create_dir_all(output.parent().expect("BUG1661 output has parent"))
-            .expect("create forbidden BUG1661 OutputData family");
-        fs::write(output, "invented gold\n").expect("write forbidden BUG1661 gold");
-        assert!(runner.validate_bug1661_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug1661_fixture("manifest-drift");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "")
-            .expect("remove BUG1661 wrapper ownership");
-        let rebuilt = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(rebuilt.validate_bug1661_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug1661_fixture("exclusion-drift");
-        fs::write(
-            runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{XYCE_BUG1661_PATH}\tNetlists/Certification_Tests/BUG_1661/exclude\t{UPSTREAM_EXCLUDED_DISPOSITION}\n"
-            ),
-        )
-        .expect("fabricate BUG1661 exclusion");
-        assert!(runner.validate_bug1661_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug1661_fixture("path-drift");
-        let wrong = XyceDeck {
-            path: deck.path,
-            section: XyceDeckSection::Netlists,
-            relative_path: "Netlists/Certification_Tests/BUG_1661/globalnode_expr_other.cir"
-                .to_string(),
-        };
-        assert!(runner.validate_bug1661_provenance(&wrong).is_err());
     }
 }

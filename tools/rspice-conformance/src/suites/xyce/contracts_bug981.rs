@@ -481,6 +481,9 @@ mod tests {
                 .is_err()
         );
         fs::write(&path, &canonical).expect("restore worker");
+        runner
+            .validate_bug981_worker(Bug981Role::OutputTimePoints, &canonical, &path)
+            .expect("canonical BUG981 worker passes outside the corpus");
         assert!(
             runner
                 .validate_bug981_worker(Bug981Role::OutputTimePoints, &mutated, &path)

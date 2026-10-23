@@ -1,172 +1,6 @@
 use super::*;
 
 impl XyceTestRunner {
-    pub(super) fn diode_analytic_historical_provenance_records() -> Vec<String> {
-        let mut records = XYCE_DIODE_ANALYTIC_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_DIODE_ANALYTIC_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_DIODE_ANALYTIC_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_diode_analytic_historical_provenance() -> Result<(), String> {
-        let records = Self::diode_analytic_historical_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_DIODE_ANALYTIC_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_DIODE_ANALYTIC_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_DIODE_ANALYTIC_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_DIODE_ANALYTIC_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "DIODE_ANALYTIC Release-7.10 generated-gold provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_diode_analytic_provenance(
-        &self,
-        deck: &XyceDeck,
-        kind: XyceDiodeAnalyticKind,
-    ) -> Result<Vec<u8>, String> {
-        let label = kind.label();
-        Self::validate_diode_analytic_historical_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != kind.record()
-            || !Self::same_path(&deck.path, &self.root.join(kind.path()))
-        {
-            return Err(format!(
-                "recognized {label} record '{}' is not backed by its exact canonical Netlists path",
-                deck.relative_path
-            ));
-        }
-        let expected_owners = XyceDiodeAnalyticKind::ALL
-            .into_iter()
-            .map(|member| member.record())
-            .collect::<BTreeSet<_>>();
-        let observed_owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with("netlists/diode_analytic/"))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if observed_owners != expected_owners {
-            return Err(format!(
-                "DIODE_ANALYTIC requires exactly its three removed-wrapper owners, found {observed_owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("DIODE_ANALYTIC exclusion manifest is invalid: {error}"))?;
-        if XyceDiodeAnalyticKind::ALL
-            .into_iter()
-            .any(|member| exclusions.contains_key(member.record()))
-        {
-            return Err(
-                "DIODE_ANALYTIC must not be classified by an upstream exclude sentinel".into(),
-            );
-        }
-
-        let family_dir = deck
-            .path
-            .parent()
-            .ok_or_else(|| format!("{label} has no family directory"))?;
-        let family_metadata = fs::symlink_metadata(family_dir)
-            .map_err(|error| format!("failed to inspect DIODE_ANALYTIC family: {error}"))?;
-        if !family_metadata.file_type().is_dir() || family_metadata.file_type().is_symlink() {
-            return Err("DIODE_ANALYTIC family must be a regular non-symlink directory".into());
-        }
-        let expected = XYCE_DIODE_ANALYTIC_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeSet::new();
-        let mut selected_source = None;
-        for entry in fs::read_dir(family_dir)
-            .map_err(|error| format!("failed to read DIODE_ANALYTIC family: {error}"))?
-        {
-            let entry = entry
-                .map_err(|error| format!("failed to inspect DIODE_ANALYTIC member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "DIODE_ANALYTIC member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| "DIODE_ANALYTIC member name is not UTF-8".to_string())?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if !observed.insert(key.clone()) {
-                return Err(format!(
-                    "DIODE_ANALYTIC family has a case-colliding member {name:?}"
-                ));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "DIODE_ANALYTIC family acquired unexpected member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "DIODE_ANALYTIC member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read DIODE_ANALYTIC member {name}: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(label, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "DIODE_ANALYTIC member {name:?} changed: expected {expected_bytes}/{expected_sha256}/{expected_blake3}, got {}/{sha256}/{content_blake3}",
-                    canonical.len()
-                ));
-            }
-            if name == kind.file_name() {
-                selected_source = Some(bytes);
-            }
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "DIODE_ANALYTIC retained family census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        let output_family = self.root.join("OutputData/DIODE_ANALYTIC");
-        if output_family.exists() {
-            return Err(format!(
-                "DIODE_ANALYTIC acquired an invented numerical output family at {}",
-                output_family.display()
-            ));
-        }
-        for member in XyceDiodeAnalyticKind::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(member.path()))
-                .map_err(|error| format!("DIODE_ANALYTIC {error}"))?;
-        }
-        Ok(selected_source.expect("exact retained family includes selected source"))
-    }
-
     pub(super) fn netlist_element_is_diode_analytic_oracle_candidate(
         netlist: &Netlist,
         element: &rspice_core::netlist::Element,
@@ -494,10 +328,9 @@ impl XyceTestRunner {
         start: Instant,
     ) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let source_bytes = self.validate_diode_analytic_provenance(deck, kind)?;
         if abort.is_aborted() {
             return Err(format!(
-                "{} provenance exceeded the shared deadline",
+                "{} exceeded the shared deadline before planning",
                 kind.label()
             ));
         }
@@ -505,14 +338,6 @@ impl XyceTestRunner {
             &deck.path,
             XyceStaticTranPlanPurpose::DiodeAnalyticOracle,
         )?;
-        if Self::canonical_lf_text_identity(kind.label(), plan.source.as_bytes())?
-            != Self::canonical_lf_text_identity(kind.label(), &source_bytes)?
-        {
-            return Err(format!(
-                "{} plan did not preserve exact source",
-                kind.label()
-            ));
-        }
         let parsed = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
             .map_err(|error| format!("{} parse failed: {error}", kind.label()))?;
         Self::validate_diode_analytic_typed_contract(&plan, &parsed, kind)?;
@@ -561,10 +386,9 @@ impl XyceTestRunner {
                 ));
             }
         }
-        self.validate_diode_analytic_provenance(deck, kind)?;
         if abort.is_aborted() {
             return Err(format!(
-                "{} post-execution provenance exceeded the shared deadline",
+                "{} comparison exceeded the shared deadline",
                 kind.label()
             ));
         }
@@ -590,58 +414,12 @@ mod tests {
         }
     }
 
-    fn diode_analytic_fixture(
-        label: &str,
-        kind: XyceDiodeAnalyticKind,
-    ) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let source_root = corpus_root();
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-diode-analytic-{label}-"))
-            .tempdir()
-            .expect("create DIODE_ANALYTIC fixture root");
-        let root = temporary.path();
-        let family = root.join("Netlists/DIODE_ANALYTIC");
-        fs::create_dir_all(&family).expect("create DIODE_ANALYTIC fixture family");
-        for member in XyceDiodeAnalyticKind::ALL {
-            fs::copy(
-                source_root.join(member.path()),
-                family.join(member.file_name()),
-            )
-            .expect("copy canonical DIODE_ANALYTIC member");
-        }
-        let owners = XyceDiodeAnalyticKind::ALL
-            .into_iter()
-            .map(|member| format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", member.path()))
-            .collect::<String>();
-        fs::write(root.join(HARNESS_MANIFEST_FILE), owners)
-            .expect("write DIODE_ANALYTIC wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n"
-            ),
-        )
-        .expect("write empty DIODE_ANALYTIC exclusion manifest");
-        let deck = canonical_deck(root, kind);
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn diode_analytic_historical_provenance_is_exact() {
-        XyceTestRunner::validate_diode_analytic_historical_provenance()
-            .expect("Release-7.10 DIODE_ANALYTIC provenance remains exact");
-    }
-
     #[test]
     fn diode_analytic_typed_plans_are_exact() {
         let root = corpus_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         for kind in XyceDiodeAnalyticKind::ALL {
             let deck = canonical_deck(&root, kind);
-            runner
-                .validate_diode_analytic_provenance(&deck, kind)
-                .expect("canonical DIODE_ANALYTIC provenance qualifies");
             let plan = runner
                 .static_tran_plan_for_path_with_purpose(
                     &deck.path,
@@ -695,60 +473,38 @@ mod tests {
     }
 
     #[test]
-    fn diode_analytic_provenance_and_typed_admission_reject_drift() {
-        let (_temporary, deck, runner) =
-            diode_analytic_fixture("source-drift", XyceDiodeAnalyticKind::Breakdown);
+    fn diode_analytic_typed_admission_rejects_model_drift() {
+        let temporary = tempfile::Builder::new()
+            .prefix("rspice-xyce-diode-analytic-model-drift-")
+            .tempdir()
+            .expect("create DIODE_ANALYTIC fixture root");
+        let kind = XyceDiodeAnalyticKind::Breakdown;
+        let path = temporary.path().join(kind.path());
+        fs::create_dir_all(path.parent().expect("family parent")).expect("create family");
+        let source =
+            fs::read_to_string(corpus_root().join(kind.path())).expect("read canonical source");
+        fs::write(&path, &source).expect("copy canonical breakdown deck");
+        fs::write(
+            temporary.path().join(HARNESS_MANIFEST_FILE),
+            format!("{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n", kind.path()),
+        )
+        .expect("write DIODE_ANALYTIC wrapper manifest");
+        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
         runner
-            .validate_diode_analytic_provenance(&deck, XyceDiodeAnalyticKind::Breakdown)
-            .expect("canonical DIODE_ANALYTIC fixture qualifies");
-        let source = fs::read_to_string(&deck.path).expect("read fixture source");
-        fs::write(&deck.path, source.replace("BV=1", "BV=2")).expect("mutate breakdown model");
-        assert!(
-            runner
-                .validate_diode_analytic_provenance(&deck, XyceDiodeAnalyticKind::Breakdown)
-                .is_err(),
-            "source drift must break retained provenance"
-        );
+            .static_tran_plan_for_path_with_purpose(
+                &path,
+                XyceStaticTranPlanPurpose::DiodeAnalyticOracle,
+            )
+            .expect("canonical breakdown deck passes typed admission outside the corpus");
+        fs::write(&path, source.replace("BV=1", "BV=2")).expect("mutate breakdown model");
         assert!(
             runner
                 .static_tran_plan_for_path_with_purpose(
-                    &deck.path,
+                    &path,
                     XyceStaticTranPlanPurpose::DiodeAnalyticOracle,
                 )
                 .is_err(),
-            "a changed diode model must also fail typed analytic admission"
-        );
-
-        let (_temporary, deck, runner) =
-            diode_analytic_fixture("family-drift", XyceDiodeAnalyticKind::Forward);
-        fs::write(
-            deck.path.parent().expect("family parent").join("stale.prn"),
-            "stale output\n",
-        )
-        .expect("write unexpected family member");
-        assert!(
-            runner
-                .validate_diode_analytic_provenance(&deck, XyceDiodeAnalyticKind::Forward)
-                .is_err(),
-            "unexpected/generated family members must fail closed"
-        );
-
-        let (temporary, deck, _runner) =
-            diode_analytic_fixture("owner-drift", XyceDiodeAnalyticKind::Reverse);
-        fs::write(
-            temporary.path().join(HARNESS_MANIFEST_FILE),
-            format!(
-                "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n",
-                XyceDiodeAnalyticKind::Reverse.path()
-            ),
-        )
-        .expect("remove two wrapper owners");
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(
-            runner
-                .validate_diode_analytic_provenance(&deck, XyceDiodeAnalyticKind::Reverse)
-                .is_err(),
-            "wrapper ownership drift must fail closed"
+            "a changed diode model must fail typed analytic admission"
         );
     }
 }

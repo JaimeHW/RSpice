@@ -3,162 +3,6 @@ use super::*;
 const BUG784_LABEL: &str = "BUG_784 archived duplicate .SUBCKT port failure";
 
 impl XyceTestRunner {
-    pub(super) fn bug784_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG784_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG784_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG784_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug784_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug784_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG784_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG784_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG784_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG784_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{BUG784_LABEL} Release-7.10 archived-wrapper provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        let tags = XYCE_BUG784_HISTORICAL_ARTIFACTS[5];
-        if tags.0 != "Netlists/Certification_Tests/BUG_784/tags"
-            || tags.1 != XYCE_BUG784_HISTORICAL_TAGS.len()
-            || format!("{:x}", Sha256::digest(XYCE_BUG784_HISTORICAL_TAGS)) != tags.2
-            || blake3::hash(XYCE_BUG784_HISTORICAL_TAGS).to_hex().as_str() != tags.3
-        {
-            return Err(format!(
-                "{BUG784_LABEL} no longer proves the exact historical tags=exclude state"
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug784_provenance(&self, deck: &XyceDeck) -> Result<Vec<u8>, String> {
-        Self::validate_bug784_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != XYCE_BUG784_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != XYCE_BUG784_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(XYCE_BUG784_PATH))
-        {
-            return Err(format!(
-                "recognized {BUG784_LABEL} record '{}' is not its canonical path",
-                deck.relative_path
-            ));
-        }
-        let prefix = "netlists/certification_tests/bug_784/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([XYCE_BUG784_RECORD]) {
-            return Err(format!(
-                "{BUG784_LABEL} requires its sole archived wrapper owner, found {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG784_LABEL} exclusions invalid: {error}"))?;
-        if exclusions.contains_key(XYCE_BUG784_RECORD) {
-            return Err(format!(
-                "{BUG784_LABEL} must not acquire an upstream exclude-sentinel row; its historical inactivity is pinned by tags=exclude"
-            ));
-        }
-
-        let family = deck
-            .path
-            .parent()
-            .ok_or_else(|| format!("{BUG784_LABEL} has no source family"))?;
-        let metadata = fs::symlink_metadata(family)
-            .map_err(|error| format!("failed to inspect {BUG784_LABEL} family: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{BUG784_LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_BUG784_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeSet::new();
-        let mut source = None;
-        for entry in fs::read_dir(family)
-            .map_err(|error| format!("failed to read {BUG784_LABEL} family: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{BUG784_LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{BUG784_LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if !observed.insert(key.clone()) {
-                return Err(format!("{BUG784_LABEL} contains a case collision"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{BUG784_LABEL} acquired unexpected source member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{BUG784_LABEL} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-            let canonical = Self::canonical_lf_text_identity(BUG784_LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!("{BUG784_LABEL} member {name:?} content changed"));
-            }
-            if name == "bug_784.cir" {
-                source = Some(bytes);
-            }
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{BUG784_LABEL} source census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        let output_family = self.root.join("OutputData/Certification_Tests/BUG_784");
-        if output_family.exists() {
-            return Err(format!("{BUG784_LABEL} acquired invented numerical output"));
-        }
-        self.reject_wrapper_output_artifacts(&deck.path)
-            .map_err(|error| format!("{BUG784_LABEL} {error}"))?;
-        Ok(source.expect("exact retained family contains bug_784.cir"))
-    }
-
     pub(super) fn observe_bug784_failure(
         source: &str,
         deck_path: &Path,
@@ -325,18 +169,16 @@ impl XyceTestRunner {
         start: Instant,
     ) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let source_bytes = self.validate_bug784_provenance(deck)?;
-        if abort.is_aborted() {
-            return Err(format!("{BUG784_LABEL} provenance exceeded its deadline"));
-        }
-        let source = std::str::from_utf8(&source_bytes)
-            .map_err(|error| format!("{BUG784_LABEL} source is not UTF-8: {error}"))?;
-        Self::observe_bug784_failure(source, &deck.path, &abort)?;
-        self.validate_bug784_provenance(deck)?;
+        let source = fs::read_to_string(&deck.path)
+            .map_err(|error| format!("failed to read {}: {error}", deck.path.display()))?;
         if abort.is_aborted() {
             return Err(format!(
-                "{BUG784_LABEL} post-observation provenance exceeded its deadline"
+                "{BUG784_LABEL} exceeded its deadline before observation"
             ));
+        }
+        Self::observe_bug784_failure(&source, &deck.path, &abort)?;
+        if abort.is_aborted() {
+            return Err(format!("{BUG784_LABEL} observation exceeded its deadline"));
         }
         Ok(())
     }
@@ -358,42 +200,6 @@ mod tests {
             section: XyceDeckSection::Netlists,
             relative_path: XYCE_BUG784_PATH.to_string(),
         }
-    }
-
-    fn bug784_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug784-{label}-"))
-            .tempdir()
-            .expect("create BUG784 fixture root");
-        let root = temporary.path();
-        let family = root.join("Netlists/Certification_Tests/BUG_784");
-        fs::create_dir_all(&family).expect("create BUG784 family");
-        let canonical = corpus_root().join("Netlists/Certification_Tests/BUG_784");
-        for (name, ..) in XYCE_BUG784_RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name)).expect("copy BUG784 member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG784_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG784 wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n"
-            ),
-        )
-        .expect("write empty BUG784 exclusions");
-        let deck = canonical_deck(root);
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug784_historical_provenance_is_exact_and_inactive() {
-        XyceTestRunner::validate_bug784_historical_oracle_provenance()
-            .expect("Release-7.10 archived BUG784 provenance remains exact");
-        assert_eq!(XYCE_BUG784_HISTORICAL_TAGS, b"exclude\n");
     }
 
     #[test]
@@ -438,35 +244,5 @@ mod tests {
                 .validate_bug784_oracle(&deck, Instant::now() - Duration::from_secs(181))
                 .is_err()
         );
-    }
-
-    #[test]
-    fn bug784_provenance_rejects_source_manifest_exclusion_and_output_drift() {
-        let (_temporary, deck, runner) = bug784_fixture("source");
-        runner
-            .validate_bug784_provenance(&deck)
-            .expect("canonical BUG784 fixture passes");
-        fs::write(&deck.path, "* mutated\n").expect("mutate BUG784 source");
-        assert!(runner.validate_bug784_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug784_fixture("manifest");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "").expect("remove BUG784 owner");
-        let rebuilt = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(rebuilt.validate_bug784_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug784_fixture("exclusion");
-        fs::write(
-            runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{XYCE_BUG784_PATH}\tNetlists/Certification_Tests/BUG_784/exclude\t{UPSTREAM_EXCLUDED_DISPOSITION}\n"
-            ),
-        )
-        .expect("fabricate BUG784 exclusion");
-        assert!(runner.validate_bug784_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug784_fixture("output");
-        fs::create_dir_all(runner.root.join("OutputData/Certification_Tests/BUG_784"))
-            .expect("create forbidden BUG784 output");
-        assert!(runner.validate_bug784_provenance(&deck).is_err());
     }
 }

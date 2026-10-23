@@ -406,6 +406,9 @@ mod tests {
         );
 
         fs::write(&path, &canonical).expect("restore canonical worker");
+        runner
+            .validate_bug1797_worker(Bug1797Role::Level9, &canonical, &path)
+            .expect("canonical BUG1797 worker passes outside the corpus");
         assert!(
             runner
                 .validate_bug1797_worker(Bug1797Role::Level9, &mutated, &path)

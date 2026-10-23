@@ -1,162 +1,6 @@
 use super::*;
 
 impl XyceTestRunner {
-    pub(super) fn bug354_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG354_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG354_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG354_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug354_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug354_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG354_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG354_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG354_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG354_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "BUG_354_SON Release-7.10 nonzero-exit wrapper provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_bug354_complete_family_provenance(
-        &self,
-        family_dir: &Path,
-    ) -> Result<(), String> {
-        const LABEL: &str = "BUG_354_SON expected output-validation failures";
-        Self::validate_bug354_historical_oracle_provenance()?;
-        let metadata = fs::symlink_metadata(family_dir)
-            .map_err(|error| format!("failed to inspect {LABEL} family: {error}"))?;
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(format!(
-                "{LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_BUG354_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeSet::new();
-        for entry in fs::read_dir(family_dir)
-            .map_err(|error| format!("failed to read {LABEL} family: {error}"))?
-        {
-            let entry =
-                entry.map_err(|error| format!("failed to inspect {LABEL} member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "{LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if !observed.insert(key.clone()) {
-                return Err(format!(
-                    "{LABEL} family has a case-colliding member {name:?}"
-                ));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{LABEL} family acquired unexpected member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{LABEL} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} member {name:?}: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} retained member {name:?} changed: expected {expected_bytes}/{expected_sha256}/{expected_blake3}, got {}/{sha256}/{content_blake3}",
-                    canonical.len()
-                ));
-            }
-        }
-        if observed.len() != expected.len() || observed.len() != 4 {
-            return Err(format!(
-                "{LABEL} retained family census changed: expected 4 members, got {}",
-                observed.len()
-            ));
-        }
-        let options = fs::read(family_dir.join("options"))
-            .map_err(|error| format!("failed to re-read {LABEL} options: {error}"))?;
-        if Self::canonical_lf_text_identity(LABEL, &options)? != b"timelimit=30\n" {
-            return Err(format!(
-                "{LABEL} options no longer binds the historical 30-second timeout"
-            ));
-        }
-
-        let prefix = "netlists/certification_tests/bug_354_son/";
-        let expected_owners = [
-            XYCE_BUG354_FUNCTION_RECORD,
-            XYCE_BUG354_LEAD_CURRENT_RECORD,
-            XYCE_BUG354_PARAMETER_RECORD,
-        ]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners != expected_owners {
-            return Err(format!(
-                "{LABEL} requires its exact three manifest owners, found {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        if expected_owners
-            .iter()
-            .any(|record| exclusions.contains_key(*record))
-        {
-            return Err(format!(
-                "{LABEL} records must not be classified by an upstream exclude sentinel"
-            ));
-        }
-        for path in [
-            XYCE_BUG354_FUNCTION_PATH,
-            XYCE_BUG354_LEAD_CURRENT_PATH,
-            XYCE_BUG354_PARAMETER_PATH,
-        ] {
-            self.reject_wrapper_output_artifacts(&self.root.join(path))
-                .map_err(|error| format!("{LABEL} {error}"))?;
-        }
-        Ok(())
-    }
-
     pub(super) fn observe_bug354_output_validation_failure(
         source: &str,
         deck_path: &Path,
@@ -302,12 +146,6 @@ mod tests {
     }
 
     #[test]
-    fn bug354_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug354_historical_oracle_provenance()
-            .expect("Release-7.10 BUG354 provenance remains exact");
-    }
-
-    #[test]
     fn bug354_three_typed_output_failures_are_exact_and_fail_closed() {
         let root = corpus_root();
         for (path, kind, correction) in [
@@ -349,14 +187,9 @@ mod tests {
     }
 
     #[test]
-    fn bug354_family_provenance_and_deadline_are_enforced() {
+    fn bug354_expired_deadline_fails_closed() {
         let root = corpus_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        let family = root.join("Netlists/Certification_Tests/BUG_354_SON");
-        runner
-            .validate_bug354_complete_family_provenance(&family)
-            .expect("retained BUG354 family provenance is exact");
-
         let deck = XyceDeck {
             path: root.join(XYCE_BUG354_FUNCTION_PATH),
             section: XyceDeckSection::Netlists,

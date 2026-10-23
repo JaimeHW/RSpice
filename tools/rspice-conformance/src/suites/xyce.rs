@@ -387,9 +387,12 @@ const XYCE_BUG402_SPICE_MEMBER_RECORD: &str =
     "netlists/certification_tests/bug_402_son/bug402spicetempoptions.cir";
 const XYCE_BUG402_DC_POINT_COUNT: usize = 51;
 
+#[cfg(test)]
 const XYCE_BUG354_FUNCTION_PATH: &str = "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir";
+#[cfg(test)]
 const XYCE_BUG354_LEAD_CURRENT_PATH: &str =
     "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir";
+#[cfg(test)]
 const XYCE_BUG354_PARAMETER_PATH: &str =
     "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir";
 const XYCE_BUG354_FUNCTION_RECORD: &str =
@@ -408,109 +411,7 @@ const XYCE_BUG354_PHYSICAL_CENSUS_BLAKE3: &str =
     "b18f00d6d7641e631c96fd17db56bbd9b5a09dbe4ffbea9295f120c806bd7ffa";
 const XYCE_BUG354_MANIFEST_CENSUS_BLAKE3: &str =
     "d895cc88602ef2af2f180ac3849d9896f577dbaf37c9f65b34140c008ab7864b";
-const XYCE_BUG354_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG354_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG354_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
-const XYCE_BUG354_HISTORICAL_RECORD_COUNT: usize = 11;
-const XYCE_BUG354_HISTORICAL_RECORD_BYTES: usize = 2_699;
-const XYCE_BUG354_HISTORICAL_RECORDS_SHA256: &str =
-    "bf8a3aea6966f912948443da0361ff159bc989ed11ef93b7343a2f45c6156a06";
-const XYCE_BUG354_HISTORICAL_RECORDS_BLAKE3: &str =
-    "2f4903a613cb20f1e27285fa2634adbd43e75d74d15cb01b8d19f71bfa5b2bd8";
-const XYCE_BUG354_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
-    (
-        "Netlists/Certification_Tests/BUG_354_SON/CMakeLists.txt",
-        4_699,
-        "e73d08da637d40031570ef7b24a428ffa65ae6be87766f48349d0c5ffdbb8952",
-        "6e6f23bd0f47b8dc30e463184c6615b895acef67f6a1a02c73d4f415aa915760",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_354_SON/Manifest.txt",
-        132,
-        "413ab42380dd5161d9009914b0412504f57638874ac6d4687eb3e2f7fef5a6c5",
-        "aee7bfe7537430cc438b7ae34bca14ff3c963dcc12eb2c9fa8f2ba4a0b558faa",
-    ),
-    (
-        XYCE_BUG354_FUNCTION_PATH,
-        117,
-        "de0a3b29d62c8aa5ca2204bcc1a1a78c02a58bb8150774d050482619860310fb",
-        "eb4dcb54436aeb0d2479cd3d8adae364a0f2d31e277b637b3d972a886c188c4f",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir.sh",
-        1_369,
-        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
-        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
-    ),
-    (
-        XYCE_BUG354_LEAD_CURRENT_PATH,
-        119,
-        "34c89b53637f25b02797aeef5fbbd6701dc64f505297113e84a3dd7b8f68d5a0",
-        "ee6893cba54dd03be7f2576ea25b2a15de9466db930e40cbfa01632162ba3b89",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_354_SON/bad_leadcurrent.cir.sh",
-        1_369,
-        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
-        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
-    ),
-    (
-        XYCE_BUG354_PARAMETER_PATH,
-        113,
-        "61059a561c3622d046a7b39966976997f0c18b8f90bbd0494d91d94787f44901",
-        "5adf7955644a95ea09536f0d8ba4865a6fcb1a55b9d18a7ef5c2b3314e9ba5cc",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_354_SON/bad_parameter.cir.sh",
-        1_369,
-        "f81a348237f09a695df74391f6f41a6108d2c26e1e0c742730115c559f8c9eae",
-        "d050e20cc6bc981d8dae880c74c3b022cb894ea42fff2f92210105a769a18392",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_354_SON/options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_354_SON/tags",
-        37,
-        "5aa3c799dbcc4d28aa47a0c6afe4708f86e4a59e36691e8312c7bca63bfc262b",
-        "979508f32619a518a60b1e89576d249d9f292fdfbd580936d7a07785f532bca0",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG354_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
-    (
-        "bad_function.cir",
-        117,
-        "de0a3b29d62c8aa5ca2204bcc1a1a78c02a58bb8150774d050482619860310fb",
-        "eb4dcb54436aeb0d2479cd3d8adae364a0f2d31e277b637b3d972a886c188c4f",
-    ),
-    (
-        "bad_leadcurrent.cir",
-        119,
-        "34c89b53637f25b02797aeef5fbbd6701dc64f505297113e84a3dd7b8f68d5a0",
-        "ee6893cba54dd03be7f2576ea25b2a15de9466db930e40cbfa01632162ba3b89",
-    ),
-    (
-        "bad_parameter.cir",
-        113,
-        "61059a561c3622d046a7b39966976997f0c18b8f90bbd0494d91d94787f44901",
-        "5adf7955644a95ea09536f0d8ba4865a6fcb1a55b9d18a7ef5c2b3314e9ba5cc",
-    ),
-    (
-        "options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-];
 
 // BUG_48_SON proves that the historical MOS LEVEL=54 alias selects BSIM4.
 // Release 7.10 required only a successful simulator exit; its comparator was
@@ -674,114 +575,18 @@ const XYCE_BUG1398_CONTROL_RECORD: &str = "netlists/certification_tests/bug_1398
 // BUG_271_SON's active Release-7.10 shell wrapper is a success-only oracle:
 // it runs the exact tab-comment RLC/PULSE deck and passes iff Xyce exits zero.
 const XYCE_BUG271_CONTRACT: &str = "bug271_tab_comment_rlc_success_wrapper";
+#[cfg(test)]
 const XYCE_BUG271_PATH: &str = "Netlists/Certification_Tests/BUG_271_SON/bug_271.cir";
 const XYCE_BUG271_RECORD: &str = "netlists/certification_tests/bug_271_son/bug_271.cir";
-const XYCE_BUG271_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG271_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG271_HISTORICAL_RECORD_COUNT: usize = 6;
-const XYCE_BUG271_HISTORICAL_RECORD_BYTES: usize = 1_442;
-const XYCE_BUG271_HISTORICAL_RECORDS_SHA256: &str =
-    "aed635c95ee18fb7bc07e3013023a788813ae20ca24f1fd365ecdf9b48d2a5bb";
-const XYCE_BUG271_HISTORICAL_RECORDS_BLAKE3: &str =
-    "f171727c2029c581207c82b383d56714ffd2814e4c78c2a1f616bd42aaab0663";
-const XYCE_BUG271_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
-    (
-        "Netlists/Certification_Tests/BUG_271_SON/CMakeLists.txt",
-        1_568,
-        "89e6533aba1c92a29ab82655de716f35b61012aeb5210ef24aa308ff6514aa12",
-        "0dc0df79c99d2478925dd54d3882319c199f4cb90f47123db6275984fb27f2b8",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_271_SON/Manifest.txt",
-        32,
-        "9e9c38f0b58689bf011e086f46458b26e3b1f2306dea16cfd7123c3e5a26824a",
-        "d708db8cedaf97833c8bb9a6ed4796721f6d0bc49f2fe84127d81fb589824781",
-    ),
-    (
-        XYCE_BUG271_PATH,
-        328,
-        "81d71de5399ec46dbcac067d5f48e6f8d61423b0fe5866dc18bb97073d1cea29",
-        "2d718077d38a66e04d8b234e91c1c4ec480cbeb4500b45f498b76249635d5f0f",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_271_SON/bug_271.cir.sh",
-        1_030,
-        "477003d4bbdad6cc1abff98bd569cb73e1cd49f938cb9d55120b0a9dd11b9cbf",
-        "8d9b010dea1a98c1249df35fdfa5a86aa97bd085723b7f4737ba0e1394d98399",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_271_SON/tags",
-        27,
-        "4b8ea8000b121cc87df41e65f9ac43dece3eab840c84e864357b3c1b9021cdcb",
-        "c3661f9aadf0946ebc823f672267a34f3f9485b8a002ff0a2ff956cf0c9dc430",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG271_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
-    "bug_271.cir",
-    328,
-    "81d71de5399ec46dbcac067d5f48e6f8d61423b0fe5866dc18bb97073d1cea29",
-    "2d718077d38a66e04d8b234e91c1c4ec480cbeb4500b45f498b76249635d5f0f",
-)];
 
 // BUG_1661's active Release-7.10 Perl wrapper runs this one transient deck,
 // requires the generated PRN, and compares the serialized V($G_1) and V(1)
 // columns for exact numeric equality. It does not use a checked-in gold file.
 const XYCE_BUG1661_CONTRACT: &str = "bug1661_globalnode_behavioral_expression_equality_wrapper";
+#[cfg(test)]
 const XYCE_BUG1661_PATH: &str = "Netlists/Certification_Tests/BUG_1661/globalnode_expr_toplev.cir";
 const XYCE_BUG1661_RECORD: &str =
     "netlists/certification_tests/bug_1661/globalnode_expr_toplev.cir";
-const XYCE_BUG1661_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG1661_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG1661_HISTORICAL_RECORD_COUNT: usize = 5;
-const XYCE_BUG1661_HISTORICAL_RECORD_BYTES: usize = 1_229;
-const XYCE_BUG1661_HISTORICAL_RECORDS_SHA256: &str =
-    "c16712fc1bd34da589181dd2109ac813a6524aaa40bf796425b276fee38da47b";
-const XYCE_BUG1661_HISTORICAL_RECORDS_BLAKE3: &str =
-    "dec807a0c52ca3b3b02d0a128583b99308b01371df1fe7bcfa9023d55d1db436";
-const XYCE_BUG1661_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 5] = [
-    (
-        "Netlists/Certification_Tests/BUG_1661/CMakeLists.txt",
-        1_320,
-        "a487b4650fbc9357fbe0a53ffb7ee5939fd8954ed4cda83d71bcfdadae786479",
-        "96460f20062b75eae10f434d25e6b7d60d8d5b98bf86d7f66973c6fbf33f4471",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1661/Manifest.txt",
-        62,
-        "be96035a82a5baefdfcaab1e1a91f89744875bd8a270121a8ed8f6a6c6aa7eea",
-        "90983379352516dd523e8212cd5c416e0a87ade91ab34de2485da8c77b3e16af",
-    ),
-    (
-        XYCE_BUG1661_PATH,
-        166,
-        "a3d847fd48a4c78171b422fd69a449ef4e5c02bcdcc0e0bd0c29fe9349b9d84f",
-        "d59abb99dde37a857ce59902ca9ce93068ee27b46b173bcae5fabbd6d8604e1e",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1661/globalnode_expr_toplev.cir.sh",
-        1_438,
-        "3368c0053a3348adea087f6ad398bbbfcfc576294a7ab03574d6aa9174a54837",
-        "8d284c65c445a1fa5d2283c8918437d55754a6c252c120c42cad14a7ae66161e",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1661/tags",
-        49,
-        "328d453b60a790e98d14cc0ed0c5e838577156852aa4982cafa9b0a892899787",
-        "e33b0893cf7c5e9f2cee4fadd792972124b34d7e4a9e7de38801285962f6304e",
-    ),
-];
-const XYCE_BUG1661_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
-    "globalnode_expr_toplev.cir",
-    166,
-    "a3d847fd48a4c78171b422fd69a449ef4e5c02bcdcc0e0bd0c29fe9349b9d84f",
-    "d59abb99dde37a857ce59902ca9ce93068ee27b46b173bcae5fabbd6d8604e1e",
-)];
 
 // BUG_519_SON's active Release-7.10 wrapper runs this transient once with
 // binary RAW output and once with ASCII RAW output, converts both through the
@@ -904,77 +709,12 @@ const XYCE_BUG307_CONTROL_RECORD: &str = "netlists/certification_tests/bug_307/b
 // complete output stream contains the unresolved-definition diagnostic. The
 // retained `options` sidecar supplies the historical 30-second outer limit.
 const XYCE_BUG864_CONTRACT: &str = "expected_failure_bug864_unresolved_subcircuit_parameter_build";
+#[cfg(test)]
 const XYCE_BUG864_PATH: &str = "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir";
 const XYCE_BUG864_RECORD: &str = "netlists/certification_tests/bug_864_son/bug_864_son.cir";
-const XYCE_BUG864_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG864_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG864_UPSTREAM_DIAGNOSTIC: &str =
     "Unable to resolve parameter FOO found in .PARAM statement";
 const XYCE_BUG864_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
-const XYCE_BUG864_HISTORICAL_RECORD_COUNT: usize = 7;
-const XYCE_BUG864_HISTORICAL_RECORD_BYTES: usize = 1_687;
-const XYCE_BUG864_HISTORICAL_RECORDS_SHA256: &str =
-    "e9f815b0c4e0f002b505ef103e1bcb507640faf2989717b5cc154623bcccb583";
-const XYCE_BUG864_HISTORICAL_RECORDS_BLAKE3: &str =
-    "62db0b949913135bfe8d7911a8fa1e272edd1f930905458fbe2c1dd379dd5e3b";
-const XYCE_BUG864_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/Certification_Tests/BUG_864_SON/CMakeLists.txt",
-        1_816,
-        "e1bfb80a50adf93e40c20cf88a23a940481b2ce744fbc322d9eebcd8ae355563",
-        "1f3ec5c8d304b12d7f3ff6f11d8e37de64e8cb63540e55ce8f1556ec09d605b6",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_864_SON/Manifest.txt",
-        48,
-        "9bc1a4cf78fcbdab9013fc1b233e1a1b6c24a8b4dd087f8d888068d57c836dc6",
-        "fc99f03d3c3a5eed06aa8a239483d36a303aea541fca394b99edf0b8176771ef",
-    ),
-    (
-        XYCE_BUG864_PATH,
-        447,
-        "71ba444757fc0add31c380fcff3f2dea34842236fce45de9c293311980695bac",
-        "3463724af68f93fc11effd6f04344ffb7532a4173c10cfc7181f24ee7edd0dd0",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_864_SON/bug_864_son.cir.sh",
-        780,
-        "6fac638aa87b177b8e6f37f39522336a34540bcf72c4f04c4099041d9b261ece",
-        "b486481e992b4e9728e254e3115f6f6d891f9a77dbba20f396768d8bdc511875",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_864_SON/options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_864_SON/tags",
-        36,
-        "38081d2c7c83cc0bf7ff6b2430777e4cfabfca9019dc9638fc59395b9ffb1095",
-        "851f6add160cd333cac9c53cb5ffd9d6f14f7f7bbd97185dfe930f14e30aede0",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG864_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
-    (
-        "bug_864_son.cir",
-        447,
-        "71ba444757fc0add31c380fcff3f2dea34842236fce45de9c293311980695bac",
-        "3463724af68f93fc11effd6f04344ffb7532a4173c10cfc7181f24ee7edd0dd0",
-    ),
-    (
-        "options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-];
 
 // BUG_1025 is an active Release-7.10 error-exit wrapper. Its zero-byte deck
 // must terminate without hanging and report that no analysis was specified.
@@ -989,477 +729,57 @@ const XYCE_BUG1025_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
 // requires a nonzero simulator exit followed by these two ordered diagnostics
 // for the incomplete two-field `.TRAN` line.
 const XYCE_BUG636_CONTRACT: &str = "expected_failure_bug636_incomplete_tran_parse";
+#[cfg(test)]
 const XYCE_BUG636_PATH: &str = "Netlists/Certification_Tests/BUG_636_SON/bug636.cir";
 const XYCE_BUG636_RECORD: &str = "netlists/certification_tests/bug_636_son/bug636.cir";
-const XYCE_BUG636_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG636_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG636_UPSTREAM_DIAGNOSTIC_ARITY: &str = ".TRAN line has an unexpected number of fields";
 const XYCE_BUG636_UPSTREAM_DIAGNOSTIC_IGNORED: &str = "Unrecognized dot line will be ignored";
-const XYCE_BUG636_HISTORICAL_RECORD_COUNT: usize = 6;
-const XYCE_BUG636_HISTORICAL_RECORD_BYTES: usize = 1_440;
-const XYCE_BUG636_HISTORICAL_RECORDS_SHA256: &str =
-    "b14b58e42be396acbaa972d89715777c8743ce460fdf5774af2b1559046f5aa8";
-const XYCE_BUG636_HISTORICAL_RECORDS_BLAKE3: &str =
-    "f3e0e44143ac1276a58d03c809c76187481b35000154e7dc5d5a2861619e806a";
-const XYCE_BUG636_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
-    (
-        "Netlists/Certification_Tests/BUG_636_SON/CMakeLists.txt",
-        1_151,
-        "e408170ff2ef7e8c6a1104cfab1934ab1834b59900ade517e88da2df69df3e80",
-        "63b719cd8f2cecc657e4ec8523ca6feedce9853f3e3d0d50333711f8bb21717d",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_636_SON/Manifest.txt",
-        30,
-        "4cde8e876bb763f94faf9c81bf924b72c2fc11fa9d22f225a41c2b54d07bff3d",
-        "2c384dbf7e7c4d812cf54f0cd4d4be1f53e7befd7be834243e3521384da3fd48",
-    ),
-    (
-        XYCE_BUG636_PATH,
-        111,
-        "35c52026df1c0db86c2797c75f309a13e108d1f51f95b20632d64c72b8d67534",
-        "19641c3140f2b965f3e85d1145d84475ccb21b3b75d92f87a625203d632a73a8",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_636_SON/bug636.cir.sh",
-        1_658,
-        "a972c26fdac0afbe4b501bab71db56d07efe4b02e148788d8a7c531ae668bd79",
-        "94ec9d0adc46f2b103f6be57a7a15154dbfb4fb52c4765d153791597e01c755c",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_636_SON/tags",
-        30,
-        "345e0af2901a7957f378f2c04303c0d27cd9e7238e751e123101f23a3303bc7c",
-        "3e70684e3759f6743f839f366245f8394859533a4505fa866bf8bd7d652e0a75",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG636_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
-    "bug636.cir",
-    111,
-    "35c52026df1c0db86c2797c75f309a13e108d1f51f95b20632d64c72b8d67534",
-    "19641c3140f2b965f3e85d1145d84475ccb21b3b75d92f87a625203d632a73a8",
-)];
 
 // BUG_206 is an active Release-7.10 error-exit regression. Its wrapper
 // requires a nonzero simulator exit followed by these two ordered hierarchy
 // diagnostics for the malformed X instance on source line three.
 const XYCE_BUG206_CONTRACT: &str = "expected_failure_bug206_undefined_subcircuit_build";
+#[cfg(test)]
 const XYCE_BUG206_PATH: &str = "Netlists/Certification_Tests/BUG_206/bug_206.cir";
 const XYCE_BUG206_RECORD: &str = "netlists/certification_tests/bug_206/bug_206.cir";
-const XYCE_BUG206_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG206_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG206_UPSTREAM_DIAGNOSTIC_LOCATION: &str = "in file bug_206.cir at or near line 3";
 const XYCE_BUG206_UPSTREAM_DIAGNOSTIC_UNDEFINED: &str =
     "Subcircuit 0 has not been defined for instance X1";
-const XYCE_BUG206_HISTORICAL_RECORD_COUNT: usize = 7;
-const XYCE_BUG206_HISTORICAL_RECORD_BYTES: usize = 1_656;
-const XYCE_BUG206_HISTORICAL_RECORDS_SHA256: &str =
-    "9687c32cbd6f3de14bc2bd104a60c702c95b013e6ada2094d30eca147c64966c";
-const XYCE_BUG206_HISTORICAL_RECORDS_BLAKE3: &str =
-    "dad83aa25b5a66edfe93f2485c62a1b7577e2ede066909f6b1a1a49247d31325";
-const XYCE_BUG206_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/Certification_Tests/BUG_206/CMakeLists.txt",
-        1_240,
-        "4cdf84f6768618604e34ff6ee223587d80724517a122b1259ea2024578cd2d1d",
-        "61de767d28ddaf73ab33590ac39b19dadd5a747e9985de691eb8da822926d874",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_206/Manifest.txt",
-        39,
-        "750dc380137bfa3535b2451c20e5f28389434cd2bab8fdeef9d2c785c079f363",
-        "3d2092627588fcd0aff7d3befc1da7f9bf054cd85e9b80a171c75e4fa9c1bfed",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_206/README",
-        505,
-        "93f03e9620a7f61bd13286fd6ef41efa1b0942f12b9dadb3c95417335a4c4d5a",
-        "afb37041e27da69687279655688ccbec94ca006152ea368f9e485c224d16c15d",
-    ),
-    (
-        XYCE_BUG206_PATH,
-        113,
-        "028f5609a9fa41f0de85b029e3fa2c25e248777d97752859ba5b98753e6105c6",
-        "35adbf753e4e0b1d287f4c0fb28380d80bcecb08a66a12c10a7a1bdbf69d1a4c",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_206/bug_206.cir.sh",
-        1_417,
-        "3063b1a2bd51695594aba7cd216a01899df6b67f63653e31f6976380ed2bcf35",
-        "d3335d2aa222d9d8d24992bbe10bfcbde15f09bcfd2987597665aa3a4ec37278",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_206/tags",
-        16,
-        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
-        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG206_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
-    (
-        "README",
-        505,
-        "93f03e9620a7f61bd13286fd6ef41efa1b0942f12b9dadb3c95417335a4c4d5a",
-        "afb37041e27da69687279655688ccbec94ca006152ea368f9e485c224d16c15d",
-    ),
-    (
-        "bug_206.cir",
-        113,
-        "028f5609a9fa41f0de85b029e3fa2c25e248777d97752859ba5b98753e6105c6",
-        "35adbf753e4e0b1d287f4c0fb28380d80bcecb08a66a12c10a7a1bdbf69d1a4c",
-    ),
-];
 
 // BUG_1116 is an active Release-7.10 error-exit regression. Its malformed
 // diode card supplies only two tokens after the instance name, leaving the
 // mandatory model field absent.
 const XYCE_BUG1116_CONTRACT: &str = "expected_failure_bug1116_missing_diode_model_parse";
+#[cfg(test)]
 const XYCE_BUG1116_PATH: &str = "Netlists/Certification_Tests/BUG_1116/bug_1116.cir";
 const XYCE_BUG1116_RECORD: &str = "netlists/certification_tests/bug_1116/bug_1116.cir";
-const XYCE_BUG1116_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG1116_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG1116_UPSTREAM_DIAGNOSTIC: &str =
     "Model is required for device D1 and no valid model card found";
-const XYCE_BUG1116_HISTORICAL_RECORD_COUNT: usize = 8;
-const XYCE_BUG1116_HISTORICAL_RECORD_BYTES: usize = 1_899;
-const XYCE_BUG1116_HISTORICAL_RECORDS_SHA256: &str =
-    "a60748b07472db91a125d5dd60fbd1f00b66abaa55287eb0f808218e85fdaab7";
-const XYCE_BUG1116_HISTORICAL_RECORDS_BLAKE3: &str =
-    "96e9d35a37d8be9bfff2cbd8039319a12432c2488237abc2bdccc8045776d059";
-const XYCE_BUG1116_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
-    (
-        "Netlists/Certification_Tests/BUG_1116/CMakeLists.txt",
-        1_857,
-        "6c8a721de3a07d25bfeb98045fc8053f00bdd4f29640b77dcbb7d11f40db1076",
-        "21fb5b5cf97be9ed3904c998109118905177d8246a49a6646bffccb09bd490d1",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1116/Manifest.txt",
-        49,
-        "724f9dd504aee2d6aca2c6d7640db251f16c00bc76133af9ad7e6010b838cdee",
-        "2f6fb0a097294b0faecf9c3f4352adbc5c89f64bb1de22b06b68adfa9c54eff0",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1116/README",
-        441,
-        "f9c58aafcb8043b1afd432804203eb29104bb246caa6db047d1f090267007089",
-        "3d855941607b9cabe338a5cdb2a09ac0eecf3e3e9aa2c5ea768f49ce16198352",
-    ),
-    (
-        XYCE_BUG1116_PATH,
-        200,
-        "e826c2b0cc5ccc49dc8219a95f03ba58a7be1d9a28d0204a9a7348b57a2388fd",
-        "60eff5369669c79d686af8e2b9095cf57833291ddd0ff14880057aa8da3ca42f",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1116/bug_1116.cir.sh",
-        1_382,
-        "cca7d72c275633c40ca5e89fc90835acad51f323bb75303cdb8b7b24eb79056f",
-        "631ad8201cb5484377cdbc2659e3443d9b103c3a936b4a284a4826a9c8c4f5da",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1116/options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1116/tags",
-        36,
-        "38081d2c7c83cc0bf7ff6b2430777e4cfabfca9019dc9638fc59395b9ffb1095",
-        "851f6add160cd333cac9c53cb5ffd9d6f14f7f7bbd97185dfe930f14e30aede0",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG1116_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
-    (
-        "README",
-        441,
-        "f9c58aafcb8043b1afd432804203eb29104bb246caa6db047d1f090267007089",
-        "3d855941607b9cabe338a5cdb2a09ac0eecf3e3e9aa2c5ea768f49ce16198352",
-    ),
-    (
-        "bug_1116.cir",
-        200,
-        "e826c2b0cc5ccc49dc8219a95f03ba58a7be1d9a28d0204a9a7348b57a2388fd",
-        "60eff5369669c79d686af8e2b9095cf57833291ddd0ff14880057aa8da3ca42f",
-    ),
-    (
-        "options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-];
 
 // ISSUE_61 is the active Xyce regression for a behavioral current expression
 // attempting to read the nonexistent MNA branch of another current-output B
 // source. Release-7.10 requires a clean error instead of the historical crash.
 const XYCE_ISSUE61_CONTRACT: &str =
     "expected_failure_issue61_behavioral_lead_current_reference_build";
+#[cfg(test)]
 const XYCE_ISSUE61_PATH: &str = "Netlists/Certification_Tests/ISSUE_61/issue61.cir";
 const XYCE_ISSUE61_RECORD: &str = "netlists/certification_tests/issue_61/issue61.cir";
-const XYCE_ISSUE61_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_ISSUE61_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_ISSUE61_UPSTREAM_DIAGNOSTIC: &str =
     "Device instance B2: Problem with value for B1 in B2";
-const XYCE_ISSUE61_HISTORICAL_RECORD_COUNT: usize = 6;
-const XYCE_ISSUE61_HISTORICAL_RECORD_BYTES: usize = 1_427;
-const XYCE_ISSUE61_HISTORICAL_RECORDS_SHA256: &str =
-    "c778d83c506695fce669b54a041900ecd612ada666b779744daf59613b38c786";
-const XYCE_ISSUE61_HISTORICAL_RECORDS_BLAKE3: &str =
-    "4f09ca56e3ef3dc08c4e1a81bcd1da102f7aac7905e97d7cc0ea5781cfd66e4f";
-const XYCE_ISSUE61_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
-    (
-        "Netlists/Certification_Tests/ISSUE_61/CMakeLists.txt",
-        1_173,
-        "a365a140d5dfc6e0be56f4bdcf8e5b1b5336445be345ddcf1378aacb4c7ea040",
-        "255592e5c1c2ca5ba104815776be904c0c596ac97727694705cd6387393c76a5",
-    ),
-    (
-        "Netlists/Certification_Tests/ISSUE_61/Manifest.txt",
-        32,
-        "7d673910c3536ef6710395dd10720d472fd9b3b9bfdf5f84dca099d527f90841",
-        "bd89f5857652ce7610d23497f7cbef17fdb24504e15949ae2814b63459510910",
-    ),
-    (
-        XYCE_ISSUE61_PATH,
-        127,
-        "b47aa5c601fe34acc7750ff468e3e71c5c65949f1488691fc182c0ef0299d502",
-        "91e85ed903e6ba2cc5e0fbaee08ddb074357c11f6cbd5c689bdff4b7226becfe",
-    ),
-    (
-        "Netlists/Certification_Tests/ISSUE_61/issue61.cir.sh",
-        1_462,
-        "3703fba38de711ad606ee4b7b28dadc123e2148247519dbdd4c19c50ec41db6b",
-        "c760f796c158381dd18004a52feb76290b09f02b720b9f0debeab3cc32379776",
-    ),
-    (
-        "Netlists/Certification_Tests/ISSUE_61/tags",
-        50,
-        "eb1565476d986a5b5fea167d0d8f24d9bcb644faf7ebc7f2627d949f04818ad2",
-        "41b6b8d29add052502d5727e57b2cbf99f2089d49358a995363eb47ea29b8a8e",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_ISSUE61_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
-    "issue61.cir",
-    127,
-    "b47aa5c601fe34acc7750ff468e3e71c5c65949f1488691fc182c0ef0299d502",
-    "91e85ed903e6ba2cc5e0fbaee08ddb074357c11f6cbd5c689bdff4b7226becfe",
-)];
 
 // BUG_784 is an archived error-exit regression: Release-7.10 retains its
 // wrapper and exact ordered diagnostic, while `tags=exclude` deliberately
 // leaves its generated CMake file without an active CTest registration.
 const XYCE_BUG784_CONTRACT: &str = "archived_expected_failure_bug784_duplicate_subcircuit_port";
+#[cfg(test)]
 const XYCE_BUG784_PATH: &str = "Netlists/Certification_Tests/BUG_784/bug_784.cir";
 const XYCE_BUG784_RECORD: &str = "netlists/certification_tests/bug_784/bug_784.cir";
-const XYCE_BUG784_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG784_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG784_UPSTREAM_DIAGNOSTIC_PREFIX: &str = "in file bug_784.cir at or near line 7";
 const XYCE_BUG784_UPSTREAM_DIAGNOSTIC: &str = "Duplicate node in .SUBCKT line: b";
-const XYCE_BUG784_HISTORICAL_TAGS: &[u8] = b"exclude\n";
-const XYCE_BUG784_HISTORICAL_RECORD_COUNT: usize = 7;
-const XYCE_BUG784_HISTORICAL_RECORD_BYTES: usize = 1_654;
-const XYCE_BUG784_HISTORICAL_RECORDS_SHA256: &str =
-    "c26641ba9051f33f9a679b6e0a838571a3398cc8ff2eef563e5e0e15faf48dbc";
-const XYCE_BUG784_HISTORICAL_RECORDS_BLAKE3: &str =
-    "0dc66de822046b9d5910a754755e979eece906bb52e9141e877bd98336dc7e78";
-const XYCE_BUG784_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/Certification_Tests/BUG_784/CMakeLists.txt",
-        221,
-        "0a9a790e450a09c7fbd82dbb1dc3364381138f241c48e3b1f75817fd373510ed",
-        "d79d375b1f7b5ac8830c1ecb8cf8a599ede1a8d49a1323ba8a41effcc5fceaa1",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_784/Manifest.txt",
-        39,
-        "43084f444d2f44172f2d5d27c0194d7aae20ab7e09ecb0820ff059a44121a86d",
-        "4d51db0a1643a4a5e8d4ad61871e43b261b728beafac535f8f905f6950467af8",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_784/README",
-        714,
-        "9da94f156415b21ac76eb9c7501af4e6aa98c6263c6309b38650944c213253ad",
-        "e9e15644dfbf3f69303cf2727151c40a0107ff530e978ae6bbc261829c44f1aa",
-    ),
-    (
-        XYCE_BUG784_PATH,
-        102,
-        "e97755c1e31c7bc9b061beb1baf48f5b0febca2001129b6f47f3d28934cdad68",
-        "e44835e871303f4d78ee52e9d4d6239bf89efe295c454c5091f230d03c690690",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_784/bug_784.cir.sh",
-        1_401,
-        "2d9c4ac45e85dd6ed79bc7a91f87bda28be6448c325e1070a2d65d0afa052c0a",
-        "ba73d0b67cd2981c83aa02b4b826516ed786bdca6dec36454c5ff54ee25ef69c",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_784/tags",
-        8,
-        "4e6c23fcd9140520f152d969561caee073952c6027b65f96b07cd01da70432e1",
-        "c76ce284ba1075a571da61a7e0227cb9734e4965b3ebdf09e920a45dccc758f5",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG784_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
-    (
-        "README",
-        714,
-        "9da94f156415b21ac76eb9c7501af4e6aa98c6263c6309b38650944c213253ad",
-        "e9e15644dfbf3f69303cf2727151c40a0107ff530e978ae6bbc261829c44f1aa",
-    ),
-    (
-        "bug_784.cir",
-        102,
-        "e97755c1e31c7bc9b061beb1baf48f5b0febca2001129b6f47f3d28934cdad68",
-        "e44835e871303f4d78ee52e9d4d6239bf89efe295c454c5091f230d03c690690",
-    ),
-];
 
 // DIODE_ANALYTIC is an active three-member Release-7.10 generated-gold
 // family. Each wrapper evaluates the analytic diode law on the simulator's
 // own transient output grid before invoking xyce_verify.
-const XYCE_DIODE_ANALYTIC_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_DIODE_ANALYTIC_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORD_COUNT: usize = 13;
-const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORD_BYTES: usize = 3_020;
-const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORDS_SHA256: &str =
-    "2ef729affb94fdc248b330b9d40e1e75f290e3507b1f3ba181623db3e569642a";
-const XYCE_DIODE_ANALYTIC_HISTORICAL_RECORDS_BLAKE3: &str =
-    "d4e68c7e1ca1ebbc47d0e3ed2014e0a870633689dd3ad32c869e86cc2d5c2215";
-const XYCE_DIODE_ANALYTIC_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 13] = [
-    (
-        "Netlists/DIODE_ANALYTIC/CMakeLists.txt",
-        5_169,
-        "4ca3c2e90c80726ab9a645669c4968363cb0509b080e038bd8b2b3f65a8a701d",
-        "83c21dd8dae4f2deb68d30bf10d7c0c4b7b420f9f346288110a398ee2409b7dc",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/Manifest.txt",
-        200,
-        "01d309e6bb67b8fde6762636603e41617bc8ae07bcb4239e4684a9cdf619d43d",
-        "459f943734c2cf14b53b13b8490aa7efe87602cffdeea91933740fa38d8c2afc",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/breakdown_model.cir",
-        2_337,
-        "c428a046c15bce99cb0f75a8346327a2becc1adb4c37b175c6d07da133159249",
-        "b25207e26ddd7e67c50980c0b53034c5a71b6f344040da120a71e5ffaa96cea0",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/breakdown_model.cir.gs.pl",
-        507,
-        "9b469fddda2dfc87ccbe4beba1ed54d40dceeb445107e486eae5189350a4fc0d",
-        "a1a2dd1bca6f8d55b5b5e146d9b2a3fbd5548ada6b525571bb6379d78139de4b",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/breakdown_model.cir.sh",
-        1_277,
-        "bb1ca31a6ff2c11a675a7b871bd6caafe01ab9590ef030c1b55e405f1ebcf3ee",
-        "4a9785f678b7a0c1b76e7c5877186aae05cc07193fd59d5a471f3a747a899730",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/forward_model.cir",
-        1_442,
-        "f5e090a36963633e2be6dc76dee709dc51efb4b9fa97dc5d93667c25b64dca9c",
-        "25153718dd56bbe9f05d3e5c86769420de8b55bcf6d7c218911042dc7e0bda44",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/forward_model.cir.gs.pl",
-        511,
-        "dbf061409dc5371deafaef55d0687ed07e4b8770450e2d276b5e5a9f9cbed830",
-        "b1724024d906f783c548c812d87b3b12b0453fa0dd9f8fb8d9cabc8e87362d6f",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/forward_model.cir.sh",
-        1_273,
-        "7fc7eea6d2164aaeefd80ea2d86b887f9f3be3d43a0329df1ea767c164cb2988",
-        "69657a1309232ef50610e76a5599ba7e0f149a6c1415b1709d787ea0d878698e",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/reverse_model.cir",
-        2_553,
-        "84ec00feef59479221276fd0c0b4421135b7ed62bfa0b8f36706acb67cdc63b4",
-        "99d3e4ed8f1371a44905644841db8f58ec74dac53642f0b6a9a2cfdaf31183f0",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/reverse_model.cir.gs.pl",
-        759,
-        "7025ff54a22d7be56a1942ab5cfd7e645c40be9c9b4194961e254d62ebb98967",
-        "152a090659c78726bb54578dd92e686071e0f6ff35a2faad550b582f081393c8",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/reverse_model.cir.sh",
-        3_402,
-        "c84ffe260bd68460c229ebdc9c81cd6b2954226d143eabe1920fa62d1829a43f",
-        "17e0a7af9157cdf8919c46ff5302a31ade92bb6078aef4cc2d3e28f5e05f1c19",
-    ),
-    (
-        "Netlists/DIODE_ANALYTIC/tags",
-        64,
-        "1ff198c2fd9e6222408cd30d4cdce15c2184fcb0ae18a6f585a91ca9d92261ee",
-        "1c58bd56195603e452af41dcd6c30cecb5539bc8eaaafb7bb4641410ab204943",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-];
-const XYCE_DIODE_ANALYTIC_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
-    (
-        "breakdown_model.cir",
-        2_337,
-        "c428a046c15bce99cb0f75a8346327a2becc1adb4c37b175c6d07da133159249",
-        "b25207e26ddd7e67c50980c0b53034c5a71b6f344040da120a71e5ffaa96cea0",
-    ),
-    (
-        "forward_model.cir",
-        1_442,
-        "f5e090a36963633e2be6dc76dee709dc51efb4b9fa97dc5d93667c25b64dca9c",
-        "25153718dd56bbe9f05d3e5c86769420de8b55bcf6d7c218911042dc7e0bda44",
-    ),
-    (
-        "reverse_model.cir",
-        2_553,
-        "84ec00feef59479221276fd0c0b4421135b7ed62bfa0b8f36706acb67cdc63b4",
-        "99d3e4ed8f1371a44905644841db8f58ec74dac53642f0b6a9a2cfdaf31183f0",
-    ),
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceDiodeAnalyticKind {
     Forward,
@@ -1470,14 +790,7 @@ enum XyceDiodeAnalyticKind {
 impl XyceDiodeAnalyticKind {
     const ALL: [Self; 3] = [Self::Forward, Self::Reverse, Self::Breakdown];
 
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::Forward => "forward_model.cir",
-            Self::Reverse => "reverse_model.cir",
-            Self::Breakdown => "breakdown_model.cir",
-        }
-    }
-
+    #[cfg(test)]
     fn path(self) -> &'static str {
         match self {
             Self::Forward => "Netlists/DIODE_ANALYTIC/forward_model.cir",

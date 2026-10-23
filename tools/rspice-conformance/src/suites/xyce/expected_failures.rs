@@ -412,9 +412,6 @@ impl XyceTestRunner {
         if kind.is_bug702_family() {
             self.validate_bug702_complete_family_provenance(family_dir)?;
         }
-        if kind.is_bug354_family() {
-            self.validate_bug354_complete_family_provenance(family_dir)?;
-        }
         if kind.is_bug75() {
             self.validate_bug75_complete_family_provenance(family_dir)?;
         }

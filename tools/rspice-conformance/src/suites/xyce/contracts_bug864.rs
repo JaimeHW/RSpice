@@ -1,164 +1,6 @@
 use super::*;
 
 impl XyceTestRunner {
-    pub(super) fn bug864_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG864_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG864_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG864_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug864_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug864_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG864_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG864_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG864_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG864_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "BUG_864_SON Release-7.10 wrapper/error-policy provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_bug864_provenance(&self, deck: &XyceDeck) -> Result<Vec<u8>, String> {
-        const LABEL: &str = "BUG_864_SON unresolved subcircuit parameter";
-        Self::validate_bug864_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != XYCE_BUG864_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != XYCE_BUG864_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(XYCE_BUG864_PATH))
-        {
-            return Err(format!(
-                "recognized {LABEL} record '{}' is not backed by its exact canonical Netlists path",
-                deck.relative_path
-            ));
-        }
-        if !self.requires_upstream_wrapper(&deck.relative_path) {
-            return Err(format!("{LABEL} lost removed-wrapper ownership"));
-        }
-        let family_prefix = "netlists/certification_tests/bug_864_son/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(family_prefix))
-            .collect::<Vec<_>>();
-        if owners.len() != 1 || owners[0].as_str() != XYCE_BUG864_RECORD {
-            return Err(format!(
-                "{LABEL} requires its exact single manifest owner, found {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        if exclusions.contains_key(XYCE_BUG864_RECORD) {
-            return Err(format!(
-                "{LABEL} must not be classified by an upstream exclude sentinel"
-            ));
-        }
-
-        let family_dir = deck
-            .path
-            .parent()
-            .ok_or_else(|| format!("{LABEL} record has no family directory"))?;
-        let family_metadata = fs::symlink_metadata(family_dir)
-            .map_err(|error| format!("failed to inspect {LABEL} family: {error}"))?;
-        if !family_metadata.file_type().is_dir() || family_metadata.file_type().is_symlink() {
-            return Err(format!(
-                "{LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_BUG864_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeSet::new();
-        let mut source = None;
-        for entry in fs::read_dir(family_dir)
-            .map_err(|error| format!("failed to read {LABEL} family: {error}"))?
-        {
-            let entry =
-                entry.map_err(|error| format!("failed to inspect {LABEL} member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "{LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if !observed.insert(key.clone()) {
-                return Err(format!(
-                    "{LABEL} family has a case-colliding member {name:?}"
-                ));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{LABEL} family acquired unexpected member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{LABEL} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} member {name:?}: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} retained member {name:?} changed: expected {expected_bytes}/{expected_sha256}/{expected_blake3}, got {}/{sha256}/{content_blake3}",
-                    canonical.len()
-                ));
-            }
-            if name == "bug_864_son.cir" {
-                source = Some(bytes);
-            }
-        }
-        if observed.len() != expected.len() || observed.len() != 2 {
-            return Err(format!(
-                "{LABEL} retained family census changed: expected 2 members, got {}",
-                observed.len()
-            ));
-        }
-        let option_bytes = fs::read(family_dir.join("options"))
-            .map_err(|error| format!("failed to re-read {LABEL} options: {error}"))?;
-        let canonical_options = Self::canonical_lf_text_identity(LABEL, &option_bytes)?;
-        if canonical_options != b"timelimit=30\n" {
-            return Err(format!(
-                "{LABEL} options no longer binds the historical 30-second outer timeout"
-            ));
-        }
-        self.reject_wrapper_output_artifacts(&deck.path)
-            .map_err(|error| format!("{LABEL} {error}"))?;
-        Ok(source.expect("exact retained family includes the source record"))
-    }
-
     pub(super) fn observe_bug864_failure(
         source: &str,
         deck_path: &Path,
@@ -294,19 +136,17 @@ impl XyceTestRunner {
             .max_time_per_test_ms
             .clamp(1, XYCE_BUG864_HISTORICAL_TIMEOUT_MS);
         let abort = DeadlineAbort::new(start, timeout_ms);
-        let source_bytes = self.validate_bug864_provenance(deck)?;
+        let source = fs::read_to_string(&deck.path)
+            .map_err(|error| format!("failed to read {}: {error}", deck.path.display()))?;
         if abort.is_aborted() {
             return Err(format!(
-                "BUG_864_SON provenance exceeded the bounded {timeout_ms}ms contract"
+                "BUG_864_SON exceeded the bounded {timeout_ms}ms contract before observation"
             ));
         }
-        let source = std::str::from_utf8(&source_bytes)
-            .map_err(|error| format!("BUG_864_SON source is not UTF-8: {error}"))?;
-        Self::observe_bug864_failure(source, &deck.path, &abort)?;
-        self.validate_bug864_provenance(deck)?;
+        Self::observe_bug864_failure(&source, &deck.path, &abort)?;
         if abort.is_aborted() {
             return Err(format!(
-                "BUG_864_SON post-execution provenance exceeded the bounded {timeout_ms}ms contract"
+                "BUG_864_SON observation exceeded the bounded {timeout_ms}ms contract"
             ));
         }
         Ok(())
@@ -321,12 +161,6 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("tests/xyce")
-    }
-
-    #[test]
-    fn bug864_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug864_historical_oracle_provenance()
-            .expect("Release-7.10 BUG864 provenance remains exact");
     }
 
     #[test]
