@@ -1304,15 +1304,28 @@ impl DigitalSignalStore {
         offset: u32,
         free: bool,
     ) -> StrengthBit {
+        self.gated_bit(slot, value, offset, free, None)
+    }
+
+    /// [`Self::contribution_bit_as`], a three-state gate or MOS switch read
+    /// under `enable` instead of its own when one is given.
+    fn gated_bit(
+        &self,
+        slot: usize,
+        value: &FourStateValue,
+        offset: u32,
+        free: bool,
+        enable: Option<FourStateBit>,
+    ) -> StrengthBit {
         let data = value.bit(offset);
+        let enable = || enable.unwrap_or_else(|| value.bit(value.width() - 1));
         match self.slot_gate(slot) {
             None => StrengthBit::driven(data, self.strengths.slots[slot]),
             Some(strength::SlotGate::Tristate) => {
-                let enable = value.bit(value.width() - 1);
-                strength::tristate(data, enable, self.strengths.slots[slot])
+                strength::tristate(data, enable(), self.strengths.slots[slot])
             }
             Some(strength::SlotGate::Mos { resistive, switch }) => {
-                let enable = value.bit(value.width() - 1);
+                let enable = enable();
                 // The passed net's strength, while it still carries the value
                 // the switch last read; a strong drive of the data otherwise.
                 let passed = switch
@@ -1338,7 +1351,7 @@ impl DigitalSignalStore {
 
     /// Fold one strength net's contributions, and the driver its type adds,
     /// into a strength range per bit (IEEE 1364-2005 section 7.10). A
-    /// `trireg`'s charge is one of them while its own drivers are all `z`
+    /// `trireg`'s charge is one of them while its own drivers may all be `z`
     /// (`store/charge.rs`).
     fn resolve_strengths(&self, signal: DigitalSignalId) -> Vec<StrengthBit> {
         self.resolve_strengths_as(signal, false)
@@ -1347,14 +1360,27 @@ impl DigitalSignalStore {
     /// [`Self::resolve_strengths`]; `free` leaves every `trireg`'s charge
     /// out, which is what the net's drivers alone make of it.
     fn resolve_strengths_as(&self, signal: DigitalSignalId, free: bool) -> Vec<StrengthBit> {
+        let (mut bits, own) = self.fold_strengths(signal, free);
+        if !free && !own.is_empty() {
+            self.resolve_charge(signal, &own, &mut bits);
+        }
+        bits
+    }
+
+    /// The contributions of [`Self::resolve_strengths_as`] without the
+    /// charge, and for a `trireg` what each bit has from its own drivers,
+    /// which decides whether its charge counts.
+    fn fold_strengths(
+        &self,
+        signal: DigitalSignalId,
+        free: bool,
+    ) -> (Vec<StrengthBit>, Vec<charge::OwnDrive>) {
         let index = usize::from(signal);
         let width = self.widths[index];
         let span = self.spans[index];
         let mut bits = vec![StrengthBit::HIGH_Z; width as usize];
-        // A `trireg`'s own drivers, without what a switch island passes it,
-        // decide whether its charge counts.
-        let charged = !free && self.charge_of(signal).is_some();
-        let mut own = vec![StrengthBit::HIGH_Z; if charged { width as usize } else { 0 }];
+        let charged = self.charge_of(signal).is_some();
+        let mut own = vec![charge::OwnDrive::default(); if charged { width as usize } else { 0 }];
         for slot in span.start..span.start + span.count {
             let contribution = &self.contributions[slot];
             let ContributionValue::FourState(Some(value)) = &contribution.value else {
@@ -1370,8 +1396,12 @@ impl DigitalSignalStore {
                 let passed = self.contribution_bit_as(slot, value, offset, free);
                 let bit = &mut bits[position as usize];
                 *bit = bit.resolve(passed);
-                if let Some(own) = own.get_mut(position as usize).filter(|_| !bridge) {
-                    *own = own.resolve(passed);
+                if let Some(own) = own.get_mut(position as usize) {
+                    if bridge {
+                        own.pass(passed);
+                    } else {
+                        self.note_own_drive(own, slot, (value, offset), passed, free);
+                    }
                 }
             }
         }
@@ -1380,10 +1410,7 @@ impl DigitalSignalStore {
                 *bit = bit.resolve(implicit);
             }
         }
-        if charged {
-            self.resolve_charge(signal, &own, &mut bits);
-        }
-        bits
+        (bits, own)
     }
 
     /// The strength of every bit of `signal`, least significant first, for

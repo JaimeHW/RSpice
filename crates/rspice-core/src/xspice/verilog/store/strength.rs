@@ -285,6 +285,46 @@ impl StrengthBit {
         }
     }
 
+    /// The range covering this one and `other`: a value that is one or the
+    /// other, by section 7.10.1's reading of an ambiguous strength as every
+    /// level between its ends.
+    pub(crate) const fn cover(self, other: Self) -> Self {
+        Self {
+            lo: if self.lo < other.lo {
+                self.lo
+            } else {
+                other.lo
+            },
+            hi: if self.hi > other.hi {
+                self.hi
+            } else {
+                other.hi
+            },
+        }
+    }
+
+    /// Whether one end of the range is `HiZ` and the other is not: an `L` or
+    /// an `H`, a drive of one value or of nothing.
+    pub(crate) const fn reaches_high_z(self) -> bool {
+        (self.lo == 0) != (self.hi == 0)
+    }
+
+    /// The part of an `L` or `H` that drives: its other end alone when one
+    /// driver made it, whose drive is that end or nothing, and otherwise
+    /// every level from that end to the weakest beside `HiZ`. Any other range
+    /// is returned as it is.
+    pub(crate) const fn driving_part(self, one_driver: bool) -> Self {
+        if !self.reaches_high_z() {
+            return self;
+        }
+        let end = if self.lo == 0 { self.hi } else { self.lo };
+        if one_driver {
+            Self::point(end)
+        } else {
+            Self::range(end, if end < 0 { -1 } else { 1 })
+        }
+    }
+
     /// The bit as the analog boundary reads it: its value and the strongest
     /// 0-side and 1-side components.
     pub(crate) const fn drive(self) -> BitDrive {

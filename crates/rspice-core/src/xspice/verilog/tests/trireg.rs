@@ -52,7 +52,8 @@ endmodule
 /// gives `We1` on a `large` `trireg` and a `medium` one alike. The capacitive
 /// state: when every driver is `z` again, each holds that 1 at its own charge
 /// strength. A three-state driver under an unknown control drives an `L`
-/// (`St0` or `z`), whose value is `x`, so that is the driven state too.
+/// (`St0` or `z`), so `tx` is either driven, `St0`, or holding its `Me1`:
+/// the `x` from `St0` to `Me1`, `62X` (section 7.10.1).
 #[test]
 fn a_driven_trireg_takes_its_drivers_value_at_their_strength() {
     let report = bench(
@@ -83,7 +84,7 @@ endmodule
         stdout(&report),
         "La0 Me0 Me1\n\
          We1 We1\n\
-         La1 Me1 StL x\n"
+         La1 Me1 62X x\n"
     );
 }
 
@@ -278,4 +279,89 @@ fn a_trireg_port_joins_a_wire_or_is_refused() {
         error.contains("is a `trireg` connected to another net through a port"),
         "{error}"
     );
+}
+
+/// Sections 4.6.3, 7.10.1 and 7.10.3: a three-state driver under an `x`
+/// enable drives `L` or `H`, its value or nothing, so its `trireg` is either
+/// driven, at the driver's strength with the charge taking no part, or
+/// capacitive, at its charge. The net carries the range covering both.
+///
+/// | net | stored    | driven | on    | off   | covered        | `%v`  |
+/// |-----|-----------|--------|-------|-------|----------------|-------|
+/// | `a` | 0, medium | `StL`  | `St0` | `Me0` | `St0` to `Me0` | `620` |
+/// | `b` | 1, medium | `StL`  | `St0` | `Me1` | `St0` to `Me1` | `62X` |
+/// | `c` | 0, medium | `StH`  | `St1` | `Me0` | `Me0` to `St1` | `26X` |
+/// | `e` | 1, medium | `StH`  | `St1` | `Me1` | `Me1` to `St1` | `621` |
+/// | `w` | 1, large  | `WeL`  | `We0` | `La1` | `LaX`          | `LaX` |
+///
+/// The charge is the net's own value (section 4.6.3), and where the cases
+/// disagree that value is `x`, so the held case is `x` at the charge
+/// strength. For `a` to `e` the driver outweighs it and the range is the one
+/// above; `w`'s weak driver does not, and `We0` against `LaX` is `LaX`. A
+/// plain resolution of `WeL` against `La1` would give `La1`, which the
+/// driver being on rules out. Once the enable is 0 each net holds the value
+/// it had at its charge strength. Icarus Verilog 13.0 does not run `trireg`,
+/// so every value is the closed form.
+#[test]
+fn a_trireg_under_an_unknown_enable_covers_driven_and_held() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module top;
+  reg en, da, db, dc, de, dw;
+  trireg a, b, c, e;
+  trireg (large) w;
+  bufif1 (a, da, en);
+  bufif1 (b, db, en);
+  bufif1 (c, dc, en);
+  bufif1 (e, de, en);
+  bufif1 (weak0, weak1) g (w, dw, en);
+  initial begin
+    en = 1; da = 0; db = 1; dc = 0; de = 1; dw = 1;
+    #1 en = 0;
+    #1 $display("%v %v %v %v %v", a, b, c, e, w);
+    da = 0; db = 0; dc = 1; de = 1; dw = 0;
+    en = 1'bx;
+    #1 $display("%v %v %v %v %v %b%b%b%b%b", a, b, c, e, w, a, b, c, e, w);
+    en = 0;
+    #1 $display("%v %v %v %v %v", a, b, c, e, w);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(
+        stdout(&report),
+        "Me0 Me1 Me0 Me1 La1\n\
+         620 62X 26X 621 LaX 0xx1x\n\
+         Me0 MeX MeX Me1 LaX\n"
+    );
+}
+
+/// Section 7.14.2: a bit only an `x`-enabled driver drives may have been
+/// let go, so its charge decay runs from the moment the enable became `x`.
+/// Until the decay the net is `St0` or `Me0`; after it, the held case is
+/// `x`, and the net covers `St0` to `MeX`. An enable of 1 drives it outright.
+#[test]
+fn a_trireg_an_unknown_enable_may_release_still_decays() {
+    let report = bench(
+        r#"`timescale 1ns/1ns
+module top;
+  reg d, en;
+  trireg #(0, 0, 5) t;
+  bufif1 (t, d, en);
+  initial begin
+    en = 0; d = 0;
+    #1 en = 1;
+    #1 $display("%0t %v", $time, t);
+    en = 1'bx;
+    #4 $display("%0t %v", $time, t);
+    #2 $display("%0t %v", $time, t);
+    en = 1;
+    #1 $display("%0t %v", $time, t);
+  end
+endmodule
+"#,
+        &[],
+    );
+    assert_eq!(stdout(&report), "2 St0\n6 620\n8 62X\n9 St0\n");
 }

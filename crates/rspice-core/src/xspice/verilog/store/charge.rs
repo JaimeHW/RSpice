@@ -5,10 +5,9 @@
 //! `small`, `medium` or `large`, `medium` by default (section 4.4.1). Section
 //! 4.6.3 gives the bit two states, decided by its own drivers:
 //!
-//! - **Driven:** a driver of the bit has the value 0, 1 or `x` (an `L` or `H`
-//!   reads as `x`, section 7.10.1). The bit is what its drivers resolve to, at
-//!   their strength, and the charge takes no part, however large: a `weak`
-//!   driver of a `large` `trireg` gives `We1`.
+//! - **Driven:** a driver of the bit has the value 0, 1 or `x`. The bit is
+//!   what its drivers resolve to, at their strength, and the charge takes no
+//!   part, however large: a `weak` driver of a `large` `trireg` gives `We1`.
 //! - **Capacitive:** every driver of the bit is `z`. The charge is then one
 //!   more contribution to the bit's resolution, a drive of the net's own
 //!   current value at its charge strength. Alone it decides the bit; inside a
@@ -16,15 +15,22 @@
 //!   the island passes, so the larger of two charges wins the charge sharing,
 //!   and a large charge outweighs a weak driver of another net of the island.
 //!
+//! A driver that drives `L` or `H` (section 7.10.1), as a three-state gate
+//! under an `x` enable does, is one value or `z`, so the bit may be in either
+//! state. While no driver surely drives it, the bit is the ambiguous strength
+//! covering both: what the drivers that may be on drive, and the charge. An
+//! `L` from a strong driver against a stored 1 of medium charge is `St0` or
+//! `Me1`, an `x` from `St0` to `Me1`, and the net then holds `x`.
+//!
 //! What a bidirectional switch passes is not a driver of the bit here: it is
 //! the island's resolution, of which the charge is a part. The net starts at
 //! `x` at its charge strength (section 4.2.1).
 //!
 //! # Decay
 //!
-//! A bit is *holding* when its drivers alone leave it at high impedance: the
-//! bit's contributions, and through a switch island what reaches it from
-//! drivers rather than from charges. When a bit starts holding the store
+//! A bit is *holding* when its drivers alone leave it, or may leave it, at
+//! high impedance: the bit's contributions, and through a switch island what
+//! reaches it from drivers rather than from charges. When a bit starts holding the store
 //! reports it, and the host schedules the decay after the net's charge decay
 //! time, the third delay of its declaration (section 7.14.2). A driver that
 //! drives the bit again before then stops the bit holding, and the host cancels
@@ -40,7 +46,7 @@
 
 use super::DigitalSignalStore;
 use super::StrengthTables;
-use super::strength::StrengthBit;
+use super::strength::{SlotGate, StrengthBit};
 use rspice_veriloga::canonical_ir::digital::{DigitalDriveStrength, DigitalNetType};
 use rspice_veriloga::canonical_ir::digital_value::FourStateValue;
 use rspice_veriloga::canonical_ir::ids::DigitalSignalId;
@@ -69,6 +75,78 @@ impl Charge {
             },
             // A decay time this precision cannot count is past any run's end.
             decay: decay.and_then(|decay| decay.ticks_at(precision)),
+        })
+    }
+}
+
+/// What one `trireg` bit has from its own drivers, which decides whether its
+/// charge counts (section 4.6.3), and from its switch island.
+#[derive(Debug, Clone)]
+pub(super) struct OwnDrive {
+    /// Whether an own driver surely drives the bit: the driven state.
+    sure: bool,
+    /// What each own driver that may be off drives when it is on.
+    maybe: Vec<StrengthBit>,
+    /// What the bit's switch island passes it.
+    island: StrengthBit,
+}
+
+impl Default for OwnDrive {
+    fn default() -> Self {
+        Self {
+            sure: false,
+            maybe: Vec::new(),
+            island: StrengthBit::HIGH_Z,
+        }
+    }
+}
+
+/// The most own drivers that may be off whose every combination
+/// [`OwnDrive::either`] resolves one by one.
+const MAX_COMBINED: usize = 10;
+
+impl OwnDrive {
+    /// Add what a bidirectional switch passes the bit.
+    pub(super) fn pass(&mut self, passed: StrengthBit) {
+        self.island = self.island.resolve(passed);
+    }
+
+    /// Whether the own drivers may leave the bit to its charge: none is
+    /// surely on and at least one may be off. Such a bit's charge may decay.
+    fn may_release(&self) -> bool {
+        !self.sure && !self.maybe.is_empty()
+    }
+
+    /// Sections 4.6.3 and 7.10.1: with every driver that may be off off, the
+    /// bit holds `stored` (the capacitive state), and with any of them on it
+    /// is what those resolve to, the charge taking no part (the driven
+    /// state). The bit is the range covering every case, so a driver against
+    /// an opposite charge gives an ambiguous `x` and neither side alone.
+    ///
+    /// Every resolution's ends are ends of what it resolves, so without a
+    /// switch island the drivers one at a time already reach the ends of any
+    /// set of them. Through an island each set is resolved, and past
+    /// [`MAX_COMBINED`] drivers the range covering the island and every
+    /// driver stands in, which holds every case.
+    fn either(&self, stored: StrengthBit) -> StrengthBit {
+        let held = self.island.resolve(stored);
+        if self.island == StrengthBit::HIGH_Z {
+            return self.maybe.iter().fold(held, |cover, on| cover.cover(*on));
+        }
+        let count = self.maybe.len();
+        if count > MAX_COMBINED {
+            return self
+                .maybe
+                .iter()
+                .fold(held.cover(self.island), |cover, on| cover.cover(*on));
+        }
+        (1u32..1 << count).fold(held, |cover, set| {
+            let driven = (0..count)
+                .filter(|position| set & (1 << position) != 0)
+                .fold(StrengthBit::HIGH_Z, |driven, position| {
+                    driven.resolve(self.maybe[position])
+                });
+            cover.cover(self.island.resolve(driven))
         })
     }
 }
@@ -152,14 +230,14 @@ impl DigitalSignalStore {
             .flatten()
     }
 
-    /// Resolve a `trireg`'s charge into the bits its own drivers, `own`, leave
-    /// at `z` (the capacitive state): the net's own value at its charge
-    /// strength, and `x` for a bit whose charge is decaying. Any other bit is
-    /// in the driven state and keeps what its drivers resolve to.
+    /// Resolve a `trireg`'s charge into the bits its own drivers, `own`, may
+    /// leave at `z`: the net's own value at its charge strength, and `x` for a
+    /// bit whose charge is decaying. A bit some driver surely drives is in
+    /// the driven state and keeps what its drivers resolve to.
     pub(super) fn resolve_charge(
         &self,
         signal: DigitalSignalId,
-        own: &[StrengthBit],
+        own: &[OwnDrive],
         bits: &mut [StrengthBit],
     ) {
         let Some(charge) = self.charge_of(signal) else {
@@ -167,7 +245,7 @@ impl DigitalSignalStore {
         };
         let value = &self.values[usize::from(signal)];
         for (position, (bit, own)) in (0u32..).zip(bits.iter_mut().zip(own)) {
-            if *own != StrengthBit::HIGH_Z {
+            if own.sure {
                 continue;
             }
             let held = if self.charge.decaying == Some((signal, position)) {
@@ -175,7 +253,57 @@ impl DigitalSignalStore {
             } else {
                 value.bit(position)
             };
-            *bit = bit.resolve(StrengthBit::driven(held, charge.strength));
+            let stored = |held| StrengthBit::driven(held, charge.strength);
+            *bit = if own.maybe.is_empty() {
+                bit.resolve(stored(held))
+            } else {
+                // The charge is the net's value, so once the cases disagree
+                // the bit holds `x`; resolving with it now gives the same bit
+                // however often the net settles.
+                let covered = own.either(stored(held));
+                if covered.value() == held {
+                    covered
+                } else {
+                    own.either(stored(FourStateBit::Unknown))
+                }
+            };
+        }
+    }
+
+    /// Fold an own driver's contribution `passed` to a `trireg` bit into
+    /// `own`. A three-state gate or MOS switch whose enable is `x` or `z`
+    /// drives `L`, `H` or `x`: what it drives on, or nothing (section 7.10.1).
+    /// So does a driver whose drive is an `L` or `H` itself, as an `x` at a
+    /// `highz` strength is. Either may be off; any other driver is surely on.
+    pub(super) fn note_own_drive(
+        &self,
+        own: &mut OwnDrive,
+        slot: usize,
+        (value, offset): (&FourStateValue, u32),
+        passed: StrengthBit,
+        free: bool,
+    ) {
+        if passed == StrengthBit::HIGH_Z {
+            return;
+        }
+        let gate = self.slot_gate(slot);
+        let switch = matches!(gate, Some(SlotGate::Mos { .. }));
+        let unknown_enable = (switch || gate == Some(SlotGate::Tristate))
+            && matches!(
+                value.bit(value.width() - 1),
+                FourStateBit::Unknown | FourStateBit::HighImpedance
+            );
+        let on = if unknown_enable {
+            self.gated_bit(slot, value, offset, free, Some(FourStateBit::One))
+        } else {
+            passed
+        };
+        if unknown_enable || on.reaches_high_z() {
+            // A switch passes a net's strength, which may be an `L` or `H` that
+            // several drivers made.
+            own.maybe.push(on.driving_part(!switch));
+        } else {
+            own.sure = true;
         }
     }
 
@@ -202,14 +330,18 @@ impl DigitalSignalStore {
         self.charge.holding.insert(signal, holding);
     }
 
-    /// Which bits of `signal` its drivers alone leave at high impedance. A
-    /// forced bit is driven by its force.
+    /// Which bits of `signal` its drivers alone leave, or may leave, at high
+    /// impedance: a bit only drivers that may be off drive, with nothing
+    /// from its island, may be holding, and so may decay. A forced bit is
+    /// driven by its force.
     fn holding_bits(&self, signal: DigitalSignalId) -> Vec<bool> {
-        let free = self.resolve_strengths_as(signal, true);
+        let (free, own) = self.fold_strengths(signal, true);
         (0u32..)
-            .zip(free)
-            .map(|(bit, free)| {
-                free == StrengthBit::HIGH_Z && self.forced_bit(signal, bit).is_none()
+            .zip(free.into_iter().zip(own))
+            .map(|(bit, (free, own))| {
+                (free == StrengthBit::HIGH_Z
+                    || (own.may_release() && own.island == StrengthBit::HIGH_Z))
+                    && self.forced_bit(signal, bit).is_none()
             })
             .collect()
     }
