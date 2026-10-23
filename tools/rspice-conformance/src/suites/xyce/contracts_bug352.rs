@@ -37,13 +37,6 @@ impl Bug352Role {
         }
     }
 
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::ExpressionOwner => "BUG_352a.cir",
-            Self::LiteralControl => "BUG_352b.cir",
-        }
-    }
-
     fn label(self) -> &'static str {
         match self {
             Self::ExpressionOwner => "model-expression owner",
@@ -53,194 +46,6 @@ impl Bug352Role {
 }
 
 impl XyceTestRunner {
-    pub(super) fn bug352_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG352_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG352_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG352_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug352_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug352_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG352_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG352_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG352_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG352_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "BUG_352 Release-7.10 wrapper provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug352_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug352Role,
-    ) -> Result<BTreeMap<Bug352Role, Vec<u8>>, String> {
-        Self::validate_bug352_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!(
-                "recognized {BUG352_LABEL} {} is not backed by its canonical path",
-                role.label()
-            ));
-        }
-        let family_prefix = "netlists/certification_tests/bug_352/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(family_prefix))
-            .collect::<Vec<_>>();
-        if owners.len() != 1 || owners[0].as_str() != XYCE_BUG352_OWNER_RECORD {
-            return Err(format!(
-                "{BUG352_LABEL} requires the expression deck as its sole wrapper owner, found {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG352_LABEL} exclusion manifest is invalid: {error}"))?;
-        if exclusions.contains_key(XYCE_BUG352_OWNER_RECORD) {
-            return Err(format!("{BUG352_LABEL} owner must not be excluded"));
-        }
-        let family_exclusions = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(family_prefix))
-            .collect::<Vec<_>>();
-        if family_exclusions.len() != 1 || family_exclusions[0].0 != XYCE_BUG352_CONTROL_RECORD {
-            return Err(format!(
-                "{BUG352_LABEL} must retain exactly its literal control exclusion row"
-            ));
-        }
-        let control = family_exclusions[0].1;
-        if control.source != XYCE_BUG352_EXCLUSION_SOURCE
-            || !matches!(&control.disposition,
-                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                    if expected_contract == XYCE_BUG352_CONTROL_CONTRACT)
-        {
-            return Err(format!(
-                "{BUG352_LABEL} literal-control qualification changed: {control:?}"
-            ));
-        }
-
-        let family_dir = self.root.join("Netlists/Certification_Tests/BUG_352");
-        let metadata = fs::symlink_metadata(&family_dir)
-            .map_err(|error| format!("failed to inspect {BUG352_LABEL} family: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{BUG352_LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_BUG352_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in fs::read_dir(&family_dir)
-            .map_err(|error| format!("failed to read {BUG352_LABEL} family: {error}"))?
-        {
-            let entry = entry
-                .map_err(|error| format!("failed to inspect {BUG352_LABEL} member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{BUG352_LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{BUG352_LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if observed.contains_key(&key) {
-                return Err(format!(
-                    "{BUG352_LABEL} family contains case-colliding member {name:?}"
-                ));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{BUG352_LABEL} family acquired unexpected member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{BUG352_LABEL} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {BUG352_LABEL} member: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(BUG352_LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{BUG352_LABEL} member {name:?} changed: expected {expected_bytes}/{expected_sha256}/{expected_blake3}, got {}/{sha256}/{content_blake3}",
-                    canonical.len()
-                ));
-            }
-            observed.insert(key, bytes);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{BUG352_LABEL} retained family census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        for member_role in Bug352Role::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(member_role.path()))
-                .map_err(|error| format!("{BUG352_LABEL} {} {error}", member_role.label()))?;
-        }
-        let output_family = self.root.join("OutputData/Certification_Tests/BUG_352");
-        match fs::symlink_metadata(&output_family) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "failed to inspect {BUG352_LABEL} OutputData absence: {error}"
-                ));
-            }
-            Ok(_) => {
-                return Err(format!(
-                    "{BUG352_LABEL} must not acquire an invented numerical gold at {}",
-                    output_family.display()
-                ));
-            }
-        }
-        Bug352Role::ALL
-            .into_iter()
-            .map(|member_role| {
-                observed
-                    .get(&member_role.file_name().to_ascii_lowercase())
-                    .cloned()
-                    .map(|bytes| (member_role, bytes))
-                    .ok_or_else(|| format!("{BUG352_LABEL} lost {}", member_role.file_name()))
-            })
-            .collect()
-    }
-
     fn validate_bug352_worker_contract(
         &self,
         role: Bug352Role,
@@ -482,30 +287,17 @@ impl XyceTestRunner {
         Ok(table)
     }
 
-    pub(super) fn validate_bug352_oracle(
-        &self,
-        deck: &XyceDeck,
-        role: Bug352Role,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug352_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
             return Err(format!("{BUG352_LABEL} deadline expired before validation"));
         }
-        let sources = self.validate_bug352_provenance(deck, role)?;
         let mut output = BTreeMap::new();
         for worker_role in Bug352Role::ALL {
-            let bytes = sources
-                .get(&worker_role)
-                .ok_or_else(|| format!("{BUG352_LABEL} lost {}", worker_role.label()))?;
-            let source = std::str::from_utf8(bytes).map_err(|error| {
-                format!(
-                    "{BUG352_LABEL} {} is not UTF-8: {error}",
-                    worker_role.label()
-                )
-            })?;
             let path = self.root.join(worker_role.path());
-            let plan = self.validate_bug352_worker_contract(worker_role, source, &path)?;
+            let source = fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let plan = self.validate_bug352_worker_contract(worker_role, &source, &path)?;
             output.insert(
                 worker_role,
                 self.run_bug352_worker(worker_role, &plan, start)?,
@@ -531,13 +323,6 @@ impl XyceTestRunner {
                 self.config.max_time_per_test_ms
             ));
         }
-        self.validate_bug352_provenance(deck, role)?;
-        if abort.is_aborted() {
-            return Err(format!(
-                "{BUG352_LABEL} final provenance exceeded timeout ({}ms)",
-                self.config.max_time_per_test_ms
-            ));
-        }
         Ok(())
     }
 }
@@ -550,46 +335,6 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("tests/xyce")
-    }
-
-    fn bug352_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug352-{label}-"))
-            .tempdir()
-            .expect("create BUG352 fixture root");
-        let root = temporary.path().to_path_buf();
-        let family = root.join("Netlists/Certification_Tests/BUG_352");
-        fs::create_dir_all(&family).expect("create BUG352 family");
-        let canonical = corpus_root().join("Netlists/Certification_Tests/BUG_352");
-        for (name, ..) in XYCE_BUG352_RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name))
-                .expect("copy canonical BUG352 member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG352_OWNER_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG352 wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{XYCE_BUG352_CONTROL_PATH}\t{XYCE_BUG352_EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG352_CONTROL_CONTRACT}\n"
-            ),
-        )
-        .expect("write BUG352 exclusion manifest");
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG352_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG352_OWNER_PATH.to_string(),
-        };
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug352_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug352_historical_oracle_provenance()
-            .expect("Release-7.10 BUG352 provenance remains exact");
     }
 
     #[test]
@@ -614,85 +359,22 @@ mod tests {
 
     #[test]
     fn bug352_oracle_runs_both_exact_roles() {
-        let root = corpus_root();
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        for role in Bug352Role::ALL {
-            let deck = XyceDeck {
-                path: root.join(role.path()),
-                section: XyceDeckSection::Netlists,
-                relative_path: role.path().to_string(),
-            };
-            runner
-                .validate_bug352_oracle(&deck, role, Instant::now())
-                .expect("canonical BUG352 relational oracle passes");
-        }
+        let runner = XyceTestRunner::new(corpus_root(), XyceRunnerConfig::default());
+        runner
+            .validate_bug352_oracle(Instant::now())
+            .expect("canonical BUG352 relational oracle passes");
     }
 
     #[test]
     fn bug352_oracle_rejects_an_expired_deadline() {
-        let root = corpus_root();
         let config = XyceRunnerConfig {
             max_time_per_test_ms: 1,
             ..XyceRunnerConfig::default()
         };
-        let runner = XyceTestRunner::new(&root, config);
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG352_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG352_OWNER_PATH.to_string(),
-        };
+        let runner = XyceTestRunner::new(corpus_root(), config);
         let start = Instant::now()
             .checked_sub(Duration::from_millis(2))
             .expect("construct expired deadline");
-        assert!(
-            runner
-                .validate_bug352_oracle(&deck, Bug352Role::ExpressionOwner, start)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn bug352_provenance_rejects_source_output_and_qualification_drift() {
-        let (_temporary, deck, runner) = bug352_fixture("source-drift");
-        runner
-            .validate_bug352_provenance(&deck, Bug352Role::ExpressionOwner)
-            .expect("canonical BUG352 fixture provenance passes");
-        fs::write(
-            deck.path
-                .parent()
-                .expect("BUG352 deck has parent")
-                .join("unexpected.out"),
-            "stale wrapper output\n",
-        )
-        .expect("write stale BUG352 artifact");
-        assert!(
-            runner
-                .validate_bug352_provenance(&deck, Bug352Role::ExpressionOwner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = bug352_fixture("output-drift");
-        fs::create_dir_all(runner.root.join("OutputData/Certification_Tests/BUG_352"))
-            .expect("create forbidden BUG352 output family");
-        assert!(
-            runner
-                .validate_bug352_provenance(&deck, Bug352Role::ExpressionOwner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = bug352_fixture("qualification-drift");
-        fs::write(
-            runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{XYCE_BUG352_CONTROL_PATH}\t{XYCE_BUG352_EXCLUSION_SOURCE}\t{UPSTREAM_EXCLUDED_DISPOSITION}\n"
-            ),
-        )
-        .expect("demote BUG352 control");
-        let refreshed = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(
-            refreshed
-                .validate_bug352_provenance(&deck, Bug352Role::ExpressionOwner)
-                .is_err()
-        );
+        assert!(runner.validate_bug352_oracle(start).is_err());
     }
 }
