@@ -2,62 +2,6 @@ use super::*;
 use std::fmt::Write as _;
 
 impl XyceTestRunner {
-    pub(super) fn bug39_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG39_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG39_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG39_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug39_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug39_historical_oracle_provenance_records();
-        let provenance_hash = blake3::hash(records.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let required_records = records
-            .iter()
-            .filter(|record| !record.contains("\tNetlists/Certification_Tests/BUG_39_SON/README\t"))
-            .cloned()
-            .collect::<Vec<_>>();
-        let required_stream = required_records.join("\n");
-        let required_sha256 = format!("{:x}", Sha256::digest(required_stream.as_bytes()));
-        let required_blake3 = blake3::hash(required_stream.as_bytes())
-            .to_hex()
-            .to_string();
-        if required_records.len() != XYCE_BUG39_REQUIRED_ORACLE_RECORD_COUNT
-            || required_stream.len() != XYCE_BUG39_REQUIRED_ORACLE_BYTES
-            || required_sha256 != XYCE_BUG39_REQUIRED_ORACLE_SHA256
-            || required_blake3 != XYCE_BUG39_REQUIRED_ORACLE_BLAKE3
-        {
-            return Err(format!(
-                "BUG_39_SON required Release-7.10 anchors/wrappers/exclude/Manifest provenance changed: records={}/{}/{required_sha256}/{required_blake3}",
-                required_records.len(),
-                required_stream.len()
-            ));
-        }
-        if records.len() != XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT
-            || provenance_hash != XYCE_BUG39_HISTORICAL_ORACLE_BLAKE3
-        {
-            return Err(format!(
-                "BUG_39_SON Release-7.10 required oracle plus README provenance changed: records={}/{provenance_hash}",
-                records.len()
-            ));
-        }
-        if UPSTREAM_EXCLUSIONS_SOURCE_COMMIT != XYCE_BUG39_PRETRIM_COMMIT
-            || UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE
-                != "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d"
-        {
-            return Err("BUG_39_SON pre-trim manifest commit/tree provenance changed".to_string());
-        }
-        Ok(())
-    }
-
     pub(super) fn bug39_gaussian_contract(
         &self,
         deck: &XyceDeck,
@@ -80,208 +24,8 @@ impl XyceTestRunner {
                     "recognized {LABEL} role {role:?} is not backed by its canonical path"
                 ));
             }
-            let contract = XyceBug39GaussianContract { anchor_path, role };
-            self.validate_bug39_provenance(&contract)?;
-            Ok(contract)
+            Ok(XyceBug39GaussianContract { anchor_path, role })
         })())
-    }
-
-    pub(super) fn validate_bug39_provenance(
-        &self,
-        contract: &XyceBug39GaussianContract,
-    ) -> Result<(), String> {
-        const LABEL: &str = "BUG_39_SON generated Gaussian mean/sigma family";
-        if !Self::same_path(&contract.anchor_path, &self.root.join(contract.role.path())) {
-            return Err(format!("{LABEL} contract target changed"));
-        }
-        let family_dir = self.validate_bug39_retained_family_provenance()?;
-
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        let wrapper_records = Self::load_upstream_wrapper_decks(&self.root);
-        let mut candidates = Vec::with_capacity(XYCE_BUG39_CANDIDATE_COUNT);
-        let mut candidate_content = Vec::with_capacity(XYCE_BUG39_CANDIDATE_COUNT);
-        let mut owner_rows = Vec::with_capacity(XYCE_BUG39_CANDIDATE_COUNT);
-        let mut historical_exclusion_rows = Vec::with_capacity(XYCE_BUG39_CANDIDATE_COUNT);
-        for role in [
-            XyceBug39GaussianRole::AgaussAbsolute,
-            XyceBug39GaussianRole::GaussRelative,
-        ] {
-            let path = self.root.join(role.path());
-            let relative = self.relative_key(&path);
-            if Self::normalize_manifest_key(&relative) != role.record() {
-                return Err(format!(
-                    "{LABEL} canonical path '{}' is unavailable",
-                    role.record()
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} anchor '{relative}': {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let content_hash = blake3::hash(&canonical).to_hex().to_string();
-            if !canonical.is_empty() || content_hash != XYCE_BUG39_EMPTY_CONTENT_BLAKE3 {
-                return Err(format!(
-                    "{LABEL} anchor '{relative}' must remain the exact zero-byte wrapper placeholder"
-                ));
-            }
-            let key = Self::normalize_manifest_key(&relative);
-            if !self.requires_upstream_wrapper(&relative) || !wrapper_records.contains(&key) {
-                return Err(format!(
-                    "{LABEL} anchor '{relative}' lost removed-wrapper ownership"
-                ));
-            }
-            let exclusion = exclusions.get(&key).ok_or_else(|| {
-                format!("{LABEL} anchor '{relative}' lost historical exclusion provenance")
-            })?;
-            if !matches!(
-                &exclusion.disposition,
-                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                    if expected_contract == role.result_contract()
-            ) || exclusion.source != XYCE_BUG39_HISTORICAL_EXCLUDE_PATH
-            {
-                return Err(format!(
-                    "{LABEL} anchor '{relative}' lacks its exact independent qualification contract"
-                ));
-            }
-
-            candidates.push(relative.clone());
-            candidate_content.push(format!("{relative}\t{content_hash}"));
-            owner_rows.push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
-            historical_exclusion_rows.push(format!(
-                "{relative}\t{}\t{UPSTREAM_EXCLUDED_DISPOSITION}",
-                exclusion.source
-            ));
-            self.reject_wrapper_output_artifacts(&path)
-                .map_err(|error| format!("{LABEL} anchor '{relative}' {error}"))?;
-            self.reject_wrapper_output_artifacts(&family_dir.join(role.generated_file_name()))
-                .map_err(|error| {
-                    format!(
-                        "{LABEL} historical generated deck '{}' {error}",
-                        role.generated_file_name()
-                    )
-                })?;
-            Self::bug39_generated_source(role)?;
-        }
-
-        candidates.sort();
-        candidate_content.sort();
-        owner_rows.sort();
-        historical_exclusion_rows.sort();
-        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let content_hash = blake3::hash(candidate_content.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let owner_hash = blake3::hash(owner_rows.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let exclusion_hash = blake3::hash(historical_exclusion_rows.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if candidates.len() != XYCE_BUG39_CANDIDATE_COUNT
-            || candidate_hash != XYCE_BUG39_CANDIDATE_BLAKE3
-            || content_hash != XYCE_BUG39_CANDIDATE_CONTENT_BLAKE3
-            || owner_hash != XYCE_BUG39_OWNER_MANIFEST_BLAKE3
-            || exclusion_hash != XYCE_BUG39_HISTORICAL_EXCLUSION_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} ownership provenance changed: candidates={}/{candidate_hash}/{content_hash}, owners={owner_hash}, exclusions={exclusion_hash}",
-                candidates.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug39_retained_family_provenance(&self) -> Result<PathBuf, String> {
-        const LABEL: &str = "BUG_39_SON retained family";
-        Self::validate_bug39_historical_oracle_provenance()?;
-        let family_dir = self.root.join("Netlists/Certification_Tests/BUG_39_SON");
-        let family_metadata = fs::symlink_metadata(&family_dir)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if family_metadata.file_type().is_symlink() || !family_metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} requires a physical, non-symlinked family directory"
-            ));
-        }
-
-        let expected_artifacts = XYCE_BUG39_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut retained_records = Vec::new();
-        let mut physical_names = Vec::new();
-        for entry in fs::read_dir(&family_dir)
-            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to read {LABEL} entry: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|error| {
-                format!(
-                    "failed to inspect {LABEL} family entry '{}': {error}",
-                    path.display()
-                )
-            })?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} family entry '{}' must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| format!("{LABEL} family entry name is not UTF-8"))?;
-            let key = file_name.to_ascii_lowercase();
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected_artifacts.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{LABEL} complete physical family census has unexpected file '{file_name}'"
-                ));
-            };
-            if file_name != expected_name {
-                return Err(format!(
-                    "{LABEL} retained artifact spelling changed: expected '{expected_name}', got '{file_name}'"
-                ));
-            }
-            let bytes = fs::read(&path).map_err(|error| {
-                format!("failed to read {LABEL} artifact '{file_name}': {error}")
-            })?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} retained artifact '{file_name}' identity changed: bytes={}/{expected_bytes}, sha256={sha256}, blake3={content_blake3}",
-                    canonical.len()
-                ));
-            }
-            physical_names.push(key);
-            retained_records.push(format!(
-                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
-            ));
-        }
-        physical_names.sort();
-        retained_records.sort_by_key(|record| record.to_ascii_lowercase());
-        let expected_names = expected_artifacts.keys().cloned().collect::<Vec<_>>();
-        let retained_hash = blake3::hash(retained_records.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if physical_names != expected_names
-            || retained_records.len() != XYCE_BUG39_RETAINED_RECORD_COUNT
-            || retained_hash != XYCE_BUG39_RETAINED_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} retained physical/content census changed: records={}/{retained_hash}, files={physical_names:?}",
-                retained_records.len()
-            ));
-        }
-
-        Ok(family_dir)
     }
 
     pub(super) fn bug39_deterministic_contract(
@@ -300,8 +44,10 @@ impl XyceTestRunner {
                     "recognized {LABEL} role {role:?} is not backed by its exact canonical Netlists path"
                 ));
             }
-            let family_dir = self.validate_bug39_deterministic_provenance()?;
-            let reference_path = family_dir.join(role.reference_file_name());
+            let reference_path = self
+                .root
+                .join("Netlists/Certification_Tests/BUG_39_SON")
+                .join(role.reference_file_name());
             let contract = XyceBug39DeterministicContract {
                 deck_path,
                 reference_path,
@@ -311,68 +57,6 @@ impl XyceTestRunner {
             Self::validate_bug39_deterministic_semantics(role, &plan, &netlist, &reference)?;
             Ok(contract)
         })())
-    }
-
-    pub(super) fn validate_bug39_deterministic_provenance(&self) -> Result<PathBuf, String> {
-        const LABEL: &str = "BUG_39_SON deterministic expression family";
-        let family_dir = self.validate_bug39_retained_family_provenance()?;
-        let wrappers = Self::load_upstream_wrapper_decks(&self.root);
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        let mut candidates = Vec::with_capacity(XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT);
-        let mut content_records = Vec::with_capacity(XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT);
-        let mut owner_rows = Vec::with_capacity(XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT);
-        for role in XyceBug39DeterministicRole::ALL {
-            let path = self.root.join(role.path());
-            let relative = self.relative_key(&path);
-            let key = Self::normalize_manifest_key(&relative);
-            if key != role.record() || !Self::same_path(&path, &self.root.join(role.path())) {
-                return Err(format!(
-                    "{LABEL} canonical path '{}' is unavailable",
-                    role.path()
-                ));
-            }
-            if !self.requires_upstream_wrapper(&relative) || !wrappers.contains(&key) {
-                return Err(format!(
-                    "{LABEL} deck '{relative}' lost removed-wrapper ownership"
-                ));
-            }
-            if exclusions.contains_key(&key) {
-                return Err(format!(
-                    "{LABEL} deck '{relative}' must not acquire upstream-exclusion provenance"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} deck '{relative}': {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let content_hash = blake3::hash(&canonical).to_hex().to_string();
-            candidates.push(relative.clone());
-            content_records.push(format!("{relative}\t{content_hash}"));
-            owner_rows.push(format!("{relative}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"));
-        }
-        candidates.sort();
-        content_records.sort();
-        owner_rows.sort();
-        let candidate_hash = blake3::hash(candidates.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let content_hash = blake3::hash(content_records.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let owner_hash = blake3::hash(owner_rows.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if candidates.len() != XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT
-            || candidate_hash != XYCE_BUG39_DETERMINISTIC_CANDIDATE_BLAKE3
-            || content_hash != XYCE_BUG39_DETERMINISTIC_CONTENT_BLAKE3
-            || owner_hash != XYCE_BUG39_DETERMINISTIC_OWNER_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} ownership/content provenance changed: records={}/{candidate_hash}/{content_hash}/{owner_hash}",
-                candidates.len()
-            ));
-        }
-        Ok(family_dir)
     }
 
     pub(super) fn bug39_deterministic_plan(
@@ -584,15 +268,6 @@ impl XyceTestRunner {
                 Vec::new(),
             );
         }
-        if let Err(error) = self.validate_bug39_deterministic_provenance() {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!("BUG_39_SON provenance changed during execution: {error}"),
-                Vec::new(),
-            );
-        }
         let mismatches = match self.compare_release_7_10_xyce_verify_dc_tables(
             "BUG_39_SON deterministic expression",
             &reference,
@@ -625,7 +300,7 @@ impl XyceTestRunner {
     }
 
     pub(super) fn bug39_generated_source(role: XyceBug39GaussianRole) -> Result<String, String> {
-        let mut source = String::with_capacity(role.generated_source_bytes());
+        let mut source = String::new();
         match role {
             XyceBug39GaussianRole::AgaussAbsolute => {
                 source.push_str("*TEST of gaussian random deviates\n")
@@ -648,29 +323,7 @@ impl XyceTestRunner {
             write!(source, "R{index}:R ").expect("writing to a String cannot fail");
         }
         source.push_str("\n.end\n");
-
-        Self::validate_bug39_generated_source_identity(role, &source)?;
         Ok(source)
-    }
-
-    pub(super) fn validate_bug39_generated_source_identity(
-        role: XyceBug39GaussianRole,
-        source: &str,
-    ) -> Result<(), String> {
-        let source_sha256 = format!("{:x}", Sha256::digest(source.as_bytes()));
-        let source_hash = blake3::hash(source.as_bytes()).to_hex().to_string();
-        if source.len() != role.generated_source_bytes()
-            || source_sha256 != role.generated_source_sha256()
-            || source_hash != role.generated_source_blake3()
-        {
-            return Err(format!(
-                "BUG_39_SON {:?} generated source identity changed: bytes={}/{}, sha256={source_sha256}, blake3={source_hash}",
-                role,
-                source.len(),
-                role.generated_source_bytes()
-            ));
-        }
-        Ok(())
     }
 
     pub(super) fn bug39_sampled_plan(

@@ -571,9 +571,6 @@ const XYCE_BUG39_INT_CONTRACT: &str = "bug39_int_single_point_xyce_verify_dc_wra
 const XYCE_BUG39_LIMIT_CONTRACT: &str = "bug39_limit_nominal_single_point_xyce_verify_dc_wrapper";
 const XYCE_BUG39_POW_CONTRACT: &str = "bug39_pow_single_point_xyce_verify_dc_wrapper";
 const XYCE_BUG39_SIGN_CONTRACT: &str = "bug39_sign_single_point_xyce_verify_dc_wrapper";
-const XYCE_BUG39_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const XYCE_BUG39_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG39_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG39_AGAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/agauss.cir";
 const XYCE_BUG39_GAUSS_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/gauss.cir";
 const XYCE_BUG39_AGAUSS_RECORD: &str = "netlists/certification_tests/bug_39_son/agauss.cir";
@@ -586,257 +583,10 @@ const XYCE_BUG39_INT_RECORD: &str = "netlists/certification_tests/bug_39_son/bug
 const XYCE_BUG39_LIMIT_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_limit.cir";
 const XYCE_BUG39_POW_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_pow.cir";
 const XYCE_BUG39_SIGN_RECORD: &str = "netlists/certification_tests/bug_39_son/bug39_sign.cir";
-const XYCE_BUG39_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/Certification_Tests/BUG_39_SON/exclude";
-const XYCE_BUG39_EMPTY_CONTENT_BLAKE3: &str =
-    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
-const XYCE_BUG39_CANDIDATE_COUNT: usize = 2;
-const XYCE_BUG39_CANDIDATE_BLAKE3: &str =
-    "bdfd3ca2dfe1884ee426617f009dfc23e60a306ce21ce78bd7024506e4848f8f";
-const XYCE_BUG39_CANDIDATE_CONTENT_BLAKE3: &str =
-    "ac62ef2c80d39221b0869b597488050562de2326329280399c16cb3b89932bc4";
-const XYCE_BUG39_OWNER_MANIFEST_BLAKE3: &str =
-    "106b025524124c209ed099f9d13e8c0523494320c91811e091b3e0657356fe68";
-const XYCE_BUG39_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "c39fe61b2e9e34fa277f15016d40925329a3965a53083237959ecc9cac7daadd";
-const XYCE_BUG39_DETERMINISTIC_CANDIDATE_COUNT: usize = 4;
-const XYCE_BUG39_DETERMINISTIC_CANDIDATE_BLAKE3: &str =
-    "60eaf1c149554b9a114a4348101c4f6e31f9531ffd66547d03d13488f126d267";
-const XYCE_BUG39_DETERMINISTIC_CONTENT_BLAKE3: &str =
-    "15c9f12196f084ffaf6cf329aab3fdc86c78786836b70774de20f890cd973540";
-const XYCE_BUG39_DETERMINISTIC_OWNER_BLAKE3: &str =
-    "f01c785308ef7ff2d9477720cd4fefead2531f9699a3580d46fa40472bcf77b6";
-const XYCE_BUG39_REQUIRED_ORACLE_RECORD_COUNT: usize = 23;
-const XYCE_BUG39_REQUIRED_ORACLE_BYTES: usize = 5_559;
-const XYCE_BUG39_REQUIRED_ORACLE_SHA256: &str =
-    "9942679e83b82ebcb3ad5d749fc61ba58af88ff3e23d08e550f83d80fc876f7f";
-const XYCE_BUG39_REQUIRED_ORACLE_BLAKE3: &str =
-    "e43bcfb707f28a3fdf35004dc01157e67940fdf1a7c6e74727cff3756ff438f0";
-const XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT: usize = 24;
-const XYCE_BUG39_HISTORICAL_ORACLE_BLAKE3: &str =
-    "f4a60b0bbb5d306718efd7371cfd84181650c71617c8b3ad908859a5e33f5b21";
-const XYCE_BUG39_RETAINED_RECORD_COUNT: usize = 11;
-const XYCE_BUG39_RETAINED_RECORDS_BLAKE3: &str =
-    "6ea5836525a3b58413107c49bf1819d150a1e1f5b7dffa8985e30b78bc92a832";
 const XYCE_BUG39_SAMPLE_COUNT: usize = 10_000;
 const XYCE_BUG39_MEAN: Value = 100.0;
 const XYCE_BUG39_EXPECTED_SIGMA: Value = 1.0;
 const XYCE_BUG39_MOMENT_TOLERANCE: Value = 5.0e-2;
-
-const XYCE_BUG39_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 24] = [
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/README",
-        879,
-        "148d072b44042d70d47ad191f462cd356b1868f4a3dddf49f9d25c271e0b13a0",
-        "37bf9fd8b2e8b91e8f7baa45e985fe19450b18208753eb8533ac473ab6709a70",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/Manifest.txt",
-        285,
-        "57d8660cdfea15e033bf4138f493e92c19beb68a676911232f4d15eef27d7b7d",
-        "ccbf49ce2050f94549bb6d2fbab51d40c4332bd7615585826fd49d10fcdd40cc",
-    ),
-    (
-        XYCE_BUG39_AGAUSS_PATH,
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/agauss.cir.sh",
-        5_235,
-        "2173930707b4a5a349fb03d1f324860f0b2f71180d02ffb88a9510615e0d5055",
-        "c779be31922b96ba6cfe8acfa07ce002852d9cffac791ceddce88480a22ad0df",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir",
-        168,
-        "ed26197d4f299a496f0c714a08c328cda560c1194c25ae0b415f73ff8bb1898c",
-        "62367769e743519c676f1283ee41d33a7310f9556b330f9a5da1178eaac5ec3b",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir.prn.gs",
-        105,
-        "340ab7510b526e583cac2b6ac15388df3217514dc96fe4620514ac47defa015c",
-        "2b05b73a06220bce643b7961dcfe068fe7c14a9bf806100d23e6ee2f66b05629",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_int.cir.sh",
-        1_097,
-        "7c38fcf5e57bbbc015ff4d7c099205c6f0801d4eaee0ac87ea5c1b22baeba9f0",
-        "cf22359501be453ee5822bb84a002554a1fd844c504bb1c90cfabc08146f0380",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir",
-        482,
-        "9b1f3329062d0d7dc1f49b8a94fd88262a796e8dd92ae1c6a2d4fc579f12910f",
-        "32e9d468ab49ec892c36f7672d1d2962f54557c9df8c89f1103185863cc1c007",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir.prn.gs",
-        111,
-        "8eba99b9cfba84e66b518177060d38dc0a8fde786fd0bfc86d9818a35bee212f",
-        "190fe153a2f5887f562ed8d1fdd2546acbab3b2d733bbc9fb2e0bb9f47e703aa",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_limit.cir.sh",
-        1_099,
-        "2bba1611c424ea3332f38cd930a4227599848b98ef84c566874f0c718f22dbc2",
-        "ab0acfba22a5fbc0c43d10295f607ec93068f3dfaf25cb02b383a1c52342dd2e",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir",
-        149,
-        "76625ca95d8a4f51f6161ba610e9d569c0c161bd228cff987f6c049cc21c0f78",
-        "175baf98941dd1e24a7942aef300a9ecc4edfa7a6e8c5cf06094e4ed55606916",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir.prn.gs",
-        105,
-        "ec7adbfa8d794ff0a8c10f0f119c74b57b3f7effb843472c6148fee4cfc2c0d6",
-        "356a59eaec3ff2e5a3dee35f0510dce0b73b512ed5f21e96bef03fc10ff149af",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_pow.cir.sh",
-        1_097,
-        "9f12693fd5d0690197861e8a51612a44c84a59b7a3d7ee94bdc4bbec6fccc11c",
-        "57de1dc11d431315e6a3f8155c6c1510785afa0e2ab35e0095c043fd7fd5e4ce",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir",
-        152,
-        "ea2e5d157bf39d575b2c33c3ef179dfbf9f879f21383ba001eed4bfc300e142d",
-        "cb8c1dfdb32f8e36242b05d475735df124d818337bf9798246ee5e6bcd75ab51",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir.prn.gs",
-        105,
-        "9d1a472e7b465d0c2caa45a16d99328334ea0a894c3fa7da844faa465b393236",
-        "cc173d820146330a519e07328559bf51061a815906837487f06be67c0b7cf545",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/bug39_sign.cir.sh",
-        1_098,
-        "308f59a5d46011dd8cd80a4be0b175c49cb58904b82b5f96241b32697a670f15",
-        "d6a1c069603d12b1bc7e9089de080381ff20bf0e20b3b4e0db96f180bb1f14fd",
-    ),
-    (
-        XYCE_BUG39_GAUSS_PATH,
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/gauss.cir.sh",
-        5_345,
-        "3c6f0797dfb473cedb1b874b54fa53897b0d154c6233ecaf36b079f0f85b9966",
-        "b35c1382598a5a766c72608d166b89f112a727ed5a401007725aa813b2812874",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_39_SON/tags",
-        46,
-        "99021efbf1ed8e6a6563e2cf21f130d010a308452e1b7a2895660e3ac8d904d5",
-        "2b5db3920215b065bab2f4ca1f443963363fcab5e31c9788788e6ca7cf664e34",
-    ),
-    (
-        XYCE_BUG39_HISTORICAL_EXCLUDE_PATH,
-        21,
-        "20533602deb07138a58ed4a233abb4f381c2a1ee77d2d5d2bf4a599fe24446db",
-        "193cec42858538b08aea1096c2a0fd7ddffd4666761078b36ace1a7ffee5ec87",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSources.pm",
-        2_739,
-        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
-        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSweep.pm",
-        9_301,
-        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
-        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
-    ),
-    (
-        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
-        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
-        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
-        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
-    ),
-];
-
-const XYCE_BUG39_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
-    (
-        "agauss.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
-    ),
-    (
-        "bug39_int.cir",
-        168,
-        "ed26197d4f299a496f0c714a08c328cda560c1194c25ae0b415f73ff8bb1898c",
-        "62367769e743519c676f1283ee41d33a7310f9556b330f9a5da1178eaac5ec3b",
-    ),
-    (
-        "bug39_int.cir.prn.gs",
-        105,
-        "340ab7510b526e583cac2b6ac15388df3217514dc96fe4620514ac47defa015c",
-        "2b05b73a06220bce643b7961dcfe068fe7c14a9bf806100d23e6ee2f66b05629",
-    ),
-    (
-        "bug39_limit.cir",
-        482,
-        "9b1f3329062d0d7dc1f49b8a94fd88262a796e8dd92ae1c6a2d4fc579f12910f",
-        "32e9d468ab49ec892c36f7672d1d2962f54557c9df8c89f1103185863cc1c007",
-    ),
-    (
-        "bug39_limit.cir.prn.gs",
-        111,
-        "8eba99b9cfba84e66b518177060d38dc0a8fde786fd0bfc86d9818a35bee212f",
-        "190fe153a2f5887f562ed8d1fdd2546acbab3b2d733bbc9fb2e0bb9f47e703aa",
-    ),
-    (
-        "bug39_pow.cir",
-        149,
-        "76625ca95d8a4f51f6161ba610e9d569c0c161bd228cff987f6c049cc21c0f78",
-        "175baf98941dd1e24a7942aef300a9ecc4edfa7a6e8c5cf06094e4ed55606916",
-    ),
-    (
-        "bug39_pow.cir.prn.gs",
-        105,
-        "ec7adbfa8d794ff0a8c10f0f119c74b57b3f7effb843472c6148fee4cfc2c0d6",
-        "356a59eaec3ff2e5a3dee35f0510dce0b73b512ed5f21e96bef03fc10ff149af",
-    ),
-    (
-        "bug39_sign.cir",
-        152,
-        "ea2e5d157bf39d575b2c33c3ef179dfbf9f879f21383ba001eed4bfc300e142d",
-        "cb8c1dfdb32f8e36242b05d475735df124d818337bf9798246ee5e6bcd75ab51",
-    ),
-    (
-        "bug39_sign.cir.prn.gs",
-        105,
-        "9d1a472e7b465d0c2caa45a16d99328334ea0a894c3fa7da844faa465b393236",
-        "cc173d820146330a519e07328559bf51061a815906837487f06be67c0b7cf545",
-    ),
-    (
-        "gauss.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        XYCE_BUG39_EMPTY_CONTENT_BLAKE3,
-    ),
-    (
-        "README",
-        879,
-        "148d072b44042d70d47ad191f462cd356b1868f4a3dddf49f9d25c271e0b13a0",
-        "37bf9fd8b2e8b91e8f7baa45e985fe19450b18208753eb8533ac473ab6709a70",
-    ),
-];
 
 // Release 7.10's BUG_402_SON wrapper runs the canonical Xyce
 // `.OPTIONS DEVICE TEMP=35` deck first, then the legacy SPICE
@@ -849,9 +599,6 @@ const XYCE_BUG402_XYCE_REFERENCE_CONTRACT: &str =
     "bug402_temperature_option_scope_relational_xyce_reference";
 const XYCE_BUG402_SPICE_MEMBER_CONTRACT: &str =
     "bug402_temperature_option_scope_relational_spice_member";
-const XYCE_BUG402_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const XYCE_BUG402_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG402_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG402_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_402_SON/bug402son.cir";
 const XYCE_BUG402_XYCE_REFERENCE_PATH: &str =
     "Netlists/Certification_Tests/BUG_402_SON/bug402XyceTempOptions.cir";
@@ -862,129 +609,7 @@ const XYCE_BUG402_XYCE_REFERENCE_RECORD: &str =
     "netlists/certification_tests/bug_402_son/bug402xycetempoptions.cir";
 const XYCE_BUG402_SPICE_MEMBER_RECORD: &str =
     "netlists/certification_tests/bug_402_son/bug402spicetempoptions.cir";
-const XYCE_BUG402_HISTORICAL_EXCLUDE_PATH: &str =
-    "Netlists/Certification_Tests/BUG_402_SON/exclude";
-const XYCE_BUG402_HISTORICAL_RECORD_COUNT: usize = 13;
-const XYCE_BUG402_HISTORICAL_RECORD_BYTES: usize = 3_111;
-const XYCE_BUG402_HISTORICAL_RECORDS_SHA256: &str =
-    "1ff1a9451de049f1156dafc4c6ed183f46119020a18f011afc39ba3889f18326";
-const XYCE_BUG402_HISTORICAL_RECORDS_BLAKE3: &str =
-    "d709cca8f53047ea80f2eb83c3bf0e96edaca874302f1985e375e26874a59704";
-const XYCE_BUG402_RETAINED_RECORD_COUNT: usize = 4;
-const XYCE_BUG402_RETAINED_RECORD_BYTES: usize = 611;
-const XYCE_BUG402_RETAINED_RECORDS_SHA256: &str =
-    "8ce7e9cddff050048c59065652c124ef2d49a22710a1738d136f7092443b2b78";
-const XYCE_BUG402_RETAINED_RECORDS_BLAKE3: &str =
-    "21d37da187ca098ed60788969dcbafca286b7d093c9d425529f1d9a813af8c0c";
 const XYCE_BUG402_DC_POINT_COUNT: usize = 51;
-
-const XYCE_BUG402_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 13] = [
-    (
-        "Netlists/Certification_Tests/BUG_402_SON/CMakeLists.txt",
-        1_679,
-        "f527618218b4c20f09c7e081af2a889b2c96d20c06de57913fb59aa2b035ed94",
-        "2ee4f59fc80286e0a26ed85babb5b5e97f079af6ee79a89ef226794fdc82d485",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_402_SON/Manifest.txt",
-        104,
-        "52be93a816570755e87fdcbddfe264761a40747998f34f9ee2857d51c1339db3",
-        "3a763c27d89cd630fed8180a36b6346d0af065d29464a32312ac17709c26366a",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_402_SON/README",
-        385,
-        "869fcd0742641e619af164c016a9dee520b581c9cd272ace32cc2a2457bc835a",
-        "de6005465a28610ffa126624506fe999e0f28b59083eaea37ac4688845b07156",
-    ),
-    (
-        XYCE_BUG402_SPICE_MEMBER_PATH,
-        1_096,
-        "4fffcf69d172c4d614673de74539634997dd35776743408ebe160701ff339d4c",
-        "dd4b124276431c8b9baca2fb9840b79768ec5843ef4afb20e68ccba17549e007",
-    ),
-    (
-        XYCE_BUG402_XYCE_REFERENCE_PATH,
-        1_102,
-        "aefc2180e4bb6a5b39e3f4105546f3c5ba22af3b74f003d2d4d3c55f45938e9e",
-        "8624a2ec9239bc664b979f01400729da865ce90a887128c92f42da4d21c9af1d",
-    ),
-    (
-        XYCE_BUG402_OWNER_PATH,
-        115,
-        "95f417f0cc5ff658ef4a79e88f69bb9964be771688d6a75629483c3ddd2cd72d",
-        "9f19d4388692a257a348ab24a50885198ce2f10854eafc9f44ada4c96b37c2a7",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_402_SON/bug402son.cir.sh",
-        1_995,
-        "798c64c762c996fb82935fcf320921e6151e3917daa0652d26af90556372598b",
-        "aa134307353972d33f0cc8b3ccacf486258ab66ed85399fb021ab3751e98b710",
-    ),
-    (
-        XYCE_BUG402_HISTORICAL_EXCLUDE_PATH,
-        54,
-        "f79abe0ee683e65894a7a4d4d96e55bf1ebc8c545601f40c5f3c9e8c1de984b2",
-        "49588e88f0ffe165e0a0bfd101fc689f91523be673a1435321e208333877b4b2",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_402_SON/tags",
-        32,
-        "a1b81f4136c15ef5d8965a5ea19cb9245b6e7f8297476a01b4dd5743327cfd23",
-        "f3260384fe5fe9b068601a1b5828440bf38cbdda3bc6ff0f1cceb6165dcb233e",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSources.pm",
-        2_739,
-        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
-        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSweep.pm",
-        9_301,
-        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
-        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
-    ),
-    (
-        XYCE_RELEASE_710_XYCE_VERIFY_PATH,
-        XYCE_RELEASE_710_XYCE_VERIFY_BYTES,
-        XYCE_RELEASE_710_XYCE_VERIFY_SHA256,
-        XYCE_RELEASE_710_XYCE_VERIFY_BLAKE3,
-    ),
-];
-
-const XYCE_BUG402_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
-    (
-        "bug402son.cir",
-        115,
-        "95f417f0cc5ff658ef4a79e88f69bb9964be771688d6a75629483c3ddd2cd72d",
-        "9f19d4388692a257a348ab24a50885198ce2f10854eafc9f44ada4c96b37c2a7",
-    ),
-    (
-        "bug402SpiceTempOptions.cir",
-        1_096,
-        "4fffcf69d172c4d614673de74539634997dd35776743408ebe160701ff339d4c",
-        "dd4b124276431c8b9baca2fb9840b79768ec5843ef4afb20e68ccba17549e007",
-    ),
-    (
-        "bug402XyceTempOptions.cir",
-        1_102,
-        "aefc2180e4bb6a5b39e3f4105546f3c5ba22af3b74f003d2d4d3c55f45938e9e",
-        "8624a2ec9239bc664b979f01400729da865ce90a887128c92f42da4d21c9af1d",
-    ),
-    (
-        "README",
-        385,
-        "869fcd0742641e619af164c016a9dee520b581c9cd272ace32cc2a2457bc835a",
-        "de6005465a28610ffa126624506fe999e0f28b59083eaea37ac4688845b07156",
-    ),
-];
 
 const XYCE_BUG354_FUNCTION_PATH: &str = "Netlists/Certification_Tests/BUG_354_SON/bad_function.cir";
 const XYCE_BUG354_LEAD_CURRENT_PATH: &str =
@@ -10061,6 +9686,7 @@ enum XyceBug39DeterministicRole {
 }
 
 impl XyceBug39DeterministicRole {
+    #[cfg(test)]
     const ALL: [Self; 4] = [Self::Int, Self::LimitNominal, Self::Pow, Self::Sign];
 
     fn result_contract(self) -> &'static str {
@@ -10139,46 +9765,10 @@ impl XyceBug39GaussianRole {
         }
     }
 
-    fn record(self) -> &'static str {
-        match self {
-            Self::AgaussAbsolute => XYCE_BUG39_AGAUSS_RECORD,
-            Self::GaussRelative => XYCE_BUG39_GAUSS_RECORD,
-        }
-    }
-
     fn generated_file_name(self) -> &'static str {
         match self {
             Self::AgaussAbsolute => "testagauss.cir",
             Self::GaussRelative => "testgauss.cir",
-        }
-    }
-
-    fn generated_source_blake3(self) -> &'static str {
-        match self {
-            Self::AgaussAbsolute => {
-                "1c1bc1b8d196596b7243940066cdc0ed78466f7828a11428e0abdbd84b822aa4"
-            }
-            Self::GaussRelative => {
-                "43c397a68a44734ca24c199e7ee40cfb3104eafd675644767f91f7db4c01ef2d"
-            }
-        }
-    }
-
-    fn generated_source_sha256(self) -> &'static str {
-        match self {
-            Self::AgaussAbsolute => {
-                "ae8438d949eb59deeb7d7b37542a1d1399a0c1c536c87adb51c158a7fcb8acf0"
-            }
-            Self::GaussRelative => {
-                "607d721eae7f6f9a7082150d9a476c59163bb11276f1c99f6e3fefa027a13ab5"
-            }
-        }
-    }
-
-    fn generated_source_bytes(self) -> usize {
-        match self {
-            Self::AgaussAbsolute => 377_897,
-            Self::GaussRelative => 377_926,
         }
     }
 

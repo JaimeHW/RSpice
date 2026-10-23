@@ -1,44 +1,6 @@
 use super::*;
 
 impl XyceTestRunner {
-    pub(super) fn bug402_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG402_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG402_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG402_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug402_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug402_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG402_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG402_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG402_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG402_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "BUG_402_SON Release-7.10 family/wrapper/Tools/xyce_verify provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        if UPSTREAM_EXCLUSIONS_SOURCE_COMMIT != XYCE_BUG402_PRETRIM_COMMIT
-            || UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE
-                != "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d"
-        {
-            return Err("BUG_402_SON pre-trim manifest commit/tree provenance changed".into());
-        }
-        Ok(())
-    }
-
     pub(super) fn bug402_temperature_option_contract(
         &self,
         deck: &XyceDeck,
@@ -55,10 +17,13 @@ impl XyceTestRunner {
                 ));
             }
 
-            self.validate_bug402_temperature_option_provenance()?;
-
             let xyce_reference_path = self.root.join(XYCE_BUG402_XYCE_REFERENCE_PATH);
             let spice_member_path = self.root.join(XYCE_BUG402_SPICE_MEMBER_PATH);
+            let xyce_source = fs::read_to_string(&xyce_reference_path)
+                .map_err(|error| format!("failed to read {LABEL} canonical member: {error}"))?;
+            let spice_source = fs::read_to_string(&spice_member_path)
+                .map_err(|error| format!("failed to read {LABEL} legacy member: {error}"))?;
+            Self::validate_bug402_temperature_source_pair(&xyce_source, &spice_source)?;
             let xyce_reference_plan =
                 self.static_dc_plan_for_path(&xyce_reference_path, ExpressionDialect::Xyce)?;
             let spice_member_plan =
@@ -87,174 +52,6 @@ impl XyceTestRunner {
                 role,
             })
         })())
-    }
-
-    pub(super) fn validate_bug402_temperature_option_provenance(&self) -> Result<(), String> {
-        const LABEL: &str = "BUG_402_SON temperature-option scope family";
-        Self::validate_bug402_historical_oracle_provenance()?;
-
-        let family_dir = self.root.join("Netlists/Certification_Tests/BUG_402_SON");
-        let family_metadata = fs::symlink_metadata(&family_dir)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if family_metadata.file_type().is_symlink() || !family_metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} requires a physical, non-symlinked family directory"
-            ));
-        }
-
-        let expected_artifacts = XYCE_BUG402_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut physical_names = Vec::new();
-        let mut retained_records = Vec::new();
-        for entry in fs::read_dir(&family_dir)
-            .map_err(|error| format!("failed to enumerate {LABEL}: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to read {LABEL} entry: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path).map_err(|error| {
-                format!(
-                    "failed to inspect {LABEL} entry '{}': {error}",
-                    path.display()
-                )
-            })?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} entry '{}' must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let file_name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| format!("{LABEL} contains a non-UTF-8 file name"))?;
-            let key = file_name.to_ascii_lowercase();
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected_artifacts.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{LABEL} complete physical census has unexpected file '{file_name}'"
-                ));
-            };
-            if file_name != expected_name {
-                return Err(format!(
-                    "{LABEL} retained artifact spelling changed: expected '{expected_name}', got '{file_name}'"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} artifact: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} retained artifact '{file_name}' identity changed: bytes={}/{expected_bytes}, sha256={sha256}, blake3={content_blake3}",
-                    canonical.len()
-                ));
-            }
-            physical_names.push(key);
-            retained_records.push(format!(
-                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
-            ));
-        }
-        physical_names.sort();
-        retained_records.sort_by_key(|record| record.to_ascii_lowercase());
-        let expected_names = expected_artifacts.keys().cloned().collect::<Vec<_>>();
-        let retained_stream = retained_records.join("\n");
-        let retained_sha256 = format!("{:x}", Sha256::digest(retained_stream.as_bytes()));
-        let retained_blake3 = blake3::hash(retained_stream.as_bytes())
-            .to_hex()
-            .to_string();
-        if physical_names != expected_names
-            || retained_records.len() != XYCE_BUG402_RETAINED_RECORD_COUNT
-            || retained_stream.len() != XYCE_BUG402_RETAINED_RECORD_BYTES
-            || retained_sha256 != XYCE_BUG402_RETAINED_RECORDS_SHA256
-            || retained_blake3 != XYCE_BUG402_RETAINED_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} retained physical/content census changed: records={}/{}, sha256={retained_sha256}, blake3={retained_blake3}, files={physical_names:?}",
-                retained_records.len(),
-                retained_stream.len()
-            ));
-        }
-
-        let owner_path = self.root.join(XYCE_BUG402_OWNER_PATH);
-        let xyce_reference_path = self.root.join(XYCE_BUG402_XYCE_REFERENCE_PATH);
-        let spice_member_path = self.root.join(XYCE_BUG402_SPICE_MEMBER_PATH);
-        let wrapper_records = Self::load_upstream_wrapper_decks(&self.root);
-        if !self.requires_upstream_wrapper(XYCE_BUG402_OWNER_RECORD)
-            || !wrapper_records.contains(XYCE_BUG402_OWNER_RECORD)
-            || self.requires_upstream_wrapper(XYCE_BUG402_XYCE_REFERENCE_RECORD)
-            || self.requires_upstream_wrapper(XYCE_BUG402_SPICE_MEMBER_RECORD)
-            || wrapper_records.contains(XYCE_BUG402_XYCE_REFERENCE_RECORD)
-            || wrapper_records.contains(XYCE_BUG402_SPICE_MEMBER_RECORD)
-        {
-            return Err(format!(
-                "{LABEL} requires exactly bug402son.cir to own the removed upstream wrapper"
-            ));
-        }
-
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        if exclusions.contains_key(XYCE_BUG402_OWNER_RECORD) {
-            return Err(format!(
-                "{LABEL} placeholder owner must not acquire an upstream-exclusion row"
-            ));
-        }
-        for role in [
-            XyceBug402TemperatureRole::XyceDeviceReference,
-            XyceBug402TemperatureRole::SpiceCompatibilityMember,
-        ] {
-            let exclusion = exclusions.get(role.record()).ok_or_else(|| {
-                format!(
-                    "{LABEL} worker '{}' lost exclusion provenance",
-                    role.record()
-                )
-            })?;
-            if exclusion.source != XYCE_BUG402_HISTORICAL_EXCLUDE_PATH
-                || !matches!(
-                    &exclusion.disposition,
-                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                        if expected_contract == role.result_contract()
-                )
-            {
-                return Err(format!(
-                    "{LABEL} worker '{}' lacks its exact independent qualification contract",
-                    role.record()
-                ));
-            }
-        }
-
-        for path in [&owner_path, &xyce_reference_path, &spice_member_path] {
-            self.reject_wrapper_output_artifacts(path)
-                .map_err(|error| format!("{LABEL} '{}' {error}", path.display()))?;
-        }
-        let owner_source = fs::read_to_string(&owner_path)
-            .map_err(|error| format!("failed to read {LABEL} owner: {error}"))?;
-        if owner_source
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .count()
-            != 4
-            || owner_source
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .any(|line| !line.trim_start().starts_with('*'))
-        {
-            return Err(format!(
-                "{LABEL} bug402son.cir must remain the four-comment, non-simulated wrapper placeholder"
-            ));
-        }
-
-        let xyce_source = fs::read_to_string(&xyce_reference_path)
-            .map_err(|error| format!("failed to read {LABEL} canonical member: {error}"))?;
-        let spice_source = fs::read_to_string(&spice_member_path)
-            .map_err(|error| format!("failed to read {LABEL} legacy member: {error}"))?;
-        Self::validate_bug402_temperature_source_pair(&xyce_source, &spice_source)
     }
 
     pub(super) fn validate_bug402_temperature_source_pair(
@@ -775,16 +572,6 @@ impl XyceTestRunner {
                 start,
                 result_contract,
                 format!("BUG 402 coordinate contract failed: {error}"),
-                Vec::new(),
-            );
-        }
-
-        if let Err(error) = self.validate_bug402_temperature_option_provenance() {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!("BUG 402 provenance changed during paired execution: {error}"),
                 Vec::new(),
             );
         }

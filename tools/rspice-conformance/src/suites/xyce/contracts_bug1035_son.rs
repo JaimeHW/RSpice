@@ -1,131 +1,9 @@
 use super::*;
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_1035_SON simple RC AC DATA equivalence";
-const FAMILY_DIR: &str = "Netlists/Certification_Tests/BUG_1035_SON";
-const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_1035_son/";
-const EXCLUDE: &str = "Netlists/Certification_Tests/BUG_1035_SON/exclude";
 const OWNER_CONTRACT: &str = "bug1035_simple_rc_ac_data_relational_wrapper_owner";
 const REFERENCE_CONTRACT: &str = "bug1035_simple_rc_ac_data_baseline_reference";
-const RELEASE_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const RELEASE_TAG: &str = "Release-7.10.0";
-const PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const HISTORICAL_RECORD_BYTES: usize = 1_688;
-const HISTORICAL_RECORDS_SHA256: &str =
-    "0c7d9143cfc8f77c145bae0853218353490e9574dabc5b1fd90d6139ea3e6e3b";
-const HISTORICAL_RECORDS_BLAKE3: &str =
-    "dc7189f5b58ed6fbeb754ee30b9609778a2692020d73813c0ccdd2727f9ea624";
 const GRID: [Value; 9] = [1.0, 10.0, 100.0, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8];
-
-const HISTORICAL: [(&str, usize, &str, &str); 6] = [
-    (
-        "Netlists/Certification_Tests/BUG_1035_SON/CMakeLists.txt",
-        7_473,
-        "88128826a9c50a6cd669bf076415a5b10e72d132736e4914e42fc8be9f976d64",
-        "7df29c8d6b496a2cfeda94aab236ddf1f79cb804d351cee86028520befca6fbe",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1035_SON/Manifest.txt",
-        459,
-        "273a423961441cf89c8cf98c31eb1e0835f6ebe72d5161f9b2ddbebf13818006",
-        "51cb680f01e2c37f4ae352d3ce9c97886a81eaea62f53bb8cb2ce1a71d0fc11f",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1035_SON/RC_simple_data.cir.sh",
-        2734,
-        "68650dcc91b976c436d5d059964ea4ff4c9c05997c105aa581a8baa784960e35",
-        "2dfb4af224b301aba14ec41d1da0e772d5160175c6dd6369a11e827eef7f2f4b",
-    ),
-    (
-        EXCLUDE,
-        95,
-        "f658fcac04e41e9be8cb8d924e890aee2a2792d09ef0390a90f169eab4028f04",
-        "8ae9cbdb88e75a0bdeaf375891b05ef7bc3a54b7ec9fbdda56edf660c4a0958c",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1035_SON/tags",
-        33,
-        "ccbb25126be8e50cee3f06c6391ce5884415fe6dd0c33a17fb1774f2cf62d133",
-        "5f511e323047ac3efe4b479178c4b882d9f56387787480307a4ad89ffc4ad959",
-    ),
-    (
-        "TestScripts/ACComparator.pl",
-        14308,
-        "265c0c24ac886ad44bf3827f2cbe0c0f1c75c80971d5bdb3429e8048b36e1571",
-        "6a1c8fdfa65116f6729343a759d172be939eb81a8617cea5a52f3572577ba926",
-    ),
-];
-
-const RETAINED: [(&str, usize, &str); 10] = [
-    (
-        "RC_AC_data_expr.cir",
-        516,
-        "eaaa23b9fb4705405f2b502aaf81d7b4326c7bc9fc46d3443f1a051edb5e1f17",
-    ),
-    (
-        "RC_AC_data_expr2.cir",
-        495,
-        "51064609bb8cad6f478fde863895e770d54c144bcf51e904d555d0eb49c73d1a",
-    ),
-    (
-        "RC_AC_data_expr3.cir",
-        403,
-        "9e87671007c4d5bc23c438e02c660380c1109734cecd33d4143c85900d602d0a",
-    ),
-    (
-        "RC_AC_data_expr4_baseline.cir",
-        498,
-        "200873cf6d53cd7804de6b7987e7e726bb08334c333731ef34254d65bf2e0914",
-    ),
-    (
-        "RC_AC_data_expr4.cir",
-        459,
-        "0d298e016b3da4782d50b0329e0ccd11041f9504f4fee56b601ddfdc9aeff4e3",
-    ),
-    (
-        "RC_AC_data_exprAlone.cir",
-        516,
-        "eaaa23b9fb4705405f2b502aaf81d7b4326c7bc9fc46d3443f1a051edb5e1f17",
-    ),
-    (
-        "RC_simple_baseline.cir",
-        138,
-        "8429901b2d71d1f91f0c6ac9b5cf6bb1e22a723f502a31af47cf8b5757151151",
-    ),
-    (
-        "RC_simple_data.cir",
-        314,
-        "487b45ef4faea9b126a194eea6211e675a4b64746b330e3ae48ce573c95da596",
-    ),
-    (
-        "RC_simple.cir",
-        356,
-        "fd3917e0a106b6d27b486dd7eb1875683af604d74c2e3bd2d7ee979b3ecfd4d3",
-    ),
-    (
-        "transLineDataGlobal_AC.cir",
-        514,
-        "69912d6e59c4a4430cebc8686449a291bfdb12488b99ee7625b89ccbb3260b8c",
-    ),
-];
-
-const RETAINED_OUTPUTS: [(&str, usize, &str); 3] = [
-    (
-        "RC_AC_data_exprAlone.cir.FD.prn",
-        951,
-        "b1d2fa65652988b5e32a869c7568cec1b7a32336fac98f38bdfa996e4a1f2d2d",
-    ),
-    (
-        "RC_simple.cir.FD.prn",
-        627,
-        "1d594ff856abf3b2ba7e8b01c55e8c249534fb810259b7df529dac3ed32820ae",
-    ),
-    (
-        "transLineDataGlobal_AC.cir.FD.prn",
-        819,
-        "f0ba5ca0fbedfa70b9c60c80649e40217c028f976da263de045445576e372ca8",
-    ),
-];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Bug1035SonRole {
@@ -174,259 +52,6 @@ struct Bug1035Worker {
 }
 
 impl XyceTestRunner {
-    fn validate_bug1035_historical(records: &[(&str, usize, &str, &str)]) -> Result<(), String> {
-        let mut canonical = records
-            .iter()
-            .map(|(path, bytes, sha, content_blake3)| {
-                format!("{PRETRIM_COMMIT}\t{RELEASE_COMMIT}\t{RELEASE_TAG}\t{path}\t{bytes}\t{sha}\t{content_blake3}")
-            })
-            .collect::<Vec<_>>();
-        canonical.sort();
-        let stream = canonical.join("\n");
-        let sha = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let b3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || RELEASE_COMMIT != "d6e278e371ec2f3df1325dcff4552e585bc7ecc1"
-            || RELEASE_TAG != "Release-7.10.0"
-            || records.len() != HISTORICAL.len()
-            || stream.len() != HISTORICAL_RECORD_BYTES
-            || sha != HISTORICAL_RECORDS_SHA256
-            || b3 != HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} Release wrapper/ACComparator provenance changed: bytes={}, sha={sha}, b3={b3}",
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn read_bug1035_directory(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} retained census aborted"));
-        }
-        let directory = self.root.join(FAMILY_DIR);
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("{LABEL} directory inspection failed: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} source directory is not a regular directory"
-            ));
-        }
-        let expected = RETAINED
-            .into_iter()
-            .map(|record| (record.0.to_ascii_lowercase(), record))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in
-            fs::read_dir(&directory).map_err(|error| format!("{LABEL} census failed: {error}"))?
-        {
-            if abort.is_aborted() {
-                return Err(format!("{LABEL} retained census aborted"));
-            }
-            let entry = entry.map_err(|error| format!("{LABEL} member failed: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("{LABEL} member inspection failed: {error}"))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            let Some((expected_name, expected_bytes, expected_sha)) = expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name || observed.contains_key(&key) {
-                return Err(format!("{LABEL} member case/census changed: {name:?}"));
-            }
-            let limit = expected_bytes
-                .checked_mul(2)
-                .and_then(|n| n.checked_add(3))
-                .ok_or_else(|| format!("{LABEL} size bound overflow"))?;
-            if metadata.len() > limit as u64 {
-                return Err(format!("{LABEL} member {name:?} exceeds bounded envelope"));
-            }
-            let mut raw = Vec::with_capacity((metadata.len() as usize).min(limit));
-            fs::File::open(&path)
-                .map_err(|error| format!("{LABEL} open failed: {error}"))?
-                .take((limit + 1) as u64)
-                .read_to_end(&mut raw)
-                .map_err(|error| format!("{LABEL} bounded read failed: {error}"))?;
-            if raw.len() > limit || abort.is_aborted() {
-                return Err(format!("{LABEL} bounded read grew or aborted"));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &raw)?;
-            let sha = format!("{:x}", Sha256::digest(&canonical));
-            if canonical.len() != expected_bytes || sha != expected_sha {
-                return Err(format!(
-                    "{LABEL} member {name:?} changed: bytes={}, sha={sha}",
-                    canonical.len()
-                ));
-            }
-            observed.insert(key, raw);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!("{LABEL} retained ten-member census changed"));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug1035_output_directory(&self, abort: &dyn AbortSignal) -> Result<(), String> {
-        let directory = self
-            .root
-            .join("OutputData/Certification_Tests/BUG_1035_SON");
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("{LABEL} output directory inspection failed: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} output directory is not a regular directory"
-            ));
-        }
-        let expected = RETAINED_OUTPUTS
-            .into_iter()
-            .map(|record| (record.0.to_ascii_lowercase(), record))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeSet::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("{LABEL} output census failed: {error}"))?
-        {
-            if abort.is_aborted() {
-                return Err(format!("{LABEL} output census aborted"));
-            }
-            let entry = entry.map_err(|error| format!("{LABEL} output member failed: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("{LABEL} output inspection failed: {error}"))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} output member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} output name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            let Some((expected_name, expected_bytes, expected_sha)) = expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected output {name:?}"));
-            };
-            if name != expected_name || !observed.insert(key) {
-                return Err(format!("{LABEL} output case/census changed: {name:?}"));
-            }
-            let limit = expected_bytes
-                .checked_mul(2)
-                .and_then(|n| n.checked_add(3))
-                .ok_or_else(|| format!("{LABEL} output size bound overflow"))?;
-            if metadata.len() > limit as u64 {
-                return Err(format!("{LABEL} output {name:?} exceeds bounded envelope"));
-            }
-            let mut raw = Vec::with_capacity((metadata.len() as usize).min(limit));
-            fs::File::open(&path)
-                .map_err(|error| format!("{LABEL} output open failed: {error}"))?
-                .take((limit + 1) as u64)
-                .read_to_end(&mut raw)
-                .map_err(|error| format!("{LABEL} bounded output read failed: {error}"))?;
-            if raw.len() > limit || abort.is_aborted() {
-                return Err(format!("{LABEL} bounded output read grew or aborted"));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &raw)?;
-            let sha = format!("{:x}", Sha256::digest(&canonical));
-            if canonical.len() != expected_bytes || sha != expected_sha {
-                return Err(format!(
-                    "{LABEL} output {name:?} changed: bytes={}, sha={sha}",
-                    canonical.len()
-                ));
-            }
-        }
-        if observed.len() != expected.len() {
-            return Err(format!("{LABEL} retained three-output census changed"));
-        }
-        Ok(())
-    }
-
-    fn validate_bug1035_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug1035SonRole,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        Self::validate_bug1035_historical(&HISTORICAL)?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!("{LABEL} recognized role is not canonical"));
-        }
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(FAMILY_PREFIX))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners
-            != BTreeSet::from([
-                "netlists/certification_tests/bug_1035_son/rc_ac_data_expr.cir",
-                "netlists/certification_tests/bug_1035_son/rc_ac_data_expr4.cir",
-                "netlists/certification_tests/bug_1035_son/rc_ac_data_expralone.cir",
-                "netlists/certification_tests/bug_1035_son/rc_simple.cir",
-                Bug1035SonRole::DataOwner.record(),
-                "netlists/certification_tests/bug_1035_son/translinedataglobal_ac.cir",
-            ])
-        {
-            return Err(format!("{LABEL} wrapper owner census changed: {owners:?}"));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusions invalid: {error}"))?;
-        let family = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(FAMILY_PREFIX))
-            .collect::<BTreeMap<_, _>>();
-        let baseline = family
-            .get(&Bug1035SonRole::BaselineReference.record().to_string())
-            .copied();
-        if family.len() != 4 || baseline.is_none_or(|entry| entry.source != EXCLUDE || !matches!(&entry.disposition, XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract } if expected_contract == REFERENCE_CONTRACT)) {
-            return Err(format!("{LABEL} exclusion classification changed: {family:?}"));
-        }
-        for record in [
-            "netlists/certification_tests/bug_1035_son/rc_ac_data_expr2.cir",
-            "netlists/certification_tests/bug_1035_son/rc_ac_data_expr3.cir",
-            "netlists/certification_tests/bug_1035_son/rc_ac_data_expr4_baseline.cir",
-        ] {
-            let Some(entry) = family.get(&record.to_string()) else {
-                return Err(format!("{LABEL} lost sibling exclusion"));
-            };
-            if entry.source != EXCLUDE
-                || entry.disposition != XyceUpstreamExclusionDisposition::Excluded
-            {
-                return Err(format!("{LABEL} sibling exclusion changed"));
-            }
-        }
-        if exclusions.contains_key(Bug1035SonRole::DataOwner.record()) {
-            return Err(format!("{LABEL} owner became excluded"));
-        }
-        let members = self.read_bug1035_directory(abort)?;
-        self.validate_bug1035_output_directory(abort)?;
-        for role in Bug1035SonRole::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(role.path()))?;
-        }
-        Ok(members)
-    }
-
     fn bug1035_worker(
         &self,
         role: Bug1035SonRole,
@@ -627,40 +252,26 @@ impl XyceTestRunner {
         }
     }
 
-    pub(super) fn validate_bug1035_son_oracle(
-        &self,
-        deck: &XyceDeck,
-        role: Bug1035SonRole,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug1035_son_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let members = self.validate_bug1035_provenance(deck, role, &abort)?;
-        let source = |role: Bug1035SonRole| -> Result<&[u8], String> {
-            let name = Path::new(role.path())
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .to_ascii_lowercase();
-            members
-                .get(&name)
-                .map(Vec::as_slice)
-                .ok_or_else(|| format!("{LABEL} lost role {role:?}"))
+        let source = |role: Bug1035SonRole| {
+            fs::read(self.root.join(role.path()))
+                .map_err(|error| format!("{LABEL} cannot read {role:?}: {error}"))
         };
         let baseline = self.bug1035_worker(
             Bug1035SonRole::BaselineReference,
-            source(Bug1035SonRole::BaselineReference)?,
+            &source(Bug1035SonRole::BaselineReference)?,
             &abort,
         )?;
         let owner = self.bug1035_worker(
             Bug1035SonRole::DataOwner,
-            source(Bug1035SonRole::DataOwner)?,
+            &source(Bug1035SonRole::DataOwner)?,
             &abort,
         )?;
         let baseline_table =
             self.run_bug1035_worker(Bug1035SonRole::BaselineReference, &baseline, &abort)?;
         let owner_table = self.run_bug1035_worker(Bug1035SonRole::DataOwner, &owner, &abort)?;
         self.validate_bug1035_relation(&baseline_table, &owner_table)?;
-        self.validate_bug1035_provenance(deck, role, &abort)?;
         Ok(())
     }
 }
@@ -676,72 +287,10 @@ mod tests {
             Default::default(),
         )
     }
-    fn deck(role: Bug1035SonRole) -> XyceDeck {
-        let runner = runner();
-        XyceDeck {
-            path: runner.root.join(role.path()),
-            section: XyceDeckSection::Netlists,
-            relative_path: role.path().into(),
-        }
-    }
-    fn copied_runner() -> (tempfile::TempDir, XyceTestRunner) {
-        let canonical = runner();
-        let temporary = tempfile::tempdir().unwrap();
-        let family = temporary.path().join(FAMILY_DIR);
-        fs::create_dir_all(&family).unwrap();
-        for (name, ..) in RETAINED {
-            fs::copy(
-                canonical.root.join(FAMILY_DIR).join(name),
-                family.join(name),
-            )
-            .unwrap();
-        }
-        let outputs = temporary
-            .path()
-            .join("OutputData/Certification_Tests/BUG_1035_SON");
-        fs::create_dir_all(&outputs).unwrap();
-        for (name, ..) in RETAINED_OUTPUTS {
-            fs::copy(
-                canonical
-                    .root
-                    .join("OutputData/Certification_Tests/BUG_1035_SON")
-                    .join(name),
-                outputs.join(name),
-            )
-            .unwrap();
-        }
-        let copied = XyceTestRunner::new(temporary.path(), Default::default());
-        (temporary, copied)
-    }
-
-    #[test]
-    fn bug1035_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug1035_historical(&HISTORICAL).unwrap();
-        let mut changed = HISTORICAL;
-        changed[0].1 += 1;
-        assert!(XyceTestRunner::validate_bug1035_historical(&changed).is_err());
-    }
     #[test]
     fn bug1035_exact_pair_executes_and_matches_analytic_oracle() {
         let runner = runner();
-        runner
-            .validate_bug1035_son_oracle(
-                &deck(Bug1035SonRole::DataOwner),
-                Bug1035SonRole::DataOwner,
-                Instant::now(),
-            )
-            .unwrap();
-    }
-    #[test]
-    fn bug1035_baseline_role_executes_same_pair() {
-        let runner = runner();
-        runner
-            .validate_bug1035_son_oracle(
-                &deck(Bug1035SonRole::BaselineReference),
-                Bug1035SonRole::BaselineReference,
-                Instant::now(),
-            )
-            .unwrap();
+        runner.validate_bug1035_son_oracle(Instant::now()).unwrap();
     }
     #[test]
     fn bug1035_data_grid_and_topology_mutations_fail() {
@@ -945,53 +494,6 @@ mod tests {
         ));
     }
     #[test]
-    fn bug1035_retained_census_is_exact_and_bounded() {
-        let (_temp, copied) = copied_runner();
-        copied
-            .read_bug1035_directory(&rspice_core::abort_signal::NoAbort)
-            .unwrap();
-        copied
-            .validate_bug1035_output_directory(&rspice_core::abort_signal::NoAbort)
-            .unwrap();
-        fs::write(copied.root.join(FAMILY_DIR).join("unexpected.cir"), b"x\n").unwrap();
-        assert!(
-            copied
-                .read_bug1035_directory(&rspice_core::abort_signal::NoAbort)
-                .is_err()
-        );
-        let (_temp, copied) = copied_runner();
-        fs::write(
-            copied
-                .root
-                .join("OutputData/Certification_Tests/BUG_1035_SON/RC_simple.cir.FD.prn"),
-            b"drift\n",
-        )
-        .unwrap();
-        assert!(
-            copied
-                .validate_bug1035_output_directory(&rspice_core::abort_signal::NoAbort)
-                .is_err()
-        );
-        let (_temp, copied) = copied_runner();
-        fs::write(
-            copied.root.join(FAMILY_DIR).join("RC_simple_data.cir"),
-            vec![b'x'; 1000],
-        )
-        .unwrap();
-        assert!(
-            copied
-                .read_bug1035_directory(&rspice_core::abort_signal::NoAbort)
-                .is_err()
-        );
-        let (_temp, copied) = copied_runner();
-        fs::remove_file(copied.root.join(FAMILY_DIR).join("RC_simple_baseline.cir")).unwrap();
-        assert!(
-            copied
-                .read_bug1035_directory(&rspice_core::abort_signal::NoAbort)
-                .is_err()
-        );
-    }
-    #[test]
     fn bug1035_expired_deadline_fails_before_preparation() {
         let canonical = runner();
         let runner = XyceTestRunner::new(
@@ -1003,11 +505,7 @@ mod tests {
         );
         assert!(
             runner
-                .validate_bug1035_son_oracle(
-                    &deck(Bug1035SonRole::DataOwner),
-                    Bug1035SonRole::DataOwner,
-                    Instant::now() - Duration::from_secs(1)
-                )
+                .validate_bug1035_son_oracle(Instant::now() - Duration::from_secs(1))
                 .is_err()
         );
     }

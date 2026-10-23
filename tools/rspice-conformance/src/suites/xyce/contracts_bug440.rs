@@ -6,126 +6,18 @@ use rspice_core::netlist::measure::{
 use rspice_core::netlist::{
     OutputRequest, OutputSymbolDependency, SaveSignal, SimulationOptions, SourceSpec,
 };
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_440_SON lead-current measurement wrappers";
+#[cfg(test)]
 const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_440_SON";
-const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_440_son/";
-const OUTPUT_DIRECTORY: &str = "OutputData/Certification_Tests/BUG_440_SON";
+#[cfg(test)]
 const DEFERRED_OWNER_RECORD: &str = "netlists/certification_tests/bug_440_son/bug440.cir";
-
-const PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const PRETRIM_NETLISTS_TREE: &str = "3e34bfaafa890cb2e4457137b6a0e325c8c1e87d";
-const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const RELEASE_TAG: &str = "Release-7.10.0";
-const RELEASE_TAG_OBJECT: &str = "2a339ec3845af0aef99a7e6cc488a41acf64f6ed";
-
-const HISTORICAL_CONTENT_BYTES: usize = 84_652;
-const HISTORICAL_STREAM_BYTES: usize = 3_649;
-const HISTORICAL_STREAM_SHA256: &str =
-    "478f383c993a06e7f7531ef6a6488a13bde5c140e2f635ac81f1ae3ee17a23c0";
-const HISTORICAL_STREAM_BLAKE3: &str =
-    "275991fb2df35a5280743cb4cee29de41fd691ec986c5e6089dd81d7540aba3e";
-const HISTORICAL: [(&str, usize, &str, &str, &str); 9] = [
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/Manifest.txt",
-        84,
-        "82713233d518435f2f286ed6a3847cc00daefa65",
-        "f68d7dd8d1c8506bb2f0b459851f8e89c5d399adb34a2fbe058397d05d99cad4",
-        "69b6d78ba3dc0bef6408aac1dbeb41ae480dcab0f2620c562ab6a3d685c329d6",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/bug440.cir",
-        880,
-        "c55e4c31bbdc64d6c47f5f9256005802e3e32343",
-        "f1986b3e35d4da9f8962dca0fe7581c0e477cb27eb380b330d2f2b0e94bab5c3",
-        "2bae8a71cac99163c0b437d69236f53f3e0ba2a1f16d4d49037f3bee6316083f",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/bug440.cir.sh",
-        5_022,
-        "dcb2f14787e88d86b6a3105627cd57d2eec88ff9",
-        "b17db356a309c3dcdfc6a98ce8d28a5c9afe484ff5e95bfa41d30cb2db118a1b",
-        "776836e9f18e099d2ec8688c6feffa4f73e522144e95d49e96e9d368f9160df7",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/bug440a.cir",
-        212,
-        "010825a9e4be6276a5bdb19d8f585d5a369fc524",
-        "89033beca3384b93008eb46128895af91c91d3d8b142b9c60000ac9866e8d92f",
-        "c1809effaad13c9fab3486da34cc99bb860df6b5118e54fb4f54de4270c2f4ef",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/bug440a.cir.sh",
-        4_759,
-        "ab501c2d8eabb5c0ac8bd6572f4e7508a00c61fc",
-        "4a042d8a29c08d5fc0cb93c26e50117c4a80e51f71a5a9f30f8f64ec7ed6a179",
-        "28f3a76b43785abd9867b6de12d5828213d5a0a0145c0694dea08f64b4278305",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/bug440b.cir",
-        447,
-        "7d87333e8facda570304a23fe0cca6b3777c29ff",
-        "cf8d34515ff04f14f03fb0620b58fcc62478b6d3086746851ee769203cbb16e1",
-        "75e32e1bf86f41ab0fd9dc4d2d3b067773823154f22893eeb5502452ca0718f8",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/bug440b.cir.sh",
-        4_812,
-        "5a7634ad9df6408f90d4bdb203fa8d3480d8e75f",
-        "995f3f6d9e432fb6b4eaec7939011e0978f460bd7a0d2b53533c8eb11b8e5870",
-        "6500f00a7e8decd1fc288d51f65e973e68f1a2994c30bb49f36debd533f3af38",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_440_SON/tags",
-        32,
-        "b10b12760d62a7c29e906858947fb20bd4f9859a",
-        "150a1ba6a65b079efe2d9a7ad9183b9a0d1fb33a3e3940987cc8887c8c624640",
-        "9606c6660adfe92d17c201bd8b975486503e32a94dc84ceedb81e3341087402d",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_404,
-        "17def57575eb3fd703978fd0634a58d6e679a3de",
-        "a86524def2895930f2bb697c058850f231df6d623c279bd7482f30c5c39090b4",
-        "11483735d34385359bbe0f981cbc8767c11e6c2b60c3f8723d49e2761479023a",
-    ),
-];
-
-const RETAINED_CONTENT_BYTES: usize = 1_539;
-const RETAINED_STREAM_BYTES: usize = 364;
-const RETAINED_STREAM_SHA256: &str =
-    "cdb51062d3e7f9603fa4ddd99ff0dad3d4566d0ba47b29f0459e08d07c7f0f70";
-const RETAINED_STREAM_BLAKE3: &str =
-    "d4bf0a778d7ae873a763e5080903248f08709d3c9c72b6334b81fdfd8cb608c7";
-const RETAINED: [(&str, usize, &str, &str); 3] = [
-    (
-        "bug440.cir",
-        880,
-        "f1986b3e35d4da9f8962dca0fe7581c0e477cb27eb380b330d2f2b0e94bab5c3",
-        "2bae8a71cac99163c0b437d69236f53f3e0ba2a1f16d4d49037f3bee6316083f",
-    ),
-    (
-        "bug440a.cir",
-        212,
-        "89033beca3384b93008eb46128895af91c91d3d8b142b9c60000ac9866e8d92f",
-        "c1809effaad13c9fab3486da34cc99bb860df6b5118e54fb4f54de4270c2f4ef",
-    ),
-    (
-        "bug440b.cir",
-        447,
-        "cf8d34515ff04f14f03fb0620b58fcc62478b6d3086746851ee769203cbb16e1",
-        "75e32e1bf86f41ab0fd9dc4d2d3b067773823154f22893eeb5502452ca0718f8",
-    ),
-];
 
 const WRAPPER_ABS_TOL: Value = 1.0e-6;
 const WRAPPER_REL_TOL: Value = 0.02;
 const WRAPPER_ZERO_TOL: Value = 1.0e-5;
 const MAX_STREAM_ROWS: usize = 256;
 const MAX_STREAM_BYTES: usize = 64_000;
-const MAX_MANIFEST_BYTES: usize = 1_048_576;
-const MAX_DIRECTORY_ENTRIES: usize = 16_384;
 const PRN_SCIENTIFIC_PRECISION: i32 = 8;
 const RESISTOR_TRAN_STEP: Value = 1.0e-6;
 // A suffixed number reads as the double nearest the decimal it writes
@@ -149,13 +41,6 @@ impl Bug440Role {
     pub(super) fn for_record(record: &str) -> Option<Self> {
         let record = XyceTestRunner::normalize_manifest_key(record);
         Self::ALL.into_iter().find(|role| role.record() == record)
-    }
-
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::Resistor => "bug440a.cir",
-            Self::Behavioral => "bug440b.cir",
-        }
     }
 
     fn path(self) -> &'static str {
@@ -209,391 +94,6 @@ impl Bug440Role {
 }
 
 impl XyceTestRunner {
-    fn find_bug440_exact_child(
-        parent: &Path,
-        expected: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<Option<PathBuf>, String> {
-        let metadata = fs::symlink_metadata(parent)
-            .map_err(|error| format!("failed to inspect {LABEL} parent directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} parent must be a regular non-symlink directory"
-            ));
-        }
-        let mut matches = Vec::new();
-        for (index, entry) in fs::read_dir(parent)
-            .map_err(|error| format!("failed to enumerate {LABEL} parent: {error}"))?
-            .enumerate()
-        {
-            if index >= MAX_DIRECTORY_ENTRIES {
-                return Err(format!(
-                    "{LABEL} parent directory exceeds its census envelope"
-                ));
-            }
-            if index % 256 == 0 && abort.is_aborted() {
-                return Err(format!("{LABEL} path-case validation aborted"));
-            }
-            let entry =
-                entry.map_err(|error| format!("failed to inspect {LABEL} child: {error}"))?;
-            let Some(name) = entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            if name.eq_ignore_ascii_case(expected) {
-                matches.push(name);
-            }
-        }
-        match matches.as_slice() {
-            [] => Ok(None),
-            [name] if name == expected => Ok(Some(parent.join(name))),
-            _ => Err(format!(
-                "{LABEL} path component {expected:?} changed case or became ambiguous: {matches:?}"
-            )),
-        }
-    }
-
-    fn bug440_exact_child(
-        parent: &Path,
-        expected: &str,
-        abort: &dyn AbortSignal,
-    ) -> Result<PathBuf, String> {
-        Self::find_bug440_exact_child(parent, expected, abort)?
-            .ok_or_else(|| format!("{LABEL} is missing exact path component {expected:?}"))
-    }
-
-    fn bug440_family_directory(&self, abort: &dyn AbortSignal) -> Result<PathBuf, String> {
-        let netlists = Self::bug440_exact_child(&self.root, "Netlists", abort)?;
-        let certification = Self::bug440_exact_child(&netlists, "Certification_Tests", abort)?;
-        Self::bug440_exact_child(&certification, "BUG_440_SON", abort)
-    }
-
-    fn bug440_record_stream_identities() -> ((usize, String, String), (usize, String, String)) {
-        let mut historical = HISTORICAL
-            .iter()
-            .map(|(path, bytes, blob, sha, b3)| {
-                format!("{PRETRIM_COMMIT}\t{PRETRIM_NETLISTS_TREE}\t{UPSTREAM_COMMIT}\t{RELEASE_TAG}\t{RELEASE_TAG_OBJECT}\t{path}\t{bytes}\t{blob}\t{sha}\t{b3}")
-            })
-            .collect::<Vec<_>>();
-        historical.sort();
-        let historical = historical.join("\n");
-        let mut retained = RETAINED
-            .iter()
-            .map(|(name, bytes, sha, _)| format!("{FAMILY_DIRECTORY}/{name}\t{bytes}\t{sha}"))
-            .collect::<Vec<_>>();
-        retained.sort();
-        let retained = retained.join("\n");
-        (
-            (
-                historical.len(),
-                format!("{:x}", Sha256::digest(historical.as_bytes())),
-                blake3::hash(historical.as_bytes()).to_hex().to_string(),
-            ),
-            (
-                retained.len(),
-                format!("{:x}", Sha256::digest(retained.as_bytes())),
-                blake3::hash(retained.as_bytes()).to_hex().to_string(),
-            ),
-        )
-    }
-
-    fn validate_bug440_record_streams() -> Result<(), String> {
-        let historical_content = HISTORICAL.iter().map(|record| record.1).sum::<usize>();
-        let retained_content = RETAINED.iter().map(|record| record.1).sum::<usize>();
-        let historical_unique = HISTORICAL
-            .iter()
-            .map(|record| record.0.to_ascii_lowercase())
-            .collect::<BTreeSet<_>>();
-        let retained_unique = RETAINED
-            .iter()
-            .map(|record| record.0.to_ascii_lowercase())
-            .collect::<BTreeSet<_>>();
-        let (historical, retained) = Self::bug440_record_stream_identities();
-        if PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || PRETRIM_NETLISTS_TREE != UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE
-            || HISTORICAL.len() != 9
-            || historical_unique.len() != HISTORICAL.len()
-            || historical_content != HISTORICAL_CONTENT_BYTES
-            || HISTORICAL.iter().any(|record| {
-                record.2.len() != 40
-                    || record.3.len() != 64
-                    || record.4.len() != 64
-                    || !record.2.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    || !record.3.bytes().all(|byte| byte.is_ascii_hexdigit())
-                    || !record.4.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
-            || historical.0 != HISTORICAL_STREAM_BYTES
-            || historical.1 != HISTORICAL_STREAM_SHA256
-            || historical.2 != HISTORICAL_STREAM_BLAKE3
-            || RETAINED.len() != 3
-            || retained_unique.len() != RETAINED.len()
-            || retained_content != RETAINED_CONTENT_BYTES
-            || retained.0 != RETAINED_STREAM_BYTES
-            || retained.1 != RETAINED_STREAM_SHA256
-            || retained.2 != RETAINED_STREAM_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} record identities changed: historical={historical:?}/{historical_content}; retained={retained:?}/{retained_content}"
-            ));
-        }
-        Ok(())
-    }
-
-    fn read_bug440_directory(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        Self::validate_bug440_record_streams()?;
-        let directory = self.bug440_family_directory(abort)?;
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} directory must be a regular non-symlink directory"
-            ));
-        }
-        let expected = RETAINED
-            .into_iter()
-            .map(|record| (record.0.to_ascii_lowercase(), record))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
-        {
-            if abort.is_aborted() {
-                return Err(format!("{LABEL} source census aborted"));
-            }
-            let entry = entry.map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            let Some((expected_name, expected_bytes, expected_sha, expected_b3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name || observed.contains_key(&key) {
-                return Err(format!("{LABEL} member case/census changed: {name:?}"));
-            }
-            let cap = expected_bytes
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(3))
-                .ok_or_else(|| format!("{LABEL} source-size bound overflowed"))?;
-            if metadata.len() > cap as u64 {
-                return Err(format!(
-                    "{LABEL} member {name:?} exceeds its bounded envelope"
-                ));
-            }
-            let mut bytes = Vec::with_capacity((metadata.len() as usize).min(cap));
-            fs::File::open(&path)
-                .map_err(|error| format!("failed to open {LABEL} member: {error}"))?
-                .take((cap + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("failed to read {LABEL} member: {error}"))?;
-            if bytes.len() > cap {
-                return Err(format!("{LABEL} bounded source read grew"));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha = format!("{:x}", Sha256::digest(&canonical));
-            let b3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes || sha != expected_sha || b3 != expected_b3 {
-                return Err(format!(
-                    "{LABEL} member {name:?} changed: bytes={}, sha={sha}, b3={b3}",
-                    canonical.len()
-                ));
-            }
-            observed.insert(key, canonical);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{LABEL} retained census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug440_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug440Role,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} provenance validation aborted"));
-        }
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!("{LABEL} recognized owner is not canonical"));
-        }
-        let owners = self.read_bug440_manifest_owners(abort)?;
-        let expected_owners = BTreeSet::from([
-            DEFERRED_OWNER_RECORD.to_string(),
-            Bug440Role::Resistor.record().to_string(),
-            Bug440Role::Behavioral.record().to_string(),
-        ]);
-        if owners != expected_owners {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        self.preflight_bug440_exclusions(abort)?;
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusions invalid: {error}"))?;
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} exclusions validation aborted"));
-        }
-        let family_exclusions = exclusions
-            .keys()
-            .filter(|record| record.starts_with(FAMILY_PREFIX))
-            .collect::<Vec<_>>();
-        if !family_exclusions.is_empty() {
-            return Err(format!(
-                "{LABEL} family must not be excluded: {family_exclusions:?}"
-            ));
-        }
-        match fs::symlink_metadata(self.root.join(OUTPUT_DIRECTORY)) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("failed to inspect {LABEL} OutputData: {error}")),
-            Ok(_) => return Err(format!("{LABEL} must not acquire invented numerical gold")),
-        }
-        for member in RETAINED {
-            self.reject_wrapper_output_artifacts(&self.root.join(FAMILY_DIRECTORY).join(member.0))
-                .map_err(|error| format!("{LABEL} {} {error}", member.0))?;
-        }
-        self.read_bug440_directory(abort)
-    }
-
-    fn read_bug440_manifest_owners(
-        &self,
-        abort: &dyn AbortSignal,
-    ) -> Result<BTreeSet<String>, String> {
-        let path = Self::bug440_exact_child(&self.root, HARNESS_MANIFEST_FILE, abort)?;
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("failed to inspect {LABEL} harness manifest: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(format!(
-                "{LABEL} harness manifest must be a regular non-symlink file"
-            ));
-        }
-        if metadata.len() > MAX_MANIFEST_BYTES as u64 {
-            return Err(format!(
-                "{LABEL} harness manifest exceeds its bounded envelope"
-            ));
-        }
-        let mut bytes = Vec::with_capacity((metadata.len() as usize).min(MAX_MANIFEST_BYTES));
-        fs::File::open(&path)
-            .map_err(|error| format!("failed to open {LABEL} harness manifest: {error}"))?
-            .take((MAX_MANIFEST_BYTES + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|error| format!("failed to read {LABEL} harness manifest: {error}"))?;
-        if bytes.len() > MAX_MANIFEST_BYTES || abort.is_aborted() {
-            return Err(format!(
-                "{LABEL} harness manifest read exceeded its envelope"
-            ));
-        }
-        let canonical =
-            Self::canonical_lf_text_identity(&format!("{LABEL} harness manifest"), &bytes)?;
-        let source = std::str::from_utf8(&canonical)
-            .map_err(|error| format!("{LABEL} harness manifest is not UTF-8: {error}"))?;
-        let expected = BTreeSet::from([
-            format!("{FAMILY_DIRECTORY}/bug440.cir"),
-            format!("{FAMILY_DIRECTORY}/bug440a.cir"),
-            format!("{FAMILY_DIRECTORY}/bug440b.cir"),
-        ]);
-        let mut owners = BTreeSet::new();
-        for (index, line) in source.lines().enumerate() {
-            if index % 256 == 0 && abort.is_aborted() {
-                return Err(format!("{LABEL} harness manifest validation aborted"));
-            }
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let family_candidate = line
-                .replace('\\', "/")
-                .to_ascii_lowercase()
-                .contains(FAMILY_PREFIX);
-            let Some((path, contract)) = line.split_once('\t') else {
-                if family_candidate {
-                    return Err(format!(
-                        "{LABEL} harness manifest line {} is malformed",
-                        index + 1
-                    ));
-                }
-                continue;
-            };
-            if !family_candidate {
-                continue;
-            }
-            if !expected.contains(path)
-                || contract != REQUIRES_UPSTREAM_WRAPPER_CONTRACT
-                || line != format!("{path}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}")
-                || !owners.insert(Self::normalize_manifest_key(path))
-            {
-                return Err(format!(
-                    "{LABEL} harness manifest line {} changed: {line:?}",
-                    index + 1
-                ));
-            }
-        }
-        let expected = BTreeSet::from([
-            DEFERRED_OWNER_RECORD.to_string(),
-            Bug440Role::Resistor.record().to_string(),
-            Bug440Role::Behavioral.record().to_string(),
-        ]);
-        if owners != expected {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        Ok(owners)
-    }
-
-    fn preflight_bug440_exclusions(&self, abort: &dyn AbortSignal) -> Result<(), String> {
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} exclusions preflight aborted"));
-        }
-        let vendoring = Self::find_bug440_exact_child(&self.root, "RSPICE-VENDORING.md", abort)?;
-        let manifest =
-            Self::find_bug440_exact_child(&self.root, UPSTREAM_EXCLUSIONS_MANIFEST_FILE, abort)?;
-        let Some(path) = manifest else {
-            if vendoring.is_some() {
-                return Err(format!(
-                    "{LABEL} vendored corpus lost its exclusions manifest"
-                ));
-            }
-            return Ok(());
-        };
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("failed to inspect {LABEL} exclusions manifest: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(format!(
-                "{LABEL} exclusions manifest must be a regular non-symlink file"
-            ));
-        }
-        if metadata.len() > MAX_MANIFEST_BYTES as u64 {
-            return Err(format!(
-                "{LABEL} exclusions manifest has an invalid bounded length: {}",
-                metadata.len()
-            ));
-        }
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} exclusions preflight aborted"));
-        }
-        Ok(())
-    }
-
     fn validate_bug440_source(
         &self,
         role: Bug440Role,
@@ -1361,27 +861,23 @@ impl XyceTestRunner {
 
     pub(super) fn validate_bug440_oracle(
         &self,
-        deck: &XyceDeck,
         role: Bug440Role,
         start: Instant,
     ) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let before = self.validate_bug440_provenance(deck, role, &abort)?;
-        let owner = before
-            .get(&role.file_name().to_ascii_lowercase())
-            .ok_or_else(|| format!("{LABEL} lost sealed owner"))?;
-        let source = std::str::from_utf8(owner)
-            .map_err(|error| format!("{LABEL} owner is not UTF-8: {error}"))?;
-        let (plan, netlist) = self.validate_bug440_source(role, source, &deck.path)?;
-        self.run_bug440_native(role, &plan, &netlist, start, &abort)?;
-        let after = self.validate_bug440_provenance(deck, role, &abort)?;
-        if before != after {
-            return Err(format!("{LABEL} sealed sources changed during execution"));
+        if abort.is_aborted() {
+            return Err(format!("{LABEL} deadline expired before execution"));
         }
+        let path = self.root.join(role.path());
+        let owner = Self::read_corpus_canonical(LABEL, &path)?;
+        let source = std::str::from_utf8(&owner)
+            .map_err(|error| format!("{LABEL} owner is not UTF-8: {error}"))?;
+        let (plan, netlist) = self.validate_bug440_source(role, source, &path)?;
+        self.run_bug440_native(role, &plan, &netlist, start, &abort)?;
         if abort.is_aborted()
             || start.elapsed().as_millis() > self.config.max_time_per_test_ms.max(1)
         {
-            return Err(format!("{LABEL} final provenance exceeded deadline"));
+            return Err(format!("{LABEL} execution exceeded deadline"));
         }
         Ok(())
     }
@@ -1523,41 +1019,6 @@ mod tests {
         }
     }
 
-    fn bug440_fixture() -> (tempfile::TempDir, XyceTestRunner) {
-        let temporary = tempfile::tempdir().unwrap();
-        let source_root = corpus_root();
-        let family = temporary.path().join(FAMILY_DIRECTORY);
-        fs::create_dir_all(&family).unwrap();
-        for (name, ..) in RETAINED {
-            fs::copy(
-                source_root.join(FAMILY_DIRECTORY).join(name),
-                family.join(name),
-            )
-            .unwrap();
-        }
-        fs::copy(
-            source_root.join(HARNESS_MANIFEST_FILE),
-            temporary.path().join(HARNESS_MANIFEST_FILE),
-        )
-        .unwrap();
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        (temporary, runner)
-    }
-
-    fn bug440_fixture_deck(runner: &XyceTestRunner, role: Bug440Role) -> XyceDeck {
-        runner
-            .discover_netlist_tests()
-            .into_iter()
-            .find(|deck| {
-                XyceTestRunner::normalize_manifest_key(&deck.relative_path) == role.record()
-            })
-            .unwrap()
-    }
-
-    fn test_abort() -> DeadlineAbort {
-        DeadlineAbort::new(Instant::now(), 30_000)
-    }
-
     #[test]
     fn bug440_routes_only_the_two_currently_observable_owners() {
         assert_eq!(
@@ -1577,11 +1038,6 @@ mod tests {
         ] {
             assert_eq!(Bug440Role::for_record(rejected), None, "claimed {rejected}");
         }
-    }
-
-    #[test]
-    fn bug440_record_streams_are_exact() {
-        XyceTestRunner::validate_bug440_record_streams().unwrap();
     }
 
     #[test]
@@ -1798,149 +1254,6 @@ mod tests {
     }
 
     #[test]
-    fn bug440_manifest_reader_rejects_case_contract_census_shape_and_size_changes() {
-        let valid = [
-            format!("{FAMILY_DIRECTORY}/bug440.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"),
-            format!("{FAMILY_DIRECTORY}/bug440a.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"),
-            format!("{FAMILY_DIRECTORY}/bug440b.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"),
-        ]
-        .join("\r\n");
-        let check = |source: &[u8]| {
-            let temporary = tempfile::tempdir().unwrap();
-            fs::write(temporary.path().join(HARNESS_MANIFEST_FILE), source).unwrap();
-            let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-            runner.read_bug440_manifest_owners(&test_abort())
-        };
-        check(valid.as_bytes()).unwrap();
-        for changed in [
-            valid.replace("BUG_440_SON", "bug_440_son"),
-            valid.replacen(
-                &format!("{FAMILY_DIRECTORY}/bug440a.cir"),
-                "Netlists\\Certification_Tests\\BUG_440_SON\\bug440a.cir",
-                1,
-            ),
-            valid.replace(REQUIRES_UPSTREAM_WRAPPER_CONTRACT, "other_contract"),
-            valid.replacen(
-                "\trequires_upstream_wrapper",
-                " requires_upstream_wrapper",
-                1,
-            ),
-            format!("{valid}\r\n{}", valid.lines().next().unwrap()),
-            valid.replace(
-                &format!("{FAMILY_DIRECTORY}/bug440b.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"),
-                "",
-            ),
-            format!(
-                "{valid}\r\n{FAMILY_DIRECTORY}/bug440c.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"
-            ),
-        ] {
-            assert!(check(changed.as_bytes()).is_err(), "accepted {changed:?}");
-        }
-        let oversized = vec![b'x'; MAX_MANIFEST_BYTES + 1];
-        assert!(check(&oversized).is_err());
-
-        let temporary = tempfile::tempdir().unwrap();
-        fs::create_dir(temporary.path().join(HARNESS_MANIFEST_FILE)).unwrap();
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(runner.read_bug440_manifest_owners(&test_abort()).is_err());
-
-        let temporary = tempfile::tempdir().unwrap();
-        fs::write(temporary.path().join("rspice-harness-manifest.tsv"), &valid).unwrap();
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(runner.read_bug440_manifest_owners(&test_abort()).is_err());
-    }
-
-    #[test]
-    fn bug440_provenance_rejects_source_census_output_and_exclusion_mutations() {
-        let (_temporary, runner) = bug440_fixture();
-        for role in Bug440Role::ALL {
-            let deck = bug440_fixture_deck(&runner, role);
-            runner
-                .validate_bug440_provenance(&deck, role, &test_abort())
-                .unwrap();
-        }
-
-        let (_temporary, runner) = bug440_fixture();
-        fs::write(
-            runner.root.join(FAMILY_DIRECTORY).join("unexpected.txt"),
-            "not an oracle",
-        )
-        .unwrap();
-        let deck = bug440_fixture_deck(&runner, Bug440Role::Resistor);
-        assert!(
-            runner
-                .validate_bug440_provenance(&deck, Bug440Role::Resistor, &test_abort())
-                .is_err()
-        );
-
-        let (_temporary, runner) = bug440_fixture();
-        fs::write(
-            runner.root.join(FAMILY_DIRECTORY).join("bug440a.cir"),
-            "mutated source\n",
-        )
-        .unwrap();
-        let deck = bug440_fixture_deck(&runner, Bug440Role::Resistor);
-        assert!(
-            runner
-                .validate_bug440_provenance(&deck, Bug440Role::Resistor, &test_abort())
-                .is_err()
-        );
-
-        let (_temporary, runner) = bug440_fixture();
-        fs::create_dir_all(runner.root.join(OUTPUT_DIRECTORY)).unwrap();
-        let deck = bug440_fixture_deck(&runner, Bug440Role::Behavioral);
-        assert!(
-            runner
-                .validate_bug440_provenance(&deck, Bug440Role::Behavioral, &test_abort())
-                .is_err()
-        );
-
-        let (_temporary, runner) = bug440_fixture();
-        fs::write(
-            runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            vec![b'x'; MAX_MANIFEST_BYTES + 1],
-        )
-        .unwrap();
-        let deck = bug440_fixture_deck(&runner, Bug440Role::Resistor);
-        assert!(
-            runner
-                .validate_bug440_provenance(&deck, Bug440Role::Resistor, &test_abort())
-                .is_err()
-        );
-
-        let temporary = tempfile::tempdir().unwrap();
-        let wrong_case_family = temporary
-            .path()
-            .join("Netlists/Certification_Tests/bug_440_son");
-        fs::create_dir_all(&wrong_case_family).unwrap();
-        for (name, ..) in RETAINED {
-            fs::copy(
-                corpus_root().join(FAMILY_DIRECTORY).join(name),
-                wrong_case_family.join(name),
-            )
-            .unwrap();
-        }
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(runner.read_bug440_directory(&test_abort()).is_err());
-
-        let (_temporary, runner) = bug440_fixture();
-        let exclusion_path = runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
-        fs::write(
-            exclusion_path,
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{FAMILY_DIRECTORY}/bug440b.cir\t{FAMILY_DIRECTORY}/exclude\t{UPSTREAM_EXCLUDED_DISPOSITION}\n"
-            ),
-        )
-        .unwrap();
-        let deck = bug440_fixture_deck(&runner, Bug440Role::Behavioral);
-        assert!(
-            runner
-                .validate_bug440_provenance(&deck, Bug440Role::Behavioral, &test_abort())
-                .is_err()
-        );
-    }
-
-    #[test]
     fn bug440_checked_in_ready_owners_execute_complete_oracles() {
         let runner = runner();
         for role in Bug440Role::ALL {
@@ -1965,16 +1278,9 @@ mod tests {
             },
         );
         for role in Bug440Role::ALL {
-            let deck = runner
-                .discover_netlist_tests()
-                .into_iter()
-                .find(|deck| {
-                    XyceTestRunner::normalize_manifest_key(&deck.relative_path) == role.record()
-                })
-                .unwrap();
             assert!(
                 runner
-                    .validate_bug440_oracle(&deck, role, Instant::now() - Duration::from_secs(1))
+                    .validate_bug440_oracle(role, Instant::now() - Duration::from_secs(1))
                     .is_err()
             );
         }

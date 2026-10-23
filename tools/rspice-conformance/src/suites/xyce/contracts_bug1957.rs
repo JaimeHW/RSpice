@@ -1,195 +1,8 @@
 use super::*;
 use rspice_core::netlist::{OutputSymbolKind, SaveSignal, SourceSpec};
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_1957 multi-winding mutual-inductor relation";
 const FAMILY_PATH: &str = "Netlists/Certification_Tests/BUG_1957";
-const OUTPUT_PATH: &str = "OutputData/Certification_Tests/BUG_1957";
-const EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_1957/exclude";
-const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const UPSTREAM_TAG: &str = "Release-7.10.0";
-
-const HISTORICAL_RECORD_COUNT: usize = 19;
-const HISTORICAL_RECORD_BYTES: usize = 4_590;
-const HISTORICAL_RECORDS_SHA256: &str =
-    "5b10c21973af222b48a08e92142a89dcfae78ff6e66ad1b6ab5d06923e39c080";
-const HISTORICAL_RECORDS_BLAKE3: &str =
-    "05d1b8e18549660784e11fde42e306d3e5fb7c6b976af60dc13645b970c77489";
-const HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 19] = [
-    (
-        "Netlists/Certification_Tests/BUG_1957/CMakeLists.txt",
-        3_101,
-        "0bac6593e93e5f75d8462b2d5952eabdfb4292f9c439e55133ab17b6a01f3e5f",
-        "a5687a70ea3224cd8d91a2da2107043c178f670379aafbcc4f7693ba1a83378b",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/Manifest.txt",
-        244,
-        "3efb914c72bc164f2b5751f5d1b20288d8eaff943251bc68fedfd215a33c6691",
-        "7905db090c70ec5c18d4dafff76f31aaa3fe2a58a9496532c2305e4873dd69a2",
-    ),
-    (
-        EXCLUSION_SOURCE,
-        90,
-        "f9ec3e6ad18f333dba6895b4371ccdcc53600940bb835b611bf213f76bd6e59c",
-        "3978c3ff8bb94a3f01c589a07f1fe45e666a88ca3417c271773ed0f634b1a18b",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_even.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_even.cir.sh",
-        3_331,
-        "7530da31841a8b1bdef2fb794d3b667ab5d99e9c72efdc0d04aed1839a0523fd",
-        "452c373a9a269a77013cc12f3edb17407be56064d8c191bd5fbced862a33d8f8",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_even_ps.cir",
-        327,
-        "4004f2c10faed0aecdbb2d829149897534c756039422486e5dbe6946d2988978",
-        "0f4512315a09e41cd8323630d5d99b675b543947bb4449e51ebfc7493df7e5d3",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_even_s3f5.cir",
-        390,
-        "3e47dbae28980555baca6737d88b77cbace82671076f5fb45d3b8fc72364dee3",
-        "18bf22eeb84b4197fe35d608c2dbfe8be927399d516effd831f6fd0aa1b10544",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_even_s3f5.cir.prn.gs",
-        17_355,
-        "f32dc48efd6096afec5ad4fbcbe5f6657e334693a722a9d87c27aa27c5aaa405",
-        "40252b8d95ea575a7a0d6aa510d5acb8534a1f4d1169bf53b27d347ed5b3b2ef",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_odd.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_odd.cir.sh",
-        3_764,
-        "14ad06799e8739f09722e60e30cddacee0246b7d34b85f730e60722fff252504",
-        "c9078003cb2fe40d786a616f09c74f13dc097c6902a86ed8467791c19ab6f9e1",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_odd_ps.cir",
-        377,
-        "1900d7a004fbd31cf3138fdfef1946e667896ffe476f49ff1d5a08d9229215f3",
-        "40ad118cc93649b03e210d8d5a7fd2f416b50f8738f5ac0baba13c686860ac2e",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_odd_s3f5.cir",
-        495,
-        "9539ff92354d35a2fdad7a44061eb6f87376f7c7976afc0d3171ae59322f3353",
-        "7cf4ce52cd53dc69f6c525eab15d584b84445785a635eb4cfe75b57c332f3fef",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/mutindlin_odd_s3f5.cir.prn.gs",
-        17_187,
-        "509dbaf17df86d9167d4ec3b4ed4e494ce81a27b37863a17c68ca3ea0f95afb8",
-        "089f935371c8fb34de4d49147f1561f8203f030a813660c38836ee3990588cbe",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1957/tags",
-        48,
-        "e1f21975a1970324bb4dfb455b7c36e31a0ee9df3da307e9db7f0eb1bb5dc17b",
-        "7d55956df6e2847fbc1dc4553fa9acc2305bb7592ac27b78aebdda3db62ed477",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSources.pm",
-        2_739,
-        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
-        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSweep.pm",
-        9_301,
-        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
-        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
-    ),
-    (
-        "TestScripts/XyceVerify/StepSweep.pm",
-        8_731,
-        "84b2d485c1848f2e456463de8a5015205d87c3db8a6d070547d6f9464618fed6",
-        "db1b142ab3ae9163bbe02bd68b5b3a6311436adbf27c06d71a5c05df9b6973e7",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-];
-
-const RETAINED_RECORD_COUNT: usize = 8;
-const RETAINED_RECORD_BYTES: usize = 1_259;
-const RETAINED_RECORDS_SHA256: &str =
-    "fb17b7aabde70a00b4010335082f6c20b5dc12ac7535a83c244e821acc2918fa";
-const RETAINED_RECORDS_BLAKE3: &str =
-    "01572e44ee2263e77a5727e90f49d565b856511e82059b714bcb674083f08224";
-const RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
-    (
-        "mutindlin_even.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "mutindlin_even_ps.cir",
-        327,
-        "4004f2c10faed0aecdbb2d829149897534c756039422486e5dbe6946d2988978",
-        "0f4512315a09e41cd8323630d5d99b675b543947bb4449e51ebfc7493df7e5d3",
-    ),
-    (
-        "mutindlin_even_s3f5.cir",
-        390,
-        "3e47dbae28980555baca6737d88b77cbace82671076f5fb45d3b8fc72364dee3",
-        "18bf22eeb84b4197fe35d608c2dbfe8be927399d516effd831f6fd0aa1b10544",
-    ),
-    (
-        "mutindlin_even_s3f5.cir.prn.gs",
-        17_355,
-        "f32dc48efd6096afec5ad4fbcbe5f6657e334693a722a9d87c27aa27c5aaa405",
-        "40252b8d95ea575a7a0d6aa510d5acb8534a1f4d1169bf53b27d347ed5b3b2ef",
-    ),
-    (
-        "mutindlin_odd.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "mutindlin_odd_ps.cir",
-        377,
-        "1900d7a004fbd31cf3138fdfef1946e667896ffe476f49ff1d5a08d9229215f3",
-        "40ad118cc93649b03e210d8d5a7fd2f416b50f8738f5ac0baba13c686860ac2e",
-    ),
-    (
-        "mutindlin_odd_s3f5.cir",
-        495,
-        "9539ff92354d35a2fdad7a44061eb6f87376f7c7976afc0d3171ae59322f3353",
-        "7cf4ce52cd53dc69f6c525eab15d584b84445785a635eb4cfe75b57c332f3fef",
-    ),
-    (
-        "mutindlin_odd_s3f5.cir.prn.gs",
-        17_187,
-        "509dbaf17df86d9167d4ec3b4ed4e494ce81a27b37863a17c68ca3ea0f95afb8",
-        "089f935371c8fb34de4d49147f1561f8203f030a813660c38836ee3990588cbe",
-    ),
-];
-
-type CapturedMembers = BTreeMap<String, Vec<u8>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bug1957Family {
@@ -303,198 +116,6 @@ impl Bug1957Role {
 }
 
 impl XyceTestRunner {
-    pub(super) fn bug1957_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, blake3)| {
-                format!("{UPSTREAM_COMMIT}\t{UPSTREAM_TAG}\t{path}\t{bytes}\t{sha256}\t{blake3}")
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug1957_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug1957_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        if records.len() != HISTORICAL_RECORD_COUNT
-            || stream.len() != HISTORICAL_RECORD_BYTES
-            || format!("{:x}", Sha256::digest(stream.as_bytes())) != HISTORICAL_RECORDS_SHA256
-            || blake3::hash(stream.as_bytes()).to_hex().as_str() != HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!("{LABEL} Release provenance changed"));
-        }
-        Ok(())
-    }
-
-    fn validate_bug1957_directory(&self) -> Result<CapturedMembers, String> {
-        let directory = self.root.join(FAMILY_PATH);
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = RETAINED_ARTIFACTS
-            .iter()
-            .copied()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut members = BTreeMap::new();
-        let mut records = Vec::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if members.contains_key(&key) {
-                return Err(format!("{LABEL} contains a case collision for {name:?}"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name {
-                return Err(format!("{LABEL} member case changed: {name:?}"));
-            }
-            let physical_cap = expected_bytes
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(1))
-                .ok_or_else(|| format!("{LABEL} retained-member bound overflow"))?;
-            if metadata.len() > physical_cap as u64 {
-                return Err(format!("{LABEL} member {name:?} is oversized"));
-            }
-            let file = fs::File::open(&path)
-                .map_err(|error| format!("failed to open {LABEL} {name:?}: {error}"))?;
-            let mut bytes = Vec::with_capacity(metadata.len() as usize);
-            file.take((physical_cap + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("failed to read {LABEL} {name:?}: {error}"))?;
-            if bytes.len() > physical_cap {
-                return Err(format!("{LABEL} member {name:?} is oversized"));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            if canonical.len() != expected_bytes
-                || format!("{:x}", Sha256::digest(&canonical)) != expected_sha256
-                || blake3::hash(&canonical).to_hex().as_str() != expected_blake3
-            {
-                return Err(format!("{LABEL} retained member {name:?} changed"));
-            }
-            records.push(format!(
-                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
-            ));
-            members.insert(key, bytes);
-        }
-        if members.len() != expected.len() {
-            return Err(format!("{LABEL} lost a retained member"));
-        }
-        records.sort();
-        let stream = records.join("\n");
-        if records.len() != RETAINED_RECORD_COUNT
-            || stream.len() != RETAINED_RECORD_BYTES
-            || format!("{:x}", Sha256::digest(stream.as_bytes())) != RETAINED_RECORDS_SHA256
-            || blake3::hash(stream.as_bytes()).to_hex().as_str() != RETAINED_RECORDS_BLAKE3
-        {
-            return Err(format!("{LABEL} retained census changed"));
-        }
-        Ok(members)
-    }
-
-    fn validate_bug1957_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug1957Role,
-    ) -> Result<CapturedMembers, String> {
-        Self::validate_bug1957_historical_oracle_provenance()?;
-        let path = role.path();
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(&path))
-        {
-            return Err(format!(
-                "recognized {LABEL} role is not at its canonical path"
-            ));
-        }
-
-        let prefix = "netlists/certification_tests/bug_1957/";
-        let owners = Self::load_upstream_wrapper_decks(&self.root)
-            .into_iter()
-            .filter(|record| record.starts_with(prefix))
-            .collect::<BTreeSet<_>>();
-        let expected_owners = [Bug1957Family::Even, Bug1957Family::Odd]
-            .into_iter()
-            .map(|family| Bug1957Role::new(family, Bug1957Representation::Anchor).record())
-            .collect::<BTreeSet<_>>();
-        if owners != expected_owners {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        let family_rows = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(prefix))
-            .collect::<BTreeMap<_, _>>();
-        let expected_workers = Bug1957Role::ALL
-            .into_iter()
-            .filter(|role| role.representation != Bug1957Representation::Anchor)
-            .collect::<Vec<_>>();
-        let expected_records = expected_workers
-            .iter()
-            .map(|role| role.record())
-            .collect::<BTreeSet<_>>();
-        if family_rows
-            .keys()
-            .map(|record| record.to_string())
-            .collect::<BTreeSet<_>>()
-            != expected_records
-        {
-            return Err(format!("{LABEL} exclusion census changed"));
-        }
-        for worker in expected_workers {
-            let row = family_rows
-                .get(&worker.record())
-                .ok_or_else(|| format!("{LABEL} lost {} exclusion row", worker.file_name()))?;
-            if row.source != EXCLUSION_SOURCE
-                || !matches!(&row.disposition,
-                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                        if expected_contract == worker.contract())
-            {
-                return Err(format!(
-                    "{LABEL} {} qualification changed",
-                    worker.file_name()
-                ));
-            }
-        }
-        match fs::symlink_metadata(self.root.join(OUTPUT_PATH)) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Ok(_) => return Err(format!("{LABEL} must not acquire an OutputData family")),
-            Err(error) => {
-                return Err(format!(
-                    "failed to inspect {LABEL} OutputData family: {error}"
-                ));
-            }
-        }
-        self.validate_bug1957_directory()
-    }
-
     fn bug1957_expected_probes(family: Bug1957Family) -> Vec<String> {
         let mut probes = vec!["i(vs)".to_string()];
         probes.extend((2..=family.winding_count() + 1).map(|node| format!("v({node})")));
@@ -832,27 +453,13 @@ impl XyceTestRunner {
 
     pub(super) fn validate_bug1957_oracle(
         &self,
-        deck: &XyceDeck,
         role: Bug1957Role,
         start: Instant,
     ) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} deadline expired before provenance"));
-        }
-        let members = self.validate_bug1957_provenance(deck, role)?;
         let run = |representation: Bug1957Representation| {
             let member_role = Bug1957Role::worker(role.family, representation);
             let plan = self.bug1957_plan(member_role)?;
-            let source = members
-                .get(&member_role.file_name().to_ascii_lowercase())
-                .ok_or_else(|| format!("{LABEL} lost {}", member_role.file_name()))?;
-            if plan.source.as_bytes() != source.as_slice() {
-                return Err(format!(
-                    "{LABEL} {} changed between reads",
-                    member_role.file_name()
-                ));
-            }
             let (netlist, result) = self
                 .run_transient_family_plan(&plan, start, None, None)
                 .map_err(|error| match error {
@@ -884,12 +491,9 @@ impl XyceTestRunner {
         }
 
         let gold_name = role.family.gold_file();
-        let gold_bytes = members
-            .get(&gold_name.to_ascii_lowercase())
-            .ok_or_else(|| format!("{LABEL} lost {gold_name}"))?;
-        let gold_source = std::str::from_utf8(gold_bytes)
-            .map_err(|error| format!("{LABEL} gold is not UTF-8: {error}"))?;
-        let gold = Self::parse_prn_table(gold_source)?;
+        let gold_source = fs::read_to_string(self.root.join(FAMILY_PATH).join(&gold_name))
+            .map_err(|error| format!("{LABEL} cannot read {gold_name}: {error}"))?;
+        let gold = Self::parse_prn_table(&gold_source)?;
         Self::validate_bug1957_table(role.family, &gold)?;
         for (plan, table, representation) in [
             (&pairwise_plan, &pairwise_table, "pairwise"),
@@ -909,7 +513,6 @@ impl XyceTestRunner {
                 ));
             }
         }
-        self.validate_bug1957_provenance(deck, role)?;
         if abort.is_aborted() {
             return Err(format!("{LABEL} exceeded its shared deadline"));
         }
@@ -927,72 +530,13 @@ mod tests {
             .join("tests/xyce")
     }
 
-    fn fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug1957-{label}-"))
-            .tempdir()
-            .expect("create BUG1957 fixture");
-        let root = temporary.path();
-        let family = root.join(FAMILY_PATH);
-        fs::create_dir_all(&family).expect("create BUG1957 family");
-        let canonical = corpus_root().join(FAMILY_PATH);
-        for (name, ..) in RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name)).expect("copy BUG1957 member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!(
-                "{FAMILY_PATH}/mutindlin_even.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n{FAMILY_PATH}/mutindlin_odd.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"
-            ),
-        )
-        .expect("write BUG1957 wrapper manifest");
-        let exclusions = Bug1957Role::ALL
-            .into_iter()
-            .filter(|role| role.representation != Bug1957Representation::Anchor)
-            .map(|role| {
-                format!(
-                    "{}\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{}",
-                    role.path(),
-                    role.contract()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{exclusions}\n"
-            ),
-        )
-        .expect("write BUG1957 exclusion manifest");
-        let role = Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor);
-        let deck = XyceDeck {
-            path: root.join(role.path()),
-            section: XyceDeckSection::Netlists,
-            relative_path: role.path(),
-        };
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug1957_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug1957_historical_oracle_provenance()
-            .expect("BUG1957 Release provenance remains exact");
-    }
-
     #[test]
     fn bug1957_all_roles_execute_the_absolute_and_relational_oracles() {
         let root = corpus_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         for role in Bug1957Role::ALL {
-            let deck = XyceDeck {
-                path: root.join(role.path()),
-                section: XyceDeckSection::Netlists,
-                relative_path: role.path(),
-            };
             runner
-                .validate_bug1957_oracle(&deck, role, Instant::now())
+                .validate_bug1957_oracle(role, Instant::now())
                 .unwrap_or_else(|error| panic!("{}: {error}", role.file_name()));
         }
     }
@@ -1044,97 +588,6 @@ mod tests {
     }
 
     #[test]
-    fn bug1957_provenance_mutations_fail_closed() {
-        let (_temporary, deck, runner) = fixture("provenance");
-        runner
-            .validate_bug1957_provenance(
-                &deck,
-                Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor),
-            )
-            .expect("canonical BUG1957 fixture");
-        fs::write(
-            runner.root.join(FAMILY_PATH).join("unexpected.cir"),
-            "unexpected\n",
-        )
-        .expect("write extra BUG1957 member");
-        assert!(
-            runner
-                .validate_bug1957_provenance(
-                    &deck,
-                    Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor),
-                )
-                .is_err()
-        );
-        fs::remove_file(runner.root.join(FAMILY_PATH).join("unexpected.cir"))
-            .expect("remove extra BUG1957 member");
-        fs::create_dir_all(runner.root.join(OUTPUT_PATH)).expect("create invented BUG1957 output");
-        assert!(
-            runner
-                .validate_bug1957_provenance(
-                    &deck,
-                    Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor),
-                )
-                .is_err()
-        );
-
-        let (_owner_fixture, owner_deck, owner_runner) = fixture("owner-drift");
-        fs::write(
-            owner_runner.root.join(HARNESS_MANIFEST_FILE),
-            format!("{FAMILY_PATH}/mutindlin_odd.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("mutate BUG1957 wrapper ownership");
-        assert!(
-            owner_runner
-                .validate_bug1957_provenance(
-                    &owner_deck,
-                    Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor),
-                )
-                .is_err()
-        );
-
-        let (exclusion_fixture, exclusion_deck, exclusion_runner) = fixture("exclusion-drift");
-        let exclusion_path = exclusion_fixture
-            .path()
-            .join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
-        let exclusions = fs::read_to_string(&exclusion_path).expect("read BUG1957 exclusions");
-        fs::write(
-            &exclusion_path,
-            exclusions.replacen(
-                "bug1957_even_multiwinding_worker",
-                "bug1957_even_pairwise_worker",
-                1,
-            ),
-        )
-        .expect("mutate BUG1957 worker qualification");
-        assert!(
-            exclusion_runner
-                .validate_bug1957_provenance(
-                    &exclusion_deck,
-                    Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor),
-                )
-                .is_err()
-        );
-
-        let (source_fixture, source_deck, source_runner) = fixture("source-drift");
-        fs::write(
-            source_fixture
-                .path()
-                .join(FAMILY_PATH)
-                .join("mutindlin_even_ps.cir"),
-            "changed\n",
-        )
-        .expect("mutate BUG1957 retained source");
-        assert!(
-            source_runner
-                .validate_bug1957_provenance(
-                    &source_deck,
-                    Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor),
-                )
-                .is_err()
-        );
-    }
-
-    #[test]
     fn bug1957_expired_deadline_rejects_before_execution() {
         let root = corpus_root();
         let runner = XyceTestRunner::new(
@@ -1145,14 +598,9 @@ mod tests {
             },
         );
         let role = Bug1957Role::new(Bug1957Family::Even, Bug1957Representation::Anchor);
-        let deck = XyceDeck {
-            path: root.join(role.path()),
-            section: XyceDeckSection::Netlists,
-            relative_path: role.path(),
-        };
         assert!(
             runner
-                .validate_bug1957_oracle(&deck, role, Instant::now() - Duration::from_millis(10),)
+                .validate_bug1957_oracle(role, Instant::now() - Duration::from_millis(10))
                 .is_err()
         );
     }

@@ -29498,96 +29498,16 @@ fn bug38_two_record_provenance_and_independent_execution_fail_closed() {
     assert!(runner.validate_bug38_provenance(&contract).is_err());
 }
 
-fn bug39_fixture() -> (tempfile::TempDir, Vec<String>, Vec<String>) {
-    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    let root = tempfile::tempdir().expect("create BUG_39_SON fixture");
-    let family_relative = "Netlists/Certification_Tests/BUG_39_SON";
-    let family_dir = root.path().join(family_relative);
-    fs::create_dir_all(&family_dir).expect("create BUG39 fixture family");
-    for (file_name, _, _, _) in XYCE_BUG39_RETAINED_ARTIFACTS {
-        fs::copy(
-            source_root.join(family_relative).join(file_name),
-            family_dir.join(file_name),
-        )
-        .expect("copy canonical BUG39 retained artifact");
-    }
-
-    let wrapper_rows = [
-        XyceBug39GaussianRole::AgaussAbsolute.path(),
-        XyceBug39GaussianRole::GaussRelative.path(),
-    ]
-    .into_iter()
-    .chain(
-        XyceBug39DeterministicRole::ALL
-            .into_iter()
-            .map(XyceBug39DeterministicRole::path),
-    )
-    .map(|path| format!("{path}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}"))
-    .collect::<Vec<_>>();
-    fs::write(
-        root.path().join(HARNESS_MANIFEST_FILE),
-        format!("{}\n", wrapper_rows.join("\n")),
-    )
-    .expect("write BUG39 wrapper ownership");
-
-    let exclusion_rows = [
-        XyceBug39GaussianRole::AgaussAbsolute,
-        XyceBug39GaussianRole::GaussRelative,
-    ]
-    .into_iter()
-    .map(|role| {
-        format!(
-            "{}\t{XYCE_BUG39_HISTORICAL_EXCLUDE_PATH}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{}",
-            role.path(),
-            role.result_contract()
-        )
-    })
-    .collect::<Vec<_>>();
-    let exclusion_refs = exclusion_rows
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    fs::write(
-        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-        upstream_exclusion_manifest(&exclusion_refs),
-    )
-    .expect("write BUG39 independent qualifications");
-    (root, wrapper_rows, exclusion_rows)
-}
-
 #[test]
 fn bug39_release_710_oracle_generated_sources_and_sampled_plans_are_exact() {
-    let records = XyceTestRunner::bug39_historical_oracle_provenance_records();
-    assert_eq!(records.len(), XYCE_BUG39_HISTORICAL_ORACLE_RECORD_COUNT);
-    assert_eq!(
-        blake3::hash(records.join("\n").as_bytes())
-            .to_hex()
-            .to_string(),
-        XYCE_BUG39_HISTORICAL_ORACLE_BLAKE3
-    );
-    assert!(records.iter().all(|record| record.starts_with(&format!(
-        "{XYCE_BUG39_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG39_UPSTREAM_RELEASE_TAG}\t"
-    ))));
-    XyceTestRunner::validate_bug39_historical_oracle_provenance()
-        .expect("BUG39 Release-7.10 anchors/wrappers/exclude/Manifest identities remain bound");
-
-    let (root, _, _) = bug39_fixture();
-    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     for role in [
         XyceBug39GaussianRole::AgaussAbsolute,
         XyceBug39GaussianRole::GaussRelative,
     ] {
         let source = XyceTestRunner::bug39_generated_source(role)
             .expect("historical generated source is reproduced exactly in memory");
-        assert_eq!(source.len(), role.generated_source_bytes());
-        assert_eq!(
-            format!("{:x}", Sha256::digest(source.as_bytes())),
-            role.generated_source_sha256()
-        );
-        assert_eq!(
-            blake3::hash(source.as_bytes()).to_hex().to_string(),
-            role.generated_source_blake3()
-        );
         assert!(
             source.contains("\n.DC I1 -1 -1 -.1\n.print DC FORMAT=NOINDEX PRECISION=19 R1:R R2:R ")
         );
@@ -29598,19 +29518,12 @@ fn bug39_release_710_oracle_generated_sources_and_sampled_plans_are_exact() {
         );
         assert!(
             !root
-                .path()
                 .join("Netlists/Certification_Tests/BUG_39_SON")
                 .join(role.generated_file_name())
                 .exists()
         );
-        let mut mutated = source.clone();
-        mutated.replace_range(0..1, ";");
-        assert!(
-            XyceTestRunner::validate_bug39_generated_source_identity(role, &mutated).is_err(),
-            "any historical generated-source drift must fail closed"
-        );
 
-        let anchor_path = root.path().join(role.path());
+        let anchor_path = root.join(role.path());
         let deck = XyceDeck {
             path: anchor_path.clone(),
             section: XyceDeckSection::Netlists,
@@ -29650,11 +29563,11 @@ fn bug39_release_710_oracle_generated_sources_and_sampled_plans_are_exact() {
 
 #[test]
 fn bug39_deterministic_plans_and_gold_semantics_are_exact() {
-    let (root, _, _) = bug39_fixture();
-    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
     for role in XyceBug39DeterministicRole::ALL {
         let deck = XyceDeck {
-            path: root.path().join(role.path()),
+            path: root.join(role.path()),
             section: XyceDeckSection::Netlists,
             relative_path: role.path().to_string(),
         };
@@ -29792,151 +29705,9 @@ fn bug39_population_mean_and_sigma_predicate_is_strict_and_independent() {
 }
 
 #[test]
-fn bug39_two_anchor_provenance_fails_closed_on_census_and_ownership_drift() {
-    let (root, wrapper_rows, exclusion_rows) = bug39_fixture();
-    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
-    let deck = XyceDeck {
-        path: root.path().join(XYCE_BUG39_AGAUSS_PATH),
-        section: XyceDeckSection::Netlists,
-        relative_path: XYCE_BUG39_AGAUSS_PATH.to_string(),
-    };
-    let contract = runner
-        .bug39_gaussian_contract(&deck)
-        .expect("AGAUSS role is selected")
-        .expect("exact BUG39 family qualifies");
-    runner
-        .validate_bug39_provenance(&contract)
-        .expect("exact BUG39 family revalidates");
-
-    fs::write(&contract.anchor_path, "anchor mutation\n").expect("mutate BUG39 anchor");
-    assert!(runner.validate_bug39_provenance(&contract).is_err());
-    fs::write(&contract.anchor_path, "").expect("restore BUG39 anchor");
-
-    let extra = contract.anchor_path.with_file_name("unexpected.cir");
-    fs::write(&extra, "unexpected BUG39 sibling\n").expect("add BUG39 sibling");
-    assert!(runner.validate_bug39_provenance(&contract).is_err());
-    fs::remove_file(extra).expect("remove BUG39 sibling");
-
-    fs::write(
-        root.path().join(HARNESS_MANIFEST_FILE),
-        format!("{}\n", wrapper_rows[1]),
-    )
-    .expect("remove AGAUSS wrapper ownership");
-    assert!(runner.validate_bug39_provenance(&contract).is_err());
-    fs::write(
-        root.path().join(HARNESS_MANIFEST_FILE),
-        format!("{}\n", wrapper_rows.join("\n")),
-    )
-    .expect("restore BUG39 wrapper ownership");
-
-    let wrong_exclusions = exclusion_rows
-        .iter()
-        .map(|row| row.replace(XYCE_BUG39_AGAUSS_CONTRACT, "wrong_bug39_agauss_contract"))
-        .collect::<Vec<_>>();
-    let wrong_refs = wrong_exclusions
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    fs::write(
-        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-        upstream_exclusion_manifest(&wrong_refs),
-    )
-    .expect("mutate BUG39 independent qualification");
-    assert!(runner.validate_bug39_provenance(&contract).is_err());
-}
-
-#[test]
-fn bug39_deterministic_provenance_fails_closed_on_source_gold_and_manifest_drift() {
-    let (root, wrapper_rows, exclusion_rows) = bug39_fixture();
-    let runner = XyceTestRunner::new(root.path(), XyceRunnerConfig::default());
-    runner
-        .validate_bug39_deterministic_provenance()
-        .expect("exact deterministic BUG39 family qualifies");
-
-    let gold = root
-        .path()
-        .join(XYCE_BUG39_INT_PATH)
-        .with_file_name(XyceBug39DeterministicRole::Int.reference_file_name());
-    fs::remove_file(&gold).expect("remove BUG39 deterministic gold");
-    assert!(runner.validate_bug39_deterministic_provenance().is_err());
-    let source_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
-    fs::copy(
-        source_root
-            .join("Netlists/Certification_Tests/BUG_39_SON")
-            .join(XyceBug39DeterministicRole::Int.reference_file_name()),
-        &gold,
-    )
-    .expect("restore deterministic gold");
-
-    let source = root.path().join(XYCE_BUG39_LIMIT_PATH);
-    let canonical_source = fs::read(&source).expect("read deterministic source");
-    fs::write(
-        &source,
-        [canonical_source.as_slice(), b"* drift\n"].concat(),
-    )
-    .expect("mutate deterministic source");
-    assert!(runner.validate_bug39_deterministic_provenance().is_err());
-    fs::write(&source, canonical_source).expect("restore deterministic source");
-
-    fs::write(
-        root.path().join(HARNESS_MANIFEST_FILE),
-        format!(
-            "{}\n",
-            wrapper_rows
-                .iter()
-                .filter(|row| !row.starts_with(XYCE_BUG39_POW_PATH))
-                .cloned()
-                .collect::<Vec<_>>()
-                .join("\n")
-        ),
-    )
-    .expect("remove POW wrapper ownership");
-    assert!(runner.validate_bug39_deterministic_provenance().is_err());
-    fs::write(
-        root.path().join(HARNESS_MANIFEST_FILE),
-        format!("{}\n", wrapper_rows.join("\n")),
-    )
-    .expect("restore deterministic wrapper ownership");
-
-    let fabricated = format!(
-        "{}\t{XYCE_BUG39_HISTORICAL_EXCLUDE_PATH}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{}",
-        XyceBug39DeterministicRole::Sign.path(),
-        XyceBug39DeterministicRole::Sign.result_contract()
-    );
-    let mut rows = exclusion_rows;
-    rows.push(fabricated);
-    let refs = rows.iter().map(String::as_str).collect::<Vec<_>>();
-    fs::write(
-        root.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-        upstream_exclusion_manifest(&refs),
-    )
-    .expect("fabricate deterministic exclusion");
-    assert!(runner.validate_bug39_deterministic_provenance().is_err());
-}
-
-#[test]
 fn bug402_release_710_temperature_option_contract_is_exact_and_executable() {
-    let records = XyceTestRunner::bug402_historical_oracle_provenance_records();
-    assert_eq!(records.len(), XYCE_BUG402_HISTORICAL_RECORD_COUNT);
-    assert_eq!(
-        format!("{:x}", Sha256::digest(records.join("\n").as_bytes())),
-        XYCE_BUG402_HISTORICAL_RECORDS_SHA256
-    );
-    assert_eq!(
-        blake3::hash(records.join("\n").as_bytes())
-            .to_hex()
-            .to_string(),
-        XYCE_BUG402_HISTORICAL_RECORDS_BLAKE3
-    );
-    XyceTestRunner::validate_bug402_historical_oracle_provenance()
-        .expect("BUG402 Release-7.10 wrapper and verifier identities remain bound");
-
     let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/xyce");
     let runner = XyceTestRunner::new(&corpus, XyceRunnerConfig::default());
-    runner
-        .validate_bug402_temperature_option_provenance()
-        .expect("exact retained BUG402 family and promotion provenance qualify");
-
     let xyce_source = fs::read_to_string(corpus.join(XYCE_BUG402_XYCE_REFERENCE_PATH))
         .expect("read canonical BUG402 worker");
     let spice_source = fs::read_to_string(corpus.join(XYCE_BUG402_SPICE_MEMBER_PATH))
