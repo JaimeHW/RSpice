@@ -7,6 +7,9 @@
 
 #![allow(clippy::excessive_precision)]
 
+#[path = "common/waveform.rs"]
+mod waveform;
+
 use rspice_core::analysis::stb::StbConfig;
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
@@ -22,6 +25,7 @@ use rspice_core::{
     },
 };
 use std::collections::HashMap;
+use waveform::interpolate;
 
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
@@ -1693,28 +1697,6 @@ fn transient_node_series<'a>(
         .position(|name| name.eq_ignore_ascii_case(node_name))
         .unwrap_or_else(|| panic!("missing node {node_name} in {:?}", names));
     &voltages[node]
-}
-
-fn interpolate(time: &[Value], values: &[Value], target: Value) -> Value {
-    assert_eq!(time.len(), values.len(), "time and value vectors align");
-    if target <= time[0] {
-        return values[0];
-    }
-    for index in 1..time.len() {
-        if time[index] >= target {
-            let t0 = time[index - 1];
-            let t1 = time[index];
-            let y0 = values[index - 1];
-            let y1 = values[index];
-            let frac = if t1 == t0 {
-                0.0
-            } else {
-                (target - t0) / (t1 - t0)
-            };
-            return y0 + frac * (y1 - y0);
-        }
-    }
-    *values.last().expect("non-empty value vector")
 }
 
 #[test]

@@ -4,8 +4,12 @@
 //! classic level-1 JFET path and related `J`/`Z` family behavior to external
 //! simulator oracles.
 
+#[path = "common/waveform.rs"]
+mod waveform;
+
 use rspice_core::engine::{Engine, SimulationConfig};
 use rspice_core::netlist::Netlist;
+use waveform::interpolate;
 
 fn engine() -> Engine {
     Engine::new(SimulationConfig::default())
@@ -478,28 +482,6 @@ fn node_series<'a>(names: &[String], voltages: &'a [Vec<f64>], want: &str) -> &'
         .position(|name| name.eq_ignore_ascii_case(want))
         .unwrap_or_else(|| panic!("missing {want} node in {:?}", names));
     &voltages[idx]
-}
-
-fn interpolate(time: &[f64], values: &[f64], target: f64) -> f64 {
-    assert_eq!(time.len(), values.len(), "time and value vectors align");
-    if target <= time[0] {
-        return values[0];
-    }
-    for index in 1..time.len() {
-        if time[index] >= target {
-            let t0 = time[index - 1];
-            let t1 = time[index];
-            let y0 = values[index - 1];
-            let y1 = values[index];
-            let frac = if t1 == t0 {
-                0.0
-            } else {
-                (target - t0) / (t1 - t0)
-            };
-            return y0 + frac * (y1 - y0);
-        }
-    }
-    *values.last().expect("non-empty value vector")
 }
 
 #[test]
