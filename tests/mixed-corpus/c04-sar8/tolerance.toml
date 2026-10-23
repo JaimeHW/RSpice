@@ -51,6 +51,17 @@ ref = "ref/ports.tran.O2.out"
 abs = 0.01
 why = "the same register in Icarus (d_cosim) over the SPICE twin of the comparator: the digital sequence must match exactly"
 
+[[q]]
+id = "known"
+analysis = "tran"
+variants = ["full"]
+kind = "checks"
+signal = "count:known"
+oracle = "O6"
+expect = "c04::known"
+abs = 0
+why = "the deck's .ASSERT known COND='!isunknown(D(b7))': sar8's initial block drives b7 to 0 at time 0 and every later write is a known bit, so b7 is never X or Z and the check reports no violation"
+
 # ---- op: the D-A state (sampling) -------------------------------------------
 
 [[q]]

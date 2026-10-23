@@ -844,14 +844,12 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
             waveforms,
             events,
             measurements,
-            hdl_output,
             ..
         } => {
             observation.kind = "tran".into();
             observation.axis = time.clone();
             waveforms_into(&mut observation, waveforms);
             record_measures(measurements, &mut observation);
-            record_hdl_checks(hdl_output, &mut observation);
             for history in &events.digital {
                 let trace = history
                     .points
@@ -966,6 +964,10 @@ fn observation(result: &SimulationResult, label: &str) -> Observation {
             observation.kind = "other".into();
             observation.label = format!("{label} ({})", result_name(other));
         }
+    }
+    if let Some(checks) = result.checks() {
+        record_hdl_checks(&checks.hdl, &mut observation);
+        record_assertions(&checks.assertions, &mut observation);
     }
     observation
 }

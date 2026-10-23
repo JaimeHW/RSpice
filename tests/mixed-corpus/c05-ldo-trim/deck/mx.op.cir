@@ -6,4 +6,7 @@
 .include ../net/spi.cir
 .hdl "../net/spi_trim.v"
 .op
+* The pass device's drop: vds, signed for its type as ngspice reports it (a
+* PMOS reads vs - vd), at most 0.6 V. It is 0.649 V, so the check fails.
+.ASSERT mpsat DEV=mp PARAM=vds MAX=0.6
 .end

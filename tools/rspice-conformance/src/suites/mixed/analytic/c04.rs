@@ -10,7 +10,13 @@ use num_complex::Complex64;
 use super::{Context, Registry, complex, points, values};
 use crate::suites::mixed::compare::Expected;
 
-pub const REGISTRY: Registry = &[("codes", codes), ("tconv", tconv), ("acc", acc), ("nz", nz)];
+pub const REGISTRY: Registry = &[
+    ("codes", codes),
+    ("tconv", tconv),
+    ("known", known),
+    ("acc", acc),
+    ("nz", nz),
+];
 
 /// The staircase's codes, in conversion order (`net/vin_codes.cir`).
 pub const STAIRCASE: [u8; 32] = [
@@ -46,6 +52,12 @@ fn codes(_: &Context<'_>) -> Result<Expected, String> {
 /// One conversion, samp's fall to eoc's rise: nine clock periods, 900 ns.
 fn tconv(_: &Context<'_>) -> Result<Expected, String> {
     Ok(values(vec![CONVERSION_CLOCKS * CLOCK_PERIOD]))
+}
+
+/// `b7` is driven from sar8's initial block onward (`net/sar8.v`), so the
+/// check that it is never X or Z reports no violation.
+fn known(_: &Context<'_>) -> Result<Expected, String> {
+    Ok(values(vec![0.0]))
 }
 
 /// `v(xcmp.o1)/v(cref) = gm·ro/(1 + jf/fp)`: cref drives inn; the top plate

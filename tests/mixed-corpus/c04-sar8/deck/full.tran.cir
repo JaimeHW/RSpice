@@ -8,4 +8,6 @@
 .include ../net/sar_full.cir
 .param vcc=1.8 nconv=32
 .tran 1n 32u
+* The register drives its bits from its initial block onward.
+.ASSERT known COND='!isunknown(D(b7))'
 .end

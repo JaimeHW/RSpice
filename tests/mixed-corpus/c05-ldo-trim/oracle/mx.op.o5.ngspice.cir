@@ -15,7 +15,7 @@ rtr1 tr1_h tr1 20
 vtr0 tr0_h 0 0
 rtr0 tr0_h tr0 20
 .op
-.save v(vout) v(og) v(fb) i(vin)
+.save v(vout) v(og) v(fb) i(vin) @mp[vds]
 * rspice-control-begin
 * pre_osdi {ngspice_lib}/juncap200.osdi
 * run

@@ -71,6 +71,23 @@ abs = 3e-5
 rel = 3e-3
 why = "Xyce BSIM4 version differs; the op row's 3 mV carried through rload (100 Ω) onto the input current"
 
+# The deck's `.ASSERT mpsat DEV=mp PARAM=vds MAX=0.6` is violated at the
+# operating point: the pass device's vds, signed for its type as ngspice-46
+# reports @mp[vds] (vin 1.8 V less vout 1.151 V), is 0.649 V. Its extreme is
+# that vds, which the O5-O1 reference saves.
+
+[[q]]
+id = "mpsat"
+analysis = "op"
+variants = ["mx"]
+kind = "checks"
+signal = "extreme:mpsat[mp]"
+oracle_signal = "@mp[vds]"
+oracle = "O5-O1"
+ref = "ref/mx.op.O5-O1.out"
+abs = 1e-3
+why = "same BSIM4 4.8.2 equations; the op row's 1 mV on the node voltages vds is taken between"
+
 # ---- dc ------------------------------------------------------------------
 
 [[q]]

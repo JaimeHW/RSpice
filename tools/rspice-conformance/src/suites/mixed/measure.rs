@@ -385,7 +385,8 @@ pub fn evaluate(
 /// A `checks` quantity's values. `hdl:<severity>[@<file>:<line>]` gives the
 /// times of the HDL records of that severity, each of which must be at the
 /// named site when one is named; `assert:<name>` gives where the assertion's
-/// violations start, and `extreme:<name>` their extreme values.
+/// violations start, `extreme:<name>` their extreme values, and
+/// `count:<name>` how many it reported.
 fn checks(observation: &Observation, selector: &str) -> MeasureResult<Vec<f64>> {
     let lower = selector.to_ascii_lowercase();
     let Some((what, name)) = lower.split_once(':') else {
@@ -420,7 +421,7 @@ fn checks(observation: &Observation, selector: &str) -> MeasureResult<Vec<f64>> 
             }
             Ok(times)
         }
-        "assert" | "extreme" => {
+        "assert" | "extreme" | "count" => {
             let report = observation
                 .assertions
                 .get(name)
@@ -430,6 +431,9 @@ fn checks(observation: &Observation, selector: &str) -> MeasureResult<Vec<f64>> 
             }
             if what == "assert" {
                 return Ok(report.starts.clone());
+            }
+            if what == "count" {
+                return Ok(vec![report.starts.len() as f64]);
             }
             report
                 .extremes
@@ -1531,10 +1535,34 @@ mod tests {
             checks("assert:mpsat[mp]").unwrap(),
             Measured::Values(vec![0.0])
         );
+        assert_eq!(
+            checks("count:mpsat[mp]").unwrap(),
+            Measured::Values(vec![1.0])
+        );
         assert!(matches!(
             checks("assert:known"),
             Err(MeasureError::Missing(_))
         ));
+        // A captured reference holds no report: the oracle's side of the
+        // extreme is the operating-point column the quantity names.
+        let spec = MeasureSpec {
+            kind: "checks".into(),
+            signal: Some(PerVariant::All("extreme:mpsat[mp]".into())),
+            oracle_signal: Some("@mp[vds]".into()),
+            ..Default::default()
+        };
+        let mut reference = Observation {
+            kind: "op".into(),
+            ..Default::default()
+        };
+        reference.real.insert(
+            crate::suites::mixed::case::canonical_signal("@mp[vds]"),
+            vec![-0.6489],
+        );
+        assert_eq!(
+            evaluate(&spec.on_oracle_side(), "x", &reference).unwrap(),
+            Measured::Values(vec![-0.6489])
+        );
         assert!(matches!(checks("hdl:loud"), Err(MeasureError::Invalid(_))));
     }
 }

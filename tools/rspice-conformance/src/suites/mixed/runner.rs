@@ -755,7 +755,8 @@ fn evaluate_quantity(
             }
             let expected = match &oracle_observation {
                 Some(observation) => {
-                    match evaluate(&quantity.measure, &oracle_variant, observation) {
+                    let measure = quantity.measure.on_oracle_side();
+                    match evaluate(&measure, &oracle_variant, observation) {
                         Ok(measured) => Expected::Measured(measured),
                         Err(error) => {
                             return QuantityOutcome::OracleError(format!("oracle side: {error}"));

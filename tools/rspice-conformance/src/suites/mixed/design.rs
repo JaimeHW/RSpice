@@ -244,6 +244,26 @@ pub struct MeasureSpec {
     pub samples: Option<usize>,
     #[serde(default)]
     pub exclude: Vec<Exclusion>,
+    /// `checks` against a captured reference: the operating-point column
+    /// that holds, on the oracle's side, the value the check reports (an
+    /// `@inst[param]` a device-form assertion's extreme reads). A reference
+    /// carries no assertion report of its own.
+    #[serde(default)]
+    pub oracle_signal: Option<String>,
+}
+
+impl MeasureSpec {
+    /// How the same quantity is measured on a captured reference.
+    pub fn on_oracle_side(&self) -> std::borrow::Cow<'_, Self> {
+        match (&self.oracle_signal, self.kind.as_str()) {
+            (Some(signal), "checks") => std::borrow::Cow::Owned(Self {
+                kind: "op".into(),
+                signals: Some(vec![signal.clone()]),
+                ..Self::default()
+            }),
+            _ => std::borrow::Cow::Borrowed(self),
+        }
+    }
 }
 
 /// One `[[q]]`. Unknown keys are rejected by the flattened [`MeasureSpec`],
@@ -293,10 +313,29 @@ pub struct Quantity {
 }
 
 /// Keys a measure (a `[[q]]` or its `of`) may carry.
-const MEASURE_KEYS: [&str; 21] = [
-    "kind", "signal", "signals", "times", "at", "window", "level", "edge", "n", "target", "band",
-    "points", "nets", "strobe", "lattice", "smax", "params", "scale", "taper", "samples",
+const MEASURE_KEYS: [&str; 22] = [
+    "kind",
+    "signal",
+    "signals",
+    "times",
+    "at",
+    "window",
+    "level",
+    "edge",
+    "n",
+    "target",
+    "band",
+    "points",
+    "nets",
+    "strobe",
+    "lattice",
+    "smax",
+    "params",
+    "scale",
+    "taper",
+    "samples",
     "exclude",
+    "oracle_signal",
 ];
 
 /// Keys only a `[[q]]` carries.
