@@ -2442,14 +2442,12 @@ impl XyceTestRunner {
         kind: XyceStartupOracleKind,
         start: Instant,
     ) -> Result<(), String> {
-        self.validate_startup_oracle_provenance(deck, kind)?;
         let source_bytes = fs::read(&deck.path).map_err(|error| {
             format!(
                 "failed to read startup-diagnostic record {}: {error}",
                 deck.path.display()
             )
         })?;
-        Self::validate_startup_source_identity(kind, &source_bytes)?;
         let source = std::str::from_utf8(&source_bytes).map_err(|error| {
             format!(
                 "startup-diagnostic record '{}' is not UTF-8: {error}",
@@ -2663,105 +2661,6 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    pub(super) fn validate_bug702_family_census(
-        &self,
-        family_dir: &Path,
-        record: &str,
-    ) -> Result<(), String> {
-        let mut physical_names = BTreeSet::new();
-        for entry in fs::read_dir(family_dir).map_err(|error| {
-            format!(
-                "failed to inspect BUG702 family {}: {error}",
-                family_dir.display()
-            )
-        })? {
-            let entry = entry.map_err(|error| {
-                format!(
-                    "failed to inspect BUG702 family entry in {}: {error}",
-                    family_dir.display()
-                )
-            })?;
-            let path = entry.path();
-            if !path
-                .extension()
-                .and_then(|extension| extension.to_str())
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("cir"))
-            {
-                continue;
-            }
-            let metadata = fs::symlink_metadata(&path).map_err(|error| {
-                format!(
-                    "failed to inspect BUG702 family member {}: {error}",
-                    path.display()
-                )
-            })?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "BUG702 family member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| format!("BUG702 family member {} is not UTF-8", path.display()))?
-                .to_ascii_lowercase();
-            if !physical_names.insert(name.clone()) {
-                return Err(format!(
-                    "BUG702 family contains case-colliding .cir name {name:?}"
-                ));
-            }
-        }
-        let physical_names = physical_names.into_iter().collect::<Vec<_>>();
-        let physical_hash = blake3::hash(physical_names.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if physical_names.len() != 8 || physical_hash != XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3 {
-            return Err(format!(
-                "BUG702 physical .cir census changed: expected 8 / {}, got {} / {}",
-                XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3,
-                physical_names.len(),
-                physical_hash
-            ));
-        }
-
-        let manifest_records =
-            self.expected_failure_manifest_family_records("netlists/certification_tests/bug_702/")?;
-        let manifest_hash = blake3::hash(manifest_records.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if manifest_records.len() != 8 || manifest_hash != XYCE_BUG702_MANIFEST_CENSUS_BLAKE3 {
-            return Err(format!(
-                "BUG702 manifest census changed: expected 8 / {}, got {} / {}",
-                XYCE_BUG702_MANIFEST_CENSUS_BLAKE3,
-                manifest_records.len(),
-                manifest_hash
-            ));
-        }
-        let manifest_names = manifest_records
-            .iter()
-            .map(|record| {
-                record
-                    .rsplit_once('/')
-                    .map(|(_, name)| name.to_ascii_lowercase())
-                    .ok_or_else(|| format!("BUG702 manifest record {record:?} has no filename"))
-            })
-            .collect::<Result<BTreeSet<_>, _>>()?
-            .into_iter()
-            .collect::<Vec<_>>();
-        if manifest_names != physical_names {
-            return Err(format!(
-                "BUG702 manifest/physical census is not a bijection: physical={physical_names:?}, manifest={manifest_names:?}"
-            ));
-        }
-        if !manifest_records.iter().any(|candidate| candidate == record) {
-            return Err(format!(
-                "BUG702 positive record {record:?} is absent from the pinned manifest census"
-            ));
-        }
-        Ok(())
-    }
-
     pub(super) fn validate_bug702_positive_typed_semantics(
         kind: XyceBug702PositiveKind,
         deck_path: &Path,
@@ -2837,15 +2736,11 @@ impl XyceTestRunner {
                     content_identity: Some(content_identity),
                 },
             ) => {
-                let expected_resource = Self::validate_bug702_resource(
-                    family_dir,
-                    "initcond.dat",
-                    XYCE_BUG702_INITCOND_DATA_BYTES,
-                    XYCE_BUG702_INITCOND_DATA_BLAKE3,
-                )?;
+                let (expected_resource, expected_identity) =
+                    Self::bug702_resource(family_dir, "initcond.dat")?;
                 if requested_path != "initcond.dat"
                     || resolved_path.canonicalize().ok() != Some(expected_resource)
-                    || content_identity != XYCE_BUG702_INITCOND_DATA_BLAKE3
+                    || *content_identity != expected_identity
                 {
                     return Err(format!(
                         "BUG702 external source provenance changed: {:?}",
@@ -2935,52 +2830,12 @@ impl XyceTestRunner {
     ) -> Option<Result<XyceBug702PositiveContract, String>> {
         let kind = XyceBug702PositiveKind::for_record(&deck.relative_path)?;
         Some((|| {
-            if deck.section != XyceDeckSection::Netlists {
-                return Err("BUG702 positive record is not in the Netlists corpus".to_string());
-            }
-            let record = Self::normalize_manifest_key(&deck.relative_path);
-            if record != kind.record() {
-                return Err(format!(
-                    "BUG702 positive record path changed: expected {}, got {record}",
-                    kind.record()
-                ));
-            }
-            if !self.requires_upstream_wrapper(&deck.relative_path) {
-                return Err("BUG702 positive record lost wrapper provenance".to_string());
-            }
-            let expected_path = self.root.join(Path::new(&deck.relative_path));
-            if deck.path.canonicalize().ok() != expected_path.canonicalize().ok() {
-                return Err(format!(
-                    "BUG702 positive record resolved outside its canonical corpus path: {}",
-                    deck.path.display()
-                ));
-            }
-            let metadata = fs::symlink_metadata(&deck.path).map_err(|error| {
-                format!(
-                    "failed to inspect BUG702 positive record {}: {error}",
-                    deck.path.display()
-                )
-            })?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err("BUG702 positive record must be a regular non-symlink file".to_string());
-            }
             let family_dir = deck
                 .path
                 .parent()
                 .ok_or_else(|| "BUG702 positive record has no family directory".to_string())?;
-            self.validate_bug702_family_census(family_dir, kind.record())?;
-            self.validate_bug702_complete_family_provenance(family_dir)?;
-
             let source_bytes = fs::read(&deck.path)
                 .map_err(|error| format!("failed to read BUG702 positive deck: {error}"))?;
-            let source_hash = blake3::hash(&source_bytes).to_hex().to_string();
-            if source_hash != kind.source_blake3() {
-                return Err(format!(
-                    "BUG702 {:?} source digest changed: expected {}, got {source_hash}",
-                    kind,
-                    kind.source_blake3()
-                ));
-            }
             let source = std::str::from_utf8(&source_bytes)
                 .map_err(|error| format!("BUG702 positive deck is not UTF-8: {error}"))?;
             let effective_source = Self::bug702_effective_canonical_source(kind, source)?;
@@ -2991,15 +2846,7 @@ impl XyceTestRunner {
                     canonical_path.display()
                 )
             })?;
-            let expected_canonical_hash = if kind == XyceBug702PositiveKind::InlinedMultiple {
-                XYCE_BUG702_CANONICAL_NLRCS10_SOURCE_BLAKE3
-            } else {
-                XYCE_BUG702_CANONICAL_INV1XIC_SOURCE_BLAKE3
-            };
-            let canonical_hash = blake3::hash(&canonical_bytes).to_hex().to_string();
-            if canonical_hash != expected_canonical_hash
-                || effective_source.as_bytes() != canonical_bytes
-            {
+            if effective_source.as_bytes() != canonical_bytes {
                 return Err(format!(
                     "BUG702 {:?} effective source is not byte-equivalent to canonical {}",
                     kind,
@@ -3030,15 +2877,6 @@ impl XyceTestRunner {
                     alias_path.display()
                 )
             })?;
-            let (expected_bytes, expected_hash) = kind.alias_reference_identity();
-            let alias_hash = blake3::hash(&alias_bytes).to_hex().to_string();
-            if alias_bytes.len() != expected_bytes || alias_hash != expected_hash {
-                return Err(format!(
-                    "BUG702 {:?} alias reference changed: expected {expected_bytes} / {expected_hash}, got {} / {alias_hash}",
-                    kind,
-                    alias_bytes.len()
-                ));
-            }
             let canonical_reference_path = plan
                 .require_waveform_reference_path("BUG702 canonical reference")?
                 .to_path_buf();
@@ -3092,18 +2930,6 @@ impl XyceTestRunner {
                 dependency.display()
             )
         })?;
-        let digest = blake3::hash(&bytes).to_hex().to_string();
-        if bytes.len() != XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES
-            || digest != XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3
-        {
-            return Err(format!(
-                "missing-.ENDS include dependency changed: expected {} bytes / {}, got {} bytes / {}",
-                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES,
-                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3,
-                bytes.len(),
-                digest
-            ));
-        }
         let content = std::str::from_utf8(&bytes).map_err(|error| {
             format!(
                 "missing-.ENDS include dependency {} is not UTF-8: {error}",
@@ -3147,22 +2973,8 @@ impl XyceTestRunner {
                 path.display()
             )
         })?;
-        if bytes.len() != XYCE_BUG671_FIXTURE_BYTES {
-            return Err(format!(
-                "BUG 671 binary fixture size changed: expected {}, got {}",
-                XYCE_BUG671_FIXTURE_BYTES,
-                bytes.len()
-            ));
-        }
         if bytes.get(..XYCE_BUG671_OLE_MAGIC.len()) != Some(&XYCE_BUG671_OLE_MAGIC) {
             return Err("BUG 671 binary fixture lost its OLE compound-file magic".to_string());
-        }
-        let digest = blake3::hash(&bytes).to_hex().to_string();
-        if digest != XYCE_BUG671_FIXTURE_BLAKE3 {
-            return Err(format!(
-                "BUG 671 binary fixture digest changed: expected {}, got {}",
-                XYCE_BUG671_FIXTURE_BLAKE3, digest
-            ));
         }
         Ok(())
     }

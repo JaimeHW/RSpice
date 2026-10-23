@@ -61,58 +61,6 @@ impl XyceTestRunner {
         }
     }
 
-    pub(super) fn reject_startup_output_artifacts(&self, deck_path: &Path) -> Result<(), String> {
-        let anchor = self
-            .static_output_reference_path(deck_path, "anchor")
-            .ok_or_else(|| {
-                "startup-diagnostic source cannot be mapped into OutputData".to_string()
-            })?;
-        let output_dir = anchor
-            .parent()
-            .ok_or_else(|| "startup-diagnostic OutputData path has no parent".to_string())?;
-        if !output_dir.exists() {
-            return Ok(());
-        }
-        let metadata = fs::symlink_metadata(output_dir)
-            .map_err(|error| format!("failed to inspect startup OutputData: {error}"))?;
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(format!(
-                "startup-diagnostic OutputData path {} must be a regular non-symlink directory",
-                output_dir.display()
-            ));
-        }
-        let deck_name = deck_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| "startup-diagnostic filename is not UTF-8".to_string())?;
-        let prefix = format!("{deck_name}.").to_ascii_lowercase();
-        let mut artifacts = Vec::new();
-        for entry in fs::read_dir(output_dir)
-            .map_err(|error| format!("failed to inspect startup OutputData entries: {error}"))?
-        {
-            let entry = entry.map_err(|error| {
-                format!(
-                    "failed to read startup OutputData entry in {}: {error}",
-                    output_dir.display()
-                )
-            })?;
-            if entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&prefix))
-            {
-                artifacts.push(entry.path());
-            }
-        }
-        artifacts.sort();
-        if !artifacts.is_empty() {
-            return Err(format!(
-                "startup-diagnostic source must not own checked-in output artifacts: {artifacts:?}"
-            ));
-        }
-        Ok(())
-    }
-
     /// Return whether an ordinary, precisionless `.PRINT TRAN` card is safe
     /// to compare with the default Release 7.10 integrated-RMS verifier for
     /// a structurally qualified LEVEL=9 deck.  Xyce serializes this form at

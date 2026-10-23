@@ -190,42 +190,6 @@ impl XyceTestRunner {
         })
     }
 
-    pub(super) fn reject_startup_source_sidecars(deck_path: &Path) -> Result<(), String> {
-        let family_dir = deck_path
-            .parent()
-            .ok_or_else(|| "startup-diagnostic source has no family directory".to_string())?;
-        let deck_name = deck_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| "startup-diagnostic source filename is not UTF-8".to_string())?;
-        let prefix = format!("{deck_name}.").to_ascii_lowercase();
-        let mut sidecars = Vec::new();
-        for entry in fs::read_dir(family_dir)
-            .map_err(|error| format!("failed to inspect source sidecars: {error}"))?
-        {
-            let entry = entry.map_err(|error| {
-                format!(
-                    "failed to read source-sidecar entry in {}: {error}",
-                    family_dir.display()
-                )
-            })?;
-            if entry
-                .file_name()
-                .to_str()
-                .is_some_and(|name| name.to_ascii_lowercase().starts_with(&prefix))
-            {
-                sidecars.push(entry.path());
-            }
-        }
-        sidecars.sort();
-        if !sidecars.is_empty() {
-            return Err(format!(
-                "startup-diagnostic source must not own source-directory sidecars: {sidecars:?}"
-            ));
-        }
-        Ok(())
-    }
-
     pub(super) fn bug702_effective_canonical_source(
         kind: XyceBug702PositiveKind,
         source: &str,

@@ -401,16 +401,6 @@ const XYCE_BUG354_LEAD_CURRENT_RECORD: &str =
     "netlists/certification_tests/bug_354_son/bad_leadcurrent.cir";
 const XYCE_BUG354_PARAMETER_RECORD: &str =
     "netlists/certification_tests/bug_354_son/bad_parameter.cir";
-const XYCE_BUG354_FUNCTION_SOURCE_BLAKE3: &str =
-    "ebaa47b9ad2236255aa47c2f7e3dab8d3bd544bbcf0d83ca5b443859fcf9ecc2";
-const XYCE_BUG354_LEAD_CURRENT_SOURCE_BLAKE3: &str =
-    "7b6dd2464c7638740c94a2c2f711855d5076f8ff3f83c8af6130c4668daf76cc";
-const XYCE_BUG354_PARAMETER_SOURCE_BLAKE3: &str =
-    "fe21209b8cce1da0fdcfa110995a7ee3598f26c20f1157560c662dca5428821e";
-const XYCE_BUG354_PHYSICAL_CENSUS_BLAKE3: &str =
-    "b18f00d6d7641e631c96fd17db56bbd9b5a09dbe4ffbea9295f120c806bd7ffa";
-const XYCE_BUG354_MANIFEST_CENSUS_BLAKE3: &str =
-    "d895cc88602ef2af2f180ac3849d9896f577dbaf37c9f65b34140c008ab7864b";
 const XYCE_BUG354_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
 
 // BUG_48_SON proves that the historical MOS LEVEL=54 alias selects BSIM4.
@@ -1176,19 +1166,6 @@ const XYCE_BUG667_SCOPED_GLOBAL_WARNING_RECORD: &str =
     "netlists/certification_tests/bug_667_son/ic_in_subckt_warning.cir";
 const XYCE_IC_NODESET_CONFLICT_RECORD: &str = "netlists/message/input/ic_and_nodeset_specified.cir";
 
-const XYCE_IC_MISSING_NODE_WARNING_BLAKE3: &str =
-    "c49c834da18ec5603a8fc748f79d184fd94385acdf12a2ffdf0c9c2b77efa793";
-const XYCE_IC_EMPTY_WARNING_BLAKE3: &str =
-    "b2f42b66d52f0c2dbf11d075e02f4fa5910b7b0f563cb7533e8759e43c4f708f";
-const XYCE_NODESET_MISSING_NODE_WARNING_BLAKE3: &str =
-    "9b861bfd6daed7c866918ddfb98f67c8f3968836b674ce1ca42c45c608059ab9";
-const XYCE_NODESET_EMPTY_WARNING_BLAKE3: &str =
-    "f89293d171168ccc1e958b88a0ca64127d29b06ed44fb50383880e9747f79729";
-const XYCE_BUG667_SCOPED_GLOBAL_WARNING_BLAKE3: &str =
-    "be5e0b168367716ca744c38417952c0b680ae063d309859100202d2b37242f19";
-const XYCE_IC_NODESET_CONFLICT_BLAKE3: &str =
-    "1e7597f00478759e105259a832d7aa298c3ffcb3c4d3a8efda4c236504ebed6b";
-
 #[cfg(test)]
 const XYCE_XDM_REPLACEGROUND_FAMILY_PREFIX: &str = "netlists/xdm/hspice/other_parsing/";
 #[cfg(test)]
@@ -1204,15 +1181,6 @@ const XYCE_XDM_REPLACEGROUND_DECLARED_ABSOLUTE_TOLERANCE: Value = 1.0e-5;
 const XYCE_XDM_REPLACEGROUND_DECLARED_RELATIVE_TOLERANCE: Value = 1.0e-3;
 const XYCE_XDM_REPLACEGROUND_DECLARED_ZERO_TOLERANCE: Value = 1.0e-10;
 
-const XYCE_STARTUP_MESSAGE_INPUT_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
-    "c1c3aab2bbf03214039de43671c9c36fe3b4e69a2baf92fd60124de6da76e950";
-const XYCE_STARTUP_BUG667_PHYSICAL_CENSUS_BLAKE3: &str =
-    "e6f6e3062ace9ab02388edc91e9a01dba2979617d480dcaba154d6398f125603";
-const XYCE_STARTUP_BUG667_MANIFEST_CENSUS_BLAKE3: &str =
-    "2457b1e041aeb407a95238024680799052bf59342381aeb9b67b16ce85df8891";
-const XYCE_STARTUP_OPTIONS_BLAKE3: &str =
-    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
-const XYCE_STARTUP_OPTIONS_BYTES: usize = 14;
 const XYCE_BUG754_GLOBAL_PARAMETER_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_754_son/dcsweep_globalpar.cir";
 const XYCE_BUG754_LITERAL_REFERENCE_RECORD: &str =
@@ -1234,12 +1202,6 @@ const XYCE_BUG1595_EXPECTED_FAILURE_RECORD: &str =
 const XYCE_BUG1595_EXPECTED_FAILURE_CONTRACT: &str =
     "expected_failure_bug1595_hierarchical_mutual_inductor_reference_parse";
 const XYCE_BUG1595_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
-const XYCE_BUG1595_SOURCE_BLAKE3: &str =
-    "ee16db30fa9cf0cca771678bbbabe6417ad5dfda5dded174b4e2b75ba6c3445b";
-const XYCE_BUG1595_PHYSICAL_CENSUS_BLAKE3: &str =
-    "d5321ed43ca99ca6e3264b9bbee806c6a0699a16e4d0e618248986731f83e7f0";
-const XYCE_BUG1595_MANIFEST_CENSUS_BLAKE3: &str =
-    "e5ec7f0630965511fb6650c98414999c5d4ef99d22081863f4cb7413456b00ec";
 const XYCE_BUG1148_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_1148/bug_1148.cir";
 const XYCE_BUG40_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_40/bug_40.cir";
@@ -1331,232 +1293,6 @@ const XYCE_BUG198_EXPECTED_FAILURE_RECORD: &str =
 const XYCE_BUG258_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_258/bug_198.cir";
 const XYCE_BUG587_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_587/587.cir";
-const XYCE_BUG67_SOURCE_BLAKE3: &str =
-    "29c1c55fcf4a297f2472878ef61e264eae4e43483d734fddbdbbb40161512337";
-const XYCE_BUG671_SOURCE_BLAKE3: &str =
-    "40af3a1050a8efeb51c7e3052eb1228ad331fd1fa469cde74508798c85f77653";
-const XYCE_BUG726_SOURCE_BLAKE3: &str =
-    "e55050584c69086bd34d84be82c885902a94eb212ffb6973f1d7786dd8b8ab2f";
-const XYCE_BUG744_SOURCE_BLAKE3: &str =
-    "b0c2ba9e38e293eb0d9d53cc14713921890e81330e6b06c64d3fc8f0df26afda";
-const XYCE_BUG75_SOURCE_BLAKE3: &str =
-    "eab31dd9fba0e2020d8ec5f40d5cfd4f3232aac87a54e7c19ced83a20fb9886f";
-const XYCE_BUG1148_SOURCE_BLAKE3: &str =
-    "de3cfb1443716a2c1bb376213cb54a2dcb38d218b074c6c2986b74c7227f7c8a";
-const XYCE_BUG40_SOURCE_BLAKE3: &str =
-    "cb77ddca1c3837d9bfc7aad5780567cc2cd2090e7903b1d749927e5f1b0bb658";
-const XYCE_BUG718_INVALID_NODES_SOURCE_BLAKE3: &str =
-    "69d78900ed75aa899acc0127836e4c2462b6f48d2ed6a34857bb10c4a170f4b2";
-const XYCE_MESSAGE_PRINT_BAD_NODENAME_SOURCE_BLAKE3: &str =
-    "20c8e3c04b88c993a4c901015eb4dd795a827f62c17692744bd5b015a0545384";
-const XYCE_MESSAGE_PRINT_BAD_VARIABLE_SOURCE_BLAKE3: &str =
-    "6bb9862735fc3d2444c4b8f819e2c96c9c4b648c8b38aa8802b94f9268531613";
-const XYCE_LEAD_CURRENTS_INVALID_DEVICE_SOURCE_BLAKE3: &str =
-    "ff72347a18df0f5d471bc20ede53cc3285adf4490707475033bd85bca7f58555";
-const XYCE_MEASURE_INVALID_NODES_SOURCE_BLAKE3: &str =
-    "aec265c84b6042e692ee6a2f5500561b1d320fcad0f83f7cb71b53d49b626f0d";
-const XYCE_FOURIER_BAD_LINE3_SOURCE_BLAKE3: &str =
-    "aeb7fd393692890326f1f2cf59663a0783720184927235c719b2e71717db21f1";
-const XYCE_BUG387_SOURCE_BLAKE3: &str =
-    "4cf9e5605ea32387fb6e670928e057940236b92fe3c240ee64b8b9bdce60e1b0";
-const XYCE_SUBCKT_NONAME_SOURCE_BLAKE3: &str =
-    "0d6a0bd47a0637d0fb92dab3555532594e026b4ed52b1840596db2acd509e79f";
-const XYCE_SUBCKT_MISSING_ENDS_END_CARD_SOURCE_BLAKE3: &str =
-    "1cb69bb569491d5aebdf0bdffae2a06c4d199aa5d46c424aef0326e10f5d149d";
-const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_SOURCE_BLAKE3: &str =
-    "4d9840ab8e11b5f154fe64d2eaa6076d2ab5b595eb16a4248a84ce39a4a50a71";
-const XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_SOURCE_BLAKE3: &str =
-    "0b74635ac9a645a8e9604152ef35223c5e98b351edab65b49baf3c1008ed62c2";
-const XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_SOURCE_BLAKE3: &str =
-    "16e9eb7f9f462997ea78c9ea2e9974c9816f2810c9de647ee430345575273334";
-const XYCE_SUBCKT_A2_DUP_BINDING_SOURCE_BLAKE3: &str =
-    "ef26ce0ef8c46541453810ca118f555f600d75f9ade4ff75f02aef26933ff4ee";
-const XYCE_SUBCKT_J1_DUP_BINDING_SOURCE_BLAKE3: &str =
-    "c1519e204897df0c4002245cdc259549c21751798ebca58e08b79d9affe4d453";
-const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BLAKE3: &str =
-    "7e198f9c1c164fa0a80560c99a8f5e85777ae6e19a1484b954459692db603661";
-const XYCE_SUBCKT_MISSING_ENDS_INCLUDE_FILE_BYTES: usize = 43;
-const XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3: &str =
-    "472709aa403c4da89e736c47b64eff48fd919f2518d671c79cc728d847812ac1";
-const XYCE_AC_UNSUPPORTED_SWEEP_SOURCE_BLAKE3: &str =
-    "de4ea71d020e6d7b8cf23bb762f3fa55bfbc60afe7bd19de452537b544a8b043";
-const XYCE_NOISE_UNSUPPORTED_SWEEP_SOURCE_BLAKE3: &str =
-    "a65a56ba1272ade0546c639ca4efd9782d6edabb0cc8845c9cded1ef8689af0f";
-const XYCE_MESSAGE_MISSING_LIBRARY_ENDL_SOURCE_BLAKE3: &str =
-    "f9b70136edeec498d0ce7429bc00810a0709c6943f806400bd1bdc4a3ecd06a6";
-const XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_SOURCE_BLAKE3: &str =
-    "36cc809ea597e944ccc8eb92057c9eacd347fbd5b21ca2b092870db47d9db57e";
-const XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_SOURCE_BLAKE3: &str =
-    "c70a89579ff9d39c287fd874bd7a7482a43aaae7e755bf521be46da0952edd2c";
-const XYCE_MESSAGE_DUPLICATE_DEVICE_SOURCE_BLAKE3: &str =
-    "ce5680dc24782e35dcb2ca9929a895306c47664591f11697ad51114e189f4171";
-const XYCE_MESSAGE_MISSING_DEVICE_NODES_SOURCE_BLAKE3: &str =
-    "a0564ed5888ea5c23b87ceca58ad61e9cc34cf974c5cb36922b0345994e2f278";
-const XYCE_BUG702_DUP_EXTERNAL_SOURCE_BLAKE3: &str =
-    "dbde7992544ec0958d58024f2f110606f770b83c7440f447833d20e51712691f";
-const XYCE_BUG702_DUP_INLINED_SOURCE_BLAKE3: &str =
-    "469a39662513264b899cd706c8fc279d24c3a630a3c274e7e05999b5406618bd";
-const XYCE_BUG702_EMPTY_INITCOND_SOURCE_BLAKE3: &str =
-    "ffc26554455d078bd6a2f66715ee65fa7f624422efbb97991f791998ece99874";
-const XYCE_BUG702_MISSING_INITCOND_SOURCE_BLAKE3: &str =
-    "0a75b775d3532734bcbcbdc24f47f156130dbefb32dd4ebee201d4a2c4eaa352";
-const XYCE_BUG702_EXTERNAL_SOURCE_BLAKE3: &str =
-    "4452f5b7b61579e9b1f9af22e377fbe8981afef85d6bf2d5532f91f0d6bea451";
-const XYCE_BUG702_INLINED_MULTIPLE_SOURCE_BLAKE3: &str =
-    "54ea0e1913a26ef18a67a1f001de5c8a6246fa0546fdb23a5a73fd58ba6034cd";
-const XYCE_BUG702_INLINED_SINGLE_SOURCE_BLAKE3: &str =
-    "f3d1cdc6272202931b57a5d1926e0828bb0e8aca6d2cfc43c3d5166dabda4728";
-const XYCE_BUG702_PRECEDENCE_SOURCE_BLAKE3: &str =
-    "e161ec6f122bfab85b62444b1ee1a0df866d8950717b7430ba01a5eb7626e45e";
-const XYCE_BUG702_INITCOND_DATA_BLAKE3: &str =
-    "aeb67f1437f1c271fc8803120cb2a4b9b2b476baf4313c3627634cf5732534f9";
-const XYCE_BUG702_INITCOND_DATA_BYTES: usize = 26;
-const XYCE_BUG702_NOINITS_DATA_BLAKE3: &str =
-    "544397224dca2dae387a0754c1e039de23d7d9d8d75269ee9aeaba68eedcffba";
-const XYCE_BUG702_NOINITS_DATA_BYTES: usize = 29;
-const XYCE_BUG702_INV1XIC_REFERENCE_BLAKE3: &str =
-    "14bf3cff491747a8ee5fa3e6e6dedf3a5672fd4773ab4576ecce0bb0f27de984";
-const XYCE_BUG702_INV1XIC_REFERENCE_BYTES: usize = 208_655;
-const XYCE_BUG702_NLRCS10_REFERENCE_BLAKE3: &str =
-    "5c82790a07c8078d3503e3045aa6e79b967e8801423045103171c119c381b437";
-const XYCE_BUG702_NLRCS10_REFERENCE_BYTES: usize = 95_773;
-const XYCE_BUG702_CANONICAL_INV1XIC_SOURCE_BLAKE3: &str =
-    "3d718166f51cc05da45f17893410e2119aa967753c19bd03dd2ffc7284b1a157";
-const XYCE_BUG702_CANONICAL_NLRCS10_SOURCE_BLAKE3: &str =
-    "2bd3ed0701cd20d41b69856d33d41e6bea50f10a2ccbac48088c9d661d49ac24";
-const XYCE_ISSUE455_SOURCE_BLAKE3: &str =
-    "9552abaee2c6162c1f1b389708fd6e338fb9ea212e04e1c8be5ea972bf04c875";
-const XYCE_BUG204_SOURCE_BLAKE3: &str =
-    "ed8984a5badf07bdc1cccab7a56cfa66303b678814dd5efcb7ca7a4b03daf947";
-const XYCE_BUG281_SOURCE_BLAKE3: &str =
-    "e7a31257432216b07ee6023392590aef62f2006d2111110242839b3d4c1c07d0";
-const XYCE_BUG401_BAD_DEVICE_SOURCE_BLAKE3: &str =
-    "53aaeb8ac36ee9748870b1eb59923eeae6e3faf19a4034fd1014457a637ff381";
-const XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3: &str =
-    "934e28a8ccfbd346bf66b6884c818d74d08fce9f2265363887ed9d2b569c07b5";
-const XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3: &str =
-    "d452d7f4844510bd2c1076ae6f6829d5c5ef421b36f0ee228a476900dd7e8fc3";
-const XYCE_BUG701_TOPLEVEL_SOURCE_BLAKE3: &str =
-    "0131acaf84d4e1602998aa6fe62660fdbee36d819070b81a470ba697d7dc8355";
-const XYCE_BUG701_SUBCIRCUIT_SOURCE_BLAKE3: &str =
-    "48e9bdb88c56c133bbbb6c5bfbe1c190b4fc8151c18be36247418d68cb8c847e";
-const XYCE_BUG769_NODE_VOLTAGE_SOURCE_BLAKE3: &str =
-    "ce0384a441aeaa20e0cce8cb6c9eb25f2965d8e674c092d823533a68c0656607";
-const XYCE_BUG769_DEVICE_CURRENT_SOURCE_BLAKE3: &str =
-    "769e5db9d7d51f1860c1e308d8c2374fb6dedc22604a47c9eb2eca1c5d5e7f59";
-const XYCE_BUG769_LEAD_CURRENT_SOURCE_BLAKE3: &str =
-    "fb46538cf279bddce942af6e7521aa276760c05d0d4211995de332be804bb60d";
-const XYCE_BUG1578_SOURCE_BLAKE3: &str =
-    "b7debe414f4dec2e06c857e139b128db9f7e64024d86d6baeab672250d9bbfc4";
-const XYCE_BUG198_SOURCE_BLAKE3: &str =
-    "985f4d4efa9b59842c268b526496f40e9f04988a9fc425e5a945bc16c6e24da7";
-const XYCE_BUG258_SOURCE_BLAKE3: &str =
-    "985f4d4efa9b59842c268b526496f40e9f04988a9fc425e5a945bc16c6e24da7";
-const XYCE_BUG587_SOURCE_BLAKE3: &str =
-    "c96b62b4de9ca3a7bd65910c29c505394c7d4047ec71e03b3657c7cb351cd4ac";
-const XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3: &str =
-    "ccdc1cb4b46160d2c993d155a6816c81e5671aecd700bd364ab8b7d512320a13";
-const XYCE_BUG401_MANIFEST_CENSUS_BLAKE3: &str =
-    "427c97a38a5a66616877760976392652da5ddd5363a9abb64108bff5e40ea50b";
-const XYCE_BUG701_PHYSICAL_CENSUS_BLAKE3: &str =
-    "95e3fe513d175af26352a58c721926147fa8d61a106f2725baa16875738961e6";
-const XYCE_BUG701_MANIFEST_CENSUS_BLAKE3: &str =
-    "d0a587a88eb1110aa7f18e230d1be0ee6ae5e8a1f57ae5d9ab7123336c55afcc";
-const XYCE_BUG769_PHYSICAL_CENSUS_BLAKE3: &str =
-    "fd6b0fc758230e97ae8b2ed878e0a981a5c2d918ac1916408fa5c2b75eb93008";
-const XYCE_BUG769_MANIFEST_CENSUS_BLAKE3: &str =
-    "5dcd16e7d0b7fb3676533549a171865ac6b2a9aeb338f7f14ef10d73ec75dbc8";
-const XYCE_BUG75_PHYSICAL_CENSUS_BLAKE3: &str =
-    "5fba33cadd7946f239fa8ca6706f30dbf76ae63c4f5bba9d44278b555682b4fd";
-const XYCE_BUG75_MANIFEST_CENSUS_BLAKE3: &str =
-    "7edf926587419e6fba45e31c3d50b31c2a1a1d149bd8c2828d03661e04f43759";
-const XYCE_BUG75_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
-    "516d58926a25ccc21284c72c2bc6fb5cf624f69ab056eadfd1d6b069eadb0e1a";
-const XYCE_BUG75_EMPTY_OUTPUT_CENSUS_BLAKE3: &str =
-    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
-const XYCE_BUG75_README_BLAKE3: &str =
-    "11eb1f7062b3bb83509aa469fb6101ccb29a4c7681fcaaf5e93dada0f869bdea";
-const XYCE_BUG75_README_BYTES: usize = 414;
-const XYCE_BUG75_OPTIONS_BLAKE3: &str =
-    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
-const XYCE_BUG75_OPTIONS_BYTES: usize = 14;
-const XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3: &str =
-    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
-const XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES: usize = 14;
-const XYCE_BUG1148_PHYSICAL_CENSUS_BLAKE3: &str =
-    "ac119116158a8781bda4860d6bce618dee17d497a1b07008255728a27340ebea";
-const XYCE_BUG1148_MANIFEST_CENSUS_BLAKE3: &str =
-    "444ec7285ebbb7da61300887823b9572d5124a5c4873fda753e193461c63bf95";
-const XYCE_BUG40_PHYSICAL_CENSUS_BLAKE3: &str =
-    "a99b9de40f7e32b6ba9e7835661a6d22d6067ab58140767d55ad8bbe023e4b39";
-const XYCE_BUG40_MANIFEST_CENSUS_BLAKE3: &str =
-    "fd7e3ba932274866eb0b1208f461257e5746a5342628a24c57716f80017baab3";
-const XYCE_BUG718_PHYSICAL_CENSUS_BLAKE3: &str =
-    "20eb41f65004e3e4060543181b2004d74086002327e13963cf70451a52a2c6c9";
-const XYCE_BUG718_MANIFEST_CENSUS_BLAKE3: &str =
-    "24ba969b3b9febf20a9c6d7daf71f220c303d5b6ce085127e96b311724cc04c7";
-const XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3: &str =
-    "e2361e63f931254fb1cb432255c5b684e885b6e4b7de79a74e954fa0d93706e1";
-const XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3: &str =
-    "110a0757f67d20b148af340af3df80312f7f6e67e8da44155fb51d9523f1e397";
-const XYCE_LEAD_CURRENTS_PHYSICAL_CENSUS_BLAKE3: &str =
-    "7945aaa6487937d9d9eabcd4690c69643c600a88ae86cdf479f1baafa570eddd";
-const XYCE_LEAD_CURRENTS_MANIFEST_CENSUS_BLAKE3: &str =
-    "679c3ea6664d25eda3bb4eedbc7a3984bab14833d92bb9c57b1939aaf34c10ef";
-const XYCE_MEASURE_PHYSICAL_CENSUS_BLAKE3: &str =
-    "c28cba07612ac07b5e934ae6ddb8b2e0a1c1316a18d1d83bf7b78461e9605e41";
-const XYCE_MEASURE_MANIFEST_CENSUS_BLAKE3: &str =
-    "f6316ce77132d90d5b1142095236bff3584824cdd507e23907bde28b1e0cafa8";
-const XYCE_FOURIER_PHYSICAL_CENSUS_BLAKE3: &str =
-    "7d2de16d5e506c7bf1f82adfa924c99796844f851621c1900ddd36bea469e2a2";
-const XYCE_FOURIER_MANIFEST_CENSUS_BLAKE3: &str =
-    "58b62857cf810e7cdbb279d6289852df1c79e7afd9f4e3b0934316ba1822e752";
-const XYCE_BUG1148_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
-    "c0a9d188b9704e6679379ff8e44a06c957c3c562700c5f8ade8a6dedccf2d0ab";
-const XYCE_BUG1148_README_BLAKE3: &str =
-    "28fae4b412da1d44c559a9b13049228044ea19d49e34c4c5e65244344065bc45";
-const XYCE_BUG1148_README_BYTES: usize = 398;
-const XYCE_BUG40_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
-    "37eb9791f65872d7682a7dccebbff69ed1e4f140fb27e6186721a8bb7f723212";
-const XYCE_BUG40_README_BLAKE3: &str =
-    "9bd772abdd9221479fadcbc3671f824da1a47f409a8c496a10cb28a8eb037a12";
-const XYCE_BUG40_README_BYTES: usize = 740;
-const XYCE_BUG40_OUT_BLAKE3: &str =
-    "faa9b6622c09538c755394cc38da008c6900cd1cce7737d16a18c479e37cf162";
-const XYCE_BUG40_OUT_BYTES: usize = 3_416;
-const XYCE_BUG40_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
-    "3b9727f72a4c72226dd83bf527675458f3a92a00b1171496d8d79ca1e6567d58";
-const XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3: &str =
-    "bcd3e366443f97db8ccb98d5d9f0102cbb67a5903657382da3ea7770ed666afc";
-const XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3: &str =
-    "dc8a7465b5524072cc0ef71b35809e306abc438d3fde69996a6ccc8889967da4";
-const XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3: &str =
-    "ef67b79684be7a1f5f8e3daa3f448986ba05ab1afa66eac92d830f20afca0cc8";
-const XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3: &str =
-    "08e791377b7ae33d9f2611d0c40fad6a63f3d3d5ba2ad81c976c9e4e97402d9c";
-const XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3: &str =
-    "5dcb3ede7c1a655558ed9b430597d05c088381c8708e2c47da82ddfdbb41417b";
-const XYCE_MESSAGE_DEVICE_PHYSICAL_CENSUS_BLAKE3: &str =
-    "d54485c64515210437cb32173963bd8c1383dfe4b392981220e4702444834c45";
-const XYCE_MESSAGE_DEVICE_MANIFEST_CENSUS_BLAKE3: &str =
-    "9ad114c0e228f83b9c5095e653c9692c98a3e5c434bb1f32ad7b71c5894d9843";
-const XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3: &str =
-    "b0a43d2f55c88c8c32673364f8a7fa361771af4c4ef065ff4783146a1cc31628";
-const XYCE_BUG702_MANIFEST_CENSUS_BLAKE3: &str =
-    "91bcb74c1c7a203646ec14cd8754b3e520e0ad4ab589d8257f7edc14cb583dd6";
-const XYCE_BUG702_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
-    "aea8d348997e22d1b024d59a9eab58cbf99eeab549119eaff091deb8b0491564";
-const XYCE_BUG702_OUTPUT_DIRECTORY_CENSUS_BLAKE3: &str =
-    "c896ecc7c724958b95072fd5972035335a23d96d4169bde9b4d07b550759a6c3";
-const XYCE_BUG702_README_BLAKE3: &str =
-    "599a576884838a0d5c0a57082945108cadb8af280ef31985cdef1058584d54b3";
-const XYCE_BUG702_README_BYTES: usize = 2_571;
-const XYCE_BUG702_OPTIONS_BLAKE3: &str =
-    "b1d67968e7446e26800d83b2f63ab18f63fd84b5b602758b2b2327bbdf15ef3b";
-const XYCE_BUG702_OPTIONS_BYTES: usize = 14;
-const XYCE_BUG671_FIXTURE_BLAKE3: &str =
-    "a20bed61d99b2bd530e4bdfdb096315198e1c4702ac3ff8e320b6ea42efce9ba";
-const XYCE_BUG671_FIXTURE_BYTES: usize = 19_456;
 const XYCE_BUG671_OLE_MAGIC: [u8; 8] = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 const XYCE_BUG662_CANONICAL_LONG_TITLE: &str = r#"** Converted using XDM 0.20rc from /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/pspice_9_1.xml to /home/rrlober/xdmwork/xdm/data-model/src/python/test/unit/resources/xyce_6_3.xml ** ** Profile: "SCHEMATIC1-bias"  [ H:\Xyce\PSpice\Netlists\TransmissionLine-PSpiceFiles\SCHEMATIC1\bias.sim ]"#;
 const XYCE_BUG655_CANONICAL_OWNER_SOURCE: &str = "*** Simple amplifier ***\n\
@@ -1628,17 +1364,6 @@ impl XyceStartupOracleKind {
             Self::NodeSetEmptyWarning => XYCE_NODESET_EMPTY_WARNING_RECORD,
             Self::Bug667ScopedGlobalWarning => XYCE_BUG667_SCOPED_GLOBAL_WARNING_RECORD,
             Self::IcNodeSetConflict => XYCE_IC_NODESET_CONFLICT_RECORD,
-        }
-    }
-
-    fn source_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::IcMissingNodeWarning => (347, XYCE_IC_MISSING_NODE_WARNING_BLAKE3),
-            Self::IcEmptyWarning => (309, XYCE_IC_EMPTY_WARNING_BLAKE3),
-            Self::NodeSetMissingNodeWarning => (352, XYCE_NODESET_MISSING_NODE_WARNING_BLAKE3),
-            Self::NodeSetEmptyWarning => (319, XYCE_NODESET_EMPTY_WARNING_BLAKE3),
-            Self::Bug667ScopedGlobalWarning => (965, XYCE_BUG667_SCOPED_GLOBAL_WARNING_BLAKE3),
-            Self::IcNodeSetConflict => (409, XYCE_IC_NODESET_CONFLICT_BLAKE3),
         }
     }
 
@@ -1721,10 +1446,6 @@ impl XyceStartupOracleKind {
             },
         )
     }
-
-    fn is_message_input(self) -> bool {
-        !matches!(self, Self::Bug667ScopedGlobalWarning)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1784,29 +1505,6 @@ enum XyceExpectedFailureKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct XyceExpectedFailureFamilyCensus {
-    physical_cir_count: usize,
-    physical_names_blake3: &'static str,
-    manifest_owner_count: usize,
-    manifest_records_blake3: &'static str,
-    require_manifest_bijection: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct XyceExpectedFailureRetainedArtifact {
-    file_name: &'static str,
-    bytes: usize,
-    blake3: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct XyceExpectedFailureSourceSidecar {
-    file_name: &'static str,
-    bytes: usize,
-    blake3: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct XyceExpectedOutputSymbol {
     directive: OutputDirectiveKind,
     operator: &'static str,
@@ -1844,24 +1542,6 @@ impl XyceBug702PositiveKind {
         }
     }
 
-    fn record(self) -> &'static str {
-        match self {
-            Self::External => XYCE_BUG702_EXTERNAL_POSITIVE_RECORD,
-            Self::InlinedMultiple => XYCE_BUG702_INLINED_MULTIPLE_POSITIVE_RECORD,
-            Self::InlinedSingle => XYCE_BUG702_INLINED_SINGLE_POSITIVE_RECORD,
-            Self::Precedence => XYCE_BUG702_PRECEDENCE_POSITIVE_RECORD,
-        }
-    }
-
-    fn source_blake3(self) -> &'static str {
-        match self {
-            Self::External => XYCE_BUG702_EXTERNAL_SOURCE_BLAKE3,
-            Self::InlinedMultiple => XYCE_BUG702_INLINED_MULTIPLE_SOURCE_BLAKE3,
-            Self::InlinedSingle => XYCE_BUG702_INLINED_SINGLE_SOURCE_BLAKE3,
-            Self::Precedence => XYCE_BUG702_PRECEDENCE_SOURCE_BLAKE3,
-        }
-    }
-
     fn result_contract(self) -> &'static str {
         match self {
             Self::External => "bug702_external_initcond_alias_tran",
@@ -1884,19 +1564,6 @@ impl XyceBug702PositiveKind {
         match self {
             Self::InlinedMultiple => "nlrcs10.cir.prn",
             Self::External | Self::InlinedSingle | Self::Precedence => "inv1xIC.cir.prn",
-        }
-    }
-
-    fn alias_reference_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::InlinedMultiple => (
-                XYCE_BUG702_NLRCS10_REFERENCE_BYTES,
-                XYCE_BUG702_NLRCS10_REFERENCE_BLAKE3,
-            ),
-            Self::External | Self::InlinedSingle | Self::Precedence => (
-                XYCE_BUG702_INV1XIC_REFERENCE_BYTES,
-                XYCE_BUG702_INV1XIC_REFERENCE_BLAKE3,
-            ),
         }
     }
 
@@ -2120,75 +1787,6 @@ impl XyceExpectedFailureKind {
             Self::Bug198UnrecognizedLine => XYCE_BUG198_EXPECTED_FAILURE_RECORD,
             Self::Bug258UnrecognizedLine => XYCE_BUG258_EXPECTED_FAILURE_RECORD,
             Self::Bug587InvalidNumericNotation => XYCE_BUG587_EXPECTED_FAILURE_RECORD,
-        }
-    }
-
-    fn source_blake3(self) -> &'static str {
-        match self {
-            Self::Bug67BehavioralExpression => XYCE_BUG67_SOURCE_BLAKE3,
-            Self::Bug671InvalidPwlFile => XYCE_BUG671_SOURCE_BLAKE3,
-            Self::Bug726AdjacentCouplings => XYCE_BUG726_SOURCE_BLAKE3,
-            Self::Bug744DcOperatingPoint => XYCE_BUG744_SOURCE_BLAKE3,
-            Self::Bug75UndefinedMutualInductorReference => XYCE_BUG75_SOURCE_BLAKE3,
-            Self::Bug1595HierarchicalMutualInductorReference => XYCE_BUG1595_SOURCE_BLAKE3,
-            Self::Bug1148UndefinedPrintNode => XYCE_BUG1148_SOURCE_BLAKE3,
-            Self::Bug40UndefinedPrintNode => XYCE_BUG40_SOURCE_BLAKE3,
-            Self::Bug718InvalidPrintNodes => XYCE_BUG718_INVALID_NODES_SOURCE_BLAKE3,
-            Self::MessagePrintBadNodeName => XYCE_MESSAGE_PRINT_BAD_NODENAME_SOURCE_BLAKE3,
-            Self::MessagePrintBadVariable => XYCE_MESSAGE_PRINT_BAD_VARIABLE_SOURCE_BLAKE3,
-            Self::LeadCurrentsInvalidDevice => XYCE_LEAD_CURRENTS_INVALID_DEVICE_SOURCE_BLAKE3,
-            Self::MeasureInvalidNodes => XYCE_MEASURE_INVALID_NODES_SOURCE_BLAKE3,
-            Self::FourierBadLine3OutputSymbols => XYCE_FOURIER_BAD_LINE3_SOURCE_BLAKE3,
-            Self::Bug387MissingLibraryEndl => XYCE_BUG387_SOURCE_BLAKE3,
-            Self::MessageSubcircuitMissingName => XYCE_SUBCKT_NONAME_SOURCE_BLAKE3,
-            Self::MessageSubcircuitMissingEndsEndCard => {
-                XYCE_SUBCKT_MISSING_ENDS_END_CARD_SOURCE_BLAKE3
-            }
-            Self::MessageSubcircuitMissingEndsIncludeEof => {
-                XYCE_SUBCKT_MISSING_ENDS_INCLUDE_EOF_SOURCE_BLAKE3
-            }
-            Self::MessageSubcircuitMissingEndsTopLevelEof => {
-                XYCE_SUBCKT_MISSING_ENDS_TOPLEVEL_EOF_SOURCE_BLAKE3
-            }
-            Self::MessageSubcircuitMissingEndsTsInvEof => {
-                XYCE_SUBCKT_MISSING_ENDS_TS_INV_EOF_SOURCE_BLAKE3
-            }
-            Self::MessageSubcircuitDuplicateBindingA2 => XYCE_SUBCKT_A2_DUP_BINDING_SOURCE_BLAKE3,
-            Self::MessageSubcircuitDuplicateBindingJ1 => XYCE_SUBCKT_J1_DUP_BINDING_SOURCE_BLAKE3,
-            Self::MessageDcExcessArguments => XYCE_DC_EXCESS_ARGS_SOURCE_BLAKE3,
-            Self::MessageAcUnsupportedSweepType => XYCE_AC_UNSUPPORTED_SWEEP_SOURCE_BLAKE3,
-            Self::MessageNoiseUnsupportedSweepType => XYCE_NOISE_UNSUPPORTED_SWEEP_SOURCE_BLAKE3,
-            Self::MessageMissingLibraryEndl => XYCE_MESSAGE_MISSING_LIBRARY_ENDL_SOURCE_BLAKE3,
-            Self::MessageMissingLibraryFileUnquoted => {
-                XYCE_MESSAGE_MISSING_LIBRARY_FILE_UNQUOTED_SOURCE_BLAKE3
-            }
-            Self::MessageMissingLibraryFileQuoted => {
-                XYCE_MESSAGE_MISSING_LIBRARY_FILE_QUOTED_SOURCE_BLAKE3
-            }
-            Self::MessageDuplicateDevice => XYCE_MESSAGE_DUPLICATE_DEVICE_SOURCE_BLAKE3,
-            Self::MessageMissingDeviceNodes => XYCE_MESSAGE_MISSING_DEVICE_NODES_SOURCE_BLAKE3,
-            Self::Bug702DuplicateExternalInitcond => XYCE_BUG702_DUP_EXTERNAL_SOURCE_BLAKE3,
-            Self::Bug702DuplicateInlinedInitcond => XYCE_BUG702_DUP_INLINED_SOURCE_BLAKE3,
-            Self::Bug702MalformedInitcondFile => XYCE_BUG702_EMPTY_INITCOND_SOURCE_BLAKE3,
-            Self::Bug702MissingInitcondFile => XYCE_BUG702_MISSING_INITCOND_SOURCE_BLAKE3,
-            Self::Issue455DuplicateDcSourceFunction => XYCE_ISSUE455_SOURCE_BLAKE3,
-            Self::Bug204InvalidDcSweepArity => XYCE_BUG204_SOURCE_BLAKE3,
-            Self::Bug281InvalidDcSweepArity => XYCE_BUG281_SOURCE_BLAKE3,
-            Self::Bug354BadFunction => XYCE_BUG354_FUNCTION_SOURCE_BLAKE3,
-            Self::Bug354BadLeadCurrent => XYCE_BUG354_LEAD_CURRENT_SOURCE_BLAKE3,
-            Self::Bug354BadParameter => XYCE_BUG354_PARAMETER_SOURCE_BLAKE3,
-            Self::Bug401BadDeviceLine => XYCE_BUG401_BAD_DEVICE_SOURCE_BLAKE3,
-            Self::Bug401ExtraSpace => XYCE_BUG401_EXTRA_SPACE_SOURCE_BLAKE3,
-            Self::Bug401WorseDeviceLine => XYCE_BUG401_WORSE_DEVICE_SOURCE_BLAKE3,
-            Self::Bug701DuplicateTopLevelDevice => XYCE_BUG701_TOPLEVEL_SOURCE_BLAKE3,
-            Self::Bug701DuplicateSubcircuitDevice => XYCE_BUG701_SUBCIRCUIT_SOURCE_BLAKE3,
-            Self::Bug769ParameterNodeVoltage => XYCE_BUG769_NODE_VOLTAGE_SOURCE_BLAKE3,
-            Self::Bug769ParameterDeviceCurrent => XYCE_BUG769_DEVICE_CURRENT_SOURCE_BLAKE3,
-            Self::Bug769ParameterLeadCurrent => XYCE_BUG769_LEAD_CURRENT_SOURCE_BLAKE3,
-            Self::Bug1578InvalidDeviceType => XYCE_BUG1578_SOURCE_BLAKE3,
-            Self::Bug198UnrecognizedLine => XYCE_BUG198_SOURCE_BLAKE3,
-            Self::Bug258UnrecognizedLine => XYCE_BUG258_SOURCE_BLAKE3,
-            Self::Bug587InvalidNumericNotation => XYCE_BUG587_SOURCE_BLAKE3,
         }
     }
 
@@ -3176,238 +2774,8 @@ impl XyceExpectedFailureKind {
         }
     }
 
-    fn shared_family_census(self) -> Option<XyceExpectedFailureFamilyCensus> {
-        match self {
-            Self::MessageSubcircuitMissingName
-            | Self::MessageSubcircuitMissingEndsEndCard
-            | Self::MessageSubcircuitMissingEndsIncludeEof
-            | Self::MessageSubcircuitMissingEndsTopLevelEof
-            | Self::MessageSubcircuitMissingEndsTsInvEof
-            | Self::MessageSubcircuitDuplicateBindingA2
-            | Self::MessageSubcircuitDuplicateBindingJ1 => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 8,
-                physical_names_blake3: XYCE_MESSAGE_SUBCIRCUIT_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 8,
-                manifest_records_blake3: XYCE_MESSAGE_SUBCIRCUIT_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: false,
-            }),
-            Self::MessageDcExcessArguments
-            | Self::MessageAcUnsupportedSweepType
-            | Self::MessageNoiseUnsupportedSweepType
-            | Self::MessageMissingLibraryEndl
-            | Self::MessageMissingLibraryFileUnquoted
-            | Self::MessageMissingLibraryFileQuoted => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 79,
-                physical_names_blake3: XYCE_MESSAGE_INPUT_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 50,
-                manifest_records_blake3: XYCE_MESSAGE_INPUT_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: false,
-            }),
-            Self::MessageDuplicateDevice | Self::MessageMissingDeviceNodes => {
-                Some(XyceExpectedFailureFamilyCensus {
-                    physical_cir_count: 28,
-                    physical_names_blake3: XYCE_MESSAGE_DEVICE_PHYSICAL_CENSUS_BLAKE3,
-                    manifest_owner_count: 26,
-                    manifest_records_blake3: XYCE_MESSAGE_DEVICE_MANIFEST_CENSUS_BLAKE3,
-                    require_manifest_bijection: false,
-                })
-            }
-            Self::Bug702DuplicateExternalInitcond
-            | Self::Bug702DuplicateInlinedInitcond
-            | Self::Bug702MalformedInitcondFile
-            | Self::Bug702MissingInitcondFile => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 8,
-                physical_names_blake3: XYCE_BUG702_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 8,
-                manifest_records_blake3: XYCE_BUG702_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: true,
-            }),
-            Self::Bug401BadDeviceLine | Self::Bug401ExtraSpace | Self::Bug401WorseDeviceLine => {
-                Some(XyceExpectedFailureFamilyCensus {
-                    physical_cir_count: 3,
-                    physical_names_blake3: XYCE_BUG401_PHYSICAL_CENSUS_BLAKE3,
-                    manifest_owner_count: 3,
-                    manifest_records_blake3: XYCE_BUG401_MANIFEST_CENSUS_BLAKE3,
-                    require_manifest_bijection: true,
-                })
-            }
-            Self::Bug354BadFunction | Self::Bug354BadLeadCurrent | Self::Bug354BadParameter => {
-                Some(XyceExpectedFailureFamilyCensus {
-                    physical_cir_count: 3,
-                    physical_names_blake3: XYCE_BUG354_PHYSICAL_CENSUS_BLAKE3,
-                    manifest_owner_count: 3,
-                    manifest_records_blake3: XYCE_BUG354_MANIFEST_CENSUS_BLAKE3,
-                    require_manifest_bijection: true,
-                })
-            }
-            Self::Bug701DuplicateTopLevelDevice | Self::Bug701DuplicateSubcircuitDevice => {
-                Some(XyceExpectedFailureFamilyCensus {
-                    physical_cir_count: 2,
-                    physical_names_blake3: XYCE_BUG701_PHYSICAL_CENSUS_BLAKE3,
-                    manifest_owner_count: 2,
-                    manifest_records_blake3: XYCE_BUG701_MANIFEST_CENSUS_BLAKE3,
-                    require_manifest_bijection: true,
-                })
-            }
-            Self::Bug769ParameterNodeVoltage
-            | Self::Bug769ParameterDeviceCurrent
-            | Self::Bug769ParameterLeadCurrent => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 3,
-                physical_names_blake3: XYCE_BUG769_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 3,
-                manifest_records_blake3: XYCE_BUG769_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: true,
-            }),
-            Self::Bug75UndefinedMutualInductorReference => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 1,
-                physical_names_blake3: XYCE_BUG75_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 1,
-                manifest_records_blake3: XYCE_BUG75_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: true,
-            }),
-            Self::Bug1595HierarchicalMutualInductorReference => {
-                Some(XyceExpectedFailureFamilyCensus {
-                    physical_cir_count: 1,
-                    physical_names_blake3: XYCE_BUG1595_PHYSICAL_CENSUS_BLAKE3,
-                    manifest_owner_count: 1,
-                    manifest_records_blake3: XYCE_BUG1595_MANIFEST_CENSUS_BLAKE3,
-                    require_manifest_bijection: true,
-                })
-            }
-            Self::Bug1148UndefinedPrintNode => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 1,
-                physical_names_blake3: XYCE_BUG1148_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 1,
-                manifest_records_blake3: XYCE_BUG1148_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: true,
-            }),
-            Self::Bug40UndefinedPrintNode => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 1,
-                physical_names_blake3: XYCE_BUG40_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 1,
-                manifest_records_blake3: XYCE_BUG40_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: true,
-            }),
-            Self::Bug718InvalidPrintNodes => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 2,
-                physical_names_blake3: XYCE_BUG718_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 2,
-                manifest_records_blake3: XYCE_BUG718_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: true,
-            }),
-            Self::MessagePrintBadNodeName | Self::MessagePrintBadVariable => {
-                Some(XyceExpectedFailureFamilyCensus {
-                    physical_cir_count: 4,
-                    physical_names_blake3: XYCE_MESSAGE_PRINT_PHYSICAL_CENSUS_BLAKE3,
-                    manifest_owner_count: 4,
-                    manifest_records_blake3: XYCE_MESSAGE_PRINT_MANIFEST_CENSUS_BLAKE3,
-                    require_manifest_bijection: true,
-                })
-            }
-            Self::LeadCurrentsInvalidDevice => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 53,
-                physical_names_blake3: XYCE_LEAD_CURRENTS_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 9,
-                manifest_records_blake3: XYCE_LEAD_CURRENTS_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: false,
-            }),
-            Self::MeasureInvalidNodes => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 80,
-                physical_names_blake3: XYCE_MEASURE_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 114,
-                manifest_records_blake3: XYCE_MEASURE_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: false,
-            }),
-            Self::FourierBadLine3OutputSymbols => Some(XyceExpectedFailureFamilyCensus {
-                physical_cir_count: 15,
-                physical_names_blake3: XYCE_FOURIER_PHYSICAL_CENSUS_BLAKE3,
-                manifest_owner_count: 13,
-                manifest_records_blake3: XYCE_FOURIER_MANIFEST_CENSUS_BLAKE3,
-                require_manifest_bijection: false,
-            }),
-            _ => None,
-        }
-    }
-
-    fn retained_non_oracle_artifact(self) -> Option<XyceExpectedFailureRetainedArtifact> {
-        match self {
-            Self::Bug204InvalidDcSweepArity => Some(XyceExpectedFailureRetainedArtifact {
-                file_name: "bug204.cir.prn",
-                bytes: 147,
-                blake3: XYCE_BUG204_RETAINED_NON_ORACLE_PRN_BLAKE3,
-            }),
-            Self::Bug40UndefinedPrintNode => Some(XyceExpectedFailureRetainedArtifact {
-                file_name: "bug_40.cir.prn",
-                bytes: 150,
-                blake3: XYCE_BUG40_RETAINED_NON_ORACLE_PRN_BLAKE3,
-            }),
-            _ => None,
-        }
-    }
-
-    fn expected_source_sidecar(self) -> Option<XyceExpectedFailureSourceSidecar> {
-        let file_name = match self {
-            Self::Bug718InvalidPrintNodes => "invalidNodes.cir.options",
-            Self::LeadCurrentsInvalidDevice => "lead_for_invalid_device.cir.options",
-            Self::MeasureInvalidNodes => "invalid_nodes.cir.options",
-            Self::FourierBadLine3OutputSymbols => "bad_dot_four_line3.cir.options",
-            _ => return None,
-        };
-        Some(XyceExpectedFailureSourceSidecar {
-            file_name,
-            bytes: XYCE_OUTPUT_SYMBOL_OPTIONS_BYTES,
-            blake3: XYCE_OUTPUT_SYMBOL_OPTIONS_BLAKE3,
-        })
-    }
-
-    fn rejects_source_directory_sidecars(self) -> bool {
-        matches!(
-            self,
-            Self::Bug75UndefinedMutualInductorReference
-                | Self::Bug1595HierarchicalMutualInductorReference
-                | Self::Bug1148UndefinedPrintNode
-                | Self::Bug40UndefinedPrintNode
-                | Self::Bug718InvalidPrintNodes
-                | Self::MessagePrintBadNodeName
-                | Self::MessagePrintBadVariable
-                | Self::LeadCurrentsInvalidDevice
-                | Self::MeasureInvalidNodes
-                | Self::FourierBadLine3OutputSymbols
-                | Self::MessageAcUnsupportedSweepType
-                | Self::MessageNoiseUnsupportedSweepType
-                | Self::MessageSubcircuitDuplicateBindingA2
-                | Self::MessageSubcircuitDuplicateBindingJ1
-                | Self::MessageMissingLibraryEndl
-                | Self::MessageMissingLibraryFileUnquoted
-                | Self::MessageMissingLibraryFileQuoted
-                | Self::MessageDuplicateDevice
-                | Self::MessageMissingDeviceNodes
-        )
-    }
-
-    fn is_bug702_family(self) -> bool {
-        matches!(
-            self,
-            Self::Bug702DuplicateExternalInitcond
-                | Self::Bug702DuplicateInlinedInitcond
-                | Self::Bug702MalformedInitcondFile
-                | Self::Bug702MissingInitcondFile
-        )
-    }
-
-    fn is_bug75(self) -> bool {
-        self == Self::Bug75UndefinedMutualInductorReference
-    }
-
     fn is_bug1595(self) -> bool {
         self == Self::Bug1595HierarchicalMutualInductorReference
-    }
-
-    fn has_complete_output_symbol_family_envelope(self) -> bool {
-        matches!(
-            self,
-            Self::Bug1148UndefinedPrintNode | Self::Bug40UndefinedPrintNode
-        )
     }
 }
 

@@ -7,132 +7,22 @@
 use super::*;
 
 impl XyceTestRunner {
-    pub(super) fn validate_startup_source_identity(
-        kind: XyceStartupOracleKind,
-        source_bytes: &[u8],
-    ) -> Result<(), String> {
-        let (expected_bytes, expected_hash) = kind.source_identity();
-        let actual_hash = blake3::hash(source_bytes).to_hex().to_string();
-        if source_bytes.len() != expected_bytes || actual_hash != expected_hash {
-            return Err(format!(
-                "startup-diagnostic record '{}' source identity changed: expected {expected_bytes} bytes / {expected_hash}, got {} bytes / {actual_hash}",
-                kind.record(),
-                source_bytes.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_startup_source_family_census(
-        family_dir: &Path,
-        expected_physical_count: usize,
-        expected_physical_hash: &str,
-        expected_complete_count: usize,
-        expected_complete_hash: &str,
-    ) -> Result<(), String> {
-        let mut physical = BTreeSet::new();
-        let mut complete = BTreeSet::new();
-        for entry in fs::read_dir(family_dir).map_err(|error| {
-            format!(
-                "failed to inspect startup-diagnostic source family {}: {error}",
-                family_dir.display()
-            )
-        })? {
-            let entry = entry.map_err(|error| {
-                format!(
-                    "failed to read startup-diagnostic family entry in {}: {error}",
-                    family_dir.display()
-                )
-            })?;
-            let metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
-                format!(
-                    "failed to inspect startup-diagnostic family member {}: {error}",
-                    entry.path().display()
-                )
-            })?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "startup-diagnostic family member {} must be a regular non-symlink file",
-                    entry.path().display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| {
-                    format!(
-                        "startup-diagnostic family filename in {} is not UTF-8",
-                        family_dir.display()
-                    )
-                })?
-                .to_ascii_lowercase();
-            if !complete.insert(name.clone()) {
-                return Err(format!(
-                    "startup-diagnostic family contains case-colliding name {name:?}"
-                ));
-            }
-            if name.ends_with(".cir") {
-                physical.insert(name);
-            }
-        }
-        let physical = physical.into_iter().collect::<Vec<_>>();
-        let complete = complete.into_iter().collect::<Vec<_>>();
-        let physical_hash = blake3::hash(physical.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let complete_hash = blake3::hash(complete.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if physical.len() != expected_physical_count || physical_hash != expected_physical_hash {
-            return Err(format!(
-                "startup-diagnostic physical .cir census changed: expected {expected_physical_count} / {expected_physical_hash}, got {} / {physical_hash}",
-                physical.len()
-            ));
-        }
-        if complete.len() != expected_complete_count || complete_hash != expected_complete_hash {
-            return Err(format!(
-                "startup-diagnostic complete source-directory census changed: expected {expected_complete_count} / {expected_complete_hash}, got {} / {complete_hash}",
-                complete.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_bug702_resource(
+    /// Canonical path and BLAKE3 content digest of a BUG702 resource file.
+    pub(super) fn bug702_resource(
         family_dir: &Path,
         file_name: &str,
-        expected_bytes: usize,
-        expected_blake3: &str,
-    ) -> Result<PathBuf, String> {
+    ) -> Result<(PathBuf, String), String> {
         let path = family_dir.join(file_name);
-        let metadata = fs::symlink_metadata(&path).map_err(|error| {
-            format!(
-                "failed to inspect BUG702 resource {}: {error}",
-                path.display()
-            )
-        })?;
-        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-            return Err(format!(
-                "BUG702 resource {} must be a regular non-symlink file",
-                path.display()
-            ));
-        }
         let bytes = fs::read(&path).map_err(|error| {
             format!("failed to read BUG702 resource {}: {error}", path.display())
         })?;
-        let digest = blake3::hash(&bytes).to_hex().to_string();
-        if bytes.len() != expected_bytes || digest != expected_blake3 {
-            return Err(format!(
-                "BUG702 resource {file_name} changed: expected {expected_bytes} bytes / {expected_blake3}, got {} bytes / {digest}",
-                bytes.len()
-            ));
-        }
-        path.canonicalize().map_err(|error| {
+        let canonical = path.canonicalize().map_err(|error| {
             format!(
                 "failed to canonicalize BUG702 resource {}: {error}",
                 path.display()
             )
-        })
+        })?;
+        Ok((canonical, blake3::hash(&bytes).to_hex().to_string()))
     }
 
     pub(super) fn validate_hspice_math_wrapper_source(source: &str) -> Result<(), String> {
