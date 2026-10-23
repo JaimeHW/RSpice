@@ -334,3 +334,67 @@ fn a_conditional_chain_of_any_length_selects_each_arm() {
         .join()
         .unwrap();
 }
+
+/// `$clog2` (IEEE 1364-2005 section 17.11.1) is a constant system function:
+/// legal in a parameter, a localparam, a range and a generate condition of a
+/// digital module, where it gives the ceiling of the base-two logarithm, and
+/// zero for zero and one. ivtest's `pr2139593` is the parameter case; before,
+/// the analog-code refusal ("system function '$clog2' is not supported in
+/// analog code") fired on each declaration.
+#[test]
+fn clog2_is_a_constant_in_parameters_ranges_and_generate_conditions() {
+    let mut harness = Harness::from_source(
+        "module top;\n\
+         \x20 parameter Z = 256;\n\
+         \x20 parameter integer P0 = $clog2(0), P1 = $clog2(1), P2 = $clog2(2);\n\
+         \x20 parameter integer PK = $clog2(1024), PK1 = $clog2(1025);\n\
+         \x20 localparam integer L64 = $clog2(64'h8000_0000_0000_0001);\n\
+         \x20 localparam integer LZ = $clog2(Z);\n\
+         \x20 reg [$clog2(Z)-1:0] r;\n\
+         \x20 integer p0, p1, p2, pk, pk1, l64, lz, g;\n\
+         \x20 generate if ($clog2(Z) == 8) begin : on\n\
+         \x20   initial begin\n\
+         \x20     g = 1; p0 = P0; p1 = P1; p2 = P2; pk = PK; pk1 = PK1;\n\
+         \x20     l64 = L64; lz = LZ; r = ~0;\n\
+         \x20   end\n\
+         \x20 end else begin : off\n\
+         \x20   initial g = 0;\n\
+         \x20 end endgenerate\n\
+         endmodule\n",
+    );
+    expect_finished(harness.run());
+    let integer = |value: i32| format!("{value:032b}");
+    for (name, value) in [
+        ("g", 1),
+        ("p0", 0),
+        ("p1", 0),
+        ("p2", 1),
+        ("pk", 10),
+        ("pk1", 11),
+        ("l64", 64),
+        ("lz", 8),
+    ] {
+        assert_eq!(harness.get(name), integer(value), "{name}");
+    }
+    assert_eq!(harness.get("r"), "11111111");
+}
+
+/// Analog code keeps its own table: a system function the analog context
+/// does not run is still refused there, by name, even where a digital
+/// constant expression accepts it.
+#[test]
+fn clog2_in_an_analog_block_is_still_refused() {
+    let error = VerilogACompiler::new(CompilerOptions::default())
+        .compile(
+            "module m(p, n); inout p, n; electrical p, n;\n\
+             \x20 analog I(p, n) <+ $clog2(4) * V(p, n);\n\
+             endmodule\n",
+        )
+        .map(|_| ())
+        .expect_err("$clog2 is not analog code")
+        .to_string();
+    assert!(
+        error.contains("system function '$clog2' is not supported in analog code"),
+        "{error}"
+    );
+}

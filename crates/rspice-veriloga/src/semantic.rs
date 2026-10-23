@@ -507,6 +507,10 @@ pub struct SemanticAnalyzer {
     /// iteration and are therefore illegal beneath such a guard (VAMS-2023
     /// section 4.5.15).
     dynamic_analog_operator_guard_depth: usize,
+    /// Lowering a declaration's constant expression in a module with no
+    /// analog behavior, where IEEE 1364-2005 section 17.11's constant system
+    /// functions are legal; analog code keeps refusing them.
+    lowering_digital_constant: bool,
     current_default_transition: f64,
     current_time_scale: crate::time_scale::ModuleTimeScale,
     /// Array variables of the module under analysis (name -> layout)
@@ -607,6 +611,7 @@ impl SemanticAnalyzer {
             inline_stack: Vec::new(),
             runtime_loop_depth: 0,
             dynamic_analog_operator_guard_depth: 0,
+            lowering_digital_constant: false,
             current_default_transition: Self::SIMULATOR_DEFAULT_TRANSITION,
             current_time_scale: crate::time_scale::ModuleTimeScale::default(),
             arrays: HashMap::new(),
@@ -2273,10 +2278,17 @@ impl SemanticAnalyzer {
                 is_event_controlled: false,
             });
 
+            // A digital module's localparam is a constant expression, where
+            // the constant system functions are legal (IEEE 1364-2005
+            // section 17.11); the digital elaboration folds it.
+            self.lowering_digital_constant = module.analog_block.is_none()
+                && module.analog_initial.is_none()
+                && module.analog_final.is_none();
             let expression =
-                self.lower_expression_with_side_effects(default, &mut analyzed, &mut statements)?;
+                self.lower_expression_with_side_effects(default, &mut analyzed, &mut statements);
+            self.lowering_digital_constant = false;
             let (expression, expr_type) =
-                self.coerce_assignment_expression(expression, value_type)?;
+                self.coerce_assignment_expression(expression?, value_type)?;
             // Prologue statements run before the analog block and have no
             // structured counterpart at all: the body starts at the `analog`
             // keyword. They are still stamped, because a site names an
@@ -7675,6 +7687,8 @@ impl SemanticAnalyzer {
                     if f.name.starts_with('$')
                         && !crate::expr_converter::LOWERED_SYSTEM_FUNCTION_NAMES
                             .contains(&f.name.as_str())
+                        && !(self.lowering_digital_constant
+                            && crate::analog_tasks::is_constant_system_function(&f.name))
                     {
                         self.record_unresolved_name(
                             Self::system_name_error_kind(&f.name, "function"),
