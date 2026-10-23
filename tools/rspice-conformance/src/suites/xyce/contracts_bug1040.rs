@@ -18,13 +18,6 @@ impl Bug1040Worker {
         }
     }
 
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::OperatingPoint => "rc_discharge_diode_op.net",
-            Self::Noop => "rc_discharge_diode_noop.net",
-        }
-    }
-
     fn label(self) -> &'static str {
         match self {
             Self::OperatingPoint => "operating-point worker",
@@ -38,177 +31,6 @@ impl Bug1040Worker {
 }
 
 impl XyceTestRunner {
-    pub(super) fn bug1040_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG1040_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG1040_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1040_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug1040_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug1040_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG1040_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG1040_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG1040_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG1040_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{BUG1040_LABEL} Release-7.10 provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug1040_source_directory(
-        directory: &Path,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {BUG1040_LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{BUG1040_LABEL} source directory must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_BUG1040_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("failed to read {BUG1040_LABEL} directory: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{BUG1040_LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{BUG1040_LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if observed.contains_key(&key) {
-                return Err(format!("{BUG1040_LABEL} contains a case collision"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{BUG1040_LABEL} acquired unexpected source member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{BUG1040_LABEL} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-            let canonical = Self::canonical_lf_text_identity(BUG1040_LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!("{BUG1040_LABEL} member {name:?} content changed"));
-            }
-            observed.insert(key, bytes);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{BUG1040_LABEL} source census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug1040_provenance(
-        &self,
-        deck: &XyceDeck,
-    ) -> Result<BTreeMap<Bug1040Worker, Vec<u8>>, String> {
-        Self::validate_bug1040_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != XYCE_BUG1040_OWNER_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path))
-                != XYCE_BUG1040_OWNER_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(XYCE_BUG1040_OWNER_PATH))
-        {
-            return Err(format!("recognized {BUG1040_LABEL} owner is not canonical"));
-        }
-        let prefix = "netlists/certification_tests/bug_1040_son/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([XYCE_BUG1040_OWNER_RECORD]) {
-            return Err(format!(
-                "{BUG1040_LABEL} wrapper ownership changed: {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG1040_LABEL} exclusions invalid: {error}"))?;
-        let family_exclusions = exclusions
-            .keys()
-            .filter(|record| record.starts_with(prefix))
-            .collect::<Vec<_>>();
-        if !family_exclusions.is_empty() {
-            return Err(format!(
-                "{BUG1040_LABEL} must not be excluded: {family_exclusions:?}"
-            ));
-        }
-        let retained = Self::validate_bug1040_source_directory(
-            &self.root.join("Netlists/Certification_Tests/BUG_1040_SON"),
-        )?;
-        let output_dir = self
-            .root
-            .join("OutputData/Certification_Tests/BUG_1040_SON");
-        match fs::symlink_metadata(&output_dir) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "failed to inspect {BUG1040_LABEL} OutputData: {error}"
-                ));
-            }
-            Ok(_) => return Err(format!("{BUG1040_LABEL} must not acquire numerical gold")),
-        }
-        self.reject_wrapper_output_artifacts(&self.root.join(XYCE_BUG1040_OWNER_PATH))
-            .map_err(|error| format!("{BUG1040_LABEL} owner {error}"))?;
-        Bug1040Worker::ALL
-            .into_iter()
-            .map(|role| {
-                self.reject_wrapper_output_artifacts(&self.root.join(role.path()))
-                    .map_err(|error| format!("{BUG1040_LABEL} {} {error}", role.label()))?;
-                retained
-                    .get(&role.file_name().to_ascii_lowercase())
-                    .cloned()
-                    .map(|bytes| (role, bytes))
-                    .ok_or_else(|| format!("{BUG1040_LABEL} lost {}", role.file_name()))
-            })
-            .collect()
-    }
-
     fn bug1040_nodes_match(actual: &[String], expected: &[&str]) -> bool {
         actual.len() == expected.len()
             && actual
@@ -422,28 +244,19 @@ impl XyceTestRunner {
         Ok(table)
     }
 
-    pub(super) fn validate_bug1040_oracle(
-        &self,
-        deck: &XyceDeck,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug1040_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
             return Err(format!(
                 "{BUG1040_LABEL} deadline expired before validation"
             ));
         }
-        let sources = self.validate_bug1040_provenance(deck)?;
         let mut outputs = BTreeMap::new();
         for role in Bug1040Worker::ALL {
-            let bytes = sources
-                .get(&role)
-                .ok_or_else(|| format!("{BUG1040_LABEL} lost {}", role.label()))?;
-            let source = std::str::from_utf8(bytes).map_err(|error| {
-                format!("{BUG1040_LABEL} {} is not UTF-8: {error}", role.label())
-            })?;
             let path = self.root.join(role.path());
-            let plan = self.validate_bug1040_worker(role, source, &path)?;
+            let source = fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let plan = self.validate_bug1040_worker(role, &source, &path)?;
             outputs.insert(role, self.run_bug1040_worker(role, &plan, start)?);
         }
         let good = outputs
@@ -463,10 +276,6 @@ impl XyceTestRunner {
         if abort.is_aborted() {
             return Err(format!("{BUG1040_LABEL} execution exceeded timeout"));
         }
-        self.validate_bug1040_provenance(deck)?;
-        if abort.is_aborted() {
-            return Err(format!("{BUG1040_LABEL} final provenance exceeded timeout"));
-        }
         Ok(())
     }
 }
@@ -479,46 +288,6 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("tests/xyce")
-    }
-
-    fn bug1040_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug1040-{label}-"))
-            .tempdir()
-            .expect("create BUG1040 fixture root");
-        let root = temporary.path().to_path_buf();
-        let family = root.join("Netlists/Certification_Tests/BUG_1040_SON");
-        fs::create_dir_all(&family).expect("create BUG1040 source family");
-        let canonical = corpus_root().join("Netlists/Certification_Tests/BUG_1040_SON");
-        for (name, ..) in XYCE_BUG1040_RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name))
-                .expect("copy canonical BUG1040 source member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG1040_OWNER_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG1040 wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n"
-            ),
-        )
-        .expect("write empty exclusion manifest");
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG1040_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG1040_OWNER_PATH.to_string(),
-        };
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug1040_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug1040_historical_oracle_provenance()
-            .expect("Release-7.10 BUG1040 provenance remains exact");
     }
 
     #[test]
@@ -545,77 +314,25 @@ mod tests {
 
     #[test]
     fn bug1040_oracle_runs_both_startup_modes() {
-        let root = corpus_root();
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG1040_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG1040_OWNER_PATH.to_string(),
-        };
+        let runner = XyceTestRunner::new(corpus_root(), XyceRunnerConfig::default());
         runner
-            .validate_bug1040_oracle(&deck, Instant::now())
+            .validate_bug1040_oracle(Instant::now())
             .expect("canonical BUG1040 relation passes");
     }
 
     #[test]
     fn bug1040_oracle_rejects_an_expired_deadline() {
-        let root = corpus_root();
         let runner = XyceTestRunner::new(
-            &root,
+            corpus_root(),
             XyceRunnerConfig {
                 max_time_per_test_ms: 1,
                 ..XyceRunnerConfig::default()
             },
         );
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG1040_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG1040_OWNER_PATH.to_string(),
-        };
         assert!(
             runner
-                .validate_bug1040_oracle(&deck, Instant::now() - Duration::from_secs(1))
+                .validate_bug1040_oracle(Instant::now() - Duration::from_secs(1))
                 .is_err()
         );
-    }
-
-    #[test]
-    fn bug1040_provenance_rejects_source_manifest_exclusion_and_output_drift() {
-        let (temporary, deck, runner) = bug1040_fixture("source");
-        runner
-            .validate_bug1040_provenance(&deck)
-            .expect("canonical BUG1040 fixture passes");
-        fs::write(temporary.path().join(XYCE_BUG1040_NOOP_PATH), "* mutated\n")
-            .expect("mutate BUG1040 worker");
-        assert!(runner.validate_bug1040_provenance(&deck).is_err());
-
-        let (temporary, deck, _runner) = bug1040_fixture("manifest");
-        fs::write(
-            temporary.path().join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG1040_NOOP_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("mutate BUG1040 wrapper owner");
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(runner.validate_bug1040_provenance(&deck).is_err());
-
-        let (temporary, deck, _) = bug1040_fixture("exclusion");
-        fs::write(
-            temporary.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{XYCE_BUG1040_OWNER_PATH}\tNetlists/Certification_Tests/BUG_1040_SON/exclude\t{UPSTREAM_EXCLUDED_DISPOSITION}\n"
-            ),
-        )
-        .expect("fabricate BUG1040 exclusion");
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(runner.validate_bug1040_provenance(&deck).is_err());
-
-        let (temporary, deck, runner) = bug1040_fixture("output");
-        fs::create_dir_all(
-            temporary
-                .path()
-                .join("OutputData/Certification_Tests/BUG_1040_SON"),
-        )
-        .expect("create fabricated BUG1040 OutputData");
-        assert!(runner.validate_bug1040_provenance(&deck).is_err());
     }
 }

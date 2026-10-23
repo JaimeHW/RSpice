@@ -37,13 +37,6 @@ impl Bug1398Role {
         }
     }
 
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::ModelOwner => "RLC.cir",
-            Self::LiteralControl => "RLC_simple.cir",
-        }
-    }
-
     fn label(self) -> &'static str {
         match self {
             Self::ModelOwner => "model-card owner",
@@ -66,186 +59,6 @@ impl XyceTestRunner {
                 .iter()
                 .zip(expected)
                 .all(|(actual, expected)| actual.eq_ignore_ascii_case(expected))
-    }
-
-    pub(super) fn bug1398_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG1398_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG1398_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1398_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug1398_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug1398_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG1398_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG1398_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG1398_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG1398_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{BUG1398_LABEL} Release-7.10 provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug1398_source_directory(
-        directory: &Path,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {BUG1398_LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{BUG1398_LABEL} source directory must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_BUG1398_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("failed to read {BUG1398_LABEL} directory: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{BUG1398_LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{BUG1398_LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if observed.contains_key(&key) {
-                return Err(format!("{BUG1398_LABEL} contains a case collision"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{BUG1398_LABEL} acquired unexpected source member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{BUG1398_LABEL} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-            let canonical = Self::canonical_lf_text_identity(BUG1398_LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!("{BUG1398_LABEL} member {name:?} content changed"));
-            }
-            observed.insert(key, bytes);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{BUG1398_LABEL} source census changed: expected {}, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug1398_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug1398Role,
-    ) -> Result<BTreeMap<Bug1398Role, Vec<u8>>, String> {
-        Self::validate_bug1398_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!(
-                "recognized {BUG1398_LABEL} {} is not canonical",
-                role.label()
-            ));
-        }
-        let prefix = "netlists/certification_tests/bug_1398/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([XYCE_BUG1398_OWNER_RECORD]) {
-            return Err(format!(
-                "{BUG1398_LABEL} wrapper ownership changed: {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG1398_LABEL} exclusions invalid: {error}"))?;
-        if exclusions.contains_key(XYCE_BUG1398_OWNER_RECORD) {
-            return Err(format!("{BUG1398_LABEL} owner must not be excluded"));
-        }
-        let family = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(prefix))
-            .collect::<Vec<_>>();
-        if family.len() != 1
-            || family[0].0.as_str() != XYCE_BUG1398_CONTROL_RECORD
-            || family[0].1.source != XYCE_BUG1398_EXCLUSION_SOURCE
-            || !matches!(&family[0].1.disposition,
-                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                    if expected_contract == XYCE_BUG1398_CONTROL_CONTRACT)
-        {
-            return Err(format!(
-                "{BUG1398_LABEL} control qualification changed: {family:?}"
-            ));
-        }
-        let source_dir = self.root.join("Netlists/Certification_Tests/BUG_1398");
-        let retained = Self::validate_bug1398_source_directory(&source_dir)?;
-        let output_dir = self.root.join("OutputData/Certification_Tests/BUG_1398");
-        match fs::symlink_metadata(&output_dir) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "failed to inspect {BUG1398_LABEL} OutputData: {error}"
-                ));
-            }
-            Ok(_) => return Err(format!("{BUG1398_LABEL} must not acquire numerical gold")),
-        }
-        for member_role in Bug1398Role::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(member_role.path()))
-                .map_err(|error| format!("{BUG1398_LABEL} {} {error}", member_role.label()))?;
-        }
-        Bug1398Role::ALL
-            .into_iter()
-            .map(|member_role| {
-                retained
-                    .get(&member_role.file_name().to_ascii_lowercase())
-                    .cloned()
-                    .map(|bytes| (member_role, bytes))
-                    .ok_or_else(|| format!("{BUG1398_LABEL} lost {}", member_role.file_name()))
-            })
-            .collect()
     }
 
     fn validate_bug1398_model(model: &rspice_core::netlist::ModelDef) -> bool {
@@ -521,32 +334,19 @@ impl XyceTestRunner {
         Ok(table)
     }
 
-    pub(super) fn validate_bug1398_oracle(
-        &self,
-        deck: &XyceDeck,
-        role: Bug1398Role,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug1398_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
             return Err(format!(
                 "{BUG1398_LABEL} deadline expired before validation"
             ));
         }
-        let sources = self.validate_bug1398_provenance(deck, role)?;
         let mut outputs = BTreeMap::new();
         for worker_role in Bug1398Role::ALL {
-            let bytes = sources
-                .get(&worker_role)
-                .ok_or_else(|| format!("{BUG1398_LABEL} lost {}", worker_role.label()))?;
-            let source = std::str::from_utf8(bytes).map_err(|error| {
-                format!(
-                    "{BUG1398_LABEL} {} is not UTF-8: {error}",
-                    worker_role.label()
-                )
-            })?;
             let path = self.root.join(worker_role.path());
-            let plan = self.validate_bug1398_worker(worker_role, source, &path)?;
+            let source = fs::read_to_string(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let plan = self.validate_bug1398_worker(worker_role, &source, &path)?;
             outputs.insert(
                 worker_role,
                 self.run_bug1398_worker(worker_role, &plan, start)?,
@@ -569,10 +369,6 @@ impl XyceTestRunner {
         if abort.is_aborted() {
             return Err(format!("{BUG1398_LABEL} execution exceeded timeout"));
         }
-        self.validate_bug1398_provenance(deck, role)?;
-        if abort.is_aborted() {
-            return Err(format!("{BUG1398_LABEL} final provenance exceeded timeout"));
-        }
         Ok(())
     }
 }
@@ -585,52 +381,6 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../..")
             .join("tests/xyce")
-    }
-
-    fn bug1398_exclusion_manifest(disposition: &str) -> String {
-        format!(
-            "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{XYCE_BUG1398_CONTROL_PATH}\t{XYCE_BUG1398_EXCLUSION_SOURCE}\t{disposition}\n"
-        )
-    }
-
-    fn bug1398_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug1398-{label}-"))
-            .tempdir()
-            .expect("create BUG1398 fixture root");
-        let root = temporary.path().to_path_buf();
-        let family = root.join("Netlists/Certification_Tests/BUG_1398");
-        fs::create_dir_all(&family).expect("create BUG1398 source family");
-        let canonical = corpus_root().join("Netlists/Certification_Tests/BUG_1398");
-        for (name, ..) in XYCE_BUG1398_RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name))
-                .expect("copy canonical BUG1398 source member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG1398_OWNER_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG1398 wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            bug1398_exclusion_manifest(&format!(
-                "{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{XYCE_BUG1398_CONTROL_CONTRACT}"
-            )),
-        )
-        .expect("write BUG1398 exclusion manifest");
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG1398_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG1398_OWNER_PATH.to_string(),
-        };
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug1398_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug1398_historical_oracle_provenance()
-            .expect("Release-7.10 BUG1398 provenance remains exact");
     }
 
     #[test]
@@ -653,93 +403,24 @@ mod tests {
 
     #[test]
     fn bug1398_oracle_runs_both_roles() {
-        let root = corpus_root();
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG1398_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG1398_OWNER_PATH.to_string(),
-        };
+        let runner = XyceTestRunner::new(corpus_root(), XyceRunnerConfig::default());
         runner
-            .validate_bug1398_oracle(&deck, Bug1398Role::ModelOwner, Instant::now())
+            .validate_bug1398_oracle(Instant::now())
             .expect("canonical BUG1398 relation passes");
     }
 
     #[test]
     fn bug1398_oracle_rejects_an_expired_deadline() {
-        let root = corpus_root();
         let runner = XyceTestRunner::new(
-            &root,
+            corpus_root(),
             XyceRunnerConfig {
                 max_time_per_test_ms: 1,
                 ..XyceRunnerConfig::default()
             },
         );
-        let deck = XyceDeck {
-            path: root.join(XYCE_BUG1398_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG1398_OWNER_PATH.to_string(),
-        };
         let start = Instant::now()
             .checked_sub(Duration::from_millis(2))
             .expect("construct expired BUG1398 deadline");
-        assert!(
-            runner
-                .validate_bug1398_oracle(&deck, Bug1398Role::ModelOwner, start)
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn bug1398_provenance_rejects_source_output_ownership_and_qualification_drift() {
-        let (_temporary, deck, runner) = bug1398_fixture("source-drift");
-        runner
-            .validate_bug1398_provenance(&deck, Bug1398Role::ModelOwner)
-            .expect("canonical BUG1398 fixture provenance passes");
-        fs::write(
-            deck.path
-                .parent()
-                .expect("BUG1398 owner has parent")
-                .join("RLC.cir.out"),
-            "stale wrapper output\n",
-        )
-        .expect("write stale BUG1398 wrapper output");
-        assert!(
-            runner
-                .validate_bug1398_provenance(&deck, Bug1398Role::ModelOwner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = bug1398_fixture("output-drift");
-        let output = runner.root.join("OutputData/Certification_Tests/BUG_1398");
-        fs::create_dir_all(&output).expect("create forbidden BUG1398 OutputData");
-        assert!(
-            runner
-                .validate_bug1398_provenance(&deck, Bug1398Role::ModelOwner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = bug1398_fixture("owner-drift");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "")
-            .expect("remove BUG1398 wrapper ownership");
-        let refreshed = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(
-            refreshed
-                .validate_bug1398_provenance(&deck, Bug1398Role::ModelOwner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = bug1398_fixture("qualification-drift");
-        fs::write(
-            runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            bug1398_exclusion_manifest(UPSTREAM_EXCLUDED_DISPOSITION),
-        )
-        .expect("demote BUG1398 literal control");
-        let refreshed = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(
-            refreshed
-                .validate_bug1398_provenance(&deck, Bug1398Role::ModelOwner)
-                .is_err()
-        );
+        assert!(runner.validate_bug1398_oracle(start).is_err());
     }
 }

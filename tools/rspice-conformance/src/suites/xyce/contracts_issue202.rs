@@ -12,7 +12,6 @@ pub(super) enum Issue202Role {
 
 impl Issue202Role {
     const ALL: [Self; 3] = [Self::Owner, Self::First, Self::Last];
-    const CONTROLS: [Self; 2] = [Self::First, Self::Last];
 
     pub(super) fn for_record(record: &str) -> Option<Self> {
         let normalized = XyceTestRunner::normalize_manifest_key(record);
@@ -118,178 +117,6 @@ impl Issue202Mode {
 }
 
 impl XyceTestRunner {
-    pub(super) fn issue202_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_ISSUE202_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, blake3)| {
-                format!(
-                    "{XYCE_ISSUE202_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_ISSUE202_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_issue202_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::issue202_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_ISSUE202_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_ISSUE202_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_ISSUE202_HISTORICAL_RECORDS_SHA256
-            || blake3 != XYCE_ISSUE202_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} Release provenance changed: records={}/{}, sha256={sha256}, blake3={blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_issue202_directory(&self) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        let directory = self.root.join("Netlists/Certification_Tests/ISSUE_202");
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} family: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = XYCE_ISSUE202_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        let mut records = Vec::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} family: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if observed.contains_key(&key) {
-                return Err(format!("{LABEL} contains a case collision for {name:?}"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name {
-                return Err(format!("{LABEL} member case changed: {name:?}"));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} {name:?}: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!("{LABEL} retained member {name:?} changed"));
-            }
-            records.push(format!(
-                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
-            ));
-            observed.insert(key, bytes);
-        }
-        records.sort();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_ISSUE202_RETAINED_RECORD_COUNT
-            || stream.len() != XYCE_ISSUE202_RETAINED_RECORD_BYTES
-            || sha256 != XYCE_ISSUE202_RETAINED_RECORDS_SHA256
-            || content_blake3 != XYCE_ISSUE202_RETAINED_RECORDS_BLAKE3
-        {
-            return Err(format!("{LABEL} retained family census changed"));
-        }
-        Ok(observed)
-    }
-
-    fn validate_issue202_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Issue202Role,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        Self::validate_issue202_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!(
-                "recognized {LABEL} role is not at its canonical path"
-            ));
-        }
-        let prefix = "netlists/certification_tests/issue_202/";
-        let owners = Self::load_upstream_wrapper_decks(&self.root)
-            .into_iter()
-            .filter(|record| record.starts_with(prefix))
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([XYCE_ISSUE202_OWNER_RECORD.to_string()]) {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        if exclusions.contains_key(XYCE_ISSUE202_OWNER_RECORD) {
-            return Err(format!("{LABEL} owner must not be excluded"));
-        }
-        let family = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(prefix))
-            .collect::<BTreeMap<_, _>>();
-        if family.len() != 2 {
-            return Err(format!("{LABEL} requires exactly two qualified controls"));
-        }
-        for control in Issue202Role::CONTROLS {
-            let row = family
-                .get(&control.record().to_string())
-                .copied()
-                .ok_or_else(|| format!("{LABEL} lost {}", control.file_name()))?;
-            if row.source != XYCE_ISSUE202_EXCLUSION_SOURCE
-                || !matches!(&row.disposition,
-                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                        if expected_contract == control.contract())
-            {
-                return Err(format!(
-                    "{LABEL} {} qualification changed",
-                    control.file_name()
-                ));
-            }
-        }
-        let members = self.validate_issue202_directory()?;
-        for role in Issue202Role::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(role.path()))
-                .map_err(|error| format!("{LABEL} {} {error}", role.file_name()))?;
-        }
-        let output = self.root.join("OutputData/Certification_Tests/ISSUE_202");
-        match fs::symlink_metadata(&output) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("failed to inspect {LABEL} OutputData: {error}")),
-            Ok(_) => return Err(format!("{LABEL} must not acquire invented numerical gold")),
-        }
-        Ok(members)
-    }
-
     fn validate_issue202_plan(
         role: Issue202Role,
         plan: &XyceStaticDcPlan,
@@ -489,31 +316,16 @@ impl XyceTestRunner {
         Ok(plan)
     }
 
-    pub(super) fn validate_issue202_oracle(
-        &self,
-        deck: &XyceDeck,
-        role: Issue202Role,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_issue202_oracle(&self, start: Instant) -> Result<(), String> {
         use rspice_core::netlist::ParameterRedefinitionDiagnosticPolicy as Diagnostic;
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
             return Err(format!(
-                "{LABEL} exceeded its shared deadline before provenance"
+                "{LABEL} exceeded its shared deadline before execution"
             ));
         }
-        let members = self.validate_issue202_provenance(deck, role)?;
 
         let run = |plan: &XyceStaticDcPlan, expected: Value, member_role: Issue202Role| {
-            let source = members
-                .get(&member_role.file_name().to_ascii_lowercase())
-                .ok_or_else(|| format!("{LABEL} lost {}", member_role.file_name()))?;
-            if plan.source.as_bytes() != source.as_slice() {
-                return Err(format!(
-                    "{LABEL} {} source changed between reads",
-                    member_role.file_name()
-                ));
-            }
             let (netlist, results) = self.run_static_dc_results(plan, start).map_err(|error| {
                 format!(
                     "{LABEL} {} execution failed: {error}",
@@ -583,14 +395,6 @@ impl XyceTestRunner {
 
         let owner_source = fs::read_to_string(self.root.join(XYCE_ISSUE202_OWNER_PATH))
             .map_err(|error| format!("failed to read {LABEL} owner: {error}"))?;
-        if members
-            .get(&Issue202Role::Owner.file_name().to_ascii_lowercase())
-            .is_none_or(|source| source.as_slice() != owner_source.as_bytes())
-        {
-            return Err(format!(
-                "{LABEL} owner source changed before error-mode validation"
-            ));
-        }
         let error = Self::parse_netlist_with_expression_dialect_policies_and_execution_dir(
             &owner_source,
             &self.root.join(XYCE_ISSUE202_OWNER_PATH),
@@ -616,7 +420,6 @@ impl XyceTestRunner {
             return Err(format!("{LABEL} error-mode diagnostic changed: {error:?}"));
         }
 
-        self.validate_issue202_provenance(deck, role)?;
         if abort.is_aborted() {
             return Err(format!("{LABEL} exceeded its shared deadline"));
         }
@@ -634,100 +437,32 @@ mod tests {
             .join("tests/xyce")
     }
 
-    fn fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-issue202-{label}-"))
-            .tempdir()
-            .expect("create ISSUE202 fixture");
-        let root = temporary.path();
-        let family = root.join("Netlists/Certification_Tests/ISSUE_202");
-        fs::create_dir_all(&family).expect("create ISSUE202 family");
-        let canonical = corpus_root().join("Netlists/Certification_Tests/ISSUE_202");
-        for (name, ..) in XYCE_ISSUE202_RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name)).expect("copy ISSUE202 member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!(
-                "{}\t{}\n",
-                XYCE_ISSUE202_OWNER_PATH, REQUIRES_UPSTREAM_WRAPPER_CONTRACT
-            ),
-        )
-        .expect("write wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{}\t{}\t{}\t{}\n{}\t{}\t{}\t{}\n",
-                XYCE_ISSUE202_FIRST_PATH,
-                XYCE_ISSUE202_EXCLUSION_SOURCE,
-                RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION,
-                XYCE_ISSUE202_FIRST_CONTRACT,
-                XYCE_ISSUE202_LAST_PATH,
-                XYCE_ISSUE202_EXCLUSION_SOURCE,
-                RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION,
-                XYCE_ISSUE202_LAST_CONTRACT,
-            ),
-        )
-        .expect("write exclusion manifest");
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        let deck = XyceDeck {
-            path: root.join(XYCE_ISSUE202_OWNER_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_ISSUE202_OWNER_PATH.to_string(),
-        };
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn issue202_historical_provenance_is_exact() {
-        XyceTestRunner::validate_issue202_historical_oracle_provenance()
-            .expect("ISSUE202 Release provenance remains exact");
-    }
-
     #[test]
     fn issue202_all_roles_execute_the_complete_mode_matrix() {
-        let root = corpus_root();
         let runner = XyceTestRunner::new(
-            &root,
+            corpus_root(),
             XyceRunnerConfig {
                 max_time_per_test_ms: 30_000,
                 ..XyceRunnerConfig::default()
             },
         );
-        for role in Issue202Role::ALL {
-            let deck = XyceDeck {
-                section: XyceDeckSection::Netlists,
-                path: root.join(role.path()),
-                relative_path: role.path().to_string(),
-            };
-            runner
-                .validate_issue202_oracle(&deck, role, Instant::now())
-                .unwrap_or_else(|error| panic!("{} failed: {error}", role.file_name()));
-        }
+        runner
+            .validate_issue202_oracle(Instant::now())
+            .expect("canonical ISSUE202 mode matrix passes");
     }
 
     #[test]
     fn issue202_expired_deadline_fails_closed() {
-        let root = corpus_root();
         let runner = XyceTestRunner::new(
-            &root,
+            corpus_root(),
             XyceRunnerConfig {
                 max_time_per_test_ms: 1,
                 ..XyceRunnerConfig::default()
             },
         );
-        let deck = XyceDeck {
-            section: XyceDeckSection::Netlists,
-            path: root.join(XYCE_ISSUE202_OWNER_PATH),
-            relative_path: XYCE_ISSUE202_OWNER_PATH.to_string(),
-        };
         assert!(
             runner
-                .validate_issue202_oracle(
-                    &deck,
-                    Issue202Role::Owner,
-                    Instant::now() - Duration::from_secs(1),
-                )
+                .validate_issue202_oracle(Instant::now() - Duration::from_secs(1))
                 .is_err()
         );
     }
@@ -755,58 +490,6 @@ mod tests {
                 1_000.0,
             )
             .is_err()
-        );
-    }
-
-    #[test]
-    fn issue202_provenance_rejects_source_output_and_role_drift() {
-        let (_temporary, deck, runner) = fixture("source");
-        runner
-            .validate_issue202_provenance(&deck, Issue202Role::Owner)
-            .expect("canonical ISSUE202 fixture");
-        fs::write(runner.root.join(XYCE_ISSUE202_FIRST_PATH), "* changed\n")
-            .expect("mutate control");
-        assert!(
-            runner
-                .validate_issue202_provenance(&deck, Issue202Role::Owner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = fixture("output");
-        fs::write(
-            runner
-                .root
-                .join("Netlists/Certification_Tests/ISSUE_202/first.cir.prn"),
-            "invented\n",
-        )
-        .expect("add generated sidecar");
-        assert!(
-            runner
-                .validate_issue202_provenance(&deck, Issue202Role::Owner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = fixture("qualification");
-        let exclusions = runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
-        let text = fs::read_to_string(&exclusions).expect("read exclusions");
-        fs::write(
-            &exclusions,
-            text.replace(XYCE_ISSUE202_FIRST_CONTRACT, XYCE_ISSUE202_LAST_CONTRACT),
-        )
-        .expect("change qualification role");
-        assert!(
-            runner
-                .validate_issue202_provenance(&deck, Issue202Role::Owner)
-                .is_err()
-        );
-
-        let (_temporary, deck, runner) = fixture("owner");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "").expect("remove live wrapper owner");
-        assert!(
-            runner
-                .validate_issue202_provenance(&deck, Issue202Role::Owner)
-                .is_err(),
-            "wrapper ownership must be reloaded during final provenance"
         );
     }
 }

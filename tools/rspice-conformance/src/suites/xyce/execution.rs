@@ -736,7 +736,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug1797Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug1797_oracle(deck, role, start) {
+            let result = match self.validate_bug1797_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -787,7 +787,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug981Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug981_oracle(deck, role, start) {
+            let result = match self.validate_bug981_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -855,7 +855,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Issue202Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_issue202_oracle(deck, role, start) {
+            let result = match self.validate_issue202_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -872,7 +872,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Issue451Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_issue451_oracle(deck, role, start) {
+            let result = match self.validate_issue451_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -906,7 +906,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug1455Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug1455_oracle(deck, role, start) {
+            let result = match self.validate_bug1455_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -1246,7 +1246,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug1398Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug1398_oracle(deck, role, start) {
+            let result = match self.validate_bug1398_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -1279,7 +1279,7 @@ impl XyceTestRunner {
         }
 
         if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG1040_OWNER_RECORD {
-            let result = match self.validate_bug1040_oracle(deck, start) {
+            let result = match self.validate_bug1040_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, XYCE_BUG1040_CONTRACT),
                 Err(error) => {
                     self.failure_result(deck, start, XYCE_BUG1040_CONTRACT, error, Vec::new())

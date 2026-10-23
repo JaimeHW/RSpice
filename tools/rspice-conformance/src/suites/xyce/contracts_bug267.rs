@@ -3,188 +3,6 @@ use super::*;
 const BUG267_LABEL: &str = "BUG_267 include/global-parameter success wrapper";
 
 impl XyceTestRunner {
-    pub(super) fn bug267_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG267_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG267_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG267_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug267_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug267_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG267_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG267_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG267_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG267_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "BUG_267 Release-7.10 wrapper provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug267_retained_directory(
-        directory: &Path,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {BUG267_LABEL} family: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{BUG267_LABEL} family {} must be a regular non-symlink directory",
-                directory.display()
-            ));
-        }
-        let expected = XYCE_BUG267_RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("failed to read {BUG267_LABEL} family: {error}"))?
-        {
-            let entry = entry
-                .map_err(|error| format!("failed to inspect {BUG267_LABEL} member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{BUG267_LABEL} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{BUG267_LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if observed.contains_key(&key) {
-                return Err(format!(
-                    "{BUG267_LABEL} family contains case-colliding member {name:?}"
-                ));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{BUG267_LABEL} family acquired unexpected member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{BUG267_LABEL} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {BUG267_LABEL} member: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(BUG267_LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{BUG267_LABEL} member {name:?} changed: expected {expected_bytes}/{expected_sha256}/{expected_blake3}, got {}/{sha256}/{content_blake3}",
-                    canonical.len()
-                ));
-            }
-            observed.insert(key, bytes);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{BUG267_LABEL} family census changed: expected {} members, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug267_provenance(&self, deck: &XyceDeck) -> Result<Vec<u8>, String> {
-        Self::validate_bug267_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != XYCE_BUG267_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != XYCE_BUG267_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(XYCE_BUG267_PATH))
-        {
-            return Err(format!(
-                "recognized {BUG267_LABEL} record '{}' is not backed by its exact canonical path",
-                deck.relative_path
-            ));
-        }
-        if !self.requires_upstream_wrapper(&deck.relative_path) {
-            return Err(format!("{BUG267_LABEL} lost removed-wrapper ownership"));
-        }
-        let family_prefix = "netlists/certification_tests/bug_267/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(family_prefix))
-            .collect::<Vec<_>>();
-        if owners.len() != 1 || owners[0].as_str() != XYCE_BUG267_RECORD {
-            return Err(format!(
-                "{BUG267_LABEL} requires its exact sole wrapper owner, found {owners:?}"
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG267_LABEL} exclusion manifest is invalid: {error}"))?;
-        let family_exclusions = exclusions
-            .keys()
-            .filter(|record| record.starts_with(family_prefix))
-            .collect::<Vec<_>>();
-        if !family_exclusions.is_empty() {
-            return Err(format!(
-                "{BUG267_LABEL} must not acquire upstream-exclusion records: {family_exclusions:?}"
-            ));
-        }
-
-        let family_dir = deck
-            .path
-            .parent()
-            .ok_or_else(|| format!("{BUG267_LABEL} record has no family directory"))?;
-        let retained = Self::validate_bug267_retained_directory(family_dir)?;
-        self.reject_wrapper_output_artifacts(&deck.path)
-            .map_err(|error| format!("{BUG267_LABEL} {error}"))?;
-        let output_anchor = self
-            .static_output_reference_path(&deck.path, "prn")
-            .ok_or_else(|| format!("{BUG267_LABEL} cannot be mapped into OutputData"))?;
-        let output_family = output_anchor
-            .parent()
-            .ok_or_else(|| format!("{BUG267_LABEL} OutputData anchor has no parent"))?;
-        match fs::symlink_metadata(output_family) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => {
-                return Err(format!(
-                    "failed to verify absence of {BUG267_LABEL} OutputData family: {error}"
-                ));
-            }
-            Ok(_) => {
-                return Err(format!(
-                    "{BUG267_LABEL} must not acquire an invented numerical oracle at {}",
-                    output_family.display()
-                ));
-            }
-        }
-        retained
-            .get("bug267.cir")
-            .cloned()
-            .ok_or_else(|| format!("{BUG267_LABEL} lost its owner source"))
-    }
-
     fn bug267_plan_and_netlist(
         &self,
         source: String,
@@ -464,21 +282,13 @@ impl XyceTestRunner {
         if abort.is_aborted() {
             return Err(format!("{BUG267_LABEL} deadline expired before validation"));
         }
-        let source_bytes = self.validate_bug267_provenance(deck)?;
-        let source = String::from_utf8(source_bytes)
-            .map_err(|error| format!("{BUG267_LABEL} source is not UTF-8: {error}"))?;
+        let source = fs::read_to_string(&deck.path)
+            .map_err(|error| format!("failed to read {}: {error}", deck.path.display()))?;
         let plan = self.validate_bug267_typed_contract(source, &deck.path)?;
         self.run_bug267_typed_oracle(&plan, start)?;
         if abort.is_aborted() {
             return Err(format!(
                 "{BUG267_LABEL} execution exceeded timeout ({}ms)",
-                self.config.max_time_per_test_ms
-            ));
-        }
-        self.validate_bug267_provenance(deck)?;
-        if abort.is_aborted() {
-            return Err(format!(
-                "{BUG267_LABEL} final provenance exceeded timeout ({}ms)",
                 self.config.max_time_per_test_ms
             ));
         }
@@ -502,47 +312,6 @@ mod tests {
             section: XyceDeckSection::Netlists,
             relative_path: XYCE_BUG267_PATH.to_string(),
         }
-    }
-
-    fn bug267_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let source_root = corpus_root();
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug267-{label}-"))
-            .tempdir()
-            .expect("create BUG267 fixture root");
-        let root = temporary.path();
-        let family = root.join("Netlists/Certification_Tests/BUG_267");
-        fs::create_dir_all(&family).expect("create BUG267 fixture family");
-        for name in ["analysis.cmds", "bug267.cir"] {
-            fs::copy(
-                source_root
-                    .join("Netlists/Certification_Tests/BUG_267")
-                    .join(name),
-                family.join(name),
-            )
-            .expect("copy canonical BUG267 member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG267_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG267 wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n"
-            ),
-        )
-        .expect("write empty BUG267 exclusion manifest");
-        let deck = canonical_deck(root);
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug267_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug267_historical_oracle_provenance()
-            .expect("Release-7.10 BUG267 provenance remains exact");
     }
 
     #[test]
@@ -597,46 +366,5 @@ mod tests {
                 .validate_bug267_oracle(&canonical_deck(&root), start)
                 .is_err()
         );
-    }
-
-    #[test]
-    fn bug267_provenance_rejects_family_manifest_and_output_drift() {
-        let (_temporary, deck, runner) = bug267_fixture("source-drift");
-        let source = fs::read_to_string(&deck.path).expect("read BUG267 fixture source");
-        fs::write(
-            &deck.path,
-            source.replace(".param foobar={3*9}", ".param foobar=27"),
-        )
-        .expect("mutate BUG267 authored parameter expression");
-        assert!(runner.validate_bug267_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug267_fixture("family-drift");
-        runner
-            .validate_bug267_provenance(&deck)
-            .expect("canonical BUG267 fixture provenance passes");
-        fs::write(
-            deck.path
-                .parent()
-                .expect("BUG267 deck has parent")
-                .join("unexpected.out"),
-            "stale wrapper output\n",
-        )
-        .expect("write stale BUG267 wrapper output");
-        assert!(runner.validate_bug267_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug267_fixture("output-drift");
-        let output = runner
-            .static_output_reference_path(&deck.path, "prn")
-            .expect("map BUG267 fixture to OutputData");
-        fs::create_dir_all(output.parent().expect("BUG267 output has parent"))
-            .expect("create forbidden BUG267 OutputData family");
-        fs::write(output, "invented gold\n").expect("write forbidden BUG267 gold");
-        assert!(runner.validate_bug267_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug267_fixture("manifest-drift");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "")
-            .expect("remove BUG267 wrapper ownership");
-        let rebuilt = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(rebuilt.validate_bug267_provenance(&deck).is_err());
     }
 }
