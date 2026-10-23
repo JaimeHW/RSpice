@@ -6,6 +6,7 @@
 
 use super::*;
 use crate::state::shortcuts::{ProtectedShortcutPolicy, ShortcutStroke};
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::shortcuts::artifacts::{
     ShortcutExportRequest, ShortcutExportScope, build_shortcut_reference_model,
     decode_shortcut_artifact_json, serialize_shortcut_reference_json,

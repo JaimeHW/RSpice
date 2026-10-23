@@ -20,7 +20,8 @@ use crate::state::shortcuts::{
     CommandShortcutOverride, ProfileShortcutBinding, ShortcutBindingSlot, ShortcutBindingSource,
     ShortcutPreferences, ShortcutSequence,
 };
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::{CommandRegistry, command_registry};
+use crate::workbench::framework::command_registry::CommandSpec;
 
 pub use super::schema::ShortcutArtifactScope as ShortcutExportScope;
 
@@ -160,7 +161,7 @@ pub fn build_shortcut_reference_model(
         .map_or(0, |commands| {
             commands
                 .keys()
-                .filter(|id| Command::from_stable_id(id).is_none())
+                .filter(|id| command_registry().resolve(id).is_none())
                 .count()
         });
 
@@ -265,8 +266,8 @@ fn user_override_rows(
     operating_system: OperatingSystem,
 ) -> Vec<ShortcutReferenceRow> {
     let mut rows = Vec::new();
-    for command in COMMAND_REGISTRY.iter().copied() {
-        let Some(command_override) = profile.command_override(command.key()) else {
+    for command in command_registry().ordered() {
+        let Some(command_override) = profile.command_override(command.key) else {
             continue;
         };
         if command_override.bindings().is_empty() {
@@ -281,10 +282,10 @@ fn user_override_rows(
                 .filter(|platform| platforms.contains(platform))
             {
                 rows.push(ShortcutReferenceRow {
-                    context: command.shortcut_context().label().to_owned(),
-                    group: command.spec().group.to_owned(),
-                    command_id: command.stable_id().to_owned(),
-                    command_label: command.spec().label.to_owned(),
+                    context: command.context.label().to_owned(),
+                    group: command.group.to_owned(),
+                    command_id: command.key.as_str().to_owned(),
+                    command_label: command.label.to_owned(),
                     slot: Some(binding.slot()),
                     platform: Some(platform),
                     sequence: Some(binding.sequence().clone()),
@@ -305,12 +306,12 @@ fn materialized_projection(
 ) -> Result<(Value, Vec<ShortcutReferenceRow>), ShortcutExportError> {
     let mut commands = BTreeMap::new();
     let mut rows = Vec::new();
-    for command in COMMAND_REGISTRY.iter().copied().filter(|command| {
+    for command in command_registry().ordered().filter(|command| {
         request.scope != ShortcutExportScope::CurrentWorkspace
-            || coverage.covers_context(command.shortcut_context().label())
+            || coverage.covers_context(command.context.label())
     }) {
         let mut bindings = Vec::new();
-        for binding in profile.effective_bindings(&CommandRegistry, command.key()) {
+        for binding in profile.effective_bindings(&CommandRegistry, command.key) {
             let binding_platforms = binding
                 .platforms()
                 .iter()
@@ -329,16 +330,16 @@ fn materialized_projection(
                 .map_err(|error| {
                     ShortcutExportError(format!(
                         "could not materialize {}: {error}",
-                        command.stable_id()
+                        command.key.as_str()
                     ))
                 })?,
             );
             for platform in binding_platforms {
                 rows.push(ShortcutReferenceRow {
-                    context: command.shortcut_context().label().to_owned(),
-                    group: command.spec().group.to_owned(),
-                    command_id: command.stable_id().to_owned(),
-                    command_label: command.spec().label.to_owned(),
+                    context: command.context.label().to_owned(),
+                    group: command.group.to_owned(),
+                    command_id: command.key.as_str().to_owned(),
+                    command_label: command.label.to_owned(),
                     slot: Some(binding.slot()),
                     platform: Some(platform),
                     sequence: Some(binding.sequence().clone()),
@@ -358,13 +359,16 @@ fn materialized_projection(
         let command_override = CommandShortcutOverride::new(bindings).map_err(|error| {
             ShortcutExportError(format!(
                 "could not materialize {}: {error}",
-                command.stable_id()
+                command.key.as_str()
             ))
         })?;
         commands.insert(
-            command.stable_id().to_owned(),
+            command.key.as_str().to_owned(),
             serde_json::to_value(command_override).map_err(|error| {
-                ShortcutExportError(format!("could not encode {}: {error}", command.stable_id()))
+                ShortcutExportError(format!(
+                    "could not encode {}: {error}",
+                    command.key.as_str()
+                ))
             })?,
         );
     }
@@ -375,12 +379,12 @@ fn materialized_projection(
     Ok((profile, rows))
 }
 
-fn unbound_row(command: Command) -> ShortcutReferenceRow {
+fn unbound_row(command: &CommandSpec) -> ShortcutReferenceRow {
     ShortcutReferenceRow {
-        context: command.shortcut_context().label().to_owned(),
-        group: command.spec().group.to_owned(),
-        command_id: command.stable_id().to_owned(),
-        command_label: command.spec().label.to_owned(),
+        context: command.context.label().to_owned(),
+        group: command.group.to_owned(),
+        command_id: command.key.as_str().to_owned(),
+        command_label: command.label.to_owned(),
         slot: None,
         platform: None,
         sequence: None,

@@ -345,7 +345,9 @@ impl Command {
 
     /// Resolve a stable product identity through the canonical registry.
     /// Unknown IDs are intentionally retained by profile persistence but are
-    /// never guessed into a command owned by this build.
+    /// never guessed into a command owned by this build. The product resolves
+    /// a stored id to a key; a key becomes a command only at dispatch.
+    #[cfg(test)]
     pub fn from_stable_id(id: &str) -> Option<Self> {
         command_registry().resolve(id).and_then(legacy_command)
     }

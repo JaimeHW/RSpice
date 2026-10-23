@@ -206,7 +206,7 @@ pub(super) fn finish_capture(editor: &mut ShortcutEditorState, target: ShortcutC
     );
     match editor.draft.as_mut().expect("editor draft").set_binding(
         &CommandRegistry,
-        target.command.key(),
+        target.command,
         target.slot,
         platforms,
         Some(sequence),
@@ -216,7 +216,7 @@ pub(super) fn finish_capture(editor: &mut ShortcutEditorState, target: ShortcutC
             editor.error_summary = Some(format!(
                 "Could not record {} for {}: {error}",
                 target.slot.label(),
-                target.command.spec().label
+                command_registry().label(target.command)
             ))
         }
     }
@@ -232,7 +232,7 @@ pub(super) fn clear_capture(editor: &mut ShortcutEditorState, target: ShortcutCa
     );
     match editor.draft.as_mut().expect("editor draft").set_binding(
         &CommandRegistry,
-        target.command.key(),
+        target.command,
         target.slot,
         platforms,
         None,
@@ -259,11 +259,11 @@ pub(super) fn modifiers_are_empty(modifiers: Modifiers) -> bool {
 
 pub(super) fn binding_platforms(
     profile: &ShortcutPreferences,
-    command: Command,
+    command: CommandKey,
     slot: ShortcutBindingSlot,
 ) -> Vec<CommandPlatform> {
     if let Some(binding) = profile
-        .resolved_bindings(&CommandRegistry, command.key())
+        .resolved_bindings(&CommandRegistry, command)
         .into_iter()
         .find(|binding| binding.slot() == slot)
     {
@@ -271,7 +271,7 @@ pub(super) fn binding_platforms(
     }
     match slot {
         ShortcutBindingSlot::Primary
-            if command.primary_is_reserved_on(CommandPlatform::Browser) =>
+            if CommandRegistry.primary_is_reserved_on(command, CommandPlatform::Browser) =>
         {
             vec![CommandPlatform::Desktop]
         }

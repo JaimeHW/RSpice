@@ -17,12 +17,12 @@ use super::schema::{
 };
 use super::{canonical_json_bytes, sha256};
 use crate::io::file_exchange::MAX_SHORTCUT_PROFILE_BYTES;
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform};
 use crate::state::shortcuts::{
     CommandShortcutOverride, ContextPrecedencePolicy, ProfileShortcutBinding, ShortcutBindingSlot,
     ShortcutSequence, ShortcutStroke, shortcut_context_precedence_rank, shortcut_contexts_overlap,
 };
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 
 /// Version of the audited VS Code-to-RSpice command identity table.
 pub const VSCODE_MAPPING_VERSION: u16 = 1;
@@ -31,78 +31,78 @@ pub const VSCODE_MAPPING_VERSION: u16 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VscodeCommandMapping {
     pub vscode_command_id: &'static str,
-    pub rspice_command: Command,
+    pub rspice_command: CommandKey,
 }
 
 /// Supported VS Code command identities. Unknown identities are never guessed.
 pub const VSCODE_COMMAND_MAPPINGS: &[VscodeCommandMapping] = &[
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.files.save",
-        rspice_command: Command::Save,
+        rspice_command: Command::Save.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.files.saveAs",
-        rspice_command: Command::SaveAs,
+        rspice_command: Command::SaveAs.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.files.saveAll",
-        rspice_command: Command::SaveAll,
+        rspice_command: Command::SaveAll.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.closeActiveEditor",
-        rspice_command: Command::CloseActiveDocument,
+        rspice_command: Command::CloseActiveDocument.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "undo",
-        rspice_command: Command::Undo,
+        rspice_command: Command::Undo.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "redo",
-        rspice_command: Command::Redo,
+        rspice_command: Command::Redo.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.clipboardCutAction",
-        rspice_command: Command::Cut,
+        rspice_command: Command::Cut.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.clipboardCopyAction",
-        rspice_command: Command::Copy,
+        rspice_command: Command::Copy.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.clipboardPasteAction",
-        rspice_command: Command::Paste,
+        rspice_command: Command::Paste.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "editor.action.selectAll",
-        rspice_command: Command::SelectAll,
+        rspice_command: Command::SelectAll.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.openSettings",
-        rspice_command: Command::Preferences,
+        rspice_command: Command::Preferences.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.showCommands",
-        rspice_command: Command::CommandPalette,
+        rspice_command: Command::CommandPalette.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.openGlobalKeybindings",
-        rspice_command: Command::KeyboardShortcuts,
+        rspice_command: Command::KeyboardShortcuts.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.toggleFullScreen",
-        rspice_command: Command::ToggleFullScreen,
+        rspice_command: Command::ToggleFullScreen.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.toggleSidebarVisibility",
-        rspice_command: Command::ToggleNavigator,
+        rspice_command: Command::ToggleNavigator.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.togglePanel",
-        rspice_command: Command::ToggleConsole,
+        rspice_command: Command::ToggleConsole.key(),
     },
     VscodeCommandMapping {
         vscode_command_id: "workbench.action.toggleZenMode",
-        rspice_command: Command::ToggleFocusMode,
+        rspice_command: Command::ToggleFocusMode.key(),
     },
 ];
 
@@ -552,7 +552,7 @@ fn remove_trailing_commas(source: &str) -> String {
 struct CandidateBinding {
     entry_index: usize,
     source_command_id: &'static str,
-    command: Command,
+    command: CommandKey,
     sequence: ShortcutSequence,
 }
 
@@ -680,7 +680,7 @@ fn adapt_vscode_entries(
         let Some(candidate) = parse_entry(entry_index, entry, platform, &mut report) else {
             continue;
         };
-        let target_id = candidate.command.stable_id().to_owned();
+        let target_id = candidate.command.as_str().to_owned();
 
         if let Some(first_index) = conflicted_commands.get(&target_id).copied() {
             report.disposition(
@@ -695,7 +695,7 @@ fn adapt_vscode_entries(
                 VscodeDiagnosticCode::ConflictingBinding,
                 format!(
                     "RSpice command '{}' already has incompatible VS Code entries (first at index {first_index})",
-                    candidate.command.stable_id()
+                    candidate.command.as_str()
                 ),
             );
             continue;
@@ -718,7 +718,7 @@ fn adapt_vscode_entries(
                     VscodeDiagnosticCode::DuplicateBinding,
                     format!(
                         "duplicate binding for RSpice command '{}' was deduplicated",
-                        candidate.command.stable_id()
+                        candidate.command.as_str()
                     ),
                 );
             }
@@ -744,7 +744,7 @@ fn adapt_vscode_entries(
                     VscodeDiagnosticCode::ConflictingBinding,
                     format!(
                         "incompatible bindings target RSpice command '{}' (first at index {first_index})",
-                        candidate.command.stable_id()
+                        candidate.command.as_str()
                     ),
                 );
             }
@@ -1135,8 +1135,12 @@ fn diagnose_cross_command_collisions(
     let mut collided_commands = BTreeSet::new();
     for (left_index, left) in bindings.iter().enumerate() {
         for right in &bindings[left_index + 1..] {
-            let left_context = left.command.shortcut_context();
-            let right_context = right.command.shortcut_context();
+            let (Some(left_context), Some(right_context)) = (
+                CommandRegistry.context(left.command),
+                CommandRegistry.context(right.command),
+            ) else {
+                continue;
+            };
             let policy = ContextPrecedencePolicy::ModalEditorWorkspaceGlobal;
             if shortcut_contexts_overlap(left_context, right_context)
                 && shortcut_context_precedence_rank(left_context, policy)
@@ -1145,8 +1149,8 @@ fn diagnose_cross_command_collisions(
                     || left.sequence.is_prefix_of(&right.sequence)
                     || right.sequence.is_prefix_of(&left.sequence))
             {
-                collided_commands.insert(left.command.stable_id().to_owned());
-                collided_commands.insert(right.command.stable_id().to_owned());
+                collided_commands.insert(left.command.as_str().to_owned());
+                collided_commands.insert(right.command.as_str().to_owned());
                 report.disposition(
                     left.entry_index,
                     Some(left.source_command_id),
@@ -1164,7 +1168,7 @@ fn diagnose_cross_command_collisions(
                     VscodeDiagnosticCode::CrossCommandCollision,
                     format!(
                         "binding collides with RSpice command '{}' in an overlapping context",
-                        left.command.stable_id()
+                        left.command.as_str()
                     ),
                 );
             }
@@ -1180,7 +1184,9 @@ fn build_native_artifact(
     let mut commands = BTreeMap::<String, Value>::new();
     let mut contexts = BTreeSet::<String>::new();
     for candidate in candidates.values() {
-        contexts.insert(candidate.command.shortcut_context().label().to_owned());
+        if let Some(context) = CommandRegistry.context(candidate.command) {
+            contexts.insert(context.label().to_owned());
+        }
         let binding = ProfileShortcutBinding::new(
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
@@ -1204,7 +1210,7 @@ fn build_native_artifact(
                 format!("could not serialize adapted shortcut override: {error}"),
             )
         })?;
-        commands.insert(candidate.command.stable_id().to_owned(), value);
+        commands.insert(candidate.command.as_str().to_owned(), value);
     }
     if contexts.is_empty() {
         contexts.insert("all".to_owned());
@@ -1242,7 +1248,7 @@ fn build_native_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
+    use crate::workbench::commands::vocabulary::command_registry;
 
     fn vscode(source: &str, platform: VscodeHostPlatform) -> VscodeShortcutAdaptation {
         adapt_vscode_keybindings(r"C:\private\keybindings.json", source.as_bytes(), platform)
@@ -1282,10 +1288,10 @@ mod tests {
         let mut target_ids = BTreeSet::new();
         for mapping in VSCODE_COMMAND_MAPPINGS {
             assert!(source_ids.insert(mapping.vscode_command_id));
-            assert!(target_ids.insert(mapping.rspice_command.stable_id()));
-            assert!(COMMAND_REGISTRY.contains(&mapping.rspice_command));
+            assert!(target_ids.insert(mapping.rspice_command.as_str()));
+            assert!(command_registry().order().contains(&mapping.rspice_command));
             assert_eq!(
-                Command::from_stable_id(mapping.rspice_command.stable_id()),
+                command_registry().resolve(mapping.rspice_command.as_str()),
                 Some(mapping.rspice_command)
             );
         }

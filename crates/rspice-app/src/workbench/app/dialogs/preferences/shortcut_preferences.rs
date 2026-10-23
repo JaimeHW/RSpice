@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use egui::{Context, Key, Modifiers, Response, Stroke, Ui, WidgetInfo, WidgetType};
 
-use crate::state::command_catalog::{CommandPlatform, ShortcutContext};
+use crate::state::command_catalog::{CommandCatalog, CommandKey, CommandPlatform, ShortcutContext};
 use crate::state::shortcuts::{
     ChordTimeoutPolicy, MAX_SHORTCUT_SEQUENCE_STROKES, ProtectedShortcutPolicy,
     ShortcutBindingSlot, ShortcutPreferences, ShortcutProfileAudit, ShortcutProfileIssue,
@@ -21,7 +21,7 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
 };
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::commands::vocabulary::{COMMAND_REGISTRY, Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
 
 use super::preferences_shell::{
     action_buttons, control_width, preference_row, searchable_row, section_heading, value_column,
@@ -66,7 +66,7 @@ impl ShortcutEditorContext {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ShortcutCaptureTarget {
-    pub(crate) command: crate::workbench::commands::vocabulary::Command,
+    pub(crate) command: CommandKey,
     pub(crate) slot: crate::state::shortcuts::ShortcutBindingSlot,
 }
 
@@ -80,7 +80,7 @@ pub(crate) struct ShortcutEditorState {
     pub(crate) draft: Option<crate::state::shortcuts::ShortcutPreferences>,
     pub(crate) query: String,
     pub(crate) context: ShortcutEditorContext,
-    pub(crate) selected_command: Option<crate::workbench::commands::vocabulary::Command>,
+    pub(crate) selected_command: Option<CommandKey>,
     pub(crate) recording: Option<ShortcutCaptureTarget>,
     pub(crate) capture_strokes: Vec<crate::state::shortcuts::ShortcutStroke>,
     pub(crate) capture_last_input_at: Option<f64>,
@@ -345,7 +345,7 @@ fn table_text_cell(
     response
 }
 
-fn registry_status_tone(audit: &ShortcutProfileAudit, command: Command) -> TableCellTone {
+fn registry_status_tone(audit: &ShortcutProfileAudit, command: CommandKey) -> TableCellTone {
     if audit_issues_for_command(audit, command)
         .any(|issue| issue.severity() == ShortcutProfileIssueSeverity::Error)
     {
@@ -564,7 +564,7 @@ fn toolbar_controls(ui: &mut Ui, editor: &mut ShortcutEditorState, narrow: bool)
             .draft
             .as_mut()
             .expect("editor draft")
-            .reset_command(command.key());
+            .reset_command(command);
         mark_editor_changed(editor);
     }
 }
@@ -573,7 +573,7 @@ fn editor_table(
     ui: &mut Ui,
     editor: &mut ShortcutEditorState,
     audit: &ShortcutProfileAudit,
-    commands: &[Command],
+    commands: &[CommandKey],
 ) {
     let viewport_width = ui.available_width().max(1.0);
     let narrow = viewport_width <= ENGINEERING_TABLE_BREAKPOINT;
@@ -613,12 +613,13 @@ fn editor_table(
                         }
                     });
                     for command in commands.iter().copied() {
-                        ui.push_id(command.stable_id(), |ui| {
-                            semantic_table_row(ui, command.spec().label, |ui| {
+                        let label = command_registry().label(command);
+                        ui.push_id(command.as_str(), |ui| {
+                            semantic_table_row(ui, label, |ui| {
                                 let selected = editor.selected_command == Some(command);
                                 let response = selectable_table_cell(
                                     ui,
-                                    command.spec().label,
+                                    label,
                                     selected,
                                     column_width,
                                     row_height,
@@ -734,7 +735,7 @@ fn selectable_table_cell(
 fn capture_table_cell(
     ui: &mut Ui,
     editor: &mut ShortcutEditorState,
-    command: Command,
+    command: CommandKey,
     slot: ShortcutBindingSlot,
     width: f32,
     height: f32,
@@ -770,7 +771,7 @@ fn capture_table_cell(
 fn capture_button(
     ui: &mut Ui,
     editor: &mut ShortcutEditorState,
-    command: Command,
+    command: CommandKey,
     slot: ShortcutBindingSlot,
     max_width: f32,
 ) -> Response {
@@ -801,13 +802,13 @@ fn capture_button(
         format!(
             "Recording {} binding for {}. Press keys, Enter to finish, plain Backspace to clear, or Escape to cancel.",
             slot.label(),
-            command.spec().label
+            command_registry().label(command)
         )
     } else {
         format!(
             "Record {} binding for {}",
             slot.label(),
-            command.spec().label
+            command_registry().label(command)
         )
     };
     let response = key_capture_control(ui, &label, &accessible, is_recording, empty, max_width);
@@ -870,12 +871,13 @@ fn synchronize_editor_validation(editor: &mut ShortcutEditorState) {
 fn filtered_commands(
     editor: &ShortcutEditorState,
     operating_system: egui::os::OperatingSystem,
-) -> Vec<Command> {
+) -> Vec<CommandKey> {
     let query = editor.query.trim().to_lowercase();
-    COMMAND_REGISTRY
+    CommandRegistry
+        .commands()
         .iter()
         .copied()
-        .filter(|command| !matches!(command, Command::KeyboardShortcuts))
+        .filter(|command| *command != Command::KeyboardShortcuts.key())
         .filter(|command| context_matches(*command, editor.context))
         .filter(|command| {
             if query.is_empty() {
@@ -885,16 +887,16 @@ fn filtered_commands(
                 .draft
                 .as_ref()
                 .expect("editor draft")
-                .resolved_bindings(&CommandRegistry, command.key())
+                .resolved_bindings(&CommandRegistry, *command)
                 .into_iter()
                 .map(|binding| binding.sequence().display_label_for(operating_system))
                 .collect::<Vec<_>>()
                 .join(" ");
             format!(
                 "{} {} {} {}",
-                command.spec().label,
+                command_registry().label(*command),
                 editor_context(*command).label(),
-                command.stable_id(),
+                command.as_str(),
                 bindings
             )
             .to_lowercase()
@@ -903,36 +905,43 @@ fn filtered_commands(
         .collect()
 }
 
-fn editor_context(command: Command) -> ShortcutEditorContext {
-    match command.shortcut_context() {
-        ShortcutContext::EditContext
-        | ShortcutContext::EngineeringCanvas
-        | ShortcutContext::SymbolCanvas
-        | ShortcutContext::DesignWorkspace => ShortcutEditorContext::Schematic,
-        ShortcutContext::SimulationWorkspace => ShortcutEditorContext::Simulation,
-        ShortcutContext::ResultsWorkspace => ShortcutEditorContext::Results,
-        ShortcutContext::VerificationWorkspace | ShortcutContext::ViolationNavigation => {
+/// The editor's context filter a command lists under; a key no command
+/// declares lists with the global ones.
+fn editor_context(command: CommandKey) -> ShortcutEditorContext {
+    match CommandRegistry.context(command) {
+        Some(
+            ShortcutContext::EditContext
+            | ShortcutContext::EngineeringCanvas
+            | ShortcutContext::SymbolCanvas
+            | ShortcutContext::DesignWorkspace,
+        ) => ShortcutEditorContext::Schematic,
+        Some(ShortcutContext::SimulationWorkspace) => ShortcutEditorContext::Simulation,
+        Some(ShortcutContext::ResultsWorkspace) => ShortcutEditorContext::Results,
+        Some(ShortcutContext::VerificationWorkspace | ShortcutContext::ViolationNavigation) => {
             ShortcutEditorContext::Verification
         }
-        ShortcutContext::Global
-        | ShortcutContext::ApplicationChrome
-        | ShortcutContext::RunnableProject => ShortcutEditorContext::Global,
-        ShortcutContext::SourceEditor => ShortcutEditorContext::SourceEditor,
+        Some(
+            ShortcutContext::Global
+            | ShortcutContext::ApplicationChrome
+            | ShortcutContext::RunnableProject,
+        )
+        | None => ShortcutEditorContext::Global,
+        Some(ShortcutContext::SourceEditor) => ShortcutEditorContext::SourceEditor,
     }
 }
 
-fn context_matches(command: Command, filter: ShortcutEditorContext) -> bool {
+fn context_matches(command: CommandKey, filter: ShortcutEditorContext) -> bool {
     filter == ShortcutEditorContext::All || editor_context(command) == filter
 }
 
 fn binding_for_slot(
     profile: &ShortcutPreferences,
-    command: Command,
+    command: CommandKey,
     slot: ShortcutBindingSlot,
     operating_system: egui::os::OperatingSystem,
 ) -> Option<String> {
     let bindings = profile
-        .resolved_bindings(&CommandRegistry, command.key())
+        .resolved_bindings(&CommandRegistry, command)
         .into_iter()
         .filter(|binding| binding.slot() == slot)
         .map(|binding| binding.sequence().display_label_for(operating_system))
@@ -940,9 +949,9 @@ fn binding_for_slot(
     (!bindings.is_empty()).then(|| bindings.join(" / "))
 }
 
-fn platform_summary(profile: &ShortcutPreferences, command: Command) -> String {
+fn platform_summary(profile: &ShortcutPreferences, command: CommandKey) -> String {
     let mut platforms = profile
-        .resolved_bindings(&CommandRegistry, command.key())
+        .resolved_bindings(&CommandRegistry, command)
         .into_iter()
         .flat_map(|binding| binding.platforms().to_vec())
         .collect::<Vec<_>>();
@@ -958,24 +967,24 @@ fn platform_summary(profile: &ShortcutPreferences, command: Command) -> String {
         .join(" / ")
 }
 
-fn editor_status(audit: &ShortcutProfileAudit, command: Command) -> &str {
+fn editor_status(audit: &ShortcutProfileAudit, command: CommandKey) -> &str {
     audit_issues_for_command(audit, command)
         .next()
         .map_or("available", ShortcutProfileIssue::message)
 }
 
-fn editor_status_tone(audit: &ShortcutProfileAudit, command: Command) -> TableCellTone {
+fn editor_status_tone(audit: &ShortcutProfileAudit, command: CommandKey) -> TableCellTone {
     registry_status_tone(audit, command)
 }
 
 fn audit_issues_for_command(
     audit: &ShortcutProfileAudit,
-    command: Command,
+    command: CommandKey,
 ) -> impl Iterator<Item = &ShortcutProfileIssue> {
     audit.issues().iter().filter(move |issue| {
         issue
             .command_id()
-            .is_some_and(|id| id.as_str() == command.stable_id())
+            .is_some_and(|id| id.as_str() == command.as_str())
     })
 }
 
@@ -1021,7 +1030,7 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
                         == ProtectedShortcutPolicy::AllowWithConfirmation
                     && let Some(command) = issue
                         .command_id()
-                        .and_then(|id| Command::from_stable_id(id.as_str()))
+                        .and_then(|id| CommandRegistry.resolve(id.as_str()))
                 {
                     // An acknowledged override is a settled state and says
                     // nothing; only the one still to confirm has a row.
@@ -1036,13 +1045,16 @@ fn conflict_list(ui: &mut Ui, editor: &mut ShortcutEditorState, audit: &Shortcut
                             )
                             .wrap(),
                         );
-                        let label = format!("Confirm protected override for {}", command.spec().label);
+                        let label = format!(
+                            "Confirm protected override for {}",
+                            command_registry().label(command)
+                        );
                         if Button::new(&label).show(ui).clicked() {
                             editor
                                 .draft
                                 .as_mut()
                                 .expect("editor draft")
-                                .acknowledge_protected_override(command.key());
+                                .acknowledge_protected_override(command);
                             mark_editor_changed(editor);
                         }
                     }
@@ -1273,7 +1285,7 @@ fn first_error_target(audit: &ShortcutProfileAudit) -> Option<ShortcutCaptureTar
         .iter()
         .find(|issue| issue.severity() == ShortcutProfileIssueSeverity::Error)
         .and_then(|issue| {
-            let command = Command::from_stable_id(issue.command_id()?.as_str())?;
+            let command = CommandRegistry.resolve(issue.command_id()?.as_str())?;
             Some(ShortcutCaptureTarget {
                 command,
                 slot: issue.slot().unwrap_or(ShortcutBindingSlot::Primary),
@@ -1294,6 +1306,7 @@ fn request_editor_cancel(state: &mut AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
 
     fn input(width: f32, height: f32) -> egui::RawInput {
         egui::RawInput {
@@ -1417,7 +1430,7 @@ mod tests {
     #[test]
     fn typed_context_filters_cover_every_registry_command() {
         for command in COMMAND_REGISTRY.iter().copied() {
-            assert!(ShortcutEditorContext::ALL.contains(&editor_context(command)));
+            assert!(ShortcutEditorContext::ALL.contains(&editor_context(command.key())));
         }
     }
 
@@ -1425,7 +1438,11 @@ mod tests {
     fn capture_platforms_preserve_defaults_and_protected_alternates() {
         let profile = ShortcutPreferences::default();
         assert_eq!(
-            binding_platforms(&profile, Command::Save, ShortcutBindingSlot::Alternate),
+            binding_platforms(
+                &profile,
+                Command::Save.key(),
+                ShortcutBindingSlot::Alternate
+            ),
             vec![
                 CommandPlatform::Browser,
                 CommandPlatform::Tablet,
@@ -1526,11 +1543,14 @@ mod tests {
             ..ShortcutEditorState::default()
         };
         let os = egui::os::OperatingSystem::Windows;
-        assert!(filtered_commands(&editor, os).contains(&Command::GenerateNetlist));
+        assert!(filtered_commands(&editor, os).contains(&Command::GenerateNetlist.key()));
         editor.query = "verification".to_owned();
         assert!(filtered_commands(&editor, os).iter().all(|command| {
             editor_context(*command) == ShortcutEditorContext::Verification
-                || command.spec().label.to_lowercase().contains("verification")
+                || command_registry()
+                    .label(*command)
+                    .to_lowercase()
+                    .contains("verification")
         }));
     }
 
@@ -1540,7 +1560,7 @@ mod tests {
         let mut editor = ShortcutEditorState::default();
         editor.open(&ShortcutPreferences::default());
         editor.recording = Some(ShortcutCaptureTarget {
-            command: Command::Save,
+            command: Command::Save.key(),
             slot: ShortcutBindingSlot::Primary,
         });
         let ctrl = Modifiers {
@@ -1571,7 +1591,7 @@ mod tests {
         assert_eq!(
             binding_for_slot(
                 editor.draft.as_ref().unwrap(),
-                Command::Save,
+                Command::Save.key(),
                 ShortcutBindingSlot::Primary,
                 egui::os::OperatingSystem::Windows,
             )
@@ -1641,7 +1661,7 @@ mod tests {
         assert_eq!(
             binding_for_slot(
                 state.model.preferences.shortcuts(),
-                Command::Save,
+                Command::Save.key(),
                 ShortcutBindingSlot::Primary,
                 egui::os::OperatingSystem::Windows,
             )
@@ -1881,9 +1901,9 @@ mod tests {
         let profile = state.model.preferences.shortcuts().clone();
         state.settings.shortcut_editor.open(&profile);
         state.settings.shortcut_editor.query = "save".to_owned();
-        state.settings.shortcut_editor.selected_command = Some(Command::Save);
+        state.settings.shortcut_editor.selected_command = Some(Command::Save.key());
         state.settings.shortcut_editor.recording = Some(ShortcutCaptureTarget {
-            command: Command::Save,
+            command: Command::Save.key(),
             slot: ShortcutBindingSlot::Primary,
         });
         state

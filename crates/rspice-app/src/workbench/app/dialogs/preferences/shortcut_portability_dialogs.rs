@@ -16,7 +16,7 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, select,
 };
 use crate::workbench::app::dialogs::review_primitives::problem_note;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::shortcuts::artifacts::{
     DecodedShortcutArtifact, DetectedShortcutArtifact, ImportBindingClass,
     PreparedShortcutArtifact, ReadyShortcutArtifactSource, ShortcutArtifactExportOutcome,
@@ -713,8 +713,11 @@ fn render_import_body(
             |ui| {
                 ui.vertical(|ui| {
                     for command_id in &required {
-                        let label = Command::from_stable_id(command_id)
-                            .map_or(command_id.as_str(), |command| command.spec().label);
+                        let label = command_registry()
+                            .resolve(command_id)
+                            .map_or(command_id.as_str(), |command| {
+                                command_registry().label(command)
+                            });
                         let mut confirmed =
                             state.options.protected_confirmations.contains(command_id);
                         if ui
@@ -1302,6 +1305,7 @@ mod tests {
     use crate::state::shortcuts::{
         ProtectedShortcutPolicy, ShortcutBindingSlot, ShortcutSequence, ShortcutStroke,
     };
+    use crate::workbench::commands::vocabulary::Command;
     use crate::workbench::shortcuts::artifacts::{
         apply_shortcut_import, decode_shortcut_artifact_json, detect_shortcut_artifact,
         serialize_shortcut_reference_json,
