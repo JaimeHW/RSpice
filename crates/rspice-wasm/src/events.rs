@@ -746,6 +746,7 @@ C1 out 0 1p
             digital_traces,
             digital_buses: buses,
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),

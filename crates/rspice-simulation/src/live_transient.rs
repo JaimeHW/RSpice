@@ -465,6 +465,7 @@ mod tests {
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),

@@ -337,7 +337,13 @@ use rspice_core::analysis::harmonic_balance::{
 // registers it under, so a project design runs at the deck's selection as
 // the builder compiles a deck's own sources. The census is 5,447, with no
 // slack.
-const MAX_PUBLIC_ITEMS: usize = 5447;
+// The HDL source map adds six: `TransientResult::hdl_sources`' element type
+// `HdlTraceSource`, with the `HdlSourceLine`, `HdlTraceDriver` and
+// `HdlDriverKind` its fields are typed by, and the result document's
+// spelling of them (`HdlSourceDocument` and the types it holds), which the
+// transient payload's `hdlSources` carries to the app and the bindings. The
+// census is 5,453, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5453;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

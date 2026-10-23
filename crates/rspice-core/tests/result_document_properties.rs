@@ -326,6 +326,7 @@ fn transient_payload(shape: &Shape) -> TransientPayload {
         digital_traces: Vec::new(),
         digital_buses: Vec::new(),
         real_traces: Vec::new(),
+        hdl_sources: Vec::new(),
         fft_children: Vec::new(),
         compression: None,
     }

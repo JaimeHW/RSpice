@@ -366,6 +366,7 @@ pub(crate) fn rebuild_compressed_transient(
         digital_traces,
         digital_buses,
         real_traces: real_traces.into_iter().map(rebuild_real_trace).collect(),
+        hdl_sources: Vec::new(),
         post_results: rspice_core::engine::TransientPostResults {
             fft: rebuild_transient_fft_results(fft_state)?,
             fourier: fourier

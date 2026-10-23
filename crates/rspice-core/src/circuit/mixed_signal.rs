@@ -1462,6 +1462,53 @@ impl CircuitData {
             .map(|(_, index, traced, variable)| (index, traced, variable))
     }
 
+    /// Where each HDL signal the run traced was declared and which processes
+    /// drive it, with the name it was traced under: a port under its circuit
+    /// node's name, for each instance whose port it is, and a variable
+    /// `.ESAVE` named under the name it was published as. `traced` says
+    /// whether the result kept a trace or bus of a name; a converter's
+    /// instance is not the deck's HDL and has no entry.
+    pub(crate) fn hdl_trace_sources(
+        &self,
+        node_names: &[String],
+        variables: &[(usize, String, crate::xspice::verilog::HdlVariable)],
+        traced: impl Fn(&str) -> bool,
+    ) -> Vec<(String, crate::xspice::verilog::HdlSignalSource)> {
+        let writers: Vec<_> = self
+            .mixed_signal_hosts
+            .iter()
+            .map(|host| crate::xspice::verilog::SignalWriters::of(host.digital_plan()))
+            .collect();
+        let mut sources = Vec::new();
+        let mut seen = std::collections::BTreeSet::new();
+        for (index, host) in self.mixed_signal_hosts.iter().enumerate() {
+            if crate::xspice::is_auto_bridge_name(host.instance_name()) {
+                continue;
+            }
+            host.traced_port_signals(|node, signal| {
+                let Some(name) = node.checked_sub(1).and_then(|node| node_names.get(node)) else {
+                    return;
+                };
+                if !traced(name) || !seen.insert((name.clone(), index, signal)) {
+                    return;
+                }
+                if let Some(source) = host.signal_source(signal, &writers[index]) {
+                    sources.push((name.clone(), source));
+                }
+            });
+        }
+        for (index, name, variable) in variables {
+            if let (Some(host), Some(writers)) =
+                (self.mixed_signal_hosts.get(*index), writers.get(*index))
+                && traced(name)
+                && let Some(source) = host.signal_source(variable.signal, writers)
+            {
+                sources.push((name.clone(), source));
+            }
+        }
+        sources
+    }
+
     /// The design time precision every digital trace an HDL observes is
     /// dumped at: the finest any instance runs at, and never below a
     /// femtosecond, VCD's finest tick. `None` without an HDL instance.

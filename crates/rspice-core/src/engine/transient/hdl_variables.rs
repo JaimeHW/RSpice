@@ -9,6 +9,9 @@
 //! changed in, through the observer its value change dump uses, and adds
 //! every variable's value at each accepted point; both arrive here by slot
 //! and are recorded as changes, like an event node's.
+//!
+//! At the end of the run, every traced HDL signal, these variables and the
+//! HDL ports the event nets are, is given its declaration and drivers.
 
 #[cfg(feature = "veriloga")]
 use crate::SimulationError;
@@ -19,6 +22,10 @@ use crate::xspice::event_trace::{EventTracePoint, settle_trace_points};
 /// A run's traced HDL variables and the traces they publish to.
 #[derive(Debug, Default)]
 pub(super) struct HdlVariableCapture {
+    /// The variables, each with its host's place and the name it is traced
+    /// under, for the run's source map.
+    #[cfg(feature = "veriloga")]
+    variables: Vec<(usize, String, crate::xspice::verilog::HdlVariable)>,
     /// Per slot: its trace's name.
     slots: Vec<String>,
     /// Per slot: its trace's index in the result, from its first value.
@@ -72,7 +79,63 @@ impl HdlVariableCapture {
         }
         capture.traces = vec![None; capture.slots.len()];
         circuit.trace_hdl_variables(&wiring);
+        capture.variables = variables.to_vec();
         Ok(capture)
+    }
+
+    /// Give every HDL signal the result traced, under each trace or bus name
+    /// it kept, its declaration and drivers.
+    #[cfg(feature = "veriloga")]
+    pub(super) fn record_sources(
+        &self,
+        result: &mut TransientResult,
+        circuit: &crate::circuit::CircuitData,
+    ) {
+        use crate::analysis::transient::{
+            HdlDriverKind, HdlSourceLine, HdlTraceDriver, HdlTraceSource,
+        };
+        use rspice_veriloga::canonical_ir::digital::{DigitalProcessKind, DigitalSourceLine};
+        let line = |line: DigitalSourceLine| HdlSourceLine {
+            file: line.file.to_string(),
+            line: line.line,
+        };
+        let published: std::collections::HashSet<&str> = result
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .chain(
+                result
+                    .real_traces
+                    .iter()
+                    .map(|trace| trace.node_name.as_str()),
+            )
+            .chain(result.digital_buses.iter().map(|bus| bus.name.as_str()))
+            .collect();
+        let sources = circuit.hdl_trace_sources(&result.node_names, &self.variables, |name| {
+            published.contains(name)
+        });
+        result.hdl_sources = sources
+            .into_iter()
+            .map(|(trace, source)| HdlTraceSource {
+                trace,
+                instance: source.instance,
+                identifier: source.identifier,
+                declaration: source.declaration.map(line),
+                drivers: source
+                    .drivers
+                    .into_iter()
+                    .map(|driver| HdlTraceDriver {
+                        scope: driver.scope,
+                        kind: match driver.kind {
+                            DigitalProcessKind::Initial => HdlDriverKind::Initial,
+                            DigitalProcessKind::Always => HdlDriverKind::Always,
+                            DigitalProcessKind::ContinuousAssign => HdlDriverKind::Assign,
+                        },
+                        source: driver.origin.map(line),
+                    })
+                    .collect(),
+            })
+            .collect();
     }
 
     /// The buses over the vector variables' bits.

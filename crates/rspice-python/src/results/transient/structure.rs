@@ -66,6 +66,9 @@ pub(super) fn restore_transient_result(
         digital_traces,
         digital_buses,
         real_traces,
+        // The pickle carries no HDL source map, as it carries no trace's
+        // HDL time precision; the result document is the route for both.
+        hdl_sources: Vec::new(),
         device_op_traces: device_op_traces
             .into_iter()
             .map(
@@ -398,6 +401,7 @@ mod structural_tests {
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),

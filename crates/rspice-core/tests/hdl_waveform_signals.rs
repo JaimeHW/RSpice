@@ -8,7 +8,7 @@
 //! `assign meas = mv`, and `pass` is set to 1 at time zero and only cleared
 //! by a step outside its window, which this design never takes.
 
-use rspice_core::engine::TransientResult;
+use rspice_core::engine::{HdlSourceLine, HdlTraceSource, TransientResult};
 use rspice_core::xspice::DigitalState;
 use rspice_core::{Engine, Netlist};
 
@@ -222,4 +222,81 @@ fn a_resumed_run_continues_the_esave_traces_exactly() {
         level_at(&logic(&resumed, "x1.q[1]"), 150e-9),
         DigitalState::One
     );
+}
+
+/// The entry a run's source map has for `trace`.
+fn source<'a>(result: &'a TransientResult, trace: &str) -> &'a HdlTraceSource {
+    result
+        .hdl_sources
+        .iter()
+        .find(|source| source.trace.eq_ignore_ascii_case(trace))
+        .unwrap_or_else(|| panic!("no source for {trace}: {:#?}", result.hdl_sources))
+}
+
+/// A source line as `file:line`, the file by its name alone.
+fn place(line: &Option<HdlSourceLine>) -> String {
+    let line = line.as_ref().expect("a placed line");
+    let file = std::path::Path::new(&line.file)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(&line.file);
+    format!("{file}:{}", line.line)
+}
+
+/// Each driver as `kind file:line`.
+fn drivers(source: &HdlTraceSource) -> Vec<String> {
+    source
+        .drivers
+        .iter()
+        .map(|driver| format!("{:?} {}", driver.kind, place(&driver.source)))
+        .collect()
+}
+
+/// The run's source map on the C12 testbench. `xtb.ok` is declared on line
+/// 12 of the testbench and driven only by its `initial` block at line 32,
+/// whether it is traced as the port's event net or as a variable;
+/// `xtrim.tr3` is driven by the `initial` block on line 9 of `spi_trim.v`
+/// and by the `always @(posedge csn)` on line 11. A replay of the cached
+/// artifacts gives the same map.
+#[test]
+fn the_source_map_places_declarations_and_drivers() {
+    let esave = ".esave xtb.ok__event_0 xtb.ok xtrim.tr3";
+    let result = run(esave);
+    assert_eq!(result.hdl_sources.len(), 3, "{:#?}", result.hdl_sources);
+    for trace in ["xtb.ok__event_0", "xtb.ok"] {
+        let ok = source(&result, trace);
+        assert!(ok.instance.eq_ignore_ascii_case("xtb"), "{ok:?}");
+        assert_eq!(ok.identifier, "ok");
+        assert_eq!(place(&ok.declaration), "tb_ldo_full.vams:12");
+        assert_eq!(drivers(ok), ["Initial tb_ldo_full.vams:32"]);
+    }
+    let tr3 = source(&result, "xtrim.tr3");
+    assert_eq!(tr3.identifier, "tr3");
+    assert_eq!(place(&tr3.declaration), "spi_trim.v:7");
+    assert_eq!(
+        drivers(tr3),
+        ["Initial spi_trim.v:9", "Always spi_trim.v:11"]
+    );
+
+    // The map is read from the compiled designs, so it is the same whether a
+    // run compiled them or replayed the compile cache's records. With no
+    // room in memory a run compiles them afresh and empties the in-memory
+    // cache, so the run after it reads back the records the first run left.
+    let mut config = rspice_core::SimulationConfig::default();
+    config.resource_limits.max_shared_cache_bytes = 1;
+    let before = rspice_core::veriloga_cache_telemetry();
+    let compiled = Engine::new(config)
+        .run_tran(&c12_full(esave), STOP, STEP)
+        .expect("the compiled run");
+    let after = rspice_core::veriloga_cache_telemetry();
+    assert!(
+        after.compilations_succeeded > before.compilations_succeeded,
+        "{before:?} {after:?}"
+    );
+    assert_eq!(compiled.hdl_sources, result.hdl_sources);
+    let before = after;
+    let replayed = run(esave);
+    let after = rspice_core::veriloga_cache_telemetry();
+    assert!(after.disk_hits > before.disk_hits, "{before:?} {after:?}");
+    assert_eq!(replayed.hdl_sources, result.hdl_sources);
 }

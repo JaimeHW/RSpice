@@ -529,6 +529,65 @@ pub struct RealTrace {
 }
 
 //=============================================================================
+// HDL source map
+//=============================================================================
+
+/// Where an HDL net or variable a run traced was declared, and which
+/// processes drive it: what a waveform's "go to declaration" and "go to
+/// drivers" open.
+///
+/// One entry per HDL signal per name it was traced under. A deck net two
+/// instances' ports join has an entry for each port, and a port drawn on a
+/// converter's endpoint has one for the endpoint and one for the deck net
+/// when both were traced. A variable `.ESAVE` named has one under its own
+/// name (`xtb.pass`), which for a vector is the name of the bus over its
+/// bits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HdlTraceSource {
+    /// The trace or bus the run published the signal under.
+    pub trace: String,
+    /// The deck instance whose design declares it (`xtb`).
+    pub instance: String,
+    /// Its name in that design (`ok`; `u1.q` inside a child instance).
+    pub identifier: String,
+    /// The file and line that declared it, when the compile placed it.
+    pub declaration: Option<HdlSourceLine>,
+    /// Every process whose code, or a task or function it calls, writes the
+    /// signal, in the design's process order. Static: which of them caused a
+    /// particular change is not recorded, so the list is exact for a signal
+    /// with one driver and the set to look in for any other.
+    pub drivers: Vec<HdlTraceDriver>,
+}
+
+/// A file and a one-based line in it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HdlSourceLine {
+    pub file: String,
+    pub line: u32,
+}
+
+/// One process that drives a traced HDL signal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HdlTraceDriver {
+    /// The scope it is written in (`xtb`, or `xtb.u1` inside a child).
+    pub scope: String,
+    pub kind: HdlDriverKind,
+    /// The line it was written on, when the compile placed it.
+    pub source: Option<HdlSourceLine>,
+}
+
+/// What kind of process drives a signal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HdlDriverKind {
+    /// An `initial` block (IEEE 1364-2005 section 9.9.1).
+    Initial,
+    /// An `always` block (section 9.9.2).
+    Always,
+    /// A continuous assignment, a gate or a port connection (section 6.1).
+    Assign,
+}
+
+//=============================================================================
 // Digital buses
 //=============================================================================
 
@@ -1166,13 +1225,16 @@ pub struct TransientResult {
     /// Buses declared over `digital_traces`, in declaration order.
     ///
     /// A bus groups member nodes; it records nothing of its own. The engine
-    /// leaves this empty: the only boundary that could declare one is a
-    /// Verilog-AMS module's vector discrete port, and that is refused today,
-    /// so every bus a consumer sees was declared by a frontend or read out of
-    /// an imported artifact.
+    /// declares one only over the bits of a vector HDL variable `.ESAVE`
+    /// names; every other bus a consumer sees was declared by a frontend or
+    /// read out of an imported artifact.
     pub digital_buses: Vec<DigitalBusDeclaration>,
     /// XSPICE real-valued event node histories captured at accepted transient points.
     pub real_traces: Vec<RealTrace>,
+    /// Where each traced HDL net or variable was declared and which processes
+    /// drive it, by the trace or bus it was published under. Empty without
+    /// an HDL instance.
+    pub hdl_sources: Vec<HdlTraceSource>,
     /// Device operating-point values captured at accepted transient points.
     pub device_op_traces: Vec<TransientDeviceOpTrace>,
     /// Typed device store outputs captured at accepted transient points.
@@ -1843,6 +1905,7 @@ impl TransientResultCompressed {
             digital_traces: self.digital_traces,
             digital_buses: self.digital_buses,
             real_traces: self.real_traces,
+            hdl_sources: self.hdl_sources,
             device_op_traces,
             store_traces,
             fft_results: self.post_results.fft.clone(),
@@ -1877,6 +1940,7 @@ mod tests {
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -2342,6 +2406,7 @@ mod bus_tests {
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),

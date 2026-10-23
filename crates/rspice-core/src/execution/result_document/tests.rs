@@ -127,6 +127,7 @@ fn transient_result() -> TransientResult {
         digital_traces: Vec::new(),
         digital_buses: Vec::new(),
         real_traces: Vec::new(),
+        hdl_sources: Vec::new(),
         device_op_traces: vec![TransientDeviceOpTrace {
             device_name: "M1".to_owned(),
             parameter: "gm".to_owned(),
@@ -2481,6 +2482,93 @@ fn a_version_eighteen_document_that_carries_an_hdl_precision_is_refused() {
 }
 
 #[test]
+fn an_hdl_source_map_round_trips_and_a_version_nineteen_document_carrying_one_is_refused() {
+    let mut document = document_for(AnalysisResultKind::Transient);
+    let ResultPayload::Tran(payload) = &mut document.payload else {
+        panic!("the transient fixture carries a transient payload");
+    };
+    payload.digital_traces = vec![DigitalEventTrace {
+        node_name: "xtb.ok".to_owned(),
+        points: Vec::new(),
+        hdl_time_precision: Some(1e-12),
+    }];
+    let line = |line| HdlSourceLineDocument {
+        file: "tb.vams".to_owned(),
+        line,
+    };
+    payload.hdl_sources = vec![HdlSourceDocument {
+        trace: "xtb.ok".to_owned(),
+        instance: "xtb".to_owned(),
+        identifier: "ok".to_owned(),
+        declaration: Some(line(12)),
+        drivers: vec![
+            HdlDriverDocument {
+                scope: "xtb".to_owned(),
+                kind: HdlDriverKindTag::Initial,
+                source: Some(line(32)),
+            },
+            HdlDriverDocument {
+                scope: "xtb".to_owned(),
+                kind: HdlDriverKindTag::Always,
+                source: None,
+            },
+        ],
+    }];
+    let json = document.to_json().expect("encode");
+    assert!(json.contains(
+        r#""hdlSources":[{"trace":"xtb.ok","instance":"xtb","identifier":"ok","declaration":{"file":"tb.vams","line":12},"drivers":[{"scope":"xtb","kind":"initial","source":{"file":"tb.vams","line":32}},{"scope":"xtb","kind":"always"}]}]"#
+    ));
+    let decoded = AnalysisResultDocument::from_json(&json).expect("version 20 carries it");
+    assert_eq!(decoded, document);
+
+    let version_nineteen = json.replace(
+        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
+        "\"schemaVersion\":19",
+    );
+    let error = AnalysisResultDocument::from_json(&version_nineteen)
+        .expect_err("version 19 predates the source map");
+    let ResultDocumentError::Malformed { location, detail } = error else {
+        panic!("a version-19 document carrying the map is malformed, not unversioned");
+    };
+    assert_eq!(location, "HDL sources");
+    assert!(detail.contains("version 20"), "{detail}");
+
+    // Without the map, a version-19 document is read as it always was.
+    let ResultPayload::Tran(payload) = &mut document.payload else {
+        panic!("the transient fixture carries a transient payload");
+    };
+    payload.hdl_sources.clear();
+    let json = document.to_json().expect("encode");
+    assert!(!json.contains("hdlSources"));
+    AnalysisResultDocument::from_json(&json.replace(
+        &format!("\"schemaVersion\":{ANALYSIS_RESULT_DOCUMENT_VERSION}"),
+        "\"schemaVersion\":19",
+    ))
+    .expect("a version-19 document without the map decodes");
+}
+
+#[test]
+fn an_hdl_source_naming_no_trace_of_the_result_is_refused() {
+    let mut document = document_for(AnalysisResultKind::Transient);
+    let ResultPayload::Tran(payload) = &mut document.payload else {
+        panic!("the transient fixture carries a transient payload");
+    };
+    payload.hdl_sources = vec![HdlSourceDocument {
+        trace: "xtb.gone".to_owned(),
+        instance: "xtb".to_owned(),
+        identifier: "gone".to_owned(),
+        declaration: None,
+        drivers: Vec::new(),
+    }];
+    let error = document.validate().expect_err("no trace is named so");
+    let ResultDocumentError::Malformed { location, detail } = error else {
+        panic!("an unanchored entry is malformed");
+    };
+    assert_eq!(location, "HDL source trace");
+    assert!(detail.contains("'xtb.gone'"), "{detail}");
+}
+
+#[test]
 fn an_empty_bus_table_leaves_no_trace_in_the_encoding() {
     // The field is skipped when empty, which is what lets a version-2 document
     // that declares no bus stay byte-comparable with the version-1 document it
@@ -2591,6 +2679,7 @@ fn a_series_whose_length_disagrees_with_the_point_count_is_rejected() {
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             fft_children: Vec::new(),
             compression: None,
         }),

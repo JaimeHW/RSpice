@@ -1006,6 +1006,7 @@ impl AnalysisResultDocument {
                 &result.digital_traces,
             )?,
             real_traces,
+            hdl_sources: result.hdl_sources.iter().map(Into::into).collect(),
             fft_children,
             compression: compression.map(CompressionReportDocument::from),
         };
@@ -1210,6 +1211,7 @@ impl AnalysisResultDocument {
                 &compressed.digital_traces,
             )?,
             real_traces,
+            hdl_sources: compressed.hdl_sources.iter().map(Into::into).collect(),
             fft_children,
             compression: Some(CompressionReportDocument::from(
                 &compressed.compression_report,
@@ -4599,6 +4601,7 @@ mod compressed_transient_tests {
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             post_results: TransientPostResults::default(),
             identity: TransientResultIdentity {
                 analysis: Some(

@@ -4745,6 +4745,7 @@ impl Engine {
                 digital_traces: Vec::new(),
                 digital_buses: Vec::new(),
                 real_traces: Vec::new(),
+                hdl_sources: Vec::new(),
                 device_op_traces: Vec::new(),
                 store_traces: Vec::new(),
                 fft_results: Vec::new(),
@@ -5962,6 +5963,7 @@ impl Engine {
             digital_traces: Vec::new(),
             digital_buses,
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces,
             fft_results: Vec::new(),
@@ -12839,6 +12841,7 @@ impl Engine {
         {
             circuit.mark_hdl_observed_traces(&mut result.digital_traces, &result.node_names);
             hdl_variables.mark_precision(&mut result, circuit.hdl_trace_precision());
+            hdl_variables.record_sources(&mut result, &circuit);
         }
         result.fft_results = fft::evaluate(self, netlist, &result, requested_stop, abort)?;
         retained_result_values = Self::transient_result_value_count(&result);
@@ -13317,6 +13320,7 @@ fn compress_transient_result(
             digital_traces: result.digital_traces.clone(),
             digital_buses: result.digital_buses.clone(),
             real_traces: result.real_traces.clone(),
+            hdl_sources: result.hdl_sources.clone(),
             post_results,
             identity,
             compression_ratio: if stored_points == 0 {
@@ -16460,6 +16464,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: vec![crate::engine::TransientDeviceOpTrace {
                 device_name: "M1".to_string(),
                 parameter: "gm".to_string(),
@@ -16625,6 +16630,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: vec![crate::engine::TransientDeviceOpTrace {
                 device_name: "MSTEP".to_string(),
                 parameter: "gm".to_string(),
@@ -16766,6 +16772,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -16801,6 +16808,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -16840,6 +16848,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -16873,6 +16882,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -16924,6 +16934,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -17064,6 +17075,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),
@@ -17114,6 +17126,7 @@ D1 D 0 DMOD
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             device_op_traces: Vec::new(),
             store_traces: Vec::new(),
             fft_results: Vec::new(),

@@ -18,6 +18,7 @@ fn fixture(time: f64, order: u32, coefficient: f64) -> TransientResult {
         digital_traces: vec![],
         digital_buses: vec![],
         real_traces: vec![],
+        hdl_sources: vec![],
         device_op_traces: vec![],
         store_traces: vec![],
         fft_results: vec![],

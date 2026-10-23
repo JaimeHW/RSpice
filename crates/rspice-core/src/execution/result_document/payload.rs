@@ -28,7 +28,8 @@ use crate::engine::waveform::{
     TransientCompressionSignal, TransientCompressionSignalKind,
 };
 use crate::engine::{
-    DigitalBusDeclaration, DigitalBusSource, HbEnvelopeStateGuarantee, validate_digital_bus_table,
+    DigitalBusDeclaration, DigitalBusSource, HbEnvelopeStateGuarantee, HdlDriverKind,
+    HdlSourceLine, HdlTraceDriver, HdlTraceSource, validate_digital_bus_table,
 };
 use crate::execution::capability::AnalysisResultKind;
 use crate::execution::plan::AnalysisInstanceId;
@@ -423,6 +424,13 @@ pub struct TransientPayload {
     /// reaches a consumer through this document, through the rawfile event
     /// plots, or through a VCD dump, and through nothing else.
     pub real_traces: Vec<RealEventTrace>,
+    /// Where each traced HDL net or variable was declared and which processes
+    /// drive it, by the trace or bus it was published under.
+    ///
+    /// Absent from the encoding when empty, so the document of a run with no
+    /// HDL is spelled as before. Requires result document version 20.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hdl_sources: Vec<HdlSourceDocument>,
     /// Identity of each `.FFT` post-process this transient produced. The
     /// spectra themselves are separate documents that name this analysis as
     /// their parent.
@@ -456,12 +464,19 @@ impl TransientPayload {
             .iter()
             .map(|bus| bus.members.len())
             .fold(0, usize::saturating_add);
+        // The same holds for a source map entry and each of its drivers.
+        let sources = self
+            .hdl_sources
+            .iter()
+            .map(|source| source.drivers.len().saturating_add(1))
+            .fold(0, usize::saturating_add);
         self.step_sizes
             .len()
             .saturating_add(stores)
             .saturating_add(digital)
             .saturating_add(real)
             .saturating_add(buses)
+            .saturating_add(sources)
             .saturating_add(crate::transient_observation::current_impulse_value_count(
                 self.current_impulses.as_deref(),
             ))
@@ -517,6 +532,7 @@ impl TransientPayload {
             }
         }
         self.validate_digital_buses()?;
+        self.validate_hdl_sources()?;
         if let Some(report) = &self.compression {
             report.validate()?;
         }
@@ -551,6 +567,35 @@ impl TransientPayload {
             location: "transient digital buses",
             detail: error.to_string(),
         })
+    }
+
+    /// Judge the HDL source map: every entry is well formed and names a
+    /// trace or bus of this payload, as a bus's members must.
+    fn validate_hdl_sources(&self) -> Result<(), ResultDocumentError> {
+        if self.hdl_sources.is_empty() {
+            return Ok(());
+        }
+        let published: std::collections::HashSet<&str> = self
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .chain(
+                self.real_traces
+                    .iter()
+                    .map(|trace| trace.node_name.as_str()),
+            )
+            .chain(self.digital_buses.iter().map(|bus| bus.name.as_str()))
+            .collect();
+        for source in &self.hdl_sources {
+            source.validate()?;
+            if !published.contains(source.trace.as_str()) {
+                return Err(ResultDocumentError::Malformed {
+                    location: "HDL source trace",
+                    detail: format!("'{}' names no trace or bus of this result", source.trace),
+                });
+            }
+        }
+        Ok(())
     }
 }
 
@@ -770,6 +815,141 @@ impl From<&DigitalEventBus> for DigitalBusDeclaration {
             lsb: bus.lsb,
             members: bus.members.clone(),
             source: bus.source.into(),
+        }
+    }
+}
+
+/// One traced HDL net or variable: the trace or bus it was published under,
+/// where it was declared, and the processes that drive it. The spelling of
+/// [`HdlTraceSource`], whose rules it carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HdlSourceDocument {
+    pub trace: String,
+    pub instance: String,
+    pub identifier: String,
+    /// Absent when the compile did not place the declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declaration: Option<HdlSourceLineDocument>,
+    pub drivers: Vec<HdlDriverDocument>,
+}
+
+/// A file and a one-based line in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HdlSourceLineDocument {
+    pub file: String,
+    pub line: u32,
+}
+
+/// One process that drives a traced HDL signal.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HdlDriverDocument {
+    pub scope: String,
+    pub kind: HdlDriverKindTag,
+    /// Absent when the compile did not place the process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<HdlSourceLineDocument>,
+}
+
+/// Wire spelling of [`HdlDriverKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HdlDriverKindTag {
+    Initial,
+    Always,
+    Assign,
+}
+
+impl HdlSourceDocument {
+    fn validate(&self) -> Result<(), ResultDocumentError> {
+        super::require_name("HDL source trace", &self.trace)?;
+        super::require_name("HDL source instance", &self.instance)?;
+        super::require_name("HDL source identifier", &self.identifier)?;
+        let lines = self.declaration.iter().chain(
+            self.drivers
+                .iter()
+                .filter_map(|driver| driver.source.as_ref()),
+        );
+        for line in lines {
+            super::require_name("HDL source file", &line.file)?;
+            if line.line == 0 {
+                return Err(ResultDocumentError::Malformed {
+                    location: "HDL source line",
+                    detail: format!("{}: line numbers start at 1", line.file),
+                });
+            }
+        }
+        for driver in &self.drivers {
+            super::require_name("HDL driver scope", &driver.scope)?;
+        }
+        Ok(())
+    }
+}
+
+impl From<&HdlSourceLine> for HdlSourceLineDocument {
+    fn from(line: &HdlSourceLine) -> Self {
+        Self {
+            file: line.file.clone(),
+            line: line.line,
+        }
+    }
+}
+
+impl From<&HdlSourceLineDocument> for HdlSourceLine {
+    fn from(line: &HdlSourceLineDocument) -> Self {
+        Self {
+            file: line.file.clone(),
+            line: line.line,
+        }
+    }
+}
+
+impl From<&HdlTraceSource> for HdlSourceDocument {
+    fn from(source: &HdlTraceSource) -> Self {
+        Self {
+            trace: source.trace.clone(),
+            instance: source.instance.clone(),
+            identifier: source.identifier.clone(),
+            declaration: source.declaration.as_ref().map(Into::into),
+            drivers: source
+                .drivers
+                .iter()
+                .map(|driver| HdlDriverDocument {
+                    scope: driver.scope.clone(),
+                    kind: match driver.kind {
+                        HdlDriverKind::Initial => HdlDriverKindTag::Initial,
+                        HdlDriverKind::Always => HdlDriverKindTag::Always,
+                        HdlDriverKind::Assign => HdlDriverKindTag::Assign,
+                    },
+                    source: driver.source.as_ref().map(Into::into),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<&HdlSourceDocument> for HdlTraceSource {
+    fn from(source: &HdlSourceDocument) -> Self {
+        Self {
+            trace: source.trace.clone(),
+            instance: source.instance.clone(),
+            identifier: source.identifier.clone(),
+            declaration: source.declaration.as_ref().map(Into::into),
+            drivers: source
+                .drivers
+                .iter()
+                .map(|driver| HdlTraceDriver {
+                    scope: driver.scope.clone(),
+                    kind: match driver.kind {
+                        HdlDriverKindTag::Initial => HdlDriverKind::Initial,
+                        HdlDriverKindTag::Always => HdlDriverKind::Always,
+                        HdlDriverKindTag::Assign => HdlDriverKind::Assign,
+                    },
+                    source: driver.source.as_ref().map(Into::into),
+                })
+                .collect(),
         }
     }
 }

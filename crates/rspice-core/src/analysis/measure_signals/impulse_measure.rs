@@ -406,6 +406,7 @@ mod tests {
             digital_traces: vec![],
             digital_buses: vec![],
             real_traces: vec![],
+            hdl_sources: vec![],
             device_op_traces: vec![TransientDeviceOpTrace {
                 device_name: "Q1".into(),
                 parameter: "ic".into(),

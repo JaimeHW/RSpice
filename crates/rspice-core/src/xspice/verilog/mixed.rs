@@ -155,7 +155,7 @@ use shared::MixedDigital;
 pub(crate) use shared::checkpoint as coordinator_checkpoint;
 pub(crate) use shared::{CoordinatorEquilibriumImage, MixedDigitalCoordinator, SharedTrialCursor};
 use standalone::StandaloneExecution;
-pub(crate) use traced::HdlVariable;
+pub(crate) use traced::{HdlSignalSource, HdlVariable, SignalWriters};
 
 use std::fmt;
 use std::sync::Arc;

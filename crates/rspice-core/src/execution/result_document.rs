@@ -210,7 +210,8 @@ pub use payload::{
     FftCoefficientFormatTag, FftCompatibilityModeTag, FftHarmonicDocument, FftMetricsDocument,
     FftPayload, FftSourceDocument, FftWindowTag, FloquetCertificateDocument,
     FloquetEvidenceDocument, FloquetOrbitTag, FourierPayload, HarmonicBalancePayload,
-    HbContinuationLimitationTag, HbReactiveKindTag, HbReactiveSpectrumDocument, MonteCarloPayload,
+    HbContinuationLimitationTag, HbReactiveKindTag, HbReactiveSpectrumDocument, HdlDriverDocument,
+    HdlDriverKindTag, HdlSourceDocument, HdlSourceLineDocument, MonteCarloPayload,
     MonteCarloVariableStatistics, NamedObservable, NamedObservableSeries, NoiseContributionSeries,
     NoiseMechanismTag, NoisePayload, NoiseSourceIdentityDocument, NyquistSample,
     OperatingPointPayload, OscillatorPhaseNoiseDocument, PNoiseBandwidth, PNoiseContribution,
@@ -237,7 +238,7 @@ use crate::execution::topology::TopologyFingerprint;
 pub const ANALYSIS_RESULT_DOCUMENT_SCHEMA: &str = "rspice-analysis-result";
 
 /// Schema version this build produces.
-pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 19;
+pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 20;
 
 /// Version 9 adds the sampling request and resolved crossing geometry to PNoise.
 ///
@@ -300,14 +301,18 @@ pub const ANALYSIS_RESULT_DOCUMENT_VERSION: u32 = 19;
 /// precision of the HDL that reads or drives the net. Earlier documents carry
 /// none, and a dump of their nets falls back to the femtosecond rule.
 ///
+/// Version 20 adds the transient `hdlSources`: where each traced HDL net or
+/// variable was declared and which processes drive it. Earlier documents
+/// carry none, and a reader has nowhere to go from their HDL traces.
+///
 /// A new result *family* costs no version. No document of an existing family
 /// changes shape, and no reader of an earlier version has a document of the
 /// new family to misread: it refuses the unknown `resultKind` tag outright.
 /// Bumping for one would instead make every family's freshly produced
 /// document undecodable by every current reader, which is the compatibility
 /// break this constant exists to avoid.
-const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 19] = [
-    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+const DECODABLE_ANALYSIS_RESULT_DOCUMENT_VERSIONS: [u32; 20] = [
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
 ];
 
 /// First version whose transient payload may declare a digital bus.
@@ -766,6 +771,15 @@ impl AnalysisResultDocument {
             return Err(ResultDocumentError::Malformed {
                 location: "digital trace HDL time precision",
                 detail: "an HDL time precision requires document version 19".into(),
+            });
+        }
+        if self.schema_version < 20
+            && let ResultPayload::Tran(payload) = &self.payload
+            && !payload.hdl_sources.is_empty()
+        {
+            return Err(ResultDocumentError::Malformed {
+                location: "HDL sources",
+                detail: "an HDL source map requires document version 20".into(),
             });
         }
         if self.payload.result_kind() != self.result_kind {

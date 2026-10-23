@@ -41,7 +41,7 @@
 //! `crate::execution` maps it into the shared result document. The mapping is
 //! total and tested; it is not a second decision about what a volt is.
 
-use super::{DigitalBusDeclaration, DigitalTrace, RealTrace, TransientPostResults};
+use super::{DigitalBusDeclaration, DigitalTrace, HdlTraceSource, RealTrace, TransientPostResults};
 use crate::Value;
 
 //=============================================================================
@@ -834,6 +834,9 @@ pub struct TransientResultCompressed {
     /// XSPICE real-valued event traces, carried exactly, for the same reason.
     pub real_traces: Vec<RealTrace>,
 
+    /// The traced HDL signals' declarations and drivers, carried exactly.
+    pub hdl_sources: Vec<HdlTraceSource>,
+
     /// Typed `.FFT`, `.FOUR`, and `.MEASURE` products computed on the exact
     /// accepted trajectory, before any decimation.
     pub post_results: TransientPostResults,
@@ -1559,6 +1562,7 @@ mod tests {
             digital_traces: Vec::new(),
             digital_buses: Vec::new(),
             real_traces: Vec::new(),
+            hdl_sources: Vec::new(),
             post_results: TransientPostResults::default(),
             identity: TransientResultIdentity::default(),
             compression_ratio: 1.0,

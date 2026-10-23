@@ -23,6 +23,7 @@ fn fixture() -> TransientResult {
         digital_traces: vec![],
         digital_buses: vec![],
         real_traces: vec![],
+        hdl_sources: vec![],
         store_traces: vec![],
         fft_results: vec![],
         voltage_impulses: None,

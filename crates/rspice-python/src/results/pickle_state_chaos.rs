@@ -458,6 +458,7 @@ fn valid_transient_result() -> TransientResult {
                 value: 0.25,
             }],
         }],
+        hdl_sources: Vec::new(),
         device_op_traces: Vec::new(),
         store_traces: Vec::new(),
         fft_results: Vec::new(),

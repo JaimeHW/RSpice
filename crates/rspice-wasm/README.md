@@ -65,7 +65,7 @@ consumes the shared document directly.
 
 ## Result contract
 
-Documents are `rspice-analysis-result` version 19, defined and validated by
+Documents are `rspice-analysis-result` version 20, defined and validated by
 `rspice-core`; `rspice_core::execution::result_document` documents their
 encoding, missingness rules and payloads, and this crate does not restate them.
 A direct call is planned as a one-analysis deck, so its result carries the same

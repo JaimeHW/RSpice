@@ -95,8 +95,8 @@ pub(crate) use mixed::checkpoint as participant_checkpoint;
 pub(crate) use mixed::coordinator_checkpoint;
 pub(crate) use mixed::{
     BoundaryBitSource, BoundaryBus, CandidateLedger, CoordinatorEquilibriumImage, DriveEdgeReport,
-    HdlVariable, HostEquilibriumImage, MixedDigitalCoordinator, PreparedMixedAcceptance,
-    SharedTrialCursor,
+    HdlSignalSource, HdlVariable, HostEquilibriumImage, MixedDigitalCoordinator,
+    PreparedMixedAcceptance, SharedTrialCursor, SignalWriters,
 };
 pub use mixed::{MixedSignalCheckpoint, MixedSignalError, MixedSignalHost};
 
