@@ -750,7 +750,14 @@ fn compute_carrier_envelopes_with_context(
         let window_start = center - half_window;
         let window_stop = window_start + projection_window;
         // The same (start, stop] event ownership as Fourier: a boundary
-        // impulse belongs to exactly one adjoining observation window.
+        // impulse belongs to exactly one adjoining observation window. The
+        // bounds are sums that round, while an impulse lands on the exact
+        // instant of its event, so an impulse within rounding of a bound is
+        // on that bound: both bounds move by the same tolerance and the
+        // window still holds exactly one period's events. Compared exactly,
+        // a 1 MHz carrier's window centered at 2 us ends at
+        // 1.5e-6 + 1e-6 = 2.4999999999999998e-6 and loses an edge at 2.5u.
+        let boundary_tolerance = center_tolerance;
         let current_range = current.map(|trace| {
             let partition = |time| {
                 let mut first = 0;
@@ -765,7 +772,10 @@ fn compute_carrier_envelopes_with_context(
                 }
                 first
             };
-            (partition(window_start), partition(window_stop))
+            (
+                partition(window_start + boundary_tolerance),
+                partition(window_stop + boundary_tolerance),
+            )
         });
         let mut normal = vec![vec![0.0; basis.len()]; basis.len()];
         let mut rhs = vec![0.0; basis.len()];
