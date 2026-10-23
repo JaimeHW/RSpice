@@ -16764,46 +16764,33 @@ mod tests {
         );
     }
 
-    #[test]
-    fn netlist_identity_parser_requires_lowercase_blake3_hex() {
+    /// Swapping the sample's `valid` hash for a short, uppercase or non-hex one
+    /// must fail parsing as a malformed `kind` identity.
+    fn assert_identity_requires_lowercase_blake3_hex(valid: &str, kind: &str) {
         let text = sample().to_text();
-        let valid = "fedcba9876543210".repeat(4);
         for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
-            let err = TransientCheckpoint::from_text(&text.replacen(&valid, &invalid, 1))
-                .expect_err("malformed netlist identity must fail during parsing");
+            let err = TransientCheckpoint::from_text(&text.replacen(valid, &invalid, 1))
+                .expect_err("malformed identity must fail during parsing");
             assert!(
-                err.contains("malformed netlist identity"),
+                err.contains(&format!("malformed {kind} identity")),
                 "unexpected error for identity {invalid}: {err}"
             );
         }
+    }
+
+    #[test]
+    fn netlist_identity_parser_requires_lowercase_blake3_hex() {
+        assert_identity_requires_lowercase_blake3_hex(&"fedcba9876543210".repeat(4), "netlist");
     }
 
     #[test]
     fn restart_identity_parser_requires_lowercase_blake3_hex() {
-        let text = sample().to_text();
-        let valid = "1234567890abcdef".repeat(4);
-        for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
-            let err = TransientCheckpoint::from_text(&text.replacen(&valid, &invalid, 1))
-                .expect_err("malformed restart identity must fail during parsing");
-            assert!(
-                err.contains("malformed restart identity"),
-                "unexpected error for identity {invalid}: {err}"
-            );
-        }
+        assert_identity_requires_lowercase_blake3_hex(&"1234567890abcdef".repeat(4), "restart");
     }
 
     #[test]
     fn simulation_identity_parser_requires_lowercase_blake3_hex() {
-        let text = sample().to_text();
-        let valid = "abcdef0123456789".repeat(4);
-        for invalid in ["abc".to_string(), "A".repeat(64), "g".repeat(64)] {
-            let err = TransientCheckpoint::from_text(&text.replacen(&valid, &invalid, 1))
-                .expect_err("malformed simulation identity must fail during parsing");
-            assert!(
-                err.contains("malformed simulation identity"),
-                "unexpected error for identity {invalid}: {err}"
-            );
-        }
+        assert_identity_requires_lowercase_blake3_hex(&"abcdef0123456789".repeat(4), "simulation");
     }
 
     #[test]
