@@ -507,10 +507,10 @@ pub struct SemanticAnalyzer {
     /// iteration and are therefore illegal beneath such a guard (VAMS-2023
     /// section 4.5.15).
     dynamic_analog_operator_guard_depth: usize,
-    /// Lowering a declaration's constant expression in a module with no
-    /// analog behavior, where IEEE 1364-2005 section 17.11's constant system
-    /// functions are legal; analog code keeps refusing them.
-    lowering_digital_constant: bool,
+    /// Lowering a declaration's constant expression, where IEEE 1364-2005
+    /// section 17.11's constant system functions are legal; analog behavior
+    /// keeps refusing them.
+    lowering_declaration_constant: bool,
     current_default_transition: f64,
     current_time_scale: crate::time_scale::ModuleTimeScale,
     /// Array variables of the module under analysis (name -> layout)
@@ -611,7 +611,7 @@ impl SemanticAnalyzer {
             inline_stack: Vec::new(),
             runtime_loop_depth: 0,
             dynamic_analog_operator_guard_depth: 0,
-            lowering_digital_constant: false,
+            lowering_declaration_constant: false,
             current_default_transition: Self::SIMULATOR_DEFAULT_TRANSITION,
             current_time_scale: crate::time_scale::ModuleTimeScale::default(),
             arrays: HashMap::new(),
@@ -1980,6 +1980,12 @@ impl SemanticAnalyzer {
                             {
                                 Ok(expression)
                             } else {
+                                // The analog default is computed from the
+                                // parameters it depends on; the constant
+                                // system functions it may call are legal in
+                                // a declaration (IEEE 1364-2005 17.11).
+                                let expression =
+                                    self.normalize_integer_expression_in(&expression, true)?;
                                 self.coerce_assignment_expression(expression, value_type)
                                     .map(|(expression, _)| expression)
                             }
@@ -2278,15 +2284,14 @@ impl SemanticAnalyzer {
                 is_event_controlled: false,
             });
 
-            // A digital module's localparam is a constant expression, where
-            // the constant system functions are legal (IEEE 1364-2005
-            // section 17.11); the digital elaboration folds it.
-            self.lowering_digital_constant = module.analog_block.is_none()
-                && module.analog_initial.is_none()
-                && module.analog_final.is_none();
+            // A localparam is a constant expression wherever it is declared,
+            // where the constant system functions are legal (IEEE 1364-2005
+            // section 17.11); the digital elaboration folds it, and the
+            // prologue computes it for analog code.
+            self.lowering_declaration_constant = true;
             let expression =
                 self.lower_expression_with_side_effects(default, &mut analyzed, &mut statements);
-            self.lowering_digital_constant = false;
+            self.lowering_declaration_constant = false;
             let (expression, expr_type) =
                 self.coerce_assignment_expression(expression?, value_type)?;
             // Prologue statements run before the analog block and have no
@@ -7334,11 +7339,23 @@ impl SemanticAnalyzer {
     /// Parameter/default coercion does not perform executable lowering, but
     /// still must retain arithmetic types in every nested scalar expression.
     fn normalize_integer_expression(&self, expr: &Expression) -> CompileResult<Expression> {
+        self.normalize_integer_expression_in(expr, false)
+    }
+
+    /// [`Self::normalize_integer_expression`], where `constant` says `expr`
+    /// is a declaration's constant expression that analog code computes: its
+    /// constant system functions become what [`Self::analog_clog2`] and
+    /// [`Self::analog_math_call`] make of them.
+    fn normalize_integer_expression_in(
+        &self,
+        expr: &Expression,
+        constant: bool,
+    ) -> CompileResult<Expression> {
         if let Expression::ArrayLiteral(array) = expr {
             let mut array = array.clone();
             for element in &mut array.elements {
                 if let ArrayLiteralElement::Value(value) = element {
-                    *value = self.normalize_integer_expression(value)?;
+                    *value = self.normalize_integer_expression_in(value, constant)?;
                 }
             }
             return Ok(Expression::ArrayLiteral(array));
@@ -7350,11 +7367,13 @@ impl SemanticAnalyzer {
                 return Ok((resolved, ValueType::Real));
             }
             if let Expression::Conditional(c) = expression {
-                let expression = c.try_map(|operand| self.normalize_integer_expression(operand))?;
+                let expression =
+                    c.try_map(|operand| self.normalize_integer_expression_in(operand, constant))?;
                 let value_type = self.infer_type(&expression)?;
                 return Ok((expression, value_type));
             }
             let mut expression = expression.clone();
+            let mut replacement = None;
             match &mut expression {
                 Expression::Call(c) => {
                     self.validate_null_arguments(c)?;
@@ -7362,22 +7381,28 @@ impl SemanticAnalyzer {
                         // A permitted omission carries no scalar value to
                         // coerce. Preserve it for the owning operator.
                         if !matches!(arg, Expression::NullArgument(_)) {
-                            *arg = self.normalize_integer_expression(arg)?;
+                            *arg = self.normalize_integer_expression_in(arg, constant)?;
                         }
                     }
                 }
                 Expression::SystemFunction(c) => {
                     for arg in &mut c.args {
-                        *arg = self.normalize_integer_expression(arg)?;
+                        *arg = self.normalize_integer_expression_in(arg, constant)?;
+                    }
+                    if constant && c.name == "$clog2" {
+                        replacement = Some(self.analog_clog2(&c.args, c.span)?);
+                    } else if constant {
+                        replacement = Self::analog_math_call(c);
                     }
                 }
                 Expression::ArrayAccess(a) => {
                     for child in a.children_mut() {
-                        *child = self.normalize_integer_expression(child)?;
+                        *child = self.normalize_integer_expression_in(child, constant)?;
                     }
                 }
                 _ => {}
             }
+            let expression = replacement.unwrap_or(expression);
             let value_type = self.infer_type(&expression)?;
             Ok((expression, value_type))
         })
@@ -7563,6 +7588,104 @@ impl SemanticAnalyzer {
         Ok(ConditionalExpr::from_arms(arms.into_iter(), tail?))
     }
 
+    /// `$clog2(n)` (IEEE 1364-2005 section 17.11.1) in a declaration's
+    /// constant expression, in terms analog code evaluates, `args` already
+    /// lowered: the least `k` with `2**k >= n`, as its value when `n` is a
+    /// literal, else as a chain of comparisons on the 32 bits an analog
+    /// integer holds, read as unsigned as the section reads its operand.
+    ///
+    /// A `parameter` or `localparam` is a constant expression wherever it is
+    /// declared, and one that depends on another parameter is evaluated again
+    /// when that parameter changes, by the analog prologue as well as by the
+    /// digital elaboration; analog behavior keeps refusing `$clog2` by name.
+    fn analog_clog2(&self, args: &[Expression], span: Span) -> CompileResult<Expression> {
+        let integral = || {
+            CompileError::Semantic(SemanticError::new(
+                SemanticErrorKind::InvalidExpression("`$clog2` takes one integral argument".into()),
+                span,
+            ))
+        };
+        let [operand] = args else {
+            return Err(integral());
+        };
+        let integer = |value: u64| {
+            Expression::Number(NumberLit {
+                value: value as f64,
+                raw: value.to_string().into(),
+                span,
+            })
+        };
+        use crate::canonical_ir::digital_value::{FourStateValue, clog2};
+        let literal = match operand {
+            Expression::Digital(DigitalExpr::FourState(literal)) => {
+                Some(FourStateValue::from_literal(&literal.value))
+            }
+            Expression::Number(number) => Self::integer_literal_value(number)
+                .and_then(|value| u64::try_from(value).ok())
+                .map(|value| FourStateValue::from_u64(64, value)),
+            _ => None,
+        };
+        if let Some(literal) = literal {
+            return clog2(&literal).to_u64().map(integer).ok_or_else(|| {
+                CompileError::Semantic(SemanticError::new(
+                    SemanticErrorKind::InvalidExpression(
+                        "`$clog2` of a value with unknown bits has no analog value".into(),
+                    ),
+                    span,
+                ))
+            });
+        }
+        if self.infer_type(operand)? != ValueType::Integer {
+            return Err(integral());
+        }
+        let compare = |op, bound: Expression| {
+            Expression::Binary(BinaryExpr {
+                op,
+                left: Box::new(operand.clone()),
+                right: Box::new(bound),
+                span,
+            })
+        };
+        // -2**31 reads as 2**31 and every other negative value as more.
+        let most_negative = Expression::Unary(UnaryExpr {
+            op: UnaryOp::Neg,
+            operand: Box::new(integer(i32::MAX as u64)),
+            span,
+        });
+        let arms = [
+            (compare(BinaryOp::Lt, most_negative), integer(31), span),
+            (compare(BinaryOp::Lt, integer(0)), integer(32), span),
+        ]
+        .into_iter()
+        .chain((0..31).rev().map(|bit| {
+            (
+                compare(BinaryOp::Gt, integer(1 << bit)),
+                integer(bit + 1),
+                span,
+            )
+        }))
+        .collect::<Vec<_>>();
+        Ok(ConditionalExpr::from_arms(arms.into_iter(), integer(0)))
+    }
+
+    /// A math function of IEEE 1364-2005 section 17.11.2 in a declaration's
+    /// constant expression, as the analog math function of the same meaning.
+    fn analog_math_call(function: &SystemFunction) -> Option<Expression> {
+        let name = match function.name.as_str() {
+            "$log10" => "log10",
+            name @ ("$ln" | "$exp" | "$sqrt" | "$pow" | "$floor" | "$ceil" | "$sin" | "$cos"
+            | "$tan" | "$asin" | "$acos" | "$atan" | "$atan2" | "$hypot" | "$sinh"
+            | "$cosh" | "$tanh" | "$asinh" | "$acosh" | "$atanh") => &name[1..],
+            _ => return None,
+        };
+        Some(Expression::Call(CallExpr {
+            resolved_builtin: true,
+            name: name.into(),
+            args: function.args.clone(),
+            span: function.span,
+        }))
+    }
+
     fn lower_non_operator_expression(&mut self, expr: &Expression) -> CompileResult<Expression> {
         let mut lowered = self.lower_non_operator_node(expr)?;
         self.read_settled_discrete_values(&mut lowered)?;
@@ -7676,19 +7799,25 @@ impl SemanticAnalyzer {
                 if let Some(limit) = self.lower_custom_limit_call(f)? {
                     return Ok(limit);
                 }
+                if self.lowering_declaration_constant
+                    && let Some(call) = Self::analog_math_call(f)
+                {
+                    return self.lower_expression(&call);
+                }
                 let args = f
                     .args
                     .iter()
                     .map(|a| self.lower_expression(a))
                     .collect::<CompileResult<Vec<_>>>()?;
+                if self.lowering_declaration_constant && f.name == "$clog2" {
+                    return self.analog_clog2(&args, f.span);
+                }
                 if let Some(noise) = self.lower_noise_process_call(&f.name, &args, f.span)? {
                     Expression::NoiseSource(noise)
                 } else {
                     if f.name.starts_with('$')
                         && !crate::expr_converter::LOWERED_SYSTEM_FUNCTION_NAMES
                             .contains(&f.name.as_str())
-                        && !(self.lowering_digital_constant
-                            && crate::analog_tasks::is_constant_system_function(&f.name))
                     {
                         self.record_unresolved_name(
                             Self::system_name_error_kind(&f.name, "function"),

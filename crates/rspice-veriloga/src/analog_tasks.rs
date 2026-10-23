@@ -142,18 +142,6 @@ const STANDARD_SYSTEM_NAMES: &[&str] = &[
     "$atanh",
 ];
 
-/// Whether `name` is a constant system function of IEEE 1364-2005 section
-/// 17.11: `$clog2` (17.11.1) or a math function (17.11.2), legal in the
-/// constant expressions of digital code.
-pub(crate) fn is_constant_system_function(name: &str) -> bool {
-    const CONSTANT_SYSTEM_FUNCTIONS: &[&str] = &[
-        "$clog2", "$ln", "$log10", "$exp", "$sqrt", "$pow", "$floor", "$ceil", "$sin", "$cos",
-        "$tan", "$asin", "$acos", "$atan", "$atan2", "$hypot", "$sinh", "$cosh", "$tanh", "$asinh",
-        "$acosh", "$atanh",
-    ];
-    CONSTANT_SYSTEM_FUNCTIONS.contains(&name)
-}
-
 /// Why an analog position refuses the system task or function `name`
 /// (`role` is "task" or "function"): a standard one is unsupported here, any
 /// other is unknown.

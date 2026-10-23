@@ -4,6 +4,7 @@
 
 use super::*;
 use rspice_veriloga::canonical_ir::digital_eval::{MAX_CALL_DEPTH, start_with_limit};
+use rspice_veriloga::device::VerilogADevice;
 
 /// A task that suspends keeps its caller's frame: the suspension resumes
 /// inside the task, and its outputs copy back only when it ends (section
@@ -379,22 +380,159 @@ fn clog2_is_a_constant_in_parameters_ranges_and_generate_conditions() {
     assert_eq!(harness.get("r"), "11111111");
 }
 
+/// A localparam is a constant expression wherever it is declared, so a module
+/// with an analog block takes `$clog2` in one too, and a range sized by it
+/// gets the LRM width: `$clog2(1000)` is 10. Before, the analog prologue that
+/// computes the same localparam refused it ("system function '$clog2' is not
+/// supported in analog code").
+#[test]
+fn clog2_is_a_constant_in_a_module_with_an_analog_block() {
+    let section = "  parameter integer N = 1000;\n\
+                   \x20 localparam integer W = $clog2(N);\n\
+                   \x20 localparam integer W64 = $clog2(64'h8000_0000_0000_0001);\n\
+                   \x20 reg [W-1:0] r;\n\
+                   \x20 integer w, w64;\n\
+                   \x20 initial begin w = W; w64 = W64; r = ~0; end\n";
+    let mut harness = Harness::new(section);
+    expect_finished(harness.run());
+    assert_eq!(harness.get("w"), format!("{:032b}", 10));
+    assert_eq!(harness.get("w64"), format!("{:032b}", 64));
+    assert_eq!(harness.get("r"), "1111111111");
+    // The mixed route compiles the analog half beside the digital plan.
+    VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..CompilerOptions::default()
+    })
+    .compile_runtime(&digital_module(section), None)
+    .unwrap_or_else(|error| panic!("{error}"));
+}
+
+/// The analog prologue computes a parameter default or localparam that calls
+/// a constant system function again whenever a parameter it depends on
+/// changes: `$clog2` exactly, its operand read as the unsigned 32 bits it
+/// holds (IEEE 1364-2005 section 17.11.1), and the section 17.11.2 math
+/// functions as the analog math functions of the same meaning.
+#[test]
+fn clog2_in_a_declaration_is_computed_for_analog_code() {
+    let report = VerilogACompiler::new(CompilerOptions::default())
+        .compile_runtime(
+            "module m(p, n); inout p, n; electrical p, n;\n\
+             \x20 parameter integer N = 1000;\n\
+             \x20 parameter integer P = $clog2(N / 2);\n\
+             \x20 localparam integer W = $clog2(N), L = $clog2(64'h8000_0000_0000_0001);\n\
+             \x20 localparam real S = $sqrt(16.0) + $log10(100.0);\n\
+             \x20 analog I(p, n) <+ (W + 100 * P + 10000 * L + S) * V(p, n);\n\
+             endmodule\n",
+            None,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+    let clog2 = |n: i32| 32 - (n as u32).saturating_sub(1).leading_zeros();
+    let device = |canonical: bool| {
+        let model = report.model.clone();
+        if canonical {
+            VerilogADevice::try_new_with_canonical_ir("X", model, &report.canonical_ir, &[1, 0])
+        } else {
+            VerilogADevice::try_new("B", model, &[1, 0])
+        }
+    };
+    // The production device, and the bytecode one where its backend exists.
+    let mut devices = vec![device(true).unwrap()];
+    devices.extend(device(false).ok());
+    for mut device in devices {
+        for n in [
+            1000,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            1024,
+            1025,
+            1 << 30,
+            (1 << 30) + 1,
+            i32::MAX,
+            -1,
+            -1000,
+            i32::MIN + 1,
+            i32::MIN,
+        ] {
+            device.try_set_parameter("N", f64::from(n)).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            device.try_begin_analysis(0).unwrap();
+            device.update_voltages(&[1.0]);
+            let expected = f64::from(clog2(n) + 100 * clog2(n / 2) + 10_000 * 64) + 6.0;
+            let current = device.try_evaluate().unwrap();
+            assert!(
+                current.len() == 1 && (current[0] - expected).abs() < 1e-9,
+                "N = {n}: {current:?}, expected {expected}"
+            );
+        }
+    }
+}
+
+/// `$log10` in a declaration is the base-10 logarithm in analog code too: a
+/// parameter operand keeps it from folding, so the device route computes it
+/// whenever the parameter changes.
+#[test]
+fn log10_of_a_parameter_in_a_declaration_is_base_10_in_analog_code() {
+    let report = VerilogACompiler::new(CompilerOptions::default())
+        .compile_runtime(
+            "module m(p, n); inout p, n; electrical p, n;\n\
+             \x20 parameter real P = 1000.0;\n\
+             \x20 localparam real L = $log10(P);\n\
+             \x20 analog I(p, n) <+ L * V(p, n);\n\
+             endmodule\n",
+            None,
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+    let device = |canonical: bool| {
+        let model = report.model.clone();
+        if canonical {
+            VerilogADevice::try_new_with_canonical_ir("X", model, &report.canonical_ir, &[1, 0])
+        } else {
+            VerilogADevice::try_new("B", model, &[1, 0])
+        }
+    };
+    // The production device, and the bytecode one where its backend exists.
+    let mut devices = vec![device(true).unwrap()];
+    devices.extend(device(false).ok());
+    for mut device in devices {
+        for (p, expected) in [(1000.0, 3.0), (100.0, 2.0), (1000.0, 3.0)] {
+            device.try_set_parameter("P", p).unwrap();
+            device.try_resolve_parameter_defaults().unwrap();
+            device.try_begin_analysis(0).unwrap();
+            device.update_voltages(&[1.0]);
+            let current = device.try_evaluate().unwrap();
+            assert_eq!(current, [expected], "P = {p}");
+        }
+    }
+}
+
 /// Analog code keeps its own table: a system function the analog context
 /// does not run is still refused there, by name, even where a digital
 /// constant expression accepts it.
 #[test]
 fn clog2_in_an_analog_block_is_still_refused() {
-    let error = VerilogACompiler::new(CompilerOptions::default())
-        .compile(
-            "module m(p, n); inout p, n; electrical p, n;\n\
-             \x20 analog I(p, n) <+ $clog2(4) * V(p, n);\n\
-             endmodule\n",
-        )
-        .map(|_| ())
-        .expect_err("$clog2 is not analog code")
-        .to_string();
-    assert!(
-        error.contains("system function '$clog2' is not supported in analog code"),
-        "{error}"
-    );
+    for source in [
+        "module m(p, n); inout p, n; electrical p, n;\n\
+         \x20 analog I(p, n) <+ $clog2(4) * V(p, n);\n\
+         endmodule\n",
+        // Beside a localparam that may use it.
+        "module m(p, n); inout p, n; electrical p, n;\n\
+         \x20 localparam integer W = $clog2(4);\n\
+         \x20 reg [W-1:0] r;\n\
+         \x20 analog I(p, n) <+ $clog2(W) * V(p, n);\n\
+         endmodule\n",
+    ] {
+        let error = VerilogACompiler::new(CompilerOptions::default())
+            .compile(source)
+            .map(|_| ())
+            .expect_err("$clog2 is not analog code")
+            .to_string();
+        assert!(
+            error.contains("system function '$clog2' is not supported in analog code"),
+            "{error}"
+        );
+    }
 }
