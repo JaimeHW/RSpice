@@ -1122,16 +1122,21 @@ mod breakpoint_manager_tests {
         assert!(!breakpoints.should_use_minimal_step());
     }
 
+    /// Lands a 6.0 step from 4.0 on the breakpoint at 10.0 and returns the
+    /// restart step that solving it schedules.
+    fn restart_after_landing_on_ten(breakpoints: &mut BreakpointManager) -> Value {
+        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
+        assert_eq!(dt, 6.0);
+        assert!(lands_on_breakpoint);
+        breakpoints.mark_breakpoint_solved(10.0)
+    }
+
     #[test]
     fn ngspice_breakpoint_restart_uses_ten_percent_of_saved_attempted_step() {
         let mut breakpoints = BreakpointManager::new();
         breakpoints.add(10.0);
 
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
-        assert_eq!(dt, 6.0);
-        assert!(lands_on_breakpoint);
-
-        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        let restart = restart_after_landing_on_ten(&mut breakpoints);
 
         assert!((restart - 0.6).abs() <= 8.0 * Value::EPSILON);
         assert!(breakpoints.should_use_minimal_step());
@@ -1201,11 +1206,7 @@ mod breakpoint_manager_tests {
         breakpoints.add(10.0);
         breakpoints.add(10.5);
 
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
-        assert_eq!(dt, 6.0);
-        assert!(lands_on_breakpoint);
-
-        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        let restart = restart_after_landing_on_ten(&mut breakpoints);
 
         assert!((restart - 0.05).abs() <= 8.0 * Value::EPSILON);
     }
@@ -1402,11 +1403,7 @@ mod breakpoint_manager_tests {
         breakpoints.add(10.0);
         breakpoints.use_conservative_restart_step();
 
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
-        assert_eq!(dt, 6.0);
-        assert!(lands_on_breakpoint);
-
-        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        let restart = restart_after_landing_on_ten(&mut breakpoints);
 
         assert!((restart - 0.03).abs() <= 8.0 * Value::EPSILON);
     }
@@ -1417,11 +1414,7 @@ mod breakpoint_manager_tests {
             BreakpointManager::new_with_tolerance_and_policy(1.0e-15, BreakpointStepPolicy::Xyce);
         breakpoints.add(10.0);
 
-        let (dt, lands_on_breakpoint) = breakpoints.limit_step(4.0, 6.0);
-        assert_eq!(dt, 6.0);
-        assert!(lands_on_breakpoint);
-
-        let restart = breakpoints.mark_breakpoint_solved(10.0);
+        let restart = restart_after_landing_on_ten(&mut breakpoints);
         assert!((restart - 0.6).abs() <= 8.0 * Value::EPSILON);
     }
 
