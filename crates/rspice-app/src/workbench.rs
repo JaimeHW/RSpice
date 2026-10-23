@@ -94,5 +94,5 @@ pub use state::WorkbenchSession;
 
 pub use app::RSpiceApp;
 pub use app_state::AppState;
-pub(crate) use frame::{show, show_embedded_secondary, show_route_overlays, show_secondary};
+pub(crate) use frame::{show, show_embedded_secondary, show_secondary};
 pub(crate) use platform::spawn_or_inline;

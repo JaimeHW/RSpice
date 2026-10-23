@@ -798,10 +798,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("app", "browser/accessibility", 3),
     ("app", "workflows/netlist_workflow", 3),
     ("app", "cross_probe", 1),
-    ("app", "tools/calculator_tool", 1),
-    // The expression diagnostics tool reads `RSpiceApp` back, so no rank
-    // clears both directions of this one.
-    ("app", "tools/expression_diagnostics", 1),
     // `AppState` is the session aggregate, so it inherits two problems from
     // the root it was split out of.
     //

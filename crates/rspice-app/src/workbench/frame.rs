@@ -22,6 +22,8 @@ use super::layout::LayoutSpec;
 use super::state::Workspace;
 use super::*;
 
+pub(in crate::workbench) mod dialog_order;
+
 /// Render one complete workbench frame.
 ///
 /// `root` is the frame `Ui` eframe hands to [`eframe::App::ui`]. Panels are
@@ -758,21 +760,6 @@ pub(crate) fn show_embedded_secondary(ui: &mut egui::Ui, app: &mut RSpiceApp, ti
     surfaces::show(ui, app);
     app.state.reconcile_schematic_drag(ui.ctx(), true);
     reattach
-}
-
-/// Render route-owned overlays after application dialogs so a workflow opened
-/// from Preferences is the top modal while the originating dialog remains
-/// retained underneath and can be restored on Close.
-///
-/// The simulation plan workflows are here for the same reason the account and
-/// tool managers are: every one of them is opened by a command the toolbar,
-/// the menus and the palette can reach from any workspace, so a host that only
-/// runs on one surface would make the control dead everywhere else.
-pub(crate) fn show_route_overlays(ctx: &Context, app: &mut RSpiceApp) {
-    account_organization::show(ctx, app);
-    tools::jobs_manager::show(ctx, app);
-    tools::specialist_tool_browser::show(ctx, app);
-    surfaces::show_simulation_workflow_dialogs(ctx, app);
 }
 
 fn synchronize_activity_stream(ctx: &Context, app: &mut RSpiceApp) {
@@ -1754,7 +1741,12 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ctx| show_route_overlays(ctx, &mut app),
+            |ctx| {
+                account_organization::show(ctx, &mut app);
+                tools::jobs_manager::show(ctx, &mut app);
+                tools::specialist_tool_browser::show(ctx, &mut app);
+                surfaces::show_simulation_workflow_dialogs(ctx, &mut app);
+            },
         );
         let nodes = output
             .platform_output

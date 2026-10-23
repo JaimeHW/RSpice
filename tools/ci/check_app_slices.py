@@ -58,6 +58,7 @@ SLICE_RULES = [
     (W + r"app\.rs$", "shell"),
     (W + r"app/browser_history\.rs$", "shell"),
     (W + r"frame\.rs$", "shell"),
+    (W + r"frame/dialog_order\.rs$", "shell"),
     # The four session aggregates and their init/serialization.
     (W + r"app_state\.rs$", "session"),
     (W + r"app_state/session\.rs$", "session"),

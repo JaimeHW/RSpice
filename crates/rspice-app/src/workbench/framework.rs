@@ -4,4 +4,5 @@
 #[cfg(test)]
 mod call_order_tests;
 pub(crate) mod command_registry;
+pub(crate) mod dialogs;
 pub(crate) mod requests;

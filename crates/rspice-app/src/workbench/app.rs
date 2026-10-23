@@ -910,99 +910,17 @@ impl RSpiceApp {
     }
 
     fn render_frame_dialogs(&mut self, ctx: &Context) {
-        self.synchronize_route_owned_dialogs();
-        self.synchronize_design_management_route();
-        self.render_confirmation_dialog(ctx);
-        dialogs::property_dialog::render_property_dialog(ctx, &mut self.state);
-        self.process_pdk_settings_dialog(ctx);
-        self.render_preferences_dialog(ctx);
-        self.render_license_dialog(ctx);
-        self.render_new_project_dialog(ctx);
-        self.render_publish_web_dialog(ctx);
-        self.render_live_session_dialog(ctx);
-        self.render_unpublish_web_dialog(ctx);
-        self.render_command_palette(ctx);
-        self.render_bus_tap_dialog(ctx);
-        self.render_builtin_xspice_placement_dialog(ctx);
-        self.render_net_label_dialog(ctx);
-        self.render_grid_snap_routing_dialog(ctx);
-        self.render_drawing_sheet_overflow_dialog(ctx);
-        self.render_schematic_visibility_dialog(ctx);
-        self.render_descend_hierarchy_dialog(ctx);
-        self.render_engineering_table_dialog(ctx);
-        self.render_pin_port_dialog(ctx);
-        // New comment hands input to the note editor in this same frame.
-        self.render_design_review_comments_dialog(ctx);
-        self.render_design_note_dialog(ctx);
-        self.render_documentation_shape_dialog(ctx);
-        self.render_array_selection_dialog(ctx);
-        self.render_replace_instance_dialog(ctx);
-        dialogs::stimulus_link::render_stimulus_link_dialog(ctx, &mut self.state);
-        self.render_create_hierarchy_dialog(ctx);
-        self.render_check_and_save_dialog(ctx);
-        self.render_connectivity_manager_dialog(ctx);
-        dialogs::delete_sheet::render_delete_sheet_confirmation(ctx, &mut self.state);
-        self.render_design_management_dialog(ctx);
-        self.render_selection_bulk_edit_dialog(ctx);
-        self.render_project_revision_history_dialog(ctx);
-        self.render_source_document_dialog(ctx);
-        self.render_source_find_dialog(ctx);
-        self.render_source_language_tools_dialog(ctx);
-        self.render_create_model_bound_symbol_dialog(ctx);
-        self.render_symbol_definition_dialogs(ctx);
-        self.render_configuration_sets_dialog(ctx);
-        // A new deck changes what blocks a run, so a run prepared under the
-        // old one is not authorized under it.
-        if dialogs::rule_setup::render_rule_setup_dialog(ctx, &mut self.state) {
-            self.invalidate_simulation_preflight();
-        }
-        self.render_drawing_sheet_defaults_dialog(ctx);
-        self.render_drawing_sheet_preset_dialogs(ctx);
-        self.render_drawing_sheet_support_dialogs(ctx);
-        self.render_hardcopy_dialog(ctx);
-        self.render_object_properties_dialog(ctx);
-        self.render_rename_selection_dialog(ctx);
-        self.render_find_replace_dialog(ctx);
-        self.render_shared_properties_dialog(ctx);
-        self.render_window_session_dialog(ctx);
-        self.render_help_center_dialog(ctx);
-        self.render_about_dialog(ctx);
-        crate::workbench::workflows::result_import_workflow::show_result_import_dialog(
+        crate::workbench::framework::dialogs::render(
+            self,
             ctx,
-            &mut self.state,
+            crate::workbench::frame::dialog_order::DIALOG_ORDER,
         );
-        // The calculator is a modeless tool, not a modal: it renders beside
-        // the dialog stack so the workspace stays live beneath it.
-        crate::workbench::tools::calculator_tool::show(ctx, self);
-        crate::workbench::tools::expression_diagnostics::show(ctx, self);
-        self.render_shortcuts_help_dialog(ctx);
-        self.process_model_browser_dialog(ctx);
-        self.process_new_cell_dialog(ctx);
-        self.process_new_view_dialog(ctx);
-        self.render_new_veriloga_device_form(ctx);
-        self.render_veriloga_import_dialog(ctx);
-        self.render_veriloga_replace_dialog(ctx);
-        self.render_veriloga_build_settings(ctx);
-        self.process_copy_cell_dialog(ctx);
-        self.process_rename_cell_dialog(ctx);
-        self.process_library_deletion_review_dialog(ctx);
-        self.process_plan_removal_review_dialog(ctx);
-        self.process_plan_removal_refusal_dialog(ctx);
-        #[cfg(not(target_arch = "wasm32"))]
-        crate::workbench::app_state::services_access::process_autosave_restore_dialog(
-            &mut self.state,
-            self.file_workflow_io.as_ref(),
-            ctx,
-        );
-        self.process_pending_library_deletions();
-        self.process_exit_request(ctx);
-        crate::workbench::show_route_overlays(ctx, self);
     }
 
     /// Keep browser-restored manager routes and the transient egui dialog
     /// owner synchronized. Commands open both in one transaction; this hook
     /// covers deep links, Back/Forward, and restored application sessions.
-    fn synchronize_design_management_route(&mut self) {
+    pub(in crate::workbench) fn synchronize_design_management_route(&mut self) {
         let route_active = self.state.workbench.current_route().surface_id()
             == crate::workbench::SurfaceId::DesignManagement;
         if route_active && !self.state.project.design_management.open {
@@ -1016,7 +934,7 @@ impl RSpiceApp {
     /// transient egui owners. Commands open the route and dialog together;
     /// this also covers direct deep links, Back/Forward, and restored
     /// sessions without leaving a route that paints only its old workspace.
-    fn synchronize_route_owned_dialogs(&mut self) {
+    pub(in crate::workbench) fn synchronize_route_owned_dialogs(&mut self) {
         let surface = self.state.workbench.current_route().surface_id();
 
         if surface == crate::workbench::SurfaceId::CommandPalette {
@@ -1221,7 +1139,7 @@ impl eframe::App for RSpiceApp {
 }
 
 impl RSpiceApp {
-    fn process_exit_request(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn process_exit_request(&mut self, ctx: &Context) {
         if !self.state.shell.exit_requested {
             return;
         }

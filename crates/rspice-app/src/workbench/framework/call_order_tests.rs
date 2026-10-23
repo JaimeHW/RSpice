@@ -12,6 +12,7 @@
 
 const APP: &str = include_str!("../app.rs");
 const FRAME: &str = include_str!("../frame.rs");
+const DIALOG_ORDER: &str = include_str!("../frame/dialog_order.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -278,9 +279,10 @@ const SHOW: &[Step] = &[
     ("11.35", &["apply_platform_full_screen_request(ctx, app)"]),
 ];
 
-/// `render_frame_dialogs` as it stands: each step's call, as the source
-/// writes it less `self.` and the shell's own path, and the slice that owns
-/// it. Every dialog the frame draws is drawn by one of these, bottom first.
+/// The frame's dialog steps as `render_frame_dialogs` wrote them out before
+/// they became the dialog order: each step's call, as the source wrote it
+/// less `self.` and the shell's own path, and the slice that owns it. Every
+/// dialog the frame draws is drawn by one of these, bottom first.
 const DIALOG_STEPS: &[(&str, &str)] = &[
     ("synchronize_route_owned_dialogs", "shell"),
     ("synchronize_design_management_route", "shell"),
@@ -381,9 +383,9 @@ const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
     "show_route_overlays",
 ];
 
-/// What `show_route_overlays`, the last dialog step, draws, and the slice
-/// that owns each: above every dialog, so a workflow opened from one of them
-/// is the top modal.
+/// What `show_route_overlays`, the last dialog step, drew, and the slice that
+/// owns each: above every dialog, so a workflow opened from one of them is
+/// the top modal. The dialog order lists each as a step of its own.
 const ROUTE_OVERLAYS: &[(&str, &str)] = &[
     ("account_organization::show", "cloud"),
     ("tools::jobs_manager::show", "simulate"),
@@ -466,8 +468,9 @@ fn assert_runs_in_order(function: &str, body: &str, steps: &[Step]) {
 
 /// The calls a function body makes at the top level, in order: each call
 /// whose parentheses are not inside another call's, as the source spells its
-/// callee, less `self.` and the shell's own path. A step's arguments and the
-/// closures it is handed are not steps.
+/// callee, less `self.` (or the `app.` a dialog spec is handed) and the
+/// shell's own path. A step's arguments and the closures it is handed are not
+/// steps.
 fn top_level_calls(body: &str) -> Vec<String> {
     let code = body
         .lines()
@@ -500,7 +503,10 @@ fn top_level_calls(body: &str) -> Vec<String> {
                         .collect::<Vec<_>>();
                     callee.reverse();
                     let callee = callee.into_iter().collect::<String>();
-                    let callee = callee.strip_prefix("self.").unwrap_or(&callee);
+                    let callee = callee
+                        .strip_prefix("self.")
+                        .or_else(|| callee.strip_prefix("app."))
+                        .unwrap_or(&callee);
                     let callee = callee.strip_prefix("crate::workbench::").unwrap_or(callee);
                     calls.push(callee.to_owned());
                 }
@@ -538,6 +544,49 @@ fn assert_calls(function: &str, found: &[String], expected: &[(&str, &str)]) {
     );
 }
 
+/// One spec of the dialog order, as its source writes it.
+struct WrittenSpec {
+    key: String,
+    /// The `Modality` variant it names.
+    modality: String,
+    /// The calls its `render` makes at the top level.
+    renders: Vec<String>,
+}
+
+/// Each spec of the dialog order in `source`, in order.
+fn dialog_specs(source: &str) -> Vec<WrittenSpec> {
+    let shipped = crate::source_guard::production_source(source)
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let order = shipped
+        .split_once("DIALOG_ORDER")
+        .and_then(|(_, rest)| rest.split_once("];"))
+        .map(|(order, _)| order)
+        .expect("the dialog order is one list");
+    let field = |spec: &str, opens: &str, closes: char| {
+        spec.split_once(opens)
+            .and_then(|(_, rest)| rest.split_once(closes))
+            .map(|(value, _)| value.to_owned())
+            .unwrap_or_else(|| panic!("a dialog spec has no `{opens}`: {spec}"))
+    };
+    order
+        .split("DialogSpec {")
+        .skip(1)
+        .map(|spec| {
+            let (_, render) = spec
+                .split_once("render:")
+                .expect("every dialog spec renders");
+            WrittenSpec {
+                key: field(spec, "DialogKey(\"", '"'),
+                modality: field(spec, "modality: Modality::", ','),
+                renders: top_level_calls(render),
+            }
+        })
+        .collect()
+}
+
 #[test]
 fn the_frame_runs_its_top_level_steps_in_todays_order() {
     assert_runs_in_order("RSpiceApp::ui", &body(APP, "fn ui("), UI);
@@ -564,16 +613,72 @@ fn the_workbench_frame_draws_in_todays_order() {
 
 #[test]
 fn the_frame_dialogs_draw_in_todays_order() {
-    assert_calls(
-        "RSpiceApp::render_frame_dialogs",
-        &top_level_calls(&body(APP, "fn render_frame_dialogs(")),
-        DIALOG_STEPS,
+    let walk = body(APP, "fn render_frame_dialogs(");
+    assert_eq!(
+        top_level_calls(&walk),
+        ["framework::dialogs::render"],
+        "the frame's dialogs are one walk and nothing else"
     );
-    assert_calls(
-        "show_route_overlays",
-        &top_level_calls(&body(FRAME, "fn show_route_overlays(")),
-        ROUTE_OVERLAYS,
+    assert!(
+        without_whitespace(&walk).contains("frame::dialog_order::DIALOG_ORDER"),
+        "the frame walks the shell's dialog order"
     );
+
+    let recorded = DIALOG_STEPS
+        .iter()
+        .flat_map(|step| {
+            if step.0 == "show_route_overlays" {
+                ROUTE_OVERLAYS
+            } else {
+                std::slice::from_ref(step)
+            }
+        })
+        .copied()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        recorded.len(),
+        76,
+        "the frame's 73 dialog steps, the route overlays' 4 owners in place of their host"
+    );
+
+    let specs = dialog_specs(DIALOG_ORDER);
+    let calls = specs
+        .iter()
+        .flat_map(|spec| spec.renders.iter().cloned())
+        .collect::<Vec<_>>();
+    assert_calls("DIALOG_ORDER", &calls, &recorded);
+
+    let mut drawn = 0;
+    for WrittenSpec {
+        key,
+        modality,
+        renders,
+    } in &specs
+    {
+        let (owner, _) = key
+            .split_once('.')
+            .unwrap_or_else(|| panic!("`{key}` names the slice that owns it"));
+        assert!(!renders.is_empty(), "`{key}` draws a step of the frame");
+        let (first, recorded_owner) = recorded[drawn];
+        assert_eq!(
+            owner, recorded_owner,
+            "`{key}` draws `{first}`, which {recorded_owner} owns"
+        );
+        for handed_to in renders.iter().skip(1) {
+            assert!(
+                SYNTHETIC_DIALOG_STEPS.contains(&handed_to.as_str()),
+                "`{key}` hands its outcome on in the same frame only to a step that draws no \
+                 dialog, not to `{handed_to}`"
+            );
+        }
+        assert_eq!(
+            modality == "None",
+            SYNTHETIC_DIALOG_STEPS.contains(&first),
+            "`{key}` is a step that draws no dialog exactly when `{first}` is one"
+        );
+        drawn += renders.len();
+    }
+
     for synthetic in SYNTHETIC_DIALOG_STEPS {
         assert!(
             DIALOG_STEPS.iter().any(|(call, _)| call == synthetic),
