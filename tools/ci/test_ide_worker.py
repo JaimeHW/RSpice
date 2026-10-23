@@ -413,7 +413,8 @@ class IdeWorkerRoutingTests(unittest.TestCase):
         self.assertRegex(
             app,
             re.compile(
-                r"if\s+self\.state\.simulation\.execution\.has_active_execution\(\)\s*\{\s*"
+                r"if\s+self\.state\.model\.simulation\.execution\.has_active_execution\(\)"
+                r"\s*(?:\|\|[^{]*)?\{\s*"
                 r"ctx\.request_repaint_after\(std::time::Duration::from_millis\(\d+\)\)",
                 re.S,
             ),
