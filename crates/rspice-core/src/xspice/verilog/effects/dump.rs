@@ -40,7 +40,9 @@ use serde::{Deserialize, Serialize};
 
 use super::files::{FileOp, text_bytes};
 use super::{HdlEffects, HdlStream, integer_of, string_argument};
+use crate::xspice::event_trace::EventTracePoint;
 use crate::xspice::verilog::store::DigitalSignalStore;
+use crate::xspice::{DigitalState, DigitalStrength, DigitalValue, EventValue};
 
 /// Section 18.1.1's default file name.
 const DEFAULT_FILE: &str = "dump.vcd";
@@ -330,6 +332,153 @@ fn change_line(value: &Dumped, identifier: &str) -> String {
         Dumped::Bits(bits) if bits.starts_with('b') => format!("{bits} {identifier}\n"),
         Dumped::Bits(bit) => format!("{bit}{identifier}\n"),
         Dumped::Real(bits) => format!("r{:?} {identifier}\n", f64::from_bits(*bits)),
+    }
+}
+
+/// One HDL variable a run publishes as a trace (`.ESAVE xtb.pass`): its
+/// signal, and the slot its first published value goes to. A real takes one
+/// slot; a four-state variable one per bit, most significant first, which is
+/// the order a bus over its bits names its members in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TracedVariable {
+    pub signal: DigitalSignalId,
+    pub real: bool,
+    pub slot: usize,
+}
+
+/// The HDL variables a run publishes as traces, observed as the dump
+/// observes the variables it dumps: the change hook marks a variable whose
+/// signal changed, and the end of the time step publishes the value the step
+/// left, at the step's instant.
+///
+/// The publications are a journal inside the host's rollback image, like the
+/// output journal, so a rejected trial publishes nothing. The run drains it at
+/// every accepted point, together with every variable's value there, and a
+/// checkpoint is taken only once it is drained; so the observer holds nothing
+/// a checkpoint carries, and a resumed run publishes each value at its first
+/// point and goes on from there. A publication is an
+/// [`EventTracePoint`] whose `node` is the slot.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct TracedVariables {
+    vars: Arc<[TracedVariable]>,
+    /// Signal to the variable publishing it, for the change hook.
+    by_signal: Arc<BTreeMap<u32, usize>>,
+    /// Variables changed in this step.
+    dirty: BTreeSet<usize>,
+    journal: Vec<EventTracePoint>,
+}
+
+impl TracedVariables {
+    pub(crate) fn new(vars: Vec<TracedVariable>) -> Self {
+        Self {
+            by_signal: Arc::new(
+                vars.iter()
+                    .enumerate()
+                    .map(|(index, var)| (var.signal.index(), index))
+                    .collect(),
+            ),
+            vars: vars.into(),
+            dirty: BTreeSet::new(),
+            journal: Vec::new(),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.vars.is_empty()
+    }
+
+    /// Whether every publication has been drained, which a checkpoint needs.
+    pub(crate) fn is_drained(&self) -> bool {
+        self.journal.is_empty() && self.dirty.is_empty()
+    }
+
+    /// Forget what a restored image never saw.
+    pub(crate) fn clear_pending(&mut self) {
+        self.dirty.clear();
+        self.journal.clear();
+    }
+
+    /// A signal changed value.
+    pub(crate) fn note_change(&mut self, signal: DigitalSignalId) {
+        if let Some(index) = self.by_signal.get(&signal.index()) {
+            self.dirty.insert(*index);
+        }
+    }
+
+    /// The end of a time step: publish what the step left of each variable
+    /// that changed in it.
+    pub(crate) fn end_of_step(&mut self, store: &DigitalSignalStore, clock: Option<DigitalClock>) {
+        if self.dirty.is_empty() {
+            return;
+        }
+        let dirty = std::mem::take(&mut self.dirty);
+        let Some(clock) = clock else {
+            return;
+        };
+        for index in dirty {
+            publish(
+                store,
+                &self.vars[index],
+                clock.absolute_seconds,
+                &mut self.journal,
+            );
+        }
+    }
+
+    /// Move the journal into `points`. The value [`Self::snapshot`] publishes
+    /// next answers any change still marked.
+    pub(crate) fn drain_into(&mut self, points: &mut Vec<EventTracePoint>) {
+        self.dirty.clear();
+        points.append(&mut self.journal);
+    }
+
+    /// Every variable's value at the accepted `time`, which the run settles
+    /// after the journal's.
+    pub(crate) fn snapshot(
+        &self,
+        time: f64,
+        store: &DigitalSignalStore,
+        points: &mut Vec<EventTracePoint>,
+    ) {
+        for var in self.vars.iter() {
+            publish(store, var, time, points);
+        }
+    }
+}
+
+fn publish(
+    store: &DigitalSignalStore,
+    var: &TracedVariable,
+    time: f64,
+    points: &mut Vec<EventTracePoint>,
+) {
+    if var.real {
+        if let Some(value) = store.read_real_signal(var.signal) {
+            points.push(EventTracePoint {
+                time,
+                node: var.slot,
+                value: EventValue::Real(value),
+            });
+        }
+        return;
+    }
+    let Some(value) = store.read_signal(var.signal) else {
+        return;
+    };
+    for (offset, bit) in value.bits_msb_first().iter().enumerate() {
+        let value = match bit {
+            FourStateBit::Zero => DigitalValue::zero(),
+            FourStateBit::One => DigitalValue::one(),
+            FourStateBit::Unknown => DigitalValue::unknown(),
+            FourStateBit::HighImpedance => {
+                DigitalValue::new(DigitalState::HighZ, DigitalStrength::Strong)
+            }
+        };
+        points.push(EventTracePoint {
+            time,
+            node: var.slot + offset,
+            value: EventValue::Digital(value),
+        });
     }
 }
 
@@ -645,13 +794,15 @@ impl HdlEffects {
     }
 
     /// The end of a time step: write the header once the selection's step
-    /// ends, and every change after it.
+    /// ends, and every change after it; and publish the traced variables
+    /// that changed.
     pub(crate) fn end_of_step(
         &mut self,
         plan: &CanonicalDigitalPlan,
         store: &DigitalSignalStore,
         clock: Option<DigitalClock>,
     ) {
+        self.traced.end_of_step(store, clock);
         let tick = clock.map_or(0, |clock| clock.tick);
         match self.dump.phase {
             DumpPhase::Selecting(_) => self.start_dump(plan, store, clock, tick),

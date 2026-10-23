@@ -1431,6 +1431,76 @@ impl CircuitData {
         snapshot.extend(claims.into_iter().map(|(node, _, value)| (node, value)));
     }
 
+    /// The HDL net or variable `name` spells as `.ESAVE` names one: an
+    /// instance path, a dot, and a name in that instance's design
+    /// (`xtb.pass`), with the instance's place among the mixed hosts and the
+    /// name it is traced under, the instance as the deck wrote it and the
+    /// name as the design declared it. The instance path is a deck name and
+    /// is compared ignoring case; when two instance paths fit, the longer one
+    /// is meant.
+    pub(crate) fn resolve_hdl_variable(
+        &self,
+        name: &str,
+    ) -> Option<(usize, String, crate::xspice::verilog::HdlVariable)> {
+        self.mixed_signal_hosts
+            .iter()
+            .enumerate()
+            .filter_map(|(index, host)| {
+                let instance = host.instance_name();
+                if crate::xspice::is_auto_bridge_name(instance) {
+                    return None;
+                }
+                let identifier = name.get(instance.len()..)?.strip_prefix('.')?;
+                if !name.get(..instance.len())?.eq_ignore_ascii_case(instance) {
+                    return None;
+                }
+                let variable = host.hdl_variable(identifier)?;
+                let traced = format!("{instance}.{}", variable.identifier);
+                Some((instance.len(), index, traced, variable))
+            })
+            .max_by_key(|(length, ..)| *length)
+            .map(|(_, index, traced, variable)| (index, traced, variable))
+    }
+
+    /// The design time precision every digital trace an HDL observes is
+    /// dumped at: the finest any instance runs at, and never below a
+    /// femtosecond, VCD's finest tick. `None` without an HDL instance.
+    pub(crate) fn hdl_trace_precision(&self) -> Option<Value> {
+        self.mixed_signal_hosts
+            .iter()
+            .map(|host| host.time_resolution())
+            .reduce(|finest, other| finest.finest(other))
+            .map(|resolution| resolution.seconds_per_tick().max(1e-15))
+    }
+
+    /// Publish HDL variables as traces: each by its host's place among the
+    /// mixed hosts, with the slot its first value goes to.
+    pub(crate) fn trace_hdl_variables(
+        &mut self,
+        variables: &[(usize, &crate::xspice::verilog::HdlVariable, usize)],
+    ) {
+        if let Some(coordinator) = &mut self.scheduler.mixed_digital_coordinator {
+            let variables: Vec<_> = variables
+                .iter()
+                .map(|(host, variable, slot)| (*host, variable.signal, variable.real, *slot))
+                .collect();
+            coordinator.trace_variables(&variables);
+        }
+    }
+
+    /// The traced HDL variables' publications since the last accepted
+    /// point, then each one's value at `time`; a publication's `node` is its
+    /// slot.
+    pub(crate) fn drain_hdl_variable_traces(
+        &mut self,
+        time: Value,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        if let Some(coordinator) = &mut self.scheduler.mixed_digital_coordinator {
+            coordinator.drain_variable_traces(time, points);
+        }
+    }
+
     /// Mark every digital trace an HDL process reads or drives with the
     /// design's time precision.
     ///
@@ -1445,12 +1515,7 @@ impl CircuitData {
         traces: &mut [crate::analysis::transient::DigitalTrace],
         node_names: &[String],
     ) {
-        let Some(resolution) = self
-            .mixed_signal_hosts
-            .iter()
-            .map(|host| host.time_resolution())
-            .reduce(|finest, other| finest.finest(other))
-        else {
+        let Some(precision) = self.hdl_trace_precision() else {
             return;
         };
         let mut nodes = std::collections::BTreeSet::new();
@@ -1467,8 +1532,6 @@ impl CircuitData {
             .filter_map(|node| node.checked_sub(1))
             .filter_map(|index| node_names.get(index).map(String::as_str))
             .collect();
-        // A kernel refined below a femtosecond still dumps at VCD's finest tick.
-        let precision = resolution.seconds_per_tick().max(1e-15);
         for trace in traces {
             if observed.contains(trace.node_name.as_str()) {
                 trace.hdl_time_precision = Some(precision);

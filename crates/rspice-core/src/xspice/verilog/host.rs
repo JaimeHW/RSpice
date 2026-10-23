@@ -1454,6 +1454,35 @@ impl DigitalHost {
         self.store.has_traces()
     }
 
+    /// Publish these variables as traces, through the observer the value
+    /// change dump uses.
+    pub(crate) fn trace_variables(&mut self, vars: Vec<super::effects::dump::TracedVariable>) {
+        self.effects.trace_variables(vars);
+    }
+
+    /// Whether a traced variable has a publication or a marked change.
+    pub(crate) fn has_variable_traces(&self) -> bool {
+        !self.effects.traced_variables().is_drained()
+    }
+
+    pub(crate) fn drain_variable_traces(
+        &mut self,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        self.effects.drain_variable_traces(points);
+    }
+
+    /// Every traced variable's value at the accepted `time`.
+    pub(crate) fn variable_snapshot(
+        &self,
+        time: f64,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        self.effects
+            .traced_variables()
+            .snapshot(time, &self.store, points);
+    }
+
     fn set_event_clock(
         &mut self,
         tick: u64,

@@ -154,6 +154,9 @@ pub(crate) struct HdlEffects {
     /// The monitor-region task whose argument function is running.
     evaluating: Option<MonitorTask>,
     dump: dump::Dump,
+    /// The variables the run publishes as traces; run wiring, not design
+    /// state, so a checkpoint neither saves nor restores it.
+    traced: dump::TracedVariables,
 }
 
 impl HdlEffects {
@@ -180,7 +183,25 @@ impl HdlEffects {
             next_monitor_serial: 0,
             evaluating: None,
             dump: dump::Dump::default(),
+            traced: dump::TracedVariables::default(),
         }
+    }
+
+    /// Publish these variables as traces from now on.
+    pub(crate) fn trace_variables(&mut self, vars: Vec<dump::TracedVariable>) {
+        self.traced = dump::TracedVariables::new(vars);
+    }
+
+    pub(crate) fn traced_variables(&self) -> &dump::TracedVariables {
+        &self.traced
+    }
+
+    /// The traced variables' publications since the last drain.
+    pub(crate) fn drain_variable_traces(
+        &mut self,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        self.traced.drain_into(points);
     }
 
     /// Install the run's options before anything has run.
@@ -290,10 +311,12 @@ impl HdlEffects {
         self.monitor.as_ref().is_some_and(|monitor| monitor.enabled)
             || !self.file_monitors.is_empty()
             || self.dump.watching()
+            || !self.traced.is_empty()
     }
 
     /// A signal changed: a `$monitor` or `$fmonitor` reading it prints at the
-    /// end of the step (sections 17.1.3 and 17.2.2), and a dump records it.
+    /// end of the step (sections 17.1.3 and 17.2.2), and a dump and a traced
+    /// variable record it.
     pub(crate) fn note_change(&mut self, plan: &CanonicalDigitalPlan, signal: DigitalSignalId) {
         let reads = |observer: u32| {
             plan.observers
@@ -314,6 +337,7 @@ impl HdlEffects {
         if self.dump.watching() {
             self.dump.note_change(signal);
         }
+        self.traced.note_change(signal);
     }
 
     /// The active `$monitor`'s argument function, if it is enabled.

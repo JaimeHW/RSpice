@@ -7,6 +7,7 @@
 //! - Cooperative abort for responsive cancellation
 
 mod fft;
+mod hdl_variables;
 mod integral_trace;
 mod post_results;
 use super::result::canonical_event_name;
@@ -1111,6 +1112,8 @@ struct TransientEventCapture<'a> {
     /// The run's bus declarations resolved onto node ids, lent to the sample
     /// hook. Run-constant: resolved once, published at every accepted point.
     sample_buses: &'a [TransientDigitalBus],
+    /// The HDL variables `.ESAVE` named, recorded beside the nets.
+    hdl_variables: &'a mut hdl_variables::HdlVariableCapture,
 }
 
 /// Project a committed digital snapshot onto the codes the sample hook carries.
@@ -1649,27 +1652,32 @@ impl TransientCapturePlan {
         }
     }
 
-    /// Refuse an `esave` list naming something that is not an event net or a
-    /// declared bus of them, as ngspice's `esave` does ("Node %s is not an
-    /// event node"): recording nothing for a misspelled net would be a silent
-    /// omission.
+    /// Refuse an `esave` list naming something that is not an event net, a
+    /// declared bus of them, or a net or variable of an HDL instance's
+    /// design, as ngspice's `esave` refuses a name that is no event node
+    /// ("Node %s is not an event node"): recording nothing for a misspelled
+    /// net would be a silent omission. Returns what `hdl_variable` made of
+    /// each name that is an HDL variable rather than a net, in list order,
+    /// once each.
     ///
     /// An event net is every net the run records a digital trace for: the
     /// event-only nets, and the deck nets a mixed module's converted boundary
     /// bits are drawn on (`boundary_trace_nodes`), which keep their voltage
     /// as well. Both are recorded by default, so both have to be nameable
     /// here; refusing the second would leave a net the run records that no
-    /// selection can keep.
-    fn validate_esave_list(
+    /// selection can keep. A name that is a net is the net, whatever an HDL
+    /// instance also declares.
+    fn validate_esave_list<V>(
         netlist: &Netlist,
         nodes: TransientNodeNamespace<'_>,
         boundary_trace_nodes: &std::collections::BTreeSet<usize>,
         buses: &[DigitalBusDeclaration],
-    ) -> Result<(), SimulationError> {
+        mut hdl_variable: impl FnMut(&str) -> Option<V>,
+    ) -> Result<Vec<V>, SimulationError> {
         let Some(crate::netlist::EventSaveSelection::Nets(nets)) =
             &netlist.options.xspice_event_trace_save
         else {
-            return Ok(());
+            return Ok(Vec::new());
         };
         let known: HashSet<String> = nodes
             .names
@@ -1682,15 +1690,23 @@ impl TransientCapturePlan {
             .map(|(_, (name, _))| canonical_event_name(name))
             .chain(buses.iter().map(|bus| canonical_event_name(&bus.name)))
             .collect();
-        match nets
-            .iter()
-            .find(|net| !known.contains(&canonical_event_name(net)))
-        {
-            Some(net) => Err(SimulationError::Circuit(format!(
-                "esave: node '{net}' is not an event node"
-            ))),
-            None => Ok(()),
+        let mut variables = Vec::new();
+        let mut named = HashSet::new();
+        for net in nets {
+            let canonical = canonical_event_name(net);
+            if known.contains(&canonical) || !named.insert(canonical) {
+                continue;
+            }
+            match hdl_variable(net) {
+                Some(variable) => variables.push(variable),
+                None => {
+                    return Err(SimulationError::Circuit(format!(
+                        "esave: node '{net}' is not an event node or an HDL variable"
+                    )));
+                }
+            }
         }
+        Ok(variables)
     }
 
     fn retain_declared_buses(
@@ -2877,6 +2893,7 @@ impl Engine {
             real_trace_indices,
             retained_event_nodes,
             sample_buses,
+            hdl_variables,
         } = events;
         changes.clear();
         if record_traces {
@@ -2935,6 +2952,8 @@ impl Engine {
                 }
                 retained_result_values = retained_result_values.saturating_add(added);
             }
+            retained_result_values =
+                retained_result_values.saturating_add(hdl_variables.record(result, circuit, time));
         }
         self.ensure_transient_result_limits(result, retained_result_values)?;
         abort.observe_transient_sample(result.observable_sample(
@@ -5757,7 +5776,7 @@ impl Engine {
         // keeps them from drifting apart.
         let mut digital_buses = mixed_module_bus_declarations(&circuit, &node_names)?;
         let converter_endpoints = circuit.mixed_converter_event_endpoints();
-        TransientCapturePlan::validate_esave_list(
+        let esave_variables = TransientCapturePlan::validate_esave_list(
             netlist,
             TransientNodeNamespace {
                 names: &node_names,
@@ -5766,6 +5785,15 @@ impl Engine {
             },
             &circuit.mixed_boundary_trace_nodes(),
             &digital_buses,
+            |name| {
+                #[cfg(feature = "veriloga")]
+                return circuit.resolve_hdl_variable(name);
+                #[cfg(not(feature = "veriloga"))]
+                {
+                    let _ = name;
+                    None::<std::convert::Infallible>
+                }
+            },
         )?;
         let capture_plan = TransientCapturePlan::compile(
             netlist,
@@ -5953,6 +5981,20 @@ impl Engine {
         } else {
             &[]
         });
+        // The HDL variables `.ESAVE` names, traced beside the nets. An
+        // `.ESAVE` list is what names them, so a run with event tracing off
+        // has none.
+        #[cfg(feature = "veriloga")]
+        let mut hdl_variables =
+            hdl_variables::HdlVariableCapture::configure(&mut circuit, &esave_variables)?;
+        #[cfg(not(feature = "veriloga"))]
+        let mut hdl_variables = {
+            let _ = esave_variables;
+            hdl_variables::HdlVariableCapture::default()
+        };
+        result
+            .digital_buses
+            .extend(hdl_variables.buses().iter().cloned());
         let mut digital_snapshot = Vec::new();
         let mut digital_event_codes = Vec::new();
         let mut real_snapshot = Vec::new();
@@ -6394,6 +6436,7 @@ impl Engine {
                 &mut real_trace_indices,
                 &capture_plan.event_nodes,
             );
+            hdl_variables.record(&mut result, &mut circuit, resume_time);
         }
         // Initial values use the same retained-node contract as later changes.
         for &(node, value) in &digital_snapshot {
@@ -11604,6 +11647,7 @@ impl Engine {
                             real_trace_indices: &mut real_trace_indices,
                             retained_event_nodes: &capture_plan.event_nodes,
                             sample_buses: &sample_buses,
+                            hdl_variables: &mut hdl_variables,
                         },
                         retained_result_values,
                         abort,
@@ -12244,6 +12288,7 @@ impl Engine {
                     real_trace_indices: &mut real_trace_indices,
                     retained_event_nodes: &capture_plan.event_nodes,
                     sample_buses: &sample_buses,
+                    hdl_variables: &mut hdl_variables,
                 },
                 retained_result_values,
                 abort,
@@ -12791,7 +12836,10 @@ impl Engine {
             None
         };
         #[cfg(feature = "veriloga")]
-        circuit.mark_hdl_observed_traces(&mut result.digital_traces, &result.node_names);
+        {
+            circuit.mark_hdl_observed_traces(&mut result.digital_traces, &result.node_names);
+            hdl_variables.mark_precision(&mut result, circuit.hdl_trace_precision());
+        }
         result.fft_results = fft::evaluate(self, netlist, &result, requested_stop, abort)?;
         retained_result_values = Self::transient_result_value_count(&result);
         self.ensure_result_values(

@@ -70,6 +70,9 @@ impl EffectsImage {
         if !effects.journal.is_empty() || !effects.queue.is_empty() {
             return Err("HDL output or the monitor region is not drained".into());
         }
+        if !effects.traced.is_drained() {
+            return Err("traced HDL variable publications are not drained".into());
+        }
         if matches!(effects.dump.phase, DumpPhase::Selecting(_)) {
             return Err("a `$dumpvars` selection has not been written".into());
         }
@@ -153,6 +156,7 @@ impl EffectsImage {
         effects.next_monitor_serial = self.files.next_monitor;
         effects.evaluating = None;
         effects.dump = dump;
+        effects.traced.clear_pending();
         Ok(())
     }
 }

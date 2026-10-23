@@ -956,6 +956,36 @@ impl MixedDigitalCoordinator {
         }
     }
 
+    /// Publish HDL variables as traces: each one an instance's own signal,
+    /// named by the instance's place among the enrolled hosts, with whether
+    /// it is a real and the slot its first value goes to.
+    pub(crate) fn trace_variables(&mut self, vars: &[(usize, DigitalSignalId, bool, usize)]) {
+        let vars = vars
+            .iter()
+            .map(
+                |&(host, signal, real, slot)| super::super::effects::dump::TracedVariable {
+                    signal: self.maps[host].signals[usize::from(signal)],
+                    real,
+                    slot,
+                },
+            )
+            .collect();
+        self.digital.make_mut().trace_variables(vars);
+    }
+
+    /// The traced variables' publications since the last accepted point,
+    /// then every one's value at `time`, the point being accepted.
+    pub(crate) fn drain_variable_traces(
+        &mut self,
+        time: f64,
+        points: &mut Vec<crate::xspice::event_trace::EventTracePoint>,
+    ) {
+        if self.digital.has_variable_traces() {
+            self.digital.make_mut().drain_variable_traces(points);
+        }
+        self.digital.variable_snapshot(time, points);
+    }
+
     pub(crate) fn real_event_values(&self) -> impl Iterator<Item = (usize, f64)> + '_ {
         self.real_event_nodes
             .iter()

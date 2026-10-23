@@ -148,12 +148,14 @@ pub(super) mod digital_edges;
 mod drive_edges;
 mod shared;
 mod standalone;
+mod traced;
 use analog_samples::{AnalogModelParticipant, PreparedAnalogStamp};
 pub(crate) use drive_edges::DriveEdgeReport;
 use shared::MixedDigital;
 pub(crate) use shared::checkpoint as coordinator_checkpoint;
 pub(crate) use shared::{CoordinatorEquilibriumImage, MixedDigitalCoordinator, SharedTrialCursor};
 use standalone::StandaloneExecution;
+pub(crate) use traced::HdlVariable;
 
 use std::fmt;
 use std::sync::Arc;
@@ -2207,6 +2209,15 @@ impl MixedSignalHost {
     /// The deck's name for this instance.
     pub(crate) fn instance_name(&self) -> &str {
         &self.instance
+    }
+
+    /// The design this instance runs as its own module compiled it, with
+    /// the names and declarations of its signals before linking renamed
+    /// them.
+    pub(crate) fn digital_plan(
+        &self,
+    ) -> &rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan {
+        self.state.digital.plan()
     }
 
     /// Name the discrete quantities an analog read refused as unknown.

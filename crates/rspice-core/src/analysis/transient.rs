@@ -1531,6 +1531,78 @@ impl TransientResult {
         added_values
     }
 
+    /// Record one value of a trace the run names itself rather than by
+    /// node, an HDL variable `.ESAVE` named, keeping changes only as the
+    /// node recorders do. `trace` is the trace's index once it has one; the
+    /// first value creates it. A second value at the time already written
+    /// replaces the first, so a variable that settles within an instant
+    /// leaves the value it settled on and no zero-width glitch.
+    ///
+    /// Returns how many result values it added.
+    pub(crate) fn record_named_event_value(
+        &mut self,
+        time: Value,
+        name: &str,
+        value: crate::xspice::EventValue,
+        trace: &mut Option<usize>,
+    ) -> usize {
+        fn settle<V: PartialEq + Copy, P>(
+            points: &mut Vec<P>,
+            time: Value,
+            value: V,
+            time_of: impl Fn(&P) -> Value,
+            value_of: impl Fn(&P) -> V,
+            point: impl Fn(Value, V) -> P,
+        ) -> usize {
+            let replaced = points.last().is_some_and(|last| time_of(last) == time);
+            if replaced {
+                points.pop();
+            }
+            if points.last().is_some_and(|last| value_of(last) == value) {
+                return 0;
+            }
+            points.push(point(time, value));
+            if replaced { 0 } else { 2 }
+        }
+        match value {
+            crate::xspice::EventValue::Digital(value) => {
+                let index = *trace.get_or_insert_with(|| {
+                    self.digital_traces.push(DigitalTrace {
+                        node_name: name.to_owned(),
+                        points: Vec::new(),
+                        hdl_time_precision: None,
+                    });
+                    self.digital_traces.len() - 1
+                });
+                settle(
+                    &mut self.digital_traces[index].points,
+                    time,
+                    value,
+                    |point| point.time,
+                    |point| point.value,
+                    |time, value| DigitalTracePoint { time, value },
+                )
+            }
+            crate::xspice::EventValue::Real(value) => {
+                let index = *trace.get_or_insert_with(|| {
+                    self.real_traces.push(RealTrace {
+                        node_name: name.to_owned(),
+                        points: Vec::new(),
+                    });
+                    self.real_traces.len() - 1
+                });
+                settle(
+                    &mut self.real_traces[index].points,
+                    time,
+                    value,
+                    |point| point.time,
+                    |point| point.value,
+                    |time, value| RealTracePoint { time, value },
+                )
+            }
+        }
+    }
+
     /// Get the complete real-valued event trace for a named XSPICE real node.
     pub fn real_trace_named(&self, name: &str) -> Option<&[RealTracePoint]> {
         self.real_traces
