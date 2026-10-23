@@ -506,13 +506,13 @@ pub(super) const VERILOGA_CACHE_LOCK_WAIT_TIMEOUT: Duration = Duration::from_sec
 pub(super) const VERILOGA_CACHE_LOCK_STALE_TIMEOUT: Duration = Duration::from_secs(180);
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_POLL_INTERVAL: Duration = Duration::from_millis(25);
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_DEFAULT_MAX_ENTRIES: usize = 512;
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_DEFAULT_MAX_BYTES: u64 = 512 * 1024 * 1024;
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_MAX_ENTRIES_ENV: &str = "RSPICE_VERILOGA_CACHE_MAX_ENTRIES";
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_MAX_BYTES_ENV: &str = "RSPICE_VERILOGA_CACHE_MAX_BYTES";
 
 /// A refusal raised while resolving, compiling or reading back one Verilog-A
@@ -695,7 +695,7 @@ pub(super) struct VerilogADependencyFingerprint {
     pub(super) content_hash: [u8; 32],
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct VerilogADiskCacheRecord {
     pub(super) version: u32,
@@ -1219,7 +1219,7 @@ fn dependencies_are_fresh_with_limits_and_abort(
     Ok(true)
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn parse_cache_env_usize(name: &str, default: usize) -> usize {
     std::env::var(name)
         .ok()
@@ -1228,7 +1228,7 @@ pub(super) fn parse_cache_env_usize(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn parse_cache_env_u64(name: &str, default: u64) -> u64 {
     std::env::var(name)
         .ok()
@@ -1237,7 +1237,7 @@ pub(super) fn parse_cache_env_u64(name: &str, default: u64) -> u64 {
         .unwrap_or(default)
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn veriloga_cache_limits() -> (usize, u64) {
     (
         parse_cache_env_usize(
@@ -1305,7 +1305,7 @@ pub(super) fn cache_record_path_with_root(
     cache_root.join(format!("{key}.json"))
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 #[derive(Debug, Clone)]
 pub(super) struct VerilogACacheFileInfo {
     path: PathBuf,
@@ -1424,29 +1424,18 @@ pub(super) fn cache_lock_is_stale(lock_path: &Path) -> bool {
     }
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn with_veriloga_cache_disk_lock<T>(
     operation: &str,
     f: impl FnOnce(&Path) -> Result<T, String>,
 ) -> Result<T, String> {
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = f;
-        Err(format!(
-            "{}: the Verilog-A disk cache is unavailable in the browser build",
-            operation
-        ))
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let root = veriloga_cache_root();
-        let _lock =
-            VerilogACacheDiskLock::acquire(&root).map_err(|e| format!("{}: {}", operation, e))?;
-        f(&root)
-    }
+    let root = veriloga_cache_root();
+    let _lock =
+        VerilogACacheDiskLock::acquire(&root).map_err(|e| format!("{}: {}", operation, e))?;
+    f(&root)
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn list_cache_files(cache_root: &Path) -> Result<Vec<VerilogACacheFileInfo>, String> {
     if !cache_root.exists() {
         return Ok(Vec::new());
@@ -1488,7 +1477,7 @@ pub(super) fn list_cache_files(cache_root: &Path) -> Result<Vec<VerilogACacheFil
     Ok(files)
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 enum VerilogACacheRecordReadError {
     Invalid(String),
     ResourceLimit(ResourceLimitError),
@@ -1496,10 +1485,10 @@ enum VerilogACacheRecordReadError {
 }
 
 /// The message an interrupted or oversized cache-record read carries.
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 const CACHE_RECORD_READ: &str = "Verilog-A cache record";
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 fn read_cache_record_with_limits_and_abort(
     path: &Path,
     limits: ResourceLimits,
@@ -1675,7 +1664,7 @@ pub(super) fn persist_model_to_disk_locked(
     )
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn remove_cache_file(path: &Path) {
     if let Err(err) = std::fs::remove_file(path)
         && err.kind() != std::io::ErrorKind::NotFound
@@ -1688,7 +1677,7 @@ pub(super) fn remove_cache_file(path: &Path) {
     }
 }
 
-#[cfg(feature = "veriloga")]
+#[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) fn prune_veriloga_cache_locked(
     cache_root: &Path,
 ) -> Result<VerilogACachePruneReport, String> {
