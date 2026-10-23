@@ -1144,18 +1144,6 @@ const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_TOOLS_SHA256: &str =
 const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_RECORD_COUNT: usize = 5;
 const XYCE_ANALYTIC_INT_FLOOR_CEIL_HISTORICAL_BLAKE3: &str =
     "b1254efb20cfb1641dbbe95daf2712c4b476d449ea13c3fbd01072b747293e33";
-const XYCE_ABM_POW_FAMILY_PREFIX: &str = "netlists/abm_pow/";
-const XYCE_ABM_POW_SOURCE_DIRECTORY_COUNT: usize = 3;
-const XYCE_ABM_POW_SOURCE_DIRECTORY_BLAKE3: &str =
-    "918d2fdc102269c9cf62b83ba5f62f4037ceb53b288ba4772532b9477f84ff39";
-const XYCE_ABM_POW_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
-    "3c3f42c4ef37d6742df6380a85820b438154c6ed9231cc42beb66714bbe2d917";
-const XYCE_ABM_POW_CANDIDATE_BLAKE3: &str =
-    "8f4fa483c6b5862124323c57f642e8763050821be3344c4d5ae036733617c144";
-const XYCE_ABM_POW_CANDIDATE_CONTENT_BLAKE3: &str =
-    "2ffe099c0701a75920d9dd5b26db68736bf85297ce7ae794e673fdbaf93dd7eb";
-const XYCE_ABM_POW_MANIFEST_BLAKE3: &str =
-    "8f4fa483c6b5862124323c57f642e8763050821be3344c4d5ae036733617c144";
 const XYCE_MEASURE_CONT_STEP_NOISE_DERIV_RECORD: &str =
     "netlists/measure_cont/step/derivtestnoise.cir";
 const XYCE_MEASURE_NOISE_STEP_DERIV_RECORD: &str = "netlists/measure_noise/step/derivtestnoise.cir";
@@ -1201,55 +1189,10 @@ const XYCE_BUG667_SCOPED_GLOBAL_WARNING_BLAKE3: &str =
 const XYCE_IC_NODESET_CONFLICT_BLAKE3: &str =
     "1e7597f00478759e105259a832d7aa298c3ffcb3c4d3a8efda4c236504ebed6b";
 
+#[cfg(test)]
 const XYCE_XDM_REPLACEGROUND_FAMILY_PREFIX: &str = "netlists/xdm/hspice/other_parsing/";
-const XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_COUNT: usize = 27;
-const XYCE_XDM_REPLACEGROUND_SOURCE_DIRECTORY_BLAKE3: &str =
-    "e5ace1dae889fc1b11fa88db05c96d21a62d1ae688e9cde5a97373205cc049e6";
-const XYCE_XDM_REPLACEGROUND_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
-    "490b8ebcd683dbdcfb6db7ab97f9b3c26e7e8b6356e1ae0f06d1a80fd89388aa";
-const XYCE_XDM_REPLACEGROUND_PHYSICAL_COUNT: usize = 13;
-const XYCE_XDM_REPLACEGROUND_PHYSICAL_BLAKE3: &str =
-    "5157bce8c21053398ed7c64eb02dd2ce217587a254b6e964c843b100ed7c48ab";
-const XYCE_XDM_REPLACEGROUND_CANDIDATE_COUNT: usize = 4;
-const XYCE_XDM_REPLACEGROUND_CANDIDATE_BLAKE3: &str =
-    "7b9fdd009d18bdc864e24e8c14aa1d7f56ab10b13f32209fb3e85963c798a406";
-const XYCE_XDM_REPLACEGROUND_MANIFEST_COUNT: usize = 13;
-const XYCE_XDM_REPLACEGROUND_MANIFEST_BLAKE3: &str =
-    "d9ef24c15d50f61735c7b136c407c5b0ba026ba3831537da5f088b178f726c75";
+#[cfg(test)]
 const XYCE_REMOVEUNUSED_FAMILY_PREFIX: &str = "netlists/redund_remove/";
-const XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_COUNT: usize = 7;
-const XYCE_REMOVEUNUSED_SOURCE_DIRECTORY_BLAKE3: &str =
-    "8b0bde42d563d5c43d66bd4d1b3b4b111181b7f77030a06b69793a098e3e6f48";
-const XYCE_REMOVEUNUSED_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
-    "3529baaa4c9d889777a7cd2f5d7557d7ac681be90bf1f02a93af8f9503c26fcc";
-const XYCE_REMOVEUNUSED_PHYSICAL_COUNT: usize = 5;
-const XYCE_REMOVEUNUSED_PHYSICAL_BLAKE3: &str =
-    "99ecb313048fdf1faec719760e6ebe979b7220728fdb82ad2d107997315ee8e7";
-const XYCE_REMOVEUNUSED_CANDIDATE_COUNT: usize = 2;
-const XYCE_REMOVEUNUSED_CANDIDATE_BLAKE3: &str =
-    "364ae7c5079dc42ed8516abd4c73da3d0001ecde999c6775fa02b97721b3f5e6";
-const XYCE_REMOVEUNUSED_CANDIDATE_CONTENT_BLAKE3: &str =
-    "a42d2e75acf718215247b712fcd4212efde2cdff5e64b41c1143eceda05be6ad";
-const XYCE_REMOVEUNUSED_MANIFEST_COUNT: usize = 3;
-const XYCE_REMOVEUNUSED_MANIFEST_BLAKE3: &str =
-    "a9410dae3a65ce0cfe54cbe24524596a121a03f0dad5b4c7419d797352823f64";
-const XYCE_ADDRESISTORS_PREPROC_FAMILY_PREFIX: &str = "netlists/preproc_addres/";
-const XYCE_ADDRESISTORS_PREPROC_SOURCE_DIRECTORY_COUNT: usize = 2;
-const XYCE_ADDRESISTORS_PREPROC_SOURCE_DIRECTORY_BLAKE3: &str =
-    "f6ddcc255042ea0fea56657278cf9a6d2860cdaa986449592e71813f3d2c335d";
-const XYCE_ADDRESISTORS_PREPROC_SOURCE_CONTENT_CENSUS_BLAKE3: &str =
-    "b0f1a0ca3eef8151ed9c31563bac68e6994bb1a5554d8c39276555006febae2e";
-const XYCE_ADDRESISTORS_PREPROC_PHYSICAL_COUNT: usize = 2;
-const XYCE_ADDRESISTORS_PREPROC_PHYSICAL_BLAKE3: &str =
-    "f6ddcc255042ea0fea56657278cf9a6d2860cdaa986449592e71813f3d2c335d";
-const XYCE_ADDRESISTORS_PREPROC_MANIFEST_COUNT: usize = 2;
-const XYCE_ADDRESISTORS_PREPROC_MANIFEST_BLAKE3: &str =
-    "db332ee1914f3484bdbfa150096708888c5122d3adca58ac0e7eefb642f9d60e";
-const XYCE_ADDRESISTORS_CANDIDATE_COUNT: usize = 3;
-const XYCE_ADDRESISTORS_CANDIDATE_BLAKE3: &str =
-    "cd3f76a92f623c439dbdedeb952482596a7528b1df04eae958f796a7d9bcd532";
-const XYCE_ADDRESISTORS_CANDIDATE_CONTENT_BLAKE3: &str =
-    "84c0a3e97435d373c8d94b678ab8650b04ad599900e13a58368424847d0c5a5e";
 
 // The four removed XDM wrappers declare abs=1e-5, rel=1e-3, and zero=1e-10,
 // but `verifyXDMtranslation` never forwards those variables for HSPICE.  It
@@ -3892,48 +3835,6 @@ impl XyceXdmReplaceGroundKind {
         }
     }
 
-    fn source_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::GndExclamation => (
-                455,
-                "fb7b552397cff95363430acd8ab5bf0792005cfff40e515ce20b80bb52aab0c2",
-            ),
-            Self::Gnd => (
-                455,
-                "d7fc61d258f0ad0f25535ac05a5e185d72a330aed8d6bdbf004da8b2d9e3a258",
-            ),
-            Self::Ground => (
-                460,
-                "ffb1e9c3d1c313dc78f60f813421115adc320872b5e4d4b9755d32b3d245e983",
-            ),
-            Self::SubcircuitInstantiation => (
-                732,
-                "6ad3d7ff0187cb31c3c663355bf8065d6d190f32cf1d058e6be5041abe3c8c1e",
-            ),
-        }
-    }
-
-    fn hspice_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::GndExclamation => (
-                331,
-                "56873a1f3a09f35f150881bb303522bfd86fc6e76a9f4d6fc8b54877776f5081",
-            ),
-            Self::Gnd => (
-                329,
-                "f57040ab2f79c2a5c9b97d8926b2f5a09aef9e4885ce5e46c993e5b6639725f6",
-            ),
-            Self::Ground => (
-                384,
-                "25e79e5ca36bad4d780f31418c1ee5097eb7c1991feddd673263af27fa783230",
-            ),
-            Self::SubcircuitInstantiation => (
-                581,
-                "247d13e7043ebbf8074f457eb9a08bea8a0d197924eae80ddb02d5eb504293f2",
-            ),
-        }
-    }
-
     fn authored_alias(self) -> &'static str {
         match self {
             Self::GndExclamation => "GND!",
@@ -4005,70 +3906,6 @@ impl XyceAbmPowKind {
             Self::UnaryMinusPrecedence => "netlists/abm_pow/abmpow1.cir",
             Self::NegativeIntegerExponent => "netlists/abm_pow/abmpow2.cir",
             Self::FractionalPrincipalComplex => "netlists/abm_pow/abmpow3.cir",
-        }
-    }
-
-    fn source_relative_path(self) -> &'static str {
-        match self {
-            Self::UnaryMinusPrecedence => "Netlists/ABM_POW/abmpow1.cir",
-            Self::NegativeIntegerExponent => "Netlists/ABM_POW/abmpow2.cir",
-            Self::FractionalPrincipalComplex => "Netlists/ABM_POW/abmpow3.cir",
-        }
-    }
-
-    fn source_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::UnaryMinusPrecedence => (
-                383,
-                "26c41b1da2a996e49a877cfe72fca3a8ba4efc2b9cb9b626e0049977c06a349b",
-            ),
-            Self::NegativeIntegerExponent => (
-                481,
-                "d9a7f907b68ba8ba393572508efb283a08980daa85cd4906dfaa0530c43489ad",
-            ),
-            Self::FractionalPrincipalComplex => (
-                523,
-                "0395a7d3c8f7630e47aa92c7b02d7be840ca2fa258d394d64a7ec9377de12a3b",
-            ),
-        }
-    }
-
-    /// Immutable audit identity of the removed Release 7.10 shell wrapper.
-    /// The artifact is intentionally not vendored; this is SHA-256 over the
-    /// canonical Xyce-Regression-history bytes.
-    fn historical_wrapper_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::UnaryMinusPrecedence => (
-                1317,
-                "82cbb932d8e66ead0da5a5b76706b002edc01b729ca43bd7ae5bf59f0c8a87f9",
-            ),
-            Self::NegativeIntegerExponent => (
-                1317,
-                "e506a1a09bddb9b87e3d18b42d7bc6fd4cf9c4bc436ce3519363d3c977cc5810",
-            ),
-            Self::FractionalPrincipalComplex => (
-                1317,
-                "7e9a7edba0297dff479afd1cbcc7f194f76ca36ea8ea0608580a8915e71f1479",
-            ),
-        }
-    }
-
-    /// Immutable SHA-256 identity of the Perl `.prn.gs` generator invoked by
-    /// the corresponding historical shell wrapper.
-    fn historical_perl_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::UnaryMinusPrecedence => (
-                482,
-                "59773e5ec007455f7284a62006f89a993103dc6a2c045ff3f392b60546e4db23",
-            ),
-            Self::NegativeIntegerExponent => (
-                564,
-                "fbe426be52c542c082cbc56f12f713a6e2b6fe0847e7e7b75360a5db0c96481a",
-            ),
-            Self::FractionalPrincipalComplex => (
-                1647,
-                "ae6134403646e522b17845aed86c58fdef866dd80a4209241ef7a4868a20d699",
-            ),
         }
     }
 
@@ -4480,19 +4317,6 @@ impl XyceRemoveUnusedKind {
         }
     }
 
-    fn source_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::ReplaceGround => (
-                3846,
-                "d717c5eeb4c47ae3ab8e6a857c7af052f9c2233cd223b104042c2616ba55c44b",
-            ),
-            Self::LiteralGroundNames => (
-                1870,
-                "99a6eef49614bf18b8414a3d47435dfaf76b8b528705f2ee9dbcd3c04f8d34b2",
-            ),
-        }
-    }
-
     fn replace_ground(self) -> bool {
         self == Self::ReplaceGround
     }
@@ -4692,31 +4516,6 @@ impl XyceAddResistorsKind {
             Self::NoDcPath => "netlists/preproc_addres/nodcpath.cir",
             Self::OneTerminal => "netlists/preproc_addres/oneterm.cir",
             Self::RedundantBridge => "netlists/redund_remove/gnd_and_redund_addres.cir",
-        }
-    }
-
-    fn source_relative_path(self) -> &'static str {
-        match self {
-            Self::NoDcPath => "Netlists/PREPROC_ADDRES/nodcpath.cir",
-            Self::OneTerminal => "Netlists/PREPROC_ADDRES/oneterm.cir",
-            Self::RedundantBridge => "Netlists/REDUND_REMOVE/gnd_and_redund_addres.cir",
-        }
-    }
-
-    fn source_identity(self) -> (usize, &'static str) {
-        match self {
-            Self::NoDcPath => (
-                3423,
-                "45b3c95d6a31422b19b0db8fdf81ef4dbcde42bf9d0d5418b25cbf0a40fd6a74",
-            ),
-            Self::OneTerminal => (
-                3439,
-                "81be55762a70572c0c5af4cc4f90cc3934069819010d45016dd6afd02f9901ea",
-            ),
-            Self::RedundantBridge => (
-                4131,
-                "1aa527ead8cfa0888d74186ee07881c128141782b4843d330dd672cad54933e6",
-            ),
         }
     }
 

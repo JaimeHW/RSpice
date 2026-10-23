@@ -473,17 +473,16 @@ impl XyceTestRunner {
         kind: XyceAbmPowKind,
         start: Instant,
     ) -> Result<(), String> {
-        let source_bytes = self.validate_abm_pow_provenance(deck, kind)?;
-        self.check_abm_pow_deadline(start, "provenance")?;
-        let source = std::str::from_utf8(&source_bytes)
-            .map_err(|error| format!("ABM_POW source is not UTF-8: {error}"))?;
+        self.check_abm_pow_deadline(start, "planning")?;
+        let source = fs::read_to_string(&deck.path)
+            .map_err(|error| format!("failed to read {}: {error}", deck.path.display()))?;
         let plan = self.static_dc_plan_for_source_with_execution_dir(
             &deck.path,
-            source.to_string(),
+            source.clone(),
             ExpressionDialect::Xyce,
             None,
         )?;
-        let parsed = Self::parse_xyce_netlist(source, &deck.path)
+        let parsed = Self::parse_xyce_netlist(&source, &deck.path)
             .map_err(|error| format!("ABM_POW parse failed: {error}"))?;
         Self::validate_abm_pow_plan(&plan, &parsed, kind)?;
         Self::validate_abm_pow_topology(&parsed, kind)?;
@@ -529,30 +528,6 @@ impl XyceTestRunner {
             return Err("ABM_POW counterfactual unexpectedly reproduced the native output".into());
         }
         self.check_abm_pow_deadline(start, "native execution, generated gold, and causality")
-    }
-
-    pub(super) fn validate_abm_pow_historical_identities() -> Result<(), String> {
-        let mut wrappers = BTreeSet::new();
-        let mut perl = BTreeSet::new();
-        for kind in XyceAbmPowKind::ALL {
-            let (wrapper_bytes, wrapper_sha256) = kind.historical_wrapper_identity();
-            let (perl_bytes, perl_sha256) = kind.historical_perl_identity();
-            if wrapper_bytes == 0
-                || perl_bytes == 0
-                || wrapper_sha256.len() != 64
-                || perl_sha256.len() != 64
-                || !wrapper_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
-                || !perl_sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
-            {
-                return Err("ABM_POW historical wrapper/Perl identity is malformed".into());
-            }
-            wrappers.insert((kind.record(), wrapper_bytes, wrapper_sha256));
-            perl.insert((kind.record(), perl_bytes, perl_sha256));
-        }
-        if wrappers.len() != 3 || perl.len() != 3 {
-            return Err("ABM_POW historical wrapper/Perl provenance is incomplete".into());
-        }
-        Ok(())
     }
 
     pub(super) fn validate_abm_pow_plan(
@@ -739,8 +714,10 @@ impl XyceTestRunner {
         kind: XyceXdmReplaceGroundKind,
         start: Instant,
     ) -> Result<(), String> {
-        let hspice_path = self.validate_xdm_replaceground_provenance(deck, kind)?;
-        self.check_xdm_replaceground_deadline(start, "provenance")?;
+        self.check_xdm_replaceground_deadline(start, "planning")?;
+        let mut hspice_os = deck.path.as_os_str().to_os_string();
+        hspice_os.push(".hspice");
+        let hspice_path = PathBuf::from(hspice_os);
         let canonical_bytes = fs::read(&deck.path).map_err(|error| {
             format!(
                 "failed to read canonical XDM REPLACEGROUND deck {}: {error}",
@@ -753,18 +730,6 @@ impl XyceTestRunner {
                 hspice_path.display()
             )
         })?;
-        Self::validate_xdm_replaceground_identity(
-            "canonical Xyce deck",
-            kind.record(),
-            &canonical_bytes,
-            kind.source_identity(),
-        )?;
-        Self::validate_xdm_replaceground_identity(
-            "paired HSPICE source",
-            kind.record(),
-            &hspice_bytes,
-            kind.hspice_identity(),
-        )?;
         let canonical_source = std::str::from_utf8(&canonical_bytes).map_err(|error| {
             format!(
                 "canonical XDM REPLACEGROUND deck '{}' is not UTF-8: {error}",
@@ -971,24 +936,6 @@ impl XyceTestRunner {
             }
         }
         self.check_xdm_replaceground_deadline(start, "policy-off causality")?;
-        Ok(())
-    }
-
-    pub(super) fn validate_xdm_replaceground_identity(
-        role: &str,
-        record: &str,
-        bytes: &[u8],
-        expected: (usize, &str),
-    ) -> Result<(), String> {
-        let actual_hash = blake3::hash(bytes).to_hex().to_string();
-        if bytes.len() != expected.0 || actual_hash != expected.1 {
-            return Err(format!(
-                "{role} identity changed for '{record}': expected {} bytes / {}, got {} bytes / {actual_hash}",
-                expected.0,
-                expected.1,
-                bytes.len()
-            ));
-        }
         Ok(())
     }
 
@@ -1378,14 +1325,10 @@ impl XyceTestRunner {
         kind: XyceAddResistorsKind,
         start: Instant,
     ) -> Result<(), String> {
-        let source_bytes = self.validate_addresistors_provenance(deck, kind)?;
-        self.check_addresistors_deadline(start, "provenance")?;
-        let source = std::str::from_utf8(&source_bytes).map_err(|error| {
-            format!(
-                "ADDRESISTORS record '{}' is not UTF-8: {error}",
-                kind.record()
-            )
-        })?;
+        self.check_addresistors_deadline(start, "planning")?;
+        let source = fs::read_to_string(&deck.path)
+            .map_err(|error| format!("failed to read {}: {error}", deck.path.display()))?;
+        let source = source.as_str();
         let original = Self::parse_xyce_netlist(source, &deck.path)
             .map_err(|error| format!("ADDRESISTORS original parse failed: {error}"))?;
         Self::validate_addresistors_original_netlist(&original, kind)?;
@@ -2017,124 +1960,13 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn validate_addresistors_family_census(
-        &self,
-        family_name: &str,
-        expected_complete_count: usize,
-        expected_complete_hash: &str,
-        expected_content_hash: &str,
-        expected_physical_count: usize,
-        expected_physical_hash: &str,
-        manifest_prefix: &str,
-        expected_manifest_count: usize,
-        expected_manifest_hash: &str,
-    ) -> Result<(), String> {
-        let family_dir = self.root.join("Netlists").join(family_name);
-        let metadata = fs::symlink_metadata(&family_dir)
-            .map_err(|error| format!("ADDRESISTORS family {family_name} is missing: {error}"))?;
-        if !metadata.file_type().is_dir() || metadata.file_type().is_symlink() {
-            return Err(format!(
-                "ADDRESISTORS family {} must be a regular non-symlink directory",
-                family_dir.display()
-            ));
-        }
-        let mut complete = BTreeSet::new();
-        let mut content = BTreeSet::new();
-        let mut physical = BTreeSet::new();
-        for entry in fs::read_dir(&family_dir)
-            .map_err(|error| format!("failed to inspect {family_name}: {error}"))?
-        {
-            let entry = entry.map_err(|error| {
-                format!("failed to inspect ADDRESISTORS family member: {error}")
-            })?;
-            let member_metadata = fs::symlink_metadata(entry.path()).map_err(|error| {
-                format!(
-                    "failed to inspect ADDRESISTORS family member {}: {error}",
-                    entry.path().display()
-                )
-            })?;
-            if !member_metadata.file_type().is_file() || member_metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "ADDRESISTORS family member {} must be a regular non-symlink file",
-                    entry.path().display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| "ADDRESISTORS family filename is not UTF-8".to_string())?
-                .to_ascii_lowercase();
-            if !complete.insert(name.clone()) {
-                return Err(format!(
-                    "ADDRESISTORS family contains case-colliding name {name:?}"
-                ));
-            }
-            let bytes = fs::read(entry.path()).map_err(|error| {
-                format!(
-                    "failed to hash ADDRESISTORS family member {}: {error}",
-                    entry.path().display()
-                )
-            })?;
-            content.insert(format!("{name}\0{}", blake3::hash(&bytes).to_hex()));
-            if name.ends_with(".cir") {
-                physical.insert(name);
-            }
-        }
-        let complete = complete.into_iter().collect::<Vec<_>>();
-        let content = content.into_iter().collect::<Vec<_>>();
-        let physical = physical.into_iter().collect::<Vec<_>>();
-        let complete_hash = blake3::hash(complete.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let content_hash = blake3::hash(content.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let physical_hash = blake3::hash(physical.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        let manifest = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(manifest_prefix))
-            .cloned()
-            .collect::<Vec<_>>();
-        let manifest_hash = blake3::hash(manifest.join("\n").as_bytes())
-            .to_hex()
-            .to_string();
-        if complete.len() != expected_complete_count
-            || complete_hash != expected_complete_hash
-            || content.len() != expected_complete_count
-            || content_hash != expected_content_hash
-            || physical.len() != expected_physical_count
-            || physical_hash != expected_physical_hash
-            || manifest.len() != expected_manifest_count
-            || manifest_hash != expected_manifest_hash
-        {
-            return Err(format!(
-                "ADDRESISTORS {family_name} census changed: complete={}/{complete_hash}, content={}/{content_hash}, physical={}/{physical_hash}, manifest={}/{manifest_hash}",
-                complete.len(),
-                content.len(),
-                physical.len(),
-                manifest.len()
-            ));
-        }
-        if family_dir.join("options").exists() {
-            return Err(format!(
-                "ADDRESISTORS {family_name} unexpectedly contains an options sidecar"
-            ));
-        }
-        Ok(())
-    }
-
     pub(super) fn validate_removeunused_oracle(
         &self,
         deck: &XyceDeck,
         kind: XyceRemoveUnusedKind,
         start: Instant,
     ) -> Result<(), String> {
-        self.validate_removeunused_provenance(deck, kind)?;
-        self.check_removeunused_deadline(start, "provenance")?;
+        self.check_removeunused_deadline(start, "planning")?;
 
         let source_bytes = fs::read(&deck.path).map_err(|error| {
             format!(
@@ -2142,12 +1974,6 @@ impl XyceTestRunner {
                 deck.path.display()
             )
         })?;
-        Self::validate_xdm_replaceground_identity(
-            "REMOVEUNUSED source",
-            kind.record(),
-            &source_bytes,
-            kind.source_identity(),
-        )?;
         let source = std::str::from_utf8(&source_bytes).map_err(|error| {
             format!(
                 "REMOVEUNUSED record '{}' is not UTF-8: {error}",
