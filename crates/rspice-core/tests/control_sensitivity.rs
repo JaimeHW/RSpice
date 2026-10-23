@@ -1,4 +1,7 @@
 //! SENS control retains physical derivatives through the shared card runner.
+#[path = "common/stop_at_completion.rs"]
+mod stop_at_completion;
+
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
     ControlPresentationKind, SensitivityCardResult,
@@ -6,10 +9,10 @@ use rspice_core::engine::{
 use rspice_core::execution::control::{ControlCommand, ControlScalarEvaluator};
 use rspice_core::execution::{AnalysisKind, AnalysisResultDocument, SignalUnit};
 use rspice_core::{
-    AbortSignal, ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig,
-    SimulationError,
+    ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig, SimulationError,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use stop_at_completion::StopAtCompletion;
 
 const RC: &str = "Sensitivity control\n.param p=1k\nV1 in 0 DC 1 AC 1\nR1 in out {p}\nR2 out 0 1k\nC1 out 0 1n\n";
 
@@ -246,18 +249,6 @@ fn executed_changes_reach_sensitivity_and_preserve_old_datasets() {
         close(r.sensitivities[0].absolute.into(), derivative.into());
     }
     assert_eq!(document(&circuit, 0), original);
-}
-
-struct StopAtCompletion(AtomicBool);
-impl AbortSignal for StopAtCompletion {
-    fn is_aborted(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-    fn observe_progress(&self, fraction: f64) {
-        if fraction == 1.0 {
-            self.0.store(true, Ordering::Relaxed);
-        }
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

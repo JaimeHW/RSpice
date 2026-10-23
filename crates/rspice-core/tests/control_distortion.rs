@@ -1,4 +1,7 @@
 //! DISTO scripts retain every spectrum and use the direct solver's physical units.
+#[path = "common/stop_at_completion.rs"]
+mod stop_at_completion;
+
 use rspice_core::analysis::{DistortionAnalysisResult, DistortionProduct};
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
@@ -7,10 +10,10 @@ use rspice_core::engine::{
 use rspice_core::execution::control::ControlCommand;
 use rspice_core::execution::{AnalysisKind, AnalysisResultDocument, SignalUnit};
 use rspice_core::{
-    AbortSignal, ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig,
-    SimulationError,
+    ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig, SimulationError,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use stop_at_completion::StopAtCompletion;
 
 const DECK: &str = "Distortion control\nV1 out 0 DC .5 DISTOF1 1m 30 DISTOF2 .5m -20\nD1 out 0 DM\n.model DM D(IS=1e-12 N=1 CJO=0 TT=0)\n";
 
@@ -249,18 +252,6 @@ fn qualified_product_expressions_keep_dataset_and_unit_identity() {
     execute(&mut circuit, "op", "").unwrap();
     assert!(execute(&mut circuit, "print", "disto(\"2f1\",v(out))").is_err());
     assert!(execute(&mut circuit, "print", "disto(\"2f1\",disto1.i(V1))").is_ok());
-}
-
-struct StopAtCompletion(AtomicBool);
-impl AbortSignal for StopAtCompletion {
-    fn is_aborted(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-    fn observe_progress(&self, fraction: f64) {
-        if fraction == 1.0 {
-            self.0.store(true, Ordering::Relaxed);
-        }
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

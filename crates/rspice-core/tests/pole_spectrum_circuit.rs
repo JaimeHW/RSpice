@@ -1,7 +1,11 @@
 //! Natural circuit modes do not depend on a transfer port or its gain range.
+#[path = "common/stop_at_completion.rs"]
+mod stop_at_completion;
+
 use rspice_core::analysis::pole_zero::StabilityVerdict;
-use rspice_core::{AbortSignal, Engine, Netlist, SimulationError};
+use rspice_core::{Engine, Netlist, SimulationError};
 use std::sync::atomic::{AtomicBool, Ordering};
+use stop_at_completion::StopAtCompletion;
 
 const LOSSLESS_LC: &str = "L1 a 0 1\nL2 b 0 3\nC1 a 0 3\nC2 b 0 5\nCc a b 4\n";
 
@@ -222,18 +226,6 @@ fn natural_circuit_spectrum_shares_vbic_charge_expansion() {
     }
 }
 
-struct CancelAtCompletion(AtomicBool);
-impl AbortSignal for CancelAtCompletion {
-    fn is_aborted(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-    fn observe_progress(&self, fraction: f64) {
-        if fraction == 1.0 {
-            self.0.store(true, Ordering::Relaxed);
-        }
-    }
-}
-
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn natural_circuit_spectrum_preserves_typed_cancellation_limits_and_admission() {
@@ -244,7 +236,7 @@ fn natural_circuit_spectrum_preserves_typed_cancellation_limits_and_admission() 
         engine.run_pole_spectrum_with_abort(&netlist, &abort),
         Err(SimulationError::Aborted)
     ));
-    let abort = CancelAtCompletion(AtomicBool::new(false));
+    let abort = StopAtCompletion(AtomicBool::new(false));
     assert!(matches!(
         engine.run_pole_spectrum_with_abort(&netlist, &abort),
         Err(SimulationError::Aborted)

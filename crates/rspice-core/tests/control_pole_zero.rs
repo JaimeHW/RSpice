@@ -1,4 +1,7 @@
 //! PZ control uses the direct solver and retains physical complex roots.
+#[path = "common/stop_at_completion.rs"]
+mod stop_at_completion;
+
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
     ControlPresentationKind,
@@ -7,10 +10,10 @@ use rspice_core::execution::control::{ControlCommand, ControlErrorKind, ControlS
 use rspice_core::execution::{AnalysisKind, AnalysisResultDocument, SignalUnit};
 use rspice_core::netlist::expr::{ParamContext, eval_expression_complex};
 use rspice_core::{
-    AbortSignal, ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig,
-    SimulationError,
+    ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig, SimulationError,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use stop_at_completion::StopAtCompletion;
 
 const RLC: &str = "PZ control\nV1 in 0 0\nR1 in mid 1\nL1 mid out 1\nC1 out 0 1\n";
 
@@ -267,18 +270,6 @@ fn root_presentations_keep_angular_units_complex_parts_and_atomic_type_changes()
     };
     assert_eq!(traces[0].y.unit, SignalUnit::Hertz);
     assert_eq!(traces[0].x.unit, SignalUnit::Hertz);
-}
-
-struct StopAtCompletion(AtomicBool);
-impl AbortSignal for StopAtCompletion {
-    fn is_aborted(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-    fn observe_progress(&self, fraction: f64) {
-        if fraction == 1.0 {
-            self.0.store(true, Ordering::Relaxed);
-        }
-    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

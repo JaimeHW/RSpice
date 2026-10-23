@@ -1,10 +1,14 @@
 //! Public pole-zero completion and physical port identity, on both solver paths.
+#[path = "common/stop_at_completion.rs"]
+mod stop_at_completion;
+
 use rspice_core::engine::NodeResolver;
 use rspice_core::execution::{
     AnalysisInstanceId, AnalysisKind, AnalysisResultDocument, ResultPayload, SignalUnit,
 };
 use rspice_core::{AbortSignal, Engine, Netlist, NoAbort, SimulationError};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use stop_at_completion::StopAtCompletion;
 
 const RESISTOR: &str = "Static PZ\nR1 out 0 1k\n.pz out 0 out 0 cur pz\n.end\n";
 const RC: &str = "Dynamic PZ\nR1 out 0 1k\nC1 out 0 1u\n.pz out 0 out 0 cur pz\n.end\n";
@@ -223,18 +227,6 @@ fn pole_zero_unit_metadata_cannot_lie_about_its_version_or_quantity() {
     let mut encoded = original;
     encoded["schemaVersion"] = 11.into();
     assert!(AnalysisResultDocument::from_json(&encoded.to_string()).is_err());
-}
-
-struct StopAtCompletion(AtomicBool);
-impl AbortSignal for StopAtCompletion {
-    fn is_aborted(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-    fn observe_progress(&self, fraction: f64) {
-        if fraction == 1.0 {
-            self.0.store(true, Ordering::Relaxed);
-        }
-    }
 }
 
 fn final_cancel(source: &str) {

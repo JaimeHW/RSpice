@@ -1,4 +1,7 @@
 //! Control STB retains the direct solver's sweep, evidence and determinations.
+#[path = "common/stop_at_completion.rs"]
+mod stop_at_completion;
+
 use rspice_core::analysis::StbConfig;
 use rspice_core::config::ExpressionDialect;
 use rspice_core::engine::{
@@ -12,10 +15,10 @@ use rspice_core::execution::result_document::{ScalarUnavailability, ScalarValue}
 use rspice_core::execution::{AnalysisKind, AnalysisResultDocument, SignalUnit};
 use rspice_core::netlist::expr::ParamContext;
 use rspice_core::{
-    AbortSignal, ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig,
-    SimulationError,
+    ComplexValue, Engine, Netlist, NoAbort, ResourceKind, SimulationConfig, SimulationError,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+use stop_at_completion::StopAtCompletion;
 
 const DECK: &str = "single-pole feedback\nE1 out 0 sense 0 -100\nVprobe out drive 0\nR1 drive sense 1k\nC1 sense 0 159.154943091895n\n";
 const SWEEP: &str = "dec 40 10 1meg probe=Vprobe nyquist=yes";
@@ -284,18 +287,6 @@ fn zero_gain_keeps_undefined_phase_and_unbounded_decibels_out_of_finite_expressi
                 error.to_string().contains("no finite determination"),
                 "{error}"
             );
-        }
-    }
-}
-
-struct StopAtCompletion(AtomicBool);
-impl AbortSignal for StopAtCompletion {
-    fn is_aborted(&self) -> bool {
-        self.0.load(Ordering::Relaxed)
-    }
-    fn observe_progress(&self, fraction: f64) {
-        if fraction == 1.0 {
-            self.0.store(true, Ordering::Relaxed);
         }
     }
 }
