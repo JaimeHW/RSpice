@@ -681,10 +681,11 @@ impl<'expressions, 'budget> ConstantEvaluator<'expressions, 'budget> {
                 ("exp", [value]) => Ok(ConstantValue::Real(
                     self.evaluate_at_depth(*value, next_depth)?.as_f64().exp(),
                 )),
-                ("ln" | "log", [value]) => Ok(ConstantValue::Real(
+                ("ln", [value]) => Ok(ConstantValue::Real(
                     self.evaluate_at_depth(*value, next_depth)?.as_f64().ln(),
                 )),
-                ("log10", [value]) => Ok(ConstantValue::Real(
+                // LRM 2.4 section 4.3.2: `log` is the decimal logarithm.
+                ("log" | "log10", [value]) => Ok(ConstantValue::Real(
                     self.evaluate_at_depth(*value, next_depth)?.as_f64().log10(),
                 )),
                 ("floor", [value]) => Ok(ConstantValue::Real(

@@ -2305,6 +2305,55 @@ endmodule
         }
     }
 
+    /// Verilog-AMS LRM 2.4 section 4.3.2: `log` is the decimal logarithm, in
+    /// the value and each derivative order, on both plans.
+    #[test]
+    fn wasm_log_is_the_decimal_logarithm() {
+        use super::abi::FRAME_RESULT_OFFSET;
+        let (x, l) = (100.0_f64, std::f64::consts::LN_10);
+        for (expression, value, slope) in [
+            ("log(V(p,n))", x.log10(), 1.0 / (x * l)),
+            ("ddx(log(V(p,n)),V(p,n))", 1.0 / (x * l), -1.0 / (x * x * l)),
+            (
+                "ddx(ddx(log(V(p,n)),V(p,n)),V(p,n))",
+                -1.0 / (x * x * l),
+                2.0 / (x * x * x * l),
+            ),
+        ] {
+            let source = format!(
+                "module decimal_log(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+            );
+            for postfix in [false, true] {
+                let mut harness =
+                    FusedKernelHarness::for_source_with_plan(&source, "decimal_log", postfix);
+                harness.reset();
+                let value_export = harness.stamp_value_export(0);
+                let jacobian = harness.jacobian_export(0, 0);
+                harness
+                    .store
+                    .data_mut()
+                    .context_mut()
+                    .begin_stateful_evaluation();
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize, x);
+                harness.write_f64(FusedKernelHarness::VOLTAGES as usize + 8, 0.0);
+                harness.call_assignments();
+                harness.call_prelude();
+                for (export, expected) in [(&value_export, value), (&jacobian, slope)] {
+                    assert_eq!(harness.call(export), 0);
+                    let actual = harness.read_f64(FRAME_RESULT_OFFSET as usize);
+                    assert!(
+                        (actual / expected - 1.0).abs() <= 4.0 * f64::EPSILON,
+                        "{expression}, postfix={postfix}, {export}: expected {expected}, got {actual}"
+                    );
+                }
+                if expression.starts_with("log") {
+                    assert_eq!(harness.call(&value_export), 0);
+                    assert_eq!(harness.read_f64(FRAME_RESULT_OFFSET as usize), 2.0);
+                }
+            }
+        }
+    }
+
     #[test]
     fn wasm_retained_inputs_preserve_values_and_derivatives_in_both_plans() {
         use super::abi::FRAME_RESULT_OFFSET;

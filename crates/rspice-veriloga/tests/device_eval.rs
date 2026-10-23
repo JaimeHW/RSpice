@@ -2046,6 +2046,10 @@ fn nested_ddx_mathematical_values_and_jacobians_follow_analytic_derivatives() {
             [-0.25 / x.powf(1.5), 0.375 / x.powf(2.5)]
         }),
         ("ln(V(p,n))", |x| [-1.0 / x.powi(2), 2.0 / x.powi(3)]),
+        ("log(V(p,n))", |x| {
+            let ln_10 = std::f64::consts::LN_10;
+            [-1.0 / (x.powi(2) * ln_10), 2.0 / (x.powi(3) * ln_10)]
+        }),
         ("pow(V(p,n),3.5)", |x| {
             [8.75 * x.powf(1.5), 13.125 * x.sqrt()]
         }),
@@ -2107,6 +2111,75 @@ fn nested_ddx_mathematical_values_and_jacobians_follow_analytic_derivatives() {
                     "{expression}, V={voltage}: expected {expected}, got {actual}"
                 );
             }
+        }
+    }
+}
+
+/// Verilog-AMS LRM 2.4 section 4.3.2: `log` is the decimal logarithm and `ln`
+/// the natural one. Each row is one place a call can sit: a contribution, a
+/// `ddx` operand, a parameter default the compiler folds, one each instance
+/// evaluates from another parameter, and a parameter array element.
+#[test]
+fn log_is_the_decimal_logarithm_and_ln_the_natural_one() {
+    let ln_10 = std::f64::consts::LN_10;
+    let v = 100.0_f64;
+    assert_eq!(
+        (v.log10(), 1.0e-3_f64.log10(), 1.0e3_f64.log10()),
+        (2.0, -3.0, 3.0)
+    );
+    for (expression, value, slope) in [
+        ("log(V(p,n))", v.log10(), 1.0 / (v * ln_10)),
+        ("ln(V(p,n))", v.ln(), 1.0 / v),
+        (
+            "ddx(log(V(p,n)),V(p,n))",
+            1.0 / (v * ln_10),
+            -1.0 / (v * v * ln_10),
+        ),
+        ("folded", 1.0e3_f64.log10(), 0.0),
+        ("derived", 1.0e-3_f64.log10(), 0.0),
+        ("natural", 1.0e-3_f64.ln(), 0.0),
+        ("decades[0]", 1.0e-3_f64.log10(), 0.0),
+        ("decades[1]", 1.0e4_f64.log10(), 0.0),
+    ] {
+        let fixture = compile(&format!(
+            "module decimal_log(p,n); inout p,n; electrical p,n;
+             parameter real folded=log(1000.0);
+             parameter real x=1.0e-3;
+             parameter real derived=log(x);
+             parameter real natural=ln(x);
+             parameter real decades[0:1]='{{log(x),log(1.0e4)}};
+             analog I(p,n)<+{expression}; endmodule"
+        ));
+        let mut routes = vec![("canonical", fixture.device("X", &[1, 0]))];
+        if cfg!(any(
+            not(feature = "native"),
+            feature = "native-bytecode-contract-tests"
+        )) {
+            routes.push((
+                "bytecode",
+                fixture.try_bytecode_device("X", &[1, 0]).unwrap(),
+            ));
+        }
+        // A logarithm's value is the platform's, bit for bit; the derivative
+        // forms may round their one division differently.
+        let ulps = if expression.starts_with("ddx") {
+            4.0
+        } else {
+            0.0
+        };
+        for (route, mut device) in routes {
+            device.update_voltages(&[v]);
+            let actual = device.try_evaluate().unwrap()[0];
+            assert!(
+                (actual - value).abs() <= ulps * f64::EPSILON * value.abs(),
+                "{route}: {expression}: expected {value}, got {actual}"
+            );
+            let (matrix, _) = collect_stamps(&mut device, &[v]);
+            let actual = matrix.get(&(0, 0)).copied().unwrap_or(0.0);
+            assert!(
+                (actual - slope).abs() <= 4.0 * f64::EPSILON * slope.abs(),
+                "{route}: d/dV {expression}: expected {slope}, got {actual}"
+            );
         }
     }
 }

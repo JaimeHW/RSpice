@@ -152,8 +152,9 @@ pub(super) fn math_call(name: &str) -> Option<MathCall> {
         "abs" => MathCall::Unary(CfgUnaryOp::Abs),
         "sqrt" => MathCall::Unary(CfgUnaryOp::Sqrt),
         "exp" => MathCall::Unary(CfgUnaryOp::Exp),
-        "ln" | "log" => MathCall::Unary(CfgUnaryOp::Ln),
-        "log10" => MathCall::Unary(CfgUnaryOp::Log10),
+        // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
+        "ln" => MathCall::Unary(CfgUnaryOp::Ln),
+        "log" | "log10" => MathCall::Unary(CfgUnaryOp::Log10),
         "floor" => MathCall::Unary(CfgUnaryOp::Floor),
         "ceil" => MathCall::Unary(CfgUnaryOp::Ceil),
         "min" => MathCall::Binary(CfgBinaryOp::Min),

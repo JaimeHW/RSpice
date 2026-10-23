@@ -449,6 +449,25 @@ fn digital_parameter_math_and_time_queries_use_the_declaring_module() {
     assert_eq!(harness.get_real("precision"), 1e-15);
 }
 
+/// Verilog-AMS LRM 2.4 section 4.3.2: in a digital module's constant
+/// expressions too, `log` is the decimal logarithm and `ln` the natural one.
+#[test]
+fn digital_parameter_log_is_the_decimal_logarithm() {
+    let mut harness = Harness::from_source(
+        "module parameters;
+        parameter real X=1.0e-3;
+        parameter real DECADES=log(X);
+        parameter real NATURAL=ln(X);
+        real decades, natural;
+        initial begin decades=DECADES; natural=NATURAL; end
+        endmodule",
+    );
+    expect_finished(harness.start(0));
+    assert_eq!(harness.get_real("decades"), 1.0e-3_f64.log10());
+    assert_eq!(harness.get_real("decades"), -3.0);
+    assert_eq!(harness.get_real("natural"), 1.0e-3_f64.ln());
+}
+
 #[test]
 fn digital_parameter_failures_retain_the_name_and_shadowed_defaults_are_unused() {
     for value in ["inf", "ln(-1.0)", "$realtime"] {

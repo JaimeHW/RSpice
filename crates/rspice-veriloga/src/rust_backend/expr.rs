@@ -1353,7 +1353,9 @@ pub(super) fn pure_intrinsic_value(name: &str, left: &str, right: Option<&str>) 
             return Some(format!("{}.{name}({right})", f64_binary_receiver(left)));
         }
         ("abs" | "fabs", None) => "abs",
-        ("ln" | "log", None) => "ln",
+        ("ln", None) => "ln",
+        // LRM 2.4 section 4.3.2: `log` is the decimal logarithm.
+        ("log", None) => "log10",
         (
             "sqrt" | "exp" | "log10" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
             | "cosh" | "tanh" | "asinh" | "acosh" | "atanh" | "floor" | "ceil",

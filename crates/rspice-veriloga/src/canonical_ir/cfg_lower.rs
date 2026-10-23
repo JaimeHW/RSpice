@@ -4457,8 +4457,9 @@ fn unary_intrinsic(name: &str) -> Option<CfgUnaryOp> {
         "exp" => CfgUnaryOp::Exp,
         "limexp" => CfgUnaryOp::LimExp,
         "__rspice_limited_exp" => CfgUnaryOp::LimitedExp,
-        "ln" | "log" => CfgUnaryOp::Ln,
-        "log10" => CfgUnaryOp::Log10,
+        // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
+        "ln" => CfgUnaryOp::Ln,
+        "log" | "log10" => CfgUnaryOp::Log10,
         "sqrt" => CfgUnaryOp::Sqrt,
         "abs" | "fabs" => CfgUnaryOp::Abs,
         "sin" => CfgUnaryOp::Sin,

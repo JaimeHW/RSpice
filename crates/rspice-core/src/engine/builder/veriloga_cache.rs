@@ -502,7 +502,11 @@ use super::*;
 // node or branch by path (`$cds_get_analog_value`) and whose HIR carries the
 // local nets `analog initial` binds to deck nodes as hidden terminals. A
 // version-171 record refused all three calls.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 172;
+//
+// Version 173 reads `log` as the decimal logarithm (Verilog-AMS LRM 2.4
+// section 4.3.2). The serialized form is unchanged, but a version-172 record
+// carries bytecode, folded defaults and lowered code that took it as `ln`.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 173;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

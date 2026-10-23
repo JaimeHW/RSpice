@@ -4964,13 +4964,14 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 self.append_arithmetic("Mul")
             }
             "exp" => self.lower_unary_chain_derivative(name, args, wrt, UnaryMathOp::Exp),
-            "ln" | "log" => {
+            // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
+            "ln" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower_derivative(args[0], wrt)?;
                 self.lower(args[0])?;
                 self.append_arithmetic("Div")
             }
-            "log10" => self.lower_log10_derivative(name, args, wrt),
+            "log" | "log10" => self.lower_log10_derivative(name, args, wrt),
             "sin" => {
                 self.require_intrinsic_arity(name, args, 1)?;
                 self.lower(args[0])?;
@@ -5205,7 +5206,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                         lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
                     },
                 ),
-            "ln" | "log" => self.lower_unary_function_second_derivative(
+            "ln" => self.lower_unary_function_second_derivative(
                 name,
                 args,
                 first,
@@ -5221,7 +5222,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     lowerer.append_arithmetic("Div")
                 },
             ),
-            "log10" => self.lower_unary_function_second_derivative(
+            "log" | "log10" => self.lower_unary_function_second_derivative(
                 name,
                 args,
                 first,
@@ -7229,8 +7230,9 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                 }
             }
             "exp" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Exp),
-            "ln" | "log" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Log),
-            "log10" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Log10),
+            // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
+            "ln" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Log),
+            "log" | "log10" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Log10),
             "sin" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Sin),
             "cos" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Cos),
             "tan" => self.lower_unary_math_intrinsic(name, args, UnaryMathOp::Tan),

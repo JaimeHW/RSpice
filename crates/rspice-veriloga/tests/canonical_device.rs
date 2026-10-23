@@ -1006,6 +1006,44 @@ for derivative in 0..4 {
     }
 }
 
+/// Verilog-AMS LRM 2.4 section 4.3.2: `log` is the decimal logarithm, in the
+/// generated device's value and in each derivative order it stamps.
+#[test]
+fn generated_log_is_the_decimal_logarithm() {
+    for (order, expression) in [
+        "log(V(p))",
+        "ddx(log(V(p)),V(p))",
+        "ddx(ddx(log(V(p)),V(p)),V(p))",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = format!(
+            "module decimal_log(p,q); inout p,q; electrical p,q; analog I(p)<+{expression}; endmodule"
+        );
+        let (state, stamp, noise) = generated_parts(&source, expression);
+        let main = r#"
+let mut instance=device::state::Instance::new(&[0,1]);
+instance.finalize_parameters().unwrap();
+let (x,l)=(100.0_f64,std::f64::consts::LN_10);
+let expected=[[x.log10(),1.0/(x*l)],[1.0/(x*l),-1.0/(x*x*l)],[-1.0/(x*x*l),2.0/(x*x*x*l)]][ORDER];
+let bias=[x,0.0];
+let ctx=runtime::GeneratedEvalContext {voltages:&bias,temperature:300.0};
+let mut sink=[0.0;12];
+instance.stamp(&ctx,&mut runtime::GeneratedStamper {sink:Some(&mut sink)});
+if ORDER==0 { assert_eq!(sink[9],2.0); }
+for (actual,expected) in [(sink[9],expected[0]),(sink[10],expected[1])] {
+    assert!((actual/expected-1.0).abs()<=4.0*f64::EPSILON,"expected {expected}, got {actual}");
+}
+assert_eq!(sink[11],0.0);
+assert!(!ctx.evaluation_failed());
+"#
+        .replace("ORDER", &order.to_string());
+        run_generated_main(expression, &state, &stamp, &noise, &main)
+            .unwrap_or_else(|report| panic!("{report}"));
+    }
+}
+
 #[test]
 fn generated_mathematical_parameter_defaults_follow_overrides_atomically() {
     let expressions = [
@@ -1014,7 +1052,7 @@ fn generated_mathematical_parameter_defaults_follow_overrides_atomically() {
         ("sqrt(x)", "x.sqrt()"),
         ("exp(x)", "x.exp()"),
         ("ln(x)", "x.ln()"),
-        ("log(x)", "x.ln()"),
+        ("log(x)", "x.log10()"),
         ("log10(x)", "x.log10()"),
         ("sin(x)", "x.sin()"),
         ("cos(x)", "x.cos()"),

@@ -4512,7 +4512,7 @@ fn native_device_executes_transcendental_assignments() {
         device.update_voltages(&[1.5]);
 
         let x = time + 0.25;
-        let expected_gain = (x + 2.0).ln()
+        let expected_gain = (x + 2.0).log10()
             + (x + 10.0).log10()
             + x.sin()
             + x.cos()

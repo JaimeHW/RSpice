@@ -713,8 +713,9 @@ fn math_function(name: &str) -> Option<IrFunction> {
         "sqrt" => IrFunction::Sqrt,
         "exp" => IrFunction::Exp,
         "__rspice_limited_exp" => IrFunction::LimitedExp,
-        "ln" | "log" => IrFunction::Log,
-        "log10" => IrFunction::Log10,
+        // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
+        "ln" => IrFunction::Log,
+        "log" | "log10" => IrFunction::Log10,
         "sin" => IrFunction::Sin,
         "cos" => IrFunction::Cos,
         "tan" => IrFunction::Tan,

@@ -1385,9 +1385,9 @@ impl<'a> ExprConverter<'a> {
             "sqrt" => IrFunction::Sqrt,
             "exp" => IrFunction::Exp,
             "__rspice_limited_exp" => IrFunction::LimitedExp,
+            // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
             "ln" => IrFunction::Log,
-            "log" => IrFunction::Log,
-            "log10" => IrFunction::Log10,
+            "log" | "log10" => IrFunction::Log10,
             "sin" => IrFunction::Sin,
             "cos" => IrFunction::Cos,
             "tan" => IrFunction::Tan,

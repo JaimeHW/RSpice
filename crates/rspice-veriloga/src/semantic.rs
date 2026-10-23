@@ -10160,8 +10160,9 @@ impl SemanticAnalyzer {
                     ("abs", [value]) => Some(ConstantValue::Real(value.as_f64().abs())),
                     ("sqrt", [value]) => Some(ConstantValue::Real(value.as_f64().sqrt())),
                     ("exp", [value]) => Some(ConstantValue::Real(value.as_f64().exp())),
-                    ("ln" | "log", [value]) => Some(ConstantValue::Real(value.as_f64().ln())),
-                    ("log10", [value]) => Some(ConstantValue::Real(value.as_f64().log10())),
+                    // LRM 2.4 section 4.3.2: `ln` is natural, `log` decimal.
+                    ("ln", [value]) => Some(ConstantValue::Real(value.as_f64().ln())),
+                    ("log" | "log10", [value]) => Some(ConstantValue::Real(value.as_f64().log10())),
                     ("floor", [value]) => Some(ConstantValue::Real(value.as_f64().floor())),
                     ("ceil", [value]) => Some(ConstantValue::Real(value.as_f64().ceil())),
                     ("min", [a, b]) => Some(Self::constant_min(*a, *b)),
