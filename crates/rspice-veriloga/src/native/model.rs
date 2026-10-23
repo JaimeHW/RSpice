@@ -284,7 +284,7 @@ impl NativeRequiredStorage {
     }
 }
 
-fn scan_assignment_steps(
+pub(super) fn scan_assignment_steps(
     steps: &[AssignmentStep],
     scan_program: &mut impl FnMut(&BytecodeProgram),
 ) {

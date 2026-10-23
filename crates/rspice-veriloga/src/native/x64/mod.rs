@@ -1315,6 +1315,7 @@ mod tests {
     use crate::jit::cfg_plan_builder::build_default_model_plan_reported;
     use crate::jit::plan_program::{BlockProgram, PlanProgram};
     use crate::native::EvalContext;
+    use crate::native::bench::count_assignment_steps;
     use crate::native::census_filter::shipped_model_filter_allows;
     use crate::native::expr::{
         CanonicalDerivativeAxis, EntryKind, NativeLoweringLimits, NativeOp, NativeProgram,
@@ -1322,6 +1323,7 @@ mod tests {
     };
     use crate::native::model::{
         CodeOffset, NativeCurrentDependencies, NativeEntryOffsets, NativeStampKernelIo,
+        scan_assignment_steps,
     };
     use crate::native::runtime::ExecutableMemory;
     use crate::native::x64::codegen::NativeAssignment;
@@ -6396,35 +6398,6 @@ endmodule
         }
     }
 
-    fn scan_assignment_steps(
-        steps: &[AssignmentStep],
-        scan_program: &mut impl FnMut(&BytecodeProgram),
-    ) {
-        for step in steps {
-            match step {
-                AssignmentStep::Initialization { body, .. } => {
-                    scan_assignment_steps(body, scan_program)
-                }
-                AssignmentStep::Task(task) => {
-                    for program in task.expressions() {
-                        scan_program(program);
-                    }
-                }
-                AssignmentStep::Assign(assignment) => {
-                    scan_program(&assignment.program);
-                }
-                AssignmentStep::AssignIndexed { index, value, .. } => {
-                    scan_program(index);
-                    scan_program(value);
-                }
-                AssignmentStep::Loop { condition, body } => {
-                    scan_program(condition);
-                    scan_assignment_steps(body, scan_program);
-                }
-            }
-        }
-    }
-
     fn eval_context_from_vm_context(context: &mut VmContext) -> EvalContext {
         let integration = context.integration_coefficients();
         let (prelude_slots, prelude_slots_len) = test_prelude_slots();
@@ -6556,20 +6529,6 @@ endmodule
 
     fn update_max_slot(max_slot: &mut Option<usize>, idx: usize) {
         *max_slot = Some(max_slot.map_or(idx, |prev| prev.max(idx)));
-    }
-
-    fn count_assignment_steps(steps: &[AssignmentStep]) -> usize {
-        steps
-            .iter()
-            .map(|step| match step {
-                AssignmentStep::Assign(_)
-                | AssignmentStep::AssignIndexed { .. }
-                | AssignmentStep::Task(_) => 1,
-                AssignmentStep::Loop { body, .. } | AssignmentStep::Initialization { body, .. } => {
-                    1 + count_assignment_steps(body)
-                }
-            })
-            .sum()
     }
 
     fn shipped_cmc_model_path(parts: &[&str]) -> PathBuf {

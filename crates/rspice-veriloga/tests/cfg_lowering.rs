@@ -23,18 +23,14 @@ use std::path::{Path, PathBuf};
 
 mod support;
 
+use support::{artifact, model_root};
+
 fn lower(source: &str) -> CfgModel {
     let artifact = artifact(source);
     match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
         Ok(model) => model,
         Err(diagnostics) => panic!("{}", render(&diagnostics)),
     }
-}
-
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
 }
 
 fn render(diagnostics: &[IrDiagnostic]) -> String {
@@ -1634,14 +1630,4 @@ fn summarize(message: &str) -> String {
         },
         None => trimmed.to_string(),
     }
-}
-
-fn model_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga");
-    assert!(root.exists(), "model tree missing: {}", root.display());
-    root
 }

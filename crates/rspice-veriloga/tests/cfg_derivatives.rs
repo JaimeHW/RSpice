@@ -25,7 +25,11 @@ use rspice_veriloga_runtime::{
     AnalogAnalysisPhase, active_analysis_query_names, analysis_query_mask,
 };
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+mod support;
+
+use support::{artifact, model_root};
 
 /// Relative agreement demanded between the rule and the difference.
 ///
@@ -340,12 +344,6 @@ fn inputs(bias: &BiasPoint) -> CfgEvalInputs<f64> {
         integral_derivatives: Default::default(),
         staged: Vec::new(),
     }
-}
-
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
 }
 
 /// The analysis state an isolated evaluation at a drawn bias actually is: the
@@ -1765,16 +1763,6 @@ fn the_whole_corpus_matches_complex_step_at_drawn_bias_points() {
 "
         )
     );
-}
-
-fn model_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga");
-    assert!(root.exists(), "model tree missing: {}", root.display());
-    root
 }
 
 /// A shipped device is `(source, module)`, and the generated manifest agrees.

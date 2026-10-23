@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 
+use rspice_veriloga::canonical_ir::CanonicalIrArtifact;
 use rspice_veriloga::device::VerilogADevice;
 use rspice_veriloga::{CompiledModel, CompilerOptions, VerilogACompiler};
 
@@ -122,4 +124,36 @@ pub fn optional_bsim4_va_path_from(
     }
 
     fallback.is_file().then(|| fallback.to_path_buf())
+}
+
+/// The repository's Verilog-A model tree.
+pub fn model_root() -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("models")
+        .join("veriloga");
+    assert!(root.exists(), "model tree missing: {}", root.display());
+    root
+}
+
+pub fn artifact(source: &str) -> CanonicalIrArtifact {
+    VerilogACompiler::default()
+        .compile_canonical_ir(source)
+        .expect("fixture must compile to canonical IR")
+}
+
+/// Collect matrix and RHS stamps into maps for inspection.
+pub fn collect_stamps(
+    device: &mut VerilogADevice,
+    voltages: &[f64],
+) -> (HashMap<(usize, usize), f64>, HashMap<usize, f64>) {
+    let mut matrix: HashMap<(usize, usize), f64> = HashMap::new();
+    let mut rhs: HashMap<usize, f64> = HashMap::new();
+    device.stamp(
+        voltages,
+        |row, col, value| *matrix.entry((row, col)).or_insert(0.0) += value,
+        |node, value| *rhs.entry(node).or_insert(0.0) += value,
+    );
+    (matrix, rhs)
 }

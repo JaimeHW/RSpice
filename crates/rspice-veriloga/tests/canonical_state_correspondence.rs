@@ -24,11 +24,9 @@ use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
-}
+mod support;
+
+use support::{artifact, model_root};
 
 fn lower(artifact: &CanonicalIrArtifact) -> CfgModel {
     match CfgModel::from_hir(&artifact.hir, &artifact.mir) {
@@ -571,14 +569,4 @@ fn render_allocation_errors(errors: &[CfgStateAllocationError]) -> String {
         .map(|error| error.to_string())
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn model_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga");
-    assert!(root.exists(), "model tree missing: {}", root.display());
-    root
 }

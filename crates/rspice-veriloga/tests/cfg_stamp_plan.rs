@@ -5,10 +5,13 @@
 //! 931 stamp arguments are literal `multiplicity * 0.0`, and the two-node CMC
 //! resistor spends two of its three stamper calls writing nothing at all.
 
-use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
-use rspice_veriloga::canonical_ir::{AdSeed, CanonicalIrArtifact, differentiate, optimize_cfg};
+use rspice_veriloga::canonical_ir::{AdSeed, differentiate, optimize_cfg};
 use rspice_veriloga::rust_backend::stamp_plan::StampPlan;
+
+mod support;
+
+use support::artifact;
 
 #[test]
 fn a_stamp_writes_only_the_entries_it_can_reach() {
@@ -119,10 +122,4 @@ fn plan(source: &str, name: &str) -> StampPlan {
     plan.remap(&wanted);
     plan.drop_zeros(&optimized);
     plan
-}
-
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
 }

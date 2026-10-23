@@ -13,7 +13,7 @@ use std::collections::HashMap;
 mod bounded_ddx;
 mod support;
 
-use support::DeviceFixture;
+use support::{DeviceFixture, collect_stamps};
 
 fn compile(source: &str) -> DeviceFixture {
     DeviceFixture::compile(source)
@@ -2385,21 +2385,6 @@ endmodule
     let (matrix, _) = collect_stamps(&mut device, &[2.0, 0.0, 7.0]);
     assert_eq!(matrix[&(1, 0)], 7.0, "d(output flow)/d(potential)");
     assert_eq!(matrix[&(1, 2)], 2.0, "d(output flow)/d(branch flow)");
-}
-
-/// Collect matrix and RHS stamps into maps for inspection
-fn collect_stamps(
-    device: &mut VerilogADevice,
-    voltages: &[f64],
-) -> (HashMap<(usize, usize), f64>, HashMap<usize, f64>) {
-    let mut matrix: HashMap<(usize, usize), f64> = HashMap::new();
-    let mut rhs: HashMap<usize, f64> = HashMap::new();
-    device.stamp(
-        voltages,
-        |row, col, value| *matrix.entry((row, col)).or_insert(0.0) += value,
-        |node, value| *rhs.entry(node).or_insert(0.0) += value,
-    );
-    (matrix, rhs)
 }
 
 const RESISTOR: &str = r#"

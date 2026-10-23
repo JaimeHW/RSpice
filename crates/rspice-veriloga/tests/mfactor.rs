@@ -3,29 +3,12 @@
 //! potential rows, probed currents, internal voltages, and $mfactor reads
 //! stay per-copy; series voltage noise averages (PSD / m).
 
-use rspice_veriloga::device::VerilogADevice;
-use std::collections::HashMap;
-
 mod support;
 
-use support::DeviceFixture;
+use support::{DeviceFixture, collect_stamps};
 
 fn compile(source: &str) -> DeviceFixture {
     DeviceFixture::compile(source)
-}
-
-fn collect_stamps(
-    device: &mut VerilogADevice,
-    voltages: &[f64],
-) -> (HashMap<(usize, usize), f64>, HashMap<usize, f64>) {
-    let mut matrix: HashMap<(usize, usize), f64> = HashMap::new();
-    let mut rhs: HashMap<usize, f64> = HashMap::new();
-    device.stamp(
-        voltages,
-        |row, col, value| *matrix.entry((row, col)).or_insert(0.0) += value,
-        |node, value| *rhs.entry(node).or_insert(0.0) += value,
-    );
-    (matrix, rhs)
 }
 
 const RESISTOR: &str = r#"

@@ -577,7 +577,7 @@ fn model_shape(model: &CompiledModel) -> NativeBenchModelShape {
     }
 }
 
-fn count_assignment_steps(steps: &[AssignmentStep]) -> usize {
+pub(super) fn count_assignment_steps(steps: &[AssignmentStep]) -> usize {
     steps
         .iter()
         .map(|step| match step {

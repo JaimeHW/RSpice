@@ -18,8 +18,12 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
 use rspice_veriloga::rust_backend::emit::{EmitBindings, emit_body};
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+mod support;
+
 use std::time::Instant;
+use support::model_root;
 
 /// Real models small enough to run on every build.
 ///
@@ -299,14 +303,4 @@ fn count_regions(regions: &[HirRegion]) -> (usize, usize) {
         }
     }
     (conditionals, assignments)
-}
-
-fn model_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga");
-    assert!(root.exists(), "model tree missing: {}", root.display());
-    root
 }

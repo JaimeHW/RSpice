@@ -35,12 +35,9 @@
 //! The `cfg_mir` census slice over `ekv3_rf` measures the same property on a
 //! shipped model.
 
-use rspice_veriloga::device::VerilogADevice;
-use std::collections::HashMap;
-
 mod support;
 
-use support::DeviceFixture;
+use support::{DeviceFixture, collect_stamps};
 
 /// The definition reaching the contribution.
 const REACHING: f64 = 2.5e-3;
@@ -48,20 +45,6 @@ const REACHING: f64 = 2.5e-3;
 const OVERWRITTEN: f64 = 1.25;
 /// The bias every stamp below is taken at.
 const BIAS: f64 = 4.0;
-
-fn collect_stamps(
-    device: &mut VerilogADevice,
-    voltages: &[f64],
-) -> (HashMap<(usize, usize), f64>, HashMap<usize, f64>) {
-    let mut matrix: HashMap<(usize, usize), f64> = HashMap::new();
-    let mut rhs: HashMap<usize, f64> = HashMap::new();
-    device.stamp(
-        voltages,
-        |row, col, value| *matrix.entry((row, col)).or_insert(0.0) += value,
-        |node, value| *rhs.entry(node).or_insert(0.0) += value,
-    );
-    (matrix, rhs)
-}
 
 /// The shape `ekv3_302.00` has, at its smallest: a scratch variable a
 /// contribution reads and a later statement reassigns.

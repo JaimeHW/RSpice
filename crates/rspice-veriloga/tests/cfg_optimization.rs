@@ -5,13 +5,16 @@
 //! answer is worse than no pass at all. Every fixture here is checked for both,
 //! and the residual is compared before and after at the same bias.
 
-use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::canonical_ir::cfg::{CfgBinaryOp, CfgFunction, CfgUnaryOp, CfgValueKind};
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::{
     AdSeed, CanonicalIrArtifact, CfgEvalInputs, differentiate, evaluate_cfg, optimize_cfg,
 };
 use std::collections::{HashMap, HashSet};
+
+mod support;
+
+use support::artifact;
 
 #[test]
 fn homogeneous_math_derivatives_preserve_extreme_finite_scales() {
@@ -640,12 +643,6 @@ fn inputs(artifact: &CanonicalIrArtifact) -> CfgEvalInputs<f64> {
         integral_derivatives: Default::default(),
         staged: Vec::new(),
     }
-}
-
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
 }
 
 fn fixtures() -> Vec<(&'static str, &'static str)> {

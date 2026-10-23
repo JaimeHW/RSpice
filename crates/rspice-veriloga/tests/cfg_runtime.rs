@@ -35,8 +35,12 @@ use rspice_veriloga::rust_backend::emit::{EmitBindings, RUNTIME_PRELUDE, emit_bo
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+mod support;
+
 use std::process::Command;
 use std::time::Instant;
+use support::model_root;
 
 /// `(module, directory under models/veriloga, file)`.
 type Model = (&'static str, &'static str, &'static str);
@@ -650,14 +654,4 @@ fn scratch(name: &str) -> PathBuf {
     let directory = std::env::temp_dir().join("rspice-cfg-runtime").join(slug);
     std::fs::create_dir_all(&directory).expect("scratch directory is creatable");
     directory
-}
-
-fn model_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga");
-    assert!(root.exists(), "model tree missing: {}", root.display());
-    root
 }

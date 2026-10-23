@@ -21,6 +21,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+mod support;
+
+use support::model_root;
+
 #[test]
 fn generated_indirect_sources_preserve_constraint_precision_and_noise() {
     let (state, stamp, noise) = generated_parts(
@@ -6522,16 +6526,6 @@ fn panic_reason(payload: &Box<dyn std::any::Any + Send>) -> String {
         || "no known payload".to_string(),
         |message| (*message).to_string(),
     )
-}
-
-fn model_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga");
-    assert!(root.exists(), "model tree missing: {}", root.display());
-    root
 }
 
 fn stamp_of(source: &str, name: &str) -> String {

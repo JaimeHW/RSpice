@@ -20,6 +20,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod support;
+
+use support::artifact;
+
 #[test]
 fn emitted_ddx_preserves_domain_errors_through_zero_derivatives_and_predicates() {
     for (expression, valid) in [
@@ -999,12 +1003,6 @@ fn inputs(bias: &Bias) -> CfgEvalInputs<f64> {
         integral_derivatives: Default::default(),
         staged: Vec::new(),
     }
-}
-
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
 }
 
 fn fixtures() -> Vec<(&'static str, &'static str)> {

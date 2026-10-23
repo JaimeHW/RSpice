@@ -10,7 +10,6 @@
 //! quietly put everything in the last stage would satisfy the equivalence test
 //! perfectly and be worth nothing.
 
-use rspice_veriloga::VerilogACompiler;
 use rspice_veriloga::canonical_ir::cfg::CfgValueKind;
 use rspice_veriloga::canonical_ir::cfg_lower::CfgModel;
 use rspice_veriloga::canonical_ir::schedule::{
@@ -21,6 +20,10 @@ use rspice_veriloga::canonical_ir::{
     schedule_cfg,
 };
 use std::collections::{HashMap, HashSet};
+
+mod support;
+
+use support::artifact;
 
 #[test]
 fn the_stages_together_compute_what_the_whole_body_computes() {
@@ -585,12 +588,6 @@ fn inputs(staged: &[f64]) -> CfgEvalInputs<f64> {
         integral_derivatives: Default::default(),
         staged: staged.to_vec(),
     }
-}
-
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
 }
 
 fn fixtures() -> Vec<(&'static str, &'static str)> {

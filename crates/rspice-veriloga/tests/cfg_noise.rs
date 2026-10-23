@@ -17,18 +17,15 @@ use rspice_veriloga::canonical_ir::{
 use rspice_veriloga::rust_backend::discover_veriloga_sources;
 use rspice_veriloga::{CompilerOptions, VerilogACompiler};
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+
+mod support;
+
+use support::{artifact, model_root};
 
 /// Relative agreement demanded of a hand-computed power.
 const TOLERANCE: f64 = 1.0e-12;
 
 const TEMPERATURE: f64 = 300.15;
-
-fn artifact(source: &str) -> CanonicalIrArtifact {
-    VerilogACompiler::default()
-        .compile_canonical_ir(source)
-        .expect("fixture must compile to canonical IR")
-}
 
 fn lower(source: &str) -> (CanonicalIrArtifact, CfgModel) {
     let artifact = artifact(source);
@@ -473,14 +470,4 @@ fn the_whole_corpus_reports_which_noise_plans_the_body_reproduces() {
     );
     assert_eq!(refused, 0, "a model's body disagrees with its noise plan");
     assert!(carried > 0, "no model reproduced its noise plan");
-}
-
-fn model_root() -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("models")
-        .join("veriloga");
-    assert!(root.exists(), "model tree missing: {}", root.display());
-    root
 }
