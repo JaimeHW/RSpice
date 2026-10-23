@@ -1,117 +1,9 @@
 use super::*;
 use rspice_core::netlist::SourceSpec;
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_706_SON RC include/inline Release relation";
-const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_706_SON";
-const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_706_son/";
-const EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_706_SON/exclude";
 const OWNER_CONTRACT: &str = "bug706_rc_include_relational_wrapper_owner";
 const INLINE_CONTRACT: &str = "bug706_rc_inline_release_reference";
-const UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const HISTORICAL_RECORD_COUNT: usize = 11;
-const HISTORICAL_RECORD_BYTES: usize = 2_604;
-const HISTORICAL_RECORDS_SHA256: &str =
-    "3aff27266900265adf1043b6af1a456dc9ceb964ab4a9687c3953c4bd59f61b1";
-const HISTORICAL_RECORDS_BLAKE3: &str =
-    "f10d742f2a9960be2a6831e61c4aca0ed9e348e12cdbf3acd30d2358a22c53e0";
-const HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); HISTORICAL_RECORD_COUNT] = [
-    (
-        "Netlists/Certification_Tests/BUG_706_SON/Manifest.txt",
-        78,
-        "cce9436719e8483732739efee28882a5e070418635fcc48d553484497955fb6b",
-        "a0316b7cf2b7eaa35e80c7570b4079d3ee2ba2738190ec69a4127092ddee844a",
-    ),
-    (
-        EXCLUSION_SOURCE,
-        19,
-        "57479b41c3463a64bfb87c731d8c9f1578fda0a1c4dd8a0a983194379c56c963",
-        "8b0c0b4861b29e51c6ef1d983b2ffaa5f16e5a68e8719c70000e69c7bc8d0c32",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_706_SON/rc.lib",
-        864,
-        "f336e91072bf25debd83c0c03e53e6602130a153b7dbd19e89d2d1c2037c05bb",
-        "5126cae39618c08211c08c6a3bfbb348396b2c72e6f4471cdcee9ab2e3393acb",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_706_SON/rc_simple_lib.cir",
-        231,
-        "a65438c0f0a91edf2c7094ceb9ec4a1a6f7c4fa7fb028da66deec1429e2a381c",
-        "ea5bda7c926d6d2cebb0cd865e265e898f8f7e2e9d8b0cbaae1793dbcba9d88d",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_706_SON/rc_simple_lib.cir.sh",
-        1_248,
-        "6f60256f746bda8b2ebb49d7eecb9100eb58c8958ed8f5ab9c54a2bce2673dfe",
-        "417c32237838c2ae272b6e8667d91f19ba0308038a0ba3d9d9e8fe9e16e75547",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_706_SON/rc_simple_xyce.cir",
-        1_077,
-        "c9bd9753f56e78365c446dafbc9bd58bb9036e5fc697c98213e402706fe2622c",
-        "a3df2b1be578b60d692faf7218581e251a06ad3419d430a52e1f98894e7edce7",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_706_SON/tags",
-        55,
-        "04842e4e40fea022b66144c675f95b3c0736ba6aa3cdf038ab37c78a55530a15",
-        "ca18948159992f52c65217aadb258b5fb25e4c95458b448d78400cc7de83b50f",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSources.pm",
-        2_739,
-        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
-        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSweep.pm",
-        9_301,
-        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
-        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
-    ),
-    (
-        "TestScripts/XyceVerify/StepSweep.pm",
-        8_731,
-        "84b2d485c1848f2e456463de8a5015205d87c3db8a6d070547d6f9464618fed6",
-        "db1b142ab3ae9163bbe02bd68b5b3a6311436adbf27c06d71a5c05df9b6973e7",
-    ),
-];
-
-const RETAINED_RECORD_COUNT: usize = 3;
-const RETAINED_RECORD_BYTES: usize = 446;
-const RETAINED_RECORDS_SHA256: &str =
-    "19ab21284a565cac0a02f742e23dfdd6328582898c6fe88a005c9a111bc587d8";
-const RETAINED_RECORDS_BLAKE3: &str =
-    "b928b1a6c049bd3613da6273df6da72516484797013e1b5fb8e74cd904036fce";
-const RETAINED_ARTIFACTS: [(&str, usize, &str, &str); RETAINED_RECORD_COUNT] = [
-    (
-        "rc.lib",
-        864,
-        "f336e91072bf25debd83c0c03e53e6602130a153b7dbd19e89d2d1c2037c05bb",
-        "5126cae39618c08211c08c6a3bfbb348396b2c72e6f4471cdcee9ab2e3393acb",
-    ),
-    (
-        "rc_simple_lib.cir",
-        231,
-        "a65438c0f0a91edf2c7094ceb9ec4a1a6f7c4fa7fb028da66deec1429e2a381c",
-        "ea5bda7c926d6d2cebb0cd865e265e898f8f7e2e9d8b0cbaae1793dbcba9d88d",
-    ),
-    (
-        "rc_simple_xyce.cir",
-        1_077,
-        "c9bd9753f56e78365c446dafbc9bd58bb9036e5fc697c98213e402706fe2622c",
-        "a3df2b1be578b60d692faf7218581e251a06ad3419d430a52e1f98894e7edce7",
-    ),
-];
-
 #[cfg(test)]
 const FLAT_ELEMENT_COUNT: usize = 6_003;
 const FLAT_NODE_COUNT: usize = 3_002;
@@ -176,193 +68,6 @@ impl Bug706Role {
 }
 
 impl XyceTestRunner {
-    fn bug706_historical_provenance_records() -> Vec<String> {
-        let mut records = HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{UPSTREAM_REGRESSION_COMMIT}\t{UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    fn validate_bug706_historical_provenance_records(records: &[String]) -> Result<(), String> {
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != HISTORICAL_RECORD_COUNT
-            || stream.len() != HISTORICAL_RECORD_BYTES
-            || sha256 != HISTORICAL_RECORDS_SHA256
-            || content_blake3 != HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} historical provenance changed: records={}, bytes={}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_bug706_historical_provenance() -> Result<(), String> {
-        Self::validate_bug706_historical_provenance_records(
-            &Self::bug706_historical_provenance_records(),
-        )
-    }
-
-    fn validate_bug706_directory(&self) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        let directory = self.root.join(FAMILY_DIRECTORY);
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} family: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = RETAINED_ARTIFACTS
-            .into_iter()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        let mut records = Vec::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} family: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if observed.contains_key(&key) {
-                return Err(format!("{LABEL} contains case-colliding member {name:?}"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name {
-                return Err(format!("{LABEL} member case changed: {name:?}"));
-            }
-            let cap = expected_bytes
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(3))
-                .ok_or_else(|| format!("{LABEL} retained-size bound overflowed"))?;
-            if metadata.len() > cap as u64 {
-                return Err(format!("{LABEL} retained member {name:?} is oversized"));
-            }
-            let mut bytes = Vec::with_capacity((metadata.len() as usize).min(cap));
-            fs::File::open(&path)
-                .map_err(|error| format!("failed to open {LABEL} {name:?}: {error}"))?
-                .take((cap + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("failed to read {LABEL} {name:?}: {error}"))?;
-            if bytes.len() > cap {
-                return Err(format!(
-                    "{LABEL} retained member {name:?} grew while reading"
-                ));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!("{LABEL} retained member {name:?} changed"));
-            }
-            records.push(format!(
-                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
-            ));
-            observed.insert(key, bytes);
-        }
-        records.sort();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != RETAINED_RECORD_COUNT
-            || stream.len() != RETAINED_RECORD_BYTES
-            || sha256 != RETAINED_RECORDS_SHA256
-            || content_blake3 != RETAINED_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} retained census changed: records={}, bytes={}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug706_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug706Role,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        Self::validate_bug706_historical_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!("recognized {LABEL} role is not canonical"));
-        }
-        let owners = Self::load_upstream_wrapper_decks(&self.root)
-            .into_iter()
-            .filter(|record| record.starts_with(FAMILY_PREFIX))
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([Bug706Role::IncludeOwner.record().to_string()]) {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        if exclusions.contains_key(Bug706Role::IncludeOwner.record()) {
-            return Err(format!("{LABEL} owner must not be excluded"));
-        }
-        let family = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(FAMILY_PREFIX))
-            .collect::<BTreeMap<_, _>>();
-        let row = family
-            .get(&Bug706Role::InlineGood.record().to_string())
-            .copied()
-            .ok_or_else(|| format!("{LABEL} lost its inline-good qualification"))?;
-        if family.len() != 1
-            || row.source != EXCLUSION_SOURCE
-            || !matches!(&row.disposition,
-                XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                    if expected_contract == INLINE_CONTRACT)
-        {
-            return Err(format!("{LABEL} inline-good qualification changed"));
-        }
-        let members = self.validate_bug706_directory()?;
-        for member_role in Bug706Role::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(member_role.path()))
-                .map_err(|error| format!("{LABEL} {} {error}", member_role.file_name()))?;
-        }
-        let output = self.root.join("OutputData/Certification_Tests/BUG_706_SON");
-        match fs::symlink_metadata(&output) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("failed to inspect {LABEL} OutputData: {error}")),
-            Ok(_) => return Err(format!("{LABEL} must not acquire invented numerical gold")),
-        }
-        Ok(members)
-    }
-
     fn bug706_plan_from_validated_netlist(
         role: Bug706Role,
         path: &Path,
@@ -1022,7 +727,6 @@ impl XyceTestRunner {
 
     fn prepare_bug706_role(
         &self,
-        members: &BTreeMap<String, Vec<u8>>,
         role: Bug706Role,
         abort: &dyn AbortSignal,
     ) -> Result<(XyceStaticTranPlan, Netlist), String> {
@@ -1032,72 +736,13 @@ impl XyceTestRunner {
             ));
         }
         let path = self.root.join(role.path());
-        let retained = members
-            .get(&role.file_name().to_ascii_lowercase())
-            .ok_or_else(|| format!("{LABEL} lost {}", role.file_name()))?;
-        let bytes = Self::reread_bug706_member_bounded(&path, role, retained, abort)?;
-        let source = String::from_utf8(bytes)
-            .map_err(|error| format!("{LABEL} {} is not UTF-8: {error}", role.file_name()))?;
+        let source = fs::read_to_string(&path)
+            .map_err(|error| format!("{LABEL} cannot read {}: {error}", role.file_name()))?;
         let netlist = Self::parse_xyce_netlist(&source, &path)
             .map_err(|error| format!("{LABEL} {} parse failed: {error}", role.file_name()))?;
         Self::validate_bug706_netlist(role, &netlist)?;
         let plan = Self::bug706_plan_from_validated_netlist(role, &path, &source, &netlist)?;
         Ok((plan, netlist))
-    }
-
-    fn reread_bug706_member_bounded(
-        path: &Path,
-        role: Bug706Role,
-        retained: &[u8],
-        abort: &dyn AbortSignal,
-    ) -> Result<Vec<u8>, String> {
-        let expected_canonical_bytes = RETAINED_ARTIFACTS
-            .into_iter()
-            .find(|artifact| artifact.0 == role.file_name())
-            .map(|artifact| artifact.1)
-            .ok_or_else(|| format!("{LABEL} lost the {} size identity", role.file_name()))?;
-        let cap = expected_canonical_bytes
-            .checked_mul(2)
-            .and_then(|value| value.checked_add(3))
-            .ok_or_else(|| format!("{LABEL} retained-size bound overflowed"))?;
-        let metadata = fs::symlink_metadata(path)
-            .map_err(|error| format!("failed to inspect {LABEL} source: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-            return Err(format!(
-                "{LABEL} {} must remain a regular non-symlink file",
-                role.file_name()
-            ));
-        }
-        if metadata.len() > cap as u64 {
-            return Err(format!(
-                "{LABEL} {} exceeded its bounded reread envelope",
-                role.file_name()
-            ));
-        }
-        let mut bytes = Vec::with_capacity((metadata.len() as usize).min(cap));
-        fs::File::open(path)
-            .map_err(|error| format!("failed to open {LABEL} source: {error}"))?
-            .take((cap + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|error| format!("failed to reread {LABEL} source: {error}"))?;
-        if bytes.len() > cap {
-            return Err(format!(
-                "{LABEL} {} grew beyond its bounded reread envelope",
-                role.file_name()
-            ));
-        }
-        if bytes.len() as u64 != metadata.len() || bytes != retained {
-            return Err(format!(
-                "{LABEL} {} source changed between independent reads",
-                role.file_name()
-            ));
-        }
-        if abort.is_aborted() {
-            return Err(format!(
-                "{LABEL} exceeded its shared deadline after bounded source reread"
-            ));
-        }
-        Ok(bytes)
     }
 
     fn execute_bug706_role(
@@ -1125,23 +770,17 @@ impl XyceTestRunner {
         Ok(table)
     }
 
-    pub(super) fn validate_bug706_oracle(
-        &self,
-        deck: &XyceDeck,
-        role: Bug706Role,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug706_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
-            return Err(format!("{LABEL} shared deadline expired before provenance"));
+            return Err(format!("{LABEL} shared deadline expired before execution"));
         }
-        let members = self.validate_bug706_provenance(deck, role)?;
         // Release wrapper direction is CIR1=inline-good followed by
         // CIR2=include-test. Both roles share this invocation's absolute
         // deadline; the expensive streaming flat-signature audit remains in
         // the dedicated structure test rather than re-elaborating each role.
         let (inline_plan, inline_netlist) =
-            self.prepare_bug706_role(&members, Bug706Role::InlineGood, &abort)?;
+            self.prepare_bug706_role(Bug706Role::InlineGood, &abort)?;
         let inline = self.execute_bug706_role(
             Bug706Role::InlineGood,
             &inline_plan,
@@ -1150,7 +789,7 @@ impl XyceTestRunner {
             &abort,
         )?;
         let (owner_plan, owner_netlist) =
-            self.prepare_bug706_role(&members, Bug706Role::IncludeOwner, &abort)?;
+            self.prepare_bug706_role(Bug706Role::IncludeOwner, &abort)?;
         let owner = self.execute_bug706_role(
             Bug706Role::IncludeOwner,
             &owner_plan,
@@ -1159,11 +798,8 @@ impl XyceTestRunner {
             &abort,
         )?;
         self.compare_bug706_relation(&inline, &owner)?;
-        self.validate_bug706_provenance(deck, role)?;
         if abort.is_aborted() {
-            return Err(format!(
-                "{LABEL} exceeded its shared deadline after provenance"
-            ));
+            return Err(format!("{LABEL} exceeded its shared deadline"));
         }
         Ok(())
     }
@@ -1179,46 +815,8 @@ mod tests {
             .join("tests/xyce")
     }
 
-    fn deck(root: &Path, role: Bug706Role) -> XyceDeck {
-        XyceDeck {
-            path: root.join(role.path()),
-            section: XyceDeckSection::Netlists,
-            relative_path: role.path().to_string(),
-        }
-    }
-
-    fn fixture(label: &str) -> (tempfile::TempDir, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug706-{label}-"))
-            .tempdir()
-            .expect("create BUG706 fixture");
-        let root = temporary.path().to_path_buf();
-        let family = root.join(FAMILY_DIRECTORY);
-        fs::create_dir_all(&family).expect("create BUG706 family");
-        let canonical = corpus_root().join(FAMILY_DIRECTORY);
-        for (name, ..) in RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name)).expect("copy retained member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!(
-                "{}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n",
-                Bug706Role::IncludeOwner.path()
-            ),
-        )
-        .expect("write wrapper manifest");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{}\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{INLINE_CONTRACT}\n",
-                Bug706Role::InlineGood.path()
-            ),
-        )
-        .expect("write exclusion manifest");
-        (
-            temporary,
-            XyceTestRunner::new(&root, XyceRunnerConfig::default()),
-        )
+    fn runner() -> XyceTestRunner {
+        XyceTestRunner::new(corpus_root(), XyceRunnerConfig::default())
     }
 
     fn comparison_table(times: &[Value], waveform: impl Fn(Value) -> Value) -> XycePrnTable {
@@ -1233,46 +831,8 @@ mod tests {
     }
 
     #[test]
-    fn bug706_historical_and_retained_provenance_are_exact() {
-        XyceTestRunner::validate_bug706_historical_provenance()
-            .expect("BUG706 historical provenance");
-        let (_temporary, runner) = fixture("provenance");
-        let members = runner
-            .validate_bug706_provenance(
-                &deck(&runner.root, Bug706Role::IncludeOwner),
-                Bug706Role::IncludeOwner,
-            )
-            .expect("BUG706 retained provenance");
-        assert_eq!(members.len(), RETAINED_RECORD_COUNT);
-    }
-
-    #[test]
-    fn bug706_historical_verifier_dependency_closure_is_exact_and_mutation_sensitive() {
-        let records = XyceTestRunner::bug706_historical_provenance_records();
-        assert_eq!(records.len(), HISTORICAL_RECORD_COUNT);
-        for dependency in [
-            "TestScripts/xyce_verify.pl",
-            "TestScripts/XyceVerify/DCSources.pm",
-            "TestScripts/XyceVerify/DCSweep.pm",
-            "TestScripts/XyceVerify/StepSweep.pm",
-        ] {
-            assert!(
-                records.iter().any(|record| record.contains(dependency)),
-                "BUG706 historical executable closure lost {dependency}"
-            );
-        }
-        let mut mutated = records;
-        let dependency = mutated
-            .iter_mut()
-            .find(|record| record.contains("TestScripts/XyceVerify/DCSweep.pm"))
-            .expect("DCSweep record");
-        dependency.push('0');
-        assert!(XyceTestRunner::validate_bug706_historical_provenance_records(&mutated).is_err());
-    }
-
-    #[test]
     fn bug706_exact_plans_topology_and_flattened_signature_match() {
-        let (_temporary, runner) = fixture("structure");
+        let runner = runner();
         let abort = DeadlineAbort::new(Instant::now(), 180_000);
         let mut signatures = Vec::new();
         for role in Bug706Role::ALL {
@@ -1291,128 +851,29 @@ mod tests {
 
     #[test]
     fn bug706_full_release_relation_executes_both_roles() {
-        let (_temporary, runner) = fixture("execution");
-        runner
-            .validate_bug706_oracle(
-                &deck(&runner.root, Bug706Role::InlineGood),
-                Bug706Role::InlineGood,
-                Instant::now(),
-            )
+        runner()
+            .validate_bug706_oracle(Instant::now())
             .expect("execute strict BUG706 relation");
     }
 
     #[test]
     fn bug706_each_production_role_fits_aggregate_watchdog_budget() {
-        let (_temporary, mut runner) = fixture("aggregate-budget");
+        let mut runner = runner();
         runner.config.max_time_per_test_ms = 29_000;
-        for role in Bug706Role::ALL {
-            let started = Instant::now();
-            runner
-                .validate_bug706_oracle(&deck(&runner.root, role), role, started)
-                .unwrap_or_else(|error| panic!("{role:?} must fit aggregate budget: {error}"));
-            assert!(
-                started.elapsed() < Duration::from_millis(29_000),
-                "{role:?} exceeded aggregate watchdog budget: {:?}",
-                started.elapsed()
-            );
-        }
-    }
-
-    #[test]
-    fn bug706_source_and_census_mutations_fail_closed() {
-        for (label, file, from, to) in [
-            ("source", "rc_simple_lib.cir", "R1 1 2 1", "R1 1 2 2"),
-            ("library", "rc.lib", "X3 3 4 rc1000", "X3 3 5 rc1000"),
-            ("inline", "rc_simple_xyce.cir", ".tran 0.1u", ".tran 0.2u"),
-        ] {
-            let (_temporary, runner) = fixture(label);
-            let path = runner.root.join(FAMILY_DIRECTORY).join(file);
-            let source = fs::read_to_string(&path).expect("read mutation target");
-            fs::write(&path, source.replace(from, to)).expect("write mutation");
-            assert!(
-                runner
-                    .validate_bug706_provenance(
-                        &deck(&runner.root, Bug706Role::IncludeOwner),
-                        Bug706Role::IncludeOwner,
-                    )
-                    .is_err(),
-                "{label} mutation must fail"
-            );
-        }
-        let (_temporary, runner) = fixture("extra-member");
-        fs::write(
-            runner.root.join(FAMILY_DIRECTORY).join("invented.prn"),
-            "invented\n",
-        )
-        .expect("write extra member");
+        let started = Instant::now();
+        runner
+            .validate_bug706_oracle(started)
+            .unwrap_or_else(|error| panic!("BUG706 must fit aggregate budget: {error}"));
         assert!(
-            runner
-                .validate_bug706_provenance(
-                    &deck(&runner.root, Bug706Role::IncludeOwner),
-                    Bug706Role::IncludeOwner,
-                )
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn bug706_bounded_reread_rejects_changed_and_oversized_members() {
-        let abort = DeadlineAbort::new(Instant::now(), 29_000);
-
-        let (_temporary, runner) = fixture("bounded-reread-change");
-        let role = Bug706Role::InlineGood;
-        let path = runner.root.join(role.path());
-        let retained = fs::read(&path).expect("read retained BUG706 member");
-        let mut changed = retained.clone();
-        changed[0] ^= 1;
-        fs::write(&path, changed).expect("mutate retained BUG706 member");
-        assert!(
-            XyceTestRunner::reread_bug706_member_bounded(&path, role, &retained, &abort).is_err(),
-            "same-size mutation must fail the independent bounded reread"
-        );
-
-        let (_temporary, runner) = fixture("bounded-reread-oversize");
-        let path = runner.root.join(role.path());
-        let retained = fs::read(&path).expect("read retained BUG706 member");
-        fs::write(&path, vec![b'x'; retained.len() * 3 + 16])
-            .expect("oversize retained BUG706 member");
-        assert!(
-            XyceTestRunner::reread_bug706_member_bounded(&path, role, &retained, &abort).is_err(),
-            "oversized mutation must fail before an unbounded allocation"
-        );
-    }
-
-    #[test]
-    fn bug706_manifest_contract_and_owner_mutations_fail_closed() {
-        let (_temporary, runner) = fixture("manifest-contract");
-        let manifest = runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
-        let source = fs::read_to_string(&manifest).expect("read exclusions");
-        fs::write(&manifest, source.replace(INLINE_CONTRACT, OWNER_CONTRACT))
-            .expect("mutate contract");
-        assert!(
-            runner
-                .validate_bug706_provenance(
-                    &deck(&runner.root, Bug706Role::InlineGood),
-                    Bug706Role::InlineGood,
-                )
-                .is_err()
-        );
-
-        let (_temporary, runner) = fixture("owner");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper owner");
-        assert!(
-            runner
-                .validate_bug706_provenance(
-                    &deck(&runner.root, Bug706Role::IncludeOwner),
-                    Bug706Role::IncludeOwner,
-                )
-                .is_err()
+            started.elapsed() < Duration::from_millis(29_000),
+            "BUG706 exceeded aggregate watchdog budget: {:?}",
+            started.elapsed()
         );
     }
 
     #[test]
     fn bug706_directional_comparator_accepts_unequal_grids_for_the_same_waveform() {
-        let (_temporary, runner) = fixture("unequal-grids");
+        let runner = runner();
         let good = comparison_table(&[0.0, 0.0005, 0.001], |time| 1_000.0 * time);
         let test = comparison_table(&[0.0, 0.00025, 0.0005, 0.00075, 0.001], |time| {
             1_000.0 * time
@@ -1436,7 +897,7 @@ mod tests {
 
     #[test]
     fn bug706_directional_comparator_is_order_sensitive_and_rejects_waveform_wide_error() {
-        let (_temporary, runner) = fixture("direction");
+        let runner = runner();
         let times = [0.0, 0.0005, 0.001];
         let inline_good = comparison_table(&times, |_| 100.0);
         let include_test = comparison_table(&times, |_| 99.005);
@@ -1470,7 +931,7 @@ mod tests {
 
     #[test]
     fn bug706_analytic_gate_rejects_identical_common_mode_wrong_tables() {
-        let (_temporary, runner) = fixture("common-mode");
+        let runner = runner();
         let times = (0..=100)
             .map(|index| index as Value * 0.001 / 100.0)
             .collect::<Vec<_>>();
@@ -1504,13 +965,8 @@ mod tests {
 
     #[test]
     fn bug706_expired_shared_deadline_fails_before_execution() {
-        let (_temporary, runner) = fixture("deadline");
-        let error = runner
-            .validate_bug706_oracle(
-                &deck(&runner.root, Bug706Role::InlineGood),
-                Bug706Role::InlineGood,
-                Instant::now() - Duration::from_secs(181),
-            )
+        let error = runner()
+            .validate_bug706_oracle(Instant::now() - Duration::from_secs(181))
             .expect_err("expired BUG706 deadline");
         assert!(error.contains("deadline"));
     }

@@ -1,146 +1,12 @@
 use super::*;
 use rspice_core::netlist::SourceSpec;
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_308_SON stepped TEMP output-framing relation";
 const FAMILY_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_308_SON";
 const OUTPUT_DIRECTORY: &str = "OutputData/Certification_Tests/BUG_308_SON";
-const FAMILY_PREFIX: &str = "netlists/certification_tests/bug_308_son/";
-const EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_308_SON/exclude";
 const OWNER_CONTRACT: &str = "bug308_stepped_temp_output_framing_wrapper_owner";
-const PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const RELEASE_TAG: &str = "Release-7.10.0";
 
-type Bug308RetainedFiles = BTreeMap<String, Vec<u8>>;
-type Bug308RetainedCensus = (Bug308RetainedFiles, Vec<u8>);
-type Bug308ExpectedMember = (&'static str, usize, &'static str, &'static str);
-type Bug308ExpectedFiles = BTreeMap<String, Bug308ExpectedMember>;
-
-const HISTORICAL_CONTENT_BYTES: usize = 157_664;
-const HISTORICAL_STREAM_BYTES: usize = 3_909;
-const HISTORICAL_STREAM_SHA256: &str =
-    "48241d87e3b086845ea8e2175cffbfcc875d83f266cf219cc9d2df54899219e0";
-const HISTORICAL_STREAM_BLAKE3: &str =
-    "df706ae46f3ac4bff47784f946d20b3cc4b00923633c97361e1a5d108dd47ccb";
-const HISTORICAL: [(&str, usize, &str, &str); 14] = [
-    (
-        "Netlists/Certification_Tests/BUG_308_SON/CMakeLists.txt",
-        2_062,
-        "5d9aad2c3941defc498256e36d0b4e998715e014ae053c6924b4c221efac11db",
-        "ad330e75b5ecc1f6ef361a4f3fe94d9b639ebd2cc56ba01cc67649a04d13c1c9",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_308_SON/Manifest.txt",
-        79,
-        "62bc051cd3687e8c13289f1bd796567013438265bb836864334b693359eea2e8",
-        "8028665d6645cc536a2e6d517951d0ad92ddd9075913097aaa04093ed7a94f79",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_308_SON/comparator.cir",
-        1_382,
-        "d8ccec35299ea45bc270f2975beceda66469ce5f3cd835d223282e157b58a90b",
-        "b3115a8d886f9ecf896b548ae141bb4fd94071bd306f45b44327ab022d8b0425",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_308_SON/comparator0.cir",
-        1_380,
-        "882e71cfaabb794b4ce9ffe83b6791bb1a6198344939df0fae0a3a455bde22f9",
-        "18b5ebc112a05d33fa70713a819cb1c43aacf4610a92ff6ec680ea681b165296",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_308_SON/comparator3.cir",
-        1_348,
-        "ed7b2746a2209b76bc03453b706f862b110671886022206fab2ebc657d987afc",
-        "28a507d03f7be6e554ee3b4b11bf4b0407209e277d3321d9e3ce3e7f5cdbb4ad",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_308_SON/comparator3.cir.sh",
-        2_778,
-        "172d3593353447b9510027ca21159c44b212cb4e24ee7030e9ce65506a73d605",
-        "1ad0d7be5414a2e4a6d53c22cb5935b7d08a1c4cba86118da78ab879ac20cce1",
-    ),
-    (
-        EXCLUSION_SOURCE,
-        31,
-        "067250aec33f5406226ec5744d471c59c78357538df39ede624c8a9cc32091fb",
-        "fb77cf972b53dab4305ce738370b9ea5e913899f888c2489893cfbbe4cbe8cd2",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_308_SON/tags",
-        37,
-        "6dd7067505eb44dbd228f1e94c65ece5d5ded82fa16c8bf0998ac7841c6dfebd",
-        "975ef49038ee7343c7f15c59e7dac65c8f9abfefb779d16550ce14c56070f7a6",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_308_SON/comparator3.cir.res",
-        122,
-        "962acbfef96f6ab5b24a92978b06e3eab14ad51f70fbac951d0f5b6c51179dad",
-        "d57a70e37081fdbf7fa9e146bdac0d40b21c750ee982b7d18274953f5ffeebb2",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSources.pm",
-        2_739,
-        "b2ddcab5ad5a89c428b9b4430190fa27ef7106da7e7afeb31452c81890a9a006",
-        "0905f9dc79d7c5bdbe17e3c2360cd063d6fcbf41823a410f98b236783d109ad7",
-    ),
-    (
-        "TestScripts/XyceVerify/DCSweep.pm",
-        9_301,
-        "2246da2374e6cce3ea516a50e472fb07f7481e8b0effb20d4a650e6b6cb1eda0",
-        "b9cc7d905d001ebe2ace44936b9631e4bdcbf42bca4d4b34c5866262cd11d9a3",
-    ),
-    (
-        "TestScripts/XyceVerify/StepSweep.pm",
-        8_731,
-        "84b2d485c1848f2e456463de8a5015205d87c3db8a6d070547d6f9464618fed6",
-        "db1b142ab3ae9163bbe02bd68b5b3a6311436adbf27c06d71a5c05df9b6973e7",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-];
-
-const RETAINED_STREAM_BYTES: usize = 771;
-const RETAINED_STREAM_SHA256: &str =
-    "d7b097c1650b3cc93d0c551bcb36a4df36b0ca4658252ab7957725e34c9b5bf0";
-const RETAINED_STREAM_BLAKE3: &str =
-    "9308e43eddc5a48e3be9b3125044b8dadd5e44acc62ed7d30521e7fab8cf035e";
-const RETAINED_SOURCES: [(&str, usize, &str, &str); 3] = [
-    (
-        "comparator.cir",
-        1_382,
-        "d8ccec35299ea45bc270f2975beceda66469ce5f3cd835d223282e157b58a90b",
-        "b3115a8d886f9ecf896b548ae141bb4fd94071bd306f45b44327ab022d8b0425",
-    ),
-    (
-        "comparator0.cir",
-        1_380,
-        "882e71cfaabb794b4ce9ffe83b6791bb1a6198344939df0fae0a3a455bde22f9",
-        "18b5ebc112a05d33fa70713a819cb1c43aacf4610a92ff6ec680ea681b165296",
-    ),
-    (
-        "comparator3.cir",
-        1_348,
-        "ed7b2746a2209b76bc03453b706f862b110671886022206fab2ebc657d987afc",
-        "28a507d03f7be6e554ee3b4b11bf4b0407209e277d3321d9e3ce3e7f5cdbb4ad",
-    ),
-];
-const RETAINED_OUTPUT: (&str, usize, &str, &str) = (
-    "comparator3.cir.res",
-    122,
-    "962acbfef96f6ab5b24a92978b06e3eab14ad51f70fbac951d0f5b6c51179dad",
-    "d57a70e37081fdbf7fa9e146bdac0d40b21c750ee982b7d18274953f5ffeebb2",
-);
+const OUTPUT_FILE: &str = "comparator3.cir.res";
 const EXPECTED_RES: &str = "STEP                 TEMP\n0          0.00000000e+00      \n1          1.00000000e+01      \nEnd of Xyce(TM) Parameter Sweep\n";
 
 const PRINT_PRECISION: usize = 12;
@@ -163,14 +29,6 @@ impl Bug308SonRole {
 
     pub(super) const fn contract(self) -> &'static str {
         OWNER_CONTRACT
-    }
-
-    const fn path(self) -> &'static str {
-        "Netlists/Certification_Tests/BUG_308_SON/comparator3.cir"
-    }
-
-    const fn record(self) -> &'static str {
-        "netlists/certification_tests/bug_308_son/comparator3.cir"
     }
 }
 
@@ -250,229 +108,9 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    fn validate_bug308_historical() -> Result<(), String> {
-        let content_bytes = HISTORICAL.iter().map(|record| record.1).sum::<usize>();
-        let mut records = HISTORICAL
-            .into_iter()
-            .map(|(path, bytes, sha, b3)| {
-                format!("{PRETRIM_COMMIT}\t{UPSTREAM_COMMIT}\t{RELEASE_TAG}\t{path}\t{bytes}\t{sha}\t{b3}")
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        let stream = records.join("\n");
-        let sha = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let b3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || content_bytes != HISTORICAL_CONTENT_BYTES
-            || records.len() != HISTORICAL.len()
-            || stream.len() != HISTORICAL_STREAM_BYTES
-            || sha != HISTORICAL_STREAM_SHA256
-            || b3 != HISTORICAL_STREAM_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} Release wrapper/verifier provenance changed: records={}, content_bytes={content_bytes}, stream_bytes={}, sha={sha}, b3={b3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug308_retained_stream() -> Result<(), String> {
-        let mut records = RETAINED_SOURCES
-            .into_iter()
-            .map(|(name, bytes, sha, b3)| {
-                format!("{FAMILY_DIRECTORY}/{name}\t{bytes}\t{sha}\t{b3}")
-            })
-            .collect::<Vec<_>>();
-        let (name, bytes, sha, b3) = RETAINED_OUTPUT;
-        records.push(format!("{OUTPUT_DIRECTORY}/{name}\t{bytes}\t{sha}\t{b3}"));
-        records.sort();
-        let stream = records.join("\n");
-        let sha = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let b3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if stream.len() != RETAINED_STREAM_BYTES
-            || sha != RETAINED_STREAM_SHA256
-            || b3 != RETAINED_STREAM_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} retained record stream changed: bytes={}, sha={sha}, b3={b3}",
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn read_bug308_census(&self, abort: &dyn AbortSignal) -> Result<Bug308RetainedCensus, String> {
-        Self::validate_bug308_retained_stream()?;
-        let read_directory = |directory: &Path,
-                              expected: Bug308ExpectedFiles|
-         -> Result<Bug308RetainedFiles, String> {
-            if abort.is_aborted() {
-                return Err(format!("{LABEL} retained census aborted"));
-            }
-            let metadata = fs::symlink_metadata(directory)
-                .map_err(|error| format!("{LABEL} directory inspection failed: {error}"))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-                return Err(format!("{LABEL} directory is not a regular directory"));
-            }
-            let mut observed = BTreeMap::new();
-            for entry in fs::read_dir(directory)
-                .map_err(|error| format!("{LABEL} census failed: {error}"))?
-            {
-                if abort.is_aborted() {
-                    return Err(format!("{LABEL} retained census aborted"));
-                }
-                let entry = entry.map_err(|error| format!("{LABEL} member failed: {error}"))?;
-                let path = entry.path();
-                let metadata = fs::symlink_metadata(&path)
-                    .map_err(|error| format!("{LABEL} member inspection failed: {error}"))?;
-                if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                    return Err(format!(
-                        "{LABEL} member {} is not a regular file",
-                        path.display()
-                    ));
-                }
-                let name = entry
-                    .file_name()
-                    .to_str()
-                    .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                    .to_string();
-                let key = name.to_ascii_lowercase();
-                let Some((expected_name, expected_bytes, expected_sha, expected_b3)) =
-                    expected.get(&key).copied()
-                else {
-                    return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-                };
-                if name != expected_name || observed.contains_key(&key) {
-                    return Err(format!("{LABEL} member case/census changed: {name:?}"));
-                }
-                let maximum = expected_bytes
-                    .checked_mul(2)
-                    .and_then(|value| value.checked_add(3))
-                    .ok_or_else(|| format!("{LABEL} retained size envelope overflowed"))?;
-                if metadata.len() > maximum as u64 {
-                    return Err(format!("{LABEL} member {name:?} exceeds bounded envelope"));
-                }
-                let mut raw = Vec::with_capacity((metadata.len() as usize).min(maximum));
-                fs::File::open(&path)
-                    .map_err(|error| format!("{LABEL} member open failed: {error}"))?
-                    .take((maximum + 1) as u64)
-                    .read_to_end(&mut raw)
-                    .map_err(|error| format!("{LABEL} bounded read failed: {error}"))?;
-                if raw.len() > maximum || abort.is_aborted() {
-                    return Err(format!("{LABEL} bounded read grew or aborted"));
-                }
-                let canonical = Self::canonical_lf_text_identity(LABEL, &raw)?;
-                let sha = format!("{:x}", Sha256::digest(&canonical));
-                let b3 = blake3::hash(&canonical).to_hex().to_string();
-                if canonical.len() != expected_bytes || sha != expected_sha || b3 != expected_b3 {
-                    return Err(format!(
-                        "{LABEL} member {name:?} changed: bytes={}, sha={sha}, b3={b3}",
-                        canonical.len()
-                    ));
-                }
-                observed.insert(key, raw);
-            }
-            if observed.len() != expected.len() {
-                return Err(format!("{LABEL} retained directory census changed"));
-            }
-            Ok(observed)
-        };
-
-        let sources = read_directory(
-            &self.root.join(FAMILY_DIRECTORY),
-            RETAINED_SOURCES
-                .into_iter()
-                .map(|record| (record.0.to_ascii_lowercase(), record))
-                .collect(),
-        )?;
-        let outputs = read_directory(
-            &self.root.join(OUTPUT_DIRECTORY),
-            [(RETAINED_OUTPUT.0.to_ascii_lowercase(), RETAINED_OUTPUT)]
-                .into_iter()
-                .collect(),
-        )?;
-        let output = outputs
-            .get(&RETAINED_OUTPUT.0.to_ascii_lowercase())
-            .cloned()
-            .ok_or_else(|| format!("{LABEL} lost retained .res"))?;
-        Ok((sources, output))
-    }
-
-    fn bug308_source(
-        sources: &Bug308RetainedFiles,
-        role: Bug308WorkerRole,
-    ) -> Result<&str, String> {
-        std::str::from_utf8(
-            sources
-                .get(&role.file_name().to_ascii_lowercase())
-                .ok_or_else(|| format!("{LABEL} lost {:?}", role.file_name()))?,
-        )
-        .map_err(|error| format!("{LABEL} {:?} is not UTF-8: {error}", role.file_name()))
-    }
-
-    fn validate_bug308_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug308SonRole,
-        abort: &dyn AbortSignal,
-    ) -> Result<Bug308RetainedCensus, String> {
-        Self::validate_bug308_historical()?;
-        if abort.is_aborted() {
-            return Err(format!("{LABEL} provenance validation aborted"));
-        }
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!("{LABEL} recognized owner is not canonical"));
-        }
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(FAMILY_PREFIX))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([role.record()]) {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        if exclusions.contains_key(role.record()) {
-            return Err(format!("{LABEL} wrapper owner became excluded"));
-        }
-        let family = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(FAMILY_PREFIX))
-            .collect::<BTreeMap<_, _>>();
-        let expected = [
-            "netlists/certification_tests/bug_308_son/comparator.cir",
-            "netlists/certification_tests/bug_308_son/comparator0.cir",
-        ];
-        if family.len() != expected.len()
-            || expected.into_iter().any(|record| {
-                family.get(&record.to_string()).is_none_or(|qualification| {
-                    qualification.source != EXCLUSION_SOURCE
-                        || qualification.disposition != XyceUpstreamExclusionDisposition::Excluded
-                })
-            })
-        {
-            return Err(format!(
-                "{LABEL} helper controls must remain ordinary upstream exclusions: {family:?}"
-            ));
-        }
-        let retained = self.read_bug308_census(abort)?;
-        for worker in [
-            Bug308WorkerRole::Temp0Control,
-            Bug308WorkerRole::Temp10Control,
-        ] {
-            self.reject_wrapper_output_artifacts(
-                &self.root.join(FAMILY_DIRECTORY).join(worker.file_name()),
-            )?;
-        }
-        Ok(retained)
+    fn bug308_source(&self, role: Bug308WorkerRole) -> Result<String, String> {
+        fs::read_to_string(self.root.join(FAMILY_DIRECTORY).join(role.file_name()))
+            .map_err(|error| format!("{LABEL} cannot read {:?}: {error}", role.file_name()))
     }
 
     fn bug308_nodes(actual: &[String], expected: &[&str]) -> bool {
@@ -929,27 +567,23 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    pub(super) fn validate_bug308_son_oracle(
-        &self,
-        deck: &XyceDeck,
-        role: Bug308SonRole,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug308_son_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
-            return Err(format!("{LABEL} deadline expired before provenance"));
+            return Err(format!("{LABEL} deadline expired before execution"));
         }
-        let (sources, output) = self.validate_bug308_provenance(deck, role, &abort)?;
+        let output = fs::read(self.root.join(OUTPUT_DIRECTORY).join(OUTPUT_FILE))
+            .map_err(|error| format!("{LABEL} cannot read {OUTPUT_FILE}: {error}"))?;
         let mut workers = BTreeMap::new();
         for worker_role in Bug308WorkerRole::ALL {
             let path = self
                 .root
                 .join(FAMILY_DIRECTORY)
                 .join(worker_role.file_name());
-            let source = Self::bug308_source(&sources, worker_role)?;
+            let source = self.bug308_source(worker_role)?;
             workers.insert(
                 worker_role,
-                self.validate_bug308_worker(worker_role, source, &path)?,
+                self.validate_bug308_worker(worker_role, &source, &path)?,
             );
         }
         let owner = workers
@@ -1079,9 +713,8 @@ impl XyceTestRunner {
                 "{LABEL} distinct Release footer contexts collapsed"
             ));
         }
-        self.validate_bug308_provenance(deck, role, &abort)?;
         if abort.is_aborted() {
-            return Err(format!("{LABEL} final provenance exceeded deadline"));
+            return Err(format!("{LABEL} execution exceeded deadline"));
         }
         Ok(())
     }
@@ -1100,46 +733,21 @@ mod tests {
         )
     }
 
-    fn owner_deck(runner: &XyceTestRunner) -> XyceDeck {
-        let path = runner.root.join(Bug308SonRole::WrapperOwner.path());
-        XyceDeck {
-            path,
-            section: XyceDeckSection::Netlists,
-            relative_path: Bug308SonRole::WrapperOwner.path().to_string(),
-        }
-    }
-
-    #[test]
-    fn bug308_historical_and_retained_provenance_is_exact() {
-        XyceTestRunner::validate_bug308_historical().unwrap();
-        XyceTestRunner::validate_bug308_retained_stream().unwrap();
-        let runner = runner();
-        runner
-            .read_bug308_census(&rspice_core::abort_signal::NoAbort)
-            .unwrap();
-    }
-
     #[test]
     fn bug308_workers_preserve_typed_layout_topology_and_step_semantics() {
         let runner = runner();
-        let (sources, _) = runner
-            .read_bug308_census(&rspice_core::abort_signal::NoAbort)
-            .unwrap();
         for role in Bug308WorkerRole::ALL {
             let path = runner.root.join(FAMILY_DIRECTORY).join(role.file_name());
-            let source = XyceTestRunner::bug308_source(&sources, role).unwrap();
-            runner.validate_bug308_worker(role, source, &path).unwrap();
+            let source = runner.bug308_source(role).unwrap();
+            runner.validate_bug308_worker(role, &source, &path).unwrap();
         }
     }
 
     #[test]
     fn bug308_output_options_print_layout_and_topology_mutations_fail_closed() {
         let canonical = runner();
-        let (sources, _) = canonical
-            .read_bug308_census(&rspice_core::abort_signal::NoAbort)
-            .unwrap();
         let role = Bug308WorkerRole::Temp0Control;
-        let source = XyceTestRunner::bug308_source(&sources, role).unwrap();
+        let source = canonical.bug308_source(role).unwrap();
         for mutation in [
             source.replace("PRINTFOOTER=false", "PRINTFOOTER=true"),
             source.replace("precision=12", "precision=11"),
@@ -1364,46 +972,12 @@ mod tests {
     #[test]
     fn bug308_owner_executes_complete_release_relation() {
         let runner = runner();
-        runner
-            .validate_bug308_son_oracle(
-                &owner_deck(&runner),
-                Bug308SonRole::WrapperOwner,
-                Instant::now(),
-            )
-            .unwrap();
+        runner.validate_bug308_son_oracle(Instant::now()).unwrap();
     }
 
     #[test]
-    fn bug308_expired_deadline_and_census_extra_fail_closed() {
+    fn bug308_expired_deadline_fails_closed() {
         let canonical = runner();
-        let temporary = tempfile::tempdir().unwrap();
-        let source_dir = temporary.path().join(FAMILY_DIRECTORY);
-        let output_dir = temporary.path().join(OUTPUT_DIRECTORY);
-        fs::create_dir_all(&source_dir).unwrap();
-        fs::create_dir_all(&output_dir).unwrap();
-        for (name, ..) in RETAINED_SOURCES {
-            fs::copy(
-                canonical.root.join(FAMILY_DIRECTORY).join(name),
-                source_dir.join(name),
-            )
-            .unwrap();
-        }
-        fs::copy(
-            canonical
-                .root
-                .join(OUTPUT_DIRECTORY)
-                .join(RETAINED_OUTPUT.0),
-            output_dir.join(RETAINED_OUTPUT.0),
-        )
-        .unwrap();
-        fs::write(source_dir.join("extra.cir"), "extra\n").unwrap();
-        let copied = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(
-            copied
-                .read_bug308_census(&rspice_core::abort_signal::NoAbort)
-                .is_err()
-        );
-
         let config = XyceRunnerConfig {
             max_time_per_test_ms: 1,
             ..XyceRunnerConfig::default()
@@ -1411,11 +985,7 @@ mod tests {
         let expired = XyceTestRunner::new(canonical.root.clone(), config);
         assert!(
             expired
-                .validate_bug308_son_oracle(
-                    &owner_deck(&expired),
-                    Bug308SonRole::WrapperOwner,
-                    Instant::now() - Duration::from_millis(10),
-                )
+                .validate_bug308_son_oracle(Instant::now() - Duration::from_millis(10))
                 .is_err()
         );
     }

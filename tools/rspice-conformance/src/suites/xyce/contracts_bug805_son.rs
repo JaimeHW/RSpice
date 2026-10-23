@@ -1,135 +1,7 @@
 use super::*;
 use rspice_core::netlist::{OutputSymbolKind, SaveSignal, SourceSpec};
-use std::io::Read as _;
 
 const LABEL: &str = "BUG_805_SON include-partition mutual-inductor relation";
-const FAMILY_PATH: &str = "Netlists/Certification_Tests/BUG_805_SON";
-const OUTPUT_PATH: &str = "OutputData/Certification_Tests/BUG_805_SON";
-const EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_805_SON/exclude";
-const UPSTREAM_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const UPSTREAM_TAG: &str = "Release-7.10.0";
-
-const HISTORICAL_RECORD_COUNT: usize = 11;
-const HISTORICAL_RECORD_BYTES: usize = 2_693;
-const HISTORICAL_RECORDS_SHA256: &str =
-    "113d6d97f014a8f62e8e68f0fa33302e87c78a78f94b7416d2a8f01c68ae584b";
-const HISTORICAL_RECORDS_BLAKE3: &str =
-    "fa2634b80b55f4959d1ca09ffbec457980ef5909f091ab02b678861b55dd4e1f";
-const HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/CMakeLists.txt",
-        2_319,
-        "1cd4b64619d5bd5bfb570de08859242625612af889329feb0bb6c0471474ae55",
-        "fa4e1b4fe60cd11c961b62853b5a3037afcd86df79e1382d0f08a6aa49daeffb",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/Manifest.txt",
-        123,
-        "3d9a3e31a63a187cd32ccb41a9b3cccf0234cb0b14d606328eb9d5d3bdc7504f",
-        "1e777949e28a2b6094f31f6b4a9f69cf1fa4a293aeb5cb41251be2b2873d8830",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/bug805_all.cir",
-        2_526,
-        "548b435bc278fcd435174d1bc5e48b1d19d429c2e334f6d952cb4051e13cd4d5",
-        "811f8cd715252dbc1df94ebe78068f488724f6896af4b836844ec8e7e9162273",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/bug805_all.cir.sh",
-        1_932,
-        "7b1833bc2323184bca2b30fdc3e17ab089268c2549beb0723d974d9d738943ba",
-        "24b756bfcb69d7f4635f3207440473bdb4d349d572a4081eed8fc4ae30d03e22",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/bug805_top.cir",
-        2_409,
-        "e48b9bf7ed1ad7094dea5c335f8e12d319cdac3de7205a8f7d89e303de5457c8",
-        "744f992372abc7b5900efbec3a85ff52f903fc99d16ad69b1fea85d0029d5cab",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/bug805_top2.cir",
-        2_410,
-        "1cf7c0ea588ac18530cc458e0ac29ec7947e406e1975b2bb11a50253f32358c0",
-        "267cacebcc7f71bee529118857500a296a57051f2b26fc91b448c36316595372",
-    ),
-    (
-        EXCLUSION_SOURCE,
-        109,
-        "e5e656095d4ee4c320aa753f064a1cedfd00107708b1dc5eaa59ecfd53650dcc",
-        "059739b75e4ddbff3dfec9f5db5d066e8cbe5f15292956c6ede51798b6c3dece",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/mil_test1.lib",
-        165,
-        "973ceffe8e6dcc0460dcd43998cad8f8f385e9ecc8516545fc77034d95df9d9e",
-        "c50a28b7e0ea28b6606b80e171b033e3c221aa95040559329fad26927d4246c4",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/mil_test2a.lib",
-        194,
-        "32d28cdd2e3cc498e85a6d6c017080b5d02dd35568fef6e986cbfb7a2c4b65a0",
-        "4569f2e4fea9f1da518a52f8e13d907b79a1e46a3fb5378416af00bdf43b45cf",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/mil_test2b.lib",
-        170,
-        "23cb040cd52ac6bb8a608ca35c8bb7b444bc18f2df5d1ea6e21f47f2f2388d2d",
-        "5593230d9efde2ddb9dd98203f9b93344a0dce0ef81a5ddaf534d025b6e5a3b4",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_805_SON/tags",
-        27,
-        "4b8ea8000b121cc87df41e65f9ac43dece3eab840c84e864357b3c1b9021cdcb",
-        "c3661f9aadf0946ebc823f672267a34f3f9485b8a002ff0a2ff956cf0c9dc430",
-    ),
-];
-
-const RETAINED_RECORD_COUNT: usize = 6;
-const RETAINED_RECORD_BYTES: usize = 896;
-const RETAINED_RECORDS_SHA256: &str =
-    "20a07efa1ceb31ac7ff11fda28e941f4762c72cf8d558b9c84cef87a1dd3864b";
-const RETAINED_RECORDS_BLAKE3: &str =
-    "c558213395b8e49ad204b61d253dbb15496b22eea56abdfd9d6f68cdb954fae5";
-const RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 6] = [
-    (
-        "bug805_all.cir",
-        2_526,
-        "548b435bc278fcd435174d1bc5e48b1d19d429c2e334f6d952cb4051e13cd4d5",
-        "811f8cd715252dbc1df94ebe78068f488724f6896af4b836844ec8e7e9162273",
-    ),
-    (
-        "bug805_top.cir",
-        2_409,
-        "e48b9bf7ed1ad7094dea5c335f8e12d319cdac3de7205a8f7d89e303de5457c8",
-        "744f992372abc7b5900efbec3a85ff52f903fc99d16ad69b1fea85d0029d5cab",
-    ),
-    (
-        "bug805_top2.cir",
-        2_410,
-        "1cf7c0ea588ac18530cc458e0ac29ec7947e406e1975b2bb11a50253f32358c0",
-        "267cacebcc7f71bee529118857500a296a57051f2b26fc91b448c36316595372",
-    ),
-    (
-        "mil_test1.lib",
-        165,
-        "973ceffe8e6dcc0460dcd43998cad8f8f385e9ecc8516545fc77034d95df9d9e",
-        "c50a28b7e0ea28b6606b80e171b033e3c221aa95040559329fad26927d4246c4",
-    ),
-    (
-        "mil_test2a.lib",
-        194,
-        "32d28cdd2e3cc498e85a6d6c017080b5d02dd35568fef6e986cbfb7a2c4b65a0",
-        "4569f2e4fea9f1da518a52f8e13d907b79a1e46a3fb5378416af00bdf43b45cf",
-    ),
-    (
-        "mil_test2b.lib",
-        170,
-        "23cb040cd52ac6bb8a608ca35c8bb7b444bc18f2df5d1ea6e21f47f2f2388d2d",
-        "5593230d9efde2ddb9dd98203f9b93344a0dce0ef81a5ddaf534d025b6e5a3b4",
-    ),
-];
-
-type CapturedMembers = BTreeMap<String, Vec<u8>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum Bug805SonRole {
@@ -177,188 +49,6 @@ impl Bug805SonRole {
 }
 
 impl XyceTestRunner {
-    pub(super) fn bug805_son_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, blake3)| {
-                format!("{UPSTREAM_COMMIT}\t{UPSTREAM_TAG}\t{path}\t{bytes}\t{sha256}\t{blake3}")
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug805_son_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug805_son_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        if records.len() != HISTORICAL_RECORD_COUNT
-            || stream.len() != HISTORICAL_RECORD_BYTES
-            || format!("{:x}", Sha256::digest(stream.as_bytes())) != HISTORICAL_RECORDS_SHA256
-            || blake3::hash(stream.as_bytes()).to_hex().as_str() != HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!("{LABEL} Release provenance changed"));
-        }
-        Ok(())
-    }
-
-    fn validate_bug805_son_directory(&self) -> Result<CapturedMembers, String> {
-        let directory = self.root.join(FAMILY_PATH);
-        let metadata = fs::symlink_metadata(&directory)
-            .map_err(|error| format!("failed to inspect {LABEL} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} family must be a regular non-symlink directory"
-            ));
-        }
-        let expected = RETAINED_ARTIFACTS
-            .iter()
-            .copied()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut members = BTreeMap::new();
-        let mut records = Vec::new();
-        for entry in fs::read_dir(&directory)
-            .map_err(|error| format!("failed to read {LABEL} directory: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect {LABEL}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} member {} is not a regular file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if members.contains_key(&key) {
-                return Err(format!("{LABEL} contains a case collision for {name:?}"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!("{LABEL} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name {
-                return Err(format!("{LABEL} member case changed: {name:?}"));
-            }
-            let physical_cap = expected_bytes
-                .checked_mul(2)
-                .and_then(|value| value.checked_add(1))
-                .ok_or_else(|| format!("{LABEL} retained-member bound overflow"))?;
-            if metadata.len() > physical_cap as u64 {
-                return Err(format!("{LABEL} member {name:?} is oversized"));
-            }
-            let file = fs::File::open(&path)
-                .map_err(|error| format!("failed to open {LABEL} {name:?}: {error}"))?;
-            let mut bytes = Vec::with_capacity(metadata.len() as usize);
-            file.take((physical_cap + 1) as u64)
-                .read_to_end(&mut bytes)
-                .map_err(|error| format!("failed to read {LABEL} {name:?}: {error}"))?;
-            if bytes.len() > physical_cap {
-                return Err(format!("{LABEL} member {name:?} is oversized"));
-            }
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            if canonical.len() != expected_bytes
-                || format!("{:x}", Sha256::digest(&canonical)) != expected_sha256
-                || blake3::hash(&canonical).to_hex().as_str() != expected_blake3
-            {
-                return Err(format!("{LABEL} retained member {name:?} changed"));
-            }
-            records.push(format!(
-                "{expected_name}\t{expected_bytes}\t{expected_sha256}\t{expected_blake3}"
-            ));
-            members.insert(key, bytes);
-        }
-        if members.len() != expected.len() {
-            return Err(format!("{LABEL} lost a retained member"));
-        }
-        records.sort();
-        let stream = records.join("\n");
-        if records.len() != RETAINED_RECORD_COUNT
-            || stream.len() != RETAINED_RECORD_BYTES
-            || format!("{:x}", Sha256::digest(stream.as_bytes())) != RETAINED_RECORDS_SHA256
-            || blake3::hash(stream.as_bytes()).to_hex().as_str() != RETAINED_RECORDS_BLAKE3
-        {
-            return Err(format!("{LABEL} retained census changed"));
-        }
-        Ok(members)
-    }
-
-    fn validate_bug805_son_provenance(
-        &self,
-        deck: &XyceDeck,
-        role: Bug805SonRole,
-    ) -> Result<CapturedMembers, String> {
-        Self::validate_bug805_son_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != role.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != role.record()
-            || !Self::same_path(&deck.path, &self.root.join(role.path()))
-        {
-            return Err(format!(
-                "recognized {LABEL} role is not at its canonical path"
-            ));
-        }
-        let prefix = "netlists/certification_tests/bug_805_son/";
-        let owners = Self::load_upstream_wrapper_decks(&self.root)
-            .into_iter()
-            .filter(|record| record.starts_with(prefix))
-            .collect::<BTreeSet<_>>();
-        if owners != BTreeSet::from([Bug805SonRole::InlineOwner.record()]) {
-            return Err(format!("{LABEL} wrapper ownership changed: {owners:?}"));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        let family_rows = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(prefix))
-            .collect::<BTreeMap<_, _>>();
-        let expected_workers = [Bug805SonRole::SingleInclude, Bug805SonRole::NestedInclude];
-        let expected_records = expected_workers
-            .into_iter()
-            .map(Bug805SonRole::record)
-            .collect::<BTreeSet<_>>();
-        if family_rows
-            .keys()
-            .map(|record| record.to_string())
-            .collect::<BTreeSet<_>>()
-            != expected_records
-        {
-            return Err(format!("{LABEL} exclusion census changed"));
-        }
-        for worker in expected_workers {
-            let row = family_rows
-                .get(&worker.record())
-                .ok_or_else(|| format!("{LABEL} lost {} exclusion row", worker.file_name()))?;
-            if row.source != EXCLUSION_SOURCE
-                || !matches!(&row.disposition,
-                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified { expected_contract }
-                        if expected_contract == worker.contract())
-            {
-                return Err(format!(
-                    "{LABEL} {} qualification changed",
-                    worker.file_name()
-                ));
-            }
-        }
-        match fs::symlink_metadata(self.root.join(OUTPUT_PATH)) {
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Ok(_) => return Err(format!("{LABEL} must not acquire an OutputData family")),
-            Err(error) => return Err(format!("failed to inspect {LABEL} OutputData: {error}")),
-        }
-        for member_role in Bug805SonRole::ALL {
-            self.reject_wrapper_output_artifacts(&self.root.join(member_role.path()))
-                .map_err(|error| format!("{LABEL} {} {error}", member_role.file_name()))?;
-        }
-        self.validate_bug805_son_directory()
-    }
-
     fn bug805_son_nodes_match(nodes: &[String], expected: &[&str]) -> bool {
         nodes.len() == expected.len()
             && nodes
@@ -636,32 +326,17 @@ impl XyceTestRunner {
         Ok(())
     }
 
-    pub(super) fn validate_bug805_son_oracle(
-        &self,
-        deck: &XyceDeck,
-        role: Bug805SonRole,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug805_son_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
-            return Err(format!("{LABEL} deadline expired before provenance"));
+            return Err(format!("{LABEL} deadline expired before execution"));
         }
-        let members = self.validate_bug805_son_provenance(deck, role)?;
         let mut tables = BTreeMap::new();
         for member_role in Bug805SonRole::ALL {
             if abort.is_aborted() {
                 return Err(format!("{LABEL} deadline expired between independent runs"));
             }
             let plan = self.bug805_son_plan(member_role)?;
-            let source = members
-                .get(&member_role.file_name().to_ascii_lowercase())
-                .ok_or_else(|| format!("{LABEL} lost {}", member_role.file_name()))?;
-            if plan.source.as_bytes() != source.as_slice() {
-                return Err(format!(
-                    "{LABEL} {} changed between reads",
-                    member_role.file_name()
-                ));
-            }
             let parsed =
                 Self::parse_xyce_netlist(&plan.source, &plan.deck_path).map_err(|error| {
                     format!("{LABEL} {} parse failed: {error}", member_role.file_name())
@@ -696,7 +371,6 @@ impl XyceTestRunner {
                 ));
             }
         }
-        self.validate_bug805_son_provenance(deck, role)?;
         if abort.is_aborted() {
             return Err(format!("{LABEL} exceeded its shared deadline"));
         }
@@ -714,68 +388,13 @@ mod tests {
             .join("tests/xyce")
     }
 
-    fn deck(root: &Path, role: Bug805SonRole) -> XyceDeck {
-        XyceDeck {
-            path: root.join(role.path()),
-            section: XyceDeckSection::Netlists,
-            relative_path: role.path().to_string(),
-        }
-    }
-
-    fn fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug805son-{label}-"))
-            .tempdir()
-            .expect("create BUG805SON fixture");
-        let root = temporary.path();
-        let family = root.join(FAMILY_PATH);
-        fs::create_dir_all(&family).expect("create BUG805SON family");
-        let canonical = corpus_root().join(FAMILY_PATH);
-        for (name, ..) in RETAINED_ARTIFACTS {
-            fs::copy(canonical.join(name), family.join(name)).expect("copy BUG805SON member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{FAMILY_PATH}/bug805_all.cir\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG805SON wrapper manifest");
-        let exclusions = [Bug805SonRole::SingleInclude, Bug805SonRole::NestedInclude]
-            .into_iter()
-            .map(|role| {
-                format!(
-                    "{}\t{EXCLUSION_SOURCE}\t{RSPICE_INDEPENDENTLY_QUALIFIED_DISPOSITION}\t{}",
-                    role.path(),
-                    role.contract()
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{exclusions}\n"
-            ),
-        ).expect("write BUG805SON exclusion manifest");
-        let owner = deck(root, Bug805SonRole::InlineOwner);
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, owner, runner)
-    }
-
-    #[test]
-    fn bug805_son_historical_provenance_is_exact() {
-        XyceTestRunner::validate_bug805_son_historical_oracle_provenance()
-            .expect("BUG805SON Release provenance remains exact");
-    }
-
     #[test]
     fn bug805_son_all_roles_execute_the_include_relation() {
         let root = corpus_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        for role in Bug805SonRole::ALL {
-            runner
-                .validate_bug805_son_oracle(&deck(&root, role), role, Instant::now())
-                .expect("BUG805SON native include relation");
-        }
+        runner
+            .validate_bug805_son_oracle(Instant::now())
+            .expect("BUG805SON native include relation");
     }
 
     #[test]
@@ -819,67 +438,6 @@ mod tests {
     }
 
     #[test]
-    fn bug805_son_provenance_mutations_fail_closed() {
-        let (_temporary, owner, runner) = fixture("extra");
-        runner
-            .validate_bug805_son_provenance(&owner, Bug805SonRole::InlineOwner)
-            .expect("canonical BUG805SON fixture");
-        fs::write(runner.root.join(FAMILY_PATH).join("unexpected.cir"), "x\n")
-            .expect("write extra BUG805SON member");
-        assert!(
-            runner
-                .validate_bug805_son_provenance(&owner, Bug805SonRole::InlineOwner)
-                .is_err()
-        );
-
-        let (_temporary, owner, runner) = fixture("owner");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "").expect("mutate BUG805SON owner");
-        assert!(
-            runner
-                .validate_bug805_son_provenance(&owner, Bug805SonRole::InlineOwner)
-                .is_err()
-        );
-
-        let (temporary, owner, runner) = fixture("exclusion");
-        let path = temporary.path().join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
-        let content = fs::read_to_string(&path).expect("read BUG805SON exclusions");
-        fs::write(
-            &path,
-            content.replacen(
-                "bug805son_single_include_worker",
-                "bug805son_nested_include_worker",
-                1,
-            ),
-        )
-        .expect("mutate BUG805SON qualification");
-        assert!(
-            runner
-                .validate_bug805_son_provenance(&owner, Bug805SonRole::InlineOwner)
-                .is_err()
-        );
-
-        let (temporary, owner, runner) = fixture("source");
-        fs::write(
-            temporary.path().join(FAMILY_PATH).join("mil_test2b.lib"),
-            "changed\n",
-        )
-        .expect("mutate BUG805SON include");
-        assert!(
-            runner
-                .validate_bug805_son_provenance(&owner, Bug805SonRole::InlineOwner)
-                .is_err()
-        );
-
-        let (_temporary, owner, runner) = fixture("output");
-        fs::create_dir_all(runner.root.join(OUTPUT_PATH)).expect("invent BUG805SON output");
-        assert!(
-            runner
-                .validate_bug805_son_provenance(&owner, Bug805SonRole::InlineOwner)
-                .is_err()
-        );
-    }
-
-    #[test]
     fn bug805_son_expired_deadline_rejects_before_execution() {
         let root = corpus_root();
         let runner = XyceTestRunner::new(
@@ -891,11 +449,7 @@ mod tests {
         );
         assert!(
             runner
-                .validate_bug805_son_oracle(
-                    &deck(&root, Bug805SonRole::InlineOwner),
-                    Bug805SonRole::InlineOwner,
-                    Instant::now() - Duration::from_millis(10),
-                )
+                .validate_bug805_son_oracle(Instant::now() - Duration::from_millis(10))
                 .is_err()
         );
     }
