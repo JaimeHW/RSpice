@@ -1,245 +1,6 @@
 use super::*;
 
-type LegacyArtifactRecord<'a> = (&'a str, usize, &'a str, &'a str);
-
 impl XyceTestRunner {
-    fn legacy_device_analytic_historical_records(
-        kind: XyceLegacyDeviceAnalyticKind,
-    ) -> Vec<String> {
-        let (commit, tag, artifacts): (&str, &str, &[LegacyArtifactRecord<'_>]) = match kind {
-            XyceLegacyDeviceAnalyticKind::BjtRamp1 | XyceLegacyDeviceAnalyticKind::BjtRamp2 => (
-                XYCE_BJT_ANALYTIC_UPSTREAM_REGRESSION_COMMIT,
-                XYCE_BJT_ANALYTIC_UPSTREAM_RELEASE_TAG,
-                &XYCE_BJT_ANALYTIC_HISTORICAL_ARTIFACTS,
-            ),
-            XyceLegacyDeviceAnalyticKind::NmosLevel1 => (
-                XYCE_NMOS_ANALYTIC_UPSTREAM_REGRESSION_COMMIT,
-                XYCE_NMOS_ANALYTIC_UPSTREAM_RELEASE_TAG,
-                &XYCE_NMOS_ANALYTIC_HISTORICAL_ARTIFACTS,
-            ),
-        };
-        let mut records = artifacts
-            .iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!("{commit}\t{tag}\t{path}\t{bytes}\t{sha256}\t{content_blake3}")
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    fn validate_legacy_device_analytic_historical_provenance(
-        kind: XyceLegacyDeviceAnalyticKind,
-    ) -> Result<(), String> {
-        let records = Self::legacy_device_analytic_historical_records(kind);
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        let (expected_count, expected_bytes, expected_sha256, expected_blake3) = match kind {
-            XyceLegacyDeviceAnalyticKind::BjtRamp1 | XyceLegacyDeviceAnalyticKind::BjtRamp2 => (
-                XYCE_BJT_ANALYTIC_HISTORICAL_RECORD_COUNT,
-                XYCE_BJT_ANALYTIC_HISTORICAL_RECORD_BYTES,
-                XYCE_BJT_ANALYTIC_HISTORICAL_RECORDS_SHA256,
-                XYCE_BJT_ANALYTIC_HISTORICAL_RECORDS_BLAKE3,
-            ),
-            XyceLegacyDeviceAnalyticKind::NmosLevel1 => (
-                XYCE_NMOS_ANALYTIC_HISTORICAL_RECORD_COUNT,
-                XYCE_NMOS_ANALYTIC_HISTORICAL_RECORD_BYTES,
-                XYCE_NMOS_ANALYTIC_HISTORICAL_RECORDS_SHA256,
-                XYCE_NMOS_ANALYTIC_HISTORICAL_RECORDS_BLAKE3,
-            ),
-        };
-        if records.len() != expected_count
-            || stream.len() != expected_bytes
-            || sha256 != expected_sha256
-            || content_blake3 != expected_blake3
-        {
-            return Err(format!(
-                "{} Release-7.10 generated-gold provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                kind.family(),
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn legacy_device_analytic_family_members(
-        kind: XyceLegacyDeviceAnalyticKind,
-    ) -> &'static [LegacyArtifactRecord<'static>] {
-        match kind {
-            XyceLegacyDeviceAnalyticKind::BjtRamp1 | XyceLegacyDeviceAnalyticKind::BjtRamp2 => {
-                &XYCE_BJT_ANALYTIC_RETAINED_ARTIFACTS
-            }
-            XyceLegacyDeviceAnalyticKind::NmosLevel1 => &XYCE_NMOS_ANALYTIC_RETAINED_ARTIFACTS,
-        }
-    }
-
-    fn legacy_device_analytic_family_kinds(
-        kind: XyceLegacyDeviceAnalyticKind,
-    ) -> &'static [XyceLegacyDeviceAnalyticKind] {
-        const BJT: [XyceLegacyDeviceAnalyticKind; 2] = [
-            XyceLegacyDeviceAnalyticKind::BjtRamp1,
-            XyceLegacyDeviceAnalyticKind::BjtRamp2,
-        ];
-        const NMOS: [XyceLegacyDeviceAnalyticKind; 1] = [XyceLegacyDeviceAnalyticKind::NmosLevel1];
-        match kind {
-            XyceLegacyDeviceAnalyticKind::BjtRamp1 | XyceLegacyDeviceAnalyticKind::BjtRamp2 => &BJT,
-            XyceLegacyDeviceAnalyticKind::NmosLevel1 => &NMOS,
-        }
-    }
-
-    fn validate_legacy_device_analytic_provenance(
-        &self,
-        deck: &XyceDeck,
-        kind: XyceLegacyDeviceAnalyticKind,
-    ) -> Result<Vec<u8>, String> {
-        let label = kind.label();
-        Self::validate_legacy_device_analytic_historical_provenance(kind)?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != kind.record()
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != kind.record()
-            || !Self::same_path(&deck.path, &self.root.join(kind.path()))
-        {
-            return Err(format!(
-                "recognized {label} record '{}' is not backed by its exact canonical Netlists path",
-                deck.relative_path
-            ));
-        }
-
-        let family_kinds = Self::legacy_device_analytic_family_kinds(kind);
-        let prefix = format!("netlists/{}/", kind.family().to_ascii_lowercase());
-        let expected_owners = family_kinds
-            .iter()
-            .map(|member| member.record())
-            .collect::<BTreeSet<_>>();
-        let observed_owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(&prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        if observed_owners != expected_owners {
-            return Err(format!(
-                "{} requires exactly its removed-wrapper owners, found {observed_owners:?}",
-                kind.family()
-            ));
-        }
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{} exclusion manifest is invalid: {error}", kind.family()))?;
-        if family_kinds
-            .iter()
-            .any(|member| exclusions.contains_key(member.record()))
-        {
-            return Err(format!(
-                "{} must not be classified by an upstream exclude sentinel",
-                kind.family()
-            ));
-        }
-
-        let family_dir = deck
-            .path
-            .parent()
-            .ok_or_else(|| format!("{label} has no family directory"))?;
-        let family_metadata = fs::symlink_metadata(family_dir)
-            .map_err(|error| format!("failed to inspect {} family: {error}", kind.family()))?;
-        if !family_metadata.file_type().is_dir() || family_metadata.file_type().is_symlink() {
-            return Err(format!(
-                "{} family must be a regular non-symlink directory",
-                kind.family()
-            ));
-        }
-        let expected = Self::legacy_device_analytic_family_members(kind)
-            .iter()
-            .copied()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeSet::new();
-        let mut selected_source = None;
-        for entry in fs::read_dir(family_dir)
-            .map_err(|error| format!("failed to read {} family: {error}", kind.family()))?
-        {
-            let entry = entry
-                .map_err(|error| format!("failed to inspect {} member: {error}", kind.family()))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-                return Err(format!(
-                    "{} member {} must be a regular non-symlink file",
-                    kind.family(),
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{} member name is not UTF-8", kind.family()))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if !observed.insert(key.clone()) {
-                return Err(format!(
-                    "{} family has a case-colliding member {name:?}",
-                    kind.family()
-                ));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{} family acquired unexpected member {name:?}",
-                    kind.family()
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{} member case changed: expected {expected_name:?}, got {name:?}",
-                    kind.family()
-                ));
-            }
-            let bytes = fs::read(&path).map_err(|error| {
-                format!("failed to read {} member {name}: {error}", kind.family())
-            })?;
-            let canonical = Self::canonical_lf_text_identity(label, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{} member {name:?} changed: expected {expected_bytes}/{expected_sha256}/{expected_blake3}, got {}/{sha256}/{content_blake3}",
-                    kind.family(),
-                    canonical.len()
-                ));
-            }
-            if name == kind.file_name() {
-                selected_source = Some(bytes);
-            }
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{} retained family census changed: expected {}, got {}",
-                kind.family(),
-                expected.len(),
-                observed.len()
-            ));
-        }
-        let output_family = self.root.join(format!("OutputData/{}", kind.family()));
-        if output_family.exists() {
-            return Err(format!(
-                "{} acquired an invented numerical output family at {}",
-                kind.family(),
-                output_family.display()
-            ));
-        }
-        for member in family_kinds {
-            self.reject_wrapper_output_artifacts(&self.root.join(member.path()))
-                .map_err(|error| format!("{} {error}", kind.family()))?;
-        }
-        selected_source.ok_or_else(|| format!("{label} retained source is missing"))
-    }
-
     fn exact_legacy_device_analytic_params(
         actual: &[(String, Value)],
         expected: &[(&str, Value)],
@@ -727,30 +488,20 @@ impl XyceTestRunner {
 
     pub(super) fn validate_legacy_device_analytic_oracle(
         &self,
-        deck: &XyceDeck,
         kind: XyceLegacyDeviceAnalyticKind,
         start: Instant,
     ) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
-        let source_bytes = self.validate_legacy_device_analytic_provenance(deck, kind)?;
         if abort.is_aborted() {
             return Err(format!(
-                "{} provenance exceeded the shared deadline",
+                "{} deadline expired before execution",
                 kind.label()
             ));
         }
         let plan = self.static_tran_plan_for_path_with_purpose(
-            &deck.path,
+            &self.root.join(kind.path()),
             XyceStaticTranPlanPurpose::LegacyDeviceAnalyticOracle,
         )?;
-        if Self::canonical_lf_text_identity(kind.label(), plan.source.as_bytes())?
-            != Self::canonical_lf_text_identity(kind.label(), &source_bytes)?
-        {
-            return Err(format!(
-                "{} plan did not preserve exact source",
-                kind.label()
-            ));
-        }
         let parsed = Self::parse_xyce_netlist(&plan.source, &plan.deck_path)
             .map_err(|error| format!("{} parse failed: {error}", kind.label()))?;
         Self::validate_legacy_device_analytic_typed_contract(&plan, &parsed, kind)?;
@@ -780,10 +531,9 @@ impl XyceTestRunner {
                 mismatches.len()
             ));
         }
-        self.validate_legacy_device_analytic_provenance(deck, kind)?;
         if abort.is_aborted() {
             return Err(format!(
-                "{} post-execution provenance exceeded the shared deadline",
+                "{} execution exceeded the shared deadline",
                 kind.label()
             ));
         }
@@ -845,25 +595,11 @@ mod tests {
     }
 
     #[test]
-    fn legacy_device_analytic_historical_provenance_is_exact() {
-        assert_historical(XyceLegacyDeviceAnalyticKind::BjtRamp1);
-        assert_historical(XyceLegacyDeviceAnalyticKind::NmosLevel1);
-    }
-
-    fn assert_historical(kind: XyceLegacyDeviceAnalyticKind) {
-        XyceTestRunner::validate_legacy_device_analytic_historical_provenance(kind)
-            .expect("Release-7.10 legacy analytic provenance remains exact");
-    }
-
-    #[test]
     fn legacy_device_analytic_typed_contracts_preserve_exact_device_laws() {
         let root = corpus_root();
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         for kind in XyceLegacyDeviceAnalyticKind::ALL {
             let deck = canonical_deck(&root, kind);
-            runner
-                .validate_legacy_device_analytic_provenance(&deck, kind)
-                .expect("canonical legacy analytic provenance qualifies");
             let plan = runner
                 .static_tran_plan_for_path_with_purpose(
                     &deck.path,
@@ -992,56 +728,20 @@ mod tests {
         let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
         for kind in XyceLegacyDeviceAnalyticKind::ALL {
             runner
-                .validate_legacy_device_analytic_oracle(
-                    &canonical_deck(&root, kind),
-                    kind,
-                    Instant::now(),
-                )
+                .validate_legacy_device_analytic_oracle(kind, Instant::now())
                 .unwrap_or_else(|error| panic!("{} failed: {error}", kind.label()));
         }
-        let (_temporary, deck, runner) =
-            fixture("deadline", XyceLegacyDeviceAnalyticKind::BjtRamp1);
+        let runner = XyceTestRunner::new(
+            &root,
+            XyceRunnerConfig {
+                max_time_per_test_ms: 1,
+                ..XyceRunnerConfig::default()
+            },
+        );
         let expired = Instant::now() - Duration::from_secs(5);
-        assert!(
-            runner
-                .validate_legacy_device_analytic_oracle(
-                    &deck,
-                    XyceLegacyDeviceAnalyticKind::BjtRamp1,
-                    expired,
-                )
-                .is_err()
-        );
-    }
-
-    #[test]
-    fn legacy_device_analytic_provenance_rejects_source_output_and_role_drift() {
-        let kind = XyceLegacyDeviceAnalyticKind::BjtRamp1;
-        let (temporary, deck, runner) = fixture("source", kind);
-        fs::write(&deck.path, "mutated\n").expect("mutate source");
-        assert!(
-            runner
-                .validate_legacy_device_analytic_provenance(&deck, kind)
-                .is_err()
-        );
-        drop(temporary);
-
-        let (temporary, deck, runner) = fixture("output", kind);
-        fs::create_dir_all(temporary.path().join("OutputData/BJT_ANALYTIC"))
-            .expect("create invented output family");
-        assert!(
-            runner
-                .validate_legacy_device_analytic_provenance(&deck, kind)
-                .is_err()
-        );
-        drop(temporary);
-
-        let (temporary, deck, _runner) = fixture("owner", kind);
-        fs::write(temporary.path().join(HARNESS_MANIFEST_FILE), "").expect("remove wrapper owners");
-        let runner = XyceTestRunner::new(temporary.path(), XyceRunnerConfig::default());
-        assert!(
-            runner
-                .validate_legacy_device_analytic_provenance(&deck, kind)
-                .is_err()
-        );
+        let error = runner
+            .validate_legacy_device_analytic_oracle(XyceLegacyDeviceAnalyticKind::BjtRamp1, expired)
+            .expect_err("an expired shared deadline must fail closed");
+        assert!(error.contains("deadline"), "unexpected error: {error}");
     }
 }

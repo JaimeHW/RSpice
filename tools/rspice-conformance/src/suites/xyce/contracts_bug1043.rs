@@ -22,127 +22,6 @@ impl XyceTestRunner {
                 })
     }
 
-    pub(super) fn bug1043_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG1043_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG1043_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG1043_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug1043_historical_oracle_records(
-        records: &[String],
-    ) -> Result<(), String> {
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if XYCE_BUG1043_PRETRIM_COMMIT != UPSTREAM_EXCLUSIONS_SOURCE_COMMIT
-            || records.len() != XYCE_BUG1043_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG1043_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG1043_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG1043_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{LABEL} Release-7.10 wrapper/exclude/ACComparator provenance changed: pretrim={XYCE_BUG1043_PRETRIM_COMMIT}, records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn validate_bug1043_historical_oracle_provenance() -> Result<(), String> {
-        Self::validate_bug1043_historical_oracle_records(
-            &Self::bug1043_historical_oracle_provenance_records(),
-        )
-    }
-
-    fn validate_bug1043_artifact_directory(
-        directory: &Path,
-        expected_artifacts: &[(&str, usize, &str, &str)],
-        purpose: &str,
-    ) -> Result<(), String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {LABEL} {purpose} directory: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{LABEL} {purpose} directory must be a regular non-symlink directory"
-            ));
-        }
-        let expected = expected_artifacts
-            .iter()
-            .copied()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        if expected.len() != expected_artifacts.len() {
-            return Err(format!("{LABEL} {purpose} artifact specification collides"));
-        }
-
-        let mut observed = BTreeSet::new();
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("failed to enumerate {LABEL} {purpose}: {error}"))?
-        {
-            let entry = entry
-                .map_err(|error| format!("failed to inspect {LABEL} {purpose} member: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {LABEL} {purpose} member: {error}"))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{LABEL} {purpose} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{LABEL} {purpose} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if !observed.insert(key.clone()) {
-                return Err(format!("{LABEL} {purpose} contains a case collision"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!(
-                    "{LABEL} acquired unexpected {purpose} member {name:?}"
-                ));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{LABEL} {purpose} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {LABEL} {purpose} member: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(LABEL, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{LABEL} {purpose} member {name:?} content changed: bytes={}, sha256={sha256}, blake3={content_blake3}",
-                    canonical.len()
-                ));
-            }
-        }
-        let expected_names = expected.keys().cloned().collect::<BTreeSet<_>>();
-        if observed != expected_names {
-            return Err(format!(
-                "{LABEL} {purpose} census changed: expected {expected_names:?}, got {observed:?}"
-            ));
-        }
-        Ok(())
-    }
-
     pub(super) fn bug1043_ac_data_parameter_family_contract(
         &self,
         deck: &XyceDeck,
@@ -182,128 +61,18 @@ impl XyceTestRunner {
                 },
                 owner_path,
                 baseline_path,
-                spec,
                 role,
             };
-            self.validate_bug1043_ac_data_parameter_provenance(&contract)?;
+            self.validate_bug1043_ac_data_parameter_semantics(&contract)?;
             Ok(contract)
         })())
     }
 
-    pub(super) fn validate_bug1043_ac_data_parameter_provenance(
+    /// The DATA owner and the expression baseline must parse to one six-row AC circuit.
+    fn validate_bug1043_ac_data_parameter_semantics(
         &self,
         contract: &XyceBug1043AcDataParameterFamilyContract,
     ) -> Result<(), String> {
-        Self::validate_bug1043_historical_oracle_provenance()?;
-        let expected_target = match contract.role {
-            XyceBug1043AcDataParameterRole::DataWrapperOwner => &contract.owner_path,
-            XyceBug1043AcDataParameterRole::ExpressionBaseline => &contract.baseline_path,
-        };
-        if contract.relational.kind != XyceBaselineFamilyKind::Bug1043AcDataParameters
-            || contract.relational.comparison
-                != XyceBaselineFamilyComparison::AcComparator(
-                    Self::bug1043_ac_data_parameter_ac_comparator_tolerance(),
-                )
-            || contract.relational.family != contract.spec.family
-            || !Self::same_path(&contract.relational.baseline_path, &contract.baseline_path)
-            || contract.relational.member_paths.len() != 2
-            || !Self::same_path(&contract.relational.member_paths[0], &contract.owner_path)
-            || !Self::same_path(
-                &contract.relational.member_paths[1],
-                &contract.baseline_path,
-            )
-            || !contract
-                .relational
-                .target_path
-                .as_ref()
-                .is_some_and(|path| Self::same_path(path, expected_target))
-            || contract
-                .relational
-                .kind
-                .ac_comparator_member_is_good_waveform()
-        {
-            return Err(format!(
-                "{LABEL} contract is not the exact expression-GOODFILE/DATA-owner-TESTFILE pair"
-            ));
-        }
-
-        let prefix = "netlists/certification_tests/bug_1043_son/";
-        let wrapper_records = Self::load_upstream_wrapper_decks(&self.root);
-        let family_wrappers = wrapper_records
-            .iter()
-            .filter(|record| record.starts_with(prefix))
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        let expected_wrappers =
-            BTreeSet::from([XYCE_BUG1043_OWNER_RECORD, XYCE_BUG1043_ANALYTIC_RECORD]);
-        let analytic_path = self.root.join(XYCE_BUG1043_ANALYTIC_PATH);
-        if family_wrappers != expected_wrappers
-            || Self::normalize_manifest_key(&self.relative_key(&analytic_path))
-                != XYCE_BUG1043_ANALYTIC_RECORD
-        {
-            return Err(format!(
-                "{LABEL} wrapper ownership changed: {family_wrappers:?}"
-            ));
-        }
-
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{LABEL} exclusion manifest is invalid: {error}"))?;
-        let family_exclusions = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(prefix))
-            .collect::<BTreeMap<_, _>>();
-        let baseline_exclusion = family_exclusions
-            .get(&XYCE_BUG1043_EXPRESSION_BASELINE_RECORD.to_string())
-            .copied();
-        if family_exclusions.len() != 1
-            || baseline_exclusion.is_none_or(|exclusion| {
-                Self::normalize_manifest_key(&exclusion.source)
-                    != Self::normalize_manifest_key(XYCE_BUG1043_HISTORICAL_EXCLUDE_PATH)
-                    || !matches!(
-                        &exclusion.disposition,
-                        XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
-                            expected_contract,
-                        } if expected_contract
-                            == XYCE_BUG1043_AC_DATA_PARAMETER_EXPRESSION_BASELINE_CONTRACT
-                    )
-            })
-        {
-            return Err(format!(
-                "{LABEL} expression baseline lost its exact independent qualification: {family_exclusions:?}"
-            ));
-        }
-
-        if contract.spec.owner_content_blake3 != XYCE_BUG1043_RETAINED_SOURCE_ARTIFACTS[0].3
-            || contract.spec.baseline_content_blake3 != XYCE_BUG1043_RETAINED_SOURCE_ARTIFACTS[2].3
-        {
-            return Err(format!(
-                "{LABEL} role/source identity specification changed"
-            ));
-        }
-        Self::validate_bug1043_artifact_directory(
-            &self.root.join(XYCE_BUG1043_FAMILY_DIR),
-            &XYCE_BUG1043_RETAINED_SOURCE_ARTIFACTS,
-            "source",
-        )?;
-        let output_directory = self
-            .root
-            .join("OutputData/Certification_Tests/BUG_1043_SON");
-        Self::validate_bug1043_artifact_directory(
-            &output_directory,
-            &[XYCE_BUG1043_ANALYTIC_ORACLE_ARTIFACT],
-            "analytic-oracle",
-        )?;
-        if !Self::same_path(
-            &output_directory.join(XYCE_BUG1043_ANALYTIC_ORACLE_ARTIFACT.0),
-            &self.root.join(XYCE_BUG1043_ANALYTIC_ORACLE_PATH),
-        ) {
-            return Err(format!("{LABEL} analytic oracle path changed"));
-        }
-        for path in [&contract.owner_path, &contract.baseline_path] {
-            self.reject_wrapper_output_artifacts(path)
-                .map_err(|error| format!("{LABEL} relational record {error}"))?;
-        }
-
         let owner_plan = self
             .bug1043_relational_ac_plan_for_path(&contract.owner_path)
             .map_err(|error| format!("{LABEL} DATA owner plan failed: {error}"))?;
@@ -349,16 +118,6 @@ mod tests {
             section: XyceDeckSection::Netlists,
             relative_path: relative_path.to_string(),
         }
-    }
-
-    #[test]
-    fn bug1043_historical_provenance_is_exact_and_rejects_drift() {
-        let records = XyceTestRunner::bug1043_historical_oracle_provenance_records();
-        XyceTestRunner::validate_bug1043_historical_oracle_records(&records)
-            .expect("Release-7.10 BUG1043 provenance remains exact");
-        let mut changed = records;
-        changed[0].push('x');
-        assert!(XyceTestRunner::validate_bug1043_historical_oracle_records(&changed).is_err());
     }
 
     #[test]

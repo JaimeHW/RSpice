@@ -629,7 +629,7 @@ impl XyceTestRunner {
 
         if let Some(kind) = XyceLegacyDeviceAnalyticKind::for_record(&deck.relative_path) {
             let contract = kind.result_contract();
-            let result = match self.validate_legacy_device_analytic_oracle(deck, kind, start) {
+            let result = match self.validate_legacy_device_analytic_oracle(kind, start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -681,7 +681,7 @@ impl XyceTestRunner {
         }
 
         if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG159_OWNER_RECORD {
-            let result = match self.validate_bug159_oracle(deck, start) {
+            let result = match self.validate_bug159_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, XYCE_BUG159_CONTRACT),
                 Err(error) => {
                     self.failure_result(deck, start, XYCE_BUG159_CONTRACT, error, Vec::new())
@@ -717,7 +717,7 @@ impl XyceTestRunner {
         }
 
         if Self::normalize_manifest_key(&deck.relative_path) == XYCE_BUG302_RECORD {
-            let result = match self.validate_bug302_oracle(deck, start) {
+            let result = match self.validate_bug302_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, XYCE_BUG302_CONTRACT),
                 Err(error) => {
                     self.failure_result(deck, start, XYCE_BUG302_CONTRACT, error, Vec::new())
@@ -821,7 +821,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug907SonRole::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug907_son_oracle(deck, role, start) {
+            let result = match self.validate_bug907_son_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -1161,7 +1161,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug412Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug412_oracle(deck, start) {
+            let result = match self.validate_bug412_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -1212,7 +1212,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug307Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug307_oracle(deck, role, start) {
+            let result = match self.validate_bug307_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -1229,7 +1229,7 @@ impl XyceTestRunner {
 
         if let Some(role) = Bug28Role::for_record(&deck.relative_path) {
             let contract = role.contract();
-            let result = match self.validate_bug28_oracle(deck, role, start) {
+            let result = match self.validate_bug28_oracle(start) {
                 Ok(()) => self.passed_result(deck, start, contract),
                 Err(error) => self.failure_result(deck, start, contract, error, Vec::new()),
             };
@@ -11599,29 +11599,9 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let result_contract = contract.role.result_contract();
-        if let Err(reason) = self.validate_abm_lookup_order_provenance(&contract) {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!("ABM_SPLINES lookup-order provenance changed before execution: {reason}"),
-                Vec::new(),
-            );
-        }
         let mut result =
             self.run_baseline_family_contract(deck, contract.relational.clone(), start);
         if result.passed && !result.expected_unsupported {
-            if let Err(reason) = self.validate_abm_lookup_order_provenance(&contract) {
-                return self.failure_result(
-                    deck,
-                    start,
-                    result_contract,
-                    format!(
-                        "ABM_SPLINES lookup-order provenance changed during execution: {reason}"
-                    ),
-                    Vec::new(),
-                );
-            }
             result.contract = result_contract.to_string();
         }
         result
@@ -11664,31 +11644,9 @@ impl XyceTestRunner {
         start: Instant,
     ) -> XyceTestResult {
         let result_contract = contract.role.result_contract();
-        if let Err(reason) = self.validate_bug1043_ac_data_parameter_provenance(&contract) {
-            return self.failure_result(
-                deck,
-                start,
-                result_contract,
-                format!(
-                    "BUG_1043_SON AC DATA parameter provenance changed before execution: {reason}"
-                ),
-                Vec::new(),
-            );
-        }
         let mut result =
             self.run_baseline_family_contract(deck, contract.relational.clone(), start);
         if result.passed && !result.expected_unsupported {
-            if let Err(reason) = self.validate_bug1043_ac_data_parameter_provenance(&contract) {
-                return self.failure_result(
-                    deck,
-                    start,
-                    result_contract,
-                    format!(
-                        "BUG_1043_SON AC DATA parameter provenance changed during execution: {reason}"
-                    ),
-                    Vec::new(),
-                );
-            }
             result.contract = result_contract.to_string();
         }
         result

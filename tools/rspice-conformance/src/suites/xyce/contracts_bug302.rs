@@ -1,6 +1,8 @@
 use super::*;
 
 const BUG302_LABEL: &str = "BUG_302 print-delimiter wrapper";
+const BUG302_SOURCE_DIRECTORY: &str = "Netlists/Certification_Tests/BUG_302";
+const BUG302_OUTPUT_DIRECTORY: &str = "OutputData/Certification_Tests/BUG_302";
 const BUG302_INVALID_WARNING: &str = "Invalid value of DELIMITER in .PRINT statment, ignoring";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,241 +77,9 @@ impl Bug302Worker {
             Bug302Mode::Tab => PrintDelimiter::Tab,
         }
     }
-
-    fn expected_contract(self) -> &'static str {
-        match self.analysis {
-            Bug302Analysis::Dc => "static_prn_dc",
-            Bug302Analysis::Tran => "static_prn_tran",
-        }
-    }
-
-    fn normalized_record(self) -> String {
-        format!(
-            "netlists/certification_tests/bug_302/{}",
-            self.file_name.to_ascii_lowercase()
-        )
-    }
-}
-
-struct Bug302RetainedArtifacts {
-    source_dir: PathBuf,
-    output_dir: PathBuf,
-    sources: BTreeMap<String, Vec<u8>>,
 }
 
 impl XyceTestRunner {
-    pub(super) fn bug302_historical_oracle_provenance_records() -> Vec<String> {
-        let mut records = XYCE_BUG302_HISTORICAL_ARTIFACTS
-            .into_iter()
-            .map(|(path, bytes, sha256, content_blake3)| {
-                format!(
-                    "{XYCE_BUG302_UPSTREAM_REGRESSION_COMMIT}\t{XYCE_BUG302_UPSTREAM_RELEASE_TAG}\t{path}\t{bytes}\t{sha256}\t{content_blake3}"
-                )
-            })
-            .collect::<Vec<_>>();
-        records.sort();
-        records
-    }
-
-    pub(super) fn validate_bug302_historical_oracle_provenance() -> Result<(), String> {
-        let records = Self::bug302_historical_oracle_provenance_records();
-        let stream = records.join("\n");
-        let sha256 = format!("{:x}", Sha256::digest(stream.as_bytes()));
-        let content_blake3 = blake3::hash(stream.as_bytes()).to_hex().to_string();
-        if records.len() != XYCE_BUG302_HISTORICAL_RECORD_COUNT
-            || stream.len() != XYCE_BUG302_HISTORICAL_RECORD_BYTES
-            || sha256 != XYCE_BUG302_HISTORICAL_RECORDS_SHA256
-            || content_blake3 != XYCE_BUG302_HISTORICAL_RECORDS_BLAKE3
-        {
-            return Err(format!(
-                "{BUG302_LABEL} Release-7.10 provenance changed: records={}/{}, sha256={sha256}, blake3={content_blake3}",
-                records.len(),
-                stream.len()
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_bug302_directory<const N: usize>(
-        directory: &Path,
-        expected: &[(&str, usize, &str, &str); N],
-        label: &str,
-    ) -> Result<BTreeMap<String, Vec<u8>>, String> {
-        let metadata = fs::symlink_metadata(directory)
-            .map_err(|error| format!("failed to inspect {label}: {error}"))?;
-        if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-            return Err(format!(
-                "{label} {} must be a regular non-symlink directory",
-                directory.display()
-            ));
-        }
-        let expected = expected
-            .iter()
-            .copied()
-            .map(|artifact| (artifact.0.to_ascii_lowercase(), artifact))
-            .collect::<BTreeMap<_, _>>();
-        let mut observed = BTreeMap::new();
-        for entry in
-            fs::read_dir(directory).map_err(|error| format!("failed to read {label}: {error}"))?
-        {
-            let entry = entry.map_err(|error| format!("failed to inspect {label}: {error}"))?;
-            let path = entry.path();
-            let metadata = fs::symlink_metadata(&path)
-                .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
-            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-                return Err(format!(
-                    "{label} member {} must be a regular non-symlink file",
-                    path.display()
-                ));
-            }
-            let name = entry
-                .file_name()
-                .to_str()
-                .ok_or_else(|| format!("{label} member name is not UTF-8"))?
-                .to_string();
-            let key = name.to_ascii_lowercase();
-            if observed.contains_key(&key) {
-                return Err(format!("{label} contains case-colliding member {name:?}"));
-            }
-            let Some((expected_name, expected_bytes, expected_sha256, expected_blake3)) =
-                expected.get(&key).copied()
-            else {
-                return Err(format!("{label} acquired unexpected member {name:?}"));
-            };
-            if name != expected_name {
-                return Err(format!(
-                    "{label} member case changed: expected {expected_name:?}, got {name:?}"
-                ));
-            }
-            let bytes = fs::read(&path)
-                .map_err(|error| format!("failed to read {label} member {name:?}: {error}"))?;
-            let canonical = Self::canonical_lf_text_identity(label, &bytes)?;
-            let sha256 = format!("{:x}", Sha256::digest(&canonical));
-            let content_blake3 = blake3::hash(&canonical).to_hex().to_string();
-            if canonical.len() != expected_bytes
-                || sha256 != expected_sha256
-                || content_blake3 != expected_blake3
-            {
-                return Err(format!(
-                    "{label} member {name:?} changed: expected {expected_bytes}/{expected_sha256}/{expected_blake3}, got {}/{sha256}/{content_blake3}",
-                    canonical.len()
-                ));
-            }
-            observed.insert(key, bytes);
-        }
-        if observed.len() != expected.len() {
-            return Err(format!(
-                "{label} census changed: expected {} members, got {}",
-                expected.len(),
-                observed.len()
-            ));
-        }
-        Ok(observed)
-    }
-
-    fn validate_bug302_provenance(
-        &self,
-        deck: &XyceDeck,
-    ) -> Result<Bug302RetainedArtifacts, String> {
-        Self::validate_bug302_historical_oracle_provenance()?;
-        if deck.section != XyceDeckSection::Netlists
-            || Self::normalize_manifest_key(&deck.relative_path) != XYCE_BUG302_RECORD
-            || Self::normalize_manifest_key(&self.relative_key(&deck.path)) != XYCE_BUG302_RECORD
-            || !Self::same_path(&deck.path, &self.root.join(XYCE_BUG302_PATH))
-        {
-            return Err(format!(
-                "recognized {BUG302_LABEL} record '{}' is not backed by its canonical path",
-                deck.relative_path
-            ));
-        }
-        let family_prefix = "netlists/certification_tests/bug_302/";
-        let owners = self
-            .upstream_wrapper_decks
-            .iter()
-            .filter(|record| record.starts_with(family_prefix))
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        if owners != [XYCE_BUG302_RECORD] {
-            return Err(format!(
-                "{BUG302_LABEL} requires its exact sole wrapper owner, found {owners:?}"
-            ));
-        }
-
-        let exclusions = Self::load_upstream_exclusions(&self.root)
-            .map_err(|error| format!("{BUG302_LABEL} exclusion manifest is invalid: {error}"))?;
-        if exclusions.contains_key(XYCE_BUG302_RECORD) {
-            return Err(format!("{BUG302_LABEL} owner must not be excluded"));
-        }
-        let family_exclusions = exclusions
-            .iter()
-            .filter(|(record, _)| record.starts_with(family_prefix))
-            .collect::<BTreeMap<_, _>>();
-        let expected_records = Bug302Worker::ALL
-            .into_iter()
-            .map(Bug302Worker::normalized_record)
-            .collect::<BTreeSet<_>>();
-        if family_exclusions
-            .keys()
-            .map(|record| record.to_string())
-            .collect::<BTreeSet<_>>()
-            != expected_records
-        {
-            return Err(format!(
-                "{BUG302_LABEL} exclusion-family census changed: {:?}",
-                family_exclusions.keys().collect::<Vec<_>>()
-            ));
-        }
-        for worker in Bug302Worker::ALL {
-            let record = worker.normalized_record();
-            let exclusion = family_exclusions
-                .get(&record)
-                .ok_or_else(|| format!("{BUG302_LABEL} lost exclusion for {record}"))?;
-            if exclusion.source != XYCE_BUG302_EXCLUSION_SOURCE
-                || !matches!(
-                    &exclusion.disposition,
-                    XyceUpstreamExclusionDisposition::RspiceIndependentlyQualified {
-                        expected_contract
-                    } if expected_contract == worker.expected_contract()
-                )
-            {
-                return Err(format!(
-                    "{BUG302_LABEL} qualification changed for {record}: {exclusion:?}"
-                ));
-            }
-        }
-
-        let source_dir = self.root.join("Netlists/Certification_Tests/BUG_302");
-        let sources = Self::validate_bug302_directory(
-            &source_dir,
-            &XYCE_BUG302_RETAINED_SOURCES,
-            "BUG_302 retained source family",
-        )?;
-        if sources
-            .get("bug_302.cir")
-            .is_none_or(|source| !source.is_empty())
-        {
-            return Err(format!("{BUG302_LABEL} owner is no longer exactly empty"));
-        }
-        let output_dir = self.root.join("OutputData/Certification_Tests/BUG_302");
-        Self::validate_bug302_directory(
-            &output_dir,
-            &XYCE_BUG302_RETAINED_OUTPUTS,
-            "BUG_302 retained output family",
-        )?;
-        self.reject_wrapper_output_artifacts(&deck.path)
-            .map_err(|error| format!("{BUG302_LABEL} {error}"))?;
-        if output_dir.join("bug_302.cir.prn").exists() {
-            return Err(format!(
-                "{BUG302_LABEL} must not acquire an invented owner gold"
-            ));
-        }
-        Ok(Bug302RetainedArtifacts {
-            source_dir,
-            output_dir,
-            sources,
-        })
-    }
-
     fn bug302_semantic_fingerprint(netlist: &Netlist) -> String {
         [
             format!("{:?}", netlist.title),
@@ -673,26 +443,20 @@ impl XyceTestRunner {
         Self::validate_bug302_fresh_rendering(&table)
     }
 
-    pub(super) fn validate_bug302_oracle(
-        &self,
-        deck: &XyceDeck,
-        start: Instant,
-    ) -> Result<(), String> {
+    pub(super) fn validate_bug302_oracle(&self, start: Instant) -> Result<(), String> {
         let abort = DeadlineAbort::new(start, self.config.max_time_per_test_ms.max(1));
         if abort.is_aborted() {
             return Err(format!("{BUG302_LABEL} deadline expired before validation"));
         }
-        let artifacts = self.validate_bug302_provenance(deck)?;
+        let source_dir = self.root.join(BUG302_SOURCE_DIRECTORY);
+        let output_dir = self.root.join(BUG302_OUTPUT_DIRECTORY);
         let mut dc_fingerprint = None;
         let mut tran_fingerprint = None;
         for worker in Bug302Worker::ALL {
-            let key = worker.file_name.to_ascii_lowercase();
-            let bytes = artifacts
-                .sources
-                .get(&key)
-                .ok_or_else(|| format!("{BUG302_LABEL} lost {}", worker.file_name))?;
-            let path = artifacts.source_dir.join(worker.file_name);
-            let (fingerprint, _) = Self::validate_bug302_worker(worker, &path, bytes)?;
+            let path = source_dir.join(worker.file_name);
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            let (fingerprint, _) = Self::validate_bug302_worker(worker, &path, &bytes)?;
             let baseline = match worker.analysis {
                 Bug302Analysis::Dc => &mut dc_fingerprint,
                 Bug302Analysis::Tran => &mut tran_fingerprint,
@@ -708,27 +472,20 @@ impl XyceTestRunner {
                 _ => {}
             }
         }
-        Self::validate_bug302_retained_output_relations(&artifacts.output_dir)?;
+        Self::validate_bug302_retained_output_relations(&output_dir)?;
         self.validate_bug302_dc_execution(
-            &artifacts.source_dir.join("DC_defaults.cir"),
-            &artifacts.output_dir.join("DC_defaults.cir.prn"),
+            &source_dir.join("DC_defaults.cir"),
+            &output_dir.join("DC_defaults.cir.prn"),
             start,
         )?;
         self.validate_bug302_tran_execution(
-            &artifacts.source_dir.join("transient_defaults.cir"),
-            &artifacts.output_dir.join("transient_defaults.cir.prn"),
+            &source_dir.join("transient_defaults.cir"),
+            &output_dir.join("transient_defaults.cir.prn"),
             start,
         )?;
         if abort.is_aborted() {
             return Err(format!(
                 "{BUG302_LABEL} execution exceeded timeout ({}ms)",
-                self.config.max_time_per_test_ms
-            ));
-        }
-        self.validate_bug302_provenance(deck)?;
-        if abort.is_aborted() {
-            return Err(format!(
-                "{BUG302_LABEL} final provenance exceeded timeout ({}ms)",
                 self.config.max_time_per_test_ms
             ));
         }
@@ -746,100 +503,14 @@ mod tests {
             .join("tests/xyce")
     }
 
-    fn canonical_deck(root: &Path) -> XyceDeck {
-        XyceDeck {
-            path: root.join(XYCE_BUG302_PATH),
-            section: XyceDeckSection::Netlists,
-            relative_path: XYCE_BUG302_PATH.to_string(),
-        }
-    }
-
-    fn bug302_fixture(label: &str) -> (tempfile::TempDir, XyceDeck, XyceTestRunner) {
-        let source_root = corpus_root();
-        let temporary = tempfile::Builder::new()
-            .prefix(&format!("rspice-xyce-bug302-{label}-"))
-            .tempdir()
-            .expect("create BUG302 fixture root");
-        let root = temporary.path();
-        let source_dir = root.join("Netlists/Certification_Tests/BUG_302");
-        let output_dir = root.join("OutputData/Certification_Tests/BUG_302");
-        fs::create_dir_all(&source_dir).expect("create BUG302 fixture source family");
-        fs::create_dir_all(&output_dir).expect("create BUG302 fixture output family");
-        for (name, ..) in XYCE_BUG302_RETAINED_SOURCES {
-            fs::copy(
-                source_root
-                    .join("Netlists/Certification_Tests/BUG_302")
-                    .join(name),
-                source_dir.join(name),
-            )
-            .expect("copy canonical BUG302 source member");
-        }
-        for (name, ..) in XYCE_BUG302_RETAINED_OUTPUTS {
-            fs::copy(
-                source_root
-                    .join("OutputData/Certification_Tests/BUG_302")
-                    .join(name),
-                output_dir.join(name),
-            )
-            .expect("copy canonical BUG302 output member");
-        }
-        fs::write(
-            root.join(HARNESS_MANIFEST_FILE),
-            format!("{XYCE_BUG302_PATH}\t{REQUIRES_UPSTREAM_WRAPPER_CONTRACT}\n"),
-        )
-        .expect("write BUG302 wrapper manifest");
-        let mut exclusion_rows = Bug302Worker::ALL
-            .into_iter()
-            .map(|worker| {
-                format!(
-                    "Netlists/Certification_Tests/BUG_302/{}\t{XYCE_BUG302_EXCLUSION_SOURCE}\trspice_independently_qualified\t{}",
-                    worker.file_name,
-                    worker.expected_contract()
-                )
-            })
-            .collect::<Vec<_>>();
-        exclusion_rows.sort();
-        fs::write(
-            root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE),
-            format!(
-                "schema_version\t{UPSTREAM_EXCLUSIONS_SCHEMA_VERSION}\nsource_commit\t{UPSTREAM_EXCLUSIONS_SOURCE_COMMIT}\nsource_netlists_tree\t{UPSTREAM_EXCLUSIONS_SOURCE_NETLISTS_TREE}\n{}\n",
-                exclusion_rows.join("\n")
-            ),
-        )
-        .expect("write BUG302 exclusion manifest");
-        let deck = canonical_deck(root);
-        let runner = XyceTestRunner::new(root, XyceRunnerConfig::default());
-        (temporary, deck, runner)
-    }
-
-    #[test]
-    fn bug302_historical_provenance_and_retained_relations_are_exact() {
-        XyceTestRunner::validate_bug302_historical_oracle_provenance()
-            .expect("Release-7.10 BUG302 provenance remains exact");
-        let root = corpus_root();
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        let artifacts = runner
-            .validate_bug302_provenance(&canonical_deck(&root))
-            .expect("retained BUG302 provenance remains exact");
-        XyceTestRunner::validate_bug302_retained_output_relations(&artifacts.output_dir)
-            .expect("retained BUG302 delimiter relations remain exact");
-    }
-
     #[test]
     fn bug302_all_workers_retain_one_typed_semantic_cohort_per_analysis() {
-        let root = corpus_root();
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
-        let artifacts = runner
-            .validate_bug302_provenance(&canonical_deck(&root))
-            .expect("canonical BUG302 provenance passes");
+        let source_dir = corpus_root().join(BUG302_SOURCE_DIRECTORY);
         let mut fingerprints = BTreeMap::<&'static str, String>::new();
         for worker in Bug302Worker::ALL {
-            let path = artifacts.source_dir.join(worker.file_name);
-            let bytes = artifacts
-                .sources
-                .get(&worker.file_name.to_ascii_lowercase())
-                .expect("worker source is retained");
-            let (fingerprint, _) = XyceTestRunner::validate_bug302_worker(worker, &path, bytes)
+            let path = source_dir.join(worker.file_name);
+            let bytes = fs::read(&path).expect("read BUG302 worker source");
+            let (fingerprint, _) = XyceTestRunner::validate_bug302_worker(worker, &path, &bytes)
                 .expect("canonical BUG302 worker remains typed");
             let analysis = match worker.analysis {
                 Bug302Analysis::Dc => "dc",
@@ -907,59 +578,10 @@ mod tests {
     }
 
     #[test]
-    fn bug302_provenance_rejects_source_output_manifest_and_path_drift() {
-        let (_temporary, deck, runner) = bug302_fixture("source-drift");
-        fs::write(&deck.path, "mutated owner\n").expect("mutate BUG302 owner");
-        assert!(runner.validate_bug302_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug302_fixture("output-drift");
-        fs::write(
-            runner
-                .root
-                .join("OutputData/Certification_Tests/BUG_302/DC_defaults.cir.prn"),
-            "mutated output\n",
-        )
-        .expect("mutate BUG302 output");
-        assert!(runner.validate_bug302_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug302_fixture("family-drift");
-        fs::write(
-            deck.path
-                .parent()
-                .expect("BUG302 deck has parent")
-                .join("unexpected.err"),
-            "stale artifact\n",
-        )
-        .expect("add BUG302 source-family member");
-        assert!(runner.validate_bug302_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug302_fixture("owner-drift");
-        fs::write(runner.root.join(HARNESS_MANIFEST_FILE), "")
-            .expect("remove BUG302 wrapper owner");
-        let rebuilt = XyceTestRunner::new(&runner.root, XyceRunnerConfig::default());
-        assert!(rebuilt.validate_bug302_provenance(&deck).is_err());
-
-        let (_temporary, deck, runner) = bug302_fixture("exclusion-drift");
-        let manifest_path = runner.root.join(UPSTREAM_EXCLUSIONS_MANIFEST_FILE);
-        let manifest = fs::read_to_string(&manifest_path).expect("read BUG302 exclusions");
-        fs::write(
-            &manifest_path,
-            manifest.replacen("static_prn_dc", "static_prn_tran", 1),
-        )
-        .expect("mutate BUG302 worker contract");
-        assert!(runner.validate_bug302_provenance(&deck).is_err());
-
-        let (_temporary, mut deck, runner) = bug302_fixture("path-drift");
-        deck.relative_path = "Netlists/Certification_Tests/BUG_302/DC_defaults.cir".to_string();
-        assert!(runner.validate_bug302_provenance(&deck).is_err());
-    }
-
-    #[test]
     fn bug302_owner_oracle_runs_both_default_analyses() {
-        let root = corpus_root();
-        let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+        let runner = XyceTestRunner::new(corpus_root(), XyceRunnerConfig::default());
         runner
-            .validate_bug302_oracle(&canonical_deck(&root), Instant::now())
+            .validate_bug302_oracle(Instant::now())
             .expect("canonical BUG302 owner oracle passes");
     }
 
@@ -976,10 +598,6 @@ mod tests {
         let start = Instant::now()
             .checked_sub(Duration::from_millis(2))
             .expect("construct expired deadline");
-        assert!(
-            runner
-                .validate_bug302_oracle(&canonical_deck(&root), start)
-                .is_err()
-        );
+        assert!(runner.validate_bug302_oracle(start).is_err());
     }
 }

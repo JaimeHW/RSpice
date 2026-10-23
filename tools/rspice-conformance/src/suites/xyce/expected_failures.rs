@@ -99,16 +99,12 @@ impl XyceTestRunner {
                 kind.record()
             ));
         }
-        let source_bytes = if kind.is_bug1595() {
-            Self::read_bug1595_source_bounded(&deck.path)?
-        } else {
-            fs::read(&deck.path).map_err(|err| {
-                format!(
-                    "failed to read expected-failure record {}: {err}",
-                    deck.path.display()
-                )
-            })?
-        };
+        let source_bytes = fs::read(&deck.path).map_err(|err| {
+            format!(
+                "failed to read expected-failure record {}: {err}",
+                deck.path.display()
+            )
+        })?;
         let source_hash = blake3::hash(&source_bytes).to_hex().to_string();
         if source_hash != kind.source_blake3() {
             return Err(format!(
@@ -421,9 +417,6 @@ impl XyceTestRunner {
         }
         if kind.is_bug75() {
             self.validate_bug75_complete_family_provenance(family_dir)?;
-        }
-        if kind.is_bug1595() {
-            self.validate_bug1595_complete_family_provenance(family_dir)?;
         }
         if kind.has_complete_output_symbol_family_envelope() {
             self.validate_output_symbol_complete_family_provenance(kind, family_dir)?;

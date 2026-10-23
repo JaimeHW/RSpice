@@ -308,140 +308,26 @@ const XYCE_BUG1043_AC_DATA_PARAMETER_WRAPPER_OWNER_CONTRACT: &str =
     "bug1043_ac_data_parameter_relational_wrapper_owner";
 const XYCE_BUG1043_AC_DATA_PARAMETER_EXPRESSION_BASELINE_CONTRACT: &str =
     "bug1043_ac_data_parameter_relational_expression_baseline";
-const XYCE_BUG1043_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const XYCE_BUG1043_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG1043_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG1043_FAMILY_DIR: &str = "Netlists/Certification_Tests/BUG_1043_SON";
 const XYCE_BUG1043_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params.cir";
 const XYCE_BUG1043_EXPRESSION_BASELINE_PATH: &str =
     "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_expr.cir";
+#[cfg(test)]
 const XYCE_BUG1043_ANALYTIC_PATH: &str =
     "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir";
-const XYCE_BUG1043_ANALYTIC_ORACLE_PATH: &str =
-    "OutputData/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir.FD.prn";
-const XYCE_BUG1043_HISTORICAL_EXCLUDE_PATH: &str =
-    "Netlists/Certification_Tests/BUG_1043_SON/exclude";
 const XYCE_BUG1043_OWNER_RECORD: &str =
     "netlists/certification_tests/bug_1043_son/rc_ac_params.cir";
 const XYCE_BUG1043_EXPRESSION_BASELINE_RECORD: &str =
     "netlists/certification_tests/bug_1043_son/rc_ac_params_expr.cir";
-const XYCE_BUG1043_ANALYTIC_RECORD: &str =
-    "netlists/certification_tests/bug_1043_son/rc_ac_params_analytic.cir";
 const XYCE_BUG1043_FREQUENCY_GRID: [Value; 6] = [1.0, 10.0, 100.0, 1.0e3, 1.0e4, 1.0e5];
 const XYCE_BUG1043_FREQUENCY_GRID_RELATIVE_ROUNDOFF: Value = 64.0 * f64::EPSILON;
-const XYCE_BUG1043_HISTORICAL_RECORD_COUNT: usize = 7;
-const XYCE_BUG1043_HISTORICAL_RECORD_BYTES: usize = 1_716;
-const XYCE_BUG1043_HISTORICAL_RECORDS_SHA256: &str =
-    "3d7d4bc314d8e1a6a83aa0341b8ff118d6ef0d44165e8d61b1e23bbf7344e31e";
-const XYCE_BUG1043_HISTORICAL_RECORDS_BLAKE3: &str =
-    "594c953743f5b4dc7ce3e13f3402a55da3507e6db0819bfe8b6842a2edefd164";
-
-const XYCE_BUG1043_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/Certification_Tests/BUG_1043_SON/Manifest.txt",
-        158,
-        "6b34b89d6f8adeae3c6434280a8f9fac8c85c23e5a229cf895b605fb98dbfe67",
-        "d629139ef9c93c48e9d640bdb1b6ab805078b9030bac86881909f0f4cde6b9a0",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params.cir.sh",
-        2_876,
-        "b703dcca118b5a16f6c1ffb8d402c4fb99ec568db21b2dccd825939f80114b57",
-        "0ae40d014a8b9ffaa74627d710ce3b2e6593ed6496655306b2a2c3a3623cba70",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir.sh",
-        2_196,
-        "bcdf24c7279b9c4702a7f59ee174495a4f2a3c510d2a4fe77bf0840ca075a95f",
-        "33bc99393271bee1e5160fb6c2891d6b312a122ea2b8ae7292b073c1c7d9adca",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1043_SON/RC_AC_params_analytic.cir.tags",
-        55,
-        "c38bdc58bde3bee682c7196d3bce6bb0caf028c19a6444b71952439fa8c005cf",
-        "00c81a30052f4110e4d8c66513ea01747f65b3fceeb431d527e568feb23cfde5",
-    ),
-    (
-        XYCE_BUG1043_HISTORICAL_EXCLUDE_PATH,
-        22,
-        "b78d4e00b18ef27ff71bcf5c4d823d80946364421414c6c4b8dc4db4c28733d7",
-        "1052573d2b22c1371958f3ecb1ec656c15f72e77f3ae242665cd0fc06ec3968f",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1043_SON/tags",
-        45,
-        "596cae8652fd11a8d05526f881f5e02cdf39f1275fc953c36d298790e94a92b7",
-        "7e72fa9e9bada1a6eb458907e99ccaeafdbcd3439c4f1957bd8943be939530ba",
-    ),
-    (
-        "TestScripts/ACComparator.pl",
-        14_308,
-        "265c0c24ac886ad44bf3827f2cbe0c0f1c75c80971d5bdb3429e8048b36e1571",
-        "6a1c8fdfa65116f6729343a759d172be939eb81a8617cea5a52f3572577ba926",
-    ),
-];
-
-const XYCE_BUG1043_RETAINED_SOURCE_ARTIFACTS: [(&str, usize, &str, &str); 3] = [
-    (
-        "RC_AC_params.cir",
-        604,
-        "8488f1f8e782ddf8697d346f72faf18afecb0f9da72341feea405dc1dc009fd7",
-        "9af9c44bb2d799ecc2e1bf25ea9535c48cdac2323e81c24f0c3372b2cfbae057",
-    ),
-    (
-        "RC_AC_params_analytic.cir",
-        1_196,
-        "caf82e0f07da37e3398988244bd3ef386c36154c7de76596eb642d2fbdd60758",
-        "485931b49884a5cfcf81ddd0dc12c7e42d3d64602c85127b6cc1e26dcbfa6efe",
-    ),
-    (
-        "RC_AC_params_expr.cir",
-        460,
-        "f7c2cfbcaf1f524d46d624b171f89dc771e830a22c9bb458550dce2b462ab2c2",
-        "0a049b4a280380dbf2d3027e5aaef6fd4ea97be804d1f1f9371799b0b3d1485d",
-    ),
-];
-
-const XYCE_BUG1043_ANALYTIC_ORACLE_ARTIFACT: (&str, usize, &str, &str) = (
-    "RC_AC_params_analytic.cir.FD.prn",
-    471,
-    "4b43d6e4d3489148a88749aa2d449f3b80ec8e07b902f5845d7016d7f102d286",
-    "2ee40573c63fd9fd8ac46081edb528589ed4fef43596cf602e8a6676f223a1d0",
-);
 
 // Release 7.10's ABM_SPLINES ordering wrappers run each authored out-of-order
 // inline lookup deck first, then its ordered control, and require their default
-// PRN files to be byte-identical. Bind the exact four retained sources and the
-// removed wrappers/exclude/xyce_verify artifacts before reproducing that
-// directional pair contract natively.
+// PRN files to be byte-identical; the pair contract reproduces that natively.
 const XYCE_ABM_LOOKUP_ORDER_WRAPPER_OWNER_CONTRACT: &str =
     "abm_splines_inline_lookup_order_wrapper_owner";
 const XYCE_ABM_LOOKUP_ORDER_SORTED_CONTROL_CONTRACT: &str =
     "abm_splines_inline_lookup_order_sorted_control";
-const XYCE_ABM_LOOKUP_ORDER_PRETRIM_COMMIT: &str = "80115a9277c0ddb3409acceb3d4e745fd11cddd4";
-const XYCE_ABM_LOOKUP_ORDER_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_ABM_LOOKUP_ORDER_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_ABM_LOOKUP_ORDER_CANDIDATE_COUNT: usize = 4;
-const XYCE_ABM_LOOKUP_ORDER_CANDIDATE_BLAKE3: &str =
-    "9ee216508da63b2a0a0abcdfca52cb029c64c7bf947754689241327cfcf791cd";
-const XYCE_ABM_LOOKUP_ORDER_CANDIDATE_CONTENT_BLAKE3: &str =
-    "be2a4505167a38bad432fcbbf100e88e59da0b598c685834bd67fb1d3fb0c691";
-const XYCE_ABM_LOOKUP_ORDER_OWNER_COUNT: usize = 2;
-const XYCE_ABM_LOOKUP_ORDER_OWNER_MANIFEST_BLAKE3: &str =
-    "286412075c19ef51b86d1e30d368c7b58cd7e610dc5fc5aa80d8edf1ff010d9d";
-const XYCE_ABM_LOOKUP_ORDER_EXCLUSION_COUNT: usize = 2;
-const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUSION_BLAKE3: &str =
-    "bcddcc20cfa2a46933f6598d047cb685b2a93f200a881d8e0bd0d51cea2beb72";
-const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_PATH: &str = "Netlists/ABM_SPLINES/exclude";
-const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_BYTES: usize = 59;
-const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_SHA256: &str =
-    "4ab0d89ccf9cd4348d3fd0290c511d6a32e6ab0fe988751bd5c78bc8bea94402";
-const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_EXCLUDE_BLAKE3: &str =
-    "16c24099b5b183a50760d0780895488630fc6681fa56919fff9c423871946f58";
-const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_ORACLE_RECORD_COUNT: usize = 4;
-const XYCE_ABM_LOOKUP_ORDER_HISTORICAL_ORACLE_BLAKE3: &str =
-    "897989a3f58c9339b2dcf88fc3333987ec1b1b57988cd6a78c54d1f56db88277";
 const XYCE_ABM_LOOKUP_ORDER_GRID: [Value; 11] =
     [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
 
@@ -711,135 +597,9 @@ const XYCE_BUG48_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
 // nonempty default PRN output. The only intended semantic difference is an
 // explicit BJT model TNOM=27 C versus the same omitted default.
 const XYCE_BUG159_CONTRACT: &str = "bug159_bjt_tnom_default_equivalence_wrapper";
-const XYCE_BUG159_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159.cir";
 const XYCE_BUG159_EXPLICIT_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159_1.cir";
 const XYCE_BUG159_IMPLICIT_PATH: &str = "Netlists/Certification_Tests/BUG_159/bug_159_2.cir";
 const XYCE_BUG159_OWNER_RECORD: &str = "netlists/certification_tests/bug_159/bug_159.cir";
-const XYCE_BUG159_EXPLICIT_RECORD: &str = "netlists/certification_tests/bug_159/bug_159_1.cir";
-const XYCE_BUG159_IMPLICIT_RECORD: &str = "netlists/certification_tests/bug_159/bug_159_2.cir";
-const XYCE_BUG159_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_159/exclude";
-const XYCE_BUG159_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG159_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG159_HISTORICAL_RECORD_COUNT: usize = 12;
-const XYCE_BUG159_HISTORICAL_RECORD_BYTES: usize = 2_864;
-const XYCE_BUG159_HISTORICAL_RECORDS_SHA256: &str =
-    "793a771a9dfc706533d109d3292e45142ab3213b7d4480d1313a7ba06819378a";
-const XYCE_BUG159_HISTORICAL_RECORDS_BLAKE3: &str =
-    "569cdcdb0a3bd2f236246e0b6184cc01e54dd54ae78b13bf99534c2664b00eca";
-const XYCE_BUG159_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 12] = [
-    (
-        "Netlists/Certification_Tests/BUG_159/CMakeLists.txt",
-        1_551,
-        "0536246875f0f282a02d7ba1a71489c848c84ac7c4875c1f894e97af0c3eebda",
-        "d1b944849c0b2af29ca578ab3b3d234d6af0fe652e579f01ec2f9e337e878602",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_159/Manifest.txt",
-        75,
-        "5dd8bbb4fd2eeded4c316fe5001cf385e2190b89dad2be4ed8b2782c9e8662bf",
-        "0d583ff0b7679e7e95f29413acdf6c386ce5925ba95a34ed3ac9c61729c5b940",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_159/README",
-        979,
-        "5d6116dd296862775d9e4d300ef9d7c566d0e789c1abfcbf560f7f99da228043",
-        "c9cfa060797b9c6bc0b8e959b4c05e4dc6b93727a1c6a0b2ee09f374467e70e3",
-    ),
-    (
-        XYCE_BUG159_OWNER_PATH,
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_159/bug_159.cir.sh",
-        1_372,
-        "0be49b3e814edf2792bbe74af877d25e67648053ecff987826b806ba16f0fc8d",
-        "e3dcd59e70656e4613938f1f7d5d8543120de04a09c71bd39a68e3c48a4bd8fd",
-    ),
-    (
-        XYCE_BUG159_EXPLICIT_PATH,
-        676,
-        "838fd5c7594c56a5f57453bb9525a034b5bb34063200b562dce410d1b8c4fabe",
-        "b831d59a60fef20cddbd91393bdf422eafd9d9f775b009bef2c0e01517ea39e4",
-    ),
-    (
-        XYCE_BUG159_IMPLICIT_PATH,
-        667,
-        "c81fe2dfd5ad56947dc9605afa0911e90e6dd2e3b85ac9d6bb65fd426883beea",
-        "0c136fb6399d922fb88efea349b5989db7b1ea7739d988ee7e0c8563d1653988",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_159/exclude",
-        28,
-        "d1312e057f924f59537f82da2b137352b9493e643890379797c92a483d78e309",
-        "a87fc1e2a9df29c7fc653c0cbbf6d70eebde6e687401fcfca135bfe2be962293",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_159/tags",
-        16,
-        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
-        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_159/bug_159_1.cir.prn",
-        213,
-        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
-        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_159/bug_159_2.cir.prn",
-        213,
-        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
-        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG159_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 4] = [
-    (
-        "README",
-        979,
-        "5d6116dd296862775d9e4d300ef9d7c566d0e789c1abfcbf560f7f99da228043",
-        "c9cfa060797b9c6bc0b8e959b4c05e4dc6b93727a1c6a0b2ee09f374467e70e3",
-    ),
-    (
-        "bug_159.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "bug_159_1.cir",
-        676,
-        "838fd5c7594c56a5f57453bb9525a034b5bb34063200b562dce410d1b8c4fabe",
-        "b831d59a60fef20cddbd91393bdf422eafd9d9f775b009bef2c0e01517ea39e4",
-    ),
-    (
-        "bug_159_2.cir",
-        667,
-        "c81fe2dfd5ad56947dc9605afa0911e90e6dd2e3b85ac9d6bb65fd426883beea",
-        "0c136fb6399d922fb88efea349b5989db7b1ea7739d988ee7e0c8563d1653988",
-    ),
-];
-const XYCE_BUG159_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 2] = [
-    (
-        "bug_159_1.cir.prn",
-        213,
-        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
-        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
-    ),
-    (
-        "bug_159_2.cir.prn",
-        213,
-        "ab4c34ff74ac0e474cf7d953e6533e51763f2776b345d64e8985fe871d9389d9",
-        "0e3ef59d22062c90b8ea6a0786fb4f58f6cda0c35f6ff0b1c3642ec1ca966a69",
-    ),
-];
 
 // BUG_267 is an include-backed global-parameter success regression. The
 // removed shell wrapper only treats a nonzero simulator exit as failure (its
@@ -927,275 +687,7 @@ const XYCE_BUG267_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
 // independently qualified by their existing numerical contracts; only the
 // removed wrapper owner is reconstructed here.
 const XYCE_BUG302_CONTRACT: &str = "bug302_print_delimiter_relational_wrapper";
-const XYCE_BUG302_PATH: &str = "Netlists/Certification_Tests/BUG_302/bug_302.cir";
 const XYCE_BUG302_RECORD: &str = "netlists/certification_tests/bug_302/bug_302.cir";
-const XYCE_BUG302_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_302/exclude";
-const XYCE_BUG302_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG302_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG302_HISTORICAL_RECORD_COUNT: usize = 24;
-const XYCE_BUG302_HISTORICAL_RECORD_BYTES: usize = 5_903;
-const XYCE_BUG302_HISTORICAL_RECORDS_SHA256: &str =
-    "f44cf8622021c04f16698e1bde928e0eba720f3203f877f1c3378dd3dbabb2ec";
-const XYCE_BUG302_HISTORICAL_RECORDS_BLAKE3: &str =
-    "cb83a9ff9d437c3a1d90fb713ce282bb09b3f5505344504c9e422c67babc90c6";
-const XYCE_BUG302_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 24] = [
-    (
-        "Netlists/Certification_Tests/BUG_302/CMakeLists.txt",
-        2_409,
-        "b7e76dc46d95b8770f1dd38c48bc06cc6069e2d8a64acbb5789b4e9abf08bb06",
-        "c56d738bf5a1e694025f4be75b1ed8c7fab804aaa143413b45a11958ff1ad025",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/DC_comma.cir",
-        1_361,
-        "576fd732409aef8363f1decfadddf636fa1b525922a3f6dd1820d9e2dc040f3d",
-        "1b5910ba8cbaa523ce8aeb7f114a5fe993433c9779320ae3e8f2201b3f096f3e",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/DC_defaults.cir",
-        1_297,
-        "00a7314ed5201c2ac0786ee396d86277de0ef3fe52f402e21dec5351a9816e60",
-        "4c031996066b6e45e06a77a4655d37e94752c7008617c68b602fd25222c80308",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/DC_delimiter_invalid.cir",
-        1_389,
-        "579411aaab9b91e298a878bd95ba94d457807f574249722f048548083b100aaf",
-        "f93d00eac0f6a4b6385d0f55c82c8cc56e62edc20d2dc3992750b8fea069a4a2",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/DC_tab.cir",
-        1_357,
-        "a6f7eafbf54aea6ad9a773c304daf288ffb5ad0e7e044bb09526209f4f05c59c",
-        "ed8dfc2890c36d76561137a22f340dd259b1947fe306d94353e38215b82f8d8e",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/Manifest.txt",
-        205,
-        "35bf395fa34c0d71654c1c7fac274c257b017e33421fb03115c33c0add284cfe",
-        "6265882d882622cdaa3dbdd2190f10dddeb54f788d59db06d2fba57c86986aaf",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/README",
-        2_545,
-        "8728ead6436c00599afe301c5f4deae92f336d4808f8b3c166a11c2a864ee3e0",
-        "cb4aa630012d2814cd24856a67a8e7e478f309b6f2c9b47a0390849f4e350700",
-    ),
-    (
-        XYCE_BUG302_PATH,
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/bug_302.cir.sh",
-        5_529,
-        "1048df29a91bae4bb6d2241d2ad095f246072316573c141d933e307c313a6fdd",
-        "969733bc7a34e752df9eab7f8ed78d36e6f5978f9b7c35e5265b53a4b75c6c1a",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/exclude",
-        199,
-        "e93976af27802fe2548ba96016c341d35febaf64d476001a0bb4f8a3bfbbc702",
-        "e570ab7eed43a3a5e838bcda614ee90d0d3a8848a30e62e897c8956a4fe2b457",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/tags",
-        46,
-        "d4dfec2dad975e8cf478d3f74ed8d5cf54efc2787671fbbab41f4e3ad7e73e06",
-        "22d1263551ed12233d6e6dd7fe27e20768b742f997f04b45cd9e2eb7294bfbf9",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/transient_comma.cir",
-        362,
-        "333bf43c003628e28b474fca7ce0faff32439b4030acb05efb2208b1f665f52c",
-        "9d4033979f95656d878feca50f34686ca471b7d60a84a9cd79766991c989417a",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/transient_defaults.cir",
-        271,
-        "c0b62f4babac639a79a7168451adb974dd8d33dc2bf34701e01a8062d346a21e",
-        "1724f72e22aba6c57fcfb598c26741b818abf4708d84b8a13bbedaa29a1b7616",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/transient_delimiter_invalid.cir",
-        362,
-        "a35072f2fcfab6bc8a7fddf39313d3ae7ef55a7b3604687ecfb467e893618d9d",
-        "5c4325f6ba74c7517cd31b6668798c3537dd48788f5907ab440d4c7840c249f0",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_302/transient_tab.cir",
-        360,
-        "9904be03558e7abf27fe03da8eefc51abc66fb9b11cff7aad41c330ea868e7b3",
-        "cbe63f1ac2be529a771bdf396834e56fe2aa94fb88a3a688c16f2db41791ea35",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/DC_comma.cir.prn",
-        28_334,
-        "b8765663f204ccb112c1242be41a29371bf00b65346e6eb0f4313a2d8cff1531",
-        "5afe7b575153389589a8e34d7ce60b17dd03654ad9b07fabb6fe398a146f11ba",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/DC_defaults.cir.prn",
-        34_163,
-        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
-        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/DC_delimiter_invalid.cir.prn",
-        34_163,
-        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
-        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/DC_tab.cir.prn",
-        28_334,
-        "865acf8210101456644a958268946dfc88c4c1c45785ada9ec2d9c674cbe2e8b",
-        "e91b4f886bb217b0609d1a8a910b4de641fcf61d9ab1f6a9090b76b4240b83bc",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/transient_comma.cir.prn",
-        2_277,
-        "663590ebb3db66ae99e4df223558acef7a808ee29b6afccbca6db236b2bc791a",
-        "55629f198cb511bbcfef12d61d7c999b713e7cc979903a91ef27e301f13ebe06",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/transient_defaults.cir.prn",
-        2_982,
-        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
-        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/transient_delimiter_invalid.cir.prn",
-        2_982,
-        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
-        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
-    ),
-    (
-        "OutputData/Certification_Tests/BUG_302/transient_tab.cir.prn",
-        2_277,
-        "1cbbd899838c8fccdc351431e85f3e8508a547a5c0aeae11cfffa586e98e0b5e",
-        "15ae9ab1fe2680cef41d9aabe64f421256e7653247cb3c64b3857626a47f7319",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG302_RETAINED_SOURCES: [(&str, usize, &str, &str); 10] = [
-    (
-        "DC_comma.cir",
-        1_361,
-        "576fd732409aef8363f1decfadddf636fa1b525922a3f6dd1820d9e2dc040f3d",
-        "1b5910ba8cbaa523ce8aeb7f114a5fe993433c9779320ae3e8f2201b3f096f3e",
-    ),
-    (
-        "DC_defaults.cir",
-        1_297,
-        "00a7314ed5201c2ac0786ee396d86277de0ef3fe52f402e21dec5351a9816e60",
-        "4c031996066b6e45e06a77a4655d37e94752c7008617c68b602fd25222c80308",
-    ),
-    (
-        "DC_delimiter_invalid.cir",
-        1_389,
-        "579411aaab9b91e298a878bd95ba94d457807f574249722f048548083b100aaf",
-        "f93d00eac0f6a4b6385d0f55c82c8cc56e62edc20d2dc3992750b8fea069a4a2",
-    ),
-    (
-        "DC_tab.cir",
-        1_357,
-        "a6f7eafbf54aea6ad9a773c304daf288ffb5ad0e7e044bb09526209f4f05c59c",
-        "ed8dfc2890c36d76561137a22f340dd259b1947fe306d94353e38215b82f8d8e",
-    ),
-    (
-        "README",
-        2_545,
-        "8728ead6436c00599afe301c5f4deae92f336d4808f8b3c166a11c2a864ee3e0",
-        "cb4aa630012d2814cd24856a67a8e7e478f309b6f2c9b47a0390849f4e350700",
-    ),
-    (
-        "bug_302.cir",
-        0,
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
-    ),
-    (
-        "transient_comma.cir",
-        362,
-        "333bf43c003628e28b474fca7ce0faff32439b4030acb05efb2208b1f665f52c",
-        "9d4033979f95656d878feca50f34686ca471b7d60a84a9cd79766991c989417a",
-    ),
-    (
-        "transient_defaults.cir",
-        271,
-        "c0b62f4babac639a79a7168451adb974dd8d33dc2bf34701e01a8062d346a21e",
-        "1724f72e22aba6c57fcfb598c26741b818abf4708d84b8a13bbedaa29a1b7616",
-    ),
-    (
-        "transient_delimiter_invalid.cir",
-        362,
-        "a35072f2fcfab6bc8a7fddf39313d3ae7ef55a7b3604687ecfb467e893618d9d",
-        "5c4325f6ba74c7517cd31b6668798c3537dd48788f5907ab440d4c7840c249f0",
-    ),
-    (
-        "transient_tab.cir",
-        360,
-        "9904be03558e7abf27fe03da8eefc51abc66fb9b11cff7aad41c330ea868e7b3",
-        "cbe63f1ac2be529a771bdf396834e56fe2aa94fb88a3a688c16f2db41791ea35",
-    ),
-];
-const XYCE_BUG302_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 8] = [
-    (
-        "DC_comma.cir.prn",
-        28_334,
-        "b8765663f204ccb112c1242be41a29371bf00b65346e6eb0f4313a2d8cff1531",
-        "5afe7b575153389589a8e34d7ce60b17dd03654ad9b07fabb6fe398a146f11ba",
-    ),
-    (
-        "DC_defaults.cir.prn",
-        34_163,
-        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
-        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
-    ),
-    (
-        "DC_delimiter_invalid.cir.prn",
-        34_163,
-        "02f63a35008a7d4decdf8cb19a52ec85ec006bd9bb3fac16b89d88b10adb5a6b",
-        "ef47fbc7a31d8b6d6de2f5ae1195f933a6f7a701cbbf8a051e4bfb029afbf8bf",
-    ),
-    (
-        "DC_tab.cir.prn",
-        28_334,
-        "865acf8210101456644a958268946dfc88c4c1c45785ada9ec2d9c674cbe2e8b",
-        "e91b4f886bb217b0609d1a8a910b4de641fcf61d9ab1f6a9090b76b4240b83bc",
-    ),
-    (
-        "transient_comma.cir.prn",
-        2_277,
-        "663590ebb3db66ae99e4df223558acef7a808ee29b6afccbca6db236b2bc791a",
-        "55629f198cb511bbcfef12d61d7c999b713e7cc979903a91ef27e301f13ebe06",
-    ),
-    (
-        "transient_defaults.cir.prn",
-        2_982,
-        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
-        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
-    ),
-    (
-        "transient_delimiter_invalid.cir.prn",
-        2_982,
-        "ae915e93d317ba29fb3db575621939138536b572d8361d2847d147f56c903732",
-        "d4736c97adc60bc5cf79c6bc7157a0168cad22e10a7da1696bcaa36f521707ce",
-    ),
-    (
-        "transient_tab.cir.prn",
-        2_277,
-        "1cbbd899838c8fccdc351431e85f3e8508a547a5c0aeae11cfffa586e98e0b5e",
-        "15ae9ab1fe2680cef41d9aabe64f421256e7653247cb3c64b3857626a47f7319",
-    ),
-];
 
 // BUG_352 proves that a diode model parameter authored as an expression is
 // resolved before device construction. The removed wrapper runs the
@@ -1978,183 +1470,6 @@ const XYCE_BUG28SON_LITERAL_RECORD: &str =
     "netlists/certification_tests/bug_28_son/bug_28_son3_noparams.cir";
 const XYCE_BUG28SON_GLOBAL_RECORD: &str =
     "netlists/certification_tests/bug_28_son/bug_28_son3_globalp.cir";
-const XYCE_BUG28SON_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_28_SON/exclude";
-const XYCE_BUG28SON_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG28SON_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG28SON_HISTORICAL_RECORD_COUNT: usize = 10;
-const XYCE_BUG28SON_HISTORICAL_RECORD_BYTES: usize = 2_404;
-const XYCE_BUG28SON_HISTORICAL_RECORDS_SHA256: &str =
-    "1c6fd3f6346f3ab8ef09228a34653496e78d36025959263abdd92522dc58e904";
-const XYCE_BUG28SON_HISTORICAL_RECORDS_BLAKE3: &str =
-    "edd96a6a017ed5cecbbb8aa0eeabd3ae720a1472232fc235c463fbf0075a5f3b";
-const XYCE_BUG28SON_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 10] = [
-    (
-        "Netlists/Certification_Tests/BUG_28_SON/CMakeLists.txt",
-        9_986,
-        "1d8fd61019741249953546feb58a8929454488c35b73645684dac7d44e732cae",
-        "7cf0826064a4f3817f526301e281df587b9c0a77f183614852c281ab73301a26",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_28_SON/Manifest.txt",
-        345,
-        "27b4a4488fd30f4be821af3f7a463d11f3cf997d2cc137962f415d9d20a4e998",
-        "7bce467bce222dd9d98e290799cbb1d8b4f464d331b14be3f6ded74734855d51",
-    ),
-    (
-        XYCE_BUG28SON_OWNER_PATH,
-        1_535,
-        "3d98e802801f3bac2446470e7e8e47ce4b10e9a1198f2e233573e5220c87d0df",
-        "305a979f760eab73d389be69fc4c968f805f24c7e15dff49259b8378944d61b6",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_28_SON/bug_28_son3.cir.sh",
-        4_046,
-        "06eaa8bff2566a04a3844b506277030e980e2038da8465116972e88b26183f99",
-        "14895eebf18154704dc8b3d10036c959ffd682e3267920be3e0ee3d2e2b4fa6e",
-    ),
-    (
-        XYCE_BUG28SON_GLOBAL_PATH,
-        1_438,
-        "1b34c062dcd8707d6010a32536ac31fc9b0f84ae46f66d2e263cc775ca75754b",
-        "2e9b01fdf87cae23cb26bc4dda98b31ad10e8214981b28dc0d104e42355a44ef",
-    ),
-    (
-        XYCE_BUG28SON_LITERAL_PATH,
-        1_796,
-        "457a5c211e4c3db59681fa6ddf4f74f7df02395767a77b7a191d23d7da25e1d4",
-        "8b8dec06660f3c299a9f485f16ba6252095fc0cfeaa519b5597432c34d4360a7",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_28_SON/exclude",
-        157,
-        "3dda928474c3652d83fba189850ed0cd16786ed3ee266283d36724f94fac3564",
-        "3eea433b9403e9857cad4c3c5fff6ecb815d1dc78ede5ac9de81678d8c9ee85b",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_28_SON/tags",
-        50,
-        "a4075ac6df3b4a04c24d56ba01f81827dc448a03e3751b4bde77f641bfa8b33f",
-        "f0a0019ad6275dce8d53f7562ed2027126afe449888bb4d8197062a40b773fb3",
-    ),
-    (
-        "TestScripts/xplat_diff.pl",
-        2_866,
-        "8a042dfcf1db979a5a620fae4908e2e063530ab3a8a70c387a3ef97437e43148",
-        "62227f94bbaf97e3cda7258bc8041102e08998da24555c3835e6c69ceca672b4",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-];
-const XYCE_BUG28SON_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 15] = [
-    (
-        "bug_28_son1.cir",
-        451,
-        "7f3e1f328cb2ae677b5430357e01777b3734dc85224e1cda91728045b9c1c756",
-        "0ca646cbc1169e88dc4f6bd62d9943d99343d8c0c32f29370417442bfd0a2b4f",
-    ),
-    (
-        "bug_28_son2.cir",
-        775,
-        "be164d879cda122a49362aff80471f8be462c5b84dbdefa6905655d9d36ca421",
-        "5a692f8eca006b51e44b61164b7887ca97d414b432e43a223109c8cb221af6aa",
-    ),
-    (
-        "bug_28_son3.cir",
-        1_535,
-        "3d98e802801f3bac2446470e7e8e47ce4b10e9a1198f2e233573e5220c87d0df",
-        "305a979f760eab73d389be69fc4c968f805f24c7e15dff49259b8378944d61b6",
-    ),
-    (
-        "bug_28_son3_globalp.cir",
-        1_438,
-        "1b34c062dcd8707d6010a32536ac31fc9b0f84ae46f66d2e263cc775ca75754b",
-        "2e9b01fdf87cae23cb26bc4dda98b31ad10e8214981b28dc0d104e42355a44ef",
-    ),
-    (
-        "bug_28_son3_noparams.cir",
-        1_796,
-        "457a5c211e4c3db59681fa6ddf4f74f7df02395767a77b7a191d23d7da25e1d4",
-        "8b8dec06660f3c299a9f485f16ba6252095fc0cfeaa519b5597432c34d4360a7",
-    ),
-    (
-        "bug_28_son4.cir",
-        1_771,
-        "7e67ac5261ff08692b294852f20a8a23125110d735038cbafde8933faeb7adcc",
-        "c9c2f87c8bb7bf80cc32766f9c66cb0d827d863d028045688a7eefb0009ffb1b",
-    ),
-    (
-        "bug_28_son4.cir.res.gs",
-        154,
-        "5b765d50f5fe56b46082b7b4a7a181a5b39bb58013c25cfd0d990a581ad6daa7",
-        "7754c0892faa6f74e3e12b7495612860856b25dacf68d3aff08cca71889e5fec",
-    ),
-    (
-        "bug_28_son4_1.cir",
-        1_734,
-        "d5d3012a77d7c6e8d030b7f2b36524de1bd4f4ba8d8c3da998158943df34778a",
-        "e48ef9d60a93c1f4684fed9263801c7292ba56b74baf7fa9d963a9714be9977a",
-    ),
-    (
-        "bug_28_son4_2.cir",
-        1_750,
-        "457c5c78ed68ac4ac5234e032ebb201f8d15a32c60972914f042158d045cb947",
-        "e80c9d1dc04861f431cbc7197e66866d3ea75b3719d5732567476719b23b48fe",
-    ),
-    (
-        "bug_28_son4_3.cir",
-        1_732,
-        "ddf180a7bc1b791ddcec38d688143f06545d78d20013d1c4d3cabd54f90a4ace",
-        "909be9640bbb9c20dc7019f5ca2531af1a836235bc605bdf844385fbe640a031",
-    ),
-    (
-        "bug_28_son5.cir",
-        1_186,
-        "547dad138de63437e7bcdf1edfb9cd46466fe9ca5b690c4053210169e3a36dfd",
-        "755162a5de1dcbed04f7842323b08dee1cb8e863b8743e433dd1d3905897e8a6",
-    ),
-    (
-        "bug_28_son5.cir.res.gs",
-        154,
-        "4113e0695db581a36ab58a906df9aeef20c6fb4a874f74f57426ac67aff24ec5",
-        "0b6c6af029fc3d90e5c20131aca0746a48582fc83f1e6bc33207fe648ac6161e",
-    ),
-    (
-        "bug_28_son5_1.cir",
-        1_084,
-        "367d1a26d6e64d5fd76469b959d443ec0e63f5b7f36a95d0e82a245be222ea52",
-        "29f19ba249659e6ad177af52ff372a7ec106480fc9ae7bdb1ee5c61617da1236",
-    ),
-    (
-        "bug_28_son5_2.cir",
-        1_101,
-        "4de9c21ae72ba5246878a8376a321f3853c5798efa679126446ff3ddc5011245",
-        "005dac325f16a025aea40590094429b51a592bdcf49b914f3076d2a543e66417",
-    ),
-    (
-        "bug_28_son5_3.cir",
-        1_085,
-        "b05be10c7d4e8703849f8d4efed3fb8634d4a96d06f101d8fd77205797fe7323",
-        "eecfd43220bc3f1f4ea4aa1b41822810185209aafdaa4db98dc01c6f31922701",
-    ),
-];
-const XYCE_BUG28SON_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 2] = [
-    (
-        "bug_28_son1.cir.prn",
-        531,
-        "ba89f7a08ffc7d077fbb90194289544eaaadf0804fbcc1b768d73218d12319bf",
-        "e11c3b2f1ec22c6f895308ab4c03ee3a925db01936c3e60927d7458930654911",
-    ),
-    (
-        "bug_28_son2.cir.prn",
-        531,
-        "3307e07168a40371d01793151760a4c87c600428127973f0237f8dafc3eb0b30",
-        "45139bb1bb7d4ff441e77f7556f4a190fc8fbd7b54303eadeda7a9fe2184a80a",
-    ),
-];
 
 // BUG_1398's active Release-7.10 wrapper compares a PSpice-style inductor
 // model-card multiplier/temperature deck against the equivalent literal
@@ -2673,171 +1988,6 @@ const XYCE_BUG307_OWNER_PATH: &str = "Netlists/Certification_Tests/BUG_307/bug_3
 const XYCE_BUG307_CONTROL_PATH: &str = "Netlists/Certification_Tests/BUG_307/bug_307_b.cir";
 const XYCE_BUG307_OWNER_RECORD: &str = "netlists/certification_tests/bug_307/bug_307_a.cir";
 const XYCE_BUG307_CONTROL_RECORD: &str = "netlists/certification_tests/bug_307/bug_307_b.cir";
-const XYCE_BUG307_EXCLUSION_SOURCE: &str = "Netlists/Certification_Tests/BUG_307/exclude";
-const XYCE_BUG307_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG307_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BUG307_HISTORICAL_RECORD_COUNT: usize = 8;
-const XYCE_BUG307_HISTORICAL_RECORD_BYTES: usize = 1_910;
-const XYCE_BUG307_HISTORICAL_RECORDS_SHA256: &str =
-    "d12d9999702cb03a5d8a7c035cd7b117e0de4a2179939ce0682ffec1919f02a9";
-const XYCE_BUG307_HISTORICAL_RECORDS_BLAKE3: &str =
-    "88ccdc0f9679d72ca35300fd520095689940c4c51b33b41cefd70adcc1bbbeb9";
-const XYCE_BUG307_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 8] = [
-    (
-        "Netlists/Certification_Tests/BUG_307/CMakeLists.txt",
-        3_726,
-        "c29d61b2ee4044b6f4f23675f615d2239c5da183efef50fc4e0471d0786f185d",
-        "a8b77563dfd31851dee65a2ec285c8cc397dca56d9fdbf99dcdda94d4c324a80",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_307/Manifest.txt",
-        215,
-        "8efafd0b6ed4df706276aaf78bddaa63bbc662727ef49002e577b2ff0e559e07",
-        "c3e85eacadb2e4ec61b3f9f016b41744923e7d9928cdc9571f4d4ff726b1cadf",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_307/README",
-        2_221,
-        "21a3c2eac2ec269b7aca08ed370b36597d19f27ab39e18893652cdcd52134017",
-        "03de16d903037f8682982f23d5f10aa83c87a48cd4326071091286359c89d7e5",
-    ),
-    (
-        XYCE_BUG307_OWNER_PATH,
-        347,
-        "a1679ad22a5e7acbf4bed85efd47f92f3d59326f3f611889a822840b37de3c22",
-        "99c850d3ca6c4021d74d697b860fe4dc2b8541f41de98474f18175c08cfa1ef0",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_307/bug_307_a.cir.sh",
-        1_179,
-        "736ee04d110134b4133412591f4c94715bdfbf3d8910015905b0e00811fc11e3",
-        "9ab7ef6f1b0debea3c708f87ab3c270f53b0b8ea8db6a1a27e3a79fcd9a0d8cd",
-    ),
-    (
-        XYCE_BUG307_CONTROL_PATH,
-        263,
-        "0dddf35b3f467b1554a795dd94ff5494e9ec5b25369ce797b1d03641f307ba0b",
-        "1e56b30e9c542f761b112af245d49e005ddd91713e1a43bf94388b04f8e624c2",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_307/exclude",
-        258,
-        "52c58cc2998c3b34b62a17fcea871a7affc41d77058c78b7dfb5d4aab93e965f",
-        "ea052f70048b548f3877ffd8904c585b66a8fa986926c24483d29e7f02ad6382",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_307/tags",
-        16,
-        "fb8b1ab6aa8b694212335a76b1b87c077f22be7543f15c12de32a2da40b4f345",
-        "a5f2cee6f41471429bc22c4c40d36881f4c11d2387b20adbdc14efe2509f6589",
-    ),
-];
-const XYCE_BUG307_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 11] = [
-    (
-        "README",
-        2_221,
-        "21a3c2eac2ec269b7aca08ed370b36597d19f27ab39e18893652cdcd52134017",
-        "03de16d903037f8682982f23d5f10aa83c87a48cd4326071091286359c89d7e5",
-    ),
-    (
-        "bug_307_a.cir",
-        347,
-        "a1679ad22a5e7acbf4bed85efd47f92f3d59326f3f611889a822840b37de3c22",
-        "99c850d3ca6c4021d74d697b860fe4dc2b8541f41de98474f18175c08cfa1ef0",
-    ),
-    (
-        "bug_307_b.cir",
-        263,
-        "0dddf35b3f467b1554a795dd94ff5494e9ec5b25369ce797b1d03641f307ba0b",
-        "1e56b30e9c542f761b112af245d49e005ddd91713e1a43bf94388b04f8e624c2",
-    ),
-    (
-        "bug_307_d.cir",
-        944,
-        "b9d7e9ff10c06d2f35dc227f609d723cb6777c6446d3067564da3f94de012d26",
-        "b532796ea4f65c12e5f5712260fc54289ac5237d16bf5acd6813f78a8ea22217",
-    ),
-    (
-        "bug_307_e.cir",
-        946,
-        "a4694f025a973b5e10172ad60344d24595f3363ce24ae1c196d5cbb8be55a864",
-        "79afd80a2d97de4ef7a747c2b3d9f6d842aecb94653e916e850d7a65a5c4be37",
-    ),
-    (
-        "bug_307_f.cir",
-        1_052,
-        "fa455d1e81bc1990479771e38b46ef217435c540ac54377e993caa63b75ea348",
-        "8945c4563decbc1b26a6bf5bfe2ac89f567aaed7e0d0bfba12d5637e6467d5c2",
-    ),
-    (
-        "bug_307_g.cir",
-        1_106,
-        "76d8a3ce9d13a58756a5b4b2426f1d20abc44e8e8d73dee96e9d27918b07cd4a",
-        "bd81fea0f08c9ca161bee4c98771cbcb5a8b0a25c6d3c1dcfb20e23c9f5a8f07",
-    ),
-    (
-        "bug_307_h.cir",
-        1_172,
-        "1b2f289deba22de22f492701a6730ef1a9b2be688099b66ee2c93ad9cf717fac",
-        "2b9e43851db5fa15a9f6424b47424a23222c4c0692d3c2f906e5769b3103b4bf",
-    ),
-    (
-        "bug_307_i.cir",
-        480,
-        "4d74799d1c37789f8740735ed7c24988e34e73818fe3b93ff45f60b8c1d60bc9",
-        "0c6bc5bc4a13a511f66163745bb7a80c9cb12a41198ad5b5104f68e929216237",
-    ),
-    (
-        "bug_307_i.lib1",
-        228,
-        "aac03ef8a09ddb99aa3b3b6f6aa6152ed7531b4cf4918b522d9b9f2a8007de47",
-        "2e084709750590888d9f0015e7b35f29f714c969dd12931a7e4af3ca6e58d391",
-    ),
-    (
-        "bug_307_i.lib2",
-        280,
-        "2fa7440e06ce352b530e640997e36c8200e5feee86e6e5e79987aaf2b38332e0",
-        "8c2ee4a4a5d0ddd0de2c89bf14380bd79ef0395dae481bd4e6e471b640a3980a",
-    ),
-];
-const XYCE_BUG307_RETAINED_OUTPUTS: [(&str, usize, &str, &str); 6] = [
-    (
-        "bug_307_d.cir.prn",
-        306_701,
-        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
-        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
-    ),
-    (
-        "bug_307_e.cir.prn",
-        306_701,
-        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
-        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
-    ),
-    (
-        "bug_307_f.cir.prn",
-        306_701,
-        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
-        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
-    ),
-    (
-        "bug_307_g.cir.prn",
-        306_701,
-        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
-        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
-    ),
-    (
-        "bug_307_h.cir.prn",
-        306_701,
-        "d55abf3b13631a17aabfe6d83cd629dbe39b972816bde0344e3525c5c54a9199",
-        "f98be1f2910ed36ef4dfe9acfc0a48add52b9dcb3d78433b6b74b8809ffd9903",
-    ),
-    (
-        "bug_307_i.cir.prn",
-        306_701,
-        "d757e3ffad74d451c22847d4f6179f63ea1c263c074a47f2f6b7f668f23f8070",
-        "ebe6ec704c22124d446aa5fbcabde53e88f060a97cac8927705541c51879611b",
-    ),
-];
 
 // BUG_864_SON is a bounded expected-error contract. Release 7.10 executes
 // the deck, requires a nonzero exit, and accepts the run only when either
@@ -3539,152 +2689,6 @@ impl XyceDiodeAnalyticKind {
 // families. Their wrappers evaluate the corresponding legacy compact-model
 // law on the simulator's own default-PRN transient grid before invoking the
 // shared xyce_verify comparator.
-const XYCE_BJT_ANALYTIC_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BJT_ANALYTIC_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_BJT_ANALYTIC_HISTORICAL_RECORD_COUNT: usize = 10;
-const XYCE_BJT_ANALYTIC_HISTORICAL_RECORD_BYTES: usize = 2_271;
-const XYCE_BJT_ANALYTIC_HISTORICAL_RECORDS_SHA256: &str =
-    "28b5f42e510263b778fdc028b4bade56321b399517fb7bed7f5a19af4042ccb2";
-const XYCE_BJT_ANALYTIC_HISTORICAL_RECORDS_BLAKE3: &str =
-    "e6a987bf12645161566c4771e7fb7a5ef13f1c5b55e0b5caa7f55ebc75d9f6bd";
-const XYCE_BJT_ANALYTIC_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 10] = [
-    (
-        "Netlists/BJT_ANALYTIC/CMakeLists.txt",
-        3_425,
-        "99eb326fa8b22ce6722049a3b2b55dcd0dcb030b6b9b52f433e00cd25db49204",
-        "bfcea7ff71d2deffdafa6a61701530b1e5b97b3ac5d0f6ea3cf6cd4f379c852a",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/Manifest.txt",
-        113,
-        "c1a6f817863a87284722a98b4922ae0e281c7adf6efb04a8e3e7484fbd678683",
-        "b734fd40ccc58c44d8b63f1e1f40386e51408bbdde09556a70fa26e698c805cd",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/ramp_test1.cir",
-        2_906,
-        "f5bb4d0e330f0bbb2f5683a870e1312c1de364184dce6aafb147d87e940bf19e",
-        "d4ee18831b6631da058ca151909d5b6937a1e28ec302e938bc6013fedbf698a6",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/ramp_test1.cir.gs.pl",
-        711,
-        "8f8895cbe88c726e9bb3ced49de5d3c447879d469dbe1e1fa27178b6c11f902a",
-        "6b21abad73ebaf159db30d086d2ea1c222cdd9446c250777fe04645f608e93af",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/ramp_test1.cir.sh",
-        1_278,
-        "f53275edade218e6c66cfe4e05d59d8961ae51aa24d0921437d1f8ae61a54c83",
-        "1186e29aaef87324169947df094be3631c4de64e3baa35cbd03c89b738618f51",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/ramp_test2.cir",
-        2_788,
-        "4117823840f391e2e11481991d86efd58583043bbfa1e93f20808d8d77f89ef2",
-        "e58df196d817bc4118193419caf8d91d58e24a80eb0bbe608990407b0eca84f9",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/ramp_test2.cir.gs.pl",
-        537,
-        "d5f254b62ec976878da825af831ebe2f8811aecdc4592202c0f71bbe2e7f390f",
-        "e485c5c8c14d72375760566dc861252a72e306b209cf78f8c135c42e11422725",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/ramp_test2.cir.sh",
-        1_278,
-        "de426dba993333412707c9c1bd3e5d1f697eabbaaf368675d5a32558f7ab960a",
-        "d321b54657c8f9ecddb9c37c6c5e313921dbe2675ea882d1033624bfe55ff4db",
-    ),
-    (
-        "Netlists/BJT_ANALYTIC/tags",
-        68,
-        "c248a3ff42cc089d9e4cf2412af952909fda19e3f6dc17c1e75f185fc6b2ef9f",
-        "a836eccaa84bdef1d96d6a8fc6a751b4113fa2ab088da0c662c63dee2faac9b7",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-];
-const XYCE_BJT_ANALYTIC_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
-    (
-        "ramp_test1.cir",
-        2_906,
-        "f5bb4d0e330f0bbb2f5683a870e1312c1de364184dce6aafb147d87e940bf19e",
-        "d4ee18831b6631da058ca151909d5b6937a1e28ec302e938bc6013fedbf698a6",
-    ),
-    (
-        "ramp_test2.cir",
-        2_788,
-        "4117823840f391e2e11481991d86efd58583043bbfa1e93f20808d8d77f89ef2",
-        "e58df196d817bc4118193419caf8d91d58e24a80eb0bbe608990407b0eca84f9",
-    ),
-];
-
-const XYCE_NMOS_ANALYTIC_UPSTREAM_REGRESSION_COMMIT: &str =
-    "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_NMOS_ANALYTIC_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
-const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORD_COUNT: usize = 7;
-const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORD_BYTES: usize = 1_593;
-const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORDS_SHA256: &str =
-    "d366c275ef0b7131c5d7342f35a999ce4316e28eacf42189f82c34df760be8bf";
-const XYCE_NMOS_ANALYTIC_HISTORICAL_RECORDS_BLAKE3: &str =
-    "2e4b198e215c293d06d683c56bc6c8508aa480e44e0f5db6984a2660c267cb6c";
-const XYCE_NMOS_ANALYTIC_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/NMOS_ANALYTIC/CMakeLists.txt",
-        1_887,
-        "4ed6b055fbda88059dbfdaca044ab84a75dbb3992c65a836470a836ff144d889",
-        "db4f0e1f9b040225de65511958296b8c185e89e39785d36cd9ee67f12628f311",
-    ),
-    (
-        "Netlists/NMOS_ANALYTIC/Manifest.txt",
-        68,
-        "aaac9d14e9b8634e47d5fa507edd18ad35c1e0ace6cf9b3f41c42a068d679890",
-        "48a10aee6277dec173f5d239697819cccdeb21d4bf280b4e9ade5d8ca57ad9e3",
-    ),
-    (
-        "Netlists/NMOS_ANALYTIC/mosfet_level1.cir",
-        2_029,
-        "b4cffa7173991ad37e46b005fb0761d3b07cd9aa3d8734554b0790367b583048",
-        "fa694e4e2ec7645fad00286f7cda19beadb6640aa6d0e6a978502f1c1b8885c6",
-    ),
-    (
-        "Netlists/NMOS_ANALYTIC/mosfet_level1.cir.gs.pl",
-        611,
-        "5c9a6132182064eb7468112b20a3b1890a316ef64e2b5e79dc8ab50d9e8f81dd",
-        "beb718b4ee596fbd1dc63e958f96661d33bce1b84803bee51bc5df86ac8f7ebe",
-    ),
-    (
-        "Netlists/NMOS_ANALYTIC/mosfet_level1.cir.sh",
-        1_273,
-        "6fda3ce1c9bb53b4a7482b9bb38931bd2a5827a0e841a30afa1f2bc5cd34987d",
-        "e8eeeb415a41d87acb159a36e0c389081331dad7a3c860ee7d7b3b9a8942a2b5",
-    ),
-    (
-        "Netlists/NMOS_ANALYTIC/tags",
-        46,
-        "a725c65e1fba0d3241656fedb9caf217f464e8a2b9e14b21bf823f43f83c1047",
-        "4933a5eed19ded7b1fe188959c216a5d1d7ab77b700e72aeb6fc8ae583e27923",
-    ),
-    (
-        "TestScripts/xyce_verify.pl",
-        59_566,
-        "6e5f84b1646b30d0e12879848d7653584b39472d640a14916ae8fda6e1df12b3",
-        "5eadb6dab06ed3091ea114146bd4a574de83784f87be9843ad7b721b0a793665",
-    ),
-];
-const XYCE_NMOS_ANALYTIC_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 1] = [(
-    "mosfet_level1.cir",
-    2_029,
-    "b4cffa7173991ad37e46b005fb0761d3b07cd9aa3d8734554b0790367b583048",
-    "fa694e4e2ec7645fad00286f7cda19beadb6640aa6d0e6a978502f1c1b8885c6",
-)];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum XyceLegacyDeviceAnalyticKind {
     BjtRamp1,
@@ -3694,21 +2698,6 @@ enum XyceLegacyDeviceAnalyticKind {
 
 impl XyceLegacyDeviceAnalyticKind {
     const ALL: [Self; 3] = [Self::BjtRamp1, Self::BjtRamp2, Self::NmosLevel1];
-
-    fn family(self) -> &'static str {
-        match self {
-            Self::BjtRamp1 | Self::BjtRamp2 => "BJT_ANALYTIC",
-            Self::NmosLevel1 => "NMOS_ANALYTIC",
-        }
-    }
-
-    fn file_name(self) -> &'static str {
-        match self {
-            Self::BjtRamp1 => "ramp_test1.cir",
-            Self::BjtRamp2 => "ramp_test2.cir",
-            Self::NmosLevel1 => "mosfet_level1.cir",
-        }
-    }
 
     fn path(self) -> &'static str {
         match self {
@@ -3757,12 +2746,6 @@ struct XyceAbmLookupOrderCaseSpec {
     control_path: &'static str,
     owner_record: &'static str,
     control_record: &'static str,
-    owner_content_blake3: &'static str,
-    control_content_blake3: &'static str,
-    wrapper_path: &'static str,
-    wrapper_bytes: usize,
-    wrapper_sha256: &'static str,
-    wrapper_blake3: &'static str,
     kind: XyceAbmLookupKind,
 }
 
@@ -3773,12 +2756,6 @@ const XYCE_ABM_LOOKUP_ORDER_CASES: [XyceAbmLookupOrderCaseSpec; 2] = [
         control_path: "Netlists/ABM_SPLINES/akimaOutOfOrder_baseline.cir",
         owner_record: "netlists/abm_splines/akimaoutoforder.cir",
         control_record: "netlists/abm_splines/akimaoutoforder_baseline.cir",
-        owner_content_blake3: "351e7255510860fc041b6519fdfad5bf860b0256199789d5406994cf67dcb7cf",
-        control_content_blake3: "c6c9d2f35af02f9d42b00117baadedb3f41fb9ba396360e8bd2977848ae20ca4",
-        wrapper_path: "Netlists/ABM_SPLINES/akimaOutOfOrder.cir.sh",
-        wrapper_bytes: 1_523,
-        wrapper_sha256: "d5618b6591666512ee1d7074217643118e08e6756f4dddc22781b1b7d0e96e3b",
-        wrapper_blake3: "bba4bda064e9d9073b5815500edc57a3a6ebfccfb0d44357d7fbe988dbf0f17d",
         kind: XyceAbmLookupKind::Akima,
     },
     XyceAbmLookupOrderCaseSpec {
@@ -3787,12 +2764,6 @@ const XYCE_ABM_LOOKUP_ORDER_CASES: [XyceAbmLookupOrderCaseSpec; 2] = [
         control_path: "Netlists/ABM_SPLINES/tableOutOfOrder2_baseline.cir",
         owner_record: "netlists/abm_splines/tableoutoforder2.cir",
         control_record: "netlists/abm_splines/tableoutoforder2_baseline.cir",
-        owner_content_blake3: "2299905d9cbb3addbf77738748dee112c21e3cce71271a546e4f0943a40d2da5",
-        control_content_blake3: "7570b3e44aeb9343c721fecc93be83a3169fb80f1750c1fbe5bea814ad0fadfd",
-        wrapper_path: "Netlists/ABM_SPLINES/tableOutOfOrder2.cir.sh",
-        wrapper_bytes: 1_525,
-        wrapper_sha256: "2e12a860cd86c530caceee6744697e73292bbaaba3c12bdc068e26726f5eaed8",
-        wrapper_blake3: "299a94323e811a857b82857201c7c990ebc93f289e69a55dfc91e93212648312",
         kind: XyceAbmLookupKind::Table,
     },
 ];
@@ -3854,8 +2825,6 @@ struct XyceBug1043AcDataParameterCaseSpec {
     baseline_path: &'static str,
     owner_record: &'static str,
     baseline_record: &'static str,
-    owner_content_blake3: &'static str,
-    baseline_content_blake3: &'static str,
 }
 
 const XYCE_BUG1043_AC_DATA_PARAMETER_CASE: XyceBug1043AcDataParameterCaseSpec =
@@ -3865,8 +2834,6 @@ const XYCE_BUG1043_AC_DATA_PARAMETER_CASE: XyceBug1043AcDataParameterCaseSpec =
         baseline_path: XYCE_BUG1043_EXPRESSION_BASELINE_PATH,
         owner_record: XYCE_BUG1043_OWNER_RECORD,
         baseline_record: XYCE_BUG1043_EXPRESSION_BASELINE_RECORD,
-        owner_content_blake3: "9af9c44bb2d799ecc2e1bf25ea9535c48cdac2323e81c24f0c3372b2cfbae057",
-        baseline_content_blake3: "0a049b4a280380dbf2d3027e5aaef6fd4ea97be804d1f1f9371799b0b3d1485d",
     };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4303,89 +3270,20 @@ const XYCE_BUG744_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_744/bad_dc_op.cir";
 const XYCE_BUG75_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_75_son/bug75.cir";
+#[cfg(test)]
 const XYCE_BUG1595_EXPECTED_FAILURE_PATH: &str =
     "Netlists/Certification_Tests/BUG_1595/bug1595.cir";
 const XYCE_BUG1595_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_1595/bug1595.cir";
 const XYCE_BUG1595_EXPECTED_FAILURE_CONTRACT: &str =
     "expected_failure_bug1595_hierarchical_mutual_inductor_reference_parse";
-const XYCE_BUG1595_UPSTREAM_REGRESSION_COMMIT: &str = "d6e278e371ec2f3df1325dcff4552e585bc7ecc1";
-const XYCE_BUG1595_UPSTREAM_RELEASE_TAG: &str = "Release-7.10.0";
 const XYCE_BUG1595_HISTORICAL_TIMEOUT_MS: u128 = 30_000;
-const XYCE_BUG1595_HISTORICAL_RECORD_COUNT: usize = 7;
-const XYCE_BUG1595_HISTORICAL_RECORD_BYTES: usize = 1_661;
-const XYCE_BUG1595_HISTORICAL_RECORDS_SHA256: &str =
-    "a909db4f211a4240f8a96d9c228750e0985e35bcc128778eb172f0367a148e5b";
-const XYCE_BUG1595_HISTORICAL_RECORDS_BLAKE3: &str =
-    "eabf571c168d4f7e9964a6faf33e507221292f3957763da41e0bfc7ff88c9848";
-const XYCE_BUG1595_HISTORICAL_ARTIFACTS: [(&str, usize, &str, &str); 7] = [
-    (
-        "Netlists/Certification_Tests/BUG_1595/CMakeLists.txt",
-        1_768,
-        "92af05c4a69f6cc77a6d9d448a09299af8bc0dee1c28eb2936f286aa4f85b95c",
-        "e71270a93a2b59c61ddb8f6469c2c6d2a3fbc0c3e38ddf6625ebb428744ba9ab",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1595/Manifest.txt",
-        40,
-        "c0ff0b44a1af8d83c178fc3fcd176c91ecfbf176f66c972817178dddb7d2861c",
-        "c6cba20bfe3767a6d8b2097af10a7d9873ef044a7c369b51fafffe18ac5903d6",
-    ),
-    (
-        XYCE_BUG1595_EXPECTED_FAILURE_PATH,
-        586,
-        "9a0971993ed4c05156b0f7bf346c74552f021de2ff3cd2d2e092d96ecd420b0f",
-        "cfa7de4956a14c54a0f37d947f6b14c1eb2a75368f1f30cc08cd9c5bff9c5f7f",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1595/bug1595.cir.sh",
-        847,
-        "e5e977ec98ddf71d52e786b4fe3f11a471a55c10ffc254631b26363d7bd1e304",
-        "7b7f62d3e37cfac341af1060bd96f3ed168cbe549be2a0595b0e2b0686fc6af6",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1595/options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-    (
-        "Netlists/Certification_Tests/BUG_1595/tags",
-        52,
-        "7fb3714b32c37ae9a1d9299f00060bb4af3528cc251c32d3d5763a5975249f75",
-        "e7388b1fb5597ceeb4f88ce83e84090ab72cdfedc5f6c95686a710d6324d3a81",
-    ),
-    (
-        "TestScripts/XyceRegression/Tools.pm",
-        68_108,
-        "5b5f86c02d46a1f3bdad5292e7e91d25a9e08e71490643d8d5ed7ae20f9d55e3",
-        "13bd274632744ddc4b8baee680ddc9770902793ed7ee892ecdedd4dcb3828667",
-    ),
-];
-const XYCE_BUG1595_RETAINED_ARTIFACTS: [(&str, usize, &str, &str); 2] = [
-    (
-        "bug1595.cir",
-        586,
-        "9a0971993ed4c05156b0f7bf346c74552f021de2ff3cd2d2e092d96ecd420b0f",
-        "cfa7de4956a14c54a0f37d947f6b14c1eb2a75368f1f30cc08cd9c5bff9c5f7f",
-    ),
-    (
-        "options",
-        13,
-        "381cd29ca4d9097c73fccc5f46cea0c37bd3e71da803e56ccad41d8270de9c0e",
-        "8e9c4c362e6a201344f7fd4b55680c6db23a1ba99121d41b9dae7573cff78b81",
-    ),
-];
 const XYCE_BUG1595_SOURCE_BLAKE3: &str =
     "ee16db30fa9cf0cca771678bbbabe6417ad5dfda5dded174b4e2b75ba6c3445b";
 const XYCE_BUG1595_PHYSICAL_CENSUS_BLAKE3: &str =
     "d5321ed43ca99ca6e3264b9bbee806c6a0699a16e4d0e618248986731f83e7f0";
 const XYCE_BUG1595_MANIFEST_CENSUS_BLAKE3: &str =
     "e5ec7f0630965511fb6650c98414999c5d4ef99d22081863f4cb7413456b00ec";
-const XYCE_BUG1595_SOURCE_DIRECTORY_CENSUS_BLAKE3: &str =
-    "c70aaccb941f7b37e2a7e9ce313ff11f0421a61dca5f5ec323bd122791159adc";
-const XYCE_BUG1595_EMPTY_OUTPUT_CENSUS_BLAKE3: &str =
-    "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262";
 const XYCE_BUG1148_EXPECTED_FAILURE_RECORD: &str =
     "netlists/certification_tests/bug_1148/bug_1148.cir";
 const XYCE_BUG40_EXPECTED_FAILURE_RECORD: &str = "netlists/certification_tests/bug_40/bug_40.cir";
@@ -9509,16 +8407,12 @@ struct XyceBug1043AcDataParameterFamilyContract {
     relational: XyceBaselineFamilyContract,
     owner_path: PathBuf,
     baseline_path: PathBuf,
-    spec: &'static XyceBug1043AcDataParameterCaseSpec,
     role: XyceBug1043AcDataParameterRole,
 }
 
 #[derive(Debug, Clone)]
 struct XyceAbmLookupOrderFamilyContract {
     relational: XyceBaselineFamilyContract,
-    owner_path: PathBuf,
-    control_path: PathBuf,
-    spec: &'static XyceAbmLookupOrderCaseSpec,
     role: XyceAbmLookupOrderRole,
 }
 
