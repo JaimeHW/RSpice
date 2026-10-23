@@ -2599,6 +2599,92 @@ fn rbodymod1_transient_drain_current_matches_xyce710_and_ngspice46() {
     }
 }
 
+/// ngspice-46 `v(out)` samples for one charge-deficit transient-NQS deck.
+enum TrnqsReference {
+    /// `(time, v(out), v(out) minus the same deck at TRNQSMOD=0)`.
+    WithQsDelta {
+        rows: &'static [(f64, f64, f64)],
+        delta_tol: f64,
+    },
+    /// `(time, v(out))`; the TRNQSMOD=0 run only guards against QS fallback.
+    Direct(&'static [(f64, f64)]),
+}
+
+/// A common-source TRNQSMOD=1 transient (0.1 ps step) checked against
+/// ngspice-46, and against the same deck at TRNQSMOD=0 so NQS cannot silently
+/// degrade to quasi-static.
+struct TrnqsCase {
+    label: &'static str,
+    deck: fn(i32) -> String,
+    tstop: f64,
+    /// Internal nodes the TRNQSMOD=1 deck must build, with why each exists.
+    hidden_nodes: &'static [(&'static str, &'static str)],
+    abs_tol: f64,
+    reference: TrnqsReference,
+    min_qs_delta: f64,
+}
+
+fn assert_trnqs_transient(case: &TrnqsCase) {
+    let label = case.label;
+    let parse = |trnqs_mod: i32| Netlist::parse(&(case.deck)(trnqs_mod)).expect("deck parses");
+    let run = |netlist: &Netlist, trnqs_mod: i32| {
+        engine()
+            .run_tran(netlist, case.tstop, 0.1e-12)
+            .unwrap_or_else(|error| panic!("{label} TRNQSMOD={trnqs_mod} transient: {error:?}"))
+    };
+    let netlist = parse(1);
+    if !case.hidden_nodes.is_empty() {
+        let circuit = engine()
+            .build_circuit(&netlist)
+            .unwrap_or_else(|error| panic!("{label} deck builds natively: {error:?}"));
+        for &(node, why) in case.hidden_nodes {
+            assert!(circuit.get_node_by_name(node).is_some(), "{why}");
+        }
+    }
+    let result = run(&netlist, 1);
+    let vout = result
+        .try_voltage_waveform_named("out")
+        .expect("out waveform");
+    let qs_result = run(&parse(0), 0);
+    let qs_vout = qs_result
+        .try_voltage_waveform_named("out")
+        .expect("QS out waveform");
+
+    let mut max_qs_delta: f64 = 0.0;
+    let mut check = |time: f64, expected: f64| {
+        let got = interp_waveform(&result.time, vout, time);
+        let abs_err = (got - expected).abs();
+        assert!(
+            abs_err < case.abs_tol,
+            "{label} transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
+        );
+        let qs_delta = got - interp_waveform(&qs_result.time, qs_vout, time);
+        max_qs_delta = max_qs_delta.max(qs_delta.abs());
+        qs_delta
+    };
+    match case.reference {
+        TrnqsReference::WithQsDelta { rows, delta_tol } => {
+            for &(time, expected, expected_delta_vs_qs) in rows {
+                let qs_delta = check(time, expected);
+                let delta_err = (qs_delta - expected_delta_vs_qs).abs();
+                assert!(
+                    delta_err < delta_tol,
+                    "{label} delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
+                );
+            }
+        }
+        TrnqsReference::Direct(rows) => {
+            for &(time, expected) in rows {
+                check(time, expected);
+            }
+        }
+    }
+    assert!(
+        max_qs_delta > case.min_qs_delta,
+        "{label} must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
+    );
+}
+
 #[test]
 fn trnqsmod1_common_source_transient_matches_ngspice46() {
     // ngspice-46 console reference for the canonical BSIM4 charge-deficit
@@ -2606,56 +2692,27 @@ fn trnqsmod1_common_source_transient_matches_ngspice46() {
     // optional networks). The local Xyce 7.10 regression tree has BSIM4
     // coverage, but no matching `TRNQSMOD=1` transient oracle; Xyce model
     // cards found there keep `TRNQSMOD=0`.
-    let deck = trnqsmod_common_source_deck(1);
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let result = engine()
-        .run_tran(&netlist, 80.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=1 transient runs natively");
-    let vout = result
-        .try_voltage_waveform_named("out")
-        .expect("out waveform");
-
-    let qs_deck = trnqsmod_common_source_deck(0);
-    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
-    let qs_result = engine()
-        .run_tran(&qs_netlist, 80.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=0 transient runs");
-    let qs_vout = qs_result
-        .try_voltage_waveform_named("out")
-        .expect("QS out waveform");
-
-    let reference: &[(f64, f64, f64)] = &[
-        (20.5e-12, 1.073_368_075_679, -7.013_011e-4),
-        (21.0e-12, 9.761_701_272_506e-1, -4.560_308e-4),
-        (21.5e-12, 7.565_004_829_099e-1, -2.372_303e-4),
-        (22.0e-12, 4.803_026_630_000e-1, -2.624_930e-4),
-        (22.5e-12, 1.833_046_107_846e-1, -1.031_226e-3),
-        (23.0e-12, 9.233_953_871_709e-2, -2.188_013e-3),
-        (24.0e-12, 7.500_728_937_211e-2, -2.924_351e-4),
-        (25.0e-12, 7.449_882_471_507e-2, -1.778_145e-5),
-    ];
-    let mut max_qs_delta: f64 = 0.0;
-    for &(time, expected, expected_delta_vs_qs) in reference {
-        let got = interp_waveform(&result.time, vout, time);
-        let abs_err = (got - expected).abs();
-        assert!(
-            abs_err < 7e-4,
-            "TRNQSMOD=1 transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
-        );
-
-        let qs = interp_waveform(&qs_result.time, qs_vout, time);
-        let qs_delta = got - qs;
-        max_qs_delta = max_qs_delta.max(qs_delta.abs());
-        let delta_err = (qs_delta - expected_delta_vs_qs).abs();
-        assert!(
-            delta_err < 8e-4,
-            "TRNQSMOD=1 delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
-        );
-    }
-    assert!(
-        max_qs_delta > 1e-3,
-        "TRNQSMOD=1 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
-    );
+    assert_trnqs_transient(&TrnqsCase {
+        label: "TRNQSMOD=1",
+        deck: trnqsmod_common_source_deck,
+        tstop: 80.0e-12,
+        hidden_nodes: &[],
+        abs_tol: 7e-4,
+        reference: TrnqsReference::WithQsDelta {
+            delta_tol: 8e-4,
+            rows: &[
+                (20.5e-12, 1.073_368_075_679, -7.013_011e-4),
+                (21.0e-12, 9.761_701_272_506e-1, -4.560_308e-4),
+                (21.5e-12, 7.565_004_829_099e-1, -2.372_303e-4),
+                (22.0e-12, 4.803_026_630_000e-1, -2.624_930e-4),
+                (22.5e-12, 1.833_046_107_846e-1, -1.031_226e-3),
+                (23.0e-12, 9.233_953_871_709e-2, -2.188_013e-3),
+                (24.0e-12, 7.500_728_937_211e-2, -2.924_351e-4),
+                (25.0e-12, 7.449_882_471_507e-2, -1.778_145e-5),
+            ],
+        },
+        min_qs_delta: 1e-3,
+    });
 }
 
 #[test]
@@ -2664,55 +2721,28 @@ fn trnqsmod1_rdsmod1_common_source_transient_matches_ngspice46() {
     // `ngspice_con.exe -b`, `set numdgt=15`, and `wrdata v(out)`.
     // The local Xyce 7.10 regression tree covers BSIM4 RDS/RGATE/RBODY
     // topologies, but did not contain a matching TRNQSMOD=1 transient NQS
-    // card, so ngspice is the physics oracle for this transient slice.
-    let deck = trnqsmod_rdsmod1_common_source_deck(1);
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let result = engine()
-        .run_tran(&netlist, 80.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=1 with RDSMOD=1 transient runs natively");
-    let vout = result
-        .try_voltage_waveform_named("out")
-        .expect("out waveform");
-
-    let qs_deck = trnqsmod_rdsmod1_common_source_deck(0);
-    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
-    // The direct NQS waveform above is the ngspice oracle. The QS run is only
-    // a qualitative guard: subtracting two local adaptive trajectories at the
-    // fast switching edge is more step-grid sensitive than the direct oracle.
-    let qs_result = engine()
-        .run_tran(&qs_netlist, 80.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=0 with RDSMOD=1 transient runs");
-    let qs_vout = qs_result
-        .try_voltage_waveform_named("out")
-        .expect("QS out waveform");
-
-    let reference: &[(f64, f64)] = &[
-        (20.5e-12, 1.072_418_965_074_154),
-        (21.0e-12, 9.787_524_399_343_329e-1),
-        (21.5e-12, 7.859_162_190_406_547e-1),
-        (22.0e-12, 5.682_037_393_571_626e-1),
-        (22.5e-12, 3.339_543_691_624_751e-1),
-        (23.0e-12, 2.300_838_893_394_644e-1),
-        (24.0e-12, 1.775_298_364_155_602e-1),
-        (25.0e-12, 1.664_264_922_468_640e-1),
-    ];
-    let mut max_qs_delta: f64 = 0.0;
-    for &(time, expected) in reference {
-        let got = interp_waveform(&result.time, vout, time);
-        let abs_err = (got - expected).abs();
-        assert!(
-            abs_err < 9e-4,
-            "TRNQSMOD=1 RDSMOD=1 transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
-        );
-
-        let qs = interp_waveform(&qs_result.time, qs_vout, time);
-        let qs_delta = got - qs;
-        max_qs_delta = max_qs_delta.max(qs_delta.abs());
-    }
-    assert!(
-        max_qs_delta > 8e-4,
-        "TRNQSMOD=1 with RDSMOD=1 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
-    );
+    // card, so ngspice is the physics oracle for this transient slice. The QS
+    // run is only a qualitative guard: subtracting two local adaptive
+    // trajectories at the fast switching edge is more step-grid sensitive than
+    // the direct oracle.
+    assert_trnqs_transient(&TrnqsCase {
+        label: "TRNQSMOD=1 RDSMOD=1",
+        deck: trnqsmod_rdsmod1_common_source_deck,
+        tstop: 80.0e-12,
+        hidden_nodes: &[],
+        abs_tol: 9e-4,
+        reference: TrnqsReference::Direct(&[
+            (20.5e-12, 1.072_418_965_074_154),
+            (21.0e-12, 9.787_524_399_343_329e-1),
+            (21.5e-12, 7.859_162_190_406_547e-1),
+            (22.0e-12, 5.682_037_393_571_626e-1),
+            (22.5e-12, 3.339_543_691_624_751e-1),
+            (23.0e-12, 2.300_838_893_394_644e-1),
+            (24.0e-12, 1.775_298_364_155_602e-1),
+            (25.0e-12, 1.664_264_922_468_640e-1),
+        ]),
+        min_qs_delta: 8e-4,
+    });
 }
 
 #[test]
@@ -2722,87 +2752,56 @@ fn trnqsmod1_rbodymod1_common_source_transient_matches_ngspice46() {
     // This composes charge-deficit transient NQS with the native RBODYMOD=1
     // substrate network; Xyce covers the body network topology, but not this
     // TRNQSMOD transient card.
-    let deck = trnqsmod_rbodymod1_common_source_deck(1);
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let circuit = engine()
-        .build_circuit(&netlist)
-        .expect("TRNQSMOD=1 RBODYMOD=1 deck builds natively");
-    assert!(
-        circuit.get_node_by_name("m1.__body").is_some(),
-        "RBODYMOD=1 must create the native body-prime node"
-    );
-    assert!(
-        circuit.get_node_by_name("m1.__dbody").is_some(),
-        "RBODYMOD=1 must create the native drain-body node"
-    );
-    assert!(
-        circuit.get_node_by_name("m1.__sbody").is_some(),
-        "RBODYMOD=1 must create the native source-body node"
-    );
-    assert!(
-        circuit.get_node_by_name("m1.__charge").is_some(),
-        "TRNQSMOD=1 must create the hidden charge-deficit node"
-    );
-    let result = engine()
-        .run_tran(&netlist, 80.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=1 with RBODYMOD=1 transient runs natively");
-    let vout = result
-        .try_voltage_waveform_named("out")
-        .expect("out waveform");
-
-    let qs_deck = trnqsmod_rbodymod1_common_source_deck(0);
-    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
-    let qs_result = engine()
-        .run_tran(&qs_netlist, 80.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=0 with RBODYMOD=1 transient runs");
-    let qs_vout = qs_result
-        .try_voltage_waveform_named("out")
-        .expect("QS out waveform");
-
-    let reference: &[(f64, f64, f64)] = &[
-        (20.5e-12, 1.108_265_888_438_446, -2.825_467_054_738_184e-2),
-        (
-            21.0e-12,
-            9.228_127_788_145_025e-1,
-            -1.156_302_559_354_542e-1,
-        ),
-        (
-            21.5e-12,
-            4.940_745_371_717_650e-1,
-            -1.680_559_006_198_611e-1,
-        ),
-        (
-            22.0e-12,
-            1.665_693_704_588_173e-1,
-            -4.187_538_203_978_528e-2,
-        ),
-        (22.5e-12, 8.337_212_477_921_546e-2, 8.505_851_007_997_917e-3),
-        (23.0e-12, 8.182_408_779_385_036e-2, 1.058_426_890_257_090e-2),
-        (24.0e-12, 8.161_922_225_990_839e-2, 9.456_455_239_337_802e-3),
-        (25.0e-12, 8.144_913_394_164_591e-2, 8.251_753_227_523_917e-3),
-    ];
-    let mut max_qs_delta: f64 = 0.0;
-    for &(time, expected, expected_delta_vs_qs) in reference {
-        let got = interp_waveform(&result.time, vout, time);
-        let abs_err = (got - expected).abs();
-        assert!(
-            abs_err < 2e-3,
-            "TRNQSMOD=1 RBODYMOD=1 transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
-        );
-
-        let qs = interp_waveform(&qs_result.time, qs_vout, time);
-        let qs_delta = got - qs;
-        max_qs_delta = max_qs_delta.max(qs_delta.abs());
-        let delta_err = (qs_delta - expected_delta_vs_qs).abs();
-        assert!(
-            delta_err < 3e-3,
-            "TRNQSMOD=1 RBODYMOD=1 delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
-        );
-    }
-    assert!(
-        max_qs_delta > 1e-1,
-        "TRNQSMOD=1 with RBODYMOD=1 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
-    );
+    assert_trnqs_transient(&TrnqsCase {
+        label: "TRNQSMOD=1 RBODYMOD=1",
+        deck: trnqsmod_rbodymod1_common_source_deck,
+        tstop: 80.0e-12,
+        hidden_nodes: &[
+            (
+                "m1.__body",
+                "RBODYMOD=1 must create the native body-prime node",
+            ),
+            (
+                "m1.__dbody",
+                "RBODYMOD=1 must create the native drain-body node",
+            ),
+            (
+                "m1.__sbody",
+                "RBODYMOD=1 must create the native source-body node",
+            ),
+            (
+                "m1.__charge",
+                "TRNQSMOD=1 must create the hidden charge-deficit node",
+            ),
+        ],
+        abs_tol: 2e-3,
+        reference: TrnqsReference::WithQsDelta {
+            delta_tol: 3e-3,
+            rows: &[
+                (20.5e-12, 1.108_265_888_438_446, -2.825_467_054_738_184e-2),
+                (
+                    21.0e-12,
+                    9.228_127_788_145_025e-1,
+                    -1.156_302_559_354_542e-1,
+                ),
+                (
+                    21.5e-12,
+                    4.940_745_371_717_650e-1,
+                    -1.680_559_006_198_611e-1,
+                ),
+                (
+                    22.0e-12,
+                    1.665_693_704_588_173e-1,
+                    -4.187_538_203_978_528e-2,
+                ),
+                (22.5e-12, 8.337_212_477_921_546e-2, 8.505_851_007_997_917e-3),
+                (23.0e-12, 8.182_408_779_385_036e-2, 1.058_426_890_257_090e-2),
+                (24.0e-12, 8.161_922_225_990_839e-2, 9.456_455_239_337_802e-3),
+                (25.0e-12, 8.144_913_394_164_591e-2, 8.251_753_227_523_917e-3),
+            ],
+        },
+        min_qs_delta: 1e-1,
+    });
 }
 
 #[test]
@@ -2812,53 +2811,24 @@ fn trnqsmod1_rgatemod1_common_source_transient_matches_ngspice46() {
     // Xyce regression coverage includes BSIM4 RGATEMOD topologies, but no
     // matching TRNQSMOD=1 transient-NQS oracle; keep ngspice as the physics
     // oracle for this charge-deficit slice.
-    let deck = trnqsmod_rgatemod1_common_source_deck(1);
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let result = engine()
-        .run_tran(&netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=1 with RGATEMOD=1 transient runs natively");
-    let vout = result
-        .try_voltage_waveform_named("out")
-        .expect("out waveform");
-
-    let qs_deck = trnqsmod_rgatemod1_common_source_deck(0);
-    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
-    let qs_result = engine()
-        .run_tran(&qs_netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=0 with RGATEMOD=1 transient runs");
-    let qs_vout = qs_result
-        .try_voltage_waveform_named("out")
-        .expect("QS out waveform");
-
-    let reference: &[(f64, f64, f64)] = &[
-        (21.0e-12, 1.043_700_960_542, 1.352_398_456_023e-4),
-        (25.0e-12, 1.021_327_482_108, -3.596_991_580_699e-3),
-        (50.0e-12, 7.520_064_843_996e-1, -2.479_646_149_617e-2),
-        (100.0e-12, 3.432_018_415_062e-1, -3.502_507_618_773e-2),
-        (200.0e-12, 9.058_323_667_115e-2, -3.803_900_420_606e-3),
-    ];
-    let mut max_qs_delta: f64 = 0.0;
-    for &(time, expected, expected_delta_vs_qs) in reference {
-        let got = interp_waveform(&result.time, vout, time);
-        let abs_err = (got - expected).abs();
-        assert!(
-            abs_err < 2e-3,
-            "TRNQSMOD=1 RGATEMOD=1 transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
-        );
-
-        let qs = interp_waveform(&qs_result.time, qs_vout, time);
-        let qs_delta = got - qs;
-        max_qs_delta = max_qs_delta.max(qs_delta.abs());
-        let delta_err = (qs_delta - expected_delta_vs_qs).abs();
-        assert!(
-            delta_err < 3e-3,
-            "TRNQSMOD=1 RGATEMOD=1 delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
-        );
-    }
-    assert!(
-        max_qs_delta > 2e-2,
-        "TRNQSMOD=1 with RGATEMOD=1 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
-    );
+    assert_trnqs_transient(&TrnqsCase {
+        label: "TRNQSMOD=1 RGATEMOD=1",
+        deck: trnqsmod_rgatemod1_common_source_deck,
+        tstop: 200.0e-12,
+        hidden_nodes: &[],
+        abs_tol: 2e-3,
+        reference: TrnqsReference::WithQsDelta {
+            delta_tol: 3e-3,
+            rows: &[
+                (21.0e-12, 1.043_700_960_542, 1.352_398_456_023e-4),
+                (25.0e-12, 1.021_327_482_108, -3.596_991_580_699e-3),
+                (50.0e-12, 7.520_064_843_996e-1, -2.479_646_149_617e-2),
+                (100.0e-12, 3.432_018_415_062e-1, -3.502_507_618_773e-2),
+                (200.0e-12, 9.058_323_667_115e-2, -3.803_900_420_606e-3),
+            ],
+        },
+        min_qs_delta: 2e-2,
+    });
 }
 
 #[test]
@@ -2868,76 +2838,45 @@ fn trnqsmod1_rgatemod2_common_source_transient_matches_ngspice46() {
     // ngspice warns when charge-deficit transient NQS and gate resistance are
     // both selected, but still evaluates this topology; pin it natively rather
     // than falling back or silently degrading to QS.
-    let deck = trnqsmod_rgatemod2_common_source_deck(1);
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let circuit = engine()
-        .build_circuit(&netlist)
-        .expect("TRNQSMOD=1 RGATEMOD=2 deck builds natively");
-    assert!(
-        circuit.get_node_by_name("m1.__gint").is_some(),
-        "RGATEMOD=2 must create the native gate-prime node"
-    );
-    assert!(
-        circuit.get_node_by_name("m1.__charge").is_some(),
-        "TRNQSMOD=1 must create the hidden charge-deficit node"
-    );
-    let result = engine()
-        .run_tran(&netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=1 with RGATEMOD=2 transient runs natively");
-    let vout = result
-        .try_voltage_waveform_named("out")
-        .expect("out waveform");
-
-    let qs_deck = trnqsmod_rgatemod2_common_source_deck(0);
-    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
-    let qs_result = engine()
-        .run_tran(&qs_netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=0 with RGATEMOD=2 transient runs");
-    let qs_vout = qs_result
-        .try_voltage_waveform_named("out")
-        .expect("QS out waveform");
-
-    let reference: &[(f64, f64, f64)] = &[
-        (21.0e-12, 1.043_660_244_024_935, 9.511_995_185_129_685e-5),
-        (25.0e-12, 1.018_768_336_492_094, -6.174_411_768_187_227e-3),
-        (
-            50.0e-12,
-            7.332_033_696_871_683e-1,
-            -4.378_514_206_716_566e-2,
-        ),
-        (
-            100.0e-12,
-            3.258_788_211_342_819e-1,
-            -5.263_640_893_241_278e-2,
-        ),
-        (
-            200.0e-12,
-            7.809_612_053_963_345e-1,
-            1.367_941_577_354_548e-2,
-        ),
-    ];
-    let mut max_qs_delta: f64 = 0.0;
-    for &(time, expected, expected_delta_vs_qs) in reference {
-        let got = interp_waveform(&result.time, vout, time);
-        let abs_err = (got - expected).abs();
-        assert!(
-            abs_err < 2e-3,
-            "TRNQSMOD=1 RGATEMOD=2 transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
-        );
-
-        let qs = interp_waveform(&qs_result.time, qs_vout, time);
-        let qs_delta = got - qs;
-        max_qs_delta = max_qs_delta.max(qs_delta.abs());
-        let delta_err = (qs_delta - expected_delta_vs_qs).abs();
-        assert!(
-            delta_err < 3e-3,
-            "TRNQSMOD=1 RGATEMOD=2 delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
-        );
-    }
-    assert!(
-        max_qs_delta > 3e-2,
-        "TRNQSMOD=1 with RGATEMOD=2 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
-    );
+    assert_trnqs_transient(&TrnqsCase {
+        label: "TRNQSMOD=1 RGATEMOD=2",
+        deck: trnqsmod_rgatemod2_common_source_deck,
+        tstop: 200.0e-12,
+        hidden_nodes: &[
+            (
+                "m1.__gint",
+                "RGATEMOD=2 must create the native gate-prime node",
+            ),
+            (
+                "m1.__charge",
+                "TRNQSMOD=1 must create the hidden charge-deficit node",
+            ),
+        ],
+        abs_tol: 2e-3,
+        reference: TrnqsReference::WithQsDelta {
+            delta_tol: 3e-3,
+            rows: &[
+                (21.0e-12, 1.043_660_244_024_935, 9.511_995_185_129_685e-5),
+                (25.0e-12, 1.018_768_336_492_094, -6.174_411_768_187_227e-3),
+                (
+                    50.0e-12,
+                    7.332_033_696_871_683e-1,
+                    -4.378_514_206_716_566e-2,
+                ),
+                (
+                    100.0e-12,
+                    3.258_788_211_342_819e-1,
+                    -5.263_640_893_241_278e-2,
+                ),
+                (
+                    200.0e-12,
+                    7.809_612_053_963_345e-1,
+                    1.367_941_577_354_548e-2,
+                ),
+            ],
+        },
+        min_qs_delta: 3e-2,
+    });
 }
 
 #[test]
@@ -2946,80 +2885,49 @@ fn trnqsmod1_rgatemod3_common_source_transient_matches_ngspice46() {
     // `ngspice_con.exe -b`, `set numdgt=15`, and `wrdata v(out)`.
     // This composes the charge-deficit transient-NQS state with the native
     // RGATEMOD=3 middle-gate topology.
-    let deck = trnqsmod_rgatemod3_common_source_deck(1);
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let circuit = engine()
-        .build_circuit(&netlist)
-        .expect("TRNQSMOD=1 RGATEMOD=3 deck builds natively");
-    assert!(
-        circuit.get_node_by_name("m1.__gmid").is_some(),
-        "RGATEMOD=3 must create the native middle-gate node"
-    );
-    assert!(
-        circuit.get_node_by_name("m1.__gint").is_some(),
-        "RGATEMOD=3 must create the native gate-prime node"
-    );
-    assert!(
-        circuit.get_node_by_name("m1.__charge").is_some(),
-        "TRNQSMOD=1 must create the hidden charge-deficit node"
-    );
-    let result = engine()
-        .run_tran(&netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=1 with RGATEMOD=3 transient runs natively");
-    let vout = result
-        .try_voltage_waveform_named("out")
-        .expect("out waveform");
-
-    let qs_deck = trnqsmod_rgatemod3_common_source_deck(0);
-    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
-    let qs_result = engine()
-        .run_tran(&qs_netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=0 with RGATEMOD=3 transient runs");
-    let qs_vout = qs_result
-        .try_voltage_waveform_named("out")
-        .expect("QS out waveform");
-
-    let reference: &[(f64, f64, f64)] = &[
-        (21.0e-12, 1.043_705_732_163_425, 1.254_894_203_346_346e-4),
-        (25.0e-12, 1.021_352_526_021_268, -3.625_744_297_955_036e-3),
-        (
-            50.0e-12,
-            7.520_417_384_538_742e-1,
-            -2.481_817_689_164_045e-2,
-        ),
-        (
-            100.0e-12,
-            3.432_362_814_044_708e-1,
-            -3.504_368_911_048_506e-2,
-        ),
-        (
-            200.0e-12,
-            7.661_957_866_240_539e-1,
-            -1.064_657_453_059_947e-3,
-        ),
-    ];
-    let mut max_qs_delta: f64 = 0.0;
-    for &(time, expected, expected_delta_vs_qs) in reference {
-        let got = interp_waveform(&result.time, vout, time);
-        let abs_err = (got - expected).abs();
-        assert!(
-            abs_err < 2e-3,
-            "TRNQSMOD=1 RGATEMOD=3 transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
-        );
-
-        let qs = interp_waveform(&qs_result.time, qs_vout, time);
-        let qs_delta = got - qs;
-        max_qs_delta = max_qs_delta.max(qs_delta.abs());
-        let delta_err = (qs_delta - expected_delta_vs_qs).abs();
-        assert!(
-            delta_err < 3e-3,
-            "TRNQSMOD=1 RGATEMOD=3 delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
-        );
-    }
-    assert!(
-        max_qs_delta > 2e-2,
-        "TRNQSMOD=1 with RGATEMOD=3 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
-    );
+    assert_trnqs_transient(&TrnqsCase {
+        label: "TRNQSMOD=1 RGATEMOD=3",
+        deck: trnqsmod_rgatemod3_common_source_deck,
+        tstop: 200.0e-12,
+        hidden_nodes: &[
+            (
+                "m1.__gmid",
+                "RGATEMOD=3 must create the native middle-gate node",
+            ),
+            (
+                "m1.__gint",
+                "RGATEMOD=3 must create the native gate-prime node",
+            ),
+            (
+                "m1.__charge",
+                "TRNQSMOD=1 must create the hidden charge-deficit node",
+            ),
+        ],
+        abs_tol: 2e-3,
+        reference: TrnqsReference::WithQsDelta {
+            delta_tol: 3e-3,
+            rows: &[
+                (21.0e-12, 1.043_705_732_163_425, 1.254_894_203_346_346e-4),
+                (25.0e-12, 1.021_352_526_021_268, -3.625_744_297_955_036e-3),
+                (
+                    50.0e-12,
+                    7.520_417_384_538_742e-1,
+                    -2.481_817_689_164_045e-2,
+                ),
+                (
+                    100.0e-12,
+                    3.432_362_814_044_708e-1,
+                    -3.504_368_911_048_506e-2,
+                ),
+                (
+                    200.0e-12,
+                    7.661_957_866_240_539e-1,
+                    -1.064_657_453_059_947e-3,
+                ),
+            ],
+        },
+        min_qs_delta: 2e-2,
+    });
 }
 
 #[test]
@@ -3028,65 +2936,36 @@ fn trnqsmod1_rdsmod1_rgatemod1_common_source_transient_matches_ngspice46() {
     // maps D/S to internal primes while RGATEMOD=1 lowers a linear resistor
     // into the intrinsic gate-prime. ngspice-46 is the physics oracle because
     // the local Xyce regression tree has no matching TRNQSMOD=1 transient card.
-    let deck = trnqsmod_rdsmod1_rgatemod1_common_source_deck(1);
-    let netlist = Netlist::parse(&deck).expect("deck parses");
-    let result = engine()
-        .run_tran(&netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=1 with RDSMOD=1 and RGATEMOD=1 transient runs natively");
-    let vout = result
-        .try_voltage_waveform_named("out")
-        .expect("out waveform");
-
-    let qs_deck = trnqsmod_rdsmod1_rgatemod1_common_source_deck(0);
-    let qs_netlist = Netlist::parse(&qs_deck).expect("QS deck parses");
-    let qs_result = engine()
-        .run_tran(&qs_netlist, 200.0e-12, 0.1e-12)
-        .expect("TRNQSMOD=0 with RDSMOD=1 and RGATEMOD=1 transient runs");
-    let qs_vout = qs_result
-        .try_voltage_waveform_named("out")
-        .expect("QS out waveform");
-
-    let reference: &[(f64, f64, f64)] = &[
-        (21.0e-12, 1.044_822_111_014_900, 1.661_128_851_568_883e-4),
-        (25.0e-12, 1.022_150_396_873_794, -3.870_435_096_143_821e-3),
-        (
-            50.0e-12,
-            7.603_819_926_870_015e-1,
-            -2.467_159_878_587_910e-2,
-        ),
-        (
-            100.0e-12,
-            3.984_975_174_651_587e-1,
-            -3.302_114_335_234_280e-2,
-        ),
-        (
-            200.0e-12,
-            1.799_145_729_018_396e-1,
-            -3.510_942_533_033_690e-3,
-        ),
-    ];
-    let mut max_qs_delta: f64 = 0.0;
-    for &(time, expected, expected_delta_vs_qs) in reference {
-        let got = interp_waveform(&result.time, vout, time);
-        let abs_err = (got - expected).abs();
-        assert!(
-            abs_err < 2e-3,
-            "TRNQSMOD=1 RDSMOD=1 RGATEMOD=1 transient v(out) at {time:.3e}s: rspice={got:.9e} ngspice={expected:.9e} abs_err={abs_err:.3e}"
-        );
-
-        let qs = interp_waveform(&qs_result.time, qs_vout, time);
-        let qs_delta = got - qs;
-        max_qs_delta = max_qs_delta.max(qs_delta.abs());
-        let delta_err = (qs_delta - expected_delta_vs_qs).abs();
-        assert!(
-            delta_err < 3e-3,
-            "TRNQSMOD=1 RDSMOD=1 RGATEMOD=1 delta vs QS at {time:.3e}s: rspice={qs_delta:.9e} ngspice={expected_delta_vs_qs:.9e} abs_err={delta_err:.3e}"
-        );
-    }
-    assert!(
-        max_qs_delta > 2e-2,
-        "TRNQSMOD=1 with RDSMOD=1 and RGATEMOD=1 must not silently degrade to QS; max |delta v(out)|={max_qs_delta:.3e}"
-    );
+    assert_trnqs_transient(&TrnqsCase {
+        label: "TRNQSMOD=1 RDSMOD=1 RGATEMOD=1",
+        deck: trnqsmod_rdsmod1_rgatemod1_common_source_deck,
+        tstop: 200.0e-12,
+        hidden_nodes: &[],
+        abs_tol: 2e-3,
+        reference: TrnqsReference::WithQsDelta {
+            delta_tol: 3e-3,
+            rows: &[
+                (21.0e-12, 1.044_822_111_014_900, 1.661_128_851_568_883e-4),
+                (25.0e-12, 1.022_150_396_873_794, -3.870_435_096_143_821e-3),
+                (
+                    50.0e-12,
+                    7.603_819_926_870_015e-1,
+                    -2.467_159_878_587_910e-2,
+                ),
+                (
+                    100.0e-12,
+                    3.984_975_174_651_587e-1,
+                    -3.302_114_335_234_280e-2,
+                ),
+                (
+                    200.0e-12,
+                    1.799_145_729_018_396e-1,
+                    -3.510_942_533_033_690e-3,
+                ),
+            ],
+        },
+        min_qs_delta: 2e-2,
+    });
 }
 
 #[test]
