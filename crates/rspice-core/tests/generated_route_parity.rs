@@ -2072,3 +2072,105 @@ fn a_generated_device_refuses_a_non_finite_contribution_as_a_rejectable_trial() 
         "the stamper's own audit must refuse at least one of {device_nodes:?}"
     );
 }
+
+/// Drain current `i(Vd)` of a deck's operating point, or the refusal.
+fn drain_current(deck: &str) -> Result<f64, String> {
+    let trace = operating_point_trace(deck, &[], &["Vd"]);
+    match trace[0].text.as_deref() {
+        Some("ok") => Ok(traced(&trace, "op.i(Vd)")),
+        _ => Err(format!("{trace:?}")),
+    }
+}
+
+fn assert_currents_agree(label: &str, left: f64, right: f64) {
+    assert!(
+        (left - right).abs() <= RELATIVE_TOLERANCE * left.abs().max(right.abs()),
+        "{label}: {left:e} and {right:e} must agree to {RELATIVE_TOLERANCE:e}"
+    );
+}
+
+const EKV3_SOURCE: &str = "models/veriloga/ekv3_302.00/vacode/ekv3.va";
+
+/// The 150 nm NMOS card of Xyce's VANOISE deck, as EKV3 parameters.
+const EKV3_NMOS150_CARD: &str = "+ SIGN=1 TG=-1 SCALE=1.0 XL=0.0 XW=0.0
++ COX=8.58E-3 GAMMAG=18.4 AQMA=0.0 AQMI=0.0 ETAQM=0.75
++ PHIF=450.0E-3 GAMMA=300.0E-3 XJ=30.0E-9 N0=1.025
++ KP=390.0E-6 E0=438.0E+6 E1=159.0E+6 ETA=0.57 ZC=1.0E-6 THC=0.0
++ PDITS=2.58E-6 PDITSD=0.91 PDITSL=0.0 FPROUT=1.85E+6 DDITS=0.1
++ AVTO=0.0 AKP=0.0 AGAMMA=0.0
++ UCRIT=5.0E+6 DELTA=1.5 LAMBDA=0.5 ACLM=0.85
++ DL=-16.7E-9 DLC=-23.0E-9 WDL=0.0 LL=0.0 LLN=1.0 DW=-45.3E-9 DWC=0.0 LDW=0.0
++ LETA0=1.0E+6 LETA=1.3 LETA2=0.0 WETA=1.0 NCS=0.5
++ ETAD=0.75 SIGMAD=1.0
++ LR=100E-9 QLR=580E-6 NLR=100.0E-3 FLR=2
++ WR=80.0E-9 QWR=500.0E-6 NWR=12.0E-3
++ RLX=170.0E-6
++ LOV=25.0E-9 GAMMAOV=5.0 VFBOV=0.0 KJF=150.0E-12 CJF=300.0E-3
++ KG=50.0E-6 XB=5.5 EB=21.0E+9 LOVIG=40.0E-12
++ TNOM=30.0 TCV=600.0E-6 BEX=-1.6 TE0EX=-4.15 TE1EX=0.0 TETA=2.0E-3
++ UCEX=1.2 TLAMBDA=0.15 TCVL=0.0 TCVW=0.0 TCVWL=0.0";
+
+/// EKV3's multi-finger threshold correction, `NFVTA*log((NF-1)*NFVTB+1)`, is
+/// a decimal logarithm (Verilog-AMS LRM 2.4 section 4.3.2). It adds to the
+/// threshold exactly as `VTO` does, so a two-finger device with `NFVTA=1`,
+/// `NFVTB=0.1` is the device with the correction off and `VTO` raised by
+/// `log10(1.1)`. ngspice-46 running `EKV3.osdi` (OpenVAF) answers the two
+/// decks with the same fifteen digits, and the corrected deck's operating
+/// point at `Vg` = 0.95 V is `i(Vd)` = -4.40971686522010e-5 A, which this route
+/// meets to 3e-11; `VTO` raised by `ln(1.1)` gives -3.79e-5 A.
+#[test]
+fn ekv3_multi_finger_threshold_correction_is_a_decimal_logarithm() {
+    let source = model_source(EKV3_SOURCE);
+    let deck = |vg: f64, vto: f64, nfvta: i32| {
+        format!(
+            "* EKV3 multi-finger threshold\n.va \"{source}\" ekv3_rf\n\
+             Vd d 0 1.0\nVg g 0 {vg}\n\
+             X1 d g 0 0 ekv3_rf W=300e-9 L=150e-9 NF=2 VTO={vto:e} NFVTA={nfvta} NFVTB=0.1\n\
+             {EKV3_NMOS150_CARD}\n.options temp=25 gmin=0\n.end\n"
+        )
+    };
+    for vg in [0.2, 0.45, 0.7, 0.95, 1.2] {
+        let label = format!("EKV3 at Vg={vg}");
+        let corrected = drain_current(&deck(vg, 0.4, 1)).expect(&label);
+        let decimal = drain_current(&deck(vg, 0.4 + 1.1_f64.log10(), 0)).expect(&label);
+        let natural = drain_current(&deck(vg, 0.4 + 1.1_f64.ln(), 0)).expect(&label);
+        assert_currents_agree(&label, corrected, decimal);
+        assert!(
+            (corrected - natural).abs() > 1.0e-3 * corrected.abs(),
+            "{label}: the deck must tell the two logarithms apart"
+        );
+    }
+}
+
+/// BSIM-BULK 107.2.1's drain-side conductivity modulation raises the drift
+/// saturation current by `CMD1*Vb_cm^CMD2`, with
+/// `Vb_cm = sqrt(V(bi,b)^2 + pow(10, 2*(-3-log(CMD1))/CMD2))`. With `log`
+/// decimal (Verilog-AMS LRM 2.4 section 4.3.2) and the body unbiased,
+/// `CMD1*Vb_cm^CMD2` is `1e-3` for every `CMD1`, so the operating point does
+/// not depend on `CMD1` while it is positive; with `log` natural it would be
+/// `1e-3*CMD1^(1-ln(10))`. ngspice-46's `BSIMBULK107.osdi` predates `CMD1`, so
+/// this closed form is the oracle.
+#[test]
+fn bsimbulk_conductivity_modulation_offset_is_a_decimal_logarithm() {
+    let source = model_source("models/veriloga/cmc/BSIM-BULK107.2.1_02112025/code/bsimbulk.va");
+    let deck = |cmd1: f64| {
+        format!(
+            "* BSIM-BULK drift conductivity modulation\n.va \"{source}\" bsimbulk\n\
+             Vd d 0 5.0\nVg g 0 1.5\n\
+             X1 d g 0 0 bsimbulk L=1u W=10u RDSMOD=1 HVMOD=1 IIMOD=1 CMD1={cmd1:e} CMD2=2\n.end\n"
+        )
+    };
+    let [off, small, large] = [0.0, 1.0e-3, 1.0]
+        .map(|cmd1| drain_current(&deck(cmd1)).unwrap_or_else(|err| panic!("CMD1={cmd1}: {err}")));
+    // The two decks round `Vb_cm^CMD2` apart in the last place, and each
+    // solve stops within its own Newton tolerance of the shared answer. The
+    // modulation itself moves this operating point by 1e-6 of the current.
+    assert!(
+        (small - large).abs() <= 1.0e-10 * large.abs(),
+        "CMD1=1e-3 and CMD1=1 must agree: {small:e}, {large:e}"
+    );
+    assert!(
+        (off - large).abs() > 1.0e-7 * large.abs(),
+        "the conductivity modulation must move the operating point: {off:e}, {large:e}"
+    );
+}
