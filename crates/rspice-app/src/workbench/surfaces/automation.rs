@@ -711,7 +711,7 @@ fn code_pane(
     let preceding_input = search_input
         .as_ref()
         .map(|input| input.preceding_scope(ui.ctx()));
-    super::publish_source_editor(
+    super::netlist::publish_source_editor(
         ui.ctx(),
         app,
         crate::workbench::documents::text_editor_commands::ActiveSourceEditor {

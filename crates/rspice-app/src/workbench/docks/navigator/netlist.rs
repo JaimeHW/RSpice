@@ -29,6 +29,82 @@ const NETLIST_OUTLINE_CARET_SIZE: f32 = 9.0;
 /// Indent of a declaration under its group, past the guide line.
 const NETLIST_OUTLINE_CHILD_INDENT: f32 = 12.0;
 
+pub(super) fn code_workspace_pages(ui: &mut Ui, app: &mut RSpiceApp) {
+    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+
+    let t = Tokens::get(ui.ctx());
+    let touch = app.state.workbench.coarse_pointer;
+    let height = if touch { 44.0 } else { 31.0 };
+    let width = ui.available_width().max(1.0);
+    let (strip, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    ui.painter().rect_filled(strip, 0.0, t.color.bg_panel);
+    ui.painter().hline(
+        strip.x_range(),
+        strip.bottom(),
+        Stroke::new(1.0, t.color.border),
+    );
+    let content = strip.shrink2(Vec2::new(8.0, 0.0));
+    let button_width = content.width() / CodeWorkspacePage::ALL.len() as f32;
+    let messages = app.state.workbench.messages();
+    let mut selected = None;
+    for (index, page) in CodeWorkspacePage::ALL.into_iter().enumerate() {
+        // The tab's identity is its position, not its name. Keying the `Id` on
+        // the label made the widget move whenever the label was translated.
+        let name = messages.text(match page {
+            CodeWorkspacePage::Netlist => crate::workbench::MessageId::CodePageNetlist,
+            CodeWorkspacePage::Automation => crate::workbench::MessageId::CodePageAutomation,
+        });
+        let left = content.left() + button_width * index as f32;
+        let right = if index + 1 == CodeWorkspacePage::ALL.len() {
+            content.right()
+        } else {
+            left + button_width
+        };
+        let rect = egui::Rect::from_min_max(
+            egui::pos2(left, content.top()),
+            egui::pos2(right, content.bottom()),
+        );
+        let response = ui.interact(
+            rect,
+            egui::Id::new(("workbench.code.page", index)),
+            Sense::click(),
+        );
+        let active = app.state.code.code_workspace.page == page;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), active, &name)
+        });
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &name,
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            if active || response.hovered() {
+                t.color.text
+            } else {
+                t.color.text_dim
+            },
+        );
+        if active {
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(
+                    egui::pos2(rect.left() + 6.0, rect.bottom() - 2.0),
+                    egui::pos2(rect.right() - 6.0, rect.bottom()),
+                ),
+                0.0,
+                t.color.accent,
+            );
+        }
+        theme::paint_focus_ring(ui, &response, rect.shrink(2.0));
+        if response.clicked() {
+            selected = Some(page);
+        }
+    }
+    if let Some(page) = selected {
+        app.state.code.code_workspace.page = page;
+        app.state.code.netlist.completion_open = false;
+    }
+}
+
 pub(super) fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.code.netlist.active_document == ActiveNetlistDocument::GeneratedDiff {
         netlist_diff(ui, app);

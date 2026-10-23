@@ -32,6 +32,22 @@ use crate::workbench::documents::netlist_document::{
 };
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 
+/// Publish the source editor a page shows as its document, and hand it any
+/// request the menus, palette or shortcuts made for it. Called before the
+/// editor is drawn so it applies the request in the same frame.
+pub(super) fn publish_source_editor(
+    ctx: &egui::Context,
+    app: &mut RSpiceApp,
+    editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
+) {
+    app.state.workbench.active_source_editor = Some(editor);
+    if let Some(request) = app.state.workbench.outbox.take() {
+        crate::workbench::documents::text_editor_commands::queue_source_editor_request(
+            ctx, editor.id, request,
+        );
+    }
+}
+
 pub(super) fn prepare_workspace(app: &mut RSpiceApp) {
     generation::reconcile_documents(app);
     crate::workbench::documents::netlist_document::prepare(&mut app.state);
@@ -169,7 +185,7 @@ pub(super) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
         } else {
-            super::publish_source_editor(
+            publish_source_editor(
                 ui.ctx(),
                 app,
                 crate::workbench::documents::text_editor_commands::ActiveSourceEditor {

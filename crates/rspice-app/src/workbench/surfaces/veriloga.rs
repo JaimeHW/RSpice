@@ -262,7 +262,7 @@ fn source_editor(
             selected.bundle().id(),
             active_path,
         );
-    super::publish_source_editor(
+    super::netlist::publish_source_editor(
         ui.ctx(),
         app,
         crate::workbench::documents::text_editor_commands::ActiveSourceEditor {

@@ -50,22 +50,6 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-/// Publish the source editor a page shows as its document, and hand it any
-/// request the menus, palette or shortcuts made for it. Called before the
-/// editor is drawn so it applies the request in the same frame.
-fn publish_source_editor(
-    ctx: &egui::Context,
-    app: &mut RSpiceApp,
-    editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
-) {
-    app.state.workbench.active_source_editor = Some(editor);
-    if let Some(request) = app.state.workbench.outbox.take() {
-        crate::workbench::documents::text_editor_commands::queue_source_editor_request(
-            ctx, editor.id, request,
-        );
-    }
-}
-
 fn show_primary(ui: &mut Ui, app: &mut RSpiceApp) {
     if app.state.workbench.current_route().surface_id() == super::SurfaceId::ReportAuthoring {
         report_authoring::show(ui, app);
