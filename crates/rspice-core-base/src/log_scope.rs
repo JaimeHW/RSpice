@@ -258,7 +258,12 @@ mod tests {
                 "rspice_core_netlist::netlist::parser",
                 "rspice_core::netlist::parser",
             ),
+            ("rspice_core_netlist::library", "rspice_core::library"),
             ("rspice_core_base::expr", "rspice_core::expr"),
+            (
+                "rspice_core_devices::device::mosfet::bsim4v8::temp",
+                "rspice_core::device::mosfet::bsim4v8::temp",
+            ),
             ("rspice_core_devices", "rspice_core"),
         ] {
             assert_eq!(canonical_target(target), canonical, "{target}");
