@@ -3,6 +3,7 @@
 use super::{
     AppState, ResultViewer, Ui, eye, instrument, sheet_domain_controls, sheet_purpose, specs, table,
 };
+use crate::workbench::framework::requests::{ExportCsv, ExportFigure};
 use rspice_results_ui::chrome::{
     ExportRequests,
     bars::{self, SheetBarHost, SpecificationAction},
@@ -12,14 +13,25 @@ pub(super) fn show(ui: &mut Ui, state: &mut AppState) {
     bars::show(ui, &mut Host(state));
 }
 
+/// Raise what a result document's export control asked for. The dataset
+/// export needs the application's IO, and the figure goes through the
+/// hardcopy workflow, so neither is done here.
+pub(super) fn raise_exports(state: &mut AppState, requests: ExportRequests) {
+    if requests.csv {
+        state.workbench.outbox.push(ExportCsv);
+    }
+    if requests.figure {
+        state.workbench.outbox.push(ExportFigure);
+    }
+}
+
 struct Host<'a>(&'a mut AppState);
 impl SheetBarHost for Host<'_> {
     fn viewer(&self) -> ResultViewer {
         self.0.results.results.session.viewer
     }
     fn export(&mut self, requests: ExportRequests) {
-        self.0.results.export_csv_requested |= requests.csv;
-        self.0.hardcopy.export_figure_requested |= requests.figure;
+        raise_exports(self.0, requests);
     }
     fn fft_summary(&self) -> Option<String> {
         self.0

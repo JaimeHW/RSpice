@@ -187,6 +187,7 @@ SLICE_RULES = [
     (W + r"browser/(file_import|download|qualification|background_alerts|accessibility)", "services"),
     (W + r"browser/navigation", "framework"),
     (W + r"(browser|platform)\.rs$", "services"),
+    (W + r"framework(\.rs$|/)", "framework"),
     (W + r"routing", "framework"),
     (W + r"(layout|localization|logging)\.rs$", "framework"),
     (W + r"state/navigator_tree", "framework"),
@@ -649,9 +650,12 @@ def measure(source_root: Path):
                 kinds[d["name"]].add(d["kind"])
                 if d["public"]:
                     public_in[d["name"]].add(owner[p])
+    # Names other code also spells as an enum variant (`TransferFailure::Request`),
+    # which a bare name cannot tell apart, are left out; `crate::` paths to the
+    # item itself are still counted below.
     symbols = {
         name: next(iter(found)) for name, found in public_in.items()
-        if len(name) >= 4 and len(defined_in[name]) == 1 and name not in ("Cell", "Align")
+        if len(name) >= 4 and len(defined_in[name]) == 1 and name not in ("Cell", "Align", "Request")
     }
 
     # `use` declarations: re-export table, external roots, per-file imports and globs.

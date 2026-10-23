@@ -11,6 +11,9 @@ use crate::schematic::view::selection_transform::{
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app::sheets as sheet_actions;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::requests::{
+    ClipboardText, FocusNavigatorSearch, FocusPlacementSearch,
+};
 use crate::workbench::menu_bar::{
     FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
 };
@@ -509,7 +512,7 @@ impl Command {
             && let Some(editor) = app.state.workbench.active_source_editor
         {
             if editor.editable || !request.mutates_source() {
-                app.state.workbench.source_editor_request = Some(request);
+                app.state.workbench.outbox.push(request);
             }
             return;
         }
@@ -626,7 +629,7 @@ impl Command {
                             &mut app.state,
                         )
                     {
-                        app.state.workbench.clipboard_text_request = Some(text);
+                        app.state.workbench.outbox.push(ClipboardText(text));
                     }
                 } else if active_symbol_editor(app) {
                     app.copy_selected_symbol_shape();
@@ -696,7 +699,7 @@ impl Command {
                     // The search box is the Navigator tab's; the Component
                     // shelf that Place instance brings forward has none.
                     app.state.design.design_panel = super::state::DesignPanel::Navigator;
-                    app.state.workbench.focus_navigator_search = true;
+                    app.state.workbench.outbox.push(FocusNavigatorSearch);
                 }
             }
             Self::Preferences => {
@@ -983,7 +986,7 @@ impl Command {
                 app.state.workbench.navigator_visible = true;
                 app.state.workbench.drawer = Some(super::state::Drawer::Navigator);
                 app.state.design.design_panel = super::state::DesignPanel::ComponentShelf;
-                app.state.design.focus_placement_search = true;
+                app.state.workbench.outbox.push(FocusPlacementSearch);
             }
             Self::PlaceWire => set_tool(app, Tool::Wire),
             Self::PlaceBus => set_tool(app, Tool::Bus),

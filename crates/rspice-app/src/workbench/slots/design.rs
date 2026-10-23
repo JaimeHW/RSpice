@@ -207,8 +207,6 @@ pub(crate) struct DesignState {
     pub occurrence_net_highlights: std::collections::BTreeMap<String, String>,
     /// Filter text in the component chooser.
     pub placement_query: String,
-    /// One-frame request to focus the component chooser filter.
-    pub focus_placement_search: bool,
     /// Tabbed property dialog state (commercial-grade property editing).
     /// Boxed: the dialog's tabs carry their drafts.
     pub(crate) tabbed_property_dialog: Box<crate::properties::TabbedPropertyDialogState>,

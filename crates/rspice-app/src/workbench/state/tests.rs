@@ -5,6 +5,7 @@
 //! through the saved session unchanged is tested with the session wire.
 
 use super::*;
+use crate::workbench::framework::requests::FullScreen;
 
 #[test]
 fn canonical_workspace_order_is_stable() {
@@ -651,17 +652,24 @@ fn a_session_left_on_the_retired_interactive_page_restores_onto_the_console() {
 #[test]
 fn full_screen_request_is_consumed_exactly_once() {
     let mut session = WorkbenchSession::default();
-    session.request_full_screen(true);
+    session.outbox.push(FullScreen(true));
 
-    assert_eq!(session.take_full_screen_request(), Some(true));
-    assert_eq!(session.take_full_screen_request(), None);
+    assert_eq!(take_full_screen_request(&mut session), Some(true));
+    assert_eq!(take_full_screen_request(&mut session), None);
 }
 
 #[test]
 fn newest_full_screen_request_supersedes_an_unapplied_request() {
     let mut session = WorkbenchSession::default();
-    session.request_full_screen(true);
-    session.request_full_screen(false);
+    session.outbox.push(FullScreen(true));
+    session.outbox.push(FullScreen(false));
 
-    assert_eq!(session.take_full_screen_request(), Some(false));
+    assert_eq!(take_full_screen_request(&mut session), Some(false));
+}
+
+fn take_full_screen_request(session: &mut WorkbenchSession) -> Option<bool> {
+    session
+        .outbox
+        .take::<FullScreen>()
+        .map(|FullScreen(enabled)| enabled)
 }

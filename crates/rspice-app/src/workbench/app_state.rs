@@ -806,7 +806,9 @@ impl AppState {
         self.project.project_launcher_open = true;
         self.project.project_launcher_page = crate::workbench::state::ProjectLauncherPage::Projects;
         self.platform.recovery_catalog.request_refresh();
-        self.project.focus_project_launcher_search = true;
+        self.workbench
+            .outbox
+            .push(crate::workbench::framework::requests::FocusProjectLauncherSearch);
     }
 
     /// Arm the analysis catalogue, from wherever the reader asked for it.

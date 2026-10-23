@@ -483,7 +483,10 @@ impl RSpiceApp {
         ) {
             Ok(text) => {
                 let rows = dataset.project_selected(view, false, selected).rows.len();
-                self.state.workbench.clipboard_text_request = Some(text);
+                self.state
+                    .workbench
+                    .outbox
+                    .push(crate::workbench::framework::requests::ClipboardText(text));
                 self.state.prompt(format!(
                     "{rows} engineering table row{} copied with headers and displayed units.",
                     if rows == 1 { "" } else { "s" }

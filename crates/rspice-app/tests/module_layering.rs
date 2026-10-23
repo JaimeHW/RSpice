@@ -598,6 +598,10 @@ fn module_references_respect_the_layer_order() {
 /// hide inside a layer, and the whole point of this table is that one already
 /// did.
 const WORKBENCH_LAYERS: &[&str] = &[
+    // The requests the parts of the shell raise for one another and the
+    // frame points that take them. It names nothing of the shell's, so every
+    // part can raise or take one.
+    "framework",
     // Contracts, routes, and policy. These describe the shell without
     // operating it.
     "platform",

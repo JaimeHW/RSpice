@@ -698,11 +698,12 @@ mod shortcut_ownership_tests {
 
         app.execute_shortcut_command(ShortcutCommand::Copy);
 
-        let copied = app
+        use crate::workbench::framework::requests::ClipboardText;
+        let ClipboardText(copied) = app
             .state
             .workbench
-            .clipboard_text_request
-            .as_deref()
+            .outbox
+            .peek::<ClipboardText>()
             .expect("cursor readout copied");
         assert!(copied.starts_with('A'));
         assert!(copied.contains("V(out)"));

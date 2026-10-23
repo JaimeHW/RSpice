@@ -1212,7 +1212,11 @@ fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp, layout: LauncherLayout) {
                     ui,
                     &mut app.state.project.project_launcher_query,
                     search_width,
-                    std::mem::take(&mut app.state.project.focus_project_launcher_search),
+                    app.state
+                        .workbench
+                        .outbox
+                        .take::<crate::workbench::framework::requests::FocusProjectLauncherSearch>()
+                        .is_some(),
                 );
 
                 if !layout.compact {

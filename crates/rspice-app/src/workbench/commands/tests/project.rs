@@ -7,6 +7,7 @@
 //! that skips the gate is invisible to a single aggregate check.
 
 use super::*;
+use crate::workbench::framework::requests::FocusProjectLauncherSearch;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
@@ -230,12 +231,18 @@ fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
     let mut state = AppState::default();
     state.project.project_launcher_filter = ProjectLauncherFilter::Pinned;
     state.project.project_launcher_open = false;
-    state.project.focus_project_launcher_search = false;
+    let _ = state.workbench.outbox.take::<FocusProjectLauncherSearch>();
 
     open_recent_projects(&mut state);
 
     assert!(state.project.project_launcher_open);
-    assert!(state.project.focus_project_launcher_search);
+    assert!(
+        state
+            .workbench
+            .outbox
+            .peek::<FocusProjectLauncherSearch>()
+            .is_some()
+    );
     assert_eq!(
         state.project.project_launcher_page,
         crate::workbench::state::ProjectLauncherPage::Projects

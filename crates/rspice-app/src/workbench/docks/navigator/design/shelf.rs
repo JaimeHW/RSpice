@@ -36,6 +36,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::requests::FocusPlacementSearch;
 
 use super::super::super::super::design_system::{
     WorkbenchIcon, section_header as shelf_section_header,
@@ -44,7 +45,7 @@ use super::super::rail::{self, RailDisclosure, RailFold};
 use super::super::{
     SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
     empty_navigator_row, panel_search, schematic_nav_row_indented_drag_response,
-    schematic_nav_row_indented_response,
+    schematic_nav_row_indented_response, search_focus_requested,
 };
 use super::{matches_query, normalized};
 
@@ -658,12 +659,13 @@ pub(super) fn component_shelf_match_count(state: &AppState, query: &str) -> usiz
 }
 
 fn shelf_search(ui: &mut Ui, state: &mut AppState) -> bool {
+    let mut focus = search_focus_requested::<FocusPlacementSearch>(ui, &mut state.workbench.outbox);
     panel_search(
         ui,
         &mut state.design.placement_query,
         "workbench.design.component_shelf.search",
         "Place component or cell…",
-        &mut state.design.focus_placement_search,
+        &mut focus,
     )
 }
 

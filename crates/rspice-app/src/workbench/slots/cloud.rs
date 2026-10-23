@@ -1,5 +1,5 @@
 //! The cloud feature's dialogs: license activation, web publication and live
-//! sessions, and the request to start mirroring a host.
+//! sessions.
 
 /// What the cloud feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -17,24 +17,8 @@ pub(crate) struct CloudState {
     pub(crate) unpublish_web:
         crate::workbench::app::dialogs::unpublish_web::UnpublishWebDialogState,
 
-    /// One-shot request raised by a completed close-to-mirror transaction;
-    /// the live-session engine consumes it to start mirroring the host.
-    pub(crate) live_mirror_entry_pending: bool,
-
     /// The activated license key as pasted (persisted; re-verified on load).
     pub(crate) license_key: Option<String>,
     /// The verified grant behind `license_key` (derived, never persisted).
     pub(crate) license: Option<crate::services::license::LicenseInfo>,
-}
-
-impl CloudState {
-    /// Raise the one-shot live-mirror entry request; the live-session engine
-    /// consumes it on its next pump.
-    pub(crate) fn request_live_mirror_entry(&mut self) {
-        self.live_mirror_entry_pending = true;
-    }
-
-    pub(crate) fn take_live_mirror_entry(&mut self) -> bool {
-        std::mem::take(&mut self.live_mirror_entry_pending)
-    }
 }

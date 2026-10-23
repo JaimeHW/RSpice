@@ -15,6 +15,9 @@ use crate::ui::tokens::Tokens;
 
 // The shell's submodules and re-exports, as this code saw them when it lived
 // in `workbench.rs` itself.
+use super::framework::requests::{
+    self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox,
+};
 use super::layout::LayoutSpec;
 use super::state::Workspace;
 use super::*;
@@ -167,17 +170,7 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     tools::notification_center::show(ctx, app, layout.title_bar_height);
     // Export requests originate in retained result-document engines but IO is
     // owned by the app boundary.
-    if let Some(keys) = app.state.results.export_result_quantities_requested.take() {
-        crate::workbench::menu_bar::action_export_result_selection_with_io(
-            &mut app.state,
-            app.export_workflow_io.as_ref(),
-            &keys,
-        );
-    }
-    run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
-    if std::mem::take(&mut app.state.results.open_producing_plan_requested) {
-        commands::vocabulary::Command::OpenProducingPlan.execute(app);
-    }
+    answer_result_requests(ctx, app);
 
     if app.state.workbench.workspace != Workspace::Design {
         app.state.design.canvas_hover = None;
@@ -217,6 +210,26 @@ fn show_toasts(
     )
 }
 
+fn outbox(app: &mut RSpiceApp) -> &mut Outbox {
+    &mut app.state.workbench.outbox
+}
+
+/// The requests the result documents and the data browser raise while they
+/// are drawn, answered at [`requests::Drain::BeforeToasts`] in this order.
+fn answer_result_requests(ctx: &Context, app: &mut RSpiceApp) {
+    requests::drain(app, outbox, |app, ExportResultQuantities(keys)| {
+        crate::workbench::menu_bar::action_export_result_selection_with_io(
+            &mut app.state,
+            app.export_workflow_io.as_ref(),
+            &keys,
+        );
+    });
+    run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
+    requests::drain(app, outbox, |app, OpenProducingPlan| {
+        commands::vocabulary::Command::OpenProducingPlan.execute(app);
+    });
+}
+
 /// "Export dataset…" asks for a format, then writes the displayed result in
 /// it. A result document's own export button arrives here as a request.
 fn run_dataset_export(
@@ -224,9 +237,11 @@ fn run_dataset_export(
     state: &mut AppState,
     io: &dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
 ) {
-    if std::mem::take(&mut state.results.export_csv_requested) {
-        crate::workbench::menu_bar::open_dataset_export_picker(state);
-    }
+    requests::drain(
+        state,
+        |state| &mut state.workbench.outbox,
+        |state, ExportCsv| crate::workbench::menu_bar::open_dataset_export_picker(state),
+    );
     if crate::workbench::menu_bar::show_dataset_export_picker(ctx, state) {
         crate::workbench::menu_bar::action_export_csv_with_io(state, io);
     }
@@ -628,17 +643,7 @@ fn show_full_screen_presentation(root: &mut egui::Ui, app: &mut RSpiceApp, layou
         app.state.exit_full_screen_presentation();
     }
 
-    if let Some(keys) = app.state.results.export_result_quantities_requested.take() {
-        crate::workbench::menu_bar::action_export_result_selection_with_io(
-            &mut app.state,
-            app.export_workflow_io.as_ref(),
-            &keys,
-        );
-    }
-    run_dataset_export(ctx, &mut app.state, app.export_workflow_io.as_ref());
-    if std::mem::take(&mut app.state.results.open_producing_plan_requested) {
-        commands::vocabulary::Command::OpenProducingPlan.execute(app);
-    }
+    answer_result_requests(ctx, app);
     if app.state.workbench.workspace != Workspace::Design {
         app.state.design.canvas_hover = None;
         app.state.design.canvas_view_center = None;
@@ -872,7 +877,11 @@ fn reconcile_platform_full_screen(app: &mut RSpiceApp) {
     // Browser chrome (notably Escape) may leave fullscreen without routing a
     // command through egui. Reflect the platform truth back into retained UI
     // state so the menu checkmark and next toggle remain accurate.
-    if app.state.workbench.full_screen_request.is_none()
+    if !app
+        .state
+        .workbench
+        .outbox
+        .waits_at(requests::Drain::AfterChrome)
         && let Some(document) = web_sys::window().and_then(|window| window.document())
     {
         let platform_full_screen = document.fullscreen_element().is_some();
@@ -887,16 +896,20 @@ fn reconcile_platform_full_screen(app: &mut RSpiceApp) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn apply_platform_full_screen_request(ctx: &Context, app: &mut RSpiceApp) {
-    if let Some(enabled) = app.state.workbench.take_full_screen_request() {
+    requests::drain(app, outbox, |_, FullScreen(enabled)| {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(enabled));
-    }
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
 fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
-    let Some(enabled) = app.state.workbench.take_full_screen_request() else {
-        return;
-    };
+    requests::drain(app, outbox, |app, FullScreen(enabled)| {
+        apply_browser_full_screen(app, enabled);
+    });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn apply_browser_full_screen(app: &mut RSpiceApp, enabled: bool) {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
         app.state.clear_full_screen_presentation(false);
         log::error!("Fullscreen request failed: browser document is unavailable");
@@ -1676,14 +1689,22 @@ mod tests {
 
         assert!(app.state.workbench.full_screen_presentation);
         assert!(app.state.workbench.full_screen);
-        assert_eq!(app.state.workbench.take_full_screen_request(), Some(true));
-        assert_eq!(app.state.workbench.take_full_screen_request(), None);
+        assert_eq!(take_full_screen_request(&mut app), Some(true));
+        assert_eq!(take_full_screen_request(&mut app), None);
 
         app.state.exit_full_screen_presentation();
         assert!(!app.state.workbench.full_screen_presentation);
         assert!(!app.state.workbench.full_screen);
-        assert_eq!(app.state.workbench.take_full_screen_request(), Some(false));
-        assert_eq!(app.state.workbench.take_full_screen_request(), None);
+        assert_eq!(take_full_screen_request(&mut app), Some(false));
+        assert_eq!(take_full_screen_request(&mut app), None);
+    }
+
+    fn take_full_screen_request(app: &mut RSpiceApp) -> Option<bool> {
+        app.state
+            .workbench
+            .outbox
+            .take::<FullScreen>()
+            .map(|FullScreen(enabled)| enabled)
     }
 
     #[test]

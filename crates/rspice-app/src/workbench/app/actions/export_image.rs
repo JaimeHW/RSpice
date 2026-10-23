@@ -22,16 +22,20 @@
 //! pipeline it belongs to.
 
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::framework::requests::{self, ExportFigure};
 
 impl RSpiceApp {
     /// Pump a pending figure-export request.
     pub(in crate::workbench) fn handle_image_export(&mut self) {
-        if !std::mem::take(&mut self.state.hardcopy.export_figure_requested) {
-            return;
-        }
-        crate::workbench::app::open_hardcopy_workflow(
+        requests::drain(
             self,
-            crate::workbench::app::HardcopyWorkflow::Export,
+            |app| &mut app.state.workbench.outbox,
+            |app, ExportFigure| {
+                crate::workbench::app::open_hardcopy_workflow(
+                    app,
+                    crate::workbench::app::HardcopyWorkflow::Export,
+                );
+            },
         );
     }
 }
@@ -39,6 +43,7 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use crate::workbench::app::{HardcopyWorkflow, RSpiceApp};
+    use crate::workbench::framework::requests::ExportFigure;
 
     /// The workflow refuses to open without a retained source, so the fixture
     /// has to make the active cell view the active document first — the same
@@ -60,12 +65,12 @@ mod tests {
     #[test]
     fn a_figure_request_opens_the_publication_workflow() {
         let mut app = app_with_an_exportable_document();
-        app.state.hardcopy.export_figure_requested = true;
+        app.state.workbench.outbox.push(ExportFigure);
 
         app.handle_image_export();
 
         assert!(
-            !app.state.hardcopy.export_figure_requested,
+            app.state.workbench.outbox.peek::<ExportFigure>().is_none(),
             "the request must be consumed exactly once"
         );
         assert!(

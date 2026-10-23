@@ -448,20 +448,29 @@ fn every_workspace_exposes_the_mockup_reset_active_view_workflow() {
 fn full_screen_command_enters_in_the_same_frame_with_no_dialog() {
     let mut app = RSpiceApp::test_instance();
     assert!(!app.state.workbench.full_screen_presentation);
-    assert_eq!(app.state.workbench.take_full_screen_request(), None);
+    assert_eq!(take_full_screen_request(&mut app), None);
 
     Command::ToggleFullScreen.execute(&mut app);
 
     assert!(!app.state.dialog_modal_open());
     assert!(app.state.workbench.full_screen_presentation);
     assert!(app.state.workbench.full_screen);
-    assert_eq!(app.state.workbench.take_full_screen_request(), Some(true));
+    assert_eq!(take_full_screen_request(&mut app), Some(true));
 
     Command::ToggleFullScreen.execute(&mut app);
 
     assert!(!app.state.workbench.full_screen_presentation);
     assert!(!app.state.workbench.full_screen);
-    assert_eq!(app.state.workbench.take_full_screen_request(), Some(false));
+    assert_eq!(take_full_screen_request(&mut app), Some(false));
+}
+
+fn take_full_screen_request(app: &mut RSpiceApp) -> Option<bool> {
+    use crate::workbench::framework::requests::FullScreen;
+    app.state
+        .workbench
+        .outbox
+        .take::<FullScreen>()
+        .map(|FullScreen(enabled)| enabled)
 }
 
 #[test]

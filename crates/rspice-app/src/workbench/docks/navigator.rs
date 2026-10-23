@@ -26,6 +26,9 @@ use crate::workbench::documents::result_document::{
     exact_result_artifact_text, exact_result_signal_last_sample, exact_result_signal_tsv,
     retained_evidence_is_valid,
 };
+use crate::workbench::framework::requests::{
+    ExportResultQuantities, FocusNavigatorSearch, Outbox, Request,
+};
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
 };
@@ -352,13 +355,22 @@ fn workspace_search(ui: &mut Ui, app: &mut RSpiceApp, workspace: Workspace) -> b
         Workspace::Models => "Search model, device or library…",
         Workspace::Netlist => "Find symbol or line…",
     };
+    let mut focus =
+        search_focus_requested::<FocusNavigatorSearch>(ui, &mut app.state.workbench.outbox);
     panel_search(
         ui,
         app.state.workbench.navigator_trees.filter_mut(workspace),
         "workbench.navigator.filter",
         placeholder,
-        &mut app.state.workbench.focus_navigator_search,
+        &mut focus,
     )
+}
+
+/// Take `R`, the request to focus a search field this pass draws, when the
+/// field can take the focus. A drawer first measures an invisible pass; the
+/// request waits for the visible one.
+pub(super) fn search_focus_requested<R: Request>(ui: &Ui, outbox: &mut Outbox) -> bool {
+    ui.is_visible() && outbox.take::<R>().is_some()
 }
 
 /// The panel's filter field: the query, the control that empties it, and the
@@ -1819,8 +1831,10 @@ fn results(ui: &mut Ui, app: &mut RSpiceApp) {
                             export_exact.clone().on_disabled_hover_text(error);
                         }
                         if export_exact.clicked() {
-                            app.state.results.export_result_quantities_requested =
-                                Some(checked_ordered.clone());
+                            app.state
+                                .workbench
+                                .outbox
+                                .push(ExportResultQuantities(checked_ordered.clone()));
                             ui.close();
                         }
                         ui.separator();
@@ -2358,7 +2372,7 @@ fn results_browser_toolbar(
         let field_width = panel_search_field_width(ui.available_width() + PANEL_SEARCH_MARGIN_X);
         let placeholder = "Find signal…";
         let field_id = ui.make_persistent_id("workbench.navigator.filter");
-        if ui.is_visible() && std::mem::take(&mut app.state.workbench.focus_navigator_search) {
+        if search_focus_requested::<FocusNavigatorSearch>(ui, &mut app.state.workbench.outbox) {
             ui.memory_mut(|memory| memory.request_focus(field_id));
         }
         let response = ui.add_sized(
@@ -5514,10 +5528,9 @@ fn result_artifact_context_menu(
 fn open_result_artifact(app: &mut RSpiceApp, artifact: &ResultArtifact, request_export: bool) {
     if select_result_artifact(app, &artifact.identity) {
         if request_export {
-            app.state.results.export_result_quantities_requested =
-                Some(vec![ResultBrowserSelectionKey::Artifact(
-                    artifact.identity.clone(),
-                )]);
+            app.state.workbench.outbox.push(ExportResultQuantities(vec![
+                ResultBrowserSelectionKey::Artifact(artifact.identity.clone()),
+            ]));
         } else {
             Command::ResultViewer(artifact.viewer).execute(app);
         }
@@ -5712,8 +5725,9 @@ fn open_signal_table(
 ) {
     if select_result_signal_by_key(app, key) {
         if request_export {
-            app.state.results.export_result_quantities_requested =
-                Some(vec![ResultBrowserSelectionKey::Waveform(key.clone())]);
+            app.state.workbench.outbox.push(ExportResultQuantities(vec![
+                ResultBrowserSelectionKey::Waveform(key.clone()),
+            ]));
         } else {
             if let Some(selected) = &app.state.results.results.session.selected_trace {
                 let (analysis, column) = selected.table_binding();

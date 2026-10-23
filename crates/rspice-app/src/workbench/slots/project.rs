@@ -149,8 +149,6 @@ pub(crate) struct ProjectState {
     pub project_launcher_page: crate::workbench::state::ProjectLauncherPage,
     /// The Examples dialog, while it is open: the example chosen in it.
     pub(crate) examples_selection: Option<usize>,
-    /// Focus is requested only on the frame in which the launcher opens.
-    pub focus_project_launcher_search: bool,
     pub project_page: crate::workbench::state::ProjectPage,
     /// Device-local filters and row selections for the Project workspace.
     /// They affect presentation only and never participate in project

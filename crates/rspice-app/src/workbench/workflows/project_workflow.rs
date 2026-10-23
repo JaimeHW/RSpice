@@ -1105,7 +1105,10 @@ pub(crate) fn close_project_discard(
         .workbench
         .activate(crate::workbench::state::Workspace::Project);
     if destination == ProjectCloseDestination::LiveMirror {
-        state.cloud.request_live_mirror_entry();
+        state
+            .workbench
+            .outbox
+            .push(crate::workbench::framework::requests::LiveMirrorEntry);
     }
     true
 }

@@ -431,8 +431,9 @@ fn close_to_live_mirror_raises_the_one_shot_engine_entry_request() {
         state.workbench.workspace,
         crate::workbench::state::Workspace::Project
     );
-    assert!(state.cloud.take_live_mirror_entry());
-    assert!(!state.cloud.take_live_mirror_entry());
+    use crate::workbench::framework::requests::LiveMirrorEntry;
+    assert!(state.workbench.outbox.take::<LiveMirrorEntry>().is_some());
+    assert!(state.workbench.outbox.take::<LiveMirrorEntry>().is_none());
 }
 
 #[test]

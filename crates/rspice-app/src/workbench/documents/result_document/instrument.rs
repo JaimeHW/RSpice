@@ -89,8 +89,7 @@ impl WaveInstrumentHost for Host<'_> {
     }
 
     fn export(&mut self, requests: ExportRequests) {
-        self.state.results.export_csv_requested |= requests.csv;
-        self.state.hardcopy.export_figure_requested |= requests.figure;
+        super::bars::raise_exports(self.state, requests);
     }
 
     fn inline_cursor_readout(&mut self) -> Option<String> {

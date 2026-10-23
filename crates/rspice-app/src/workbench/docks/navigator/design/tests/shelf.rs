@@ -18,6 +18,7 @@ use crate::state::{
     ComponentType, Tool, builtin_xspice_library_binding, builtin_xspice_vector_ports,
     engine_only_xspice_devices,
 };
+use crate::workbench::framework::requests::FocusPlacementSearch;
 
 #[test]
 fn mockup_primitive_groups_cover_every_placeable_palette_entry_once() {
@@ -1535,7 +1536,7 @@ fn the_shelf_rail_walks_and_folds_from_the_keyboard() {
 
     let mut shelf = ShelfHarness::opened().reporting_accessibility().settled();
 
-    shelf.app.state.design.focus_placement_search = true;
+    shelf.app.state.workbench.outbox.push(FocusPlacementSearch);
     let output = shelf.output(Vec::new());
     assert_eq!(
         focus(&output).as_deref(),

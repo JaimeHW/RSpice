@@ -206,7 +206,10 @@ pub(crate) fn open_dataset_browser(app: &mut RSpiceApp) {
     app.state.workbench.activate(Workspace::Results);
     app.state.workbench.navigator_visible = true;
     app.state.workbench.inspector_visible = true;
-    app.state.workbench.focus_navigator_search = true;
+    app.state
+        .workbench
+        .outbox
+        .push(crate::workbench::framework::requests::FocusNavigatorSearch);
     app.state.results.results.session.viewer = ResultViewer::Manifest;
 }
 

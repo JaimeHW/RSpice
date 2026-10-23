@@ -527,7 +527,6 @@ impl<'a> WorkbenchWireRef<'a> {
             inline_edit: _,
             last_repeatable_command: _,
             drawer: _,
-            focus_navigator_search: _,
             specialist_tool_browser,
             notification_center_open: _,
             notification_filter: _,
@@ -543,10 +542,8 @@ impl<'a> WorkbenchWireRef<'a> {
             number_locale: _,
             text_locale: _,
             toasts: _,
-            clipboard_text_request: _,
             active_source_editor: _,
-            source_editor_request: _,
-            full_screen_request: _,
+            outbox: _,
         } = workbench;
         Self {
             workspace,
@@ -767,7 +764,6 @@ impl WorkbenchWire {
             inline_edit: _,
             last_repeatable_command: _,
             drawer: _,
-            focus_navigator_search: _,
             specialist_tool_browser,
             notification_center_open: _,
             notification_filter: _,
@@ -783,10 +779,8 @@ impl WorkbenchWire {
             number_locale: _,
             text_locale: _,
             toasts: _,
-            clipboard_text_request: _,
             active_source_editor: _,
-            source_editor_request: _,
-            full_screen_request: _,
+            outbox: _,
         } = &mut *state.workbench;
         *workspace = self.workspace;
         *window_session = self.window_session;

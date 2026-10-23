@@ -46,6 +46,7 @@ pub(crate) mod documents;
 // tests also build from.
 pub(crate) mod examples;
 pub(crate) mod frame;
+pub(crate) mod framework;
 pub(crate) mod hardcopy_adapters;
 mod layout;
 pub(crate) mod lifecycle;

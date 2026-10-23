@@ -31,6 +31,7 @@ use crate::state::SchematicState;
 use crate::state::write_policy::LiveWriteLocks;
 use crate::time_compat::Instant;
 use crate::workbench::AppState;
+use crate::workbench::framework::requests::LiveMirrorEntry;
 
 /// Presence cadence; doubles as the relay keepalive under its idle timeout.
 const PRESENCE_PERIOD: Duration = Duration::from_secs(15);
@@ -237,7 +238,7 @@ impl LiveSessionEngine {
         self.reconcile_role(state, cloud);
         self.settle_mirror_discard(state);
         if matches!(self.role, Role::Idle) {
-            if state.cloud.take_live_mirror_entry() {
+            if state.workbench.outbox.take::<LiveMirrorEntry>().is_some() {
                 // The close-to-mirror transaction outlived its session. Its
                 // close already left the no-project landing in place, and a
                 // closed project never raises the project launcher.
@@ -427,14 +428,14 @@ impl LiveSessionEngine {
                 );
             }
         } else {
-            state.cloud.request_live_mirror_entry();
+            state.workbench.outbox.push(LiveMirrorEntry);
         }
     }
 
     /// Complete mirror adoption after the close-to-mirror transaction:
     /// from here every host document applies, starting with a full resync.
     fn finish_mirror_entry(&mut self, state: &mut AppState) {
-        if !state.cloud.take_live_mirror_entry() {
+        if state.workbench.outbox.take::<LiveMirrorEntry>().is_none() {
             return;
         }
         let Role::Guest(guest) = &mut self.role else {
@@ -1838,7 +1839,7 @@ mod tests {
             crate::workbench::state::Workspace::Project
         );
         assert!(
-            !state.cloud.take_live_mirror_entry(),
+            state.workbench.outbox.peek::<LiveMirrorEntry>().is_none(),
             "the pump consumes the stale entry"
         );
     }

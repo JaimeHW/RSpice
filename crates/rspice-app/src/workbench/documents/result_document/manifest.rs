@@ -114,7 +114,10 @@ pub(crate) fn right_panel(ui: &mut Ui, state: &mut AppState) {
         }
     }
     if response.open_plan {
-        state.results.open_producing_plan_requested = true;
+        state
+            .workbench
+            .outbox
+            .push(crate::workbench::framework::requests::OpenProducingPlan);
     }
     // Acted on after the panel is drawn, like the plan route above it, so the
     // workspace switch happens between frames rather than under the widget

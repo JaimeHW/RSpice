@@ -26,6 +26,7 @@ use egui::{Align, Layout, Rect, Sense, Ui, UiBuilder, WidgetInfo, WidgetType};
 
 use crate::ui::tokens::Tokens;
 use crate::workbench::RSpiceApp;
+use crate::workbench::framework::requests::Drain;
 
 use super::state::Workspace;
 
@@ -38,13 +39,13 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         show_primary(ui, app);
     }
-    if app.state.workbench.source_editor_request.is_some() {
+    if app.state.workbench.outbox.waits_at(Drain::SourceEditor) {
         if app.state.workbench.active_source_editor.is_some() {
             // Asked after the editor was drawn: it takes it next frame.
             ui.ctx().request_repaint();
         } else {
             // No editor is on screen to take it.
-            app.state.workbench.source_editor_request = None;
+            app.state.workbench.outbox.decline_at(Drain::SourceEditor);
         }
     }
 }
@@ -58,7 +59,7 @@ fn publish_source_editor(
     editor: crate::workbench::documents::text_editor_commands::ActiveSourceEditor,
 ) {
     app.state.workbench.active_source_editor = Some(editor);
-    if let Some(request) = app.state.workbench.source_editor_request.take() {
+    if let Some(request) = app.state.workbench.outbox.take() {
         crate::workbench::documents::text_editor_commands::queue_source_editor_request(
             ctx, editor.id, request,
         );

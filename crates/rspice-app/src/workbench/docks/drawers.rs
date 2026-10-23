@@ -84,7 +84,10 @@ pub fn show(ctx: &Context, app: &mut RSpiceApp, layout: LayoutSpec) {
         Drawer::Navigator => {
             let opened_this_pass = begin_side_drawer_focus(ctx, Drawer::Navigator);
             if opened_this_pass {
-                app.state.workbench.focus_navigator_search = true;
+                app.state
+                    .workbench
+                    .outbox
+                    .push(crate::workbench::framework::requests::FocusNavigatorSearch);
                 ctx.memory_mut(|memory| memory.move_focus(FocusDirection::None));
             }
             let width = if layout.compact_shell {

@@ -703,7 +703,13 @@ fn finding_references_seeds_the_navigator_filter_with_the_object_name() {
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(app.state.design.design_panel, DesignPanel::Navigator);
     assert!(app.state.workbench.navigator_visible);
-    assert!(app.state.workbench.focus_navigator_search);
+    assert!(
+        app.state
+            .workbench
+            .outbox
+            .peek::<FocusNavigatorSearch>()
+            .is_some()
+    );
 }
 
 /// The keyboard find is a different promise: it raises an empty box to type
@@ -727,7 +733,13 @@ fn the_plain_find_command_leaves_the_navigator_filter_alone() {
             .filter(Workspace::Design),
         "VOUT"
     );
-    assert!(app.state.workbench.focus_navigator_search);
+    assert!(
+        app.state
+            .workbench
+            .outbox
+            .peek::<FocusNavigatorSearch>()
+            .is_some()
+    );
 }
 
 /// Find raised the search flag but left the left dock on the Component shelf
@@ -753,7 +765,13 @@ fn find_brings_the_navigator_tab_forward_over_the_component_shelf() {
             DesignPanel::Navigator,
             "by key: {by_key}"
         );
-        assert!(app.state.workbench.focus_navigator_search);
+        assert!(
+            app.state
+                .workbench
+                .outbox
+                .peek::<FocusNavigatorSearch>()
+                .is_some()
+        );
     }
 }
 
@@ -1359,7 +1377,7 @@ impl NavigatorPanel {
     /// Put the keyboard in the filter field, through the route the Find
     /// command uses.
     fn focus_filter(&mut self) {
-        self.app.state.workbench.focus_navigator_search = true;
+        self.app.state.workbench.outbox.push(FocusNavigatorSearch);
         self.pass(Vec::new());
     }
 

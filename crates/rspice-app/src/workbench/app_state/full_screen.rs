@@ -1,6 +1,7 @@
 //! Full-screen state transitions shared by commands and platform events.
 
 use super::AppState;
+use crate::workbench::framework::requests::FullScreen;
 
 impl AppState {
     /// Put the application window into full screen, keeping the panels the reader
@@ -11,7 +12,7 @@ impl AppState {
     pub(crate) fn enter_full_screen_presentation(&mut self) {
         self.workbench.full_screen_presentation = true;
         self.workbench.full_screen = true;
-        self.workbench.request_full_screen(true);
+        self.workbench.outbox.push(FullScreen(true));
     }
 
     pub(crate) fn exit_full_screen_presentation(&mut self) {
@@ -23,7 +24,7 @@ impl AppState {
         self.workbench.full_screen = false;
         self.workbench.full_screen_presentation = false;
         if request_platform_exit && platform_full_screen {
-            self.workbench.request_full_screen(false);
+            self.workbench.outbox.push(FullScreen(false));
         }
     }
 }

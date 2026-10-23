@@ -591,7 +591,10 @@ fn apply(state: &mut AppState, stage: &Stage, action: StageAction) {
             }
         }
         StageAction::ImportDataFile => stimulus::import_data_file(state),
-        StageAction::Copy(text) => state.workbench.clipboard_text_request = Some(text),
+        StageAction::Copy(text) => state
+            .workbench
+            .outbox
+            .push(crate::workbench::framework::requests::ClipboardText(text)),
         StageAction::Place => stimulus::place_selected_definition(state),
     }
 }

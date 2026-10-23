@@ -1141,9 +1141,11 @@ impl eframe::App for RSpiceApp {
         self.record_publish_receipt();
         self.live_session
             .pump(&mut self.state, &mut self.cloud_account);
-        if let Some(text) = self.state.workbench.clipboard_text_request.take() {
-            ctx.copy_text(text);
-        }
+        crate::workbench::framework::requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |_, crate::workbench::framework::requests::ClipboardText(text)| ctx.copy_text(text),
+        );
         #[cfg(not(target_arch = "wasm32"))]
         self.autosave_tick(&ctx);
         self.render_frame_chrome(ui);

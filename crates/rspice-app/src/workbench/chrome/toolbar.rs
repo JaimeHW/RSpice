@@ -182,7 +182,10 @@ pub fn show(root: &mut Ui, app: &mut RSpiceApp, layout: LayoutSpec) {
                         let opening = app.state.workbench.drawer != Some(Drawer::Navigator);
                         remember_drawer_invoker(ui.ctx(), Drawer::Navigator, navigator_toggle.id);
                         if opening {
-                            app.state.workbench.focus_navigator_search = true;
+                            app.state
+                                .workbench
+                                .outbox
+                                .push(crate::workbench::framework::requests::FocusNavigatorSearch);
                             mark_drawer_focus_pending(ui.ctx(), Drawer::Navigator);
                         }
                         app.state.workbench.toggle_drawer(Drawer::Navigator);

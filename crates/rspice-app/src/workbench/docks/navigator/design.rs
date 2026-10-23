@@ -25,6 +25,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::requests::FocusNavigatorSearch;
 use rspice_design::connectivity::summary::DesignNet;
 
 use super::super::super::commands::vocabulary::Command;
@@ -35,7 +36,7 @@ use super::super::super::state::{DesignPanel, Workspace};
 use super::rail::{self, RailDisclosure, RailFold};
 use super::{
     SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
-    empty_navigator_row, panel_search, schematic_nav_row_indented_response,
+    empty_navigator_row, panel_search, schematic_nav_row_indented_response, search_focus_requested,
 };
 
 mod find_matches;
@@ -570,12 +571,13 @@ fn sheet_scope_control(ui: &mut Ui, scope: SheetScope) -> Option<SheetScope> {
 
 fn navigator_search(ui: &mut Ui, state: &mut crate::workbench::app_state::AppState) -> bool {
     let workspace = state.workbench.workspace;
+    let mut focus = search_focus_requested::<FocusNavigatorSearch>(ui, &mut state.workbench.outbox);
     panel_search(
         ui,
         state.workbench.navigator_trees.filter_mut(workspace),
         "workbench.design.navigator.search",
         "Find instance, net or port…",
-        &mut state.workbench.focus_navigator_search,
+        &mut focus,
     )
 }
 
@@ -1948,7 +1950,7 @@ fn find_navigator_object_references(state: &mut AppState, object: &NavigatorObje
         .filter_mut(Workspace::Design) = name;
     state.workbench.navigator_visible = true;
     state.design.design_panel = DesignPanel::Navigator;
-    state.workbench.focus_navigator_search = true;
+    state.workbench.outbox.push(FocusNavigatorSearch);
 }
 
 fn open_measurements(state: &mut AppState) {

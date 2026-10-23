@@ -257,6 +257,13 @@ impl SourceEditorRequest {
     }
 }
 
+/// The menus, palette, shortcuts and language tools raise these; the page
+/// that draws the active source editor hands it over just before drawing it.
+impl crate::workbench::framework::requests::Request for SourceEditorRequest {
+    const DRAIN: crate::workbench::framework::requests::Drain =
+        crate::workbench::framework::requests::Drain::SourceEditor;
+}
+
 /// Hand `request` to the editor `editor_id`, which applies it the next time
 /// it is drawn.
 pub(crate) fn queue_source_editor_request(
