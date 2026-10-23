@@ -1782,6 +1782,7 @@ mod tests {
             integer: false,
             procedurally_assignable: reg,
             span: span(),
+            origin: None,
         }
     }
 
@@ -1800,6 +1801,7 @@ mod tests {
             integer: false,
             procedurally_assignable: false,
             span: span(),
+            origin: None,
         }
     }
 

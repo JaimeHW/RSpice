@@ -108,6 +108,7 @@ impl ProcessLowerer<'_> {
                 integer: declaration.integer,
                 procedurally_assignable: true,
                 span: declaration.span.into(),
+                origin: None,
             });
             self.locals[usize::from(local)].shared = Some(signal);
             self.write_local(entry, local, value);

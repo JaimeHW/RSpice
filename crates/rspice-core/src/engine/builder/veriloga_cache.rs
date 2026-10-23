@@ -506,7 +506,11 @@ use super::*;
 // Version 173 reads `log` as the decimal logarithm (Verilog-AMS LRM 2.4
 // section 4.3.2). The serialized form is unchanged, but a version-172 record
 // carries bytecode, folded defaults and lowered code that took it as `ln`.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 173;
+//
+// Version 174 follows the schema to 183, whose digital plan records where
+// each signal was declared. A version-173 record would replay a plan whose
+// signals a waveform cannot place.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 174;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

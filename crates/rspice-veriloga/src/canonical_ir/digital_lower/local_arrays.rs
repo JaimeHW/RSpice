@@ -240,6 +240,7 @@ impl ProcessLowerer<'_> {
                 integer: declaration.integer,
                 procedurally_assignable: true,
                 span: declaration.span.into(),
+                origin: None,
             });
             self.builder.push(
                 block,

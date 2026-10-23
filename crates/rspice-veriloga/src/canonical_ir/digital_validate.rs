@@ -172,9 +172,9 @@ impl CanonicalDigitalPlan {
         self.seal()
     }
 
-    /// Record where each process and each system call was written, from the
-    /// byte offset of its span in the source the plan was compiled from, then
-    /// reseal.
+    /// Record where each signal was declared and where each process and each
+    /// system call was written, from the byte offset of its span in the
+    /// source the plan was compiled from, then reseal.
     ///
     /// The lowering sees only spans; the source map that turns an offset in
     /// the preprocessed text into an original file and line belongs to the
@@ -183,8 +183,11 @@ impl CanonicalDigitalPlan {
         mut self,
         locate: impl Fn(super::SourceSpanRef) -> Option<DigitalSourceLine>,
     ) -> Result<Self, Vec<IrDiagnostic>> {
-        if self.processes.is_empty() && self.system_calls.is_empty() {
+        if self.signals.is_empty() && self.processes.is_empty() && self.system_calls.is_empty() {
             return Ok(self);
+        }
+        for signal in &mut self.signals {
+            signal.origin = locate(signal.span);
         }
         for process in &mut self.processes {
             process.origin = locate(process.span);

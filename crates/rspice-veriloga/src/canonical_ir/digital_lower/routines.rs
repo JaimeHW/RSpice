@@ -251,6 +251,7 @@ fn static_signal(
         integer: shape.integer,
         procedurally_assignable: true,
         span: span.into(),
+        origin: None,
     });
     id
 }

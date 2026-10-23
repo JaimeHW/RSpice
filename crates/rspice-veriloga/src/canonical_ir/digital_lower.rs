@@ -2199,6 +2199,7 @@ fn lower_signal(
         ),
         procedurally_assignable: signal.class.is_variable(),
         span: signal.span.into(),
+        origin: None,
     }
 }
 

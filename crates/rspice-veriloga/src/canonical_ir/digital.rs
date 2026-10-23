@@ -492,6 +492,10 @@ pub struct DigitalSignal {
     /// Whether a procedural assignment may drive it (`reg` can, `wire` cannot).
     pub procedurally_assignable: bool,
     pub span: SourceSpanRef,
+    /// Where the signal was declared, once a source map has resolved the
+    /// span; what a waveform's "go to declaration" opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<DigitalSourceLine>,
 }
 
 impl DigitalSignal {
@@ -1972,8 +1976,9 @@ pub struct DigitalSourceLine {
     pub line: u32,
 }
 
-/// Where a located plan placed its processes and system calls, by the byte
-/// offset of each one's span in the compiled document.
+/// Where a located plan placed its signals, processes and system calls, by
+/// the byte offset of each one's span in the compiled document. Two sites at
+/// one offset are on one line, so they share an entry.
 ///
 /// A replay compiles the expanded text an artifact retained, not the
 /// documents that text was expanded from, so it cannot place a site itself;
@@ -1984,6 +1989,10 @@ pub(crate) struct DigitalSourceOrigins(std::collections::BTreeMap<u32, Option<Di
 
 impl DigitalSourceOrigins {
     pub(crate) fn of(plan: &CanonicalDigitalPlan) -> Self {
+        let signals = plan
+            .signals
+            .iter()
+            .map(|signal| (signal.span, &signal.origin));
         let processes = plan
             .processes
             .iter()
@@ -1993,7 +2002,8 @@ impl DigitalSourceOrigins {
             .iter()
             .map(|call| (call.span, &call.origin));
         Self(
-            processes
+            signals
+                .chain(processes)
                 .chain(calls)
                 .filter(|(span, _)| span.source_file_id == 0)
                 .map(|(span, origin)| (span.start, origin.clone()))

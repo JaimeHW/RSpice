@@ -1622,8 +1622,9 @@ impl VerilogACompiler {
         // prevent.
         let digital = canonical_ir::digital_lower::lower_module(module)
             .map_err(Self::digital_lowering_error)?;
-        // A process and a system call report the file and line they were
-        // written on. A replay keeps where its artifact placed them. The
+        // A signal reports the file and line it was declared on, and a
+        // process and a system call the ones they were written on. A replay
+        // keeps where its artifact placed them. The
         // prepared source map knows the original document behind each
         // expanded line; without one, the line is the preprocessed text's,
         // counted from its newlines once.

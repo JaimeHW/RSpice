@@ -4321,6 +4321,7 @@ mod tests {
                     start: 0,
                     end: 0,
                 },
+                origin: None,
             }],
             ..CanonicalDigitalPlan::default()
         }

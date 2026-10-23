@@ -14,6 +14,12 @@ use smol_str::SmolStr;
 /// never deserialize a structurally different artifact merely because its HIR
 /// and metadata happen to repeat the same stale version number.
 ///
+/// Version 183 records where each digital signal was declared
+/// (`DigitalSignal::origin`), as version 172 did for processes: the file and
+/// line behind an `` `include ``, and on a replay the line the artifact's own
+/// plan gave the span's offset. The digital plan identity covers it. Earlier
+/// artifacts carry no declaration lines and must be rebuilt.
+///
 /// Version 182 lets HDL code reach values inside the deck's hierarchy. A
 /// discrete read may name a deck node or branch by its absolute path
 /// (`DigitalAnalogProbeTarget::External`, `$cds_get_analog_value`), and a
@@ -234,7 +240,7 @@ use smol_str::SmolStr;
 /// Version 19 rejects unrepresentable digital select and delay constants instead
 /// of clamping them. Earlier artifacts must be rebuilt from source. Version 18
 /// fixed constant integer comparisons; version 17 fixed digital range arithmetic.
-pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 182;
+pub const CANONICAL_IR_SCHEMA_VERSION: u32 = 183;
 
 /// Collision-resistant identity of one exact preprocessed source closure.
 pub fn source_identity(source_text: &str) -> String {

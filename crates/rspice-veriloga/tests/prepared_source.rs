@@ -851,6 +851,77 @@ fn a_replay_places_processes_and_system_calls_where_they_were_written() {
     assert_eq!(replay.content_identity, original.content_identity);
 }
 
+/// A signal declared in an `` `include ``d file is placed on that file's
+/// line, not on the line of the expanded text, and a replay of the artifact
+/// places it there too.
+#[test]
+fn a_signal_is_placed_on_the_line_of_the_included_file_that_declares_it() {
+    use rspice_veriloga::canonical_ir::digital::CanonicalDigitalPlan;
+
+    let files = Sources::new();
+    files.write("spacer.vams", "module spacer;\n  wire unused;\nendmodule\n");
+    files.write(
+        "body.vams",
+        "module inv(input wire a, output wire y);\n\
+         \x20 assign y = ~a;\n\
+         endmodule\n\
+         module top(p);\n\
+         \x20 inout p; electrical p;\n\
+         \x20 reg a;\n\
+         \x20 wire y;\n\
+         \x20 inv u(.a(a), .y(y));\n\
+         \x20 initial a = 0;\n\
+         \x20 analog V(p) <+ 0;\n\
+         endmodule\n",
+    );
+    let root = files.write(
+        "design.vams",
+        "`include \"spacer.vams\"\n`include \"body.vams\"\n",
+    );
+    let compiler = VerilogACompiler::new(CompilerOptions {
+        enable_ams: true,
+        ..Default::default()
+    });
+    let original = compiler
+        .prepare_file_runtime_source(&root)
+        .unwrap()
+        .compile_runtime(Some("top"))
+        .unwrap();
+    let replay = compiler
+        .prepare_artifact_runtime_source(&original.canonical_ir, &NoPipelineControl)
+        .unwrap()
+        .compile_runtime(None)
+        .unwrap();
+    let declared = |plan: &CanonicalDigitalPlan, name: &str| {
+        let signal = plan
+            .signals
+            .iter()
+            .find(|signal| signal.name == name)
+            .unwrap_or_else(|| panic!("no signal {name}"));
+        let origin = signal.origin.as_ref().expect("a declaration is placed");
+        assert!(origin.file.ends_with("body.vams"), "{origin:?}");
+        origin.line
+    };
+    for plan in [&original.canonical_ir.digital, &replay.canonical_ir.digital] {
+        assert_eq!(declared(plan, "a"), 6);
+        assert_eq!(declared(plan, "y"), 7);
+    }
+    let origins = |plan: &CanonicalDigitalPlan| {
+        plan.signals
+            .iter()
+            .map(|signal| signal.origin.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        origins(&replay.canonical_ir.digital),
+        origins(&original.canonical_ir.digital)
+    );
+    assert_eq!(
+        replay.canonical_ir.digital.content_identity,
+        original.canonical_ir.digital.content_identity
+    );
+}
+
 #[test]
 fn standalone_connect_library_is_prepared_without_a_device_module() {
     let files = Sources::new();

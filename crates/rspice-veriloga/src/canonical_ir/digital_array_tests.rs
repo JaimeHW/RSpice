@@ -87,6 +87,7 @@ fn signal(index: u32, name: String, real: bool, width: u32) -> DigitalSignal {
             start: 0,
             end: 0,
         },
+        origin: None,
     }
 }
 
