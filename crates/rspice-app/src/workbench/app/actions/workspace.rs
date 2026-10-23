@@ -8,6 +8,7 @@
 mod libraries;
 pub(in crate::workbench) mod symbol_document;
 pub(in crate::workbench) mod symbol_in_place;
+mod waivers;
 
 use super::hierarchy_net_highlight::NetCarry;
 use crate::diagnostics::{LogAnchor, LogSeverity, LogSource};

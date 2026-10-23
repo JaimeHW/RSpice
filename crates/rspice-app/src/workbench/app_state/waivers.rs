@@ -19,7 +19,7 @@ use rspice_design::drc::{
 use rspice_design::schematic::document::SchematicDocument;
 use rspice_vocabulary::diagnostics::DiagnosticSuppression;
 
-use super::AppState;
+use super::Model;
 use super::diagnostic_store::{
     DiagnosticLevel, DiagnosticRecord, DiagnosticSubject, FindingKey, mint_canonical,
 };
@@ -150,13 +150,13 @@ fn cell_view_of_key(key: &str) -> Option<CellViewRef> {
 /// and offers to remove the waiver, except a list this build cannot read,
 /// which it keeps as it is.
 pub(in crate::workbench) fn stored_waiver_records(
-    state: &AppState,
+    model: &Model,
     subject: &CellViewRef,
     stored: &DrcWaivers,
     result: &DrcResult,
 ) -> Vec<DiagnosticRecord> {
-    let project = state.model.workspace.content.project.id();
-    let revision = state.model.workspace.content.project.revision().get();
+    let project = model.workspace.content.project.id();
+    let revision = model.workspace.content.project.revision().get();
     let document: Arc<str> = Arc::from(subject.key().as_str());
     let applied = CheckWaivers::for_subject(stored);
     let unmatched = applied.unmatched_in(result);
@@ -273,14 +273,14 @@ impl StoredWaiverFinding<'_> {
     }
 }
 
-impl AppState {
+impl Model {
     /// The view in front of the reader, where it is a schematic.
     fn active_schematic_view(&self) -> Option<CellViewRef> {
         matches!(
-            self.model.workspace.content.active_view_type(),
+            self.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
-        .then(|| self.model.workspace.content.active_view.clone())
+        .then(|| self.workspace.content.active_view.clone())
     }
 
     /// Every schematic document the workspace holds, by cellview, the view in
@@ -289,9 +289,9 @@ impl AppState {
         let active = self.active_schematic_view();
         let mut documents = Vec::new();
         if let Some(active) = &active {
-            documents.push((active.clone(), self.model.schematic.document()));
+            documents.push((active.clone(), self.schematic.document()));
         }
-        for (key, design) in &self.model.workspace.content.schematic_buffers {
+        for (key, design) in &self.workspace.content.schematic_buffers {
             if active
                 .as_ref()
                 .is_some_and(|active| active.key().eq_ignore_ascii_case(key))
@@ -351,106 +351,49 @@ impl AppState {
                 .into_iter()
                 .map(|(cell_view, document)| (cell_view.key(), document.waivers.clone()))
                 .collect(),
-            symbol: (self.model.workspace.content.active_view_type() == ViewType::Symbol)
+            symbol: (self.workspace.content.active_view_type() == ViewType::Symbol)
                 .then(|| self.load_active_symbol_document().ok())
                 .flatten()
                 .map(|document| document.waivers),
         }
     }
 
-    /// State the findings again where a history step changed the waivers
-    /// stored as they were in `before`. Returns whether a schematic's
-    /// changed: those are the waivers the run gate applies.
-    ///
-    /// An undo restores the document whole, a waiver with it, and nothing
-    /// about that tells the published findings: without this a finding whose
-    /// waiver was undone would still be listed waived, and still not count.
-    pub(in crate::workbench) fn restate_waived_findings(&mut self, before: &StoredWaivers) -> bool {
-        let after = self.stored_waivers();
-        if after.symbol != before.symbol {
-            // The pin checks read the symbol document, waivers and all.
-            self.run_active_symbol_pin_checks();
-        }
-        let schematics = after.schematics != before.schematics;
-        if schematics {
-            self.restate_design_checks();
-        }
-        schematics
-    }
-
-    /// Waive the finding at `target` for `reason`, as an edit of the document
-    /// that stores it, and state every published finding again.
-    pub(in crate::workbench) fn waive_finding(
-        &mut self,
-        target: &WaiverTarget,
-        reason: &str,
-    ) -> Result<(), String> {
-        let waived_at_ms = crate::time_compat::checked_unix_time_ms()
-            .map_err(|error| format!("The waiver was not recorded: {error}."))?;
-        let waiver = DrcWaiver {
-            rule: target.rule.to_string(),
-            object: target.object.clone(),
-            reason: reason.to_owned(),
-            author: waiver_author().to_owned(),
-            waived_at_ms,
-        };
-        self.edit_waivers(&target.cell_view, StoredWaiverEdit::Waive(waiver))
-    }
-
-    /// Remove the waiver stored at `target`, as an edit of the document that
-    /// stores it, and state every published finding again.
-    pub(in crate::workbench) fn remove_finding_waiver(
-        &mut self,
-        target: &WaiverTarget,
-    ) -> Result<(), String> {
-        self.edit_waivers(
-            &target.cell_view,
-            StoredWaiverEdit::Remove {
-                rule: target.rule.to_string(),
-                object: target.object.clone(),
-            },
-        )
-    }
-
     /// Why the waivers stored with `cell_view` cannot be changed here, or
     /// `None` where they can.
     ///
     /// The one answer to it: the page offers Waive and Remove by it, and
-    /// [`Self::edit_waivers`] edits by it, so a verb is never offered that
-    /// the edit then refuses. A waiver is an edit of the document that stores
-    /// it, so that document has to be one the workbench edits: the view in
-    /// front of the reader, or a schematic the project holds open. A library
-    /// the project borrows read-only is never edited from here.
+    /// [`Self::edit_held_waivers`] edits by it, so a verb is never offered
+    /// that the edit then refuses. A waiver is an edit of the document that
+    /// stores it, so that document has to be one the workbench edits: the
+    /// view in front of the reader, or a schematic the project holds open. A
+    /// library the project borrows read-only is never edited from here.
     pub(in crate::workbench) fn waiver_edit_refusal(
         &self,
         cell_view: &CellViewRef,
     ) -> Option<String> {
-        if self.model.safe_mode.project_read_only() {
+        if self.safe_mode.project_read_only() {
             return Some("The project is read-only".to_owned());
         }
-        let borrowed =
-            self.model
-                .library_manager
-                .catalog()
-                .libraries_by_key()
-                .any(|(_, library)| {
-                    library.read_only && library.name.eq_ignore_ascii_case(&cell_view.library)
-                });
+        let borrowed = self
+            .library_manager
+            .catalog()
+            .libraries_by_key()
+            .any(|(_, library)| {
+                library.read_only && library.name.eq_ignore_ascii_case(&cell_view.library)
+            });
         if borrowed {
             return Some(format!("{} is read-only", cell_view.library));
         }
         let key = cell_view.key();
         let active = self
-            .model
             .workspace
             .content
             .active_view
             .key()
             .eq_ignore_ascii_case(&key);
-        let editable = match self.model.workspace.content.active_view_type() {
+        let editable = match self.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench | ViewType::Symbol if active => true,
             _ => self
-                .model
                 .workspace
                 .content
                 .schematic_buffers
@@ -460,35 +403,34 @@ impl AppState {
         (!editable).then(|| format!("Open {} to change its waivers", cell_view.display_path()))
     }
 
-    fn edit_waivers(
+    /// Apply `edit` to the schematic that stores the waivers of `cell_view`,
+    /// refused where [`Self::waiver_edit_refusal`] refuses.
+    ///
+    /// The symbol in front of the reader stores its waivers through its
+    /// editor, so for it the edit is handed back, unapplied, for the editor
+    /// to make.
+    pub(in crate::workbench) fn edit_held_waivers(
         &mut self,
         cell_view: &CellViewRef,
         edit: StoredWaiverEdit,
-    ) -> Result<(), String> {
+    ) -> Result<Option<StoredWaiverEdit>, String> {
         if let Some(refusal) = self.waiver_edit_refusal(cell_view) {
             return Err(format!("{refusal}."));
         }
         let key = cell_view.key();
         let active = self
-            .model
             .workspace
             .content
             .active_view
             .key()
             .eq_ignore_ascii_case(&key);
-        match self.model.workspace.content.active_view_type() {
+        match self.workspace.content.active_view_type() {
             ViewType::Schematic | ViewType::Testbench if active => {
-                edit.apply_to_schematic(&mut self.model.schematic)?;
+                edit.apply_to_schematic(&mut self.schematic)?;
             }
-            ViewType::Symbol if active => {
-                self.edit_active_symbol_waivers(edit)?;
-                // The pin checks read the symbol document, waivers and all,
-                // so they are asked again rather than left stale.
-                self.run_active_symbol_pin_checks();
-            }
+            ViewType::Symbol if active => return Ok(Some(edit)),
             _ => {
                 let held = self
-                    .model
                     .workspace
                     .content
                     .schematic_buffers
@@ -499,47 +441,66 @@ impl AppState {
                         format!("Open {} to change its waivers.", cell_view.display_path())
                     })?;
                 let mut editor = self
-                    .model
                     .workspace
                     .schematic_editor_mut(&held)
                     .ok_or_else(|| format!("{} could not be edited.", cell_view.display_path()))?;
                 edit.apply_to_schematic(&mut editor.editor)?;
             }
         }
-        self.runs.preflight.invalidate();
-        self.restate_design_checks();
-        Ok(())
-    }
-
-    fn edit_active_symbol_waivers(&mut self, edit: StoredWaiverEdit) -> Result<(), String> {
-        let before = self.load_active_symbol_document()?;
-        let mut document = before.clone();
-        edit.apply(&mut document.waivers)?;
-        if document == before {
-            return Ok(());
-        }
-        self.store_active_symbol_document(&document)?;
-        self.record_symbol_edit(&before);
-        Ok(())
+        Ok(None)
     }
 }
 
 /// The waivers the documents open for editing store, as
-/// [`AppState::stored_waivers`] takes them.
+/// [`Model::stored_waivers`] takes them.
 #[derive(Debug, PartialEq, Eq)]
 pub(in crate::workbench) struct StoredWaivers {
     schematics: Vec<(String, DrcWaivers)>,
     symbol: Option<DrcWaivers>,
 }
 
+impl StoredWaivers {
+    /// Whether the symbol's waivers differ from what they were in `before`.
+    pub(in crate::workbench) fn symbol_changed_since(&self, before: &Self) -> bool {
+        self.symbol != before.symbol
+    }
+
+    /// Whether any schematic's waivers differ from what they were in
+    /// `before`.
+    pub(in crate::workbench) fn schematics_changed_since(&self, before: &Self) -> bool {
+        self.schematics != before.schematics
+    }
+}
+
 /// One change to the waivers a document stores.
-enum StoredWaiverEdit {
+pub(in crate::workbench) enum StoredWaiverEdit {
     Waive(DrcWaiver),
     Remove { rule: String, object: String },
 }
 
 impl StoredWaiverEdit {
-    fn apply(self, waivers: &mut DrcWaivers) -> Result<(), String> {
+    /// Waive the finding at `target` for `reason`, stamped now.
+    pub(in crate::workbench) fn waive(target: &WaiverTarget, reason: &str) -> Result<Self, String> {
+        let waived_at_ms = crate::time_compat::checked_unix_time_ms()
+            .map_err(|error| format!("The waiver was not recorded: {error}."))?;
+        Ok(Self::Waive(DrcWaiver {
+            rule: target.rule.to_string(),
+            object: target.object.clone(),
+            reason: reason.to_owned(),
+            author: waiver_author().to_owned(),
+            waived_at_ms,
+        }))
+    }
+
+    /// Remove the waiver stored at `target`.
+    pub(in crate::workbench) fn remove(target: &WaiverTarget) -> Self {
+        Self::Remove {
+            rule: target.rule.to_string(),
+            object: target.object.clone(),
+        }
+    }
+
+    pub(in crate::workbench) fn apply(self, waivers: &mut DrcWaivers) -> Result<(), String> {
         match self {
             Self::Waive(waiver) => waivers.waive(waiver).map_err(|refusal| refusal.to_string()),
             Self::Remove { rule, object } => waivers

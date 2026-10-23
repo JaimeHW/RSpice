@@ -861,10 +861,10 @@ fn design_rule_records(
     // The subject's own waivers that do not do what they say are stated with
     // the pass that found that out.
     if stored_waivers == StoredWaivers::Stated
-        && let Some(stored) = state.schematic_waivers(subject)
+        && let Some(stored) = state.model.schematic_waivers(subject)
     {
         records.extend(
-            waivers::stored_waiver_records(state, subject, stored, result)
+            waivers::stored_waiver_records(&state.model, subject, stored, result)
                 .into_iter()
                 .map(|record| record.drawn_in(subject)),
         );
@@ -1062,7 +1062,7 @@ impl AppState {
                 .design_rules
                 .severity_overrides(),
             connectivity: self.model.workspace.content.connectivity.policy.clone(),
-            waivers: self.check_waivers(subject),
+            waivers: self.model.check_waivers(subject),
             ..DrcConfig::default()
         }
     }

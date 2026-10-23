@@ -145,7 +145,7 @@ impl AppState {
                 .design_rules
                 .severity_overrides(),
             connectivity: self.model.workspace.content.connectivity.policy.clone(),
-            waivers: self.check_waivers(subject),
+            waivers: self.model.check_waivers(subject),
             ..DrcConfig::default()
         }
     }

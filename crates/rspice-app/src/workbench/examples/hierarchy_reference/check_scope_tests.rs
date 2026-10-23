@@ -428,30 +428,31 @@ fn a_waiver_is_changed_only_where_its_document_is_edited() {
     let symbol = CellViewRef::new(USER_LIBRARY, "amp", "symbol");
     let state = &fixture.state;
     assert_eq!(
-        state.waiver_edit_refusal(&fixture.amp),
+        state.model.waiver_edit_refusal(&fixture.amp),
         None,
         "the open view"
     );
     assert_eq!(
-        state.waiver_edit_refusal(&fixture.top),
+        state.model.waiver_edit_refusal(&fixture.top),
         None,
         "a schematic the project holds"
     );
     assert_eq!(
-        state.waiver_edit_refusal(&symbol),
+        state.model.waiver_edit_refusal(&symbol),
         Some(format!(
             "Open {} to change its waivers",
             symbol.display_path()
         ))
     );
     assert_eq!(
-        state.waiver_edit_refusal(&fixture.borrowed),
+        state.model.waiver_edit_refusal(&fixture.borrowed),
         Some(format!("{} is read-only", fixture.borrowed.library))
     );
 
     for cell_view in [symbol, fixture.borrowed.clone()] {
         let reason = fixture
             .state
+            .model
             .waiver_edit_refusal(&cell_view)
             .expect("refused above");
         let target = WaiverTarget {

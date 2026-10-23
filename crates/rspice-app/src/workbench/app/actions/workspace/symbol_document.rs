@@ -23,12 +23,12 @@ use crate::state::{
     SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, SymbolEditorMetadata,
 };
 use crate::ui::accessibility::counted;
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::location_key;
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
     FindingKey, mint_canonical,
 };
+use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 use rspice_design::symbol::publication::{
     EncodedSymbolEditorBundle, SymbolSaveCheck, check_symbol_pins, symbol_save_checks,
@@ -155,40 +155,7 @@ impl AppState {
     /// the contract that finding was derived from — and navigating away from
     /// a symbol does not change that symbol's contract.
     pub(crate) fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
-        let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
-        if self.model.workspace.content.active_view == schematic_ref {
-            return self.model.schematic.document().interface_ports();
-        }
-        if let Some(schematic) = self
-            .model
-            .workspace
-            .content
-            .schematic_buffers
-            .get(&schematic_ref.key())
-        {
-            let ports = schematic.document().interface_ports();
-            if !ports.is_empty() {
-                return ports;
-            }
-        }
-
-        let cell = self
-            .model
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell));
-        // With no schematic, the module's last clean compile is the contract.
-        if let Some(ports) = cell
-            .and_then(module_interface_view)
-            .and_then(|view| metadata_ports(&view.metadata))
-            .filter(|ports| !ports.is_empty())
-        {
-            return ports;
-        }
-        cell.and_then(|cell| cell.get_view(&reference.view))
-            .and_then(|view| view.metadata.get(GENERATED_PORTS_KEY))
-            .map(|encoded| decode_ports(encoded))
-            .unwrap_or_default()
+        self.model.symbol_ports(reference)
     }
 
     /// The [stamp](rspice_design::stamped) of the drawing [`Self::symbol_ports`]
@@ -215,7 +182,7 @@ impl AppState {
     }
 
     pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
-        self.load_symbol_document(&self.model.workspace.content.active_view)
+        self.model.load_active_symbol_document()
     }
 
     /// One cell's symbol artwork, as published in the library.
@@ -223,25 +190,7 @@ impl AppState {
         &self,
         reference: &CellViewRef,
     ) -> Result<SymbolDocument, String> {
-        let Some(view) = self
-            .model
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-        else {
-            return Err(format!("View '{}' not found", reference.display_path()));
-        };
-        let has_document = view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY);
-        let document = SymbolDocument::load_from_view(view)?;
-        if has_document {
-            return Ok(document);
-        }
-        let ports = self.symbol_ports(reference);
-        if view.metadata.contains_key("generated") && !ports.is_empty() {
-            return Ok(SymbolDocument::generated_from_ports(&ports));
-        }
-        Ok(document)
+        self.model.load_symbol_document(reference)
     }
 
     pub(crate) fn load_active_symbol_editor_metadata(
@@ -852,7 +801,7 @@ impl AppState {
         // with the pass that found that out.
         if let Ok(document) = self.load_symbol_document(&subject) {
             records.extend(crate::workbench::app_state::waivers::stored_waiver_records(
-                self,
+                &self.model,
                 &subject,
                 &document.waivers,
                 result,
@@ -984,6 +933,74 @@ impl AppState {
             )
         };
         self.record(LogSeverity::Info, LogSource::Studio, summary);
+    }
+}
+
+impl Model {
+    /// The interface contract one cell's symbol is checked against: see
+    /// [`AppState::symbol_ports`].
+    pub(crate) fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
+        let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
+        if self.workspace.content.active_view == schematic_ref {
+            return self.schematic.document().interface_ports();
+        }
+        if let Some(schematic) = self
+            .workspace
+            .content
+            .schematic_buffers
+            .get(&schematic_ref.key())
+        {
+            let ports = schematic.document().interface_ports();
+            if !ports.is_empty() {
+                return ports;
+            }
+        }
+
+        let cell = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell));
+        // With no schematic, the module's last clean compile is the contract.
+        if let Some(ports) = cell
+            .and_then(module_interface_view)
+            .and_then(|view| metadata_ports(&view.metadata))
+            .filter(|ports| !ports.is_empty())
+        {
+            return ports;
+        }
+        cell.and_then(|cell| cell.get_view(&reference.view))
+            .and_then(|view| view.metadata.get(GENERATED_PORTS_KEY))
+            .map(|encoded| decode_ports(encoded))
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
+        self.load_symbol_document(&self.workspace.content.active_view)
+    }
+
+    /// One cell's symbol artwork, as published in the library.
+    pub(crate) fn load_symbol_document(
+        &self,
+        reference: &CellViewRef,
+    ) -> Result<SymbolDocument, String> {
+        let Some(view) = self
+            .library_manager
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| cell.get_view(&reference.view))
+        else {
+            return Err(format!("View '{}' not found", reference.display_path()));
+        };
+        let has_document = view.metadata.contains_key(SYMBOL_DOCUMENT_METADATA_KEY);
+        let document = SymbolDocument::load_from_view(view)?;
+        if has_document {
+            return Ok(document);
+        }
+        let ports = self.symbol_ports(reference);
+        if view.metadata.contains_key("generated") && !ports.is_empty() {
+            return Ok(SymbolDocument::generated_from_ports(&ports));
+        }
+        Ok(document)
     }
 }
 

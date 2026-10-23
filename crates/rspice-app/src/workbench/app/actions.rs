@@ -253,7 +253,7 @@ impl RSpiceApp {
         if self.history_waits_for_the_edit_in_progress("undoing") {
             return;
         }
-        let waivers = self.state.stored_waivers();
+        let waivers = self.state.model.stored_waivers();
         self.step_undo();
         self.after_history_step(&waivers);
     }
@@ -262,7 +262,7 @@ impl RSpiceApp {
         if self.history_waits_for_the_edit_in_progress("redoing") {
             return;
         }
-        let waivers = self.state.stored_waivers();
+        let waivers = self.state.model.stored_waivers();
         self.step_redo();
         self.after_history_step(&waivers);
     }

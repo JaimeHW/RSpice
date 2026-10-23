@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::state::{ComponentType, Point};
+use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::diagnostic_store::DiagnosticInputs;
 use crate::workbench::app_state::diagnostic_store::listing::listing;
 use rspice_design::drc::{DrcLocation, DrcViolationType};
@@ -291,7 +292,7 @@ fn a_history_step_that_takes_a_waiver_away_re_states_the_finding() {
     assert!(one(&published(&state), COLLISION).waived());
     assert_eq!(listing(&state).counts().errors, errors - 1);
 
-    let before = state.stored_waivers();
+    let before = state.model.stored_waivers();
     assert!(state.model.schematic.undo(), "the waiver is one undo step");
     state.sync_active_schematic_to_workspace();
     assert!(active_waivers(&state).is_empty(), "undo takes it away");
@@ -310,7 +311,7 @@ fn a_history_step_that_takes_a_waiver_away_re_states_the_finding() {
     ));
     assert_eq!(listing(&state).counts().errors, errors);
 
-    let unchanged = state.stored_waivers();
+    let unchanged = state.model.stored_waivers();
     assert!(
         !state.restate_waived_findings(&unchanged),
         "a step that changes no waiver re-states nothing"
