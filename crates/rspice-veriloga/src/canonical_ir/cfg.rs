@@ -3041,6 +3041,7 @@ fn is_leaf(kind: &CfgValueKind) -> bool {
     )
 }
 
+#[cfg(any(feature = "rust-codegen", feature = "native", feature = "wasm-jit"))]
 impl CfgTerminator {
     /// The jump and branch edges with the block arguments each passes. A
     /// suspension passes none.
