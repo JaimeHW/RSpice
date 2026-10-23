@@ -1309,6 +1309,68 @@ fn every_real_valued_event_model_resumes_bit_for_bit() {
     }
 }
 
+/// A clock and four data streams from one module, each at its own period.
+const STORAGE_STIMULUS: &str = r#"
+module storage_stimulus(clk, a, b, c, d);
+ output clk, a, b, c, d;
+ reg clk, a, b, c, d;
+ initial begin clk = 1'b0; a = 1'b0; b = 1'b0; c = 1'b1; d = 1'b0; end
+ always #10 clk = ~clk;
+ always #17 a = ~a;
+ always #23 b = ~b;
+ always #29 c = ~c;
+ always #37 d = ~d;
+endmodule
+"#;
+
+/// Each XSPICE flip-flop and latch, and the frequency divider, keeps its
+/// stored bit and the levels it last saw in its context, so each resumes bit
+/// for bit under a mixed host from between two clock edges and from an edge.
+#[test]
+fn every_xspice_flip_flop_latch_and_divider_resumes_bit_for_bit() {
+    let model = ModelFile::new("storage_stimulus", STORAGE_STIMULUS);
+    let deck = format!(
+        "* the storage models\nX1 clk a b c d storage_stimulus\n\
+         Adff a clk NULL NULL q1 nq1 dffm\n.model dffm d_dff (clk_delay=1n)\n\
+         Ajk a b clk NULL NULL q2 nq2 jkm\n.model jkm d_jkff (clk_delay=2n)\n\
+         At c clk NULL NULL q3 nq3 tm\n.model tm d_tff (clk_delay=1n)\n\
+         Asr b c clk NULL NULL q4 nq4 srm\n.model srm d_srff (clk_delay=1n)\n\
+         Adl a d NULL NULL q5 nq5 dlm\n.model dlm d_dlatch (data_delay=1n enable_delay=1n)\n\
+         Asl a c d NULL NULL q6 nq6 slm\n.model slm d_srlatch (sr_delay=1n enable_delay=1n)\n\
+         Adiv clk q7 divm\n.model divm d_fdiv (div_factor=3 high_cycles=1)\n\
+         Adac [q1 q2 q3 q4 q5 q6 q7] [o1 o2 o3 o4 o5 o6 o7] dac\n\
+         .model dac dac_bridge (out_low=0 out_high=1)\n\
+         R1 o1 0 1k\nR2 o2 0 1k\nR3 o3 0 1k\nR4 o4 0 1k\nR5 o5 0 1k\nR6 o6 0 1k\nR7 o7 0 1k\n\
+         .va \"{}\" storage_stimulus\n.end\n",
+        model.deck_path()
+    );
+    let netlist = Netlist::parse(&deck).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let capability = engine.preflight_transient_checkpoint(&netlist).unwrap();
+    assert!(capability.is_resumable(), "{:?}", capability.blockers());
+    let (baseline, scheduled) = engine
+        .run_tran_checkpoint_schedule_with_startup_mode(
+            &netlist,
+            300e-9,
+            1e-9,
+            TransientStartupMode::OperatingPoint,
+            &[115e-9, 150e-9],
+        )
+        .unwrap();
+    for net in ["q1", "q2", "q3", "q4", "q5", "q6", "q7"] {
+        let changes = digital_points(&baseline, net).len();
+        assert!(changes >= 3, "{net} moves: {changes} points");
+    }
+    for point in &scheduled {
+        let saved = through_disk(&point.checkpoint);
+        let (resumed, _) = engine
+            .run_tran_resume(&netlist, &saved, 300e-9, 1e-9)
+            .unwrap();
+        let events = assert_resumes_bit_for_bit(&baseline, &resumed, saved.time);
+        assert!(events >= 40, "every model publishes after the seam");
+    }
+}
+
 /// The mixed corpus's C12 testbench, checkpointed inside its trim sequence,
 /// resumes bit for bit on either route. Its readings reach the LDO's analog
 /// side on `meas` through the automatic real-to-voltage converter, which once

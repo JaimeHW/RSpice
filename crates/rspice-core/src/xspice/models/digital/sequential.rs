@@ -1,11 +1,21 @@
 use crate::Value;
-use crate::xspice::{CmError, EvaluationPhase};
+use crate::xspice::{CmError, EvaluationPhase, XspiceCheckpointSupport};
 
 use super::*;
 
 //=============================================================================
 // Flip-Flops and Latches
 //=============================================================================
+
+/// Every flip-flop, latch and the divider keep what they carry between
+/// accepted points in integer states (the previous clock, enable, data, set
+/// and reset levels, the stored output, the divider's count) and their
+/// published outputs in the context, which a transient checkpoint's context
+/// image holds whole, as it does for the gates. A resumed run therefore
+/// continues each one from its saved state.
+fn context_checkpoint() -> XspiceCheckpointSupport {
+    XspiceCheckpointSupport::Serializable
+}
 
 const OFFICIAL_SEQUENTIAL_DELAY_MIN: Value = 1.0e-12;
 const OFFICIAL_IC_MIN: i64 = 0;
@@ -322,6 +332,10 @@ impl CodeModel for DFlipFlop {
         true
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         evaluate_edge_model(ctx, dff_next_on_rising_clock)
     }
@@ -368,6 +382,10 @@ impl CodeModel for JkFlipFlop {
         true
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         evaluate_edge_model(ctx, jkff_next_on_rising_clock)
     }
@@ -411,6 +429,10 @@ impl CodeModel for TFlipFlop {
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -989,6 +1011,10 @@ impl CodeModel for DigitalFrequencyDivider {
         Ok(())
     }
 
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
+    }
+
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let div_factor = official_min_integer_param(ctx, "div_factor", 1)?;
         let high_cycles = official_min_integer_param(ctx, "high_cycles", 1)?;
@@ -1092,6 +1118,10 @@ impl CodeModel for SrFlipFlop {
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -1202,6 +1232,10 @@ impl CodeModel for DLatch {
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
@@ -1374,6 +1408,10 @@ impl CodeModel for SrLatch {
 
     fn can_skip_unchanged_event_inputs(&self) -> bool {
         true
+    }
+
+    fn checkpoint_support(&self, _ctx: &CmContext) -> XspiceCheckpointSupport {
+        context_checkpoint()
     }
 
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
