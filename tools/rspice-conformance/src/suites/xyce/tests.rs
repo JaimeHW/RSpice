@@ -968,21 +968,34 @@ fn removeunused_plan_topology_analytic_and_deadline_mutations_fail_closed() {
         .is_err()
     );
 
-    let (root, family) = removeunused_mutation_fixture("expired-deadline");
+    // The REMOVEUNUSED check floors the budget at 1 ms, so the start is set
+    // in the past rather than relying on the run taking that long.
+    let (root, _) = removeunused_mutation_fixture("expired-deadline");
     let timed_runner = XyceTestRunner::new(
         &root,
         XyceRunnerConfig {
-            max_time_per_test_ms: 0,
+            max_time_per_test_ms: 1,
             ..XyceRunnerConfig::default()
         },
     );
-    let result = timed_runner.run_test(family.join("gnd_and_redund.cir"));
-    assert!(!result.passed);
+    let deck = timed_runner
+        .discover_tests()
+        .into_iter()
+        .find(|deck| {
+            deck.path
+                .ends_with("Netlists/REDUND_REMOVE/gnd_and_redund.cir")
+        })
+        .expect("fixture REMOVEUNUSED deck is discovered");
+    let error = timed_runner
+        .validate_removeunused_oracle(
+            &deck,
+            XyceRemoveUnusedKind::ReplaceGround,
+            Instant::now() - Duration::from_millis(10),
+        )
+        .expect_err("an expired REMOVEUNUSED deadline must fail closed");
     assert!(
-        result
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("shared deadline expired"))
+        error.contains("shared deadline expired"),
+        "unexpected deadline error: {error}"
     );
     fs::remove_dir_all(root).expect("remove deadline fixture");
 }
